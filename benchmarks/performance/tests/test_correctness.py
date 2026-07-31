@@ -246,7 +246,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["dominated_graphify_nodes"], 1)
         self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
 
-    def test_same_label_cross_package_definition_is_ambiguous(self) -> None:
+    def test_unqualified_placeholder_cannot_choose_a_cross_package_definition(self) -> None:
         result = compare_documents(
             """
             {"graph":{"diagnostics":[]},"nodes":[
@@ -260,9 +260,14 @@ class CorrectnessTests(unittest.TestCase):
             {"nodes":[{"id":"receiver","label":"Agent"}],"links":[]}
             """,
         )
-        self.assertFalse(result.passed)
-        self.assertEqual(result.metrics["ambiguous_graphify_nodes"], 1)
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_nodes"], 1)
+        self.assertEqual(result.metrics["ambiguous_graphify_nodes"], 0)
         self.assertEqual(result.metrics["missing_graphify_nodes"], 0)
+        self.assertIn(
+            "rejected:unverifiable_placeholder",
+            result.metrics["graphify_nodes_coverage_reasons"],
+        )
 
     def test_case_exact_generated_owner_disambiguates_case_distinct_types(self) -> None:
         result = compare_documents(
@@ -654,8 +659,9 @@ class CorrectnessTests(unittest.TestCase):
             ]}
             """,
         )
-        self.assertFalse(result.passed)
-        self.assertEqual(result.metrics["missing_graphify_nodes"], 1)
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_nodes"], 1)
+        self.assertEqual(result.metrics["missing_graphify_nodes"], 0)
         self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
         self.assertEqual(result.metrics["missing_graphify_edges"], 0)
         self.assertIn(
@@ -688,11 +694,82 @@ class CorrectnessTests(unittest.TestCase):
             ]}
             """,
         )
-        self.assertFalse(result.passed)
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_nodes"], 1)
         self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
         self.assertEqual(result.metrics["missing_graphify_edges"], 0)
         self.assertIn(
             "dominated:qualified_external_binding",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_extends_occurrence_grounds_a_sourceless_placeholder(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"child","label":"Child","kind":"class",
+               "source_file":"pkg/models.py","source_location":"L10","language":"python"},
+              {"id":"base","label":"Storage","kind":"class",
+               "source_file":"pkg/storage.py","source_location":"L2","language":"python"}
+            ],"links":[
+              {"source":"child","target":"base","relation":"extends",
+               "source_file":"pkg/models.py","source_location":"L12"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"child","label":"Child",
+               "source_file":"pkg/models.py","source_location":"L10"},
+              {"id":"storage","label":"Storage"}
+            ],"links":[
+              {"source":"child","target":"storage","relation":"inherits",
+               "source_file":"pkg/models.py","source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_nodes"], 1)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "dominated:precise_inheritance_occurrence",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_inheritance_occurrence_rejects_a_wrong_anchored_target(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"child","label":"Child","kind":"class",
+               "source_file":"pkg/models.py","source_location":"L10","language":"python"},
+              {"id":"base","label":"Base","kind":"class",
+               "source_file":"pkg/base.py","source_location":"L2","language":"python"},
+              {"id":"wrong","label":"Wrong","kind":"class",
+               "source_file":"pkg/wrong.py","source_location":"L2","language":"python"}
+            ],"links":[
+              {"source":"child","target":"base","relation":"extends",
+               "source_file":"pkg/models.py","source_location":"L11"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"child","label":"Child",
+               "source_file":"pkg/models.py","source_location":"L10"},
+              {"id":"base","label":"Base",
+               "source_file":"pkg/base.py","source_location":"L2"},
+              {"id":"wrong","label":"Wrong",
+               "source_file":"pkg/wrong.py","source_location":"L2"}
+            ],"links":[
+              {"source":"child","target":"wrong","relation":"inherits",
+               "source_file":"pkg/models.py","source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "rejected:exact_inheritance_target_conflict",
             result.metrics["graphify_edges_coverage_reasons"],
         )
 
@@ -726,6 +803,109 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["missing_graphify_edges"], 0)
         self.assertIn(
             "dominated:imported_symbol_definition",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_precise_function_import_owner_dominates_a_file_owner(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"file","label":"app.py","kind":"file",
+               "source_file":"app.py","source_location":"L1"},
+              {"id":"function","label":"run","kind":"function",
+               "source_file":"app.py","source_location":"L10"},
+              {"id":"symbol","label":"Widget","kind":"class",
+               "source_file":"lib.py","source_location":"L2"}
+            ],"links":[
+              {"source":"function","target":"symbol","relation":"imports",
+               "source_file":"app.py","source_location":"L11"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"file","label":"app.py",
+               "source_file":"app.py","source_location":"L1"},
+              {"id":"function","label":"run()",
+               "source_file":"app.py","source_location":"L10"},
+              {"id":"symbol","label":"Widget",
+               "source_file":"lib.py","source_location":"L2"}
+            ],"links":[
+              {"source":"file","target":"symbol","relation":"imports",
+               "source_file":"app.py","source_location":"L11"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertIn(
+            "dominated:precise_occurrence_owner",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_symbol_reexport_dominates_a_package_import(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"file","label":"__init__.py","kind":"file",
+               "source_file":"pkg/__init__.py","source_location":"L1"},
+              {"id":"symbol","label":"Widget","kind":"class",
+               "source_file":"pkg/widget.py","source_location":"L2"}
+            ],"links":[
+              {"source":"file","target":"symbol","relation":"exports",
+               "source_file":"pkg/__init__.py","source_location":"L1"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"file","label":"__init__.py",
+               "source_file":"pkg/__init__.py","source_location":"L1"},
+              {"id":"symbol","label":"Widget",
+               "source_file":"pkg/widget.py","source_location":"L2"}
+            ],"links":[
+              {"source":"file","target":"symbol","relation":"imports",
+               "source_file":"pkg/__init__.py","source_location":"L1"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertIn(
+            "dominated:symbol_reexport",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_reexport_occurrence_rejects_a_wrong_local_import_target(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"file","label":"__init__.py","kind":"file",
+               "source_file":"pkg/__init__.py","source_location":"L1"},
+              {"id":"external","label":"os","kind":"import",
+               "qualified_name":"os"},
+              {"id":"wrong","label":"os.py","kind":"file",
+               "source_file":"pkg/os.py","source_location":"L1"}
+            ],"links":[
+              {"source":"file","target":"external","relation":"exports",
+               "source_file":"pkg/__init__.py","source_location":"L2"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"file","label":"__init__.py",
+               "source_file":"pkg/__init__.py","source_location":"L1"},
+              {"id":"wrong","label":"os.py",
+               "source_file":"pkg/os.py","source_location":"L1"}
+            ],"links":[
+              {"source":"file","target":"wrong","relation":"imports",
+               "source_file":"pkg/__init__.py","source_location":"L2"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "rejected:reexport_target_conflict",
             result.metrics["graphify_edges_coverage_reasons"],
         )
 

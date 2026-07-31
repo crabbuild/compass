@@ -277,6 +277,33 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
 }
 
 #[test]
+fn empty_hard_cut_sources_emit_zero_width_file_inventory_evidence() {
+    for (path, source_file, language) in [
+        ("/repo/pkg/__init__.py", "pkg/__init__.py", "python"),
+        ("/repo/pkg/empty.go", "pkg/empty.go", "go"),
+    ] {
+        let mut engine = Engine::default();
+        let evidence = engine
+            .extract_source_combined(std::path::Path::new(path), source_file, b"")
+            .expect("extract empty hard-cut source")
+            .graph
+            .semantic_evidence
+            .expect("empty source evidence");
+        validate_evidence(&evidence, EvidenceLimits::default()).expect("valid empty evidence");
+
+        assert_eq!(evidence.adapter.language, language);
+        assert_eq!(evidence.declarations.len(), 1);
+        assert_eq!(evidence.declarations[0].kind, "file");
+        assert_eq!(evidence.declarations[0].range.source_file, source_file);
+        assert_eq!(evidence.declarations[0].range.start_byte, 0);
+        assert_eq!(evidence.declarations[0].range.end_byte, 0);
+        assert_eq!(evidence.scopes.len(), 1);
+        assert_eq!(evidence.scopes[0].kind, "module");
+        assert_eq!(evidence.scopes[0].range, evidence.declarations[0].range);
+    }
+}
+
+#[test]
 fn python_emits_direct_source_grounded_evidence() {
     let source = br#"from tools.runner import execute as run
 

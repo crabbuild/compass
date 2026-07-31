@@ -362,6 +362,10 @@ impl UniversalResolutionIndex {
                     && matches!((language, qualifier), ("python", "self" | "cls"))
             });
 
+        if let Some(decision) = self.resolve_explicit_binding(language, candidate) {
+            return decision;
+        }
+
         if allows_lexical_lookup && let Some(scope) = candidate.constraints.scope_id.as_deref() {
             let mut cursor = Some(scope);
             let mut visited = BTreeSet::new();
@@ -382,85 +386,6 @@ impl UniversalResolutionIndex {
                     .scopes
                     .get(scope)
                     .and_then(|scope| scope.parent_scope_id.as_deref());
-            }
-        }
-
-        if let Some(binding_id) = candidate.binding_id.as_deref()
-            && let Some(binding) = self.bindings.get(binding_id)
-        {
-            if let Some(target) = binding.target_declaration_id.as_ref()
-                && self.declaration_allowed(target, candidate)
-            {
-                return ResolutionDecision::Resolved {
-                    declaration_id: target.clone(),
-                    evidence: ResolutionEvidence {
-                        rule: ResolutionRule::ExplicitBinding,
-                        candidate_count: 1,
-                    },
-                };
-            }
-            match self.bound_member_target(language, binding, candidate) {
-                Ok(Some(qualified)) => {
-                    let key = (language.to_owned(), qualified.clone());
-                    if let Some(decision) = self.unique_decision(
-                        self.by_qualified.get(&key),
-                        candidate,
-                        ResolutionRule::ExplicitBinding,
-                    ) {
-                        return decision;
-                    }
-                    return ResolutionDecision::QualifiedExternal {
-                        qualified_name: qualified,
-                        evidence: ResolutionEvidence {
-                            rule: ResolutionRule::QualifiedExternal,
-                            candidate_count: 0,
-                        },
-                    };
-                }
-                Ok(None) => {}
-                Err(candidate_count) => {
-                    return ResolutionDecision::Ambiguous { candidate_count };
-                }
-            }
-            let binding_lookup = if matches!(
-                candidate.relation,
-                CandidateRelation::Imports | CandidateRelation::Reexports
-            ) {
-                candidate
-                    .constraints
-                    .qualified_name
-                    .as_deref()
-                    .unwrap_or(&binding.qualified_target)
-            } else {
-                &binding.qualified_target
-            };
-            let qualified = match self.follow_alias(language, binding_lookup) {
-                Ok(qualified) => qualified,
-                Err(candidate_count) => {
-                    return ResolutionDecision::Ambiguous { candidate_count };
-                }
-            };
-            let key = (language.to_owned(), qualified.clone());
-            if let Some(decision) = self.unique_decision(
-                self.by_qualified.get(&key),
-                candidate,
-                ResolutionRule::ExplicitBinding,
-            ) {
-                return decision;
-            }
-            if let Some(decision) = self.inventory_decision(language, &qualified, candidate) {
-                return decision;
-            }
-            let imported =
-                self.imported_declarations(language, binding_lookup, &candidate.target_spelling);
-            if !imported.is_empty()
-                && let Some(decision) = self.unique_decision(
-                    Some(&imported),
-                    candidate,
-                    ResolutionRule::ExplicitBinding,
-                )
-            {
-                return decision;
             }
         }
 
@@ -515,9 +440,91 @@ impl UniversalResolutionIndex {
         ResolutionDecision::Unresolved
     }
 
+    fn resolve_explicit_binding(
+        &self,
+        language: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        let binding = candidate
+            .binding_id
+            .as_deref()
+            .and_then(|binding_id| self.bindings.get(binding_id))?;
+        if let Some(target) = binding.target_declaration_id.as_ref()
+            && self.declaration_allowed(target, candidate)
+        {
+            return Some(ResolutionDecision::Resolved {
+                declaration_id: target.clone(),
+                evidence: ResolutionEvidence {
+                    rule: ResolutionRule::ExplicitBinding,
+                    candidate_count: 1,
+                },
+            });
+        }
+        match self.bound_member_target(language, binding, candidate) {
+            Ok(Some(qualified)) => {
+                let key = (language.to_owned(), qualified.clone());
+                if let Some(decision) = self.unique_decision(
+                    self.by_qualified.get(&key),
+                    candidate,
+                    ResolutionRule::ExplicitBinding,
+                ) {
+                    return Some(decision);
+                }
+                return Some(ResolutionDecision::QualifiedExternal {
+                    qualified_name: qualified,
+                    evidence: ResolutionEvidence {
+                        rule: ResolutionRule::QualifiedExternal,
+                        candidate_count: 0,
+                    },
+                });
+            }
+            Ok(None) => {}
+            Err(candidate_count) => {
+                return Some(ResolutionDecision::Ambiguous { candidate_count });
+            }
+        }
+        let binding_lookup = if matches!(
+            candidate.relation,
+            CandidateRelation::Imports | CandidateRelation::Reexports
+        ) {
+            candidate
+                .constraints
+                .qualified_name
+                .as_deref()
+                .unwrap_or(&binding.qualified_target)
+        } else {
+            &binding.qualified_target
+        };
+        let qualified = match self.follow_alias(language, binding_lookup) {
+            Ok(qualified) => qualified,
+            Err(candidate_count) => {
+                return Some(ResolutionDecision::Ambiguous { candidate_count });
+            }
+        };
+        let key = (language.to_owned(), qualified.clone());
+        if let Some(decision) = self.unique_decision(
+            self.by_qualified.get(&key),
+            candidate,
+            ResolutionRule::ExplicitBinding,
+        ) {
+            return Some(decision);
+        }
+        if let Some(decision) = self.inventory_decision(language, &qualified, candidate) {
+            return Some(decision);
+        }
+        let imported =
+            self.imported_declarations(language, binding_lookup, &candidate.target_spelling);
+        (!imported.is_empty())
+            .then(|| {
+                self.unique_decision(Some(&imported), candidate, ResolutionRule::ExplicitBinding)
+            })
+            .flatten()
+    }
+
     pub fn materialize(&self, nodes: &mut Vec<NodeRecord>, edges: &mut Vec<EdgeRecord>) {
         let mut profile_started = Instant::now();
         let overloads = declaration_overloads(self.declarations.values());
+        let graph_ids = materialized_declaration_ids(self.declarations.values());
         let existing_positions = nodes
             .iter()
             .enumerate()
@@ -528,16 +535,17 @@ impl UniversalResolutionIndex {
             .map(|node| node.id.clone())
             .collect::<BTreeSet<_>>();
         for declaration in self.declarations.values() {
-            if let Some(index) = existing_positions.get(&declaration.graph_node_id) {
-                project_declaration_onto_node(&mut nodes[*index], declaration);
+            let graph_node_id = &graph_ids[&declaration.id];
+            if let Some(index) = existing_positions.get(graph_node_id) {
+                project_declaration_onto_node(&mut nodes[*index], declaration, graph_node_id);
                 if let Some(discriminator) = overloads.get(&declaration.id) {
                     nodes[*index].attributes.insert(
                         "overload_discriminator".to_owned(),
                         Value::String(discriminator.clone()),
                     );
                 }
-            } else if existing_nodes.insert(declaration.graph_node_id.clone()) {
-                let mut node = declaration_node(declaration);
+            } else if existing_nodes.insert(graph_node_id.clone()) {
+                let mut node = declaration_node(declaration, graph_node_id);
                 if let Some(discriminator) = overloads.get(&declaration.id) {
                     node.attributes.insert(
                         "overload_discriminator".to_owned(),
@@ -568,7 +576,7 @@ impl UniversalResolutionIndex {
             let Some(source) = self
                 .declarations
                 .get(&candidate.source_declaration_id)
-                .map(|declaration| declaration.graph_node_id.clone())
+                .map(|declaration| graph_ids[&declaration.id].clone())
             else {
                 continue;
             };
@@ -581,7 +589,7 @@ impl UniversalResolutionIndex {
                         continue;
                     };
                     (
-                        target.graph_node_id.clone(),
+                        graph_ids[&target.id].clone(),
                         evidence.rule,
                         Some(target.kind.clone()),
                     )
@@ -870,6 +878,32 @@ fn declaration_overloads<'a>(
     overloads
 }
 
+fn materialized_declaration_ids<'a>(
+    declarations: impl Iterator<Item = &'a DeclarationFact>,
+) -> BTreeMap<String, String> {
+    let mut groups = BTreeMap::<String, Vec<&DeclarationFact>>::new();
+    for declaration in declarations {
+        groups
+            .entry(declaration.graph_node_id.clone())
+            .or_default()
+            .push(declaration);
+    }
+    let mut ids = BTreeMap::new();
+    for (graph_node_id, declarations) in groups {
+        if declarations.len() == 1 {
+            ids.insert(declarations[0].id.clone(), graph_node_id);
+            continue;
+        }
+        for declaration in declarations {
+            ids.insert(
+                declaration.id.clone(),
+                make_id(&[&graph_node_id, &declaration.id]),
+            );
+        }
+    }
+    ids
+}
+
 fn profile_internal(label: &str, started: &mut Instant) {
     if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
         eprintln!(
@@ -913,12 +947,16 @@ fn insert_unique<T>(map: &mut BTreeMap<String, T>, id: String, value: T) -> Resu
     Ok(())
 }
 
-fn project_declaration_onto_node(node: &mut NodeRecord, declaration: &DeclarationFact) {
+fn project_declaration_onto_node(
+    node: &mut NodeRecord,
+    declaration: &DeclarationFact,
+    graph_node_id: &str,
+) {
     node.attributes
-        .extend(declaration_node(declaration).attributes);
+        .extend(declaration_node(declaration, graph_node_id).attributes);
 }
 
-fn declaration_node(declaration: &DeclarationFact) -> NodeRecord {
+fn declaration_node(declaration: &DeclarationFact, graph_node_id: &str) -> NodeRecord {
     let label = match declaration.kind.as_str() {
         "function" => format!("{}()", declaration.name),
         "method" => format!(".{}()", declaration.name),
@@ -1012,7 +1050,7 @@ fn declaration_node(declaration: &DeclarationFact) -> NodeRecord {
         );
     }
     NodeRecord {
-        id: declaration.graph_node_id.clone(),
+        id: graph_node_id.to_owned(),
         attributes,
     }
 }

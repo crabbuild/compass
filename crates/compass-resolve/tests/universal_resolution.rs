@@ -123,6 +123,74 @@ fn universal_overloads_receive_stable_publication_discriminators() {
 }
 
 #[test]
+fn empty_hard_cut_source_materializes_its_file_node() {
+    let extracted = extract("pkg/__init__.py", b"");
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([("pkg/__init__.py".to_owned(), String::new())]),
+    );
+
+    let file = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "file" && node.string("source_file") == "pkg/__init__.py"
+        })
+        .expect("empty Python source inventory node");
+    assert_eq!(file.label(), "__init__.py");
+    assert_eq!(file.string("language"), "python");
+    assert_eq!(
+        file.attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64),
+        Some(0)
+    );
+    assert_eq!(
+        file.attributes
+            .get("end_byte")
+            .and_then(serde_json::Value::as_u64),
+        Some(0)
+    );
+}
+
+#[test]
+fn normalized_source_id_collisions_preserve_every_file_node() {
+    let paths = ["pkg/.util.py", "pkg/_util.py", "pkg/~util.py"];
+    let extracted = paths
+        .iter()
+        .map(|path| extract(path, b""))
+        .collect::<Vec<_>>();
+    let sources = paths
+        .iter()
+        .map(|path| ((*path).to_owned(), String::new()))
+        .collect::<HashMap<_, _>>();
+    let resolved = compass_resolve::resolve(&extracted, &sources);
+
+    let files = resolved
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "file")
+        .map(|node| (node.id.clone(), node.string("source_file")))
+        .collect::<Vec<_>>();
+    assert_eq!(files.len(), paths.len());
+    assert_eq!(
+        files
+            .iter()
+            .map(|(_, source)| source.as_str())
+            .collect::<std::collections::BTreeSet<_>>(),
+        paths.into_iter().collect::<std::collections::BTreeSet<_>>()
+    );
+    assert_eq!(
+        files
+            .iter()
+            .map(|(id, _)| id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        paths.len()
+    );
+}
+
+#[test]
 fn universal_batches_discard_stale_untyped_raw_calls_in_both_merge_paths() {
     let provider = extract(
         "pkg/provider.py",
@@ -176,6 +244,76 @@ fn universal_batches_discard_stale_untyped_raw_calls_in_both_merge_paths() {
 }
 
 #[test]
+fn python_super_call_resolves_only_the_exact_direct_base_method() {
+    let provider = extract(
+        "pkg/base.py",
+        b"class Base:\n    def run(self):\n        return None\n",
+    );
+    let caller_source =
+        b"from pkg.base import Base\nclass Child(Base):\n    def run(self):\n        super().run()\n";
+    let caller = extract("pkg/child.py", caller_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, caller],
+        &HashMap::from([(
+            "pkg/child.py".to_owned(),
+            String::from_utf8(caller_source.to_vec()).expect("source"),
+        )]),
+    );
+    let base_run = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "method"
+                && node.string("source_file") == "pkg/base.py"
+                && node.string("qualified_name") == "pkg.base.Base::run"
+        })
+        .unwrap_or_else(|| panic!("base method; nodes={:#?}", resolved.nodes));
+
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == base_run.id)
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].string("source_location"), "L4");
+    assert_eq!(calls[0].string("resolution_rule"), "explicit-binding");
+}
+
+#[test]
+fn python_super_call_with_multiple_bases_cannot_terminal_match_an_unrelated_method() {
+    let source = b"class Unrelated:\n    def run(self):\n        return None\nclass Left:\n    pass\nclass Right:\n    pass\nclass Child(Left, Right):\n    def run(self):\n        super().run()\n";
+    let extracted = extract("pkg/models.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/models.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "calls" || edge.string("source_location") != "L9"
+    }));
+}
+
+#[test]
+fn python_shadowed_super_call_does_not_bind_the_builtin_hierarchy() {
+    let source = b"class Base:\n    def run(self):\n        return None\nclass Child(Base):\n    def run(self, super):\n        super().run()\n";
+    let extracted = extract("pkg/models.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/models.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "calls" || edge.string("source_location") != "L6"
+    }));
+}
+
+#[test]
 fn ambiguous_same_package_targets_fail_closed() {
     let first = extract("pkg/first.go", b"package pkg\nfunc duplicate() {}\n");
     let second = extract("pkg/second.go", b"package pkg\nfunc duplicate() {}\n");
@@ -214,6 +352,78 @@ fn explicit_python_alias_resolves_before_external_fallback() {
         edge.string("relation") == "calls"
             && edge.target == target.id
             && edge.string("resolution_rule") == "explicit-binding"
+    }));
+}
+
+#[test]
+fn explicit_python_type_alias_resolves_before_same_scope_declaration() {
+    let provider = extract("framework/serializer.py", b"class Serializer:\n    pass\n");
+    let consumer = extract(
+        "app/serializer.py",
+        b"from framework.serializer import Serializer as PythonSerializer\nclass Serializer(PythonSerializer):\n    pass\n",
+    );
+    let resolved = compass_resolve::resolve(&[provider, consumer], &HashMap::new());
+    let imported = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "framework.serializer.Serializer")
+        .expect("imported serializer");
+    let local = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.serializer.Serializer")
+        .expect("local serializer");
+
+    let inheritance = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.source == local.id || edge.string("relation") == "inherits")
+        .collect::<Vec<_>>();
+    assert!(
+        inheritance.iter().any(|edge| {
+            edge.source == local.id
+                && edge.target == imported.id
+                && edge.string("relation") == "inherits"
+                && edge.string("resolution_rule") == "explicit-binding"
+        }),
+        "imported={imported:#?} local={local:#?} inheritance={inheritance:#?}"
+    );
+    assert!(resolved.edges.iter().all(|edge| {
+        !(edge.source == local.id
+            && edge.target == local.id
+            && edge.string("relation") == "inherits")
+    }));
+}
+
+#[test]
+fn function_local_import_binding_shadows_same_named_outer_declaration() {
+    let provider = extract("pkg/template.py", b"def render():\n    return 'template'\n");
+    let consumer = extract(
+        "facade.py",
+        b"def render():\n    from pkg.template import render\n    return render()\n",
+    );
+    let resolved = compass_resolve::resolve(&[provider, consumer], &HashMap::new());
+    let wrapper = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "facade.render")
+        .expect("wrapper render");
+    let imported = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.template.render")
+        .expect("imported render");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == wrapper.id
+            && edge.target == imported.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "explicit-binding"
+    }));
+    assert!(resolved.edges.iter().all(|edge| {
+        !(edge.source == wrapper.id
+            && edge.target == wrapper.id
+            && edge.string("relation") == "calls")
     }));
 }
 

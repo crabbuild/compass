@@ -415,11 +415,11 @@ pub(crate) fn extract_tree_evidence(
     profile: &'static AdapterProfile,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
     let mut state = DirectAdapterState::new(path, source_file, source, profile);
+    state.add_file(root)?;
     if root.end_byte() == root.start_byte() {
         return state.builder.finish();
     }
     state.capture_parser_errors(root);
-    state.add_file(root)?;
     match profile.language {
         "python" => state.extract_python(root)?,
         "go" => state.extract_go(root)?,
@@ -452,12 +452,19 @@ struct DeclarationContext {
     name: String,
     qualified_name: String,
     kind: String,
+    enclosing_type_qualified_name: Option<String>,
 }
 
 struct ImportBindingVersion {
     binding_id: String,
     target: String,
     active_from: usize,
+}
+
+#[derive(Default)]
+struct PythonTypeBases {
+    complete: bool,
+    qualified_names: Vec<String>,
 }
 
 struct DirectAdapterState<'source> {
@@ -475,6 +482,8 @@ struct DirectAdapterState<'source> {
     local_shadows: HashMap<String, HashSet<String>>,
     scope_parents: HashMap<String, String>,
     ambiguous_bindings: HashSet<(String, String)>,
+    python_module_bound_names: HashSet<String>,
+    python_type_bases: HashMap<String, PythonTypeBases>,
     go_lexical_bindings: HashMap<usize, Vec<GoLexicalBinding>>,
     graph_ids: HashSet<String>,
     parser_error_ranges: Vec<(usize, usize)>,
@@ -515,6 +524,8 @@ impl<'source> DirectAdapterState<'source> {
             local_shadows: HashMap::new(),
             scope_parents: HashMap::new(),
             ambiguous_bindings: HashSet::new(),
+            python_module_bound_names: HashSet::new(),
+            python_type_bases: HashMap::new(),
             go_lexical_bindings: HashMap::new(),
             graph_ids: HashSet::new(),
             parser_error_ranges: Vec::new(),
@@ -606,6 +617,7 @@ impl<'source> DirectAdapterState<'source> {
             name: label.to_owned(),
             qualified_name: self.module_or_package.clone(),
             kind: "file".to_owned(),
+            enclosing_type_qualified_name: None,
         });
         Ok(())
     }
@@ -620,6 +632,7 @@ impl<'source> DirectAdapterState<'source> {
         self.collect_python_declarations(root, &file, None)?;
         self.collect_python_imports(root, &file)?;
         let module_bound = crate::engine::python_bound_names(root, self.source, true);
+        self.python_module_bound_names.clone_from(&module_bound);
         self.walk_python_indirect(root, &file, true, &module_bound)?;
         self.walk_python_evidence(root, &file, true)
     }
@@ -708,6 +721,9 @@ impl<'source> DirectAdapterState<'source> {
                 name,
                 qualified_name,
                 kind: kind.to_owned(),
+                enclosing_type_qualified_name: (!is_class)
+                    .then(|| class_owner.map(|owner| owner.qualified_name.clone()))
+                    .flatten(),
             };
             self.add_ownership(owner, &context)?;
             self.declarations.insert(node.id(), context.clone());
@@ -1125,6 +1141,10 @@ impl<'source> DirectAdapterState<'source> {
         let Some(arguments) = declaration.child_by_field_name("superclasses") else {
             return Ok(());
         };
+        let mut bases = PythonTypeBases {
+            complete: true,
+            qualified_names: Vec::new(),
+        };
         let mut cursor = arguments.walk();
         for argument in arguments
             .children(&mut cursor)
@@ -1138,10 +1158,18 @@ impl<'source> DirectAdapterState<'source> {
                 _ => None,
             };
             let Some(target) = target else {
+                bases.complete = false;
                 continue;
             };
             let raw = self.text(target);
             let (qualifier, spelling) = split_qualified(&raw);
+            if let Some(qualified_name) =
+                self.python_base_qualified_name(owner, qualifier, spelling, target.start_byte())
+            {
+                bases.qualified_names.push(qualified_name);
+            } else {
+                bases.complete = false;
+            }
             self.add_relationship_occurrence(
                 SemanticRole::BaseType,
                 CandidateRelation::Extends,
@@ -1151,6 +1179,10 @@ impl<'source> DirectAdapterState<'source> {
                 target,
             )?;
         }
+        bases.qualified_names.sort();
+        bases.qualified_names.dedup();
+        self.python_type_bases
+            .insert(owner.qualified_name.clone(), bases);
         Ok(())
     }
 
@@ -1248,6 +1280,7 @@ impl<'source> DirectAdapterState<'source> {
                     name,
                     qualified_name,
                     kind: kind.to_owned(),
+                    enclosing_type_qualified_name: None,
                 };
                 self.add_ownership(file, &context)?;
                 self.declarations.insert(node.id(), context);
@@ -1303,6 +1336,7 @@ impl<'source> DirectAdapterState<'source> {
                 name,
                 qualified_name,
                 kind: kind.to_owned(),
+                enclosing_type_qualified_name: None,
             };
             self.add_ownership(file, &context)?;
             self.declarations.insert(node.id(), context);
@@ -1756,6 +1790,20 @@ impl<'source> DirectAdapterState<'source> {
         if spelling.is_empty() {
             return Ok(());
         }
+        let python_super_receiver = (self.language == "python")
+            .then(|| python_super_receiver(function, self.source))
+            .flatten();
+        let exact_super_target = if let Some(receiver) = python_super_receiver {
+            if !python_super_call_is_builtin(receiver, call, owner, self) {
+                return Ok(());
+            }
+            let Some(target) = self.direct_python_super_target(owner, spelling) else {
+                return Ok(());
+            };
+            Some(target)
+        } else {
+            None
+        };
         let lookup_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
         let allow_later_file_binding =
             self.language == "python" && matches!(owner.kind.as_str(), "function" | "method");
@@ -1791,32 +1839,34 @@ impl<'source> DirectAdapterState<'source> {
                 allow_later_file_binding,
             )
             .cloned();
-        let qualified_name = qualifier
-            .and_then(|qualifier| {
-                self.local_target_for(owner, qualifier)
-                    .map(|target| format!("{target}::{spelling}"))
-            })
-            .or_else(|| {
-                qualifier
-                    .and_then(|qualifier| {
-                        self.imported_qualified_target_for(
-                            owner,
-                            qualifier,
-                            function.start_byte(),
-                            allow_later_file_binding,
-                        )
-                    })
-                    .map(|target| format!("{target}.{spelling}"))
-            })
-            .or_else(|| {
-                self.imported_target_for_occurrence(
-                    owner,
-                    spelling,
-                    function.start_byte(),
-                    allow_later_file_binding,
-                )
-                .cloned()
-            });
+        let qualified_name = exact_super_target.or_else(|| {
+            qualifier
+                .and_then(|qualifier| {
+                    self.local_target_for(owner, qualifier)
+                        .map(|target| format!("{target}::{spelling}"))
+                })
+                .or_else(|| {
+                    qualifier
+                        .and_then(|qualifier| {
+                            self.imported_qualified_target_for(
+                                owner,
+                                qualifier,
+                                function.start_byte(),
+                                allow_later_file_binding,
+                            )
+                        })
+                        .map(|target| format!("{target}.{spelling}"))
+                })
+                .or_else(|| {
+                    self.imported_target_for_occurrence(
+                        owner,
+                        spelling,
+                        function.start_byte(),
+                        allow_later_file_binding,
+                    )
+                    .cloned()
+                })
+        });
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
@@ -1852,11 +1902,45 @@ impl<'source> DirectAdapterState<'source> {
                 } else {
                     vec!["function".to_owned(), "method".to_owned()]
                 },
-                allow_external: qualified_name.is_some(),
+                allow_external: qualified_name.is_some() && python_super_receiver.is_none(),
             },
         )?;
         let _ = call_kind;
         Ok(())
+    }
+
+    fn direct_python_super_target(
+        &self,
+        owner: &DeclarationContext,
+        spelling: &str,
+    ) -> Option<String> {
+        let enclosing_type = owner.enclosing_type_qualified_name.as_deref()?;
+        let bases = self.python_type_bases.get(enclosing_type)?;
+        let [base] = bases.qualified_names.as_slice() else {
+            return None;
+        };
+        bases.complete.then(|| format!("{base}::{spelling}"))
+    }
+
+    fn python_base_qualified_name(
+        &self,
+        owner: &DeclarationContext,
+        qualifier: Option<&str>,
+        spelling: &str,
+        use_start: usize,
+    ) -> Option<String> {
+        if spelling.is_empty() || is_python_builtin_type(spelling) {
+            return None;
+        }
+        match qualifier {
+            None => self
+                .imported_target_for_occurrence(owner, spelling, use_start, false)
+                .cloned()
+                .or_else(|| Some(format!("{}.{}", self.module_or_package, spelling))),
+            Some(qualifier) => self
+                .imported_qualified_target_for(owner, qualifier, use_start, false)
+                .map(|target| format!("{target}.{spelling}")),
+        }
     }
 
     fn add_relationship_occurrence(
@@ -2186,6 +2270,78 @@ fn split_qualified(raw: &str) -> (Option<&str>, &str) {
         .map_or((None, raw), |(qualifier, spelling)| {
             (Some(qualifier), spelling)
         })
+}
+
+fn python_super_receiver<'tree>(function: Node<'tree>, source: &[u8]) -> Option<Node<'tree>> {
+    if function.kind() != "attribute" {
+        return None;
+    }
+    let receiver = function.child_by_field_name("object")?;
+    if receiver.kind() != "call" {
+        return None;
+    }
+    let callable = receiver.child_by_field_name("function")?;
+    (callable.kind() == "identifier"
+        && callable.utf8_text(source).ok().map(str::trim) == Some("super"))
+    .then_some(receiver)
+}
+
+fn python_super_call_is_builtin(
+    receiver: Node<'_>,
+    call: Node<'_>,
+    owner: &DeclarationContext,
+    state: &DirectAdapterState<'_>,
+) -> bool {
+    if owner.kind != "method" || owner.enclosing_type_qualified_name.is_none() {
+        return false;
+    }
+    if receiver
+        .child_by_field_name("arguments")
+        .is_none_or(|arguments| arguments.named_child_count() != 0)
+    {
+        return false;
+    }
+    if state
+        .binding_for_occurrence(owner, "super", receiver.start_byte(), true)
+        .is_some()
+        || state.python_module_bound_names.contains("super")
+        || state.declarations.values().any(|declaration| {
+            declaration.qualified_name == format!("{}.super", state.module_or_package)
+        })
+    {
+        return false;
+    }
+
+    let mut ancestor = call.parent();
+    while let Some(node) = ancestor {
+        if matches!(
+            node.kind(),
+            "lambda"
+                | "list_comprehension"
+                | "dictionary_comprehension"
+                | "set_comprehension"
+                | "generator_expression"
+        ) {
+            return false;
+        }
+        if node.kind() == "function_definition" {
+            let owned_by_current_method = state
+                .declarations
+                .get(&node.id())
+                .is_some_and(|declaration| declaration.fact_id == owner.fact_id);
+            let has_first_argument = node
+                .child_by_field_name("parameters")
+                .is_some_and(|parameters| parameters.named_child_count() != 0);
+            return owned_by_current_method
+                && has_first_argument
+                && !crate::engine::python_bound_names(node, state.source, false).contains("super");
+        }
+        if node.kind() == "class_definition" {
+            return false;
+        }
+        ancestor = node.parent();
+    }
+    false
 }
 
 fn resolve_python_module(current: &str, imported: &str, current_is_package: bool) -> String {
