@@ -477,9 +477,10 @@ def markdown_report(payload: dict[str, object]) -> str:
             "`rejected` means a known unsafe/fabricated Graphify projection; `missing` "
             "means no source-compatible Compass fact was found.",
             "",
-            "| Corpus | Exact nodes | Dominated nodes | Missing nodes | Exact edges | "
-            "Dominated edges | Rejected edges | Ambiguous edges | Missing edges |",
-            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| Corpus | Exact nodes | Dominated nodes | Ambiguous nodes | Missing nodes | "
+            "Exact edges | Dominated edges | Rejected edges | Ambiguous edges | "
+            "Missing edges |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         )
     )
     for corpus in corpora:
@@ -488,6 +489,7 @@ def markdown_report(payload: dict[str, object]) -> str:
             f"| {corpus['name']} | "
             f"{metrics.get('exact_graphify_nodes', 0):,} | "
             f"{metrics.get('dominated_graphify_nodes', 0):,} | "
+            f"{metrics.get('ambiguous_graphify_nodes', 0):,} | "
             f"{metrics.get('missing_graphify_nodes', 0):,} | "
             f"{metrics.get('exact_graphify_edges', 0):,} | "
             f"{metrics.get('dominated_graphify_edges', 0):,} | "
