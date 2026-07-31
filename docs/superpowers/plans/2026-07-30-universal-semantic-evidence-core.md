@@ -1119,11 +1119,16 @@ Result:
   non-controlled comparison to phase five's different remote corpus commits,
   Django incremental p50 rises 15.5%; peak build memory remains high.
 
-- [ ] **Step 5: Record evidence and update PR #93**
+- [x] **Step 5: Record evidence and update PR #93**
 
 Add a phase-six review with exact topology deltas, complete changed-population
 audit, graph counts and digests, Graphify classifications, performance, and
 remaining gaps. Commit and push only after all required gates pass.
+
+Result: phase-six evidence is recorded in
+`docs/superpowers/reviews/2026-07-31-semantic-dominance-phase-6.md`.
+Implementation and qualification commits are pushed, and PR #93 contains the
+phase-six scope, results, performance caveats, and remaining gaps.
 
 ## Plan self-review
 
