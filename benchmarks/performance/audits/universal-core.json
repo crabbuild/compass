@@ -1,0 +1,211 @@
+{
+  "schema": "compass.quality-audit",
+  "mode": "conformance",
+  "corpora": [
+    {
+      "name": "universal-core",
+      "commit": "0000000000000000000000000000000000000000",
+      "path": ".",
+      "graph": "audit_graph.json",
+      "graphSha256": "44d735381ee2cb47f849cb2fd62ffe805a4bbf18f8d6c2a2ea33f8f40a94ff19"
+    }
+  ],
+  "advertisedCapabilities": [
+    {"adapter": "python", "capability": "calls"},
+    {"adapter": "python", "capability": "decorators"},
+    {"adapter": "python", "capability": "type_references"}
+  ],
+  "requiredRelations": ["calls", "decorates", "references"],
+  "records": [
+    {
+      "id": "accepted-correct",
+      "corpus": "universal-core",
+      "pool": "accepted",
+      "adapter": "python",
+      "capability": "calls",
+      "language": "python",
+      "relation": "calls",
+      "confidence": "exact",
+      "targetCluster": "beta",
+      "source": {"nodeId": "alpha", "language": "python"},
+      "target": {"nodeId": "beta", "language": "python"},
+      "occurrence": {
+        "file": "main.py",
+        "startByte": 17,
+        "endByte": 23,
+        "snippetSha256": "f2bfeac46a84e27dd286c0bc1521571704adf43fb1132baba7536ad9600c394b"
+      },
+      "judgment": "correct",
+      "reason": "Exact local call owner, target, relation, and occurrence."
+    },
+    {
+      "id": "accepted-cross-language",
+      "corpus": "universal-core",
+      "pool": "accepted",
+      "adapter": "python",
+      "capability": "calls",
+      "language": "python",
+      "relation": "calls",
+      "confidence": "exact",
+      "targetCluster": "go-target",
+      "source": {"nodeId": "alpha", "language": "python"},
+      "target": {"nodeId": "go-target", "language": "go"},
+      "occurrence": {
+        "file": "main.py",
+        "startByte": 73,
+        "endByte": 81,
+        "snippetSha256": "bf3dd103a084c209bd382be9f319878a4a3bb797123cafa3199951007b0d63f9"
+      },
+      "judgment": "cross_language_match",
+      "reason": "A Python use was incorrectly bound to an unrelated Go declaration."
+    },
+    {
+      "id": "accepted-external",
+      "corpus": "universal-core",
+      "pool": "accepted",
+      "adapter": "python",
+      "capability": "calls",
+      "language": "python",
+      "relation": "calls",
+      "confidence": "exact",
+      "targetCluster": "external",
+      "source": {"nodeId": "alpha", "language": "python"},
+      "target": {"nodeId": "external", "language": "external"},
+      "occurrence": {
+        "file": "main.py",
+        "startByte": 28,
+        "endByte": 38,
+        "snippetSha256": "52ef600b372f7918a8d416adb33d07f9795b2d4ac229e42d24179d5964ff49f0"
+      },
+      "judgment": "external",
+      "reason": "The qualified external endpoint preserves a real use site."
+    },
+    {
+      "id": "accepted-fabricated-occurrence",
+      "corpus": "universal-core",
+      "pool": "accepted",
+      "adapter": "python",
+      "capability": "calls",
+      "language": "python",
+      "relation": "calls",
+      "confidence": "inferred",
+      "targetCluster": "beta",
+      "source": {"nodeId": "alpha", "language": "python"},
+      "target": {"nodeId": "beta", "language": "python"},
+      "occurrence": {
+        "file": "main.py",
+        "startByte": 4,
+        "endByte": 9,
+        "snippetSha256": "8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8"
+      },
+      "judgment": "fabricated_occurrence",
+      "reason": "The declaration name is not a call occurrence."
+    },
+    {
+      "id": "accepted-invalid",
+      "corpus": "universal-core",
+      "pool": "accepted",
+      "adapter": "python",
+      "capability": "calls",
+      "language": "python",
+      "relation": "calls",
+      "confidence": "exact",
+      "targetCluster": "wrong",
+      "source": {"nodeId": "alpha", "language": "python"},
+      "target": {"nodeId": "wrong", "language": "python"},
+      "occurrence": {
+        "file": "main.py",
+        "startByte": 17,
+        "endByte": 23,
+        "snippetSha256": "f2bfeac46a84e27dd286c0bc1521571704adf43fb1132baba7536ad9600c394b"
+      },
+      "judgment": "invalid",
+      "reason": "The accepted target identity is wrong and remains in the precision denominator."
+    },
+    {
+      "id": "accepted-unsafe-substitution",
+      "corpus": "universal-core",
+      "pool": "accepted",
+      "adapter": "python",
+      "capability": "calls",
+      "language": "python",
+      "relation": "calls",
+      "confidence": "inferred",
+      "targetCluster": "wrong",
+      "source": {"nodeId": "alpha", "language": "python"},
+      "target": {"nodeId": "wrong", "language": "python"},
+      "occurrence": {
+        "file": "main.py",
+        "startByte": 73,
+        "endByte": 81,
+        "snippetSha256": "bf3dd103a084c209bd382be9f319878a4a3bb797123cafa3199951007b0d63f9"
+      },
+      "judgment": "unsafe_local_substitution",
+      "reason": "An unresolved spelling was replaced by an unrelated local target."
+    },
+    {
+      "id": "oracle-ambiguous",
+      "corpus": "universal-core",
+      "pool": "source_oracle",
+      "adapter": "python",
+      "capability": "calls",
+      "language": "python",
+      "relation": "calls",
+      "confidence": "exact",
+      "targetCluster": "ambiguous",
+      "source": {"nodeId": "alpha", "language": "python"},
+      "target": {"nodeId": "wrong", "language": "python"},
+      "occurrence": {
+        "file": "main.py",
+        "startByte": 57,
+        "endByte": 68,
+        "snippetSha256": "020366e4ec6c07fd40029e41959ecd8a4f060431f174625d46a8b3da4202dbc5"
+      },
+      "judgment": "ambiguous",
+      "reason": "The source does not provide enough evidence to select one target."
+    },
+    {
+      "id": "oracle-missing",
+      "corpus": "universal-core",
+      "pool": "source_oracle",
+      "adapter": "python",
+      "capability": "decorators",
+      "language": "python",
+      "relation": "decorates",
+      "confidence": "exact",
+      "targetCluster": "beta",
+      "source": {"nodeId": "alpha", "language": "python"},
+      "target": {"nodeId": "beta", "language": "python"},
+      "occurrence": {
+        "file": "main.py",
+        "startByte": 43,
+        "endByte": 52,
+        "snippetSha256": "47dd5c56b1f9d43e8683b1700015915f814fa1adfa8546d317fe078f0867f93a"
+      },
+      "judgment": "missing",
+      "reason": "A source-derived oracle relationship is not represented."
+    },
+    {
+      "id": "oracle-represented-elsewhere",
+      "corpus": "universal-core",
+      "pool": "source_oracle",
+      "adapter": "python",
+      "capability": "type_references",
+      "language": "python",
+      "relation": "references",
+      "confidence": "exact",
+      "targetCluster": "beta",
+      "source": {"nodeId": "alpha", "language": "python"},
+      "target": {"nodeId": "beta", "language": "python"},
+      "occurrence": {
+        "file": "main.py",
+        "startByte": 17,
+        "endByte": 23,
+        "snippetSha256": "f2bfeac46a84e27dd286c0bc1521571704adf43fb1132baba7536ad9600c394b"
+      },
+      "judgment": "represented_elsewhere",
+      "reason": "The dependency is represented by a more specific call relationship at the same real occurrence.",
+      "representation": {"source": "alpha", "target": "beta", "relation": "calls"}
+    }
+  ]
+}

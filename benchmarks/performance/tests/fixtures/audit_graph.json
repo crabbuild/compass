@@ -1,0 +1,50 @@
+{
+  "directed": true,
+  "multigraph": true,
+  "graph": {"schema": "compass.graph/1"},
+  "nodes": [
+    {"id": "alpha", "kind": "function", "language": "python"},
+    {"id": "beta", "kind": "function", "language": "python"},
+    {"id": "external", "kind": "external", "language": "external"},
+    {"id": "go-target", "kind": "function", "language": "go"},
+    {"id": "wrong", "kind": "function", "language": "python"}
+  ],
+  "links": [
+    {
+      "source": "alpha",
+      "target": "beta",
+      "kind": "calls",
+      "relationshipSite": {"file": "main.py", "startByte": 17, "endByte": 23}
+    },
+    {
+      "source": "alpha",
+      "target": "external",
+      "kind": "calls",
+      "relationshipSite": {"file": "main.py", "startByte": 28, "endByte": 38}
+    },
+    {
+      "source": "alpha",
+      "target": "beta",
+      "kind": "calls",
+      "relationshipSite": {"file": "main.py", "startByte": 4, "endByte": 9}
+    },
+    {
+      "source": "alpha",
+      "target": "go-target",
+      "kind": "calls",
+      "relationshipSite": {"file": "main.py", "startByte": 73, "endByte": 81}
+    },
+    {
+      "source": "alpha",
+      "target": "wrong",
+      "kind": "calls",
+      "relationshipSite": {"file": "main.py", "startByte": 73, "endByte": 81}
+    },
+    {
+      "source": "alpha",
+      "target": "wrong",
+      "kind": "calls",
+      "relationshipSite": {"file": "main.py", "startByte": 17, "endByte": 23}
+    }
+  ]
+}

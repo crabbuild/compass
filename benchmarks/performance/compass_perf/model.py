@@ -156,6 +156,104 @@ class QualificationRun:
     gates: GateReport | None = None
 
 
+@dataclass(frozen=True)
+class AuditCorpus:
+    name: str
+    commit: str
+    path: str
+    graph: str
+    graph_sha256: str
+
+
+@dataclass(frozen=True)
+class AuditEndpoint:
+    node_id: str
+    language: str
+
+
+@dataclass(frozen=True)
+class AuditOccurrence:
+    file: str
+    start_byte: int
+    end_byte: int
+    snippet_sha256: str
+
+
+@dataclass(frozen=True)
+class AuditGraphFact:
+    source: str
+    target: str
+    relation: str
+
+
+@dataclass(frozen=True)
+class AuditCapabilityIdentity:
+    adapter: str
+    capability: str
+    framework_pack: str | None = None
+
+
+@dataclass(frozen=True)
+class AuditRecord:
+    record_id: str
+    corpus: str
+    pool: str
+    adapter: str
+    framework_pack: str | None
+    capability: str
+    language: str
+    relation: str
+    confidence: str
+    target_cluster: str
+    source: AuditEndpoint
+    target: AuditEndpoint
+    occurrence: AuditOccurrence
+    judgment: str
+    reason: str
+    representation: AuditGraphFact | None = None
+
+
+@dataclass(frozen=True)
+class AuditManifest:
+    schema: str
+    mode: str
+    corpora: tuple[AuditCorpus, ...]
+    advertised_capabilities: tuple[AuditCapabilityIdentity, ...]
+    required_relations: tuple[str, ...]
+    records: tuple[AuditRecord, ...]
+
+
+@dataclass(frozen=True)
+class WilsonInterval:
+    lower: float
+    upper: float
+
+
+@dataclass(frozen=True)
+class AuditMetric:
+    numerator: int
+    denominator: int
+    observed: float | None
+    wilson_95: WilsonInterval | None = None
+
+
+@dataclass(frozen=True)
+class AuditResult:
+    schema: str
+    mode: str
+    passed: bool
+    eligible_for_quality_claim: bool
+    manifest_sha256: str
+    audited_records: int
+    audited_accepted_edges: int
+    precision: AuditMetric
+    recall: AuditMetric
+    judgments: dict[str, int]
+    critical_violations: dict[str, int]
+    strata: dict[str, dict[str, dict[str, int | float | None]]]
+    failures: tuple[str, ...]
+
+
 def to_json_value(value: Any) -> Any:
     """Convert nested qualification dataclasses to JSON-safe values."""
     if hasattr(value, "__dataclass_fields__"):

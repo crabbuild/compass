@@ -23,6 +23,7 @@ if __package__ in {None, ""}:
 
 from benchmarks.performance.compass_perf import RUN_SCHEMA
 from benchmarks.performance.compass_perf.adapters import CompassAdapter, GraphifyAdapter
+from benchmarks.performance.compass_perf.audit import audit_result_json_value, run_audit
 from benchmarks.performance.compass_perf.config import load_suite
 from benchmarks.performance.compass_perf.correctness import compare_graphs, index_graph
 from benchmarks.performance.compass_perf.model import (
@@ -436,6 +437,19 @@ def promote(args: argparse.Namespace) -> int:
     return 0
 
 
+def audit(args: argparse.Namespace) -> int:
+    result = run_audit(args.manifest, args.graph, args.corpus)
+    print(
+        json.dumps(
+            audit_result_json_value(result),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+    )
+    return 0 if result.passed else 1
+
+
 def _common(parser: argparse.ArgumentParser, *, execution: bool = False) -> None:
     parser.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     parser.add_argument("--workspace", type=Path, default=DEFAULT_WORKSPACE)
@@ -471,6 +485,10 @@ def build_parser() -> argparse.ArgumentParser:
     promote_parser = subparsers.add_parser("promote")
     promote_parser.add_argument("run", type=Path)
     promote_parser.add_argument("--destination", type=Path)
+    audit_parser = subparsers.add_parser("audit")
+    audit_parser.add_argument("--manifest", type=Path, required=True)
+    audit_parser.add_argument("--graph", type=Path, required=True)
+    audit_parser.add_argument("--corpus", type=Path, required=True)
     return parser
 
 
@@ -494,6 +512,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return regenerate_report(args)
         if args.command == "promote":
             return promote(args)
+        if args.command == "audit":
+            return audit(args)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
