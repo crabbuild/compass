@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use compass_cypher::{
-    CompileLimits, CompileRequest, ParameterTypes, QueryProfileMode, compile, parse_only,
+    Clause, CompileLimits, CompileRequest, ParameterTypes, QueryProfileMode, compile, parse_only,
 };
 use compass_model::SchemaFingerprint;
 
@@ -73,5 +73,46 @@ fn correlated_exists_does_not_require_a_return_clause() -> Result<(), Box<dyn Er
         &parameters,
         &schema,
     ))?;
+    Ok(())
+}
+
+#[test]
+fn planner_eliminates_only_path_bindings_that_are_semantically_dead() -> Result<(), Box<dyn Error>>
+{
+    let parameters = ParameterTypes::new();
+    let schema = SchemaFingerprint::empty();
+    let unused = compile(request(
+        "MATCH p=(a)-[:CALLS*1..2]->(b) RETURN a.id, b.id",
+        &parameters,
+        &schema,
+    ))?;
+    assert!(
+        unused
+            .plan
+            .optimizations
+            .iter()
+            .any(|optimization| { optimization.rule == "unused-path-binding-elimination" })
+    );
+    let Clause::Match(unused_match) = &unused.plan.ast.parts[0].clauses[0] else {
+        return Err("expected MATCH clause".into());
+    };
+    assert_eq!(unused_match.patterns[0].variable, None);
+
+    let used = compile(request(
+        "MATCH p=(a)-[:CALLS*1..2]->(b) RETURN length(p), b.id",
+        &parameters,
+        &schema,
+    ))?;
+    let Clause::Match(used_match) = &used.plan.ast.parts[0].clauses[0] else {
+        return Err("expected MATCH clause".into());
+    };
+    assert_eq!(used_match.patterns[0].variable.as_deref(), Some("p"));
+    assert!(
+        !used
+            .plan
+            .optimizations
+            .iter()
+            .any(|optimization| { optimization.rule == "unused-path-binding-elimination" })
+    );
     Ok(())
 }
