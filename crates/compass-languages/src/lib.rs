@@ -11,6 +11,7 @@ mod dm;
 mod dotnet_project;
 mod elixir;
 mod engine;
+pub mod evidence;
 mod facts;
 mod fortran;
 pub mod frameworks;
@@ -47,6 +48,12 @@ mod zig;
 
 #[doc(hidden)]
 pub use builtins::is_language_builtin_global;
+pub use evidence::{
+    AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
+    EvidenceDiagnostic, EvidenceError, EvidenceErrorCode, EvidenceLimits, EvidenceRange,
+    LanguageCapability, OccurrenceFact, RelationshipCandidate, ResolutionConstraint, ScopeFact,
+    SemanticEvidenceBatch, SemanticRole, validate_evidence,
+};
 pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
 pub use frameworks::{
     FrameworkLimitError, FrameworkLimits, RawDomainFact, RawFrameworkAnchor, RawFrameworkFact,
