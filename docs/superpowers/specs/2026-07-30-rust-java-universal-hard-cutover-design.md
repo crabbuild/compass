@@ -16,6 +16,36 @@ Peak resident memory is measured and reported but is not a blocking gate in
 this phase. Graph quality, determinism, latency advantage, and regression
 safety are blocking gates.
 
+## Layered Ownership
+
+The vendored `compass-tree-sitter-language-pack` remains a grammar substrate,
+not a Compass semantic extension system. It owns:
+
+- the pinned grammar catalog and aliases;
+- static parser linkage and build-time completeness checks;
+- parser construction and grammar ABI compatibility;
+- grammar provenance sufficient to invalidate extraction caches.
+
+The vendored package must not depend on Compass evidence, graph, resolver, or
+framework crates. Compass wraps it behind a small `GrammarProvider` boundary;
+adapter code does not depend on vendor implementation details.
+
+Compass owns the remaining layers:
+
+1. The source registry maps a file to one producer descriptor.
+2. The grammar provider prepares one parser and AST for an AST-backed
+   producer.
+3. The adapter-local semantic policy interprets syntax and emits one universal
+   evidence batch.
+4. The universal resolver resolves evidence across the collection.
+5. The universal projector publishes the normalized Compass graph.
+6. Framework packs target normalized declarations and exact occurrences.
+
+Non-AST producers skip the grammar layer and enter at step 3. The universal
+evidence contract therefore remains useful for configuration, template,
+manifest, and document sources without pretending that those sources have a
+Tree-sitter grammar.
+
 ## Architectural Choice
 
 The universal evidence API, bounded resolver, and graph projector are
@@ -42,11 +72,73 @@ would lose lexical scope and occurrence identity.
 
 The rejected alternatives are:
 
+- storing Compass adapter descriptors or semantic registration in the
+  vendored language pack, because grammar upgrades must remain independent of
+  Compass graph semantics;
+- converting the language pack's generic `process()` output into universal
+  evidence, because that introduces a lossy translation path and cannot
+  preserve adapter-specific lexical identity;
 - a dedicated Java graph extractor that duplicates the generic traversal and
   creates a second publication model;
 - post-hoc evidence reconstruction from legacy nodes and edges;
 - a benchmark-specific patch layer that adds Rust or Java name-resolution
   rules directly to the central publisher.
+
+## Grammar Provider Contract
+
+The Compass-side `GrammarProvider` exposes only grammar concerns:
+
+- load a grammar by its canonical grammar ID;
+- report whether that grammar is statically available;
+- return grammar provenance consisting of grammar ID, language-pack version,
+  pinned parser-source identity, and Tree-sitter ABI version;
+- create or configure a parser without enabling runtime download or dynamic
+  loading.
+
+The default provider wraps the vendored static language pack. An AST-backed
+adapter receives borrowed source bytes, the prepared Tree-sitter root, and
+immutable grammar provenance. It never invokes the language pack's generic
+intelligence `process()` pipeline and never parses the source again.
+
+Grammar provenance is stored with extraction provenance and participates in
+cache identity. A grammar revision changes cache identity, but does not by
+itself change `compass.languages.evidence/1` or an adapter version. The
+language-pack crate version must change when its pinned parser-source identity
+changes.
+
+## Producer Registration Contract
+
+Compass owns a single producer registry. Each source registration resolves to
+a `ProducerDescriptor` containing:
+
+- source identity and extractor kind;
+- an optional canonical grammar requirement;
+- adapter ID, adapter version, profile, and evidence schema;
+- declared semantic capabilities;
+- evidence, scope, import-expansion, overload, and occurrence budgets.
+
+Every AST-backed producer declares exactly one grammar requirement. Every
+source-driven producer declares none. Registry validation fails before
+extraction when an AST-backed producer requires a grammar that the static
+provider cannot supply.
+
+The registry distinguishes five states rather than conflating parser support
+with semantic support:
+
+1. grammar available;
+2. source recognized;
+3. legacy extraction available;
+4. universal candidate;
+5. universal complete.
+
+For every source that passes grammar and parser preparation,
+`UniversalCandidate` and `UniversalComplete` producers emit exactly one
+`compass.languages.evidence/1` batch. A fatal substrate failure instead
+returns a structured extraction error and no batch. Capability claims become
+valid only when adapter conformance proves the corresponding evidence. Adding
+a grammar alone never promotes semantic support. Adding a later universal
+adapter may extend source registration and adapter-local policy, but cannot
+require a shared resolver or projector change.
 
 ## Universal Adapter Contract
 
@@ -70,6 +162,10 @@ resolution. Limits apply per source file to declarations, scopes, bindings,
 occurrences, candidates, scope depth, import expansion, and overload
 candidates. Exceeding a limit produces a diagnostic and prevents that file's
 partial universal graph projection from being reported as complete.
+
+After hard cutover, an adapter emits no final graph nodes, graph edges, or
+`RawCall` records. A local projection requested by a single-file API is still
+performed by the shared universal projector, never by the adapter.
 
 ## Rust Phase 2
 
@@ -182,6 +278,31 @@ byte range. Containment derives from declaration ownership and scope
 parentage. The projector does not manufacture edges from unresolved
 candidates.
 
+## Performance Contract
+
+AST-backed extraction parses each file exactly once. Adapters may make bounded
+subpasses over the prepared tree when semantic ordering requires them, but
+they may not reparse source or run the language pack's generic intelligence
+pipeline.
+
+The evidence builder interns repeated identities and spellings in a bounded
+per-file arena during construction. The serialized version-1 evidence shape
+may expose owned strings at its storage boundary, but in-process extraction,
+resolution, and projection do not round-trip evidence through JSON or another
+serialization format. Corpus merge transfers evidence and graph buffers by
+ownership wherever the caller no longer needs the per-file extraction.
+
+Parsing, evidence emission, collection resolution, graph projection, and
+persistence have separate timing counters. Qualification records these
+counters along with total latency and peak RSS. The design adopts the useful
+performance principles of a native extraction kernel—one parse, compact
+storage, bounded work, and delayed materialization—without adopting direct
+per-language graph publication or a fallback publisher.
+
+Peak RSS remains non-blocking for Rust Phase 2 and Java candidate status, but
+bounded evidence collections, scope depth, import expansion, and overload
+candidate counts are mandatory correctness constraints.
+
 ## Framework Integration
 
 Rust web and Spring packs consume uniform universal evidence and normalized
@@ -193,10 +314,25 @@ This phase does not hard-cut unrelated framework packs or languages.
 
 ## Failure Behavior
 
-Malformed source may produce bounded partial evidence with diagnostics.
-Invalid anchors, missing owners, scope cycles, duplicate conflicting symbol
-identities, and resource-limit exhaustion fail closed for universal
-projection. They do not trigger terminal-name fallback.
+Failures have three explicit classes:
+
+- **fatal substrate or structure failure:** missing grammar, grammar ABI
+  mismatch, parser creation failure, null parse tree, invalid anchors, missing
+  owners, scope cycles, or conflicting symbol identities produce a structured
+  diagnostic and no universal projection for that file;
+- **bounded incomplete evidence:** Tree-sitter error ranges or resource-limit
+  exhaustion allow only individually validated facts outside the affected
+  range or exhausted collection to project, mark the batch incomplete, and
+  prevent it from satisfying a completeness gate;
+- **semantic ambiguity:** multiple scope-valid overload, import, trait,
+  receiver, or type candidates preserve the occurrence and candidates but
+  publish no relationship edge.
+
+An adapter must not emit evidence whose anchor overlaps an untrusted
+Tree-sitter error range. Incomplete or ambiguous evidence never triggers
+terminal-name fallback. A hard-cut adapter never falls back to its legacy
+publisher, and a framework pack cannot repair or reinterpret malformed
+language evidence.
 
 A hard cutover is not merged when a blocking gate fails. Because no dual-run
 path is retained, rollback is the Git commit boundary rather than a runtime
@@ -209,29 +345,45 @@ then exercised with targeted conformance tests and broader regression suites.
 
 Verification proceeds in this order:
 
-1. adapter-local Rust or Java conformance tests;
-2. full `compass-languages` tests;
-3. full `compass-resolve` tests;
-4. Rust web or Spring framework tests;
-5. deterministic repeated fixture extraction;
-6. normalized fixture comparison with Graphify;
-7. pinned Bevy or Spring qualification, including cold, warm, incremental,
-   restore, strict graph coverage, and peak RSS;
-8. `cargo fmt --all -- --check`, `git diff --check`, and
+1. grammar substrate tests prove every advertised static grammar loads, every
+   registered grammar requirement is satisfiable, runtime download and
+   dynamic loading remain disabled, and grammar provenance is stable;
+2. universal contract tests prove deterministic ordering, exact UTF-8
+   anchors, version-1 compatibility, resource bounds, and use by both AST and
+   non-AST producers;
+3. adapter-local Rust or Java conformance tests prove capability claims,
+   malformed-source behavior, Unicode anchors, and absence of adapter-emitted
+   graph nodes, edges, and raw calls after hard cutover;
+4. full `compass-languages` tests;
+5. full `compass-resolve` tests;
+6. Rust web or Spring framework tests;
+7. deterministic repeated fixture extraction;
+8. normalized fixture comparison with Graphify;
+9. pinned Bevy or Spring qualification, including cold, warm, incremental,
+   restore, strict graph coverage, stage timings, and peak RSS;
+10. `cargo fmt --all -- --check`, `git diff --check`, and
    `graphify update .`.
 
 The evidence report distinguishes official multi-sample qualification from
 single-sample diagnostic probes and does not equate additional graph facts
 with correctness.
 
+Changing a pinned grammar requires parser-source and ABI verification plus
+affected-language fixture qualification. It invalidates extraction caches
+through grammar provenance and does not change the universal evidence schema
+or adapter version unless the semantic contract itself changes.
+
 ## Delivery Sequence
 
-1. Add the shared bounded evidence-emitter and universal resolver/projector
+1. Add the Compass-side grammar-provider boundary, grammar provenance, and
+   producer-registry validation without changing the vendored package's
+   semantic responsibilities.
+2. Add the shared bounded evidence-emitter and universal resolver/projector
    interfaces.
-2. Complete Rust Phase 2 evidence and hard-cut Rust.
-3. Verify and qualify Rust against fixtures, Bevy, and Graphify.
-4. Add Java adapter policy and evidence on the same interfaces.
-5. Hard-cut Java and Spring's Java-facing integration.
-6. Verify and qualify Java against fixtures, Spring, and Graphify.
-7. Record remaining quality and RSS gaps without promoting either adapter to
+3. Complete Rust Phase 2 evidence and hard-cut Rust.
+4. Verify and qualify Rust against fixtures, Bevy, and Graphify.
+5. Add Java adapter policy and evidence on the same interfaces.
+6. Hard-cut Java and Spring's Java-facing integration.
+7. Verify and qualify Java against fixtures, Spring, and Graphify.
+8. Record remaining quality and RSS gaps without promoting either adapter to
    `UniversalComplete`.
