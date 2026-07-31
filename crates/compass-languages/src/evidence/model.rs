@@ -165,6 +165,14 @@ pub struct DeclarationFact {
     pub module_or_package: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implementation_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
     pub range: EvidenceRange,
 }
 

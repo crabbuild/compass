@@ -42,6 +42,10 @@ fn valid_batch() -> SemanticEvidenceBatch {
             qualified_name: "example.caller".to_owned(),
             module_or_package: Some("example".to_owned()),
             scope_id: None,
+            signature: None,
+            signature_hash: None,
+            implementation_hash: None,
+            source_hash: None,
             range: range(0, 6),
         }],
         scopes: vec![ScopeFact {
@@ -294,6 +298,10 @@ class Derived(Base):
         extraction.graph.raw_calls.is_none(),
         "hard-cut Python extraction must not publish replaced raw call facts"
     );
+    assert!(
+        extraction.graph.nodes.is_empty() && extraction.graph.edges.is_empty(),
+        "hard-cut Python extraction must not construct its replaced raw graph"
+    );
     let evidence = extraction
         .graph
         .semantic_evidence
@@ -329,6 +337,46 @@ class Derived(Base):
         let end = usize::try_from(occurrence.range.end_byte).expect("fixture offset");
         assert_eq!(&source[start..end], b"run");
     }
+}
+
+#[test]
+fn universal_declarations_preserve_signature_and_implementation_change_metadata() {
+    fn function_declaration(source: &[u8]) -> DeclarationFact {
+        let mut engine = Engine::default();
+        engine
+            .extract_source_combined(
+                std::path::Path::new("/repo/src/example.py"),
+                "src/example.py",
+                source,
+            )
+            .expect("extract python")
+            .graph
+            .semantic_evidence
+            .expect("python universal evidence")
+            .declarations
+            .into_iter()
+            .find(|declaration| declaration.kind == "function")
+            .expect("function declaration")
+    }
+
+    let original = function_declaration(b"def value() -> int:\n    return 1\n");
+    let changed = function_declaration(b"def value() -> int:\n    return 2\n");
+
+    assert_eq!(original.signature.as_deref(), Some("def value() -> int"));
+    assert_eq!(original.signature_hash, changed.signature_hash);
+    assert_ne!(original.implementation_hash, changed.implementation_hash);
+    assert_ne!(original.source_hash, changed.source_hash);
+    for digest in [
+        original.signature_hash.as_deref(),
+        original.implementation_hash.as_deref(),
+        original.source_hash.as_deref(),
+    ] {
+        assert_eq!(digest.expect("declaration digest").len(), 64);
+    }
+    let serialized = serde_json::to_value(original).expect("serialize declaration metadata");
+    assert!(serialized.get("signatureHash").is_some());
+    assert!(serialized.get("implementationHash").is_some());
+    assert!(serialized.get("sourceHash").is_some());
 }
 
 #[test]
@@ -521,6 +569,10 @@ func (d *Derived) Handle(value alias.Input) alias.Output {
     assert!(
         extraction.graph.raw_calls.is_none(),
         "hard-cut Go extraction must not publish replaced raw call facts"
+    );
+    assert!(
+        extraction.graph.nodes.is_empty() && extraction.graph.edges.is_empty(),
+        "hard-cut Go extraction must not construct its replaced raw graph"
     );
     let evidence = extraction
         .graph

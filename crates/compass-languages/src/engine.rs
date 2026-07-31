@@ -261,33 +261,30 @@ impl Engine {
     ) -> Extraction {
         let config = generic_config(spec);
         let universal_profile = Registry::universal_profile_for_spec(spec);
-        let mut extraction = match spec.name {
-            "go" => crate::go::extract(path, source, root),
-            "rust" => crate::rust_lang::extract(path, source, root),
-            "bash" => crate::bash::extract(path, source, root),
-            "csharp" => crate::csharp::extract(path, source, root),
-            "cpp" => crate::cpp::extract(path, source, root),
-            "php" => crate::php::extract(path, source, root),
-            "swift" => crate::swift::extract(path, source, root),
-            "objc" => crate::objc::extract(path, source, root),
-            "powershell" => crate::powershell::extract(path, source, root),
-            "elixir" => crate::elixir::extract(path, source, root),
-            "julia" => crate::julia::extract(path, source, root),
-            "fortran" => crate::fortran::extract(path, source, root),
-            _ => extract_tree(
-                path,
-                source,
-                root,
-                &config,
-                spec.name,
-                universal_profile.is_none(),
-            ),
+        let mut extraction = if universal_profile.is_some() {
+            Extraction::default()
+        } else {
+            match spec.name {
+                "go" => crate::go::extract(path, source, root),
+                "rust" => crate::rust_lang::extract(path, source, root),
+                "bash" => crate::bash::extract(path, source, root),
+                "csharp" => crate::csharp::extract(path, source, root),
+                "cpp" => crate::cpp::extract(path, source, root),
+                "php" => crate::php::extract(path, source, root),
+                "swift" => crate::swift::extract(path, source, root),
+                "objc" => crate::objc::extract(path, source, root),
+                "powershell" => crate::powershell::extract(path, source, root),
+                "elixir" => crate::elixir::extract(path, source, root),
+                "julia" => crate::julia::extract(path, source, root),
+                "fortran" => crate::fortran::extract(path, source, root),
+                _ => extract_tree(path, source, root, &config, spec.name, true),
+            }
         };
         if spec.name == "python" {
             add_python_rationale(path, source, root, &mut extraction);
         }
-        attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
         if universal_profile.is_none() {
+            attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
             crate::semantic::enrich(path, source, root, spec.name, &mut extraction);
         }
         if let Some(profile) = universal_profile {

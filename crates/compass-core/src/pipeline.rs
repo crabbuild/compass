@@ -58,6 +58,7 @@ use crate::raw_guard::enforce_incomplete_raw_guard;
 /// size while building records. Callers may raise this bound explicitly for
 /// repositories with intentionally large generated sources.
 pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
+const SEMANTIC_MARKER_FILE: &str = ".compass_semantic_marker";
 
 #[derive(Clone, Debug)]
 pub struct BuildOptions {
@@ -183,6 +184,10 @@ const fn cache_reuse_enabled(force: bool, reuse_cache_on_force: bool) -> bool {
 
 const fn prior_published_graph_input_enabled(force: bool) -> bool {
     !force
+}
+
+fn prior_semantic_layer_required(read_prior_published_graph: bool, output_dir: &Path) -> bool {
+    read_prior_published_graph && output_dir.join(SEMANTIC_MARKER_FILE).is_file()
 }
 
 #[derive(Clone, Debug)]
@@ -471,7 +476,9 @@ fn build_graph_inner(
     timings.detect = stage_started.elapsed();
     stage_started = Instant::now();
     let mut internal_started = Instant::now();
-    let mut semantic_documents = if read_prior_published_graph {
+    let preserve_prior_semantic =
+        prior_semantic_layer_required(read_prior_published_graph, &output_dir);
+    let mut semantic_documents = if preserve_prior_semantic {
         semantic_document_sources(&output_dir.join("graph.json"), &root)
     } else {
         HashSet::new()
@@ -883,7 +890,7 @@ fn build_graph_inner(
     };
     let mut ast_cache_entries = fresh
         .par_iter()
-        .filter(|(_, extraction, _, _)| !extraction.nodes.is_empty())
+        .filter(|(_, extraction, _, _)| extraction_has_cacheable_ast_facts(extraction))
         .map(|(path, extraction, _, _)| (path.clone(), extraction.clone()))
         .collect::<Vec<_>>();
     let mut empty_files = Vec::new();
@@ -893,7 +900,7 @@ fn build_graph_inner(
         .collect::<HashSet<_>>();
     let mut fresh_source_text = HashMap::with_capacity(fresh.len());
     for (path, extraction, (source_path, source), _) in fresh {
-        if extraction.nodes.is_empty() {
+        if !extraction_has_cacheable_ast_facts(&extraction) {
             empty_files.push(path.clone());
         }
         fresh_source_text.insert(source_path, source);
@@ -990,7 +997,7 @@ fn build_graph_inner(
     };
     profile_internal("wait for Program analysis", &mut internal_started);
     stage_started = Instant::now();
-    if read_prior_published_graph {
+    if preserve_prior_semantic {
         let refreshed = semantic
             .map(|layer| {
                 let mut refreshed = canonical_source_set(&layer.refreshed_files, &root);
@@ -1687,7 +1694,7 @@ fn publish_build_state(
         }
         BuildPurpose::Extract => {}
     }
-    for optional in ["graph.html", ".compass_semantic_marker"] {
+    for optional in ["graph.html", SEMANTIC_MARKER_FILE] {
         let path = output_dir.join(optional);
         if path.is_file() {
             required.push(path);
@@ -1752,9 +1759,9 @@ fn write_semantic_marker(
     semantic: Option<&SemanticLayer>,
 ) -> Result<(), CoreError> {
     let (_, output_tokens) = semantic_tokens(semantic);
-    if output_tokens > 0 {
+    if output_tokens > 0 || semantic.is_some_and(|layer| !semantic_layer_is_empty(layer)) {
         write_json_atomic(
-            output_dir.join(".compass_semantic_marker"),
+            output_dir.join(SEMANTIC_MARKER_FILE),
             &json!({"output_tokens": output_tokens}),
             false,
         )?;
@@ -3918,6 +3925,26 @@ fn cached_universal_evidence_matches(extraction: &Extraction, path: &Path) -> bo
         })
 }
 
+fn extraction_has_cacheable_ast_facts(extraction: &Extraction) -> bool {
+    !extraction.nodes.is_empty()
+        || !extraction.edges.is_empty()
+        || !extraction.hyperedges.is_empty()
+        || extraction
+            .raw_calls
+            .as_ref()
+            .is_some_and(|calls| !calls.is_empty())
+        || !extraction.framework_facts.is_empty()
+        || !extraction.universal_evidence.is_empty()
+        || extraction.semantic_evidence.as_ref().is_some_and(|batch| {
+            !batch.declarations.is_empty()
+                || !batch.scopes.is_empty()
+                || !batch.bindings.is_empty()
+                || !batch.occurrences.is_empty()
+                || !batch.candidates.is_empty()
+                || !batch.diagnostics.is_empty()
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use std::error::Error;
@@ -3935,6 +3962,39 @@ mod tests {
         assert!(cache_reuse_enabled(true, true));
         assert!(prior_published_graph_input_enabled(false));
         assert!(!prior_published_graph_input_enabled(true));
+    }
+
+    #[test]
+    fn prior_semantic_preservation_requires_an_owned_marker() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        assert!(!prior_semantic_layer_required(true, directory.path()));
+        fs::write(directory.path().join(SEMANTIC_MARKER_FILE), b"{}")?;
+        assert!(prior_semantic_layer_required(true, directory.path()));
+        assert!(!prior_semantic_layer_required(false, directory.path()));
+        Ok(())
+    }
+
+    #[test]
+    fn nonempty_zero_token_semantic_layers_publish_a_marker() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let semantic = SemanticLayer {
+            fragment: json!({
+                "nodes": [{"id": "semantic", "label": "Semantic", "file_type": "concept"}],
+                "edges": [],
+                "hyperedges": [],
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "failed_chunks": 0,
+            }),
+            refreshed_files: Vec::new(),
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+
+        write_semantic_marker(directory.path(), Some(&semantic))?;
+
+        assert!(directory.path().join(SEMANTIC_MARKER_FILE).is_file());
+        Ok(())
     }
 
     #[test]
@@ -3963,6 +4023,18 @@ mod tests {
 
         extraction.raw_calls = Some(Vec::new());
         assert!(!cached_universal_evidence_matches(&extraction, path));
+        Ok(())
+    }
+
+    #[test]
+    fn evidence_only_universal_extractions_are_cacheable_ast_facts() -> Result<(), Box<dyn Error>> {
+        let extraction = compass_languages::Engine::default()
+            .extract_source(Path::new("cached.go"), b"package cached\n\nfunc Run() {}\n")?;
+        assert!(extraction.nodes.is_empty());
+        assert!(extraction.edges.is_empty());
+        assert!(extraction.semantic_evidence.is_some());
+        assert!(extraction_has_cacheable_ast_facts(&extraction));
+        assert!(!extraction_has_cacheable_ast_facts(&Extraction::default()));
         Ok(())
     }
 
@@ -4008,7 +4080,7 @@ mod tests {
     }
 
     #[test]
-    fn universal_adapter_cache_requires_current_valid_evidence() {
+    fn universal_adapter_cache_requires_current_valid_evidence() -> Result<(), Box<dyn Error>> {
         let python = Path::new("src/example.py");
         let rust = Path::new("src/example.rs");
         assert!(!cached_universal_evidence_matches(
@@ -4023,8 +4095,7 @@ mod tests {
         let source = b"def example():\n    return 1\n";
         let mut engine = Engine::default();
         let extracted = engine
-            .extract_source_combined(python, "src/example.py", source)
-            .expect("extract python")
+            .extract_source_combined(python, "src/example.py", source)?
             .graph;
         assert!(cached_universal_evidence_matches(&extracted, python));
 
@@ -4032,11 +4103,12 @@ mod tests {
         invalid
             .semantic_evidence
             .as_mut()
-            .expect("universal evidence")
+            .ok_or_else(|| std::io::Error::other("universal evidence is missing"))?
             .adapter
             .capabilities
             .clear();
         assert!(!cached_universal_evidence_matches(&invalid, python));
+        Ok(())
     }
 
     #[test]

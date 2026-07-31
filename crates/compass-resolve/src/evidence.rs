@@ -874,6 +874,19 @@ fn declaration_node(declaration: &DeclarationFact) -> NodeRecord {
     if callable {
         attributes.insert("_callable".to_owned(), Value::Bool(true));
     }
+    for (key, value) in [
+        ("signature", declaration.signature.as_ref()),
+        ("signature_hash", declaration.signature_hash.as_ref()),
+        (
+            "implementation_hash",
+            declaration.implementation_hash.as_ref(),
+        ),
+        ("source_hash", declaration.source_hash.as_ref()),
+    ] {
+        if let Some(value) = value {
+            attributes.insert(key.to_owned(), Value::String(value.clone()));
+        }
+    }
     if let Some(module_or_package) = declaration.module_or_package.as_ref() {
         attributes.insert(
             "module".to_owned(),

@@ -20,6 +20,14 @@ pub struct EvidenceBuilder {
     limits: EvidenceLimits,
 }
 
+#[derive(Default)]
+struct DeclarationMetadata {
+    signature: Option<String>,
+    signature_hash: Option<String>,
+    implementation_hash: Option<String>,
+    source_hash: Option<String>,
+}
+
 impl EvidenceBuilder {
     #[must_use]
     pub fn new(
@@ -58,6 +66,30 @@ impl EvidenceBuilder {
         scope_id: Option<&str>,
         range: EvidenceRange,
     ) -> Result<String, EvidenceError> {
+        self.declare_with_metadata(
+            kind,
+            graph_node_id,
+            name,
+            qualified_name,
+            module_or_package,
+            scope_id,
+            range,
+            DeclarationMetadata::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn declare_with_metadata(
+        &mut self,
+        kind: &str,
+        graph_node_id: &str,
+        name: &str,
+        qualified_name: &str,
+        module_or_package: Option<&str>,
+        scope_id: Option<&str>,
+        range: EvidenceRange,
+        metadata: DeclarationMetadata,
+    ) -> Result<String, EvidenceError> {
         ensure_capacity(
             "declarations",
             self.batch.declarations.len(),
@@ -85,6 +117,10 @@ impl EvidenceBuilder {
             qualified_name: qualified_name.to_owned(),
             module_or_package: module_or_package.map(str::to_owned),
             scope_id: scope_id.map(str::to_owned),
+            signature: metadata.signature,
+            signature_hash: metadata.signature_hash,
+            implementation_hash: metadata.implementation_hash,
+            source_hash: metadata.source_hash,
             range,
         });
         Ok(id)
@@ -519,6 +555,23 @@ impl<'source> DirectAdapterState<'source> {
             .is_ok_and(|prefix| !valid_python_import_whitespace(prefix))
     }
 
+    fn declaration_metadata(&self, node: Node<'_>) -> DeclarationMetadata {
+        let body = evidence_declaration_body(node);
+        DeclarationMetadata {
+            signature: evidence_readable_signature(node, body, self.source),
+            signature_hash: Some(evidence_ast_hash(
+                node,
+                self.source,
+                body.map(|body| body.id()),
+            )),
+            implementation_hash: body.map(|body| evidence_ast_hash(body, self.source, None)),
+            source_hash: self
+                .source
+                .get(node.start_byte()..node.end_byte())
+                .map(evidence_normalized_source_hash),
+        }
+    }
+
     fn add_file(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
         let label = self
             .path
@@ -625,7 +678,8 @@ impl<'source> DirectAdapterState<'source> {
             } else {
                 "function"
             };
-            let fact_id = self.builder.declare(
+            let metadata = self.declaration_metadata(node);
+            let fact_id = self.builder.declare_with_metadata(
                 kind,
                 &graph_node_id,
                 &name,
@@ -633,6 +687,7 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&self.module_or_package),
                 Some(&owner.scope_id),
                 range_for_node(self.source_file, name_node),
+                metadata,
             )?;
             let scope_id = self.builder.open_scope(
                 kind,
@@ -1161,7 +1216,8 @@ impl<'source> DirectAdapterState<'source> {
                 } else {
                     "type_alias"
                 };
-                let fact_id = self.builder.declare(
+                let metadata = self.declaration_metadata(node);
+                let fact_id = self.builder.declare_with_metadata(
                     kind,
                     &graph_node_id,
                     &name,
@@ -1169,6 +1225,7 @@ impl<'source> DirectAdapterState<'source> {
                     Some(&self.module_or_package),
                     Some(&file.scope_id),
                     range_for_node(self.source_file, name_node),
+                    metadata,
                 )?;
                 let scope_id = self.builder.open_scope(
                     kind,
@@ -1214,7 +1271,8 @@ impl<'source> DirectAdapterState<'source> {
             } else {
                 "function"
             };
-            let fact_id = self.builder.declare(
+            let metadata = self.declaration_metadata(node);
+            let fact_id = self.builder.declare_with_metadata(
                 kind,
                 &graph_node_id,
                 &name,
@@ -1222,6 +1280,7 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&self.module_or_package),
                 Some(&file.scope_id),
                 range_for_node(self.source_file, name_node),
+                metadata,
             )?;
             let scope_id = self.builder.open_scope(
                 kind,
@@ -2456,6 +2515,102 @@ fn target_kinds_for_relation(relation: CandidateRelation) -> Vec<String> {
             vec!["file".to_owned(), "module".to_owned(), "package".to_owned()]
         }
     }
+}
+
+fn evidence_declaration_body(node: Node<'_>) -> Option<Node<'_>> {
+    node.child_by_field_name("body").or_else(|| {
+        let mut cursor = node.walk();
+        node.children(&mut cursor).find(|child| {
+            matches!(
+                child.kind(),
+                "body" | "block" | "compound_statement" | "class_body" | "declaration_list"
+            )
+        })
+    })
+}
+
+fn evidence_readable_signature(
+    node: Node<'_>,
+    body: Option<Node<'_>>,
+    source: &[u8],
+) -> Option<String> {
+    let end = body.map_or(node.end_byte(), |body| body.start_byte());
+    let raw = source.get(node.start_byte()..end)?;
+    let compact = String::from_utf8_lossy(raw)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let compact = compact
+        .trim()
+        .trim_end_matches(['{', ':', ';'])
+        .trim()
+        .to_owned();
+    if compact.is_empty() {
+        return None;
+    }
+    let mut chars = compact.chars();
+    let signature = chars.by_ref().take(500).collect::<String>();
+    Some(if chars.next().is_some() {
+        format!("{signature}…")
+    } else {
+        signature
+    })
+}
+
+fn evidence_ast_hash(node: Node<'_>, source: &[u8], excluded: Option<usize>) -> String {
+    let mut digest = Sha256::new();
+    hash_evidence_ast_node(node, source, excluded, &mut digest);
+    hex_sha256_digest(&digest.finalize())
+}
+
+fn hash_evidence_ast_node(
+    node: Node<'_>,
+    source: &[u8],
+    excluded: Option<usize>,
+    digest: &mut Sha256,
+) {
+    if excluded == Some(node.id()) || node.kind().contains("comment") {
+        return;
+    }
+    digest.update(b"(");
+    digest.update(node.kind().as_bytes());
+    if node.child_count() == 0 {
+        digest.update(b":");
+        if let Some(bytes) = source.get(node.start_byte()..node.end_byte()) {
+            digest.update(bytes);
+        }
+    } else {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            hash_evidence_ast_node(child, source, excluded, digest);
+        }
+    }
+    digest.update(b")");
+}
+
+fn evidence_normalized_source_hash(source: &[u8]) -> String {
+    let mut normalized = Vec::with_capacity(source.len());
+    let mut index = 0;
+    while index < source.len() {
+        if source[index] == b'\r' && source.get(index + 1) == Some(&b'\n') {
+            normalized.push(b'\n');
+            index += 2;
+        } else {
+            normalized.push(source[index]);
+            index += 1;
+        }
+    }
+    hex_sha256_digest(&Sha256::digest(normalized))
+}
+
+fn hex_sha256_digest(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+
+    let mut value = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(value, "{byte:02x}");
+    }
+    value
 }
 
 fn ensure_capacity(name: &str, current: usize, limit: usize) -> Result<(), EvidenceError> {
