@@ -369,6 +369,114 @@ fn target_is_rendered() { target(Product { value: 1 }); }
 }
 
 #[test]
+fn rust_universal_occurrences_preserve_qualified_call_sites() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("qualified.rs");
+    let source = br#"
+struct Graph {}
+impl Graph {
+    fn new() -> Self { Self {} }
+    fn add_edge(&mut self) {}
+}
+fn build(mut graph: Graph) {
+    Graph::new();
+    HashMap::new();
+    graph.add_edge();
+}
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .universal_evidence
+        .first()
+        .ok_or("missing Rust universal evidence")?;
+    assert_eq!(evidence.schema, "compass.languages.evidence/1");
+    assert_eq!(evidence.adapter_id, "compass.rust");
+    assert_eq!(evidence.adapter_version, 1);
+
+    let calls = evidence
+        .occurrences
+        .iter()
+        .filter(|occurrence| occurrence.role == compass_languages::OccurrenceRole::Call)
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 3, "occurrences={calls:#?}");
+    for (spelling, qualifier) in [("new", "Graph"), ("new", "HashMap"), ("add_edge", "graph")] {
+        let occurrence = calls
+            .iter()
+            .find(|occurrence| {
+                occurrence.spelling == spelling
+                    && occurrence.qualifier.as_deref() == Some(qualifier)
+            })
+            .ok_or_else(|| format!("missing {qualifier}::{spelling}: {calls:#?}"))?;
+        let start = usize::try_from(occurrence.anchor.start_byte)?;
+        let end = usize::try_from(occurrence.anchor.end_byte)?;
+        assert!(start < end && end <= source.len());
+        assert_eq!(
+            std::str::from_utf8(&source[start..end])?.replace('.', "::"),
+            format!("{qualifier}::{spelling}()")
+        );
+    }
+    assert!(
+        calls
+            .windows(2)
+            .all(|pair| pair[0].anchor != pair[1].anchor),
+        "each source use must keep a distinct occurrence: {calls:#?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_qualified_calls_bind_only_to_the_exact_local_owner() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("qualified.rs");
+    let source = br#"
+struct Graph {}
+impl Graph {
+    fn new() -> Self { Self {} }
+}
+fn build() {
+    Graph::new();
+    HashMap::new();
+}
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let local_new = extraction
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name")
+                .starts_with("impl Graph::new(")
+        })
+        .ok_or("missing Graph::new declaration")?;
+    let calls = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == local_new.id)
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1, "edges={:#?}", extraction.edges);
+    let call = calls[0];
+    let start = usize::try_from(
+        call.attributes["start_byte"]
+            .as_u64()
+            .ok_or("missing start")?,
+    )?;
+    let end = usize::try_from(call.attributes["end_byte"].as_u64().ok_or("missing end")?)?;
+    assert_eq!(&source[start..end], b"Graph::new()");
+
+    let hash_map = extraction
+        .universal_evidence
+        .first()
+        .ok_or("missing universal evidence")?
+        .relationship_candidates
+        .iter()
+        .find(|candidate| {
+            candidate.spelling == "new" && candidate.qualifier.as_deref() == Some("HashMap")
+        })
+        .ok_or("missing HashMap::new candidate")?;
+    assert!(hash_map.external_identity);
+    Ok(())
+}
+
+#[test]
 fn typescript_semantics_publish_exports_annotations_properties_and_constructors()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;

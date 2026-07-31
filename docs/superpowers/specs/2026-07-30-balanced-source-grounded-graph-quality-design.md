@@ -311,21 +311,20 @@ namespaces, overloads, annotations, inheritance, interfaces, traits, impl
 ownership, macros, imports, and external packages without Python- or Go-shaped
 special cases.
 
-JavaScript/TypeScript, Ruby, C#, PHP, Swift, C/C++, and the remaining registered
-languages retain explicit legacy capability profiles until migrated. Their
-existing graph output must not regress. The universal registry and
-compatibility projection let each migrate without central resolver or
-publisher changes.
+JavaScript/TypeScript, Ruby, C#, PHP, Swift, C/C++, and the remaining
+registered languages retain their current extraction algorithms until their
+hard-cutover increments. They are not translated or dual-run. Their existing
+graph output must not regress before cutover, and each later cutover uses the
+same universal registry and resolver without central publisher changes.
 
 ### Framework packs
 
 Existing Python web, Rails, Spring, Go web, Rust web, ASP.NET, Vapor,
 TypeScript web, filesystem-route, enterprise-domain, config, and template
-packs migrate to the universal pack interface. The phase may preserve their
-detector internals initially, but activation, accepted evidence, target
-constraints, occurrence policy, resource limits, and conformance registration
-become uniform. Spring and the Rust web packs provide the non-Python/Go
-vertical proof.
+packs hard-cut to the universal pack interface. Activation, accepted evidence,
+target constraints, occurrence policy, resource limits, and conformance
+registration become uniform, and the replaced pack path is removed. Spring
+and the Rust web packs provide the non-Python/Go vertical proof.
 
 ## Independent quality measurement
 

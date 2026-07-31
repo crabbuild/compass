@@ -41,6 +41,7 @@ mod sql;
 mod swift;
 mod templates;
 mod terraform;
+mod universal;
 mod verilog;
 mod xaml;
 mod zig;
@@ -59,6 +60,11 @@ pub use project_evidence::{
 };
 pub use registry::{ExtractorKind, LanguageSpec, Registry};
 pub use scip::{ScipExtraction, ingest_scip_json};
+pub use universal::{
+    AdapterCapability, AdapterDescriptor, AdapterProfile, BindingFact, BindingKind,
+    DeclarationFact, DeclarationKind, OccurrenceFact, OccurrenceRole, RelationshipCandidate,
+    ScopeFact, UNIVERSAL_EVIDENCE_SCHEMA, UniversalEvidence,
+};
 
 use std::path::PathBuf;
 

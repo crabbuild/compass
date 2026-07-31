@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use crate::{AdapterCapability, AdapterDescriptor, AdapterProfile, UNIVERSAL_EVIDENCE_SCHEMA};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtractorKind {
     Generic,
@@ -54,6 +56,32 @@ pub struct RegistryCase {
 pub struct Registry;
 
 impl Registry {
+    #[must_use]
+    pub fn adapter(language: &str) -> AdapterDescriptor {
+        if language == "rust" {
+            return AdapterDescriptor {
+                id: "compass.rust".to_owned(),
+                language: "rust".to_owned(),
+                version: 1,
+                evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA.to_owned(),
+                profile: AdapterProfile::UniversalCandidate,
+                capabilities: vec![
+                    AdapterCapability::ImplOwnership,
+                    AdapterCapability::Calls,
+                    AdapterCapability::ExternalPackages,
+                ],
+            };
+        }
+        AdapterDescriptor {
+            id: format!("compass.legacy.{language}"),
+            language: language.to_owned(),
+            version: 1,
+            evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA.to_owned(),
+            profile: AdapterProfile::Legacy,
+            capabilities: Vec::new(),
+        }
+    }
+
     #[must_use]
     pub fn resolve(path: &Path) -> Option<LanguageSpec> {
         REGISTRY_CASES

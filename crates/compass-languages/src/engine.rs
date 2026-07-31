@@ -521,6 +521,13 @@ fn attach_definition_metadata(
         let Some(indices) = candidates.get_mut(&at_line) else {
             continue;
         };
+        let exact = indices.iter().position(|index| {
+            let record = &extraction.nodes[*index];
+            record.attributes.get("start_byte").and_then(Value::as_u64)
+                == Some(u64::try_from(definition.start_byte()).unwrap_or(u64::MAX))
+                && record.attributes.get("end_byte").and_then(Value::as_u64)
+                    == Some(u64::try_from(definition.end_byte()).unwrap_or(u64::MAX))
+        });
         let name = definition_name(definition, source);
         let matched = name.as_deref().and_then(|name| {
             indices.iter().position(|index| {
@@ -535,7 +542,13 @@ fn attach_definition_metadata(
                 .and_then(Value::as_bool)
                 == Some(true)
         });
-        let Some(position) = matched.or(fallback).or((indices.len() == 1).then_some(0)) else {
+        let unanchored_single = (indices.len() == 1
+            && extraction.nodes[indices[0]]
+                .attributes
+                .get("start_byte")
+                .is_none())
+        .then_some(0);
+        let Some(position) = exact.or(matched).or(fallback).or(unanchored_single) else {
             continue;
         };
         let index = indices.remove(position);

@@ -2,7 +2,10 @@ use std::error::Error;
 use std::fs;
 use std::path::Path;
 
-use compass_languages::{Registry, file_stem, make_id, normalize_id};
+use compass_languages::{
+    AdapterCapability, AdapterProfile, Registry, UNIVERSAL_EVIDENCE_SCHEMA, file_stem, make_id,
+    normalize_id,
+};
 
 #[test]
 fn registry_covers_every_python_dispatch_extension() -> Result<(), Box<dyn Error>> {
@@ -106,4 +109,28 @@ fn ids_match_python_unicode_casefold_contract() {
     assert_eq!(file_stem(Path::new("README")), "README");
     assert_eq!(file_stem(Path::new("")), "");
     assert!(Registry::resolve(Path::new("archive.zip")).is_none());
+}
+
+#[test]
+fn universal_adapter_registry_marks_only_rust_as_a_candidate() {
+    let rust = Registry::adapter("rust");
+    assert_eq!(rust.id, "compass.rust");
+    assert_eq!(rust.language, "rust");
+    assert_eq!(rust.evidence_schema, UNIVERSAL_EVIDENCE_SCHEMA);
+    assert_eq!(rust.profile, AdapterProfile::UniversalCandidate);
+    for capability in [
+        AdapterCapability::ImplOwnership,
+        AdapterCapability::Calls,
+        AdapterCapability::ExternalPackages,
+    ] {
+        assert!(
+            rust.capabilities.contains(&capability),
+            "missing {capability:?}: {rust:?}"
+        );
+    }
+
+    let typescript = Registry::adapter("typescript");
+    assert_eq!(typescript.id, "compass.legacy.typescript");
+    assert_eq!(typescript.profile, AdapterProfile::Legacy);
+    assert!(typescript.capabilities.is_empty());
 }

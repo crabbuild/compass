@@ -187,6 +187,9 @@ pub fn resolve_with_root(
         merged
             .framework_facts
             .extend(extraction.framework_facts.iter().cloned());
+        merged
+            .universal_evidence
+            .extend(extraction.universal_evidence.iter().cloned());
     }
     finish_resolution(merged, language_facts, sources, root)
 }
@@ -209,6 +212,9 @@ pub fn resolve_owned_with_root(
         merged
             .framework_facts
             .append(&mut extraction.framework_facts);
+        merged
+            .universal_evidence
+            .append(&mut extraction.universal_evidence);
     }
     extractions.into_par_iter().for_each(drop);
     finish_resolution(merged, language_facts, sources, root)

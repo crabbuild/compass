@@ -5,7 +5,11 @@ use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
-use crate::{Extraction, RawCall, make_id};
+use crate::{
+    DeclarationKind, Extraction, OccurrenceFact, OccurrenceRole, RawCall, Registry,
+    RelationshipCandidate, UniversalEvidence, make_id,
+};
+use compass_ir::SourceAnchor;
 
 const TRAIT_METHOD_BLOCKLIST: &[&str] = &[
     "new",
@@ -62,6 +66,8 @@ struct RustState<'source, 'tree> {
     extraction: Extraction,
     seen: HashSet<String>,
     function_bodies: Vec<(String, Node<'tree>)>,
+    scoped_callables: HashMap<(String, String), Vec<String>>,
+    universal_evidence: UniversalEvidence,
 }
 
 impl<'source, 'tree> RustState<'source, 'tree> {
@@ -77,6 +83,8 @@ impl<'source, 'tree> RustState<'source, 'tree> {
             extraction: Extraction::default(),
             seen: HashSet::new(),
             function_bodies: Vec::new(),
+            scoped_callables: HashMap::new(),
+            universal_evidence: UniversalEvidence::new(&Registry::adapter("rust")),
         };
         let label = path
             .file_name()
@@ -98,10 +106,17 @@ impl<'source, 'tree> RustState<'source, 'tree> {
                         Some("imports" | "imports_from")
                     ))
         });
+        self.universal_evidence.occurrences.sort();
+        self.universal_evidence.occurrences.dedup();
+        self.universal_evidence.relationship_candidates.sort();
+        self.universal_evidence.relationship_candidates.dedup();
+        self.extraction
+            .universal_evidence
+            .push(self.universal_evidence);
         self.extraction
     }
 
-    fn walk(&mut self, node: Node<'tree>, parent_impl: Option<(&str, &str)>) {
+    fn walk(&mut self, node: Node<'tree>, parent_impl: Option<(&str, &str, bool)>) {
         match node.kind() {
             "function_item" => {
                 self.add_function(node, parent_impl);
@@ -127,13 +142,13 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         }
     }
 
-    fn add_function(&mut self, node: Node<'tree>, parent_impl: Option<(&str, &str)>) {
+    fn add_function(&mut self, node: Node<'tree>, parent_impl: Option<(&str, &str, bool)>) {
         let Some(name_node) = node.child_by_field_name("name") else {
             return;
         };
         let name = self.text(name_node);
         let at = line(node);
-        let id = if let Some((parent, semantic_owner)) = parent_impl {
+        let id = if let Some((parent, semantic_owner, inherent)) = parent_impl {
             let id = make_id(&[parent, semantic_owner, &name]);
             self.add_node(&id, &format!(".{name}()"), at);
             if let Some(method) = self
@@ -152,11 +167,19 @@ impl<'source, 'tree> RustState<'source, 'tree> {
                 );
             }
             self.add_edge(parent, &id, "method", at, None);
+            self.stamp_node_range(&id, node);
+            if inherent {
+                self.scoped_callables
+                    .entry((semantic_owner.to_owned(), name.clone()))
+                    .or_default()
+                    .push(id.clone());
+            }
             id
         } else {
             let id = make_id(&[&self.stem, &name]);
             self.add_node(&id, &format!("{name}()"), at);
             self.add_edge(&self.file_id.clone(), &id, "contains", at, None);
+            self.stamp_node_range(&id, node);
             id
         };
         self.add_function_references(node, &id, at);
@@ -173,6 +196,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         let at = line(node);
         let id = make_id(&[&self.stem, &name]);
         self.add_node(&id, &name, at);
+        self.stamp_node_range(&id, node);
         self.add_edge(&self.file_id.clone(), &id, "contains", at, None);
         match node.kind() {
             "trait_item" => self.add_trait_bounds(node, &id, at),
@@ -332,7 +356,10 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         if let Some(body) = node.child_by_field_name("body") {
             let mut cursor = body.walk();
             for child in body.children(&mut cursor) {
-                self.walk(child, Some((&id, &semantic_owner)));
+                self.walk(
+                    child,
+                    Some((&id, &semantic_owner, trait_node_is_absent(node))),
+                );
             }
         }
     }
@@ -443,30 +470,62 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         if node.kind() == "call_expression"
             && let Some(function) = node.child_by_field_name("function")
         {
-            let (callee, member, scoped) = match function.kind() {
-                "identifier" => (Some(self.text(function)), false, false),
-                "field_expression" => (
-                    function
-                        .child_by_field_name("field")
-                        .map(|field| self.text(field)),
-                    true,
-                    false,
-                ),
-                "scoped_identifier" => (
-                    function
-                        .child_by_field_name("name")
-                        .map(|name| self.text(name)),
-                    false,
-                    true,
-                ),
-                _ => (None, false, false),
+            let (callee, qualifier, member, scoped) = match function.kind() {
+                "identifier" => (Some(self.text(function)), None, false, false),
+                "field_expression" => {
+                    let qualifier = function
+                        .child_by_field_name("value")
+                        .map(|value| self.text(value));
+                    (
+                        function
+                            .child_by_field_name("field")
+                            .map(|field| self.text(field)),
+                        qualifier,
+                        true,
+                        false,
+                    )
+                }
+                "scoped_identifier" => {
+                    let qualifier = function
+                        .child_by_field_name("path")
+                        .map(|path| self.text(path));
+                    (
+                        function
+                            .child_by_field_name("name")
+                            .map(|name| self.text(name)),
+                        qualifier,
+                        false,
+                        true,
+                    )
+                }
+                _ => (None, None, false, false),
             };
             if let Some(callee) = callee {
-                if let Some(target) = (!scoped)
-                    .then(|| labels.get(&callee))
-                    .flatten()
-                    .filter(|target| *target != caller)
-                {
+                let exact_scoped_target = qualifier
+                    .as_ref()
+                    .filter(|_| scoped)
+                    .and_then(|qualifier| {
+                        self.scoped_callables
+                            .get(&(qualifier.clone(), callee.clone()))
+                    })
+                    .filter(|targets| targets.len() == 1)
+                    .and_then(|targets| targets.first())
+                    .cloned();
+                self.record_call_candidate(
+                    caller,
+                    &callee,
+                    qualifier.as_deref(),
+                    node,
+                    scoped && exact_scoped_target.is_none(),
+                );
+                let target = exact_scoped_target.or_else(|| {
+                    (!scoped)
+                        .then(|| labels.get(&callee))
+                        .flatten()
+                        .filter(|target| *target != caller)
+                        .cloned()
+                });
+                if let Some(target) = target {
                     let pair = (
                         caller.to_owned(),
                         target.clone(),
@@ -474,7 +533,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
                         node.end_byte(),
                     );
                     if pairs.insert(pair) {
-                        self.add_call_edge(caller, target, node);
+                        self.add_call_edge(caller, &target, node);
                     }
                 } else if !scoped
                     && !TRAIT_METHOD_BLOCKLIST.contains(&callee.to_lowercase().as_str())
@@ -497,6 +556,40 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         for child in node.children(&mut cursor) {
             self.walk_calls_in(child, caller, labels, pairs);
         }
+    }
+
+    fn record_call_candidate(
+        &mut self,
+        owner: &str,
+        spelling: &str,
+        qualifier: Option<&str>,
+        node: Node<'_>,
+        external_identity: bool,
+    ) {
+        let anchor = SourceAnchor {
+            source_file: self.source_file.clone(),
+            start_byte: u64::try_from(node.start_byte()).unwrap_or(u64::MAX),
+            end_byte: u64::try_from(node.end_byte()).unwrap_or(u64::MAX),
+        };
+        let qualifier = qualifier.map(str::to_owned);
+        self.universal_evidence.occurrences.push(OccurrenceFact {
+            owner: owner.to_owned(),
+            role: OccurrenceRole::Call,
+            spelling: spelling.to_owned(),
+            qualifier: qualifier.clone(),
+            anchor: anchor.clone(),
+        });
+        self.universal_evidence
+            .relationship_candidates
+            .push(RelationshipCandidate {
+                owner: owner.to_owned(),
+                role: OccurrenceRole::Call,
+                spelling: spelling.to_owned(),
+                qualifier,
+                anchor,
+                target_kinds: vec![DeclarationKind::Function, DeclarationKind::Method],
+                external_identity,
+            });
     }
 
     fn ensure_named_node(&mut self, name: &str) -> String {
@@ -539,6 +632,17 @@ impl<'source, 'tree> RustState<'source, 'tree> {
             id: id.to_owned(),
             attributes,
         });
+    }
+
+    fn stamp_node_range(&mut self, id: &str, node: Node<'_>) {
+        if let Some(record) = self
+            .extraction
+            .nodes
+            .iter_mut()
+            .find(|record| record.id == id)
+        {
+            crate::facts::stamp_node_range(&mut record.attributes, node);
+        }
     }
 
     fn add_edge(
@@ -679,4 +783,8 @@ fn is_type_node(kind: &str) -> bool {
 
 fn line(node: Node<'_>) -> usize {
     node.start_position().row + 1
+}
+
+fn trait_node_is_absent(node: Node<'_>) -> bool {
+    node.child_by_field_name("trait").is_none()
 }
