@@ -65,6 +65,16 @@ def _revision(name: str, root: Path, binary: Path) -> ToolRevision:
     )
 
 
+def cargo_target_directory(source_root: Path) -> Path:
+    configured = os.environ.get("CARGO_TARGET_DIR")
+    if configured is None:
+        return (source_root / "target").resolve(strict=False)
+    target = Path(configured)
+    if not target.is_absolute():
+        target = source_root / target
+    return target.resolve(strict=False)
+
+
 @dataclass(frozen=True)
 class ToolAdapter:
     executable: Path
@@ -116,7 +126,7 @@ class CompassAdapter(ToolAdapter):
             ],
             cwd=source_root,
         )
-        binary = source_root / "target" / "release" / "compass"
+        binary = cargo_target_directory(source_root) / "release" / "compass"
         if not binary.is_file() or not os.access(binary, os.X_OK):
             raise RuntimeError(f"release Compass binary is not executable: {binary}")
         revision = _revision("compass", source_root, binary)
@@ -197,11 +207,18 @@ class GraphifyAdapter(ToolAdapter):
         cls,
         workspace: QualificationWorkspace,
         url: str = "https://github.com/Graphify-Labs/graphify.git",
+        commit: str | None = None,
     ) -> "GraphifyAdapter":
-        branch, commit = resolve_remote_head(url)
+        branch, remote_commit = resolve_remote_head(url)
+        effective_commit = commit or remote_commit
         spec = RepositorySpec("graphify", url, ".py", ())
         checkout = workspace.root / "tools" / "graphify-source"
-        identity = prepare_checkout(spec, commit, checkout)
+        identity = prepare_checkout(
+            spec,
+            effective_commit,
+            checkout,
+            pinned=commit is not None,
+        )
         if identity.branch != branch:
             raise RuntimeError("Graphify default branch changed during preparation")
         environment = workspace.root / "tools" / "graphify-venv"

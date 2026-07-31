@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
-from benchmarks.performance.compass.adapters import CompassAdapter, GraphifyAdapter
+from benchmarks.performance.compass import adapters as adapters_module
+from benchmarks.performance.compass.adapters import (
+    CompassAdapter,
+    GraphifyAdapter,
+    cargo_target_directory,
+)
 from benchmarks.performance.compass.model import ToolRevision
 from benchmarks.performance.compass.workspace import QualificationWorkspace
 
@@ -14,6 +21,42 @@ def revision(name: str) -> ToolRevision:
 
 
 class AdapterTests(unittest.TestCase):
+    def test_cargo_target_directory_matches_cargo_environment_rules(self) -> None:
+        source = Path("/work/compass")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(source / "target", cargo_target_directory(source))
+        with mock.patch.dict(os.environ, {"CARGO_TARGET_DIR": "shared-target"}, clear=True):
+            self.assertEqual(source / "shared-target", cargo_target_directory(source))
+        with mock.patch.dict(os.environ, {"CARGO_TARGET_DIR": "/cache/cargo"}, clear=True):
+            self.assertEqual(Path("/cache/cargo"), cargo_target_directory(source))
+
+    def test_compass_prepare_selects_binary_from_cargo_target_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            binary = source / "shared-target" / "release" / "compass"
+            binary.parent.mkdir(parents=True)
+            binary.write_text("#!/bin/sh\n")
+            binary.chmod(0o755)
+            expected_revision = revision("compass")
+
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"CARGO_TARGET_DIR": "shared-target"},
+                    clear=False,
+                ),
+                mock.patch.object(adapters_module, "_git_value", return_value=""),
+                mock.patch.object(adapters_module, "_run", return_value="tool version"),
+                mock.patch.object(
+                    adapters_module,
+                    "_revision",
+                    return_value=expected_revision,
+                ),
+            ):
+                adapter = CompassAdapter.prepare(source)
+
+            self.assertEqual(binary.resolve(), adapter.executable)
+
     def test_compass_build_and_query_contracts(self) -> None:
         adapter = CompassAdapter(Path("/opt/compass"), revision("compass"))
         build = adapter.build_command(Path("/repo"), Path("/output"))
