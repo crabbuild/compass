@@ -108,8 +108,9 @@ Peak RSS is also material: the standardized Django run measured about 4.76 GiB c
 **Files:**
 - Create: `docs/superpowers/reviews/2026-07-31-source-grounded-correctness-hardening.md`
 
-- [ ] Run formatting, focused tests, Python benchmark tests, clippy, locked workspace tests, and deterministic publication checks.
-- [ ] Run the retained Django comparison with the pinned source root and audit every changed classification population.
-- [ ] Confirm the known `AdminEmailHandler.emit -> ServerFormatter.format` edge is absent without losing source-proven receiver edges.
-- [ ] Record controlled performance evidence and clearly distinguish measured results from inference.
+- [x] Run formatting, focused Rust and Python benchmark tests, clippy, and deterministic publication checks.
+- [ ] Run a fresh full locked-workspace link when at least 10 GiB of free disk is available; the current machine fell below 5 GiB during focused linking.
+- [x] Run the retained Django comparison with the pinned source root and audit every changed classification population.
+- [x] Confirm the known `AdminEmailHandler.emit -> ServerFormatter.format` edge is absent without losing source-proven receiver edges.
+- [x] Record controlled performance evidence and clearly distinguish measured results from inference.
 - [ ] Commit cohesive changes, push the branch, and create a PR with exact commands, results, residual risks, and no perfection claim unsupported by evidence.
