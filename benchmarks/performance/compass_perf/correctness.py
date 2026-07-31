@@ -303,7 +303,12 @@ def index_graph(
             record.get(key) is True
             for key in ("placeholder", "unresolved", "external")
         ) or _text(record.get("resolution")).casefold() in {"deferred", "unresolved"}
-        placeholder = explicit_placeholder or not source_file or (tool == "graphify" and not kind)
+        placeholder = (
+            explicit_placeholder
+            or not source_file
+            or kind in {"import", "export"}
+            or (tool == "graphify" and not kind)
+        )
         anchored_definition = bool(
             source_file
             and not placeholder
@@ -664,6 +669,8 @@ def _classify_edges(
     direct_index: dict[tuple[str, str, str], list[EdgeFact]] = {}
     occurrence_target_index: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
     qualified_external_targets: dict[tuple[str, str, str, str], set[str]] = {}
+    qualified_external_imports: dict[tuple[str, str], set[str]] = {}
+    imported_symbol_targets: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
     containment: dict[str, set[str]] = {}
     import_occurrences: set[tuple[str, str, str]] = set()
     for edges in (graphify_edges, compass_edges):
@@ -701,6 +708,16 @@ def _classify_edges(
             ).append(edge)
             target_node = compass_nodes.get(edge.target)
             if (
+                edge.relation == "imports"
+                and target_node is not None
+                and target_node.placeholder
+                and target_node.qualified_name
+            ):
+                qualified_external_imports.setdefault(
+                    (edge.occurrence_file, edge.occurrence_location),
+                    set(),
+                ).add(edge.target)
+            if (
                 target_node is not None
                 and target_node.placeholder
                 and "." in target_node.qualified_name
@@ -716,6 +733,23 @@ def _classify_edges(
                 ).add(edge.target)
         if edge.relation == "contains":
             containment.setdefault(source, set()).add(target)
+        if edge.relation == "imports":
+            target_node = compass_nodes.get(edge.target)
+            if (
+                target_node is not None
+                and target_node.source_file
+                and edge.occurrence_file
+                and edge.occurrence_location
+            ):
+                imported_symbol_targets.setdefault(
+                    (
+                        source,
+                        target_node.source_file,
+                        edge.occurrence_file,
+                        edge.occurrence_location,
+                    ),
+                    [],
+                ).append(edge)
 
     output: list[Coverage] = []
     for graphify in graphify_edges:
@@ -750,6 +784,24 @@ def _classify_edges(
             continue
 
         graphify_target = graphify_nodes.get(graphify.target)
+        external_imports = qualified_external_imports.get(
+            (graphify.occurrence_file, graphify.occurrence_location),
+            set(),
+        )
+        if (
+            graphify.relation == "imports"
+            and graphify_target is not None
+            and graphify_target.source_file
+            and len(external_imports) == 1
+        ):
+            output.append(
+                Coverage(
+                    "rejected",
+                    "qualified_external_import_rebound_to_local",
+                    next(iter(external_imports)),
+                )
+            )
+            continue
         corrected_targets = qualified_external_targets.get(
             (
                 graphify.relation,
@@ -759,15 +811,17 @@ def _classify_edges(
             ),
             set(),
         )
-        if (
-            graphify_target is not None
-            and graphify_target.source_file
-            and len(corrected_targets) == 1
-        ):
+        if graphify_target is not None and len(corrected_targets) == 1:
+            status = "rejected" if graphify_target.source_file else "dominated"
+            reason = (
+                "qualified_external_target_rebound_to_local"
+                if graphify_target.source_file
+                else "qualified_external_binding"
+            )
             output.append(
                 Coverage(
-                    "rejected",
-                    "qualified_external_target_rebound_to_local",
+                    status,
+                    reason,
                     next(iter(corrected_targets)),
                 )
             )
@@ -799,6 +853,30 @@ def _classify_edges(
         target_coverage = node_coverage.get(graphify.target)
         source = node_mapping.get(graphify.source)
         target = node_mapping.get(graphify.target)
+        if (
+            graphify.relation == "imports"
+            and source is not None
+            and graphify_target is not None
+            and graphify_target.source_file
+        ):
+            imported_symbols = imported_symbol_targets.get(
+                (
+                    source,
+                    graphify_target.source_file,
+                    graphify.occurrence_file,
+                    graphify.occurrence_location,
+                ),
+                [],
+            )
+            if imported_symbols:
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "imported_symbol_definition",
+                        imported_symbols[0].payload_sha256,
+                    )
+                )
+                continue
         if source is None or target is None:
             status = (
                 "ambiguous"
