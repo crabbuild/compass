@@ -18,6 +18,7 @@ fn build() {
     Beta::new();
     Alpha::new();
     External::new();
+    NoCollision::launch();
 }
 "#;
     let source = source_text.as_bytes();
@@ -31,7 +32,7 @@ fn build() {
         .iter()
         .filter(|occurrence| occurrence.role == OccurrenceRole::Call)
         .collect::<Vec<_>>();
-    assert_eq!(calls.len(), 4, "occurrences={calls:#?}");
+    assert_eq!(calls.len(), 5, "occurrences={calls:#?}");
     assert_eq!(
         calls
             .iter()
@@ -45,7 +46,7 @@ fn build() {
         let qualifier = occurrence.qualifier.as_deref().ok_or("missing qualifier")?;
         assert_eq!(
             std::str::from_utf8(&source[start..end])?,
-            format!("{qualifier}::new()")
+            format!("{qualifier}::{}()", occurrence.spelling)
         );
     }
 
@@ -88,6 +89,32 @@ fn build() {
         .find(|candidate| candidate.qualifier.as_deref() == Some("External"))
         .ok_or("missing external candidate")?;
     assert!(external.external_identity);
+    let external_node = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "External.new")
+        .ok_or("missing qualified external call target")?;
+    assert_eq!(
+        external_node.attributes.get("external"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    let external_edge = extraction
+        .edges
+        .iter()
+        .find(|edge| edge.string("relation") == "calls" && edge.target == external_node.id)
+        .ok_or("missing qualified external call edge")?;
+    assert_eq!(external_edge.string("source_location"), "L11");
+    assert!(
+        extraction
+            .nodes
+            .iter()
+            .all(|node| node.string("qualified_name") != "NoCollision.launch")
+    );
+    assert!(evidence.relationship_candidates.iter().any(
+        |candidate| candidate.qualifier.as_deref() == Some("NoCollision")
+            && candidate.spelling == "launch"
+            && candidate.external_identity
+    ));
     Ok(())
 }
 
@@ -123,5 +150,16 @@ fn build() { other::Item::new(); }
         .ok_or("missing namespaced candidate")?;
     assert_eq!(candidate.qualifier.as_deref(), Some("other::Item"));
     assert!(candidate.external_identity);
+    let external = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "other.Item.new")
+        .ok_or("missing namespaced external target")?;
+    assert!(
+        extraction
+            .edges
+            .iter()
+            .any(|edge| edge.string("relation") == "calls" && edge.target == external.id)
+    );
     Ok(())
 }

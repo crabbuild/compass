@@ -535,6 +535,20 @@ impl<'source, 'tree> RustState<'source, 'tree> {
                     if pairs.insert(pair) {
                         self.add_call_edge(caller, &target, node);
                     }
+                } else if scoped
+                    && labels.contains_key(&callee)
+                    && let Some(qualifier) = qualifier.as_deref()
+                {
+                    let target = self.ensure_qualified_external_callable(qualifier, &callee);
+                    let pair = (
+                        caller.to_owned(),
+                        target.clone(),
+                        node.start_byte(),
+                        node.end_byte(),
+                    );
+                    if pairs.insert(pair) {
+                        self.add_call_edge(caller, &target, node);
+                    }
                 } else if !scoped
                     && !TRAIT_METHOD_BLOCKLIST.contains(&callee.to_lowercase().as_str())
                 {
@@ -608,6 +622,27 @@ impl<'source, 'tree> RustState<'source, 'tree> {
                 "origin_file".into(),
                 Value::String(self.source_file.clone()),
             );
+            self.extraction.nodes.push(NodeRecord {
+                id: id.clone(),
+                attributes,
+            });
+        }
+        id
+    }
+
+    fn ensure_qualified_external_callable(&mut self, qualifier: &str, callee: &str) -> String {
+        let id = make_id(&["external_call", qualifier, callee]);
+        if self.seen.insert(id.clone()) {
+            let qualified_name = format!("{}.{}", qualifier.replace("::", "."), callee);
+            let mut attributes = Map::new();
+            attributes.insert("label".into(), Value::String(format!(".{callee}()")));
+            attributes.insert("file_type".into(), Value::String("code".into()));
+            attributes.insert("source_file".into(), Value::String(String::new()));
+            attributes.insert("source_location".into(), Value::String(String::new()));
+            attributes.insert("qualified_name".into(), Value::String(qualified_name));
+            attributes.insert("external".into(), Value::Bool(true));
+            attributes.insert("placeholder".into(), Value::Bool(true));
+            attributes.insert("resolution".into(), Value::String("unresolved".to_owned()));
             self.extraction.nodes.push(NodeRecord {
                 id: id.clone(),
                 attributes,
