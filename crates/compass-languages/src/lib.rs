@@ -58,8 +58,9 @@ pub use evidence::{
 };
 pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
 pub use frameworks::{
-    FrameworkLimitError, FrameworkLimits, RawDomainFact, RawFrameworkAnchor, RawFrameworkFact,
-    RawFrameworkOrigin, RawRouteFact,
+    FrameworkLimitError, FrameworkLimits, FrameworkManifestPolicy, FrameworkOccurrencePolicy,
+    FrameworkPackDescriptor, FrameworkPackKind, FrameworkPackRegistry, FrameworkPackRegistryError,
+    RawDomainFact, RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
 };
 pub use ids::{file_stem, make_id, normalize_id};
 pub use program::{TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
