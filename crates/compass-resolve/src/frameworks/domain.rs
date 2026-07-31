@@ -251,18 +251,37 @@ fn resolve_one(
             target_candidates: targets,
         });
     }
-    let reference = fact
+    let signature_reference = fact
         .detail
-        .get("handler_reference")
+        .get("target_signature_qualified")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let candidates = resolve_reference(
-        targets,
-        reference,
-        TargetKind::Callable,
-        &fact.anchor.source_file,
-        limits,
-    )?;
+    let qualified_reference = fact
+        .detail
+        .get("target_qualified_name")
+        .or_else(|| fact.detail.get("handler_reference"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let mut candidates = if signature_reference.is_empty() {
+        Vec::new()
+    } else {
+        resolve_reference(
+            targets,
+            signature_reference,
+            TargetKind::Callable,
+            &fact.anchor.source_file,
+            limits,
+        )?
+    };
+    if candidates.is_empty() {
+        candidates = resolve_reference(
+            targets,
+            qualified_reference,
+            TargetKind::Callable,
+            &fact.anchor.source_file,
+            limits,
+        )?;
+    }
     Ok(ResolvedDomainFact {
         fact: fact.clone(),
         state: single_state(&candidates),

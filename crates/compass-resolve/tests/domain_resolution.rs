@@ -28,12 +28,6 @@ fn extract(relative: &str) -> Result<Extraction, Box<dyn Error>> {
     Ok(extraction)
 }
 
-fn merge(target: &mut Extraction, mut source: Extraction) {
-    target.nodes.append(&mut source.nodes);
-    target.edges.append(&mut source.edges);
-    target.framework_facts.append(&mut source.framework_facts);
-}
-
 fn extract_and_resolve(relatives: &[&str]) -> Result<Extraction, Box<dyn Error>> {
     let mut extractions = Vec::with_capacity(relatives.len());
     let mut sources = HashMap::new();
@@ -65,8 +59,7 @@ fn extract_and_resolve(relatives: &[&str]) -> Result<Extraction, Box<dyn Error>>
 
 #[test]
 fn nest_and_spring_message_facts_preserve_direction_and_transport() -> Result<(), Box<dyn Error>> {
-    let mut extraction = extract("messaging/nest.ts")?;
-    merge(&mut extraction, extract("messaging/spring.java")?);
+    let mut extraction = extract_and_resolve(&["messaging/nest.ts", "messaging/spring.java"])?;
     let resolved =
         resolve_and_publish_framework_domains(&mut extraction, FrameworkLimits::default())?;
     assert!(resolved.iter().any(|fact| {
@@ -74,11 +67,14 @@ fn nest_and_spring_message_facts_preserve_direction_and_transport() -> Result<()
             && fact.fact.name == "orders.created"
             && fact.state == ResolutionState::Exact
     }));
-    assert!(resolved.iter().any(|fact| {
-        fact.fact.kind == "topic"
-            && fact.fact.name == "orders.created"
-            && fact.state == ResolutionState::Exact
-    }));
+    assert!(
+        resolved.iter().any(|fact| {
+            fact.fact.kind == "topic"
+                && fact.fact.name == "orders.created"
+                && fact.state == ResolutionState::Exact
+        }),
+        "resolved={resolved:#?}"
+    );
     assert!(resolved.iter().any(|fact| {
         fact.fact.kind == "queue"
             && fact.fact.name == "orders.queue"
