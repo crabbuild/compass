@@ -109,7 +109,7 @@ paths and do not claim universal capabilities.
 - `Extraction.semantic_evidence` is
   `Option<SemanticEvidenceBatch>` with serde default and empty omission.
 
-- [ ] **Step 1: Implement the production evidence model**
+- [x] **Step 1: Implement the production evidence model**
 
 Create closed serde enums for `SemanticRole`, `LanguageCapability`,
 `BindingKind`, and `CandidateRelation`. Use `camelCase` fields and
@@ -150,7 +150,7 @@ Stable evidence identities use the unchanged
 `EXTRACTION_SEMANTICS_VERSION` value as one hash component; this plan does not
 modify that value.
 
-- [ ] **Step 2: Implement structural and resource validation**
+- [x] **Step 2: Implement structural and resource validation**
 
 `validate_evidence(batch, limits)` must reject:
 
@@ -168,7 +168,7 @@ modify that value.
 Return one stable `EvidenceError` containing a code and bounded message. Sort
 validation traversal by fact ID so input order cannot change the first error.
 
-- [ ] **Step 3: Attach evidence to the extraction cache contract**
+- [x] **Step 3: Attach evidence to the extraction cache contract**
 
 Add:
 
@@ -181,14 +181,14 @@ to `Extraction`, initialize it to `None`, re-export evidence types from
 `compass-languages`, and leave `EXTRACTION_SEMANTICS_VERSION` at its current
 value.
 
-- [ ] **Step 4: Add post-implementation tests**
+- [x] **Step 4: Add post-implementation tests**
 
 Cover round-trip serialization, unknown-field rejection, invalid ranges,
 duplicate IDs, dangling references, undeclared capabilities, cross-language
 constraints, resource boundaries, and deterministic error ordering in
 `crates/compass-languages/tests/universal_evidence.rs`.
 
-- [ ] **Step 5: Verify and commit task one**
+- [x] **Step 5: Verify and commit task one**
 
 Run:
 
@@ -227,7 +227,7 @@ git commit -m "feat(languages): add universal semantic evidence model"
 - A returned profile means that the language must use universal evidence; no
   fallback to its replaced algorithm is allowed.
 
-- [ ] **Step 1: Implement universal adapter profiles**
+- [x] **Step 1: Implement universal adapter profiles**
 
 Define:
 
@@ -244,21 +244,21 @@ by task three. Do not register Java, Rust, pseudo-languages, or any other
 adapter in this increment. They continue their current algorithms unchanged
 and cannot claim universal capabilities.
 
-- [ ] **Step 2: Connect file detection to adapter identity**
+- [x] **Step 2: Connect file detection to adapter identity**
 
 Add `Registry::universal_adapter(path)` and
 `Registry::universal_profile_for_spec(spec)` helpers. Python and Go return
 their static profiles. Every other spec returns `None`; this is an explicit
 not-yet-cut-over state, not a compatibility projection.
 
-- [ ] **Step 3: Add post-implementation registry tests**
+- [x] **Step 3: Add post-implementation registry tests**
 
 Assert unique adapter languages, sorted/deduplicated capabilities, direct
 Python and Go registration, and `None` for every not-yet-cut-over language.
 Assert that no universal adapter can be configured with an empty capability
 set.
 
-- [ ] **Step 4: Verify and commit task two**
+- [x] **Step 4: Verify and commit task two**
 
 Run:
 
@@ -299,7 +299,7 @@ git commit -m "feat(languages): register semantic adapter capabilities"
 - Python and Go extraction must return a populated, valid evidence batch.
 - Cached Python or Go extraction without evidence is a cache miss.
 
-- [ ] **Step 1: Implement the production evidence builder**
+- [x] **Step 1: Implement the production evidence builder**
 
 Implement bounded methods that accept typed parser facts directly:
 
@@ -314,7 +314,7 @@ Stable evidence IDs use length-prefixed SHA-256 inputs containing the unchanged
 extraction-semantics identity, adapter language, source path, role, range, and
 producer identity. Sort and deduplicate by typed ID before validation.
 
-- [ ] **Step 2: Hard-cut Python extraction**
+- [x] **Step 2: Hard-cut Python extraction**
 
 Change the Python branch of generic tree extraction to emit declarations,
 scopes, imports/re-exports, aliases, calls/construction, decorators,
@@ -323,7 +323,7 @@ Remove the replaced Python-specific raw relationship construction and
 collection resolver inputs for those capabilities. Retain framework detection
 only through its declared framework-fact boundary until task five.
 
-- [ ] **Step 3: Hard-cut Go extraction**
+- [x] **Step 3: Hard-cut Go extraction**
 
 Change `go.rs` to emit packages, declarations, scopes, imports/aliases,
 receivers, fields, calls/construction, type references, embedding, and
@@ -331,7 +331,7 @@ ownership through `EvidenceBuilder`. Remove the replaced Go raw type-reference
 and receiver-placeholder algorithm. Preserve qualified package identity in
 every constraint.
 
-- [ ] **Step 4: Reject stale cached Python and Go facts**
+- [x] **Step 4: Reject stale cached Python and Go facts**
 
 At cache acceptance, resolve the source language through
 `AdapterRegistry::universal_profile`. If a universal adapter's cached
@@ -339,7 +339,7 @@ At cache acceptance, resolve the source language through
 normal cache miss and re-extract it. Do not change cache or extraction version
 constants.
 
-- [ ] **Step 5: Add post-implementation adapter tests**
+- [x] **Step 5: Add post-implementation adapter tests**
 
 Use Python and Go Unicode, repeated-call, alias-import, re-export,
 decorator/annotation, package import, receiver, embedding, external type,
@@ -347,13 +347,13 @@ sourceless stub, and partial-parser fixtures. Assert exact ranges, stable IDs,
 bounded diagnostics, capability truthfulness, and cache rejection when
 required evidence is absent.
 
-- [ ] **Step 6: Prove cold/warm determinism**
+- [x] **Step 6: Prove cold/warm determinism**
 
 Extend `code_graph_v1_determinism.rs` so cold and warm Python/Go extracts
 produce byte-identical `graph.json`, evidence batches, and canonical graph
 digests after task four materializes resolved evidence.
 
-- [ ] **Step 7: Verify and commit task three**
+- [x] **Step 7: Verify and commit task three**
 
 Run:
 
@@ -395,7 +395,7 @@ git commit -m "feat(languages): hard-cut Python and Go semantic evidence"
   resolved declarations and decisions materialize the Python and Go raw graph
   records consumed by strict publication.
 
-- [ ] **Step 1: Implement the bounded universal index**
+- [x] **Step 1: Implement the bounded universal index**
 
 Index declarations by:
 
@@ -408,7 +408,7 @@ Index declarations by:
 Use `AHashMap`/`AHashSet`, sort candidate IDs before decisions, and enforce
 maximum candidates per lookup, declarations, bindings, and occurrences.
 
-- [ ] **Step 2: Implement deterministic resolution**
+- [x] **Step 2: Implement deterministic resolution**
 
 Resolve in this exact order:
 
@@ -423,7 +423,7 @@ case-folded candidates never select a winner unless one exact case-sensitive
 identity remains and all other constraints match. Emit a typed
 `ResolutionEvidence` describing the rule and candidate count.
 
-- [ ] **Step 3: Hard-cut collection resolution**
+- [x] **Step 3: Hard-cut collection resolution**
 
 Merge Python and Go evidence batches by adapter language after per-file
 extractions merge. Validate, construct the universal index, resolve every
@@ -437,14 +437,14 @@ once no non-universal adapter calls them. A missing or invalid universal batch
 sets `Extraction.error` and blocks complete publication; there is no fallback
 to the prior resolver.
 
-- [ ] **Step 4: Add post-implementation resolver tests**
+- [x] **Step 4: Add post-implementation resolver tests**
 
 Cover lexical shadowing, explicit aliases, re-export bindings,
 same-package definitions, case-distinct owners, standard-library externals,
 ambiguous overloads, candidate limits, cross-language `cleanup` collisions,
 and input-order determinism.
 
-- [ ] **Step 5: Verify and commit task four**
+- [x] **Step 5: Verify and commit task four**
 
 Run:
 
@@ -483,7 +483,7 @@ git commit -m "feat(resolve): add universal constrained resolution core"
   dedicated hard cutover; no compatibility adapter connects them to this
   contract.
 
-- [ ] **Step 1: Implement the descriptor contract**
+- [x] **Step 1: Implement the descriptor contract**
 
 Define a descriptor containing stable ID, source/config/template kind,
 supported languages, required capabilities, dependency markers, manifest
@@ -494,21 +494,21 @@ and `FrameworkLimits`.
 universal adapter profile, undeclared capabilities, an empty accepted-role set,
 heuristic packs without rules, and zero limits.
 
-- [ ] **Step 2: Add a production registration boundary**
+- [x] **Step 2: Add a production registration boundary**
 
 Implement registration and validation APIs used by future hard-cutover packs.
 Do not register or translate current `SourcePack`, `ConfigPack`, or
 `TemplatePack` values in this increment. Their later cutover removes the old
 entry and adds the universal pack atomically.
 
-- [ ] **Step 3: Add post-implementation framework conformance tests**
+- [x] **Step 3: Add post-implementation framework conformance tests**
 
 Assert a synthetic valid pack registers for Python and Go, a pack cannot
 register for a not-yet-cut-over language, and no pack can bypass capability,
 occurrence, activation, or limit requirements. Existing route/domain fixtures
 must remain unchanged because no production pack is registered twice.
 
-- [ ] **Step 4: Verify and commit task five**
+- [x] **Step 4: Verify and commit task five**
 
 Run:
 
@@ -546,7 +546,7 @@ git commit -m "feat(frameworks): add universal evidence pack contract"
 - Produces a deterministic JSON result with strata counts, precision, recall,
   critical violations, and Wilson bounds.
 
-- [ ] **Step 1: Implement manifest and result models**
+- [x] **Step 1: Implement manifest and result models**
 
 Use Python standard-library dataclasses. Validate schema
 `compass.quality-audit`, audit mode (`conformance` or `qualification`), safe
@@ -557,7 +557,7 @@ the engine with a small fixture set but its result is ineligible for production
 quality claims. A `qualification` manifest enforces the design's 2,000-record
 and stratum minimums without configurable overrides.
 
-- [ ] **Step 2: Implement deterministic audit calculations**
+- [x] **Step 2: Implement deterministic audit calculations**
 
 Compute:
 
@@ -575,7 +575,7 @@ stratum is undersized, or a critical violation exists. Never exclude an
 invalid record from a denominator. Include `eligibleForQualityClaim: false`
 for every conformance-mode result.
 
-- [ ] **Step 3: Add the CLI subcommand and synthetic manifest**
+- [x] **Step 3: Add the CLI subcommand and synthetic manifest**
 
 Add `audit` without changing existing `run`, `compare`, or `report` behavior.
 The synthetic conformance manifest uses checked-in performance fixtures and
@@ -584,13 +584,13 @@ endpoint, one missing fact, and all three critical violation labels. Tests
 prove that this small manifest cannot report production qualification
 eligibility.
 
-- [ ] **Step 4: Add post-implementation harness tests**
+- [x] **Step 4: Add post-implementation harness tests**
 
 Cover exact Wilson values, stale snippets, corpus mismatch, duplicate IDs,
 unsafe paths, missing graph facts, undersized strata, critical violations,
 deterministic output, and denominator accounting.
 
-- [ ] **Step 5: Verify and commit task six**
+- [x] **Step 5: Verify and commit task six**
 
 Run:
 
@@ -627,7 +627,7 @@ git commit -m "feat(quality): add universal graph conformance audit"
 - Documents the exact adapter, capability, hard-cutover, framework-pack,
   resolution, and conformance extension process used by later increments.
 
-- [ ] **Step 1: Write the extension guide**
+- [x] **Step 1: Write the extension guide**
 
 Document:
 
@@ -641,7 +641,7 @@ Document:
 - one complete minimal language/profile example plus one minimal framework
   pack example using the actual APIs implemented above.
 
-- [ ] **Step 2: Run focused and full verification**
+- [x] **Step 2: Run focused and full verification**
 
 Run fresh:
 
@@ -655,7 +655,7 @@ cargo check --workspace --all-targets
 cargo test --workspace --all-targets
 ```
 
-- [ ] **Step 3: Verify real graph quality and determinism**
+- [x] **Step 3: Verify real graph quality and determinism**
 
 Build release Compass and extract fresh Django and Entire graphs using the
 same pinned corpora and harness command as phase two. Verify:
@@ -670,14 +670,20 @@ same pinned corpora and harness command as phase two. Verify:
 - fewer Django edges are called an improvement only when invalid evidence is
   removed and real later uses remain represented.
 
-- [ ] **Step 4: Update the review**
+Outcome: cold/warm graph bytes and all four query oracles passed, and the final
+Django graph has no publication collision or omission. The 10% performance,
+strict Graphify-superset, and production 2,000-record precision gates did not
+pass or were not qualified; the review records those gaps without promoting a
+quality claim.
+
+- [x] **Step 4: Update the review**
 
 Record verification commands, exact corpus revisions, graph counts/digests,
 latency, audited precision/recall, every critical-violation count, and an
 honest classification of Compass improvements, regressions, representation
 changes, and unresolved gaps. Do not run `graphify update .`.
 
-- [ ] **Step 5: Commit documentation and push**
+- [x] **Step 5: Commit documentation and push**
 
 ```bash
 git add docs/reference/universal-semantic-evidence.md \
