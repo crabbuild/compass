@@ -1,5 +1,5 @@
 use compass_languages::{
-    AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
+    AdapterIdentity, AdapterRegistry, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
     EvidenceErrorCode, EvidenceLimits, EvidenceRange, Extraction, LanguageCapability,
     OccurrenceFact, RelationshipCandidate, ResolutionConstraint, ScopeFact, SemanticEvidenceBatch,
     SemanticRole, validate_evidence,
@@ -240,4 +240,30 @@ fn first_fact_error_is_independent_of_input_order() {
         validate_evidence(&second, EvidenceLimits::default()).expect_err("invalid ranges");
     assert_eq!(first_error, second_error);
     assert!(first_error.message.contains("a-invalid"));
+}
+
+#[test]
+fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
+    AdapterRegistry::validate().expect("production registry must be valid");
+    let profiles = AdapterRegistry::universal_profiles();
+    assert_eq!(
+        profiles
+            .iter()
+            .map(|profile| profile.language)
+            .collect::<Vec<_>>(),
+        ["go", "python"]
+    );
+    assert!(
+        profiles
+            .iter()
+            .all(|profile| !profile.capabilities.is_empty())
+    );
+    assert!(profiles.iter().all(|profile| {
+        profile
+            .capabilities
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+    }));
+    assert!(AdapterRegistry::universal_profile("java").is_none());
+    assert!(AdapterRegistry::universal_profile("rust").is_none());
 }

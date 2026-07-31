@@ -1,5 +1,6 @@
 //! Statically linked deterministic language extraction for Compass.
 
+mod adapters;
 mod apex;
 mod bash;
 mod builtins;
@@ -46,6 +47,7 @@ mod verilog;
 mod xaml;
 mod zig;
 
+pub use adapters::{AdapterProfile, AdapterRegistry, AdapterRegistryError};
 #[doc(hidden)]
 pub use builtins::is_language_builtin_global;
 pub use evidence::{
