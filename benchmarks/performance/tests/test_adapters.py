@@ -42,6 +42,22 @@ class AdapterTests(unittest.TestCase):
         self.assertIn("--code-only", build)
         self.assertEqual(build[-1], "--force")
 
+    def test_graphify_removes_only_its_checkout_artifacts(self) -> None:
+        adapter = GraphifyAdapter(Path("/venv/bin/python"), revision("graphify"))
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = QualificationWorkspace.create(Path(directory) / "workspace")
+            checkout = workspace.root / "corpora" / "fixture"
+            generated = checkout / "graphify-out" / "cache"
+            generated.mkdir(parents=True)
+            (generated / "stat-index.json").write_text("{}")
+            source = checkout / "source.py"
+            source.write_text("pass\n")
+
+            adapter.cleanup_checkout(checkout)
+
+            self.assertFalse((checkout / "graphify-out").exists())
+            self.assertEqual(source.read_text(), "pass\n")
+
     def test_compass_active_generation_is_validated(self) -> None:
         adapter = CompassAdapter(Path("/opt/compass"), revision("compass"))
         with tempfile.TemporaryDirectory() as directory:

@@ -89,6 +89,9 @@ class ToolAdapter:
     def parse_build_evidence(self, stderr: str) -> dict[str, float]:
         return {}
 
+    def cleanup_checkout(self, checkout: Path) -> None:
+        """Remove tool-owned checkout side effects after a measured command."""
+
     def prune_superseded_artifacts(self, output: Path, active_graph: Path) -> None:
         """Release tool-specific artifacts that are no longer needed by the run."""
 
@@ -253,3 +256,8 @@ class GraphifyAdapter(ToolAdapter):
         if not graph.is_file() or not graph.resolve().is_relative_to(output.resolve()):
             raise RuntimeError(f"invalid Graphify graph artifact: {graph}")
         return graph
+
+    def cleanup_checkout(self, checkout: Path) -> None:
+        generated = checkout / "graphify-out"
+        if generated.exists() or generated.is_symlink():
+            guarded_remove(generated)
