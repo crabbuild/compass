@@ -77,4 +77,3 @@ def load_suite(path: Path) -> Suite:
         repositories.append(RepositorySpec(name, url, suffix, tuple(queries)))
 
     return Suite(SUITE_SCHEMA, tuple(repositories), hashlib.sha256(raw).hexdigest())
-

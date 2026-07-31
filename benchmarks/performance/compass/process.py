@@ -77,4 +77,3 @@ def run_measured(spec: ProcessSpec) -> ProcessMetrics:
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise RuntimeError(f"invalid measurement worker output: {completed.stdout!r}") from error
-

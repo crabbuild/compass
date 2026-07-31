@@ -20,6 +20,20 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual("compare", parser.parse_args(["compare"]).command)
         self.assertEqual("report", parser.parse_args(["report", "run.json"]).command)
         self.assertEqual("promote", parser.parse_args(["promote", "run.json"]).command)
+        self.assertEqual(
+            "audit",
+            parser.parse_args(
+                [
+                    "audit",
+                    "--manifest",
+                    "audit.json",
+                    "--graph",
+                    "graph.json",
+                    "--corpus",
+                    "repository",
+                ]
+            ).command,
+        )
 
     def test_comparison_is_explicit(self) -> None:
         parser = build_parser()

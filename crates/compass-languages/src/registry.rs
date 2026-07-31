@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use crate::{AdapterProfile, AdapterRegistry};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtractorKind {
     Generic,
@@ -65,6 +67,18 @@ impl Registry {
     #[must_use]
     pub fn cases() -> &'static [RegistryCase] {
         REGISTRY_CASES
+    }
+
+    /// Resolve a path only when its language has hard-cut to universal evidence.
+    #[must_use]
+    pub fn universal_adapter(path: &Path) -> Option<&'static AdapterProfile> {
+        Self::resolve(path).and_then(Self::universal_profile_for_spec)
+    }
+
+    /// Return the hard-cut adapter associated with a resolved language.
+    #[must_use]
+    pub fn universal_profile_for_spec(spec: LanguageSpec) -> Option<&'static AdapterProfile> {
+        AdapterRegistry::universal_profile(spec.name)
     }
 
     #[must_use]

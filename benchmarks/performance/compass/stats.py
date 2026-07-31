@@ -39,4 +39,3 @@ def speedup(graphify: Aggregate, compass: Aggregate) -> float:
     if graphify.p50_seconds <= 0 or compass.p50_seconds <= 0:
         raise ValueError("speedup requires positive medians")
     return graphify.p50_seconds / compass.p50_seconds
-

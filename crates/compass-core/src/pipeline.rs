@@ -664,7 +664,9 @@ fn build_graph_inner(
                         path: path.clone(),
                         source,
                     })?;
-                if cached_framework_evidence_matches(&extraction, path, &project_evidence) {
+                if cached_framework_evidence_matches(&extraction, path, &project_evidence)
+                    && cached_universal_evidence_matches(&extraction, path)
+                {
                     extractions.insert(path.clone(), extraction);
                 } else {
                     missing.push(path.clone());
@@ -1912,6 +1914,28 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
             }
         }
     }
+    if let Some(evidence) = extraction.semantic_evidence.as_mut() {
+        for range in evidence
+            .declarations
+            .iter_mut()
+            .map(|fact| &mut fact.range)
+            .chain(evidence.scopes.iter_mut().map(|fact| &mut fact.range))
+            .chain(evidence.bindings.iter_mut().map(|fact| &mut fact.range))
+            .chain(evidence.occurrences.iter_mut().map(|fact| &mut fact.range))
+            .chain(
+                evidence
+                    .diagnostics
+                    .iter_mut()
+                    .filter_map(|diagnostic| diagnostic.range.as_mut()),
+            )
+        {
+            if Path::new(&range.source_file) == source
+                || Path::new(&range.source_file).is_absolute()
+            {
+                range.source_file.clone_from(&portable);
+            }
+        }
+    }
 }
 
 fn normalize_source_attribute_cached(
@@ -2093,6 +2117,26 @@ fn ast_extractions_are_portable(extractions: &[Extraction], root: &Path) -> bool
             .iter()
             .flatten()
             .all(|call| !call.caller_nid.starts_with(&rooted_prefix))
+            && extraction
+                .semantic_evidence
+                .as_ref()
+                .is_none_or(|evidence| {
+                    evidence.declarations.iter().all(|fact| {
+                        !fact.graph_node_id.starts_with(&rooted_prefix)
+                            && !Path::new(&fact.range.source_file).is_absolute()
+                    }) && evidence
+                        .scopes
+                        .iter()
+                        .all(|fact| !Path::new(&fact.range.source_file).is_absolute())
+                        && evidence
+                            .bindings
+                            .iter()
+                            .all(|fact| !Path::new(&fact.range.source_file).is_absolute())
+                        && evidence
+                            .occurrences
+                            .iter()
+                            .all(|fact| !Path::new(&fact.range.source_file).is_absolute())
+                })
     })
 }
 
@@ -2294,6 +2338,11 @@ fn apply_ast_id_remap(
     if let Some(calls) = extraction.raw_calls.as_mut() {
         for call in calls {
             apply_ast_id(&mut call.caller_nid, id_remap, root_marker);
+        }
+    }
+    if let Some(evidence) = extraction.semantic_evidence.as_mut() {
+        for declaration in &mut evidence.declarations {
+            apply_ast_id(&mut declaration.graph_node_id, id_remap, root_marker);
         }
     }
 }
@@ -3853,6 +3902,21 @@ fn cached_framework_evidence_matches(
         == Some(project_evidence.fingerprint_for(path))
 }
 
+fn cached_universal_evidence_matches(extraction: &Extraction, path: &Path) -> bool {
+    let Some(profile) = Registry::universal_adapter(path) else {
+        return true;
+    };
+    extraction.semantic_evidence.as_ref().is_some_and(|batch| {
+        batch.adapter.language == profile.language
+            && batch.adapter.capabilities.as_slice() == profile.capabilities
+            && compass_languages::validate_evidence(
+                batch,
+                compass_languages::EvidenceLimits::default(),
+            )
+            .is_ok()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::error::Error;
@@ -3927,6 +3991,38 @@ mod tests {
             &changed
         ));
         Ok(())
+    }
+
+    #[test]
+    fn universal_adapter_cache_requires_current_valid_evidence() {
+        let python = Path::new("src/example.py");
+        let rust = Path::new("src/example.rs");
+        assert!(!cached_universal_evidence_matches(
+            &Extraction::default(),
+            python
+        ));
+        assert!(cached_universal_evidence_matches(
+            &Extraction::default(),
+            rust
+        ));
+
+        let source = b"def example():\n    return 1\n";
+        let mut engine = Engine::default();
+        let extracted = engine
+            .extract_source_combined(python, "src/example.py", source)
+            .expect("extract python")
+            .graph;
+        assert!(cached_universal_evidence_matches(&extracted, python));
+
+        let mut invalid = extracted;
+        invalid
+            .semantic_evidence
+            .as_mut()
+            .expect("universal evidence")
+            .adapter
+            .capabilities
+            .clear();
+        assert!(!cached_universal_evidence_matches(&invalid, python));
     }
 
     #[test]

@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from benchmarks.performance.compass_perf.model import (
+from benchmarks.performance.compass.model import (
     Aggregate,
     CheckoutIdentity,
     CorrectnessResult,
@@ -17,7 +17,7 @@ from benchmarks.performance.compass_perf.model import (
     ToolRevision,
     WorkloadResult,
 )
-from benchmarks.performance.compass_perf.report import (
+from benchmarks.performance.compass.report import (
     compare_baseline,
     compare_tools,
     load_run,

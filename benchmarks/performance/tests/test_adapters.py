@@ -4,9 +4,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from benchmarks.performance.compass_perf.adapters import CompassAdapter, GraphifyAdapter
-from benchmarks.performance.compass_perf.model import ToolRevision
-from benchmarks.performance.compass_perf.workspace import QualificationWorkspace
+from benchmarks.performance.compass.adapters import CompassAdapter, GraphifyAdapter
+from benchmarks.performance.compass.model import ToolRevision
+from benchmarks.performance.compass.workspace import QualificationWorkspace
 
 
 def revision(name: str) -> ToolRevision:

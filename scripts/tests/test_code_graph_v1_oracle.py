@@ -94,6 +94,27 @@ class OracleTests(unittest.TestCase):
     def test_endpoint_matrix_rejects_inheritance_to_variable(self) -> None:
         self.assertFalse(endpoint_allowed({"kind": "class"}, {"kind": "extends"}, {"kind": "variable"}))
 
+    def test_endpoint_matrix_accepts_top_level_instantiations(self) -> None:
+        for source_kind in ("file", "module"):
+            with self.subTest(source_kind=source_kind):
+                self.assertTrue(endpoint_allowed(
+                    {"kind": source_kind},
+                    {"kind": "instantiates"},
+                    {"kind": "class", "language": "python"},
+                ))
+
+    def test_endpoint_matrix_accepts_only_rust_enum_member_instantiations(self) -> None:
+        self.assertTrue(endpoint_allowed(
+            {"kind": "function"},
+            {"kind": "instantiates"},
+            {"kind": "enum_member", "language": "rust"},
+        ))
+        self.assertFalse(endpoint_allowed(
+            {"kind": "function"},
+            {"kind": "instantiates"},
+            {"kind": "enum_member", "language": "python"},
+        ))
+
     def test_validate_graph_rejects_unknown_producer(self) -> None:
         item = node("function:a", "function")
         item["evidence"][0]["extractor"] = "compass.languages.unknown"

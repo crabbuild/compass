@@ -5,6 +5,7 @@ mod file_routes;
 mod go;
 mod java;
 mod model;
+mod pack;
 mod php;
 mod play;
 mod python;
@@ -17,6 +18,10 @@ mod typescript;
 pub use model::{
     FrameworkLimitError, FrameworkLimits, RawDomainFact, RawFrameworkAnchor, RawFrameworkFact,
     RawFrameworkOrigin, RawRouteFact,
+};
+pub use pack::{
+    FrameworkManifestPolicy, FrameworkOccurrencePolicy, FrameworkPackDescriptor, FrameworkPackKind,
+    FrameworkPackRegistry, FrameworkPackRegistryError,
 };
 
 use std::path::Path;

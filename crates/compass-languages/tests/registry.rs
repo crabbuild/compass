@@ -107,3 +107,26 @@ fn ids_match_python_unicode_casefold_contract() {
     assert_eq!(file_stem(Path::new("")), "");
     assert!(Registry::resolve(Path::new("archive.zip")).is_none());
 }
+
+#[test]
+fn only_hard_cut_languages_expose_universal_profiles() {
+    let python = Registry::resolve(Path::new("src/example.py")).expect("python spec");
+    let go = Registry::resolve(Path::new("src/example.go")).expect("go spec");
+    let java = Registry::resolve(Path::new("src/Example.java")).expect("java spec");
+    let rust = Registry::resolve(Path::new("src/example.rs")).expect("rust spec");
+
+    assert_eq!(
+        Registry::universal_profile_for_spec(python).map(|profile| profile.language),
+        Some("python")
+    );
+    assert_eq!(
+        Registry::universal_profile_for_spec(go).map(|profile| profile.language),
+        Some("go")
+    );
+    assert!(Registry::universal_profile_for_spec(java).is_none());
+    assert!(Registry::universal_profile_for_spec(rust).is_none());
+    assert_eq!(
+        Registry::universal_adapter(Path::new("src/example.py")).map(|profile| profile.language),
+        Some("python")
+    );
+}

@@ -96,8 +96,8 @@ fn scoring_and_find_node_cover_match_tiers_and_seed_collection() -> Result<(), B
         ("src/foo.py", 24.338_368_737_318_614),
         ("caller", 1.889_245_806_401_811_8),
         ("foo-member", 1.431_100_440_464_734_3),
-        ("isolated", 0.972_955_074_527_656_6),
         ("other", 0.972_955_074_527_656_6),
+        ("isolated", 0.972_955_074_527_656_6),
     ];
     assert_eq!(scores.ranked.len(), expected.len());
     for (actual, (id, score)) in scores.ranked.iter().zip(expected) {

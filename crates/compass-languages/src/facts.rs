@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
+use crate::evidence::SemanticEvidenceBatch;
 use crate::frameworks::RawFrameworkFact;
 
 /// One flexible node fact produced before the strict v1 publication boundary.
@@ -80,6 +81,8 @@ pub struct Extraction {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub framework_facts: Vec<RawFrameworkFact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_evidence: Option<SemanticEvidenceBatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(flatten)]
     pub extensions: serde_json::Map<String, Value>,
@@ -103,6 +106,7 @@ impl Default for Extraction {
             hyperedges: Vec::new(),
             raw_calls: Some(Vec::new()),
             framework_facts: Vec::new(),
+            semantic_evidence: None,
             error: None,
             extensions: serde_json::Map::new(),
         }

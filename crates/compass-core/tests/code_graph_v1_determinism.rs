@@ -6,10 +6,13 @@ use std::path::Path;
 use compass_core::{
     BuildOptions, BuildPurpose, SemanticLayer, build_graph_with_semantic, build_local_graph,
 };
+use compass_files::{Cache, CacheKind, CacheOptions};
+use compass_languages::Extraction;
 use compass_model::code_graph::{
     EdgeKind, GraphDocument, NodeDetails, NodeKind, NodeRole, RouteStage,
 };
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, ResolutionState};
+use sha2::{Digest, Sha256};
 
 const SOURCE: &str = r#"
 pub struct Store;
@@ -62,6 +65,31 @@ fn build_clustered(root: &Path) -> Result<(Vec<u8>, bool), Box<dyn Error>> {
     let bytes = fs::read(&path)?;
     GraphDocument::load(&path)?;
     Ok((bytes, result.outputs_changed))
+}
+
+fn cached_semantic_evidence_bytes(
+    root: &Path,
+    sources: &[&str],
+) -> Result<Vec<u8>, Box<dyn Error>> {
+    let mut cache = Cache::open(root, CacheOptions::output_directory(None))?;
+    let mut batches = Vec::with_capacity(sources.len());
+    for source in sources {
+        let path = root.join(source);
+        let value = cache
+            .load(&path, &CacheKind::Ast, None, false)?
+            .ok_or_else(|| format!("missing AST cache entry for {source}"))?;
+        let extraction: Extraction = serde_json::from_value(value)?;
+        let batch = extraction
+            .semantic_evidence
+            .ok_or_else(|| format!("missing semantic evidence for {source}"))?;
+        batches.push((source.to_string(), batch));
+    }
+    batches.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(serde_json::to_vec(&batches)?)
+}
+
+fn sha256(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 #[test]
@@ -171,6 +199,88 @@ fn empty_python_modules_publish_stable_file_and_import_facts() -> Result<(), Box
     let forced = build_local_graph(&options)?;
     let forced_bytes = fs::read(forced.output_dir.join("graph.json"))?;
     assert_eq!(forced_bytes, first_bytes);
+    Ok(())
+}
+
+#[test]
+fn python_and_go_cold_and_cached_rebuilds_have_identical_graph_and_evidence()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    for (relative, source) in [
+        (
+            "python/pkg/base.py",
+            "class Base:\n    def run(self):\n        return 1\n",
+        ),
+        (
+            "python/pkg/__init__.py",
+            "from .base import Base as ExportedBase\n",
+        ),
+        (
+            "python/app.py",
+            "from pkg import ExportedBase\n\
+             class Worker(ExportedBase):\n\
+                 def execute(self):\n\
+                     return self.run()\n",
+        ),
+        ("go/go.mod", "module example.com/project\n\ngo 1.22\n"),
+        (
+            "go/model/task.go",
+            "package model\n\
+             type Task struct{}\n\
+             func (task *Task) Run() {}\n",
+        ),
+        (
+            "go/cmd/agent/main.go",
+            "package agent\n\
+             import \"example.com/project/model\"\n\
+             func Execute(task *model.Task) { task.Run() }\n",
+        ),
+    ] {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, source)?;
+    }
+    let evidence_sources = [
+        "go/cmd/agent/main.go",
+        "go/model/task.go",
+        "python/app.py",
+        "python/pkg/__init__.py",
+        "python/pkg/base.py",
+    ];
+
+    let mut options = BuildOptions::new(root);
+    options.no_cluster = true;
+    options.no_viz = true;
+    options.max_workers = Some(2);
+    options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
+
+    let cold = build_local_graph(&options)?;
+    assert!(cold.files_extracted >= evidence_sources.len());
+    let cold_graph_bytes = fs::read(cold.output_dir.join("graph.json"))?;
+    let cold_graph = GraphDocument::load(&cold.output_dir.join("graph.json"))?;
+    let cold_evidence = cached_semantic_evidence_bytes(root, &evidence_sources)?;
+    let cold_digest = sha256(&cold_graph_bytes);
+
+    options.force = true;
+    options.reuse_cache_on_force = true;
+    let warm = build_local_graph(&options)?;
+    assert_eq!(warm.files_extracted, 0);
+    assert!(warm.files_cached >= evidence_sources.len());
+    let warm_graph_bytes = fs::read(warm.output_dir.join("graph.json"))?;
+    let warm_graph = GraphDocument::load(&warm.output_dir.join("graph.json"))?;
+    let warm_evidence = cached_semantic_evidence_bytes(root, &evidence_sources)?;
+    let warm_digest = sha256(&warm_graph_bytes);
+
+    assert_eq!(warm_graph_bytes, cold_graph_bytes);
+    assert_eq!(warm_evidence, cold_evidence);
+    assert_eq!(warm_digest, cold_digest);
+    assert_eq!(
+        warm_graph.graph.build.generation_id,
+        cold_graph.graph.build.generation_id
+    );
     Ok(())
 }
 
