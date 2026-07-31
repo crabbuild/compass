@@ -300,3 +300,67 @@ fn external() { External::load(); }
     }));
     Ok(())
 }
+
+#[test]
+fn rust_phase2_scopes_trait_impl_methods_and_emits_enum_payload_references()
+-> Result<(), Box<dyn Error>> {
+    let extraction = Engine::default().extract_source(
+        Path::new("src/lib.rs"),
+        br#"
+trait Execute { fn execute(&self); }
+struct Local;
+struct Remote;
+impl Execute for Local { fn execute(&self) {} }
+impl Execute for Remote { fn execute(&self) {} }
+enum Event { Local(Local), Remote { value: Remote } }
+"#,
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+
+    for owner in ["Local", "Remote"] {
+        let method = evidence
+            .declarations
+            .iter()
+            .find(|declaration| {
+                declaration.kind == "method"
+                    && declaration
+                        .qualified_name
+                        .starts_with(&format!("<crate::{owner} as "))
+            })
+            .ok_or("missing trait impl method")?;
+        let containment = evidence
+            .candidates
+            .iter()
+            .find(|candidate| {
+                candidate.relation == CandidateRelation::Contains
+                    && candidate.constraints.qualified_name.as_deref()
+                        == Some(method.qualified_name.as_str())
+            })
+            .ok_or("missing trait impl containment")?;
+        assert!(evidence.scopes.iter().any(|scope| {
+            scope.id == method.scope_id.as_deref().unwrap_or_default() && scope.kind == "impl"
+        }));
+        assert_eq!(
+            containment.constraints.qualified_name.as_deref(),
+            Some(method.qualified_name.as_str())
+        );
+    }
+
+    let event = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "crate::Event")
+        .ok_or("missing enum declaration")?;
+    for payload in ["crate::Local", "crate::Remote"] {
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::References
+                && candidate.source_declaration_id == event.id
+                && candidate.constraints.qualified_name.as_deref() == Some(payload)
+        }));
+    }
+    Ok(())
+}

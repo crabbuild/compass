@@ -399,6 +399,27 @@ impl UniversalResolutionIndex {
             return decision;
         }
 
+        if matches!(
+            candidate.relation,
+            CandidateRelation::Contains | CandidateRelation::Owns
+        ) && let Some(qualified) = candidate.constraints.qualified_name.as_ref()
+        {
+            let qualified = match self.follow_alias(language, qualified) {
+                Ok(qualified) => qualified,
+                Err(candidate_count) => {
+                    return ResolutionDecision::Ambiguous { candidate_count };
+                }
+            };
+            if let Some(decision) = self.unique_decision(
+                self.by_qualified
+                    .get(&(language.to_owned(), qualified.clone())),
+                candidate,
+                ResolutionRule::ExplicitBinding,
+            ) {
+                return decision;
+            }
+        }
+
         if allows_lexical_lookup && let Some(scope) = candidate.constraints.scope_id.as_deref() {
             let mut cursor = Some(scope);
             let mut visited = BTreeSet::new();

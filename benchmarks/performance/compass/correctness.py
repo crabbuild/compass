@@ -553,6 +553,10 @@ def _terminal_symbol(normalized_label: str) -> str:
     return re.split(r"::|\.", normalized_label)[-1]
 
 
+def _qualified_name_has_owner(qualified_name: str) -> bool:
+    return "." in qualified_name or "::" in qualified_name
+
+
 def _unverifiable_placeholder(node: NodeFact) -> bool:
     return bool(
         node.placeholder
@@ -832,7 +836,7 @@ def _classify_edges(
             if (
                 target_node is not None
                 and target_node.placeholder
-                and "." in target_node.qualified_name
+                and _qualified_name_has_owner(target_node.qualified_name)
             ):
                 qualified_external_targets.setdefault(
                     (

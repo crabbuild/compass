@@ -1523,18 +1523,18 @@ impl<'source> DirectAdapterState<'source> {
         let graph_node_id =
             self.unique_graph_id(make_id(&[&self.module_or_package, &qualified_name]), node);
         let metadata = self.declaration_metadata(node);
+        let parent_scope =
+            active_impl.map_or(owner.scope_id.as_str(), |value| value.scope_id.as_str());
         let fact_id = self.builder.declare_with_metadata(
             if method { "method" } else { "function" },
             &graph_node_id,
             &name,
             &qualified_name,
             Some(&self.module_or_package),
-            Some(&owner.scope_id),
+            Some(parent_scope),
             range_for_node(self.source_file, name_node),
             metadata,
         )?;
-        let parent_scope =
-            active_impl.map_or(owner.scope_id.as_str(), |value| value.scope_id.as_str());
         let scope_id = self.builder.open_scope(
             "callable",
             Some(&fact_id),
@@ -1761,6 +1761,7 @@ impl<'source> DirectAdapterState<'source> {
                 enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
             };
             self.add_ownership(owner, &context)?;
+            self.add_rust_declaration_references(variant, owner)?;
             self.declarations.insert(variant.id(), context);
         }
         Ok(())
@@ -1964,9 +1965,20 @@ impl<'source> DirectAdapterState<'source> {
         node: Node<'_>,
         owner: &DeclarationContext,
     ) -> Result<(), EvidenceError> {
-        let body_start = node
-            .child_by_field_name("body")
-            .map_or(node.end_byte(), |body| body.start_byte());
+        let body_start = if matches!(
+            node.kind(),
+            "function_item"
+                | "function_signature_item"
+                | "trait_item"
+                | "struct_item"
+                | "enum_item"
+                | "mod_item"
+        ) {
+            node.child_by_field_name("body")
+                .map_or(node.end_byte(), |body| body.start_byte())
+        } else {
+            node.end_byte()
+        };
         let name_id = node.child_by_field_name("name").map(|name| name.id());
         let mut targets = Vec::new();
         collect_rust_type_nodes(node, body_start, name_id, &mut targets);

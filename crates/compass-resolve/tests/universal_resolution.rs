@@ -244,6 +244,58 @@ fn universal_batches_discard_stale_untyped_raw_calls_in_both_merge_paths() {
 }
 
 #[test]
+fn rust_trait_impl_methods_and_enum_payloads_keep_exact_owners() {
+    let source = br#"
+trait Execute { fn execute(&self); }
+struct Local;
+struct Remote;
+impl Execute for Local { fn execute(&self) {} }
+impl Execute for Remote { fn execute(&self) {} }
+enum Event { Local(Local), Remote { value: Remote } }
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let nodes = resolved
+        .nodes
+        .iter()
+        .map(|node| (node.string("qualified_name"), node.id.as_str()))
+        .collect::<HashMap<_, _>>();
+
+    for owner in ["Local", "Remote"] {
+        let owner_id = nodes[&format!("crate::{owner}")];
+        let method_id = nodes
+            .iter()
+            .find_map(|(qualified, id)| {
+                qualified
+                    .starts_with(&format!("<crate::{owner} as crate::Execute>::execute"))
+                    .then_some(*id)
+            })
+            .expect("trait impl method");
+        assert!(resolved.edges.iter().any(|edge| {
+            edge.source == owner_id
+                && edge.target == method_id
+                && edge.string("relation") == "contains"
+        }));
+    }
+
+    let event_id = nodes["crate::Event"];
+    for payload in ["crate::Local", "crate::Remote"] {
+        let payload_id = nodes[payload];
+        assert!(resolved.edges.iter().any(|edge| {
+            edge.source == event_id
+                && edge.target == payload_id
+                && edge.string("relation") == "references"
+        }));
+    }
+}
+
+#[test]
 fn python_super_call_resolves_only_the_exact_direct_base_method() {
     let provider = extract(
         "pkg/base.py",

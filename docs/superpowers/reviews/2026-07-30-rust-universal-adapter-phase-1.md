@@ -9,7 +9,7 @@
 - Added the versioned internal evidence schema
   `compass.languages.evidence/1`.
 - Registered Rust as `UniversalCandidate`; all other registered languages
-  remain on their existing legacy algorithms.
+  remain on their established extraction algorithms.
 - Advertised only the Rust capabilities emitted in this increment: exact impl
   ownership, calls, and qualified external packages.
 - Preserved per-file Rust evidence batches through borrowed and owned
@@ -83,6 +83,44 @@ On the shared `sample.rs` fixture, five `/usr/bin/time -l` samples reported:
 
 These are extractor-level fixture results. They do not substitute for the
 official Bevy cold, warm, incremental, query, and Graphify comparison gates.
+
+## Phase 2 fixture qualification
+
+Phase 2 replaced the one-off fixture normalization with the reusable,
+occurrence-aware correctness classifier used by the real-corpus gate. Each of
+the nine Rust fixtures was extracted independently by Compass and Graphify
+three times. All Compass and Graphify canonical digests were stable across the
+three repetitions.
+
+The final isolated-fixture matrix contained 100 Compass nodes and 128 Compass
+edges versus 62 Graphify nodes and 89 Graphify edges. Compass emitted 26 calls
+on every repetition, compared with 8 Graphify calls. The shared-fact result
+handled all 89 Graphify edges with no missing or ambiguous facts:
+
+| Relation | Graphify | Exact | Dominated | Rejected | Missing | Ambiguous |
+|---|---:|---:|---:|---:|---:|---:|
+| calls | 8 | 6 | 0 | 2 | 0 | 0 |
+| contains | 39 | 38 | 1 | 0 | 0 | 0 |
+| extends | 1 | 1 | 0 | 0 | 0 | 0 |
+| implements | 4 | 4 | 0 | 0 | 0 | 0 |
+| imports | 2 | 0 | 2 | 0 | 0 | 0 |
+| references | 35 | 7 | 5 | 23 | 0 | 0 |
+
+The rejected facts are not omissions: they are Graphify terminal-name
+rebindings contradicted by Compass's qualified or exact-occurrence evidence.
+For example, a qualified Rust receiver is not rebound to an unrelated local
+method solely because the terminal spelling matches.
+
+A separate combined-corpus stress run placed all nine unrelated fixtures in
+one source tree. Both tools remained deterministic, but Graphify rebound six
+`std::result::Result` uses in the Program IR fixture to the unrelated custom
+`Result` declared in `sample.rs`. Compass conservatively emitted no such
+cross-module references. The graph-only classifier reports those six edges as
+missing because the unresolved standard-library identity is intentionally not
+materialized; manual source inspection establishes that preserving those
+Graphify edges would reduce correctness. The qualification gate therefore
+uses fixture-isolated parity, while the combined run is retained as an
+adversarial false-rebinding audit.
 
 ## Verification
 
