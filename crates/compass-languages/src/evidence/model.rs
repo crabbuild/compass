@@ -92,6 +92,7 @@ pub enum BindingKind {
     Reexport,
     LocalAlias,
     Package,
+    Member,
 }
 
 impl BindingKind {
@@ -101,6 +102,7 @@ impl BindingKind {
             Self::Import | Self::Package => LanguageCapability::Imports,
             Self::ImportAlias | Self::LocalAlias => LanguageCapability::Aliases,
             Self::Reexport => LanguageCapability::Reexports,
+            Self::Member => LanguageCapability::Members,
         }
     }
 }

@@ -616,6 +616,68 @@ func (d *Derived) Handle(value alias.Input) alias.Output {
 }
 
 #[test]
+fn go_emits_direct_and_grouped_aliases_with_closure_signature_references() {
+    let source = br#"package sample
+
+import "example.com/types"
+
+type Direct = types.Token
+type (
+    Grouped = types.Skill
+)
+
+type Event struct {
+    Token *Direct
+    Skill Grouped
+}
+
+func use() {
+    _ = func(value types.Input) {}
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/sample/example.go"),
+            "sample/example.go",
+            source,
+        )
+        .expect("extract go")
+        .graph
+        .semantic_evidence
+        .expect("go universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid go evidence");
+
+    for name in ["Direct", "Grouped"] {
+        assert!(
+            evidence.declarations.iter().any(|declaration| {
+                declaration.name == name && declaration.kind == "type_alias"
+            })
+        );
+    }
+    for (target, qualifier) in [
+        ("Token", Some("types")),
+        ("Skill", Some("types")),
+        ("Direct", None),
+        ("Grouped", None),
+        ("Input", Some("types")),
+    ] {
+        assert!(evidence.occurrences.iter().any(|occurrence| {
+            occurrence.role == SemanticRole::TypeReference
+                && occurrence.spelling == target
+                && occurrence.qualifier.as_deref() == qualifier
+        }));
+    }
+    for (member, target) in [("Token", "sample.Direct"), ("Skill", "sample.Grouped")] {
+        assert!(evidence.bindings.iter().any(|binding| {
+            binding.kind == BindingKind::Member
+                && binding.spelling == member
+                && binding.qualified_target == target
+        }));
+    }
+}
+
+#[test]
 fn go_embeddings_require_a_declared_type_owner() {
     let source = br#"package sample
 

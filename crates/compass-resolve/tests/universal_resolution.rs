@@ -347,13 +347,16 @@ fn repeated_external_type_uses_share_one_canonical_symbol_and_exact_edges() {
 }
 
 #[test]
-fn qualified_calls_require_a_binding_or_an_exact_language_receiver() {
+fn qualified_calls_use_exact_receiver_bindings_before_terminal_names() {
     let go_source = br#"package pkg
 type Worker struct{}
 func (worker *Worker) Run() {}
-func caller(untyped any, worker *Worker) {
+type Other struct{}
+func (other *Other) Run() {}
+func caller(untyped any, worker *Worker, other *Other) {
     untyped.Run()
     worker.Run()
+    other.Run()
 }
 "#;
     let extracted = extract("pkg/caller.go", go_source);
@@ -362,22 +365,146 @@ func caller(untyped any, worker *Worker) {
         String::from_utf8(go_source.to_vec()).expect("source"),
     )]);
     let resolved = compass_resolve::resolve(&[extracted], &sources);
-    let run = resolved
+    let worker_run = resolved
         .nodes
         .iter()
         .find(|node| {
             node.string("symbol_kind") == "method"
-                && node.label().trim_start_matches('.').trim_end_matches("()") == "Run"
+                && node.string("qualified_name") == "pkg.Worker::Run"
         })
-        .unwrap_or_else(|| panic!("declared method; nodes={:#?}", resolved.nodes));
+        .unwrap_or_else(|| panic!("Worker.Run declaration; nodes={:#?}", resolved.nodes));
+    let other_run = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "method"
+                && node.string("qualified_name") == "pkg.Other::Run"
+        })
+        .unwrap_or_else(|| panic!("Other.Run declaration; nodes={:#?}", resolved.nodes));
     let calls = resolved
         .edges
         .iter()
-        .filter(|edge| edge.string("relation") == "calls" && edge.target == run.id)
+        .filter(|edge| edge.string("relation") == "calls")
         .collect::<Vec<_>>();
 
-    assert_eq!(calls.len(), 1, "untyped receivers must fail closed");
-    assert_eq!(calls[0].string("source_location"), "L6");
+    assert_eq!(calls.len(), 2, "untyped receivers must fail closed");
+    assert!(
+        calls
+            .iter()
+            .any(|edge| { edge.target == worker_run.id && edge.string("source_location") == "L8" })
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|edge| { edge.target == other_run.id && edge.string("source_location") == "L9" })
+    );
+}
+
+#[test]
+fn go_closures_resolve_typed_parameters_and_captured_receivers() {
+    let go_source = br#"package pkg
+import "io/fs"
+type Worker struct{}
+func (worker *Worker) Run() {}
+func caller(worker *Worker) {
+    visit := func(entry fs.DirEntry) {
+        entry.Name()
+        worker.Run()
+    }
+    shadow := func(worker any) {
+        worker.Run()
+    }
+    variadic := func(worker ...*Worker) {
+        worker.Run()
+    }
+    capture := func() {
+        worker.Run()
+    }
+    _ = visit
+    _ = shadow
+    _ = variadic
+    _ = capture
+}
+"#;
+    let extracted = extract("pkg/caller.go", go_source);
+    let sources = HashMap::from([(
+        "pkg/caller.go".to_owned(),
+        String::from_utf8(go_source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let worker_run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Worker::Run")
+        .expect("Worker.Run declaration");
+    let entry_name = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "io/fs.DirEntry::Name")
+        .expect("external fs.DirEntry.Name method");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == worker_run.id
+            && edge.string("source_location") == "L8"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == entry_name.id
+            && edge.string("source_location") == "L7"
+            && edge.string("resolution_rule") == "qualified-external"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == worker_run.id
+            && edge.string("source_location") == "L17"
+    }));
+    assert!(!resolved.edges.iter().any(|edge| {
+        let location = edge.string("source_location");
+        edge.string("relation") == "calls" && (location == "L11" || location == "L14")
+    }));
+}
+
+#[test]
+fn qualified_external_types_are_not_rebound_to_local_terminal_names() {
+    let go_source = br#"package auth
+import deviceflow "example.com/deviceflow"
+import authcode "example.com/authcode"
+type Client struct {
+    inner *deviceflow.Client
+    browser *authcode.Client
+}
+"#;
+    let extracted = extract("auth/client.go", go_source);
+    let sources = HashMap::from([(
+        "auth/client.go".to_owned(),
+        String::from_utf8(go_source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let local = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "auth.Client")
+        .expect("local Client declaration");
+
+    for (qualified_name, line) in [
+        ("example.com/deviceflow.Client", "L5"),
+        ("example.com/authcode.Client", "L6"),
+    ] {
+        let external = resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+            .unwrap_or_else(|| panic!("external {qualified_name}; nodes={:#?}", resolved.nodes));
+        assert_ne!(external.id, local.id);
+        assert!(resolved.edges.iter().any(|edge| {
+            edge.source == local.id
+                && edge.target == external.id
+                && edge.string("relation") == "references"
+                && edge.string("source_location") == line
+        }));
+    }
+    assert!(resolved.edges.iter().all(|edge| edge.source != edge.target));
 }
 
 #[test]
@@ -412,5 +539,92 @@ func Load(value string) {
         edge.string("relation") == "calls"
             && edge.target == target.id
             && edge.string("source_location") == "L5"
+    }));
+}
+
+#[test]
+fn go_packages_with_the_same_terminal_directory_keep_distinct_alias_owners() {
+    let provider = extract(
+        "api/checkpoint/metadata.go",
+        b"package checkpoint\ntype Summary struct{}\n",
+    );
+    let alias = extract(
+        "cmd/entire/cli/checkpoint/aliases.go",
+        br#"package checkpoint
+import api "github.com/example/project/api/checkpoint"
+type Summary = api.Summary
+"#,
+    );
+    let consumer_source = b"package checkpoint\nfunc Read() *Summary { return nil }\n";
+    let consumer = extract("cmd/entire/cli/checkpoint/reader.go", consumer_source);
+    let sources = HashMap::from([(
+        "cmd/entire/cli/checkpoint/reader.go".to_owned(),
+        String::from_utf8(consumer_source.to_vec()).expect("source"),
+    )]);
+    let resolved =
+        compass_resolve::resolve_with_root(&[provider, alias, consumer], &sources, Path::new("."));
+    let provider = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "api/checkpoint.Summary")
+        .expect("provider Summary");
+    let alias = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "cmd/entire/cli/checkpoint.Summary")
+        .expect("local Summary alias");
+
+    assert_ne!(provider.id, alias.id);
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "references"
+            && edge.target == alias.id
+            && edge.string("source_file") == "cmd/entire/cli/checkpoint/reader.go"
+            && edge.string("source_location") == "L2"
+    }));
+}
+
+#[test]
+fn go_selector_chains_use_declared_direct_field_types() {
+    let types = br#"package generated
+type Schema struct{}
+type Body struct {
+    Value Schema
+    Pointer *Schema
+    Many []Schema
+}
+"#;
+    let methods = br#"package generated
+func (schema *Schema) Encode() {}
+func (body *Body) Encode() {
+    body.Value.Encode()
+    body.Pointer.Encode()
+    body.Many.Encode()
+}
+"#;
+    let types = extract("generated/types.go", types);
+    let methods_extraction = extract("generated/methods.go", methods);
+    let sources = HashMap::from([(
+        "generated/methods.go".to_owned(),
+        String::from_utf8(methods.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[types, methods_extraction], &sources);
+    let schema_encode = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "generated.Schema::Encode")
+        .expect("Schema.Encode declaration");
+    let call_sites = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == schema_encode.id)
+        .map(|edge| edge.string("source_location"))
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert_eq!(
+        call_sites,
+        std::collections::BTreeSet::from(["L4".to_owned(), "L5".to_owned()])
+    );
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "calls" || edge.string("source_location") != "L6"
     }));
 }

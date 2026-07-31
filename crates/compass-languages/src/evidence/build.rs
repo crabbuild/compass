@@ -472,6 +472,8 @@ struct DirectAdapterState<'source> {
     import_bindings: HashMap<String, HashMap<String, Vec<ImportBindingVersion>>>,
     local_bindings: HashMap<String, HashMap<String, String>>,
     local_targets: HashMap<String, HashMap<String, String>>,
+    local_shadows: HashMap<String, HashSet<String>>,
+    scope_parents: HashMap<String, String>,
     ambiguous_bindings: HashSet<(String, String)>,
     go_lexical_bindings: HashMap<usize, Vec<GoLexicalBinding>>,
     graph_ids: HashSet<String>,
@@ -489,6 +491,8 @@ impl<'source> DirectAdapterState<'source> {
         let stem = file_stem(path);
         let module_or_package = if profile.language == "python" {
             python_module_identity(path, source_file)
+        } else if profile.language == "go" {
+            go_package_identity(path, source_file)
         } else {
             path.parent()
                 .and_then(Path::file_name)
@@ -508,6 +512,8 @@ impl<'source> DirectAdapterState<'source> {
             import_bindings: HashMap::new(),
             local_bindings: HashMap::new(),
             local_targets: HashMap::new(),
+            local_shadows: HashMap::new(),
+            scope_parents: HashMap::new(),
             ambiguous_bindings: HashSet::new(),
             go_lexical_bindings: HashMap::new(),
             graph_ids: HashSet::new(),
@@ -1203,13 +1209,15 @@ impl<'source> DirectAdapterState<'source> {
         node: Node<'_>,
         file: &DeclarationContext,
     ) -> Result<(), EvidenceError> {
-        if node.kind() == "type_spec" {
+        if matches!(node.kind(), "type_spec" | "type_alias") {
             if let Some(name_node) = node.child_by_field_name("name") {
                 let name = self.text(name_node);
                 let qualified_name = format!("{}.{}", self.module_or_package, name);
                 let graph_node_id =
                     self.unique_graph_id(make_id(&[&self.module_or_package, &name]), node);
-                let kind = if has_descendant(node, "struct_type") {
+                let kind = if node.kind() == "type_alias" {
+                    "type_alias"
+                } else if has_descendant(node, "struct_type") {
                     "struct"
                 } else if has_descendant(node, "interface_type") {
                     "interface"
@@ -1313,11 +1321,23 @@ impl<'source> DirectAdapterState<'source> {
         owner: &DeclarationContext,
         root: bool,
     ) -> Result<(), EvidenceError> {
-        let active = self
+        let mut active = self
             .declarations
             .get(&node.id())
             .cloned()
             .unwrap_or_else(|| owner.clone());
+        if node.kind() == "func_literal" && self.go_has_named_parameters(node) {
+            let parent_scope_id = active.scope_id.clone();
+            let scope_id = self.builder.open_scope(
+                "closure",
+                None,
+                Some(&parent_scope_id),
+                range_for_node(self.source_file, node),
+            )?;
+            self.scope_parents.insert(scope_id.clone(), parent_scope_id);
+            active.scope_id = scope_id;
+            self.add_go_typed_bindings(node, &active)?;
+        }
         if matches!(node.kind(), "function_declaration" | "method_declaration") {
             self.add_go_typed_bindings(node, &active)?;
         }
@@ -1332,10 +1352,12 @@ impl<'source> DirectAdapterState<'source> {
             "type_elem" => self.add_go_embedded_types(node, &active)?,
             _ => {}
         }
-        if matches!(node.kind(), "function_declaration" | "method_declaration")
-            || (node.kind() == "type_spec"
-                && !has_descendant(node, "struct_type")
-                && !has_descendant(node, "interface_type"))
+        if matches!(
+            node.kind(),
+            "function_declaration" | "method_declaration" | "func_literal"
+        ) || (matches!(node.kind(), "type_spec" | "type_alias")
+            && !has_descendant(node, "struct_type")
+            && !has_descendant(node, "interface_type"))
         {
             self.add_go_type_references(node, &active)?;
         }
@@ -1344,7 +1366,7 @@ impl<'source> DirectAdapterState<'source> {
             if !root
                 && matches!(
                     child.kind(),
-                    "function_declaration" | "method_declaration" | "type_spec"
+                    "function_declaration" | "method_declaration" | "type_spec" | "type_alias"
                 )
                 && !self.declarations.contains_key(&child.id())
             {
@@ -1370,7 +1392,30 @@ impl<'source> DirectAdapterState<'source> {
                 "parameter_declaration",
                 &mut parameter_declarations,
             );
+            collect_nodes(
+                parameters,
+                "variadic_parameter_declaration",
+                &mut parameter_declarations,
+            );
             for parameter in parameter_declarations {
+                let mut cursor = parameter.walk();
+                let names = parameter
+                    .children_by_field_name("name", &mut cursor)
+                    .filter_map(|name_node| {
+                        let name = self.text(name_node);
+                        (!name.is_empty() && name != "_").then_some((name, name_node))
+                    })
+                    .collect::<Vec<_>>();
+                if names.is_empty() {
+                    continue;
+                }
+                self.local_shadows
+                    .entry(owner.scope_id.clone())
+                    .or_default()
+                    .extend(names.iter().map(|(name, _)| name.clone()));
+                if parameter.kind() == "variadic_parameter_declaration" {
+                    continue;
+                }
                 let Some(type_node) = parameter.child_by_field_name("type") else {
                     continue;
                 };
@@ -1401,12 +1446,7 @@ impl<'source> DirectAdapterState<'source> {
                         || format!("{}.{}", self.module_or_package, spelling),
                         |module| format!("{module}.{spelling}"),
                     );
-                let mut cursor = parameter.walk();
-                for name_node in parameter.children_by_field_name("name", &mut cursor) {
-                    let name = self.text(name_node);
-                    if name.is_empty() || name == "_" {
-                        continue;
-                    }
+                for (name, name_node) in names {
                     let binding_id = self.builder.bind(
                         BindingKind::LocalAlias,
                         &name,
@@ -1427,6 +1467,32 @@ impl<'source> DirectAdapterState<'source> {
             }
         }
         Ok(())
+    }
+
+    fn go_has_named_parameters(&self, declaration: Node<'_>) -> bool {
+        let Some(parameters) = declaration.child_by_field_name("parameters") else {
+            return false;
+        };
+        let mut parameter_declarations = Vec::new();
+        collect_nodes(
+            parameters,
+            "parameter_declaration",
+            &mut parameter_declarations,
+        );
+        collect_nodes(
+            parameters,
+            "variadic_parameter_declaration",
+            &mut parameter_declarations,
+        );
+        parameter_declarations.into_iter().any(|parameter| {
+            let mut cursor = parameter.walk();
+            parameter
+                .children_by_field_name("name", &mut cursor)
+                .any(|name_node| {
+                    let name = self.text(name_node);
+                    !name.is_empty() && name != "_"
+                })
+        })
     }
 
     fn add_go_imports(
@@ -1531,6 +1597,26 @@ impl<'source> DirectAdapterState<'source> {
         }) else {
             return Ok(());
         };
+        if has_name
+            && let Some(target) = go_direct_type_target(type_node)
+            && let Some(qualified_target) = self.go_qualified_type_target(owner, target)
+        {
+            let mut names = Vec::new();
+            collect_nodes(field, "field_identifier", &mut names);
+            for name_node in names {
+                let name = self.text(name_node);
+                if !name.is_empty() && name != "_" {
+                    self.builder.bind(
+                        BindingKind::Member,
+                        &name,
+                        &qualified_target,
+                        None,
+                        Some(&owner.scope_id),
+                        range_for_node(self.source_file, name_node),
+                    )?;
+                }
+            }
+        }
         let mut targets = Vec::new();
         collect_named_targets(
             type_node,
@@ -1554,6 +1640,28 @@ impl<'source> DirectAdapterState<'source> {
             self.add_relationship_occurrence(role, relation, owner, spelling, qualifier, target)?;
         }
         Ok(())
+    }
+
+    fn go_qualified_type_target(
+        &self,
+        owner: &DeclarationContext,
+        target: Node<'_>,
+    ) -> Option<String> {
+        let raw = self.text(target);
+        let (qualifier, spelling) = split_qualified(&raw);
+        if spelling.is_empty() || is_go_predeclared_type(spelling) {
+            return None;
+        }
+        Some(
+            qualifier
+                .and_then(|qualifier| {
+                    self.imported_target_for_occurrence(owner, qualifier, target.start_byte(), true)
+                })
+                .map_or_else(
+                    || format!("{}.{}", self.module_or_package, spelling),
+                    |module| format!("{module}.{spelling}"),
+                ),
+        )
     }
 
     fn add_go_embedded_types(
@@ -1599,7 +1707,7 @@ impl<'source> DirectAdapterState<'source> {
         let mut roots = Vec::new();
         if matches!(
             declaration.kind(),
-            "function_declaration" | "method_declaration"
+            "function_declaration" | "method_declaration" | "func_literal"
         ) {
             roots.extend(
                 ["receiver", "parameters", "result"]
@@ -1944,13 +2052,10 @@ impl<'source> DirectAdapterState<'source> {
         use_start: usize,
         allow_later_file_binding: bool,
     ) -> Option<&String> {
-        self.local_bindings
-            .get(&owner.scope_id)
-            .and_then(|bindings| bindings.get(name))
-            .or_else(|| {
-                self.import_binding_version_at(owner, name, use_start, allow_later_file_binding)
-                    .map(|binding| &binding.binding_id)
-            })
+        self.local_binding_for(owner, name).or_else(|| {
+            self.import_binding_version_at(owner, name, use_start, allow_later_file_binding)
+                .map(|binding| &binding.binding_id)
+        })
     }
 
     fn imported_target_for_occurrence(
@@ -1981,11 +2086,7 @@ impl<'source> DirectAdapterState<'source> {
     }
 
     fn import_binding_is_ambiguous(&self, owner: &DeclarationContext, name: &str) -> bool {
-        if self
-            .local_bindings
-            .get(&owner.scope_id)
-            .is_some_and(|bindings| bindings.contains_key(name))
-        {
+        if self.local_binding_for(owner, name).is_some() {
             return false;
         }
         if self
@@ -2004,9 +2105,35 @@ impl<'source> DirectAdapterState<'source> {
     }
 
     fn local_target_for(&self, owner: &DeclarationContext, name: &str) -> Option<&String> {
-        self.local_targets
-            .get(&owner.scope_id)
-            .and_then(|targets| targets.get(name))
+        self.local_value_for(&self.local_targets, owner, name)
+    }
+
+    fn local_binding_for(&self, owner: &DeclarationContext, name: &str) -> Option<&String> {
+        self.local_value_for(&self.local_bindings, owner, name)
+    }
+
+    fn local_value_for<'a>(
+        &'a self,
+        values: &'a HashMap<String, HashMap<String, String>>,
+        owner: &DeclarationContext,
+        name: &str,
+    ) -> Option<&'a String> {
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let current = scope_id?;
+            if let Some(value) = values.get(current).and_then(|scope| scope.get(name)) {
+                return Some(value);
+            }
+            if self
+                .local_shadows
+                .get(current)
+                .is_some_and(|shadows| shadows.contains(name))
+            {
+                return None;
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        None
     }
 
     fn add_ownership(
@@ -2110,6 +2237,23 @@ fn python_module_identity(path: &Path, source_file: &str) -> String {
     } else {
         stem.to_owned()
     }
+}
+
+fn go_package_identity(path: &Path, source_file: &str) -> String {
+    let source = source_file.replace('\\', "/");
+    let directory = source
+        .rsplit_once('/')
+        .map(|(directory, _)| directory.trim_matches('/'))
+        .filter(|directory| !directory.is_empty() && *directory != ".");
+    directory.map_or_else(
+        || {
+            path.parent()
+                .and_then(Path::file_name)
+                .and_then(|value| value.to_str())
+                .map_or_else(|| file_stem(path), str::to_owned)
+        },
+        str::to_owned,
+    )
 }
 
 fn collect_parser_error_ranges(node: Node<'_>, output: &mut Vec<(usize, usize)>) {
@@ -2252,6 +2396,25 @@ fn collect_named_targets<'tree>(node: Node<'tree>, kinds: &[&str], output: &mut 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
         collect_named_targets(child, kinds, output);
+    }
+}
+
+fn go_direct_type_target(node: Node<'_>) -> Option<Node<'_>> {
+    match node.kind() {
+        "type_identifier" | "qualified_type" => Some(node),
+        "pointer_type" | "parenthesized_type" => {
+            let mut cursor = node.walk();
+            let mut children = node.children(&mut cursor).filter(|child| child.is_named());
+            let child = children.next()?;
+            children
+                .next()
+                .is_none()
+                .then(|| go_direct_type_target(child))?
+        }
+        "generic_type" => node
+            .child_by_field_name("type")
+            .and_then(go_direct_type_target),
+        _ => None,
     }
 }
 
@@ -2630,6 +2793,7 @@ const fn binding_kind_name(kind: BindingKind) -> &'static str {
         BindingKind::Reexport => "reexport",
         BindingKind::LocalAlias => "local_alias",
         BindingKind::Package => "package",
+        BindingKind::Member => "member",
     }
 }
 

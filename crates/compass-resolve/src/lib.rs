@@ -517,7 +517,7 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
         if label.is_empty() {
             continue;
         }
-        if source.is_empty() {
+        if source.is_empty() && !is_canonical_external_symbol(node) {
             stubs.insert(node.id.clone(), label);
         } else if is_type_like_definition(node)
             && let Some(family @ "jvm") = language_family(&source)
@@ -812,7 +812,7 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
         }
         let source = string_attribute(node, "source_file");
         source_by_id.insert(node.id.clone(), source.clone());
-        if source.is_empty() {
+        if source.is_empty() && !is_canonical_external_symbol(node) {
             stubs.push((node.id.clone(), label));
         } else if is_type_like_definition(node) {
             types
@@ -973,6 +973,13 @@ fn is_type_like_definition(node: &NodeRecord) -> bool {
     }
     let label = node.label().trim();
     !label.is_empty() && !label.ends_with(')') && !label.starts_with('.') && !label.contains('.')
+}
+
+fn is_canonical_external_symbol(node: &NodeRecord) -> bool {
+    node.attributes
+        .get("_canonical_external_symbol")
+        .and_then(Value::as_bool)
+        == Some(true)
 }
 
 #[cfg(test)]

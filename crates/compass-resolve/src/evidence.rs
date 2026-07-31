@@ -80,6 +80,7 @@ pub struct UniversalResolutionIndex {
     by_source_directory_name: AHashMap<(String, String, String), Vec<String>>,
     inventory_by_qualified: AHashMap<(String, String), Vec<String>>,
     aliases: AHashMap<(String, String), Vec<String>>,
+    members: AHashMap<(String, String, String), Vec<String>>,
     limits: UniversalResolutionLimits,
 }
 
@@ -253,6 +254,34 @@ impl UniversalResolutionIndex {
             targets.dedup();
         }
         profile_internal("universal alias index", &mut profile_started);
+        let mut members = AHashMap::<_, Vec<_>>::new();
+        for binding in bindings
+            .values()
+            .filter(|binding| binding.kind == compass_languages::BindingKind::Member)
+        {
+            let Some(owner) = binding
+                .scope_id
+                .as_deref()
+                .and_then(|id| scopes.get(id))
+                .and_then(|scope| scope.owner_declaration_id.as_deref())
+                .and_then(|id| declarations.get(id))
+            else {
+                continue;
+            };
+            members
+                .entry((
+                    binding.language.clone(),
+                    owner.qualified_name.clone(),
+                    binding.spelling.clone(),
+                ))
+                .or_default()
+                .push(binding.qualified_target.clone());
+        }
+        for targets in members.values_mut() {
+            targets.sort_unstable();
+            targets.dedup();
+        }
+        profile_internal("universal member index", &mut profile_started);
         Ok(Self {
             declarations,
             occurrences,
@@ -265,6 +294,7 @@ impl UniversalResolutionIndex {
             by_source_directory_name,
             inventory_by_qualified,
             aliases,
+            members,
             limits,
         })
     }
@@ -321,16 +351,18 @@ impl UniversalResolutionIndex {
             .as_deref()
             .unwrap_or(&candidate.language);
         let occurrence = self.occurrence(candidate);
-        let has_unbound_qualified_receiver = occurrence
-            .and_then(|occurrence| occurrence.qualifier.as_deref())
-            .is_some_and(|qualifier| {
+        let qualifier = occurrence.and_then(|occurrence| occurrence.qualifier.as_deref());
+        let has_unbound_qualified_receiver = qualifier.is_some_and(|qualifier| {
+            candidate.binding_id.is_none()
+                && !matches!((language, qualifier), ("python", "self" | "cls"))
+        });
+        let allows_lexical_lookup = qualifier.is_none()
+            || qualifier.is_some_and(|qualifier| {
                 candidate.binding_id.is_none()
-                    && !matches!((language, qualifier), ("python", "self" | "cls"))
+                    && matches!((language, qualifier), ("python", "self" | "cls"))
             });
 
-        if !has_unbound_qualified_receiver
-            && let Some(scope) = candidate.constraints.scope_id.as_deref()
-        {
+        if allows_lexical_lookup && let Some(scope) = candidate.constraints.scope_id.as_deref() {
             let mut cursor = Some(scope);
             let mut visited = BTreeSet::new();
             while let Some(scope) = cursor.filter(|scope| visited.insert((*scope).to_owned())) {
@@ -366,6 +398,29 @@ impl UniversalResolutionIndex {
                         candidate_count: 1,
                     },
                 };
+            }
+            match self.bound_member_target(language, binding, candidate) {
+                Ok(Some(qualified)) => {
+                    let key = (language.to_owned(), qualified.clone());
+                    if let Some(decision) = self.unique_decision(
+                        self.by_qualified.get(&key),
+                        candidate,
+                        ResolutionRule::ExplicitBinding,
+                    ) {
+                        return decision;
+                    }
+                    return ResolutionDecision::QualifiedExternal {
+                        qualified_name: qualified,
+                        evidence: ResolutionEvidence {
+                            rule: ResolutionRule::QualifiedExternal,
+                            candidate_count: 0,
+                        },
+                    };
+                }
+                Ok(None) => {}
+                Err(candidate_count) => {
+                    return ResolutionDecision::Ambiguous { candidate_count };
+                }
             }
             let binding_lookup = if matches!(
                 candidate.relation,
@@ -707,6 +762,43 @@ impl UniversalResolutionIndex {
             .into_iter()
             .take(self.limits.candidates_per_lookup.saturating_add(1))
             .collect()
+    }
+
+    fn bound_member_target(
+        &self,
+        language: &str,
+        binding: &BindingFact,
+        candidate: &RelationshipCandidate,
+    ) -> Result<Option<String>, usize> {
+        if binding.kind != compass_languages::BindingKind::LocalAlias {
+            return Ok(None);
+        }
+        let Some(qualifier) = self.occurrence(candidate).and_then(|occurrence| {
+            occurrence
+                .qualifier
+                .as_deref()
+                .filter(|qualifier| qualifier.contains('.'))
+        }) else {
+            return Ok(None);
+        };
+        let mut parts = qualifier.split('.');
+        if parts.next() != Some(binding.spelling.as_str()) {
+            return Ok(None);
+        }
+        let mut target = binding.qualified_target.clone();
+        for member in parts {
+            let Some(targets) =
+                self.members
+                    .get(&(language.to_owned(), target.clone(), member.to_owned()))
+            else {
+                return Ok(None);
+            };
+            let [next] = targets.as_slice() else {
+                return Err(targets.len());
+            };
+            target.clone_from(next);
+        }
+        Ok(Some(format!("{target}::{}", candidate.target_spelling)))
     }
 
     fn declaration_allowed(&self, declaration_id: &str, candidate: &RelationshipCandidate) -> bool {
@@ -1157,6 +1249,7 @@ fn binding_kind_name(kind: compass_languages::BindingKind) -> &'static str {
         compass_languages::BindingKind::Reexport => "reexport",
         compass_languages::BindingKind::LocalAlias => "local_alias",
         compass_languages::BindingKind::Package => "package",
+        compass_languages::BindingKind::Member => "member",
     }
 }
 

@@ -25,14 +25,22 @@ def compare_documents(
         compass.write_text(compass_document, encoding="utf-8")
         graphify.write_text(graphify_document, encoding="utf-8")
         database = sqlite3.connect(":memory:")
-        index_graph("compass", compass, database)
-        index_graph("graphify", graphify, database)
-        return compare_graphs(database)
+        try:
+            index_graph("compass", compass, database)
+            index_graph("graphify", graphify, database)
+            return compare_graphs(database)
+        finally:
+            database.close()
 
 
 class CorrectnessTests(unittest.TestCase):
-    def test_compass_superset_passes_shared_fact_comparison(self) -> None:
+    def database(self) -> sqlite3.Connection:
         database = sqlite3.connect(":memory:")
+        self.addCleanup(database.close)
+        return database
+
+    def test_compass_superset_passes_shared_fact_comparison(self) -> None:
+        database = self.database()
         compass = index_graph("compass", FIXTURES / "compass_graph.json", database)
         graphify = index_graph("graphify", FIXTURES / "graphify_graph.json", database)
         result = compare_graphs(database)
@@ -42,7 +50,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.digest, compare_graphs(database).digest)
 
     def test_storage_order_does_not_change_digest(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         first = index_graph("compass", FIXTURES / "compass_graph.json", database)
         with tempfile.TemporaryDirectory() as directory:
             reordered = Path(directory) / "graph.json"
@@ -63,7 +71,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(first.digest, second.digest)
 
     def test_missing_shared_node_fails(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         with tempfile.TemporaryDirectory() as directory:
             graph = Path(directory) / "compass.json"
             graph.write_text(
@@ -78,7 +86,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["missing_graphify_nodes"], 1)
 
     def test_v1_compass_nodes_match_graphify_by_source_fact_not_internal_id(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             compass = root / "compass.json"
@@ -124,7 +132,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["missing_graphify_edges"], 0)
 
     def test_shared_relation_projection_accepts_more_precise_compass_edges(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             compass = root / "compass.json"
@@ -151,7 +159,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertTrue(result.passed, result.failures)
 
     def test_rationale_facts_match_by_source_anchor_across_schema_names(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             compass = root / "compass.json"
@@ -185,7 +193,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertTrue(result.passed, result.failures)
 
     def test_dangling_edge_is_rejected(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         with tempfile.TemporaryDirectory() as directory:
             graph = Path(directory) / "graph.json"
             graph.write_text(
@@ -197,7 +205,7 @@ class CorrectnessTests(unittest.TestCase):
                 index_graph("compass", graph, database)
 
     def test_conflicting_duplicate_id_is_rejected(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         with tempfile.TemporaryDirectory() as directory:
             graph = Path(directory) / "graph.json"
             graph.write_text(
@@ -515,6 +523,38 @@ class CorrectnessTests(unittest.TestCase):
             result.metrics["graphify_edges_coverage_reasons"],
         )
 
+    def test_precise_reference_site_dominates_a_declaration_line_projection(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"Run","kind":"function",
+               "source_file":"app.go","source_location":"L10","language":"go"},
+              {"id":"target","label":"Widget","kind":"struct",
+               "source_file":"lib.go","source_location":"L2","language":"go"}
+            ],"links":[
+              {"source":"owner","target":"target","relation":"references",
+               "source_file":"app.go","source_location":"L12"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"owner","label":"Run()",
+               "source_file":"app.go","source_location":"L10"},
+              {"id":"target","label":"Widget",
+               "source_file":"lib.go","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"target","relation":"uses",
+               "source_file":"app.go","source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertIn(
+            "dominated:precise_declaration_reference_occurrence",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
     def test_qualified_external_target_rejects_same_named_local_rebinding(self) -> None:
         result = compare_documents(
             """
@@ -548,6 +588,78 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
         self.assertIn(
             "rejected:qualified_external_target_rebound_to_local",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_occurrence_rejects_same_named_receiver_misbinding(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"MarshalJSON","kind":"method",
+               "source_file":"pkg/a.go","source_location":"L8","language":"go"},
+              {"id":"correct","label":"A::Encode","kind":"method",
+               "source_file":"pkg/a.go","source_location":"L2","language":"go",
+               "qualified_name":"pkg.A::Encode"},
+              {"id":"wrong","label":".Encode()","kind":"method",
+               "source_file":"pkg/b.go","source_location":"L2","language":"go",
+               "qualified_name":"pkg.B::Encode"}
+            ],"links":[
+              {"source":"owner","target":"correct","relation":"calls",
+               "source_file":"pkg/a.go","source_location":"L10"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"owner","label":"MarshalJSON()",
+               "source_file":"pkg/a.go","source_location":"L8"},
+              {"id":"wrong","label":".Encode()",
+               "source_file":"pkg/b.go","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"wrong","relation":"calls",
+               "source_file":"pkg/a.go","source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "rejected:exact_occurrence_target_conflict",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_occurrence_resolves_an_ambiguous_sourceless_target(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"MarshalJSON","kind":"method",
+               "source_file":"pkg/a.go","source_location":"L8","language":"go"},
+              {"id":"correct","label":".Encode()","kind":"method",
+               "source_file":"pkg/a.go","source_location":"L2","language":"go"},
+              {"id":"other","label":".Encode()","kind":"method",
+               "source_file":"pkg/b.go","source_location":"L2","language":"go"}
+            ],"links":[
+              {"source":"owner","target":"correct","relation":"calls",
+               "source_file":"pkg/a.go","source_location":"L10"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"owner","label":"MarshalJSON()",
+               "source_file":"pkg/a.go","source_location":"L8"},
+              {"id":"generated_encode","label":".Encode()"}
+            ],"links":[
+              {"source":"owner","target":"generated_encode","relation":"calls",
+               "source_file":"pkg/a.go","source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.metrics["missing_graphify_nodes"], 1)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "dominated:exact_occurrence_target_conflict",
             result.metrics["graphify_edges_coverage_reasons"],
         )
 

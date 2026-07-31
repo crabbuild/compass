@@ -549,6 +549,10 @@ def _identifier_carries_module(identifier: str, module: str) -> bool:
     )
 
 
+def _terminal_symbol(normalized_label: str) -> str:
+    return re.split(r"::|\.", normalized_label)[-1]
+
+
 def _classify_nodes(
     graphify_nodes: dict[str, NodeFact],
     compass_nodes: dict[str, NodeFact],
@@ -671,6 +675,9 @@ def _classify_edges(
     qualified_external_targets: dict[tuple[str, str, str, str], set[str]] = {}
     qualified_external_imports: dict[tuple[str, str], set[str]] = {}
     imported_symbol_targets: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
+    exact_occurrence_targets: dict[
+        tuple[str, str, str, str, str], set[str]
+    ] = {}
     containment: dict[str, set[str]] = {}
     import_occurrences: set[tuple[str, str, str]] = set()
     for edges in (graphify_edges, compass_edges):
@@ -707,6 +714,21 @@ def _classify_edges(
                 [],
             ).append(edge)
             target_node = compass_nodes.get(edge.target)
+            if (
+                edge.relation in {"calls", "references", "embeds"}
+                and target_node is not None
+                and target_node.normalized_label
+            ):
+                exact_occurrence_targets.setdefault(
+                    (
+                        edge.relation,
+                        source,
+                        edge.occurrence_file,
+                        edge.occurrence_location,
+                        _terminal_symbol(target_node.normalized_label),
+                    ),
+                    set(),
+                ).add(target)
             if (
                 edge.relation == "imports"
                 and target_node is not None
@@ -853,6 +875,37 @@ def _classify_edges(
         target_coverage = node_coverage.get(graphify.target)
         source = node_mapping.get(graphify.source)
         target = node_mapping.get(graphify.target)
+        occurrence_targets = (
+            exact_occurrence_targets.get(
+                (
+                    graphify.relation,
+                    source,
+                    graphify.occurrence_file,
+                    graphify.occurrence_location,
+                    _terminal_symbol(graphify_target.normalized_label)
+                    if graphify_target is not None
+                    else "",
+                ),
+                set(),
+            )
+            if source is not None
+            else set()
+        )
+        if len(occurrence_targets) == 1 and target not in occurrence_targets:
+            resolved_target = next(iter(occurrence_targets))
+            status = (
+                "rejected"
+                if graphify_target is not None and graphify_target.source_file
+                else "dominated"
+            )
+            output.append(
+                Coverage(
+                    status,
+                    "exact_occurrence_target_conflict",
+                    resolved_target,
+                )
+            )
+            continue
         if (
             graphify.relation == "imports"
             and source is not None
@@ -890,6 +943,28 @@ def _classify_edges(
             continue
 
         direct = direct_index.get((graphify.relation, source, target), [])
+        graphify_source = graphify_nodes.get(graphify.source)
+        if (
+            graphify.relation == "references"
+            and graphify_source is not None
+            and graphify.occurrence_file == graphify_source.source_file
+            and graphify.occurrence_location == graphify_source.source_location
+        ):
+            precise_references = [
+                edge
+                for edge in direct
+                if edge.occurrence_file == graphify.occurrence_file
+                and edge.occurrence_location != graphify.occurrence_location
+            ]
+            if precise_references:
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "precise_declaration_reference_occurrence",
+                        precise_references[0].payload_sha256,
+                    )
+                )
+                continue
         if graphify.relation == "contains":
             direct_paths = int(bool(direct))
             middle_nodes = {
