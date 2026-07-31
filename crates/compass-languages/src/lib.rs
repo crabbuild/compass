@@ -1,5 +1,6 @@
 //! Statically linked deterministic language extraction for Compass.
 
+mod adapters;
 mod apex;
 mod bash;
 mod builtins;
@@ -11,6 +12,7 @@ mod dm;
 mod dotnet_project;
 mod elixir;
 mod engine;
+pub mod evidence;
 mod facts;
 mod fortran;
 pub mod frameworks;
@@ -46,12 +48,20 @@ mod verilog;
 mod xaml;
 mod zig;
 
+pub use adapters::{AdapterProfile, AdapterRegistry, AdapterRegistryError};
 #[doc(hidden)]
 pub use builtins::is_language_builtin_global;
+pub use evidence::{
+    AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceBuilder,
+    EvidenceDiagnostic, EvidenceError, EvidenceErrorCode, EvidenceLimits, EvidenceRange,
+    LanguageCapability, OccurrenceFact, RelationshipCandidate, ResolutionConstraint, ScopeFact,
+    SemanticEvidenceBatch, SemanticRole, range_for_node, validate_evidence,
+};
 pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
 pub use frameworks::{
-    FrameworkLimitError, FrameworkLimits, RawDomainFact, RawFrameworkAnchor, RawFrameworkFact,
-    RawFrameworkOrigin, RawRouteFact,
+    FrameworkLimitError, FrameworkLimits, FrameworkManifestPolicy, FrameworkOccurrencePolicy,
+    FrameworkPackDescriptor, FrameworkPackKind, FrameworkPackRegistry, FrameworkPackRegistryError,
+    RawDomainFact, RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
 };
 pub use ids::{file_stem, make_id, normalize_id};
 pub use program::{TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
@@ -61,9 +71,8 @@ pub use project_evidence::{
 pub use registry::{ExtractorKind, LanguageSpec, Registry};
 pub use scip::{ScipExtraction, ingest_scip_json};
 pub use universal::{
-    AdapterCapability, AdapterDescriptor, AdapterProfile, BindingFact, BindingKind,
-    DeclarationFact, DeclarationKind, OccurrenceFact, OccurrenceRole, RelationshipCandidate,
-    ScopeFact, UNIVERSAL_EVIDENCE_SCHEMA, UniversalEvidence,
+    AdapterCapability, AdapterDescriptor, AdapterProfile as CandidateAdapterProfile,
+    DeclarationKind, OccurrenceRole, UNIVERSAL_EVIDENCE_SCHEMA, UniversalEvidence,
 };
 
 use std::path::PathBuf;

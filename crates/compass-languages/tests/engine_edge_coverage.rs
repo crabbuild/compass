@@ -1,7 +1,136 @@
 use std::error::Error;
 use std::fs;
 
-use compass_languages::{Engine, ExtractError, Registry, make_id};
+use compass_languages::{
+    CandidateRelation, Engine, ExtractError, FrameworkLimits, FrameworkManifestPolicy,
+    FrameworkOccurrencePolicy, FrameworkPackDescriptor, FrameworkPackKind, FrameworkPackRegistry,
+    FrameworkPackRegistryError, LanguageCapability, Registry, SemanticRole, make_id,
+};
+
+fn valid_universal_framework_pack(id: &'static str) -> FrameworkPackDescriptor {
+    FrameworkPackDescriptor {
+        id,
+        kind: FrameworkPackKind::Source,
+        languages: &["go", "python"],
+        required_capabilities: &[LanguageCapability::Calls],
+        dependency_markers: &["example/framework"],
+        manifest_policy: FrameworkManifestPolicy::Required,
+        activation_rules: &["decorated-handler"],
+        accepted_roles: &[SemanticRole::Call],
+        emitted_relation_families: &[CandidateRelation::Calls],
+        occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+        limits: FrameworkLimits::default(),
+    }
+}
+
+#[test]
+fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
+    let descriptor = valid_universal_framework_pack("example-handlers");
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[descriptor]),
+        Ok(())
+    );
+    assert!(FrameworkPackRegistry::descriptors().is_empty());
+    assert_eq!(FrameworkPackRegistry::validate(), Ok(()));
+
+    let rust = FrameworkPackDescriptor {
+        languages: &["rust"],
+        ..descriptor
+    };
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[rust]),
+        Err(FrameworkPackRegistryError::NonUniversalLanguage {
+            pack: descriptor.id,
+            language: "rust",
+        })
+    );
+
+    let unsupported = FrameworkPackDescriptor {
+        languages: &["python"],
+        required_capabilities: &[LanguageCapability::Calls, LanguageCapability::Receivers],
+        accepted_roles: &[SemanticRole::Receiver],
+        ..descriptor
+    };
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[unsupported]),
+        Err(FrameworkPackRegistryError::UnsupportedCapability {
+            pack: descriptor.id,
+            language: "python",
+            capability: LanguageCapability::Receivers,
+        })
+    );
+}
+
+#[test]
+fn universal_framework_pack_registry_enforces_evidence_activation_and_limits() {
+    let descriptor = valid_universal_framework_pack("bounded-pack");
+
+    let missing_role_capability = FrameworkPackDescriptor {
+        accepted_roles: &[SemanticRole::Import],
+        ..descriptor
+    };
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[missing_role_capability]),
+        Err(FrameworkPackRegistryError::RoleCapabilityNotDeclared {
+            pack: descriptor.id,
+            role: SemanticRole::Import,
+        })
+    );
+
+    let missing_relation_capability = FrameworkPackDescriptor {
+        emitted_relation_families: &[CandidateRelation::Imports],
+        ..descriptor
+    };
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[missing_relation_capability]),
+        Err(FrameworkPackRegistryError::RelationCapabilityNotDeclared {
+            pack: descriptor.id,
+            relation: CandidateRelation::Imports,
+        })
+    );
+
+    let missing_manifest_evidence = FrameworkPackDescriptor {
+        dependency_markers: &[],
+        ..descriptor
+    };
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[missing_manifest_evidence]),
+        Err(FrameworkPackRegistryError::MissingRequiredDependencyMarkers(descriptor.id))
+    );
+
+    let unnamed_heuristic = FrameworkPackDescriptor {
+        activation_rules: &[],
+        manifest_policy: FrameworkManifestPolicy::Advisory,
+        occurrence_policy: FrameworkOccurrencePolicy::ExactAnchoredHeuristic,
+        ..descriptor
+    };
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[unnamed_heuristic]),
+        Err(FrameworkPackRegistryError::MissingHeuristicRule(
+            descriptor.id
+        ))
+    );
+
+    let zero_limit = FrameworkPackDescriptor {
+        limits: FrameworkLimits {
+            max_candidates: 0,
+            ..FrameworkLimits::default()
+        },
+        ..descriptor
+    };
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[zero_limit]),
+        Err(FrameworkPackRegistryError::ZeroLimit {
+            pack: descriptor.id,
+            limit: "max_candidates",
+        })
+    );
+
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[descriptor, descriptor]),
+        Err(FrameworkPackRegistryError::DuplicateId(descriptor.id))
+    );
+}
 
 #[test]
 fn caller_supplied_source_matches_file_based_generic_extraction() -> Result<(), Box<dyn Error>> {

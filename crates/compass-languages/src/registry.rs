@@ -1,6 +1,10 @@
 use std::path::Path;
 
-use crate::{AdapterCapability, AdapterDescriptor, AdapterProfile, UNIVERSAL_EVIDENCE_SCHEMA};
+use crate::universal::{
+    AdapterCapability, AdapterDescriptor, AdapterProfile as CandidateAdapterProfile,
+    UNIVERSAL_EVIDENCE_SCHEMA,
+};
+use crate::{AdapterProfile, AdapterRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtractorKind {
@@ -64,7 +68,7 @@ impl Registry {
                 language: "rust".to_owned(),
                 version: 1,
                 evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA.to_owned(),
-                profile: AdapterProfile::UniversalCandidate,
+                profile: CandidateAdapterProfile::UniversalCandidate,
                 capabilities: vec![
                     AdapterCapability::ImplOwnership,
                     AdapterCapability::Calls,
@@ -77,7 +81,7 @@ impl Registry {
             language: language.to_owned(),
             version: 1,
             evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA.to_owned(),
-            profile: AdapterProfile::Legacy,
+            profile: CandidateAdapterProfile::Legacy,
             capabilities: Vec::new(),
         }
     }
@@ -93,6 +97,18 @@ impl Registry {
     #[must_use]
     pub fn cases() -> &'static [RegistryCase] {
         REGISTRY_CASES
+    }
+
+    /// Resolve a path only when its language has hard-cut to universal evidence.
+    #[must_use]
+    pub fn universal_adapter(path: &Path) -> Option<&'static AdapterProfile> {
+        Self::resolve(path).and_then(Self::universal_profile_for_spec)
+    }
+
+    /// Return the hard-cut adapter associated with a resolved language.
+    #[must_use]
+    pub fn universal_profile_for_spec(spec: LanguageSpec) -> Option<&'static AdapterProfile> {
+        AdapterRegistry::universal_profile(spec.name)
     }
 
     #[must_use]

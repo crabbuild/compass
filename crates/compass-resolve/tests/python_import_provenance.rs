@@ -76,7 +76,7 @@ fn python_decorator_uses_resolve_reexports_at_the_decorator_occurrence()
     assert!(decorator_edges.iter().all(|edge| {
         edge.attributes.contains_key("start_byte")
             && edge.attributes.contains_key("end_byte")
-            && edge.attributes.contains_key("_endpoint_rewrite_rules")
+            && edge.string("resolution_rule") == "explicitbinding"
     }));
     assert!(extraction.edges.iter().all(|edge| {
         edge.string("target_qualified_name") != "framework.unused"
@@ -762,9 +762,19 @@ fn qualified_external_python_calls_are_source_scoped_and_fail_closed() -> Result
     let placeholders = extraction
         .nodes
         .iter()
-        .filter(|node| node.string("extractor") == "compass.graph.external-placeholder")
+        .filter(|node| {
+            node.string("extractor") == "compass.resolve.python.universal"
+                && !node.string("source_file").is_empty()
+                && node.string("external_role") == "calls"
+        })
         .collect::<Vec<_>>();
     assert_eq!(placeholders.len(), 3);
+    assert!(placeholders.iter().all(|node| {
+        node.attributes
+            .get("external")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+    }));
     assert_eq!(
         placeholders
             .iter()
@@ -827,8 +837,8 @@ fn qualified_external_python_calls_are_source_scoped_and_fail_closed() -> Result
         .nodes
         .iter()
         .filter(|node| {
-            node.kind == NodeKind::Function
-                && node.source.is_none()
+            node.kind == NodeKind::Import
+                && node.source.is_some()
                 && matches!(
                     node.qualified_name.as_str(),
                     "unittest.mock.patch" | "vendor.mock.patch"
@@ -838,10 +848,9 @@ fn qualified_external_python_calls_are_source_scoped_and_fail_closed() -> Result
     assert_eq!(published_placeholders.len(), 3);
     assert!(published_placeholders.iter().all(|node| {
         node.evidence.iter().any(|evidence| {
-            evidence.origin == EvidenceOrigin::Heuristic
-                && evidence.confidence == EvidenceConfidence::Inferred
-                && evidence.rule.as_deref() == Some("external-symbol-placeholder")
-                && evidence.wiring_site.is_some()
+            evidence.origin == EvidenceOrigin::Ast
+                && evidence.confidence == EvidenceConfidence::Exact
+                && evidence.anchors.len() == 1
         })
     }));
     assert_eq!(

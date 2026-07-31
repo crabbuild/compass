@@ -146,6 +146,15 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
             .score
             .total_cmp(&left.score)
             .then_with(|| {
+                semantic_seed_rank(graph.node(right.node))
+                    .cmp(&semantic_seed_rank(graph.node(left.node)))
+            })
+            .then_with(|| {
+                source_is_test_or_generated(graph.node(left.node))
+                    .cmp(&source_is_test_or_generated(graph.node(right.node)))
+            })
+            .then_with(|| graph.degree(right.node).cmp(&graph.degree(left.node)))
+            .then_with(|| {
                 graph
                     .node(left.node)
                     .label()
@@ -341,11 +350,35 @@ fn compute_idf(graph: &Graph, terms: &[String]) -> HashMap<String, f64> {
 
 pub(crate) fn normalized_label(node: &NodeRecord) -> String {
     let stored = node.string("norm_label");
-    if stored.is_empty() {
+    let normalized = if stored.is_empty() {
         strip_diacritics(&node.string("label")).to_lowercase()
     } else {
         stored.to_lowercase()
+    };
+    normalized.trim_start_matches('.').to_owned()
+}
+
+fn semantic_seed_rank(node: &NodeRecord) -> u8 {
+    match node.kind_name() {
+        "method" | "function" | "constructor" => 4,
+        "class" | "interface" | "struct" | "trait" | "type_alias" => 3,
+        "module" | "package" | "namespace" | "file" => 2,
+        "field" | "parameter" | "variable" | "constant" => 1,
+        _ => 0,
     }
+}
+
+fn source_is_test_or_generated(node: &NodeRecord) -> bool {
+    let source = node.string("source_file").to_lowercase();
+    source.split('/').any(|component| {
+        matches!(
+            component,
+            "test" | "tests" | "testing" | "fixtures" | "vendor" | "generated"
+        )
+    }) || source
+        .rsplit('/')
+        .next()
+        .is_some_and(|name| name.starts_with("test_") || name.ends_with("_test.go"))
 }
 
 struct BestSeed {
@@ -628,6 +661,32 @@ mod tests {
 
         let first = scores.ranked.first().ok_or("missing score")?;
         assert_eq!(graph.node(first.node).id, "resolver");
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_query_prefers_callable_production_symbols_over_test_names()
+    -> Result<(), Box<dyn Error>> {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "nodes": [
+                {"id":"save-variable","label":"save","kind":"variable","source_file":"tests/uploads/test_save.py"},
+                {"id":"save-method","label":".save()","kind":"method","source_file":"django/db/models/base.py"},
+                {"id":"model-test","label":"Model","kind":"class","source_file":"tests/gis/models.py"},
+                {"id":"model-production","label":"Model","kind":"class","source_file":"django/db/models/base.py"}
+            ],
+            "links": [
+                {"source":"model-production","target":"save-method","kind":"contains"}
+            ]
+        }))?;
+        let graph = Graph::from_document(document)?;
+        let terms = crate::text::query_terms("how does a model save data");
+        let scores = score_nodes(&graph, &terms, true);
+        let seeds = pick_seeds(&graph, &scores, 3, 0.2)
+            .into_iter()
+            .map(|index| graph.node(index).id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(seeds[..2], ["save-method", "model-production"]);
         Ok(())
     }
 }

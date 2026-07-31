@@ -5,7 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 
-from benchmarks.performance.compass_perf.correctness import (
+from benchmarks.performance.compass.correctness import (
     canonical_graph_digest,
     compare_graphs,
     index_graph,
@@ -548,6 +548,106 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
         self.assertIn(
             "rejected:qualified_external_target_rebound_to_local",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_import_binding_dominates_a_sourceless_external_placeholder(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"Run","kind":"function",
+               "source_file":"app.go","source_location":"L10","language":"go"},
+              {"id":"external","label":"RawMessage","kind":"import",
+               "source_file":"app.go","source_location":"L2","language":"go",
+               "qualified_name":"encoding/json.rawmessage"}
+            ],"links":[
+              {"source":"owner","target":"external","relation":"references",
+               "source_file":"app.go","source_location":"L11"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"owner","label":"Run()",
+               "source_file":"app.go","source_location":"L10"},
+              {"id":"external","label":"RawMessage"}
+            ],"links":[
+              {"source":"owner","target":"external","relation":"uses",
+               "source_file":"app.go","source_location":"L11"}
+            ]}
+            """,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "dominated:qualified_external_binding",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_imported_symbol_dominates_a_module_level_import(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"module","label":"app.py","kind":"file",
+               "source_file":"app.py","source_location":"L1"},
+              {"id":"symbol","label":"Widget","kind":"class",
+               "source_file":"lib.py","source_location":"L20"}
+            ],"links":[
+              {"source":"module","target":"symbol","relation":"imports",
+               "source_file":"app.py","source_location":"L2"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"module","label":"app.py",
+               "source_file":"app.py","source_location":"L1"},
+              {"id":"library","label":"lib.py",
+               "source_file":"lib.py","source_location":"L1"}
+            ],"links":[
+              {"source":"module","target":"library","relation":"imports",
+               "source_file":"app.py","source_location":"L2"}
+            ]}
+            """,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "dominated:imported_symbol_definition",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_external_import_rejects_terminal_name_local_rebinding(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"module","label":"app.py","kind":"file",
+               "source_file":"app.py","source_location":"L1"},
+              {"id":"external","label":"inspect","kind":"import",
+               "source_file":"app.py","source_location":"L2",
+               "qualified_name":"inspect"}
+            ],"links":[
+              {"source":"module","target":"external","relation":"imports",
+               "source_file":"app.py","source_location":"L2"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"module","label":"app.py",
+               "source_file":"app.py","source_location":"L1"},
+              {"id":"wrong","label":"inspect.py",
+               "source_file":"project/inspect.py","source_location":"L1"}
+            ],"links":[
+              {"source":"module","target":"wrong","relation":"imports",
+               "source_file":"app.py","source_location":"L2"}
+            ]}
+            """,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "rejected:qualified_external_import_rebound_to_local",
             result.metrics["graphify_edges_coverage_reasons"],
         )
 

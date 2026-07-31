@@ -37,17 +37,17 @@ Create these focused files:
 - `benchmarks/performance/harness.py`: command-line entry point and command dispatch
 - `benchmarks/performance/repositories.toml`: repository URLs, mutation suffixes, and query oracles
 - `benchmarks/performance/README.md`: operator workflow and result interpretation
-- `benchmarks/performance/compass_perf/__init__.py`: package version and schema constants
-- `benchmarks/performance/compass_perf/model.py`: immutable result and configuration dataclasses
-- `benchmarks/performance/compass_perf/config.py`: strict TOML parsing
-- `benchmarks/performance/compass_perf/stats.py`: p50, p95, median absolute deviation, and ratios
-- `benchmarks/performance/compass_perf/workspace.py`: marker, lock, Git mirrors, checkouts, and guarded cleanup
-- `benchmarks/performance/compass_perf/process.py`: per-command wall, CPU, exit, signal, and peak-memory measurement
-- `benchmarks/performance/compass_perf/adapters.py`: Compass and Graphify build/query command contracts
-- `benchmarks/performance/compass_perf/jsonstream.py`: bounded iteration over top-level JSON arrays
-- `benchmarks/performance/compass_perf/correctness.py`: graph normalization, SQLite comparison, invariants, and digests
-- `benchmarks/performance/compass_perf/workloads.py`: cold, warm, incremental, natural-query, and CompassQL execution
-- `benchmarks/performance/compass_perf/report.py`: immutable JSON, Markdown, baseline compatibility, and gates
+- `benchmarks/performance/compass/__init__.py`: package version and schema constants
+- `benchmarks/performance/compass/model.py`: immutable result and configuration dataclasses
+- `benchmarks/performance/compass/config.py`: strict TOML parsing
+- `benchmarks/performance/compass/stats.py`: p50, p95, median absolute deviation, and ratios
+- `benchmarks/performance/compass/workspace.py`: marker, lock, Git mirrors, checkouts, and guarded cleanup
+- `benchmarks/performance/compass/process.py`: per-command wall, CPU, exit, signal, and peak-memory measurement
+- `benchmarks/performance/compass/adapters.py`: Compass and Graphify build/query command contracts
+- `benchmarks/performance/compass/jsonstream.py`: bounded iteration over top-level JSON arrays
+- `benchmarks/performance/compass/correctness.py`: graph normalization, SQLite comparison, invariants, and digests
+- `benchmarks/performance/compass/workloads.py`: cold, warm, incremental, natural-query, and CompassQL execution
+- `benchmarks/performance/compass/report.py`: immutable JSON, Markdown, baseline compatibility, and gates
 - `benchmarks/performance/tests/`: standard-library unit and integration tests
 - `PERFORMANCE.md`: public qualification commands and policy
 
@@ -111,10 +111,10 @@ Expected: one documentation-only commit on the isolated branch.
 ### Task 2: Define strict suite, sample, and result models
 
 **Files:**
-- Create: `benchmarks/performance/compass_perf/__init__.py`
-- Create: `benchmarks/performance/compass_perf/model.py`
-- Create: `benchmarks/performance/compass_perf/config.py`
-- Create: `benchmarks/performance/compass_perf/stats.py`
+- Create: `benchmarks/performance/compass/__init__.py`
+- Create: `benchmarks/performance/compass/model.py`
+- Create: `benchmarks/performance/compass/config.py`
+- Create: `benchmarks/performance/compass/stats.py`
 - Create: `benchmarks/performance/repositories.toml`
 - Create: `benchmarks/performance/tests/test_config.py`
 - Create: `benchmarks/performance/tests/test_stats.py`
@@ -198,7 +198,7 @@ git commit -m "test(perf): define qualification suite and result model"
 ### Task 3: Build guarded workspaces and exact revision resolution
 
 **Files:**
-- Create: `benchmarks/performance/compass_perf/workspace.py`
+- Create: `benchmarks/performance/compass/workspace.py`
 - Create: `benchmarks/performance/tests/test_workspace.py`
 
 **Interfaces:**
@@ -240,7 +240,7 @@ Expected: all tests pass and temporary repositories remain intact.
 - [ ] **Step 6: Commit workspace isolation**
 
 ```bash
-git add benchmarks/performance/compass_perf/workspace.py
+git add benchmarks/performance/compass/workspace.py
 git add benchmarks/performance/tests/test_workspace.py
 git commit -m "test(perf): isolate qualification workspaces"
 ```
@@ -248,8 +248,8 @@ git commit -m "test(perf): isolate qualification workspaces"
 ### Task 4: Measure each process without cumulative memory contamination
 
 **Files:**
-- Create: `benchmarks/performance/compass_perf/process.py`
-- Create: `benchmarks/performance/compass_perf/measure_child.py`
+- Create: `benchmarks/performance/compass/process.py`
+- Create: `benchmarks/performance/compass/measure_child.py`
 - Create: `benchmarks/performance/tests/helpers/process_fixture.py`
 - Create: `benchmarks/performance/tests/test_process.py`
 
@@ -284,8 +284,8 @@ Expected: all tests pass on macOS and Linux. Unsupported platforms fail `doctor`
 - [ ] **Step 5: Commit process measurement**
 
 ```bash
-git add benchmarks/performance/compass_perf/process.py
-git add benchmarks/performance/compass_perf/measure_child.py
+git add benchmarks/performance/compass/process.py
+git add benchmarks/performance/compass/measure_child.py
 git add benchmarks/performance/tests
 git commit -m "test(perf): measure isolated process resources"
 ```
@@ -293,7 +293,7 @@ git commit -m "test(perf): measure isolated process resources"
 ### Task 5: Implement release Compass and optional Graphify adapters
 
 **Files:**
-- Create: `benchmarks/performance/compass_perf/adapters.py`
+- Create: `benchmarks/performance/compass/adapters.py`
 - Create: `benchmarks/performance/tests/test_adapters.py`
 
 **Interfaces:**
@@ -351,7 +351,7 @@ Expected: all tests pass without building either real tool.
 - [ ] **Step 6: Commit tool adapters**
 
 ```bash
-git add benchmarks/performance/compass_perf/adapters.py
+git add benchmarks/performance/compass/adapters.py
 git add benchmarks/performance/tests/test_adapters.py
 git commit -m "test(perf): add Compass and Graphify adapters"
 ```
@@ -359,8 +359,8 @@ git commit -m "test(perf): add Compass and Graphify adapters"
 ### Task 6: Stream and normalize large graph outputs
 
 **Files:**
-- Create: `benchmarks/performance/compass_perf/jsonstream.py`
-- Create: `benchmarks/performance/compass_perf/correctness.py`
+- Create: `benchmarks/performance/compass/jsonstream.py`
+- Create: `benchmarks/performance/compass/correctness.py`
 - Create: `benchmarks/performance/tests/fixtures/compass_graph.json`
 - Create: `benchmarks/performance/tests/fixtures/graphify_graph.json`
 - Create: `benchmarks/performance/tests/test_jsonstream.py`
@@ -413,8 +413,8 @@ Expected: all tests pass while the parser's maximum buffer remains within its de
 - [ ] **Step 8: Commit graph correctness**
 
 ```bash
-git add benchmarks/performance/compass_perf/jsonstream.py
-git add benchmarks/performance/compass_perf/correctness.py
+git add benchmarks/performance/compass/jsonstream.py
+git add benchmarks/performance/compass/correctness.py
 git add benchmarks/performance/tests
 git commit -m "test(perf): gate timings on graph correctness"
 ```
@@ -422,7 +422,7 @@ git commit -m "test(perf): gate timings on graph correctness"
 ### Task 7: Execute cold, warm, incremental, and query workloads
 
 **Files:**
-- Create: `benchmarks/performance/compass_perf/workloads.py`
+- Create: `benchmarks/performance/compass/workloads.py`
 - Create: `benchmarks/performance/tests/test_workloads.py`
 - Modify: `benchmarks/performance/repositories.toml`
 
@@ -476,7 +476,7 @@ Expected: all tests pass and every temporary source checkout ends clean.
 - [ ] **Step 9: Commit workload execution**
 
 ```bash
-git add benchmarks/performance/compass_perf/workloads.py
+git add benchmarks/performance/compass/workloads.py
 git add benchmarks/performance/repositories.toml
 git add benchmarks/performance/tests/test_workloads.py
 git commit -m "test(perf): execute correctness-gated workloads"
@@ -485,7 +485,7 @@ git commit -m "test(perf): execute correctness-gated workloads"
 ### Task 8: Generate immutable reports and enforce honest gates
 
 **Files:**
-- Create: `benchmarks/performance/compass_perf/report.py`
+- Create: `benchmarks/performance/compass/report.py`
 - Create: `benchmarks/performance/tests/test_report.py`
 
 **Interfaces:**
@@ -525,7 +525,7 @@ Expected: all tests pass.
 - [ ] **Step 6: Commit reporting and gates**
 
 ```bash
-git add benchmarks/performance/compass_perf/report.py
+git add benchmarks/performance/compass/report.py
 git add benchmarks/performance/tests/test_report.py
 git commit -m "test(perf): enforce per-workload qualification gates"
 ```

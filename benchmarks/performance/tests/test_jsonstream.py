@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from benchmarks.performance.compass_perf.jsonstream import (
+from benchmarks.performance.compass.jsonstream import (
     iter_top_level_array,
     read_top_level_object_value,
     read_top_level_value,

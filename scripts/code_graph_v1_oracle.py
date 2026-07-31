@@ -385,7 +385,16 @@ def endpoint_allowed(source: dict[str, Any], edge: dict[str, Any], target: dict[
             "variable", "import", "schema", "database_table", "database_view",
         }
     if kind == "instantiates":
-        return s in CALLABLE | TYPE_KINDS | {"variable"} and t in {"class", "struct", "enum", "component", "database_procedure"}
+        return (
+            s in CALLABLE | TYPE_KINDS | {"file", "module", "variable"}
+            and (
+                t in {"class", "struct", "enum", "component", "database_procedure"}
+                or (
+                    t == "enum_member"
+                    and target.get("language") == "rust"
+                )
+            )
+        )
     if kind == "overrides":
         return s in CALLABLE and t in CALLABLE
     if kind == "decorates":

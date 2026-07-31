@@ -288,6 +288,149 @@ Django and one Entire node misses plus 4,327 Django and 742 Entire edge misses.
 Those residuals, rather than restoration of audited false positives, are the
 next graph-quality target.
 
+### Universal semantic-evidence hard cutover
+
+The universal semantic-evidence increment hard-cuts Python and Go extraction
+and resolution to one typed, bounded evidence contract. It does not translate
+or shadow the removed language-specific algorithms. Other languages continue
+their existing implementations until separate atomic cutovers. Framework
+packs now have a universal registration contract, but no existing framework
+detector is maintained through a compatibility projection.
+
+No extraction, cache, producer, graph, adapter, framework, or package version
+was changed. `graphify update .` was not run.
+
+The final release binary SHA-256 is
+`8d692043471f4bdfdffa314a914bffcd55dff5a3f0ceebb29a73c5b15873c3e0`.
+Measurements use the same pinned revisions:
+
+- Django `50d706d0aebcc2d073c8d034b6e22fc98fad49f2`;
+- Entire `279b988597f1037c14cdd4c46765a5552e067d17`; and
+- retained Graphify 0.9.31 at
+  `4fe11092ccbe9f543608f140c790f68d5d83cae4`.
+
+#### What materially improved
+
+- Python imports, relative modules, re-exports, bases, decorators, annotations,
+  calls, and imported members now use exact AST ranges and typed bindings.
+  Dynamic bases and unbound qualified receivers fail closed.
+- Go package imports, receivers, typed parameters, embeddings, calls, and type
+  references preserve package and declared-type identity. Uppercase Go calls
+  are no longer treated as Python-style constructors.
+- Exact external bindings remain external rather than being rebound to an
+  unrelated local terminal-name match.
+- Repeated external type uses share one exact import-bound target while every
+  use retains its own relationship occurrence. The real Django build found
+  and fixed this identity defect: the pre-fix graph quarantined 339 colliding
+  nodes and 408 incident edges; the final graph has no publication collision
+  or omission diagnostic.
+- Candidate lookup is indexed and bounded instead of scanning every import
+  against every declaration. Unchanged generation seals are verified in
+  parallel after the manifest trust boundary.
+- Natural query ties prefer callable/type semantics, production source, and
+  graph connectivity. The Django model-save query now starts from `.save()`
+  and the production `django/db/models/base.py::Model`.
+
+#### Final graph size and determinism
+
+| Repository | Compass nodes | Compass raw edges | Compass canonical edges | Graphify nodes | Graphify edges | Cold/warm graph SHA-256 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Django | 63,796 | 157,560 | 147,223 | 50,842 | 158,704 | `3e2e913f38b2059b5b23ab6e7bbc54ace1c73b8afef540fad47540f2c8781816` |
+| Entire | 58,391 | 152,151 | 151,257 | 20,585 | 61,062 | `96d51d3e917182915404482c59ecf87d4c229f8c9cd452256413d66a911318ba` |
+
+Django has 12,954 more nodes than Graphify but 1,144 fewer raw edges. That
+edge reduction is only 0.72%, and it is not itself called an improvement.
+Entire has 37,806 more nodes and 91,089 more raw edges. These totals show that
+the hard cutover is not an indiscriminate edge-removal strategy.
+
+Both repositories produced byte-identical cold and warm `graph.json`.
+Django has no publication omission or identity-collision diagnostic. Entire
+has one fail-closed ambiguous normalized endpoint diagnostic and no partial
+publication summary.
+
+#### Source-grounded Graphify comparison
+
+The comparator accepts an exact fact or a unique source-grounded dominance
+mapping, explicitly rejects a demonstrated Graphify conflict, and otherwise
+leaves the fact ambiguous or missing. Rejected facts are not counted as
+Compass coverage.
+
+| Repository | Graphify fact | Exact | Dominated | Rejected | Ambiguous | Missing |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Django | Nodes | 50,189 | 131 | 0 | 61 | 461 |
+| Django | Edges | 51,530 | 44,065 | 55,437 | 257 | 7,415 |
+| Entire | Nodes | 18,184 | 898 | 0 | 233 | 1,270 |
+| Entire | Edges | 27,489 | 24,238 | 6,127 | 397 | 2,811 |
+
+After excluding only explicit rejected conflicts, exact-or-dominated edge
+coverage is 92.57% for Django and 94.16% for Entire. Node coverage is 98.97%
+and 92.70%, respectively. Strict Graphify-superset quality is therefore not
+achieved, and the universal cutover has lower measured Graphify recall than
+phase two.
+
+The major Django rejection is 53,006 Graphify module-import relationships
+projected onto symbols without a later symbol-use occurrence. Graphify also
+rebounds `import inspect` in `django/apps/config.py` to the local
+`django/utils/inspect.py`. Compass retains the exact external `inspect`
+binding. In `django/contrib/admin/apps.py`, Graphify treats
+`check_dependencies` and `check_admin_app` arguments to `checks.register(...)`
+as calls; Compass records the actual call to `register` and does not fabricate
+calls to the arguments.
+
+Entire rejects 6,127 relationships only when a qualified external target at
+the same occurrence proves a local same-name rebound, such as
+`context.Context` to a project-local `Context`. Its 1,270 node misses are
+mainly Graphify sourceless/generated placeholders that do not yet map to a
+unique source-backed Compass declaration. Its 2,811 edge misses include real
+unresolved owner and call/reference relationships. Those are regressions or
+open recall gaps, not improvements.
+
+#### Performance and query checks
+
+These are final single cold runs plus a stable second warm run, not replacement
+p50/p95 qualification samples.
+
+| Repository | Cold | Stable warm | Peak cold RSS | Retained Graphify cold p50 | Observed cold ratio |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Django | 15.14 s | 1.66 s | 4.57 GiB | 49.985 s | 3.30x |
+| Entire | 7.20 s | 0.90 s | 2.63 GiB | 17.650 s | 2.45x |
+
+Django stable warm is within 2% of the prior 1.6324-second baseline. Entire
+warm is 67% above its prior 0.5391-second baseline. Cold is 61% above the prior
+Django median and 106% above the prior Entire median. The 10% cold/warm preservation
+gate and the previous 5x Graphify cold ratio are not met. Higher-recall graph
+materialization and publication size remain material performance costs.
+
+All four final fresh-process query oracles passed:
+
+| Repository / query | Wall time | Semantic seed |
+| --- | ---: | --- |
+| Django URL resolution | 1.883 s | `URLResolver`, `.resolve()` |
+| Django model save | 1.745 s | `.save()`, production `Model` |
+| Entire checkpoint creation | 1.630 s | `checkpointCreatedAt()`, `Checkpoint` |
+| Entire repository state | 1.440 s | `.Repository()`, `Repository`, `State` |
+
+#### Qualification boundary
+
+The deterministic audit harness and its negative conformance fixtures pass
+their unit contracts. The checked-in conformance manifest intentionally
+contains one example of each forbidden critical violation and correctly exits
+nonzero; it is ineligible for a production claim.
+
+No independently labeled 2,000-record Python/Go qualification manifest was
+produced in this increment. Consequently, the requested observed precision of
+at least 99%, its Wilson lower bound, capability recall, and zero production
+critical-violation claim are **not proven**. The implementation is
+source-grounded and substantially more conservative than Graphify in the
+demonstrated false-positive families, but “flawless,” “99% precision,” and
+“better than Graphify overall” would overstate the evidence.
+
+The next quality increment should prioritize local closure/receiver inference,
+generated declaration identity, and unresolved call/reference owners, then run
+the real stratified audit. The next performance increment should reduce
+high-recall graph materialization and loading cost without reintroducing
+terminal-label or all-pairs resolution.
+
 ## Changes validated
 
 - Exact path-aware AST cache keys prevent byte-identical symlinks from losing

@@ -21,17 +21,18 @@ from typing import Sequence
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from benchmarks.performance.compass_perf import RUN_SCHEMA
-from benchmarks.performance.compass_perf.adapters import CompassAdapter, GraphifyAdapter
-from benchmarks.performance.compass_perf.config import load_suite
-from benchmarks.performance.compass_perf.correctness import compare_graphs, index_graph
-from benchmarks.performance.compass_perf.model import (
+from benchmarks.performance.compass import RUN_SCHEMA
+from benchmarks.performance.compass.adapters import CompassAdapter, GraphifyAdapter
+from benchmarks.performance.compass.audit import audit_result_json_value, run_audit
+from benchmarks.performance.compass.config import load_suite
+from benchmarks.performance.compass.correctness import compare_graphs, index_graph
+from benchmarks.performance.compass.model import (
     EnvironmentIdentity,
     GateIssue,
     GateReport,
     QualificationRun,
 )
-from benchmarks.performance.compass_perf.report import (
+from benchmarks.performance.compass.report import (
     compare_baseline,
     compare_tools,
     load_run,
@@ -39,12 +40,12 @@ from benchmarks.performance.compass_perf.report import (
     render_markdown,
     write_run,
 )
-from benchmarks.performance.compass_perf.workloads import (
+from benchmarks.performance.compass.workloads import (
     run_build_matrix,
     run_compassql_matrix,
     run_query_matrix,
 )
-from benchmarks.performance.compass_perf.workspace import (
+from benchmarks.performance.compass.workspace import (
     QualificationWorkspace,
     prepare_checkout,
     resolve_remote_head,
@@ -436,6 +437,19 @@ def promote(args: argparse.Namespace) -> int:
     return 0
 
 
+def audit(args: argparse.Namespace) -> int:
+    result = run_audit(args.manifest, args.graph, args.corpus)
+    print(
+        json.dumps(
+            audit_result_json_value(result),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+    )
+    return 0 if result.passed else 1
+
+
 def _common(parser: argparse.ArgumentParser, *, execution: bool = False) -> None:
     parser.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     parser.add_argument("--workspace", type=Path, default=DEFAULT_WORKSPACE)
@@ -471,6 +485,10 @@ def build_parser() -> argparse.ArgumentParser:
     promote_parser = subparsers.add_parser("promote")
     promote_parser.add_argument("run", type=Path)
     promote_parser.add_argument("--destination", type=Path)
+    audit_parser = subparsers.add_parser("audit")
+    audit_parser.add_argument("--manifest", type=Path, required=True)
+    audit_parser.add_argument("--graph", type=Path, required=True)
+    audit_parser.add_argument("--corpus", type=Path, required=True)
     return parser
 
 
@@ -494,6 +512,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return regenerate_report(args)
         if args.command == "promote":
             return promote(args)
+        if args.command == "audit":
+            return audit(args)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

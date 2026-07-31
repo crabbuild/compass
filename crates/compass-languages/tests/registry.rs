@@ -3,8 +3,8 @@ use std::fs;
 use std::path::Path;
 
 use compass_languages::{
-    AdapterCapability, AdapterProfile, Registry, UNIVERSAL_EVIDENCE_SCHEMA, file_stem, make_id,
-    normalize_id,
+    AdapterCapability, CandidateAdapterProfile, Registry, UNIVERSAL_EVIDENCE_SCHEMA, file_stem,
+    make_id, normalize_id,
 };
 
 #[test]
@@ -112,12 +112,12 @@ fn ids_match_python_unicode_casefold_contract() {
 }
 
 #[test]
-fn universal_adapter_registry_marks_only_rust_as_a_candidate() {
+fn rust_has_a_separate_phase_one_candidate_descriptor() {
     let rust = Registry::adapter("rust");
     assert_eq!(rust.id, "compass.rust");
     assert_eq!(rust.language, "rust");
     assert_eq!(rust.evidence_schema, UNIVERSAL_EVIDENCE_SCHEMA);
-    assert_eq!(rust.profile, AdapterProfile::UniversalCandidate);
+    assert_eq!(rust.profile, CandidateAdapterProfile::UniversalCandidate);
     for capability in [
         AdapterCapability::ImplOwnership,
         AdapterCapability::Calls,
@@ -131,6 +131,29 @@ fn universal_adapter_registry_marks_only_rust_as_a_candidate() {
 
     let typescript = Registry::adapter("typescript");
     assert_eq!(typescript.id, "compass.legacy.typescript");
-    assert_eq!(typescript.profile, AdapterProfile::Legacy);
+    assert_eq!(typescript.profile, CandidateAdapterProfile::Legacy);
     assert!(typescript.capabilities.is_empty());
+}
+
+#[test]
+fn only_hard_cut_languages_expose_universal_profiles() {
+    let python = Registry::resolve(Path::new("src/example.py")).expect("python spec");
+    let go = Registry::resolve(Path::new("src/example.go")).expect("go spec");
+    let java = Registry::resolve(Path::new("src/Example.java")).expect("java spec");
+    let rust = Registry::resolve(Path::new("src/example.rs")).expect("rust spec");
+
+    assert_eq!(
+        Registry::universal_profile_for_spec(python).map(|profile| profile.language),
+        Some("python")
+    );
+    assert_eq!(
+        Registry::universal_profile_for_spec(go).map(|profile| profile.language),
+        Some("go")
+    );
+    assert!(Registry::universal_profile_for_spec(java).is_none());
+    assert!(Registry::universal_profile_for_spec(rust).is_none());
+    assert_eq!(
+        Registry::universal_adapter(Path::new("src/example.py")).map(|profile| profile.language),
+        Some("python")
+    );
 }

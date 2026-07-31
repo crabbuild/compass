@@ -163,7 +163,7 @@ selected source file
   Python types and retain safely qualified unresolved external calls.
 - Modify `crates/compass-resolve/tests/python_import_provenance.rs`: verify
   re-exported bases and unresolved call occurrence evidence.
-- Modify `benchmarks/performance/compass_perf/correctness.py`: index semantic
+- Modify `benchmarks/performance/compass/correctness.py`: index semantic
   identity, occurrence, and ownership evidence and classify exact, dominated,
   ambiguous, and missing facts.
 - Modify `benchmarks/performance/tests/test_correctness.py`: deterministic
@@ -478,7 +478,7 @@ git commit -m "fix(graph): retain qualified external Python calls"
 
 **Files:**
 
-- Modify: `benchmarks/performance/compass_perf/correctness.py`
+- Modify: `benchmarks/performance/compass/correctness.py`
 - Modify: `benchmarks/performance/tests/test_correctness.py`
 - Modify: `benchmarks/performance/tests/fixtures/compass_graph.json`
 - Modify: `benchmarks/performance/tests/fixtures/graphify_graph.json`
@@ -567,7 +567,7 @@ python3 -m compileall -q benchmarks/performance
 - [ ] **Step 6: Commit**
 
 ```bash
-git add benchmarks/performance/compass_perf/correctness.py \
+git add benchmarks/performance/compass/correctness.py \
   benchmarks/performance/tests/test_correctness.py \
   benchmarks/performance/tests/fixtures/compass_graph.json \
   benchmarks/performance/tests/fixtures/graphify_graph.json

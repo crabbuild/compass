@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from benchmarks.performance.compass_perf.model import ProcessMetrics, Sample
-from benchmarks.performance.compass_perf.stats import speedup, summarize
+from benchmarks.performance.compass.model import ProcessMetrics, Sample
+from benchmarks.performance.compass.stats import speedup, summarize
 
 
 def sample(index: int, seconds: float, *, eligible: bool = True) -> Sample:
@@ -49,4 +49,3 @@ class StatsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

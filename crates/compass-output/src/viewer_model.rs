@@ -72,6 +72,10 @@ pub struct GraphViewSource {
     pub start_line: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_line: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_byte: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_byte: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -137,6 +141,8 @@ pub fn graph_view_model(
                         file,
                         start_line: object.get("line_start").and_then(Value::as_u64),
                         end_line: object.get("line_end").and_then(Value::as_u64),
+                        start_byte: object.get("start_byte").and_then(Value::as_u64),
+                        end_byte: object.get("end_byte").and_then(Value::as_u64),
                     }),
                 color: color.and_then(|color| {
                     Some(GraphViewColor {
@@ -326,6 +332,49 @@ mod tests {
         assert_eq!(
             node.source.as_ref().and_then(|source| source.end_line),
             Some(8)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn graph_model_preserves_code_graph_v1_source_anchor() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "nodes": [{
+                "id": "sha256:8cfda4",
+                "name": "metavoice.rs",
+                "kind": "file",
+                "language": "rust",
+                "source": {
+                    "file": "candle-transformers/src/models/metavoice.rs",
+                    "startByte": 1842,
+                    "endByte": 1976,
+                    "startLine": 61,
+                    "startColumn": 4,
+                    "endLine": 66,
+                    "endColumn": 5
+                }
+            }],
+            "links": []
+        }))?;
+        let communities: Communities = BTreeMap::from([(0, vec!["sha256:8cfda4".to_owned()])]);
+        let model = graph_view_model(
+            &document,
+            &communities,
+            "Code Graph v1",
+            &HtmlOptions::default(),
+            false,
+        );
+
+        assert_eq!(
+            serde_json::to_value(&model.nodes[0].source)?,
+            json!({
+                "file": "candle-transformers/src/models/metavoice.rs",
+                "startLine": 61,
+                "endLine": 66,
+                "startByte": 1842,
+                "endByte": 1976
+            })
         );
         Ok(())
     }

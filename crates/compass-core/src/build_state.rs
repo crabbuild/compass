@@ -212,17 +212,28 @@ pub(crate) fn load_verified(
         || state.producer != current_build_fingerprint()
         || state.profile != *profile
         || !state.manifest.matches(manifest_path)
-        || !state.graph.matches(&output_dir.join("graph.json"))
-        || state.profile.program_analysis
-            != state
-                .program
-                .as_ref()
-                .is_some_and(|seal| seal.matches(&output_dir.join("program.json")))
-        || !state
-            .required
-            .iter()
-            .all(|(name, seal)| seal.matches(&output_dir.join(name)))
     {
+        return Ok(None);
+    }
+    let (graph_matches, (program_matches, required_match)) = rayon::join(
+        || state.graph.matches(&output_dir.join("graph.json")),
+        || {
+            rayon::join(
+                || match (&state.program, state.profile.program_analysis) {
+                    (Some(seal), true) => seal.matches(&output_dir.join("program.json")),
+                    (None, false) => true,
+                    _ => false,
+                },
+                || {
+                    state
+                        .required
+                        .par_iter()
+                        .all(|(name, seal)| seal.matches(&output_dir.join(name)))
+                },
+            )
+        },
+    );
+    if !graph_matches || !program_matches || !required_match {
         return Ok(None);
     }
     Ok(Some(state))
@@ -290,6 +301,13 @@ mod tests {
         fs::write(&program, b"PROGRAM")?;
         assert!(load_verified(output, &profile, &manifest, true)?.is_none());
         fs::write(&program, b"program")?;
+        fs::write(&graph, b"GRAPH")?;
+        assert!(load_verified(output, &profile, &manifest, true)?.is_none());
+        fs::write(&graph, b"graph")?;
+        fs::write(&required, b"ROOT")?;
+        assert!(load_verified(output, &profile, &manifest, true)?.is_none());
+        fs::write(&required, b"root")?;
+        assert!(load_verified(output, &profile, &manifest, true)?.is_some());
 
         let state_path = output.join(BUILD_STATE_FILE);
         let mut document: serde_json::Value = serde_json::from_slice(&fs::read(&state_path)?)?;

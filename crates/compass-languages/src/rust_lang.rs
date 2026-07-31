@@ -5,10 +5,10 @@ use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
-use crate::{
-    DeclarationKind, Extraction, OccurrenceFact, OccurrenceRole, RawCall, Registry,
-    RelationshipCandidate, UniversalEvidence, make_id,
+use crate::universal::{
+    DeclarationKind, OccurrenceFact, OccurrenceRole, RelationshipCandidate, UniversalEvidence,
 };
+use crate::{Extraction, RawCall, Registry, make_id};
 use compass_ir::SourceAnchor;
 
 const TRAIT_METHOD_BLOCKLIST: &[&str] = &[

@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from benchmarks.performance.compass_perf.config import load_suite
+from benchmarks.performance.compass.config import load_suite
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,4 +47,3 @@ class ConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

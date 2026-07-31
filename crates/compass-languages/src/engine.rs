@@ -115,6 +115,17 @@ impl Engine {
     ) -> Result<CombinedExtraction, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
+        if spec.kind == ExtractorKind::Generic && spec.name == "go" {
+            let tree = self.parse(path, spec, source)?;
+            let mut graph =
+                self.extract_generic_from_tree(path, spec, source_file, source, tree.root_node());
+            self.stamp_project_evidence(path, &mut graph);
+            stamp_producer_metadata(&mut graph, spec.name);
+            return Ok(CombinedExtraction {
+                graph,
+                program: None,
+            });
+        }
         if spec.kind != ExtractorKind::Generic
             || !matches!(
                 spec.name,
@@ -130,7 +141,7 @@ impl Engine {
         }
         let tree = self.parse(path, spec, source)?;
         let root = tree.root_node();
-        let mut graph = self.extract_generic_from_tree(path, spec, source, root);
+        let mut graph = self.extract_generic_from_tree(path, spec, source_file, source, root);
         self.stamp_project_evidence(path, &mut graph);
         stamp_producer_metadata(&mut graph, spec.name);
         let program = crate::program::extract_from_tree(source_file, spec.name, source, root)
@@ -229,13 +240,21 @@ impl Engine {
             source
         };
         let tree = self.parse(path, spec, source)?;
-        Ok(self.extract_generic_from_tree(path, spec, source, tree.root_node()))
+        let evidence_source_file = portable_evidence_source(path);
+        Ok(self.extract_generic_from_tree(
+            path,
+            spec,
+            &evidence_source_file,
+            source,
+            tree.root_node(),
+        ))
     }
 
     fn extract_generic_from_tree(
         &self,
         path: &Path,
         spec: LanguageSpec,
+        evidence_source_file: &str,
         source: &[u8],
         root: Node<'_>,
     ) -> Extraction {
@@ -260,6 +279,23 @@ impl Engine {
         }
         attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
         crate::semantic::enrich(path, source, root, spec.name, &mut extraction);
+        if let Some(profile) = Registry::universal_profile_for_spec(spec) {
+            match crate::evidence::extract_tree_evidence(
+                path,
+                evidence_source_file,
+                source,
+                root,
+                profile,
+            ) {
+                Ok(evidence) => extraction.semantic_evidence = Some(evidence),
+                Err(error) => {
+                    extraction.error = Some(format!(
+                        "{} universal evidence extraction failed: {error}",
+                        spec.name
+                    ));
+                }
+            }
+        }
         crate::frameworks::detect(
             path,
             source,
@@ -415,6 +451,26 @@ impl Engine {
             .parse(source, None)
             .ok_or_else(|| ExtractError::ParseCancelled(path.to_path_buf()))?;
         Ok(tree)
+    }
+}
+
+fn portable_evidence_source(path: &Path) -> String {
+    if path.is_relative() {
+        return path.to_string_lossy().replace('\\', "/");
+    }
+    let file = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("source");
+    let parent = path
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    if parent.is_empty() || parent.starts_with('.') || parent.starts_with("tmp") {
+        file.to_owned()
+    } else {
+        format!("{parent}/{file}")
     }
 }
 

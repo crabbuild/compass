@@ -1,5 +1,6 @@
 //! Deterministic cross-file resolution over immutable extraction facts.
 
+pub mod evidence;
 pub mod frameworks;
 mod members;
 
@@ -12,7 +13,7 @@ use std::time::Instant;
 use ahash::{AHashMap, AHashSet};
 use compass_languages::{
     Extraction, RawCall, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord,
-    is_language_builtin_global, make_id,
+    SemanticEvidenceBatch, is_language_builtin_global, make_id,
 };
 use compass_model::provenance::{
     EndpointRewriteEvidence, EndpointRewriteRule, OCCURRENCE_RULE_ATTRIBUTE,
@@ -176,11 +177,47 @@ pub fn resolve_with_root(
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
-    let language_facts = members::collect_language_call_facts(extractions);
+    let mut language_facts = members::collect_language_call_facts(extractions);
+    language_facts
+        .calls
+        .retain(|call| !matches!(call.lang.as_deref(), Some("python" | "go")));
+    let evidence_batches = extractions
+        .iter()
+        .filter_map(|extraction| extraction.semantic_evidence.clone())
+        .collect::<Vec<_>>();
     let mut merged = Extraction::default();
     for extraction in extractions {
-        merged.nodes.extend(extraction.nodes.iter().cloned());
-        merged.edges.extend(extraction.edges.iter().cloned());
+        if extraction.semantic_evidence.is_some() {
+            let allowed = universal_allowed_node_ids(extraction);
+            merged.nodes.extend(
+                extraction
+                    .nodes
+                    .iter()
+                    .filter(|node| {
+                        allowed.contains(&node.id)
+                            || node.string("file_type") != "code"
+                            || is_source_inventory_node(node)
+                    })
+                    .cloned(),
+            );
+            merged.edges.extend(
+                extraction
+                    .edges
+                    .iter()
+                    .filter(|edge| {
+                        !evidence::is_replaced_relation(
+                            edge.attributes
+                                .get("relation")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default(),
+                        )
+                    })
+                    .cloned(),
+            );
+        } else {
+            merged.nodes.extend(extraction.nodes.iter().cloned());
+            merged.edges.extend(extraction.edges.iter().cloned());
+        }
         merged
             .hyperedges
             .extend(extraction.hyperedges.iter().cloned());
@@ -191,7 +228,7 @@ pub fn resolve_with_root(
             .universal_evidence
             .extend(extraction.universal_evidence.iter().cloned());
     }
-    finish_resolution(merged, language_facts, sources, root)
+    finish_resolution(merged, language_facts, evidence_batches, sources, root)
 }
 
 /// Resolve a collection while transferring its node and edge buffers into the
@@ -203,9 +240,42 @@ pub fn resolve_owned_with_root(
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
-    let language_facts = members::collect_language_call_facts_owned(&mut extractions);
+    let mut language_facts = members::collect_language_call_facts_owned(&mut extractions);
+    language_facts
+        .calls
+        .retain(|call| !matches!(call.lang.as_deref(), Some("python" | "go")));
+    let mut evidence_batches = Vec::new();
     let mut merged = Extraction::default();
     for extraction in &mut extractions {
+        let universal = extraction.semantic_evidence.take();
+        if universal.is_some() {
+            let mut allowed = universal
+                .as_ref()
+                .into_iter()
+                .flat_map(|batch| &batch.declarations)
+                .map(|declaration| declaration.graph_node_id.clone())
+                .collect::<HashSet<_>>();
+            allowed.extend(
+                extraction
+                    .edges
+                    .iter()
+                    .filter(|edge| !evidence::is_replaced_relation(relation(edge)))
+                    .flat_map(|edge| [edge.source.clone(), edge.target.clone()]),
+            );
+            extraction.nodes.retain(|node| {
+                allowed.contains(&node.id)
+                    || node.string("file_type") != "code"
+                    || is_source_inventory_node(node)
+            });
+            extraction.edges.retain(|edge| {
+                !evidence::is_replaced_relation(
+                    edge.attributes
+                        .get("relation")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                )
+            });
+        }
         merged.nodes.append(&mut extraction.nodes);
         merged.edges.append(&mut extraction.edges);
         merged.hyperedges.append(&mut extraction.hyperedges);
@@ -215,14 +285,40 @@ pub fn resolve_owned_with_root(
         merged
             .universal_evidence
             .append(&mut extraction.universal_evidence);
+        if let Some(batch) = universal {
+            evidence_batches.push(batch);
+        }
     }
     extractions.into_par_iter().for_each(drop);
-    finish_resolution(merged, language_facts, sources, root)
+    finish_resolution(merged, language_facts, evidence_batches, sources, root)
+}
+
+fn universal_allowed_node_ids(extraction: &Extraction) -> HashSet<String> {
+    let mut allowed = extraction
+        .semantic_evidence
+        .as_ref()
+        .into_iter()
+        .flat_map(|batch| &batch.declarations)
+        .map(|declaration| declaration.graph_node_id.clone())
+        .collect::<HashSet<_>>();
+    allowed.extend(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| !evidence::is_replaced_relation(relation(edge)))
+            .flat_map(|edge| [edge.source.clone(), edge.target.clone()]),
+    );
+    allowed
+}
+
+fn is_source_inventory_node(node: &NodeRecord) -> bool {
+    node.string("symbol_kind") == "file" && !node.string("source_file").is_empty()
 }
 
 fn finish_resolution(
     mut merged: Extraction,
     mut language_facts: members::LanguageCallFacts,
+    evidence_batches: Vec<SemanticEvidenceBatch>,
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
@@ -232,10 +328,22 @@ fn finish_resolution(
     profile_internal("resolver JavaScript re-exports", &mut profile_started);
     canonicalize_import_targets(&mut merged);
     profile_internal("resolver import canonicalization", &mut profile_started);
-    canonicalize_go_receiver_owners(&mut merged);
-    profile_internal("resolver Go receiver ownership", &mut profile_started);
-    canonicalize_go_imported_types(&mut merged, &canonical_root);
-    profile_internal("resolver Go imported types", &mut profile_started);
+    if !evidence_batches.is_empty() {
+        match evidence::UniversalResolutionIndex::new_with_inventory(
+            &evidence_batches,
+            &merged.nodes,
+            &canonical_root,
+            evidence::UniversalResolutionLimits::default(),
+        ) {
+            Ok(index) => index.materialize(&mut merged.nodes, &mut merged.edges),
+            Err(error) => {
+                merged
+                    .error
+                    .get_or_insert_with(|| format!("universal resolution failed: {error}"));
+            }
+        }
+    }
+    profile_internal("resolver universal evidence", &mut profile_started);
     disambiguate_colliding_node_ids_with_calls(
         &mut merged,
         &canonical_root,
@@ -246,8 +354,6 @@ fn finish_resolution(
     profile_internal("resolver C# namespace normalization", &mut profile_started);
     resolve_php_type_references(&mut merged, sources);
     profile_internal("resolver PHP types", &mut profile_started);
-    resolve_python_imported_types(&mut merged, &canonical_root);
-    profile_internal("resolver Python imported types", &mut profile_started);
     rewire_unique_family_stubs(&mut merged);
     profile_internal("resolver family stubs", &mut profile_started);
     rewire_unique_stub_nodes(&mut merged);
@@ -690,149 +796,6 @@ fn canonicalize_import_targets(extraction: &mut Extraction) {
     }
 }
 
-fn resolve_python_imported_types(extraction: &mut Extraction, root: &Path) {
-    let mut definitions = HashMap::<String, Vec<String>>::new();
-    for node in &extraction.nodes {
-        let source = string_attribute(node, "source_file");
-        let Some(module) = python_module_name(&source, root) else {
-            continue;
-        };
-        let label = node.label().trim();
-        let definition_name = if is_type_like_definition(node) {
-            Some(label)
-        } else if string_attribute(node, "symbol_kind") == "function"
-            && label.ends_with("()")
-            && !label.starts_with('.')
-        {
-            Some(label.trim_end_matches("()"))
-        } else {
-            None
-        };
-        if let Some(definition_name) = definition_name.filter(|name| !name.is_empty()) {
-            definitions
-                .entry(format!("{module}.{definition_name}"))
-                .or_default()
-                .push(node.id.clone());
-        }
-    }
-
-    let mut aliases = HashMap::<String, HashSet<String>>::new();
-    for edge in &extraction.edges {
-        let Some(module) = python_module_name(&edge.string("source_file"), root) else {
-            continue;
-        };
-        let Some(bindings) = edge
-            .attributes
-            .get("python_imports")
-            .and_then(Value::as_object)
-        else {
-            continue;
-        };
-        for (local, target) in bindings {
-            let Some(target) = target.as_str() else {
-                continue;
-            };
-            let package_module = Path::new(&edge.string("source_file"))
-                .file_name()
-                .and_then(|name| name.to_str())
-                == Some("__init__.py");
-            let target = resolve_relative_python_import(&module, target, package_module);
-            if !local.is_empty() && !target.is_empty() {
-                aliases
-                    .entry(format!("{module}.{local}"))
-                    .or_default()
-                    .insert(target);
-            }
-        }
-    }
-
-    let resolve = |requested: &str| {
-        let mut current = requested.to_owned();
-        let mut seen = HashSet::new();
-        for _ in 0..64 {
-            if !seen.insert(current.clone()) {
-                return None;
-            }
-            if let Some(candidates) = definitions.get(&current)
-                && let [candidate] = candidates.as_slice()
-            {
-                return Some(candidate.clone());
-            }
-            let targets = aliases.get(&current)?;
-            if targets.len() != 1 {
-                return None;
-            }
-            current = targets.iter().next()?.clone();
-        }
-        None
-    };
-
-    let mut repointed = HashSet::new();
-    for edge in &mut extraction.edges {
-        if !matches!(
-            relation(edge),
-            "inherits" | "implements" | "extends" | "references"
-        ) {
-            continue;
-        }
-        let Some(requested) = edge
-            .attributes
-            .get("target_qualified_name")
-            .and_then(Value::as_str)
-        else {
-            continue;
-        };
-        let Some(target) = resolve(requested) else {
-            continue;
-        };
-        if target == edge.target {
-            continue;
-        }
-        repointed.insert(edge.target.clone());
-        edge.target = target;
-        stamp_endpoint_rewrite(edge, EndpointRewriteRule::PythonImportedTypeResolution, 1.0);
-    }
-    drop_unreferenced_nodes(extraction, &repointed);
-}
-
-fn python_module_name(source_file: &str, root: &Path) -> Option<String> {
-    let source = source_key(source_file, root);
-    let source = source.strip_suffix(".py")?;
-    let source = source.strip_suffix("/__init__").unwrap_or(source);
-    let module = source
-        .split('/')
-        .filter(|component| !component.is_empty() && *component != ".")
-        .collect::<Vec<_>>()
-        .join(".");
-    (!module.is_empty()).then_some(module)
-}
-
-fn resolve_relative_python_import(
-    source_module: &str,
-    target: &str,
-    package_module: bool,
-) -> String {
-    let dots = target
-        .chars()
-        .take_while(|character| *character == '.')
-        .count();
-    if dots == 0 {
-        return target.to_owned();
-    }
-    let suffix = target.trim_start_matches('.');
-    let mut components = source_module.split('.').collect::<Vec<_>>();
-    if !package_module {
-        components.pop();
-    }
-    for _ in 1..dots {
-        components.pop();
-    }
-    if !suffix.is_empty() {
-        components.extend(suffix.split('.'));
-    }
-    components.join(".")
-}
-
 fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
     let mut types = HashMap::<String, Vec<String>>::new();
     let mut types_ci = HashMap::<String, Vec<String>>::new();
@@ -1016,145 +979,6 @@ fn is_type_like_definition(node: &NodeRecord) -> bool {
     }
     let label = node.label().trim();
     !label.is_empty() && !label.ends_with(')') && !label.starts_with('.') && !label.contains('.')
-}
-
-fn canonicalize_go_receiver_owners(extraction: &mut Extraction) {
-    let mut groups = HashMap::<&str, Vec<usize>>::new();
-    for (index, node) in extraction.nodes.iter().enumerate() {
-        if !node.id.is_empty() && string_attribute(node, "language") == "go" {
-            groups.entry(&node.id).or_default().push(index);
-        }
-    }
-
-    let mut dropped = HashSet::new();
-    for (id, indexes) in groups {
-        if indexes.len() < 2 {
-            continue;
-        }
-        let definitions = indexes
-            .iter()
-            .copied()
-            .filter(|index| {
-                matches!(
-                    string_attribute(&extraction.nodes[*index], "symbol_kind").as_str(),
-                    "class" | "struct" | "interface" | "type_alias"
-                )
-            })
-            .collect::<Vec<_>>();
-        if definitions.len() != 1 {
-            continue;
-        }
-        let definition = &extraction.nodes[definitions[0]];
-        let definition_scope = repository_scope(&string_attribute(definition, "source_file"));
-        let definition_label = definition.label();
-        if definition_scope.is_empty() || definition_label.is_empty() {
-            continue;
-        }
-
-        for index in indexes {
-            if index == definitions[0] {
-                continue;
-            }
-            let candidate = &extraction.nodes[index];
-            let candidate_source = string_attribute(candidate, "source_file");
-            if string_attribute(candidate, "symbol_kind") != "symbol"
-                || candidate.label() != definition_label
-                || repository_scope(&candidate_source) != definition_scope
-            {
-                continue;
-            }
-            let owns_method_in_source = extraction.edges.iter().any(|edge| {
-                edge.source == id
-                    && relation(edge) == "method"
-                    && edge.string("source_file") == candidate_source
-            });
-            if owns_method_in_source {
-                dropped.insert(index);
-            }
-        }
-    }
-
-    if dropped.is_empty() {
-        return;
-    }
-    let mut index = 0_usize;
-    extraction.nodes.retain(|_| {
-        let keep = !dropped.contains(&index);
-        index += 1;
-        keep
-    });
-}
-
-fn canonicalize_go_imported_types(extraction: &mut Extraction, root: &Path) {
-    let mut definitions = HashMap::<(String, String), Vec<(String, String)>>::new();
-    for node in &extraction.nodes {
-        if string_attribute(node, "language") != "go"
-            || !matches!(
-                string_attribute(node, "symbol_kind").as_str(),
-                "class" | "struct" | "interface" | "type_alias"
-            )
-        {
-            continue;
-        }
-        let package = string_attribute(node, "package");
-        let label = node.label().trim();
-        let source = source_key(&string_attribute(node, "source_file"), root);
-        let directory = Path::new(&source)
-            .parent()
-            .map(|path| path.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
-        if !package.is_empty() && !label.is_empty() && !directory.is_empty() {
-            definitions
-                .entry((package, label.to_owned()))
-                .or_default()
-                .push((node.id.clone(), directory));
-        }
-    }
-
-    let mut remap = HashMap::<String, String>::new();
-    for node in &extraction.nodes {
-        if string_attribute(node, "language") != "go"
-            || string_attribute(node, "symbol_kind") != "symbol"
-        {
-            continue;
-        }
-        let import_path = string_attribute(node, "go_import_path");
-        let package = string_attribute(node, "go_target_package");
-        let label = node.label().trim();
-        if import_path.is_empty() || package.is_empty() || label.is_empty() {
-            continue;
-        }
-        let Some(candidates) = definitions.get(&(package, label.to_owned())) else {
-            continue;
-        };
-        let compatible = candidates
-            .iter()
-            .filter(|(_, directory)| {
-                import_path == directory.as_str()
-                    || import_path
-                        .strip_suffix(directory.as_str())
-                        .is_some_and(|prefix| prefix.ends_with('/'))
-            })
-            .collect::<Vec<_>>();
-        if let [candidate] = compatible.as_slice() {
-            remap.insert(node.id.clone(), candidate.0.clone());
-        }
-    }
-    if remap.is_empty() {
-        return;
-    }
-    for edge in &mut extraction.edges {
-        if let Some(target) = remap.get(&edge.source) {
-            edge.source.clone_from(target);
-        }
-        if let Some(target) = remap.get(&edge.target) {
-            edge.target.clone_from(target);
-            stamp_endpoint_rewrite(edge, EndpointRewriteRule::UniqueStubEndpointResolution, 1.0);
-        }
-    }
-    extraction
-        .nodes
-        .retain(|node| !remap.contains_key(&node.id));
 }
 
 #[cfg(test)]
@@ -3463,61 +3287,6 @@ mod tests {
                     }))
             );
         }
-    }
-
-    #[test]
-    fn python_import_reexports_anchor_inheritance_to_the_definition() {
-        let mut reexport = edge(
-            "django-test-file",
-            "django.test.testcases",
-            "imports_from",
-            "django/test/__init__.py",
-        );
-        reexport.attributes.insert(
-            "python_imports".to_owned(),
-            json!({"TestCase": "django.test.testcases.TestCase"}),
-        );
-        let mut inheritance = edge(
-            "admin-test",
-            "test-case-stub",
-            "inherits",
-            "tests/admin_views/tests.py",
-        );
-        inheritance.attributes.insert(
-            "target_qualified_name".to_owned(),
-            Value::String("django.test.TestCase".to_owned()),
-        );
-        let mut extraction = Extraction {
-            nodes: vec![
-                node("test-case", "TestCase", "django/test/testcases.py", "class"),
-                node("test-case-stub", "TestCase", "", "stub"),
-                node(
-                    "admin-test",
-                    "AdminViewUnicodeTest",
-                    "tests/admin_views/tests.py",
-                    "class",
-                ),
-            ],
-            edges: vec![reexport, inheritance],
-            ..Extraction::default()
-        };
-
-        resolve_python_imported_types(&mut extraction, Path::new("."));
-
-        assert_eq!(extraction.edges[1].target, "test-case");
-        assert!(
-            extraction
-                .nodes
-                .iter()
-                .all(|node| node.id != "test-case-stub")
-        );
-        assert!(
-            extraction.edges[1].attributes["_endpoint_rewrite_rules"]
-                .as_array()
-                .is_some_and(|entries| entries.iter().any(|entry| {
-                    entry["rule"] == "python-imported-type-resolution" && entry["score"] == 1.0
-                }))
-        );
     }
 
     #[test]

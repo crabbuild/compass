@@ -161,7 +161,7 @@ type External interface {
         .iter()
         .find(|node| {
             node.string("qualified_name") == "context.Context"
-                && node.string("source_file").is_empty()
+                && node.string("source_file") == caller_path.to_string_lossy()
         })
         .ok_or("missing qualified standard-library Context")?;
     assert_ne!(external_context.id, local_context.id);
