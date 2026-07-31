@@ -1,16 +1,32 @@
 use crate::LanguageCapability;
 
+/// Publication maturity of one hard-cut universal adapter.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UniversalAdapterProfile {
+    UniversalCandidate,
+    UniversalComplete,
+}
+
 /// The universal evidence capabilities implemented by one hard-cut adapter.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AdapterProfile {
+    pub id: &'static str,
     pub language: &'static str,
+    pub version: u32,
+    pub evidence_schema: &'static str,
+    pub profile: UniversalAdapterProfile,
     pub capabilities: &'static [LanguageCapability],
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum AdapterRegistryError {
+    #[error("universal adapter id must not be empty")]
+    EmptyId,
     #[error("universal adapter language must not be empty")]
     EmptyLanguage,
+    #[error("duplicate universal adapter id {0:?}")]
+    DuplicateId(&'static str),
     #[error("universal adapter {0:?} must declare at least one capability")]
     EmptyCapabilities(&'static str),
     #[error("duplicate universal adapter language {0:?}")]
@@ -19,6 +35,10 @@ pub enum AdapterRegistryError {
     UnsortedLanguages(&'static str),
     #[error("universal adapter {0:?} capabilities must be sorted and unique")]
     InvalidCapabilityOrder(&'static str),
+    #[error("universal adapter {0:?} must remain at adapter version 1")]
+    InvalidVersion(&'static str),
+    #[error("universal adapter {0:?} declares an unsupported evidence schema")]
+    InvalidEvidenceSchema(&'static str),
 }
 
 /// Registry of languages that have atomically hard-cut to universal evidence.
@@ -41,9 +61,24 @@ impl AdapterRegistry {
 
     pub fn validate() -> Result<(), AdapterRegistryError> {
         let mut previous_language = None;
+        let mut ids = std::collections::BTreeSet::new();
         for profile in UNIVERSAL_ADAPTERS {
+            if profile.id.is_empty() {
+                return Err(AdapterRegistryError::EmptyId);
+            }
             if profile.language.is_empty() {
                 return Err(AdapterRegistryError::EmptyLanguage);
+            }
+            if !ids.insert(profile.id) {
+                return Err(AdapterRegistryError::DuplicateId(profile.id));
+            }
+            if profile.version != 1 {
+                return Err(AdapterRegistryError::InvalidVersion(profile.language));
+            }
+            if profile.evidence_schema != crate::UNIVERSAL_EVIDENCE_SCHEMA {
+                return Err(AdapterRegistryError::InvalidEvidenceSchema(
+                    profile.language,
+                ));
             }
             if profile.capabilities.is_empty() {
                 return Err(AdapterRegistryError::EmptyCapabilities(profile.language));
@@ -101,13 +136,47 @@ const PYTHON_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::ExternalReferences,
 ];
 
+const RUST_CAPABILITIES: &[LanguageCapability] = &[
+    LanguageCapability::Declarations,
+    LanguageCapability::LexicalScopes,
+    LanguageCapability::Namespaces,
+    LanguageCapability::Traits,
+    LanguageCapability::ImplOwnership,
+    LanguageCapability::Macros,
+    LanguageCapability::Tests,
+    LanguageCapability::Imports,
+    LanguageCapability::Aliases,
+    LanguageCapability::Calls,
+    LanguageCapability::TypeReferences,
+    LanguageCapability::BaseTypes,
+    LanguageCapability::Members,
+    LanguageCapability::Ownership,
+    LanguageCapability::ExternalReferences,
+];
+
 const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
     AdapterProfile {
+        id: "compass.go",
         language: "go",
+        version: 1,
+        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+        profile: UniversalAdapterProfile::UniversalCandidate,
         capabilities: GO_CAPABILITIES,
     },
     AdapterProfile {
+        id: "compass.python",
         language: "python",
+        version: 1,
+        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+        profile: UniversalAdapterProfile::UniversalCandidate,
         capabilities: PYTHON_CAPABILITIES,
+    },
+    AdapterProfile {
+        id: "compass.rust",
+        language: "rust",
+        version: 1,
+        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+        profile: UniversalAdapterProfile::UniversalCandidate,
+        capabilities: RUST_CAPABILITIES,
     },
 ];

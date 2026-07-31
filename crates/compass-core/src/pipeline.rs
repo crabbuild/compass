@@ -3915,7 +3915,11 @@ fn cached_universal_evidence_matches(extraction: &Extraction, path: &Path) -> bo
     };
     extraction.raw_calls.is_none()
         && extraction.semantic_evidence.as_ref().is_some_and(|batch| {
-            batch.adapter.language == profile.language
+            batch.adapter.id == profile.id
+                && batch.adapter.language == profile.language
+                && batch.adapter.version == profile.version
+                && batch.adapter.evidence_schema == profile.evidence_schema
+                && batch.adapter.profile == profile.profile
                 && batch.adapter.capabilities.as_slice() == profile.capabilities
                 && compass_languages::validate_evidence(
                     batch,
@@ -3934,7 +3938,6 @@ fn extraction_has_cacheable_ast_facts(extraction: &Extraction) -> bool {
             .as_ref()
             .is_some_and(|calls| !calls.is_empty())
         || !extraction.framework_facts.is_empty()
-        || !extraction.universal_evidence.is_empty()
         || extraction.semantic_evidence.as_ref().is_some_and(|batch| {
             !batch.declarations.is_empty()
                 || !batch.scopes.is_empty()
@@ -4087,7 +4090,7 @@ mod tests {
             &Extraction::default(),
             python
         ));
-        assert!(cached_universal_evidence_matches(
+        assert!(!cached_universal_evidence_matches(
             &Extraction::default(),
             rust
         ));
@@ -4098,6 +4101,10 @@ mod tests {
             .extract_source_combined(python, "src/example.py", source)?
             .graph;
         assert!(cached_universal_evidence_matches(&extracted, python));
+        let extracted_rust = engine
+            .extract_source_combined(rust, "src/example.rs", b"fn example() {}\n")?
+            .graph;
+        assert!(cached_universal_evidence_matches(&extracted_rust, rust));
 
         let mut invalid = extracted;
         invalid

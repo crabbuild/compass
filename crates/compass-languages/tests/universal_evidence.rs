@@ -4,7 +4,7 @@ use compass_languages::{
     AdapterIdentity, AdapterRegistry, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
     Engine, EvidenceErrorCode, EvidenceLimits, EvidenceRange, Extraction, LanguageCapability,
     OccurrenceFact, RelationshipCandidate, ResolutionConstraint, ScopeFact, SemanticEvidenceBatch,
-    SemanticRole, validate_evidence,
+    SemanticRole, UNIVERSAL_EVIDENCE_SCHEMA, UniversalAdapterProfile, validate_evidence,
 };
 
 fn range(start: u64, end: u64) -> EvidenceRange {
@@ -22,7 +22,11 @@ fn range(start: u64, end: u64) -> EvidenceRange {
 fn valid_batch() -> SemanticEvidenceBatch {
     SemanticEvidenceBatch {
         adapter: AdapterIdentity {
+            id: "compass.python".to_owned(),
             language: "python".to_owned(),
+            version: 1,
+            evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA.to_owned(),
+            profile: UniversalAdapterProfile::UniversalCandidate,
             producer: "tree-sitter-python".to_owned(),
             capabilities: vec![
                 LanguageCapability::Declarations,
@@ -259,12 +263,25 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
             .iter()
             .map(|profile| profile.language)
             .collect::<Vec<_>>(),
-        ["go", "python"]
+        ["go", "python", "rust"]
     );
     assert!(
         profiles
             .iter()
             .all(|profile| !profile.capabilities.is_empty())
+    );
+    assert!(profiles.iter().all(|profile| {
+        !profile.id.is_empty()
+            && profile.version == 1
+            && profile.evidence_schema == UNIVERSAL_EVIDENCE_SCHEMA
+    }));
+    assert_eq!(
+        profiles
+            .iter()
+            .map(|profile| profile.id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        profiles.len()
     );
     assert!(profiles.iter().all(|profile| {
         profile
@@ -273,7 +290,10 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
             .all(|pair| pair[0] < pair[1])
     }));
     assert!(AdapterRegistry::universal_profile("java").is_none());
-    assert!(AdapterRegistry::universal_profile("rust").is_none());
+    assert_eq!(
+        AdapterRegistry::universal_profile("rust").map(|profile| profile.version),
+        Some(1)
+    );
 }
 
 #[test]
@@ -281,6 +301,7 @@ fn empty_hard_cut_sources_emit_zero_width_file_inventory_evidence() {
     for (path, source_file, language) in [
         ("/repo/pkg/__init__.py", "pkg/__init__.py", "python"),
         ("/repo/pkg/empty.go", "pkg/empty.go", "go"),
+        ("/repo/pkg/empty.rs", "pkg/empty.rs", "rust"),
     ] {
         let mut engine = Engine::default();
         let evidence = engine

@@ -1,9 +1,5 @@
 use std::path::Path;
 
-use crate::universal::{
-    AdapterCapability, AdapterDescriptor, AdapterProfile as CandidateAdapterProfile,
-    UNIVERSAL_EVIDENCE_SCHEMA,
-};
 use crate::{AdapterProfile, AdapterRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,32 +56,6 @@ pub struct RegistryCase {
 pub struct Registry;
 
 impl Registry {
-    #[must_use]
-    pub fn adapter(language: &str) -> AdapterDescriptor {
-        if language == "rust" {
-            return AdapterDescriptor {
-                id: "compass.rust".to_owned(),
-                language: "rust".to_owned(),
-                version: 1,
-                evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA.to_owned(),
-                profile: CandidateAdapterProfile::UniversalCandidate,
-                capabilities: vec![
-                    AdapterCapability::ImplOwnership,
-                    AdapterCapability::Calls,
-                    AdapterCapability::ExternalPackages,
-                ],
-            };
-        }
-        AdapterDescriptor {
-            id: format!("compass.legacy.{language}"),
-            language: language.to_owned(),
-            version: 1,
-            evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA.to_owned(),
-            profile: CandidateAdapterProfile::Legacy,
-            capabilities: Vec::new(),
-        }
-    }
-
     #[must_use]
     pub fn resolve(path: &Path) -> Option<LanguageSpec> {
         REGISTRY_CASES

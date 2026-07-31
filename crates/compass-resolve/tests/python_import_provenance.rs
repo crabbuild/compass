@@ -318,16 +318,27 @@ fn repeated_python_import_occurrences_survive_resolution_and_publication()
     );
     assert_eq!(rule_counts.get(PYTHON_REEXPORT_RULE), Some(&2));
 
-    let occurrence_rules = resolver_edges
+    let occurrence_identities = resolver_edges
         .iter()
         .filter_map(|edge| {
-            edge.attributes
+            let rule = edge
+                .attributes
                 .get("_occurrence_rule")
-                .and_then(serde_json::Value::as_str)
+                .and_then(serde_json::Value::as_str)?;
+            Some((
+                rule,
+                edge.string("source_file"),
+                edge.attributes
+                    .get("start_byte")
+                    .and_then(serde_json::Value::as_u64),
+                edge.attributes
+                    .get("end_byte")
+                    .and_then(serde_json::Value::as_u64),
+            ))
         })
         .collect::<HashSet<_>>();
-    assert_eq!(occurrence_rules.len(), resolver_edges.len());
-    assert!(occurrence_rules.iter().all(|rule| {
+    assert_eq!(occurrence_identities.len(), resolver_edges.len());
+    assert!(occurrence_identities.iter().all(|(rule, ..)| {
         rule.starts_with("universal-import-") || rule.starts_with("universal-reexport-")
     }));
     let repeated_connectivity = resolver_edges

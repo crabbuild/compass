@@ -18,7 +18,7 @@ mod fortran;
 pub mod frameworks;
 
 /// Version of the extraction contract consumed by graph publication.
-pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/2";
+pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/3";
 mod go;
 mod groovy;
 mod ids;
@@ -36,26 +36,27 @@ mod program;
 mod project_evidence;
 mod r;
 mod registry;
-mod rust_lang;
 mod scip;
 mod semantic;
 mod sql;
 mod swift;
 mod templates;
 mod terraform;
-mod universal;
 mod verilog;
 mod xaml;
 mod zig;
 
-pub use adapters::{AdapterProfile, AdapterRegistry, AdapterRegistryError};
+pub use adapters::{
+    AdapterProfile, AdapterRegistry, AdapterRegistryError, UniversalAdapterProfile,
+};
 #[doc(hidden)]
 pub use builtins::is_language_builtin_global;
 pub use evidence::{
     AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceBuilder,
     EvidenceDiagnostic, EvidenceError, EvidenceErrorCode, EvidenceLimits, EvidenceRange,
     LanguageCapability, OccurrenceFact, RelationshipCandidate, ResolutionConstraint, ScopeFact,
-    SemanticEvidenceBatch, SemanticRole, range_for_node, validate_evidence,
+    SemanticEvidenceBatch, SemanticRole, UNIVERSAL_EVIDENCE_SCHEMA, range_for_node,
+    validate_evidence,
 };
 pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
 pub use frameworks::{
@@ -70,10 +71,6 @@ pub use project_evidence::{
 };
 pub use registry::{ExtractorKind, LanguageSpec, Registry};
 pub use scip::{ScipExtraction, ingest_scip_json};
-pub use universal::{
-    AdapterCapability, AdapterDescriptor, AdapterProfile as CandidateAdapterProfile,
-    DeclarationKind, OccurrenceRole, UNIVERSAL_EVIDENCE_SCHEMA, UniversalEvidence,
-};
 
 use std::path::PathBuf;
 

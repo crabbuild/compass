@@ -266,7 +266,6 @@ impl Engine {
         } else {
             match spec.name {
                 "go" => crate::go::extract(path, source, root),
-                "rust" => crate::rust_lang::extract(path, source, root),
                 "bash" => crate::bash::extract(path, source, root),
                 "csharp" => crate::csharp::extract(path, source, root),
                 "cpp" => crate::cpp::extract(path, source, root),
@@ -3952,19 +3951,22 @@ mod rationale_tests {
         )?;
 
         let extraction = Engine::default().extract(&source)?;
-        let node = extraction
-            .nodes
+        let declaration = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing Python semantic evidence")?
+            .declarations
             .iter()
-            .find(|node| node.label() == "reveal()")
+            .find(|declaration| declaration.name == "reveal")
             .ok_or("missing reveal function")?;
 
-        assert_eq!(node.string("symbol_kind"), "function");
-        assert_eq!(node.string("language"), "python");
-        assert_eq!(node.attributes.get("line_start"), Some(&Value::from(1)));
-        assert_eq!(node.attributes.get("line_end"), Some(&Value::from(3)));
+        assert_eq!(declaration.kind, "function");
+        assert_eq!(declaration.language, "python");
+        assert_eq!(declaration.range.start_line, 1);
+        assert_eq!(declaration.range.end_line, 1);
         assert_eq!(
-            node.string("signature"),
-            "def reveal(t, hold_val=\"1\", start_val=\"0\")"
+            declaration.signature.as_deref(),
+            Some("def reveal(t, hold_val=\"1\", start_val=\"0\")")
         );
         Ok(())
     }
@@ -4229,23 +4231,30 @@ mod rationale_tests {
         )?;
 
         let extraction = Engine::default().extract(&source)?;
-        let caller = extraction
-            .nodes
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing Rust semantic evidence")?;
+        let caller = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "caller()")
-            .map(|node| node.id.as_str())
+            .find(|declaration| declaration.name == "caller")
             .ok_or("missing caller")?;
         assert_eq!(
-            extraction
-                .edges
+            evidence
+                .candidates
                 .iter()
-                .filter(|edge| {
-                    edge.source == caller
-                        && edge.attributes.get("relation").and_then(Value::as_str) == Some("calls")
+                .filter(|candidate| {
+                    candidate.source_declaration_id == caller.id
+                        && candidate.relation == crate::CandidateRelation::Calls
+                        && matches!(candidate.target_spelling.as_str(), "open" | "list")
                 })
                 .count(),
             2
         );
+        assert!(extraction.nodes.is_empty());
+        assert!(extraction.edges.is_empty());
+        assert!(extraction.raw_calls.is_none());
         Ok(())
     }
 

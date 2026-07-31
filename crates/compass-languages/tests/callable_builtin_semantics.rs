@@ -77,10 +77,54 @@ fn assert_local_builtin_collisions_resolve(
     Ok(())
 }
 
+fn assert_universal_builtin_collisions_are_resolvable(
+    path: &Path,
+    source: &[u8],
+    expected_sites: usize,
+) -> Result<(), Box<dyn Error>> {
+    let extraction = Engine::default().extract_source(path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing universal semantic evidence")?;
+    let local_calls = evidence
+        .occurrences
+        .iter()
+        .filter(|occurrence| {
+            occurrence.role == SemanticRole::Call
+                && matches!(
+                    occurrence.spelling.as_str(),
+                    "open" | "list" | "map" | "filter"
+                )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(local_calls.len(), expected_sites);
+    assert_eq!(
+        local_calls
+            .iter()
+            .map(|occurrence| occurrence.spelling.as_str())
+            .collect::<HashSet<_>>(),
+        HashSet::from(["open", "list", "map", "filter"])
+    );
+    assert!(local_calls.iter().all(|occurrence| {
+        occurrence.range.start_byte < occurrence.range.end_byte
+            && evidence.candidates.iter().any(|candidate| {
+                candidate.relation == CandidateRelation::Calls
+                    && candidate.occurrence_id.as_deref() == Some(&occurrence.id)
+                    && !candidate.constraints.allow_external
+            })
+    }));
+    assert!(extraction.nodes.is_empty());
+    assert!(extraction.edges.is_empty());
+    assert!(extraction.raw_calls.is_none());
+    Ok(())
+}
+
 #[test]
 fn local_builtin_spellings_resolve_before_filtering_in_rust_and_java() -> Result<(), Box<dyn Error>>
 {
-    assert_local_builtin_collisions_resolve(
+    assert_universal_builtin_collisions_are_resolvable(
         Path::new("collisions.rs"),
         br#"
 fn open() {}

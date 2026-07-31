@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
-use crate::UniversalEvidence;
 use crate::evidence::SemanticEvidenceBatch;
 use crate::frameworks::RawFrameworkFact;
 
@@ -81,8 +80,6 @@ pub struct Extraction {
     pub raw_calls: Option<Vec<RawCall>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub framework_facts: Vec<RawFrameworkFact>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub universal_evidence: Vec<UniversalEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub semantic_evidence: Option<SemanticEvidenceBatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -109,7 +106,6 @@ impl Default for Extraction {
             hyperedges: Vec::new(),
             raw_calls: Some(Vec::new()),
             framework_facts: Vec::new(),
-            universal_evidence: Vec::new(),
             semantic_evidence: None,
             error: None,
             extensions: serde_json::Map::new(),

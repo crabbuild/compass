@@ -1,10 +1,16 @@
 use serde::{Deserialize, Serialize};
 
+use crate::UniversalAdapterProfile;
+
 /// Identity and truthful capability declaration for one semantic adapter.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AdapterIdentity {
+    pub id: String,
     pub language: String,
+    pub version: u32,
+    pub evidence_schema: String,
+    pub profile: UniversalAdapterProfile,
     pub producer: String,
     pub capabilities: Vec<LanguageCapability>,
 }
@@ -28,6 +34,11 @@ pub struct EvidenceRange {
 pub enum LanguageCapability {
     Declarations,
     LexicalScopes,
+    Namespaces,
+    Traits,
+    ImplOwnership,
+    Macros,
+    Tests,
     Imports,
     Reexports,
     Aliases,
@@ -61,6 +72,8 @@ pub enum SemanticRole {
     Ownership,
     Receiver,
     Embedding,
+    TraitBound,
+    MacroInvocation,
 }
 
 impl SemanticRole {
@@ -79,6 +92,8 @@ impl SemanticRole {
             Self::Ownership => LanguageCapability::Ownership,
             Self::Receiver => LanguageCapability::Receivers,
             Self::Embedding => LanguageCapability::Embedding,
+            Self::TraitBound => LanguageCapability::Traits,
+            Self::MacroInvocation => LanguageCapability::Macros,
         }
     }
 }
@@ -125,6 +140,8 @@ pub enum CandidateRelation {
     Embeds,
     Imports,
     Reexports,
+    InvokesMacro,
+    Tests,
 }
 
 impl CandidateRelation {
@@ -143,6 +160,8 @@ impl CandidateRelation {
             Self::Embeds => LanguageCapability::Embedding,
             Self::Imports => LanguageCapability::Imports,
             Self::Reexports => LanguageCapability::Reexports,
+            Self::InvokesMacro => LanguageCapability::Macros,
+            Self::Tests => LanguageCapability::Tests,
         }
     }
 

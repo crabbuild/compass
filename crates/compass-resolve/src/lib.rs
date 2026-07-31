@@ -221,9 +221,6 @@ pub fn resolve_with_root(
         merged
             .framework_facts
             .extend(extraction.framework_facts.iter().cloned());
-        merged
-            .universal_evidence
-            .extend(extraction.universal_evidence.iter().cloned());
     }
     finish_resolution(merged, language_facts, evidence_batches, sources, root)
 }
@@ -276,9 +273,6 @@ pub fn resolve_owned_with_root(
         merged
             .framework_facts
             .append(&mut extraction.framework_facts);
-        merged
-            .universal_evidence
-            .append(&mut extraction.universal_evidence);
         if let Some(batch) = universal {
             evidence_batches.push(batch);
         }
@@ -320,8 +314,6 @@ fn finish_resolution(
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     resolve_javascript_reexports(&mut merged);
     profile_internal("resolver JavaScript re-exports", &mut profile_started);
-    canonicalize_import_targets(&mut merged);
-    profile_internal("resolver import canonicalization", &mut profile_started);
     if !evidence_batches.is_empty() {
         match evidence::UniversalResolutionIndex::new_with_inventory(
             &evidence_batches,
@@ -338,6 +330,11 @@ fn finish_resolution(
         }
     }
     profile_internal("resolver universal evidence", &mut profile_started);
+    canonicalize_file_targets(&mut merged, root);
+    profile_internal(
+        "resolver file-target canonicalization",
+        &mut profile_started,
+    );
     disambiguate_colliding_node_ids_with_calls(
         &mut merged,
         &canonical_root,
@@ -769,23 +766,34 @@ fn drop_unreferenced_nodes(extraction: &mut Extraction, candidates: &HashSet<Str
         .retain(|node| !candidates.contains(&node.id) || referenced.contains(&node.id));
 }
 
-fn canonicalize_import_targets(extraction: &mut Extraction) {
-    let aliases = extraction
-        .nodes
-        .iter()
-        .filter_map(|node| {
-            let source = string_attribute(node, "source_file");
-            is_file_node(node, &source).then_some((make_id(&[&source]), node.id.clone()))
-        })
-        .collect::<HashMap<_, _>>();
+fn canonicalize_file_targets(extraction: &mut Extraction, root: &Path) {
+    let mut aliases = HashMap::new();
+    for node in &extraction.nodes {
+        let source = string_attribute(node, "source_file");
+        if !is_file_node(node, &source) {
+            continue;
+        }
+        aliases.insert(make_id(&[&source]), node.id.clone());
+        let source_path = Path::new(&source);
+        let absolute = if source_path.is_absolute() {
+            source_path.to_path_buf()
+        } else {
+            root.join(source_path)
+        };
+        aliases.insert(make_id(&[&absolute.to_string_lossy()]), node.id.clone());
+    }
     for edge in &mut extraction.edges {
-        if matches!(
-            relation(edge),
-            "imports" | "imports_from" | "exports" | "re_exports"
-        ) && let Some(target) = aliases.get(&edge.target)
-        {
+        if let Some(target) = aliases.get(&edge.target) {
+            let rule = if matches!(
+                relation(edge),
+                "imports" | "imports_from" | "exports" | "re_exports"
+            ) {
+                EndpointRewriteRule::CanonicalImportTarget
+            } else {
+                EndpointRewriteRule::CanonicalFileTarget
+            };
             edge.target.clone_from(target);
-            stamp_endpoint_rewrite(edge, EndpointRewriteRule::CanonicalImportTarget, 1.0);
+            stamp_endpoint_rewrite(edge, rule, 1.0);
         }
     }
 }
@@ -1686,10 +1694,11 @@ fn string_attribute(node: &NodeRecord, key: &str) -> String {
 
 fn is_file_node(node: &NodeRecord, source: &str) -> bool {
     !source.is_empty()
-        && Path::new(source)
-            .file_name()
-            .and_then(|value| value.to_str())
-            == Some(node.label())
+        && (string_attribute(node, "symbol_kind") == "file"
+            || Path::new(source)
+                .file_name()
+                .and_then(|value| value.to_str())
+                == Some(node.label()))
 }
 
 fn is_generic_call_target(node: &NodeRecord) -> bool {

@@ -1,6 +1,8 @@
 use std::error::Error;
 
-use compass_languages::{Engine, OccurrenceRole};
+use compass_languages::{
+    CandidateRelation, Engine, LanguageCapability, SemanticRole, UniversalAdapterProfile,
+};
 
 #[test]
 fn qualified_calls_keep_owner_identity_repetition_and_unicode_ranges() -> Result<(), Box<dyn Error>>
@@ -18,19 +20,45 @@ fn build() {
     Beta::new();
     Alpha::new();
     External::new();
-    NoCollision::launch();
+    external_crate::NoCollision::launch();
 }
 "#;
     let source = source_text.as_bytes();
     let extraction = Engine::default().extract_source(&path, source)?;
     let evidence = extraction
-        .universal_evidence
-        .first()
-        .ok_or("missing universal evidence")?;
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+
+    assert_eq!(evidence.adapter.id, "compass.rust");
+    assert_eq!(evidence.adapter.version, 1);
+    assert_eq!(
+        evidence.adapter.evidence_schema,
+        "compass.languages.evidence/1"
+    );
+    assert_eq!(
+        evidence.adapter.profile,
+        UniversalAdapterProfile::UniversalCandidate
+    );
+    for capability in [
+        LanguageCapability::Namespaces,
+        LanguageCapability::Traits,
+        LanguageCapability::ImplOwnership,
+        LanguageCapability::Macros,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::ExternalReferences,
+    ] {
+        assert!(evidence.adapter.capabilities.contains(&capability));
+    }
+    assert!(extraction.nodes.is_empty());
+    assert!(extraction.edges.is_empty());
+    assert!(extraction.raw_calls.is_none());
+
     let calls = evidence
         .occurrences
         .iter()
-        .filter(|occurrence| occurrence.role == OccurrenceRole::Call)
+        .filter(|occurrence| occurrence.role == SemanticRole::Call)
         .collect::<Vec<_>>();
     assert_eq!(calls.len(), 5, "occurrences={calls:#?}");
     assert_eq!(
@@ -41,80 +69,37 @@ fn build() {
         2
     );
     for occurrence in &calls {
-        let start = usize::try_from(occurrence.anchor.start_byte)?;
-        let end = usize::try_from(occurrence.anchor.end_byte)?;
+        let start = usize::try_from(occurrence.range.start_byte)?;
+        let end = usize::try_from(occurrence.range.end_byte)?;
         let qualifier = occurrence.qualifier.as_deref().ok_or("missing qualifier")?;
         assert_eq!(
             std::str::from_utf8(&source[start..end])?,
-            format!("{qualifier}::{}()", occurrence.spelling)
+            format!("{qualifier}::{}", occurrence.spelling)
         );
     }
 
-    let alpha = extraction
-        .nodes
+    let alpha_calls = evidence
+        .candidates
         .iter()
-        .find(|node| {
-            node.string("qualified_name")
-                .starts_with("impl Alpha::new(")
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.constraints.qualified_name.as_deref()
+                    == Some("crate::qualified::Alpha::new")
         })
-        .ok_or("missing Alpha::new")?;
-    let beta = extraction
-        .nodes
-        .iter()
-        .find(|node| node.string("qualified_name").starts_with("impl Beta::new("))
-        .ok_or("missing Beta::new")?;
-    let alpha_calls = extraction
-        .edges
-        .iter()
-        .filter(|edge| edge.string("relation") == "calls" && edge.target == alpha.id)
         .count();
-    let beta_calls = extraction
-        .edges
-        .iter()
-        .filter(|edge| edge.string("relation") == "calls" && edge.target == beta.id)
-        .count();
-    assert_eq!(
-        alpha_calls, 2,
-        "alpha={alpha:#?} nodes={:#?} edges={:#?}",
-        extraction.nodes, extraction.edges
-    );
-    assert_eq!(
-        beta_calls, 1,
-        "beta={beta:#?} nodes={:#?} edges={:#?}",
-        extraction.nodes, extraction.edges
-    );
-    let external = evidence
-        .relationship_candidates
-        .iter()
-        .find(|candidate| candidate.qualifier.as_deref() == Some("External"))
-        .ok_or("missing external candidate")?;
-    assert!(external.external_identity);
-    let external_node = extraction
-        .nodes
-        .iter()
-        .find(|node| node.string("qualified_name") == "External.new")
-        .ok_or("missing qualified external call target")?;
-    assert_eq!(
-        external_node.attributes.get("external"),
-        Some(&serde_json::Value::Bool(true))
-    );
-    let external_edge = extraction
-        .edges
-        .iter()
-        .find(|edge| edge.string("relation") == "calls" && edge.target == external_node.id)
-        .ok_or("missing qualified external call edge")?;
-    assert_eq!(external_edge.string("source_location"), "L11");
-    assert!(
-        extraction
-            .nodes
-            .iter()
-            .all(|node| node.string("qualified_name") != "NoCollision.launch")
-    );
-    assert!(evidence.relationship_candidates.iter().any(
-        |candidate| candidate.qualifier.as_deref() == Some("NoCollision")
-            && candidate.spelling == "launch"
-            && candidate.external_identity
-    ));
+    assert_eq!(alpha_calls, 2);
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "launch"
+            && candidate.constraints.qualified_name.as_deref()
+                == Some("external_crate::NoCollision::launch")
+            && candidate.constraints.allow_external
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.target_spelling == "new"
+            && candidate.constraints.qualified_name.is_none()
+            && !candidate.constraints.allow_external
+    }));
     Ok(())
 }
 
@@ -129,37 +114,25 @@ impl Item { fn new() -> Self { Self {} } }
 fn build() { other::Item::new(); }
 "#;
     let extraction = Engine::default().extract_source(&path, source)?;
-    let local_new = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let candidate = evidence
+        .candidates
         .iter()
-        .find(|node| node.string("qualified_name").starts_with("impl Item::new("))
-        .ok_or("missing Item::new")?;
-    assert!(
-        extraction
-            .edges
-            .iter()
-            .all(|edge| { edge.string("relation") != "calls" || edge.target != local_new.id })
-    );
-    let candidate = extraction
-        .universal_evidence
-        .first()
-        .ok_or("missing universal evidence")?
-        .relationship_candidates
-        .iter()
-        .find(|candidate| candidate.spelling == "new")
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "new"
+        })
         .ok_or("missing namespaced candidate")?;
-    assert_eq!(candidate.qualifier.as_deref(), Some("other::Item"));
-    assert!(candidate.external_identity);
-    let external = extraction
-        .nodes
-        .iter()
-        .find(|node| node.string("qualified_name") == "other.Item.new")
-        .ok_or("missing namespaced external target")?;
-    assert!(
-        extraction
-            .edges
-            .iter()
-            .any(|edge| edge.string("relation") == "calls" && edge.target == external.id)
+    assert_eq!(
+        candidate.constraints.qualified_name.as_deref(),
+        Some("other::Item::new")
+    );
+    assert!(candidate.constraints.allow_external);
+    assert_ne!(
+        candidate.constraints.qualified_name.as_deref(),
+        Some("crate::namespaced::Item::new")
     );
     Ok(())
 }

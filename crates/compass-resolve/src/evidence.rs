@@ -580,7 +580,9 @@ impl UniversalResolutionIndex {
             else {
                 continue;
             };
-            let (target, resolution_rule, target_kind) = match self.resolve(candidate_id) {
+            let (target, resolution_rule, target_kind, target_site) = match self
+                .resolve(candidate_id)
+            {
                 ResolutionDecision::Resolved {
                     declaration_id,
                     evidence,
@@ -592,6 +594,7 @@ impl UniversalResolutionIndex {
                         graph_ids[&target.id].clone(),
                         evidence.rule,
                         Some(target.kind.clone()),
+                        Some(&target.range),
                     )
                 }
                 ResolutionDecision::ResolvedInventory {
@@ -599,7 +602,7 @@ impl UniversalResolutionIndex {
                     evidence,
                 } => {
                     let kind = inventory_kinds.get(&graph_node_id).cloned();
-                    (graph_node_id, evidence.rule, kind)
+                    (graph_node_id, evidence.rule, kind, None)
                 }
                 ResolutionDecision::QualifiedExternal {
                     qualified_name,
@@ -625,7 +628,7 @@ impl UniversalResolutionIndex {
                         .map(|position| nodes[*position].string("symbol_kind"))
                         .filter(|kind| !kind.is_empty())
                         .unwrap_or_else(|| kind.to_owned());
-                    (id, evidence.rule, Some(projected_kind))
+                    (id, evidence.rule, Some(projected_kind), None)
                 }
                 ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved => continue,
             };
@@ -648,6 +651,14 @@ impl UniversalResolutionIndex {
             let site = self
                 .occurrence(candidate)
                 .map(|occurrence| &occurrence.range)
+                .or_else(|| {
+                    matches!(
+                        candidate.relation,
+                        CandidateRelation::Contains | CandidateRelation::Owns
+                    )
+                    .then_some(target_site)
+                    .flatten()
+                })
                 .or_else(|| {
                     self.declarations
                         .get(&candidate.source_declaration_id)
@@ -1069,6 +1080,8 @@ fn relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::Embeds => "embeds",
         CandidateRelation::Imports => "imports_from",
         CandidateRelation::Reexports => "re_exports",
+        CandidateRelation::InvokesMacro => "references",
+        CandidateRelation::Tests => "tests",
     }
 }
 
@@ -1174,6 +1187,8 @@ fn external_kind(candidate: &RelationshipCandidate) -> &'static str {
         CandidateRelation::Decorates => "function",
         CandidateRelation::References => "variable",
         CandidateRelation::Contains | CandidateRelation::Owns => "variable",
+        CandidateRelation::InvokesMacro => "macro",
+        CandidateRelation::Tests => "function",
     }
 }
 
@@ -1233,7 +1248,22 @@ fn materialized_edge(
         candidate_relation_name(candidate.relation),
         resolution_rule_name(resolution_rule)
     );
-    let occurrence_rule = format!("{producer_rule}:{}", candidate.id);
+    let occurrence_rule = binding.map_or_else(
+        || producer_rule.clone(),
+        |binding| {
+            // Import aliases can share one statement anchor and one resolved
+            // endpoint. Keep those occurrences distinct without using the
+            // candidate ID, whose absolute byte position changes when the
+            // statement moves. Binding offsets within the statement remain
+            // portable across checkouts and source relocation.
+            format!(
+                "{producer_rule}:binding:{}:{}:{}",
+                binding.spelling,
+                binding.range.start_byte.saturating_sub(range.start_byte),
+                binding.range.end_byte.saturating_sub(range.start_byte)
+            )
+        },
+    );
     let mut attributes = Map::from_iter([
         ("relation".to_owned(), Value::String(relation.to_owned())),
         ("_origin".to_owned(), Value::String("ast".to_owned())),
@@ -1377,6 +1407,8 @@ const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::Embeds => "embedding",
         CandidateRelation::Imports => "import",
         CandidateRelation::Reexports => "reexport",
+        CandidateRelation::InvokesMacro => "macro-invocation",
+        CandidateRelation::Tests => "test-call",
     }
 }
 
