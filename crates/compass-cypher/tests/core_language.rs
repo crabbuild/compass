@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use compass_cypher::{
-    CompileLimits, CompileRequest, ParameterTypes, QueryProfileMode, compile, parse_only,
+    Clause, CompileLimits, CompileRequest, ParameterTypes, QueryProfileMode, compile, parse_only,
 };
 use compass_model::SchemaFingerprint;
 
@@ -73,5 +73,44 @@ fn correlated_exists_does_not_require_a_return_clause() -> Result<(), Box<dyn Er
         &parameters,
         &schema,
     ))?;
+    Ok(())
+}
+
+#[test]
+fn removes_only_unreferenced_path_bindings() -> Result<(), Box<dyn Error>> {
+    let parameters = ParameterTypes::new();
+    let schema = SchemaFingerprint::empty();
+    let unused = compile(request(
+        "MATCH p=(a)-[:CALLS*1..2]->(b) \
+         RETURN a.id AS source, b.id AS target ORDER BY source, target LIMIT 100",
+        &parameters,
+        &schema,
+    ))?;
+    assert!(unused.plan.optimizations.iter().any(|record| {
+        record.rule == "unused-path-binding-elimination"
+            && record.reason == "removed 1 unreferenced path binding(s) before execution"
+    }));
+    let Some(Clause::Match(unused_match)) = unused.plan.ast.parts[0].clauses.first() else {
+        return Err("expected leading MATCH".into());
+    };
+    assert_eq!(unused_match.patterns[0].variable, None);
+
+    for source in [
+        "MATCH p=(a)-[:CALLS*1..2]->(b) RETURN length(p) AS hops",
+        "MATCH p=(a)-[:CALLS*1..2]->(b) RETURN *",
+    ] {
+        let retained = compile(request(source, &parameters, &schema))?;
+        let Some(Clause::Match(retained_match)) = retained.plan.ast.parts[0].clauses.first() else {
+            return Err("expected leading MATCH".into());
+        };
+        assert_eq!(retained_match.patterns[0].variable.as_deref(), Some("p"));
+        assert!(
+            retained
+                .plan
+                .optimizations
+                .iter()
+                .all(|record| record.rule != "unused-path-binding-elimination")
+        );
+    }
     Ok(())
 }
