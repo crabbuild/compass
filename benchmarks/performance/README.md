@@ -77,6 +77,52 @@ the cross-tool ratio because Graphify has no equivalent workload.
 The comparison environment is isolated under `target/performance/` and is not a
 Compass runtime or development dependency.
 
+## Analyze external comparison runs
+
+`analyze.py` profiles Compass and Graphify graphs that were built outside the
+qualification harness. It expects this workspace layout:
+
+```text
+run/
+├── logs/{compass,graphify}-CORPUS.log
+└── outputs/
+    ├── compass/CORPUS/compass-out/
+    └── graphify/CORPUS/graphify-out/
+```
+
+Describe the matching source checkouts in a JSON manifest. Relative `source`
+paths are resolved from the manifest directory, so manifests remain portable
+when the corpus bundle is moved:
+
+```json
+{
+  "corpora": [
+    {
+      "name": "django",
+      "language": "Python",
+      "framework": "Django",
+      "source": "sources/django"
+    }
+  ]
+}
+```
+
+Run the analyzer with the exact binaries used to build the graphs:
+
+```bash
+python3 benchmarks/performance/analyze.py \
+  --workspace /path/to/run \
+  --corpora /path/to/corpora.json \
+  --compass-binary /path/to/compass \
+  --compass-source /path/to/compass-checkout \
+  --graphify-binary /path/to/graphify
+```
+
+The command writes `metrics/results.json`, one comparator SQLite database per
+corpus, and `REPORT.md` under the run workspace. This is diagnostic evidence,
+not a promotable Compass performance baseline; use `harness.py compare` for
+qualification.
+
 ## Output and interruption policy
 
 `run.json` contains exact tool, environment, corpus, command, timing, memory,
