@@ -9,6 +9,7 @@ import json
 import math
 from pathlib import Path, PurePosixPath
 import re
+import sqlite3
 import subprocess
 from typing import Any, Iterable
 
@@ -25,6 +26,13 @@ from .model import (
     WilsonInterval,
     to_json_value,
 )
+from .correctness import (
+    _classify_edges,
+    _classify_nodes,
+    _edge_facts,
+    _node_facts,
+)
+from .occurrences import SourceOccurrenceOracle
 
 
 AUDIT_SCHEMA = "compass.quality-audit"
@@ -79,6 +87,203 @@ class AuditError(ValueError):
 class _GraphIndex:
     nodes: dict[str, dict[str, Any]]
     facts: dict[tuple[str, str, str], tuple[dict[str, Any], ...]]
+
+
+def _source_line_range(root: Path, source_file: str, location: str) -> tuple[int, int, str] | None:
+    match = re.fullmatch(r"L([1-9][0-9]*)", location)
+    if match is None:
+        return None
+    relative = Path(source_file.replace("\\", "/"))
+    if relative.is_absolute():
+        return None
+    root = root.resolve()
+    path = (root / relative).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return None
+    try:
+        contents = path.read_bytes()
+    except OSError:
+        return None
+    lines = contents.splitlines(keepends=True)
+    line = int(match.group(1))
+    if line > len(lines):
+        return None
+    start = sum(map(len, lines[: line - 1]))
+    snippet = lines[line - 1].rstrip(b"\r\n")
+    if not snippet:
+        return None
+    end = start + len(snippet)
+    normalized = snippet.replace(b"\r\n", b"\n")
+    return start, end, hashlib.sha256(normalized).hexdigest()
+
+
+def _capability_for_relation(relation: str) -> str:
+    return {
+        "calls": "calls",
+        "contains": "ownership",
+        "exports": "reexports",
+        "extends": "base_types",
+        "imports": "imports",
+        "rationale_for": "rationale",
+        "references": "type_references",
+        "routes_to": "routes",
+    }.get(relation, relation)
+
+
+def _target_cluster(label: str, identifier: str) -> str:
+    normalized = re.sub(r"[^a-z0-9_.:/-]+", "-", label.casefold()).strip("-")
+    if normalized and IDENTITY.fullmatch(normalized) is not None:
+        return normalized[:120]
+    return f"target-{hashlib.sha256(identifier.encode()).hexdigest()[:16]}"
+
+
+def export_comparison_candidates(
+    database_path: Path,
+    graph_path: Path,
+    corpus_root: Path,
+    corpus: str,
+    adapter: str,
+    destination: Path,
+) -> Path:
+    """Export deterministic, unjudged source-bounded comparison hypotheses."""
+
+    corpus = _text(corpus, "corpus", identity=True)
+    adapter = _text(adapter, "adapter", identity=True)
+    if not database_path.is_file():
+        raise AuditError(f"comparison database does not exist: {database_path}")
+    if not graph_path.is_file():
+        raise AuditError(f"graph does not exist: {graph_path}")
+    corpus_root = corpus_root.resolve()
+    if not corpus_root.is_dir():
+        raise AuditError(f"corpus root does not exist: {corpus_root}")
+
+    with sqlite3.connect(database_path) as database:
+        compass_nodes = _node_facts(database, "compass")
+        graphify_nodes = _node_facts(database, "graphify")
+        node_coverage, node_mapping = _classify_nodes(graphify_nodes, compass_nodes)
+        compass_edges = _edge_facts(database, "compass")
+        graphify_edges = _edge_facts(database, "graphify")
+        coverage = _classify_edges(
+            graphify_edges,
+            compass_edges,
+            graphify_nodes,
+            compass_nodes,
+            node_coverage,
+            node_mapping,
+            SourceOccurrenceOracle(corpus_root),
+        )
+
+    compass_by_payload = {edge.payload_sha256: edge for edge in compass_edges}
+    candidates: list[dict[str, Any]] = []
+    for graphify, classification in zip(graphify_edges, coverage, strict=True):
+        bounded = _source_line_range(
+            corpus_root,
+            graphify.occurrence_file,
+            graphify.occurrence_location,
+        )
+        if bounded is None:
+            continue
+        start, end, snippet_sha256 = bounded
+        compass_fact = (
+            compass_by_payload.get(classification.compass_fact)
+            if classification.compass_fact is not None
+            else None
+        )
+        source_id = (
+            compass_fact.source
+            if compass_fact is not None
+            else node_mapping.get(graphify.source)
+        )
+        if source_id is None:
+            continue
+        target_id = (
+            compass_fact.target
+            if compass_fact is not None
+            else node_mapping.get(graphify.target, graphify.target)
+        )
+        source_node = compass_nodes.get(source_id) or graphify_nodes.get(graphify.source)
+        target_node = compass_nodes.get(target_id) or graphify_nodes.get(graphify.target)
+        if source_node is None or target_node is None:
+            continue
+        language = source_node.language
+        if not language:
+            continue
+        identity = (
+            corpus,
+            graphify.relation,
+            source_id,
+            target_id,
+            graphify.occurrence_file,
+            graphify.occurrence_location,
+            classification.status,
+            classification.reason,
+        )
+        candidate_id = "candidate-" + hashlib.sha256(
+            json.dumps(identity, separators=(",", ":")).encode()
+        ).hexdigest()[:24]
+        candidates.append(
+            {
+                "id": candidate_id,
+                "suggestedPool": (
+                    "accepted"
+                    if classification.status in {"exact", "dominated"}
+                    and compass_fact is not None
+                    else "graphify_hypothesis"
+                ),
+                "adapter": adapter,
+                "capability": _capability_for_relation(graphify.relation),
+                "language": language,
+                "relation": graphify.relation,
+                "confidence": classification.status,
+                "targetCluster": _target_cluster(
+                    target_node.qualified_name or target_node.normalized_label,
+                    target_id,
+                ),
+                "source": {"nodeId": source_id, "language": language},
+                "target": {
+                    "nodeId": target_id,
+                    "language": target_node.language or language,
+                },
+                "occurrence": {
+                    "file": graphify.occurrence_file,
+                    "line": int(graphify.occurrence_location[1:]),
+                    "startByte": start,
+                    "endByte": end,
+                    "snippetSha256": snippet_sha256,
+                    "requiresExactGraphRange": True,
+                },
+                "comparison": {
+                    "status": classification.status,
+                    "reason": classification.reason,
+                    "compassFact": classification.compass_fact,
+                },
+                "judgment": None,
+                "reason": None,
+            }
+        )
+    candidates.sort(key=lambda candidate: candidate["id"])
+    payload = {
+        "schema": "compass.quality-audit-candidates",
+        "corpus": {
+            "name": corpus,
+            "commit": _corpus_commit(corpus_root),
+            "path": str(corpus_root),
+            "graph": str(graph_path.resolve()),
+            "graphSha256": _file_sha256(graph_path),
+        },
+        "adapter": adapter,
+        "recordsAreUnjudged": True,
+        "candidates": candidates,
+    }
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        + "\n",
+        encoding="utf-8",
+    )
+    return destination
 
 
 def _expect_object(value: object, context: str) -> dict[str, Any]:

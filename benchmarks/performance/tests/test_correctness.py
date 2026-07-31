@@ -17,7 +17,9 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def compare_documents(
-    compass_document: str, graphify_document: str
+    compass_document: str,
+    graphify_document: str,
+    source_documents: dict[str, str] | None = None,
 ):
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -25,10 +27,14 @@ def compare_documents(
         graphify = root / "graphify.json"
         compass.write_text(compass_document, encoding="utf-8")
         graphify.write_text(graphify_document, encoding="utf-8")
+        for source_file, document in (source_documents or {}).items():
+            destination = root / source_file
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(document, encoding="utf-8")
         with closing(sqlite3.connect(":memory:")) as database:
             index_graph("compass", compass, database)
             index_graph("graphify", graphify, database)
-            return compare_graphs(database)
+            return compare_graphs(database, root if source_documents is not None else None)
 
 
 class CorrectnessTests(unittest.TestCase):
@@ -155,6 +161,110 @@ class CorrectnessTests(unittest.TestCase):
             index_graph("graphify", graphify, database)
         result = compare_graphs(database)
         self.assertTrue(result.passed, result.failures)
+
+    def test_multiline_python_imports_match_only_with_same_statement_evidence(self) -> None:
+        nodes = """
+          {"id":"source","label":"module.py","kind":"file",
+           "source_file":"pkg/module.py","source_location":"L1","language":"python"},
+          {"id":"target","label":"Target","kind":"type_alias","language":"python"}
+        """
+        compass = (
+            '{"graph":{"diagnostics":[]},"nodes":['
+            + nodes
+            + '],"links":[{"source":"source","target":"target","relation":"imports",'
+            '"source_file":"pkg/module.py","source_location":"L2"}]}'
+        )
+        graphify = (
+            '{"nodes":['
+            + nodes
+            + '],"links":[{"source":"source","target":"target","relation":"imports",'
+            '"source_file":"pkg/module.py","source_location":"L1"}]}'
+        )
+        source = {"pkg/module.py": "from package import (\n    Target,\n)\n"}
+
+        strict = compare_documents(compass, graphify)
+        self.assertEqual(strict.metrics["missing_graphify_edges"], 1)
+
+        proven = compare_documents(compass, graphify, source)
+        self.assertTrue(proven.passed, proven.failures)
+        self.assertEqual(proven.metrics["exact_graphify_edges"], 0)
+        self.assertEqual(proven.metrics["dominated_graphify_edges"], 1)
+        self.assertIn(
+            '"dominated:source_statement_occurrence":1',
+            proven.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_occurrence_oracle_rejects_different_statements_and_invalid_sources(self) -> None:
+        def result_for(source_file: str, compass_line: int, source: str):
+            nodes = (
+                f'{{"id":"source","label":"module","kind":"file",'
+                f'"source_file":"{source_file}","source_location":"L1",'
+                '"language":"python"},'
+                '{"id":"target","label":"Target","kind":"type_alias",'
+                '"language":"python"}'
+            )
+            compass = (
+                '{"graph":{"diagnostics":[]},"nodes":['
+                + nodes
+                + '],"links":[{"source":"source","target":"target",'
+                f'"relation":"imports","source_file":"{source_file}",'
+                f'"source_location":"L{compass_line}"}}]}}'
+            )
+            graphify = (
+                '{"nodes":['
+                + nodes
+                + '],"links":[{"source":"source","target":"target",'
+                f'"relation":"imports","source_file":"{source_file}",'
+                '"source_location":"L1"}]}'
+            )
+            return compare_documents(compass, graphify, {source_file: source})
+
+        different = result_for(
+            "pkg/module.py",
+            2,
+            "from package import Target\nfrom package import Target\n",
+        )
+        self.assertEqual(different.metrics["missing_graphify_edges"], 1)
+
+        malformed = result_for(
+            "pkg/module.py",
+            2,
+            "from package import (\n    Target,\n",
+        )
+        self.assertEqual(malformed.metrics["missing_graphify_edges"], 1)
+
+        unsupported = result_for(
+            "pkg/module.java",
+            2,
+            "import package.\n    Target;\n",
+        )
+        self.assertEqual(unsupported.metrics["missing_graphify_edges"], 1)
+
+    def test_occurrence_oracle_does_not_merge_nested_calls(self) -> None:
+        nodes = """
+          {"id":"source","label":"run","kind":"function",
+           "source_file":"pkg/module.py","source_location":"L1","language":"python"},
+          {"id":"target","label":"target","kind":"function",
+           "source_file":"pkg/target.py","source_location":"L1","language":"python"}
+        """
+        compass = (
+            '{"graph":{"diagnostics":[]},"nodes":['
+            + nodes
+            + '],"links":[{"source":"source","target":"target","relation":"calls",'
+            '"source_file":"pkg/module.py","source_location":"L2"}]}'
+        )
+        graphify = (
+            '{"nodes":['
+            + nodes
+            + '],"links":[{"source":"source","target":"target","relation":"calls",'
+            '"source_file":"pkg/module.py","source_location":"L1"}]}'
+        )
+        result = compare_documents(
+            compass,
+            graphify,
+            {"pkg/module.py": "target(\n    target()\n)\n"},
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 1)
 
     def test_rationale_facts_match_by_source_anchor_across_schema_names(self) -> None:
         database = self.database()

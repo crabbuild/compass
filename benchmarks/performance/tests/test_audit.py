@@ -3,16 +3,19 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 
 from benchmarks.performance.compass.audit import (
     AuditError,
     audit_result_json_value,
+    export_comparison_candidates,
     load_manifest,
     run_audit,
     wilson_interval,
 )
+from benchmarks.performance.compass.correctness import index_graph
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -174,6 +177,64 @@ class AuditTests(unittest.TestCase):
             wrong_corpus["records"][0]["corpus"] = "different"
             with self.assertRaisesRegex(AuditError, "unknown corpus"):
                 load_manifest(self.write_manifest(wrong_corpus, root))
+
+    def test_comparison_candidate_export_is_pinned_deterministic_and_unjudged(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            (corpus / ".compass-audit-commit").write_text(
+                "1" * 40, encoding="utf-8"
+            )
+            (corpus / "main.py").write_text("target()\n", encoding="utf-8")
+            nodes = (
+                '{"id":"source","label":"run()","kind":"function",'
+                '"source_file":"main.py","source_location":"L1","language":"python"},'
+                '{"id":"target","label":"target()","kind":"function",'
+                '"source_file":"main.py","source_location":"L1","language":"python"}'
+            )
+            compass = root / "compass.json"
+            compass.write_text(
+                '{"graph":{"diagnostics":[]},"nodes":['
+                + nodes
+                + '],"links":[{"source":"source","target":"target",'
+                '"relation":"calls","relationshipSite":{"file":"main.py",'
+                '"startLine":1,"startByte":0,"endByte":6}}]}',
+                encoding="utf-8",
+            )
+            graphify = root / "graphify.json"
+            graphify.write_text(
+                '{"nodes":['
+                + nodes
+                + '],"links":[{"source":"source","target":"target",'
+                '"relation":"calls","source_file":"main.py",'
+                '"source_location":"L1"}]}',
+                encoding="utf-8",
+            )
+            database_path = root / "comparison.sqlite"
+            with sqlite3.connect(database_path) as database:
+                index_graph("compass", compass, database)
+                index_graph("graphify", graphify, database)
+
+            first = root / "first.json"
+            second = root / "second.json"
+            export_comparison_candidates(
+                database_path, compass, corpus, "fixture", "python", first
+            )
+            export_comparison_candidates(
+                database_path, compass, corpus, "fixture", "python", second
+            )
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+            payload = json.loads(first.read_text(encoding="utf-8"))
+            self.assertEqual(payload["schema"], "compass.quality-audit-candidates")
+            self.assertTrue(payload["recordsAreUnjudged"])
+            self.assertEqual(payload["corpus"]["commit"], "1" * 40)
+            self.assertEqual(len(payload["candidates"]), 1)
+            candidate = payload["candidates"][0]
+            self.assertIsNone(candidate["judgment"])
+            self.assertIsNone(candidate["reason"])
+            self.assertEqual(candidate["comparison"]["status"], "exact")
+            self.assertTrue(candidate["occurrence"]["requiresExactGraphRange"])
 
 
 if __name__ == "__main__":

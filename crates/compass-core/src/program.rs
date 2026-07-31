@@ -3,6 +3,7 @@ use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
 use compass_files::{Cache, CacheKind, FileError, write_bytes_atomic};
@@ -37,7 +38,7 @@ pub(crate) struct ProgramBuild {
 struct SourceInput {
     source_file: String,
     language: String,
-    bytes: Vec<u8>,
+    bytes: Arc<[u8]>,
     digest: String,
     cache_key: String,
 }
@@ -46,7 +47,7 @@ struct SourceInput {
 pub(crate) struct PreparedSyntaxInput {
     pub source_file: String,
     pub language: String,
-    pub bytes: Vec<u8>,
+    pub bytes: Arc<[u8]>,
     pub batch: EvidenceBatch,
 }
 
@@ -105,10 +106,14 @@ pub(crate) fn build_program(
         .iter()
         .map(|input| (input.source_file.clone(), input.digest.clone()))
         .collect::<BTreeMap<_, _>>();
-    let source_texts = inputs
-        .iter()
-        .map(|input| (input.source_file.clone(), input.bytes.clone()))
-        .collect::<BTreeMap<_, _>>();
+    let source_texts = if artifacts.is_empty() {
+        BTreeMap::new()
+    } else {
+        inputs
+            .iter()
+            .map(|input| (input.source_file.clone(), input.bytes.to_vec()))
+            .collect::<BTreeMap<_, _>>()
+    };
     profile_internal("Program input preparation", &mut internal_started);
 
     let syntax_kind = CacheKind::ProgramSyntax {
@@ -331,7 +336,7 @@ pub(crate) fn load_current_program(
         .collect::<BTreeMap<_, _>>();
     let source_texts = inputs
         .iter()
-        .map(|input| (input.source_file.clone(), input.bytes.clone()))
+        .map(|input| (input.source_file.clone(), input.bytes.to_vec()))
         .collect::<BTreeMap<_, _>>();
     let mut providers = Vec::new();
     let syntax_provider = TreeSitterSyntaxProvider::default();
@@ -406,7 +411,7 @@ pub(crate) fn current_provider_manifest(
         .collect::<BTreeMap<_, _>>();
     let source_texts = inputs
         .iter()
-        .map(|input| (input.source_file.clone(), input.bytes.clone()))
+        .map(|input| (input.source_file.clone(), input.bytes.to_vec()))
         .collect::<BTreeMap<_, _>>();
     let syntax_provider = TreeSitterSyntaxProvider::default();
     let mut providers = inputs
@@ -473,10 +478,12 @@ fn read_sources(
             ))
         })?;
         let source_file = compass_program::normalize_source_path(&relative.to_string_lossy())?;
-        let bytes = fs::read(&canonical).map_err(|source| FileError::Io {
-            path: canonical,
-            source,
-        })?;
+        let bytes: Arc<[u8]> = fs::read(&canonical)
+            .map_err(|source| FileError::Io {
+                path: canonical,
+                source,
+            })?
+            .into();
         let digest = hex_sha256(&bytes);
         let language = Registry::resolve(Path::new(&source_file))
             .map_or("", |spec| spec.name)

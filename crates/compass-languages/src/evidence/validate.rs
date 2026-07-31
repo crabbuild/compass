@@ -449,11 +449,13 @@ fn validate_fact(
                     } => {
                         if !matches!(
                             fact.relation,
-                            CandidateRelation::Calls | CandidateRelation::AccessesMember
+                            CandidateRelation::Calls
+                                | CandidateRelation::Constructs
+                                | CandidateRelation::AccessesMember
                         ) {
                             return Err(invalid_fact(
                                 &fact.id,
-                                "receiver dispatch requires a call or member-access candidate",
+                                "receiver dispatch requires a call, construction, or member-access candidate",
                             ));
                         }
                         if receiver_qualified_name.is_empty() {

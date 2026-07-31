@@ -123,6 +123,49 @@ corpus, and `REPORT.md` under the run workspace. This is diagnostic evidence,
 not a promotable Compass performance baseline; use `harness.py compare` for
 qualification.
 
+The comparator uses each manifest's pinned `source` checkout to prove
+statement-level occurrence equivalence. For example, the first line of a
+multiline Python import and the exact imported-item line are equivalent only
+when both fall inside the same parsed import statement. Missing, unreadable,
+escaped, unsupported, or malformed source fails closed to exact-line matching.
+
+## Source-grounded quality audit
+
+Create an unjudged candidate set from a comparator database without rerunning
+either graph producer:
+
+```bash
+python3 benchmarks/performance/harness.py audit-candidates \
+  --database target/performance/manual/django-comparison.sqlite \
+  --graph /path/to/pinned/compass/graph.json \
+  --corpus /path/to/pinned/django \
+  --name django \
+  --adapter python \
+  --output target/performance/audits/django-candidates.json
+```
+
+The export pins the corpus commit and graph digest, bounds every candidate to
+repository source, records the comparator classification, and leaves
+`judgment` and adjudicator `reason` empty. Candidate line ranges are discovery
+evidence, not accepted graph ranges: `requiresExactGraphRange` must be resolved
+to the graph's exact occurrence before a record enters a qualification
+manifest. This prevents generated hypotheses from silently becoming positive
+precision evidence.
+
+After explicit adjudication, run the existing audit gate:
+
+```bash
+python3 benchmarks/performance/harness.py audit \
+  --manifest /path/to/qualification.json \
+  --graph /path/to/pinned/compass/graph.json \
+  --corpus /path/to/pinned/corpus
+```
+
+The checked-in `audits/universal-core.json` is only a small conformance fixture.
+Production qualification still requires the fixed sample, precision, Wilson
+lower-bound, capability, corpus, relation, diversity, and recall thresholds
+enforced by `compass/audit.py`.
+
 ## Output and interruption policy
 
 `run.json` contains exact tool, environment, corpus, command, timing, memory,

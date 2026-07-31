@@ -240,6 +240,187 @@ fn python_super_call_resolves_an_exact_direct_base_method_through_shared_c3_disp
 }
 
 #[test]
+fn python_self_and_cls_calls_resolve_only_through_the_proven_receiver_hierarchy() {
+    let source = b"class Base:\n    def inherited(self):\n        return None\nclass Owner(Base):\n    def own(self):\n        return None\n    @classmethod\n    def build(cls):\n        cls.own()\n        cls.inherited()\n    def run(self):\n        self.own()\n        self.inherited()\n        self.missing()\nclass Unrelated:\n    def missing(self):\n        return None\n";
+    let extracted = extract("pkg/models.py", source);
+    let sources = HashMap::from([(
+        "pkg/models.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+
+    let calls_at = |line: &str| {
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.string("relation") == "calls" && edge.string("source_location") == line
+            })
+            .collect::<Vec<_>>()
+    };
+    let target_location = |target: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.id == target)
+            .map(|node| node.string("source_location"))
+            .unwrap_or_default()
+    };
+    for line in ["L9", "L12"] {
+        let calls = calls_at(line);
+        assert_eq!(calls.len(), 1, "own receiver call at {line}: {calls:#?}");
+        assert_eq!(target_location(&calls[0].target), "L5");
+        assert_eq!(
+            calls[0].string("resolution_rule"),
+            "linearizedreceiverdispatch"
+        );
+    }
+    for line in ["L10", "L13"] {
+        let calls = calls_at(line);
+        assert_eq!(
+            calls.len(),
+            1,
+            "inherited receiver call at {line}: {calls:#?}"
+        );
+        assert_eq!(target_location(&calls[0].target), "L2");
+        assert_eq!(
+            calls[0].string("resolution_rule"),
+            "linearizedreceiverdispatch"
+        );
+    }
+    assert!(
+        calls_at("L14").is_empty(),
+        "unrelated method must fail closed"
+    );
+}
+
+#[test]
+fn python_self_call_with_an_external_base_cannot_rebind_to_a_local_class() {
+    let source = b"import logging\nclass Handler(logging.Handler):\n    def emit(self, record):\n        self.format(record)\nclass Formatter:\n    def format(self, record):\n        return record\n";
+    let extracted = extract("pkg/log.py", source);
+    let sources = HashMap::from([(
+        "pkg/log.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "calls" || edge.string("source_location") != "L4"
+    }));
+}
+
+#[test]
+fn python_self_call_does_not_guess_a_runtime_subclass_override() {
+    let source = b"class Base:\n    def run(self):\n        self.hook()\nclass Child(Base):\n    def hook(self):\n        return None\n";
+    let extracted = extract("pkg/models.py", source);
+    let sources = HashMap::from([(
+        "pkg/models.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "calls" || edge.string("source_location") != "L3"
+    }));
+}
+
+#[test]
+fn python_receiver_construction_resolves_an_exact_nested_type() {
+    let source = b"class Owner:\n    class Product:\n        pass\n    def build(self):\n        return self.Product()\n";
+    let extracted = extract("pkg/models.py", source);
+    assert_eq!(extracted.error, None);
+    let sources = HashMap::from([(
+        "pkg/models.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let product = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "class"
+                && node.string("source_file") == "pkg/models.py"
+                && node.string("source_location") == "L2"
+        })
+        .expect("nested product class");
+    let constructions = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.string("source_location") == "L5")
+        .collect::<Vec<_>>();
+    assert_eq!(constructions.len(), 1, "{constructions:#?}");
+    assert_eq!(constructions[0].target, product.id);
+    assert_eq!(
+        constructions[0].string("resolution_rule"),
+        "linearizedreceiverdispatch"
+    );
+}
+
+#[test]
+fn python_self_call_uses_a_source_proven_first_base_before_an_external_boundary() {
+    let source = b"class Known:\n    def prepare(self):\n        return None\nclass Owner(Known, External):\n    def run(self):\n        self.prepare()\n";
+    let extracted = extract("pkg/models.py", source);
+    assert_eq!(extracted.error, None);
+    let sources = HashMap::from([(
+        "pkg/models.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let prepare = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "method"
+                && node.string("source_file") == "pkg/models.py"
+                && node.string("source_location") == "L2"
+        })
+        .expect("known first-base member");
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.string("source_location") == "L6")
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1, "{calls:#?}");
+    assert_eq!(calls[0].target, prepare.id);
+    assert_eq!(
+        calls[0].string("resolution_rule"),
+        "linearizedreceiverdispatch"
+    );
+}
+
+#[test]
+fn python_self_call_follows_single_inheritance_to_a_proven_first_base_member() {
+    let source = b"class Known:\n    def prepare(self):\n        return None\nclass Middle(Known, External):\n    pass\nclass Owner(Middle):\n    def run(self):\n        self.prepare()\n";
+    let extracted = extract("pkg/models.py", source);
+    assert_eq!(extracted.error, None);
+    let sources = HashMap::from([(
+        "pkg/models.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let prepare = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "method"
+                && node.string("source_file") == "pkg/models.py"
+                && node.string("source_location") == "L2"
+        })
+        .expect("known first-base member");
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.string("source_location") == "L8")
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1, "{calls:#?}");
+    assert_eq!(calls[0].target, prepare.id);
+    assert_eq!(
+        calls[0].string("resolution_rule"),
+        "linearizedreceiverdispatch"
+    );
+}
+
+#[test]
 fn python_direct_base_publication_cannot_fall_through_to_a_same_named_local_class() {
     let provider = extract("pkg/provider.py", b"class Transform:\n    pass\n");
     let caller_source = b"from pkg.provider import Transform\nclass Child(Transform):\n    pass\nclass Transform:\n    pass\n";

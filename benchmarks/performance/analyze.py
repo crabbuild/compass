@@ -343,7 +343,10 @@ def _summary_after_validation_error(
 
 
 def compare(
-    database_path: Path, compass_path: Path, graphify_path: Path
+    database_path: Path,
+    compass_path: Path,
+    graphify_path: Path,
+    source_root: Path,
 ) -> dict[str, object]:
     if database_path.exists():
         database_path.unlink()
@@ -389,7 +392,7 @@ def compare(
             )
             graphify_summary = _summary_after_validation_error(database, "graphify", 0)
 
-        result = compare_graphs(database)
+        result = compare_graphs(database, source_root)
         return {
             "passed": result.passed,
             "failures": list(result.failures),
@@ -570,6 +573,7 @@ def analyze(
                     metrics_directory / f"{name}.sqlite",
                     compass_path,
                     graphify_path,
+                    source,
                 ),
             }
         )

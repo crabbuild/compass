@@ -439,10 +439,15 @@ impl UniversalResolutionIndex {
         }
         if let Some(HierarchyConstraint::ReceiverDispatch {
             receiver_qualified_name,
-            strategy: ReceiverDispatchStrategy::C3AfterReceiver,
+            strategy,
         }) = candidate.constraints.hierarchy.as_ref()
         {
-            return self.resolve_c3_receiver_dispatch(language, receiver_qualified_name, candidate);
+            return self.resolve_c3_receiver_dispatch(
+                language,
+                receiver_qualified_name,
+                *strategy,
+                candidate,
+            );
         }
         if matches!(
             candidate.constraints.hierarchy.as_ref(),
@@ -453,10 +458,7 @@ impl UniversalResolutionIndex {
         let occurrence = self.occurrence(candidate);
         let has_unbound_qualified_receiver = occurrence
             .and_then(|occurrence| occurrence.qualifier.as_deref())
-            .is_some_and(|qualifier| {
-                candidate.binding_id.is_none()
-                    && !matches!((language, qualifier), ("python", "self" | "cls"))
-            });
+            .is_some_and(|_| candidate.binding_id.is_none());
 
         if let Some(decision) = self.resolve_explicit_binding(language, candidate) {
             return decision;
@@ -738,12 +740,38 @@ impl UniversalResolutionIndex {
         &self,
         language: &str,
         receiver_qualified_name: &str,
+        strategy: ReceiverDispatchStrategy,
         candidate: &RelationshipCandidate,
     ) -> ResolutionDecision {
-        if let Some(decision) =
-            self.resolve_direct_receiver_successor(language, receiver_qualified_name, candidate)
-        {
-            return decision;
+        match strategy {
+            ReceiverDispatchStrategy::C3FromReceiver => {
+                if let Some(decision) =
+                    self.resolve_exact_receiver_member(language, receiver_qualified_name, candidate)
+                {
+                    return decision;
+                }
+                // A direct member on the first base is source-proven even
+                // when a later external base prevents construction of the
+                // complete linearization. The same remains true through a
+                // chain of single inheritance: no sibling can precede the
+                // next class until the chain reaches a multiple-base fork.
+                if let Some(decision) = self.resolve_source_proven_receiver_prefix(
+                    language,
+                    receiver_qualified_name,
+                    candidate,
+                ) {
+                    return decision;
+                }
+            }
+            ReceiverDispatchStrategy::C3AfterReceiver => {
+                if let Some(decision) = self.resolve_direct_receiver_successor(
+                    language,
+                    receiver_qualified_name,
+                    candidate,
+                ) {
+                    return decision;
+                }
+            }
         }
         let mut memo = BTreeMap::new();
         let mut visiting = BTreeSet::new();
@@ -793,6 +821,77 @@ impl UniversalResolutionIndex {
             }
         }
         ResolutionDecision::Unresolved
+    }
+
+    fn resolve_source_proven_receiver_prefix(
+        &self,
+        language: &str,
+        receiver_qualified_name: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        let mut receiver = self.exact_hierarchy_type(language, receiver_qualified_name)?;
+        let mut visited = BTreeSet::new();
+        for _ in 0..self.limits.candidates_per_lookup {
+            if !visited.insert(receiver.clone()) {
+                return None;
+            }
+            let base_set = self
+                .direct_bases
+                .get(&(language.to_owned(), receiver.clone()))?;
+            if !base_set.complete
+                || base_set.links.is_empty()
+                || base_set.links.len() > self.limits.candidates_per_lookup
+            {
+                return None;
+            }
+            let first_base = base_set.links[0]
+                .qualified_name
+                .as_deref()
+                .and_then(|name| self.exact_hierarchy_type(language, name))?;
+            if let Some(decision) =
+                self.resolve_exact_receiver_member(language, &first_base, candidate)
+            {
+                return Some(decision);
+            }
+            if base_set.links.len() != 1 {
+                return None;
+            }
+            receiver = first_base;
+        }
+        None
+    }
+
+    fn resolve_exact_receiver_member(
+        &self,
+        language: &str,
+        receiver_qualified_name: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        let receiver = self.exact_hierarchy_type(language, receiver_qualified_name)?;
+        let members = self.members_by_owner.get(&(
+            language.to_owned(),
+            receiver,
+            candidate.target_spelling.clone(),
+        ))?;
+        let eligible = members
+            .iter()
+            .filter(|id| self.declaration_allowed(id, candidate))
+            .take(self.limits.candidates_per_lookup.saturating_add(1))
+            .cloned()
+            .collect::<Vec<_>>();
+        match eligible.as_slice() {
+            [only] => Some(ResolutionDecision::Resolved {
+                declaration_id: only.clone(),
+                evidence: ResolutionEvidence {
+                    rule: ResolutionRule::LinearizedReceiverDispatch,
+                    candidate_count: 1,
+                },
+            }),
+            [] => None,
+            many => Some(ResolutionDecision::Ambiguous {
+                candidate_count: many.len(),
+            }),
+        }
     }
 
     fn resolve_direct_base(
