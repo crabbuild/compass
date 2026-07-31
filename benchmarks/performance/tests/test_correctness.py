@@ -5,7 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 
-from benchmarks.performance.compass_perf.correctness import (
+from benchmarks.performance.compass.correctness import (
     canonical_graph_digest,
     compare_graphs,
     index_graph,

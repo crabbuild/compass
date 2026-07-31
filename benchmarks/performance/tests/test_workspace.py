@@ -6,8 +6,8 @@ import subprocess
 import tempfile
 import unittest
 
-from benchmarks.performance.compass_perf.model import RepositorySpec
-from benchmarks.performance.compass_perf.workspace import (
+from benchmarks.performance.compass.model import RepositorySpec
+from benchmarks.performance.compass.workspace import (
     QualificationWorkspace,
     guarded_remove,
     prepare_checkout,
@@ -91,4 +91,3 @@ class WorkspaceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

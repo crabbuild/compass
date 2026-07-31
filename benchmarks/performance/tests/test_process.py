@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 
-from benchmarks.performance.compass_perf.process import ProcessSpec, run_measured
+from benchmarks.performance.compass.process import ProcessSpec, run_measured
 
 
 FIXTURE = Path(__file__).parent / "helpers" / "process_fixture.py"
@@ -64,4 +64,3 @@ class ProcessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

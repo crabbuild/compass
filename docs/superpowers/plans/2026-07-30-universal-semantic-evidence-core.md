@@ -79,7 +79,7 @@ paths and do not claim universal capabilities.
   adapter, projection, and cache contracts.
 - Create `crates/compass-resolve/tests/universal_resolution.rs`: shared
   resolution and isolation contracts.
-- Create `benchmarks/performance/compass_perf/audit.py`: deterministic audit
+- Create `benchmarks/performance/compass/audit.py`: deterministic audit
   manifest validation, strata accounting, and Wilson precision interval.
 - Create `benchmarks/performance/tests/test_audit.py`: audit harness contracts.
 - Create `benchmarks/performance/audits/universal-core.json`: checked-in
@@ -534,10 +534,10 @@ git commit -m "feat(frameworks): add universal evidence pack contract"
 
 **Files:**
 
-- Create: `benchmarks/performance/compass_perf/audit.py`
+- Create: `benchmarks/performance/compass/audit.py`
 - Create: `benchmarks/performance/tests/test_audit.py`
 - Create: `benchmarks/performance/audits/universal-core.json`
-- Modify: `benchmarks/performance/compass_perf/model.py`
+- Modify: `benchmarks/performance/compass/model.py`
 - Modify: `benchmarks/performance/harness.py`
 
 **Interfaces:**
@@ -602,8 +602,8 @@ python3 -m unittest discover -s benchmarks/performance/tests -p 'test_*.py'
 Commit:
 
 ```bash
-git add benchmarks/performance/compass_perf/audit.py \
-  benchmarks/performance/compass_perf/model.py \
+git add benchmarks/performance/compass/audit.py \
+  benchmarks/performance/compass/model.py \
   benchmarks/performance/harness.py \
   benchmarks/performance/audits/universal-core.json \
   benchmarks/performance/tests/test_audit.py

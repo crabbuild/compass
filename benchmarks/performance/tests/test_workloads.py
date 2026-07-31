@@ -6,9 +6,9 @@ import sys
 import tempfile
 import unittest
 
-from benchmarks.performance.compass_perf.adapters import ToolAdapter
-from benchmarks.performance.compass_perf.model import QueryOracle, RepositorySpec, ToolRevision
-from benchmarks.performance.compass_perf.workloads import (
+from benchmarks.performance.compass.adapters import ToolAdapter
+from benchmarks.performance.compass.model import QueryOracle, RepositorySpec, ToolRevision
+from benchmarks.performance.compass.workloads import (
     graph_neutral_mutation,
     run_build_matrix,
     run_compassql_matrix,
@@ -16,7 +16,7 @@ from benchmarks.performance.compass_perf.workloads import (
     select_mutation_file,
     validate_query_output,
 )
-from benchmarks.performance.compass_perf.workspace import QualificationWorkspace
+from benchmarks.performance.compass.workspace import QualificationWorkspace
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "compass_graph.json"

@@ -21,18 +21,18 @@ from typing import Sequence
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from benchmarks.performance.compass_perf import RUN_SCHEMA
-from benchmarks.performance.compass_perf.adapters import CompassAdapter, GraphifyAdapter
-from benchmarks.performance.compass_perf.audit import audit_result_json_value, run_audit
-from benchmarks.performance.compass_perf.config import load_suite
-from benchmarks.performance.compass_perf.correctness import compare_graphs, index_graph
-from benchmarks.performance.compass_perf.model import (
+from benchmarks.performance.compass import RUN_SCHEMA
+from benchmarks.performance.compass.adapters import CompassAdapter, GraphifyAdapter
+from benchmarks.performance.compass.audit import audit_result_json_value, run_audit
+from benchmarks.performance.compass.config import load_suite
+from benchmarks.performance.compass.correctness import compare_graphs, index_graph
+from benchmarks.performance.compass.model import (
     EnvironmentIdentity,
     GateIssue,
     GateReport,
     QualificationRun,
 )
-from benchmarks.performance.compass_perf.report import (
+from benchmarks.performance.compass.report import (
     compare_baseline,
     compare_tools,
     load_run,
@@ -40,12 +40,12 @@ from benchmarks.performance.compass_perf.report import (
     render_markdown,
     write_run,
 )
-from benchmarks.performance.compass_perf.workloads import (
+from benchmarks.performance.compass.workloads import (
     run_build_matrix,
     run_compassql_matrix,
     run_query_matrix,
 )
-from benchmarks.performance.compass_perf.workspace import (
+from benchmarks.performance.compass.workspace import (
     QualificationWorkspace,
     prepare_checkout,
     resolve_remote_head,

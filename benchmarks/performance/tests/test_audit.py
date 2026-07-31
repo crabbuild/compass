@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from benchmarks.performance.compass_perf.audit import (
+from benchmarks.performance.compass.audit import (
     AuditError,
     audit_result_json_value,
     load_manifest,
