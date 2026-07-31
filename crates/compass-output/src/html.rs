@@ -783,7 +783,7 @@ fn degrees(document: &GraphDocument) -> HashMap<&str, usize> {
 }
 
 fn node_label(node: &NodeRecord) -> String {
-    match node.property("label") {
+    match node.property("label").or_else(|| node.property("name")) {
         None => node.id.clone(),
         Some(Value::Null) => String::new(),
         Some(value) => python_value_string(&value),
@@ -2361,6 +2361,19 @@ mod tests {
         .ok_or("HTML unexpectedly skipped")?;
         assert!(rendered.html.contains("\"learning_status\": \"preferred\""));
         assert!(rendered.html.contains("\"learning_stale\": false"));
+        Ok(())
+    }
+
+    #[test]
+    fn viewer_node_label_projects_code_graph_v1_name() -> Result<(), Box<dyn Error>> {
+        let node: NodeRecord = serde_json::from_value(json!({
+            "id": "sha256:8cfda4",
+            "name": "metavoice.rs",
+            "kind": "file",
+            "language": "rust"
+        }))?;
+
+        assert_eq!(node_label(&node), "metavoice.rs");
         Ok(())
     }
 
