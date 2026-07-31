@@ -438,7 +438,8 @@ mod tests {
 
     #[test]
     fn rooted_index_matches_portable_framework_source() {
-        let root = std::path::Path::new("/workspace/repository");
+        let root = std::env::temp_dir().join("compass-framework-target-index-repository");
+        let source = root.join("routes/python/django/qualification/urls.py");
         let mut extraction = Extraction::default();
         extraction.nodes.push(RawNodeRecord {
             id: "handler".to_owned(),
@@ -457,15 +458,12 @@ mod tests {
                 ),
                 (
                     "source_file".to_owned(),
-                    Value::String(
-                        "/workspace/repository/routes/python/django/qualification/urls.py"
-                            .to_owned(),
-                    ),
+                    Value::String(source.to_string_lossy().into_owned()),
                 ),
             ]),
         });
 
-        let index = FrameworkTargetIndex::new_with_root(&extraction, Some(root));
+        let index = FrameworkTargetIndex::new_with_root(&extraction, Some(&root));
         let (positions, truncated) = index.by_source_terminal(
             "routes/python/django/qualification/urls.py",
             "qualification_health",
