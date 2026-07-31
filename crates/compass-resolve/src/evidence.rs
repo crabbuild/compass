@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use ahash::AHashMap;
 use compass_languages::{
@@ -35,6 +36,7 @@ pub enum ResolutionRule {
     ExactLexicalDeclaration,
     ExplicitBinding,
     UniqueModuleOrPackage,
+    ExactSourceInventory,
     QualifiedExternal,
 }
 
@@ -48,6 +50,10 @@ pub struct ResolutionEvidence {
 pub enum ResolutionDecision {
     Resolved {
         declaration_id: String,
+        evidence: ResolutionEvidence,
+    },
+    ResolvedInventory {
+        graph_node_id: String,
         evidence: ResolutionEvidence,
     },
     QualifiedExternal {
@@ -69,6 +75,7 @@ pub struct UniversalResolutionIndex {
     by_qualified: AHashMap<(String, String), Vec<String>>,
     by_module_name: AHashMap<(String, String, String), Vec<String>>,
     by_scope_name: AHashMap<(String, String, String), Vec<String>>,
+    inventory_by_qualified: AHashMap<(String, String), Vec<String>>,
     aliases: AHashMap<(String, String), Vec<String>>,
     limits: UniversalResolutionLimits,
 }
@@ -76,6 +83,15 @@ pub struct UniversalResolutionIndex {
 impl UniversalResolutionIndex {
     pub fn new(
         batches: &[SemanticEvidenceBatch],
+        limits: UniversalResolutionLimits,
+    ) -> Result<Self, String> {
+        Self::new_with_inventory(batches, &[], Path::new("."), limits)
+    }
+
+    pub fn new_with_inventory(
+        batches: &[SemanticEvidenceBatch],
+        inventory_nodes: &[NodeRecord],
+        root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
         let mut declarations = BTreeMap::new();
@@ -157,6 +173,34 @@ impl UniversalResolutionIndex {
                 values.truncate(limits.candidates_per_lookup);
             }
         }
+        let mut inventory_by_qualified = AHashMap::<_, Vec<_>>::new();
+        for node in inventory_nodes {
+            if node.string("symbol_kind") != "file" || node.string("source_file").is_empty() {
+                continue;
+            }
+            let language = node.string("language");
+            let qualified = match language.as_str() {
+                "python" => python_module_name(&node.string("source_file"), root),
+                "go" => {
+                    let package = node.string("package");
+                    (!package.is_empty()).then_some(package)
+                }
+                _ => None,
+            };
+            if let Some(qualified) = qualified {
+                inventory_by_qualified
+                    .entry((language, qualified))
+                    .or_default()
+                    .push(node.id.clone());
+            }
+        }
+        for values in inventory_by_qualified.values_mut() {
+            values.sort_unstable();
+            values.dedup();
+            if values.len() > limits.candidates_per_lookup {
+                values.truncate(limits.candidates_per_lookup);
+            }
+        }
         let mut aliases = AHashMap::<_, Vec<_>>::new();
         for binding in bindings
             .values()
@@ -195,6 +239,7 @@ impl UniversalResolutionIndex {
             by_qualified,
             by_module_name,
             by_scope_name,
+            inventory_by_qualified,
             aliases,
             limits,
         })
@@ -286,12 +331,15 @@ impl UniversalResolutionIndex {
                     return ResolutionDecision::Ambiguous { candidate_count };
                 }
             };
-            let key = (language.to_owned(), qualified);
+            let key = (language.to_owned(), qualified.clone());
             if let Some(decision) = self.unique_decision(
                 self.by_qualified.get(&key),
                 candidate,
                 ResolutionRule::ExplicitBinding,
             ) {
+                return decision;
+            }
+            if let Some(decision) = self.inventory_decision(language, &qualified, candidate) {
                 return decision;
             }
             let imported = self
@@ -332,12 +380,15 @@ impl UniversalResolutionIndex {
                     return ResolutionDecision::Ambiguous { candidate_count };
                 }
             };
-            let key = (language.to_owned(), qualified);
+            let key = (language.to_owned(), qualified.clone());
             if let Some(decision) = self.unique_decision(
                 self.by_qualified.get(&key),
                 candidate,
                 ResolutionRule::ExplicitBinding,
             ) {
+                return decision;
+            }
+            if let Some(decision) = self.inventory_decision(language, &qualified, candidate) {
                 return decision;
             }
         }
@@ -397,6 +448,10 @@ impl UniversalResolutionIndex {
                     };
                     (target.graph_node_id.clone(), evidence.rule)
                 }
+                ResolutionDecision::ResolvedInventory {
+                    graph_node_id,
+                    evidence,
+                } => (graph_node_id, evidence.rule),
                 ResolutionDecision::QualifiedExternal {
                     qualified_name,
                     evidence,
@@ -511,6 +566,42 @@ impl UniversalResolutionIndex {
         }
     }
 
+    fn inventory_decision(
+        &self,
+        language: &str,
+        qualified_name: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        if !matches!(
+            candidate.relation,
+            CandidateRelation::Imports | CandidateRelation::Reexports
+        ) || (!candidate.constraints.allowed_target_kinds.is_empty()
+            && !candidate
+                .constraints
+                .allowed_target_kinds
+                .iter()
+                .any(|kind| matches!(kind.as_str(), "file" | "module" | "package")))
+        {
+            return None;
+        }
+        let candidates = self
+            .inventory_by_qualified
+            .get(&(language.to_owned(), qualified_name.to_owned()))?;
+        match candidates.as_slice() {
+            [graph_node_id] => Some(ResolutionDecision::ResolvedInventory {
+                graph_node_id: graph_node_id.clone(),
+                evidence: ResolutionEvidence {
+                    rule: ResolutionRule::ExactSourceInventory,
+                    candidate_count: 1,
+                },
+            }),
+            [] => None,
+            many => Some(ResolutionDecision::Ambiguous {
+                candidate_count: many.len(),
+            }),
+        }
+    }
+
     fn declaration_allowed(&self, declaration_id: &str, candidate: &RelationshipCandidate) -> bool {
         self.declarations.get(declaration_id).is_some_and(|target| {
             target.language == candidate.language
@@ -539,6 +630,20 @@ impl UniversalResolutionIndex {
         }
         Err(64)
     }
+}
+
+fn python_module_name(source_file: &str, root: &Path) -> Option<String> {
+    let path = Path::new(source_file);
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let source = relative.to_string_lossy().replace('\\', "/");
+    let source = source.strip_suffix(".py")?;
+    let source = source.strip_suffix("/__init__").unwrap_or(source);
+    let module = source
+        .split('/')
+        .filter(|component| !component.is_empty() && *component != ".")
+        .collect::<Vec<_>>()
+        .join(".");
+    (!module.is_empty()).then_some(module)
 }
 
 fn insert_unique<T>(map: &mut BTreeMap<String, T>, id: String, value: T) -> Result<(), String> {

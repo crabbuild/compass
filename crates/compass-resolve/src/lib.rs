@@ -193,7 +193,11 @@ pub fn resolve_with_root(
                 extraction
                     .nodes
                     .iter()
-                    .filter(|node| allowed.contains(&node.id) || node.string("file_type") != "code")
+                    .filter(|node| {
+                        allowed.contains(&node.id)
+                            || node.string("file_type") != "code"
+                            || is_source_inventory_node(node)
+                    })
                     .cloned(),
             );
             merged.edges.extend(
@@ -255,9 +259,11 @@ pub fn resolve_owned_with_root(
                     .filter(|edge| !evidence::is_replaced_relation(relation(edge)))
                     .flat_map(|edge| [edge.source.clone(), edge.target.clone()]),
             );
-            extraction
-                .nodes
-                .retain(|node| allowed.contains(&node.id) || node.string("file_type") != "code");
+            extraction.nodes.retain(|node| {
+                allowed.contains(&node.id)
+                    || node.string("file_type") != "code"
+                    || is_source_inventory_node(node)
+            });
             extraction.edges.retain(|edge| {
                 !evidence::is_replaced_relation(
                     edge.attributes
@@ -299,6 +305,10 @@ fn universal_allowed_node_ids(extraction: &Extraction) -> HashSet<String> {
     allowed
 }
 
+fn is_source_inventory_node(node: &NodeRecord) -> bool {
+    node.string("symbol_kind") == "file" && !node.string("source_file").is_empty()
+}
+
 fn finish_resolution(
     mut merged: Extraction,
     mut language_facts: members::LanguageCallFacts,
@@ -313,8 +323,10 @@ fn finish_resolution(
     canonicalize_import_targets(&mut merged);
     profile_internal("resolver import canonicalization", &mut profile_started);
     if !evidence_batches.is_empty() {
-        match evidence::UniversalResolutionIndex::new(
+        match evidence::UniversalResolutionIndex::new_with_inventory(
             &evidence_batches,
+            &merged.nodes,
+            &canonical_root,
             evidence::UniversalResolutionLimits::default(),
         ) {
             Ok(index) => index.materialize(&mut merged.nodes, &mut merged.edges),
