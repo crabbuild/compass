@@ -116,3 +116,78 @@ fn run() { build_widget(); Widget::new(); }
     }));
     Ok(())
 }
+
+#[test]
+fn java_imports_receivers_and_overload_arity_resolve_on_the_universal_path()
+-> Result<(), Box<dyn Error>> {
+    let mut engine = Engine::default();
+    let repository_source = br#"package org.example.data;
+public class Repository {
+    public Result load(String key) { return new Result(); }
+    public Result load(String key, int limit) { return new Result(); }
+}
+class Result {}
+"#;
+    let service_source = br#"package org.example.app;
+import org.example.data.Repository;
+public class Service {
+    private final Repository repository;
+    public Service(Repository repository) { this.repository = repository; }
+    public void run() { repository.load("one"); }
+}
+"#;
+    let repository = engine.extract_source(
+        Path::new("src/main/java/org/example/data/Repository.java"),
+        repository_source,
+    )?;
+    let service = engine.extract_source(
+        Path::new("src/main/java/org/example/app/Service.java"),
+        service_source,
+    )?;
+    assert!(repository.nodes.is_empty() && repository.edges.is_empty());
+    assert!(service.nodes.is_empty() && service.edges.is_empty());
+    let sources = HashMap::from([
+        (
+            "src/main/java/org/example/data/Repository.java".to_owned(),
+            String::from_utf8(repository_source.to_vec())?,
+        ),
+        (
+            "src/main/java/org/example/app/Service.java".to_owned(),
+            String::from_utf8(service_source.to_vec())?,
+        ),
+    ]);
+    let merged = resolve(&[repository, service], &sources);
+    assert!(merged.error.is_none(), "{:#?}", merged.error);
+    let run = merged
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "org.example.app.Service::run")
+        .ok_or("missing Service::run")?;
+    let loads = merged
+        .nodes
+        .iter()
+        .filter(|node| node.string("qualified_name") == "org.example.data.Repository::load")
+        .collect::<Vec<_>>();
+    assert_eq!(loads.len(), 2);
+    let one_argument_load = loads
+        .iter()
+        .find(|node| node.string("signature") == "load(String)")
+        .ok_or("missing one-argument overload")?;
+    assert!(
+        merged.edges.iter().any(|edge| {
+            edge.source == run.id
+                && edge.target == one_argument_load.id
+                && edge.string("relation") == "calls"
+                && edge.string("resolution_rule") == "explicit-binding"
+        }),
+        "one-argument overload was not selected"
+    );
+    assert!(!merged.edges.iter().any(|edge| {
+        edge.source == run.id
+            && loads
+                .iter()
+                .any(|load| load.id == edge.target && load.id != one_argument_load.id)
+            && edge.string("relation") == "calls"
+    }));
+    Ok(())
+}

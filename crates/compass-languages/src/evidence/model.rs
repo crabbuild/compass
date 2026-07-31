@@ -188,6 +188,12 @@ pub struct DeclarationFact {
     pub scope_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
+    /// Number of source-level parameters when this declaration is callable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameter_count: Option<u32>,
+    /// Whether the final source-level parameter accepts a variable arity.
+    #[serde(default)]
+    pub variadic: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -257,6 +263,9 @@ pub struct ResolutionConstraint {
     pub scope_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub qualified_name: Option<String>,
+    /// Number of source-level arguments at a callable occurrence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub argument_count: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_target_kinds: Vec<String>,
     #[serde(default)]

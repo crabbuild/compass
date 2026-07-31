@@ -1104,6 +1104,15 @@ impl UniversalResolutionIndex {
     fn declaration_allowed(&self, declaration_id: &str, candidate: &RelationshipCandidate) -> bool {
         self.declarations.get(declaration_id).is_some_and(|target| {
             target.language == candidate.language
+                && candidate
+                    .constraints
+                    .argument_count
+                    .is_none_or(|arguments| {
+                        target.parameter_count.is_none_or(|parameters| {
+                            arguments == parameters
+                                || (target.variadic && arguments >= parameters.saturating_sub(1))
+                        })
+                    })
                 && (candidate.constraints.allowed_target_kinds.is_empty()
                     || candidate
                         .constraints

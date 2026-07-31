@@ -23,6 +23,8 @@ pub struct EvidenceBuilder {
 #[derive(Default)]
 struct DeclarationMetadata {
     signature: Option<String>,
+    parameter_count: Option<u32>,
+    variadic: bool,
     signature_hash: Option<String>,
     implementation_hash: Option<String>,
     source_hash: Option<String>,
@@ -122,6 +124,8 @@ impl EvidenceBuilder {
             module_or_package: module_or_package.map(str::to_owned),
             scope_id: scope_id.map(str::to_owned),
             signature: metadata.signature,
+            parameter_count: metadata.parameter_count,
+            variadic: metadata.variadic,
             signature_hash: metadata.signature_hash,
             implementation_hash: metadata.implementation_hash,
             source_hash: metadata.source_hash,
@@ -276,6 +280,10 @@ impl EvidenceBuilder {
         )?;
         constraints.allowed_target_kinds.sort_unstable();
         constraints.allowed_target_kinds.dedup();
+        let argument_count_identity = constraints
+            .argument_count
+            .map(|count| count.to_string())
+            .unwrap_or_default();
         let mut identity = vec![
             candidate_relation_name(relation),
             source_declaration_id,
@@ -286,6 +294,7 @@ impl EvidenceBuilder {
             constraints.module_or_package.as_deref().unwrap_or_default(),
             constraints.scope_id.as_deref().unwrap_or_default(),
             constraints.qualified_name.as_deref().unwrap_or_default(),
+            argument_count_identity.as_str(),
         ];
         identity.extend(constraints.allowed_target_kinds.iter().map(String::as_str));
         identity.push(if constraints.allow_external {
@@ -433,6 +442,7 @@ pub(crate) fn extract_tree_evidence(
     match profile.language {
         "python" => state.extract_python(root)?,
         "go" => state.extract_go(root)?,
+        "java" => state.extract_java(root)?,
         "rust" => state.extract_rust(root)?,
         _ => {
             return Err(EvidenceError::new(
@@ -510,6 +520,8 @@ struct DirectAdapterState<'source> {
     rust_import_nodes: HashSet<usize>,
     rust_test_declarations: HashSet<String>,
     go_lexical_bindings: HashMap<usize, Vec<GoLexicalBinding>>,
+    java_containers: HashMap<usize, DeclarationContext>,
+    java_value_types: HashMap<String, HashMap<String, String>>,
     graph_ids: HashSet<String>,
     parser_error_ranges: Vec<(usize, usize)>,
     builder: EvidenceBuilder,
@@ -527,6 +539,8 @@ impl<'source> DirectAdapterState<'source> {
             python_module_identity(path, source_file)
         } else if profile.language == "go" {
             go_package_identity(path, source_file)
+        } else if profile.language == "java" {
+            java_package_identity(source).unwrap_or_else(|| "<default>".to_owned())
         } else if profile.language == "rust" {
             rust_module_identity(path, source_file)
         } else {
@@ -560,6 +574,8 @@ impl<'source> DirectAdapterState<'source> {
             rust_import_nodes: HashSet::new(),
             rust_test_declarations: HashSet::new(),
             go_lexical_bindings: HashMap::new(),
+            java_containers: HashMap::new(),
+            java_value_types: HashMap::new(),
             graph_ids: HashSet::new(),
             parser_error_ranges: Vec::new(),
             builder: EvidenceBuilder::new(
@@ -609,6 +625,8 @@ impl<'source> DirectAdapterState<'source> {
         let body = evidence_declaration_body(node);
         DeclarationMetadata {
             signature: evidence_readable_signature(node, body, self.source),
+            parameter_count: None,
+            variadic: false,
             signature_hash: Some(evidence_ast_hash(
                 node,
                 self.source,
@@ -945,6 +963,7 @@ impl<'source> DirectAdapterState<'source> {
                     .or_else(|| Some(self.module_or_package.clone())),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: qualified_name.clone(),
+                argument_count: None,
                 allowed_target_kinds: vec!["function".to_owned(), "method".to_owned()],
                 allow_external: qualified_name.is_some(),
             },
@@ -1116,6 +1135,7 @@ impl<'source> DirectAdapterState<'source> {
                     .map(|(module, _)| module.to_owned()),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: Some(import_target.clone()),
+                argument_count: None,
                 allowed_target_kinds: vec![
                     "file".to_owned(),
                     "module".to_owned(),
@@ -1258,6 +1278,837 @@ impl<'source> DirectAdapterState<'source> {
             }
         }
         Ok(())
+    }
+
+    fn extract_java(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
+        let file = self.file.clone().ok_or_else(|| {
+            EvidenceError::new(
+                EvidenceErrorCode::InvalidFact,
+                "non-empty Java source has no file evidence",
+            )
+        })?;
+        self.collect_java_imports(root, &file)?;
+        self.collect_java_declarations(root, &file)?;
+        self.collect_java_value_types(root, &file)?;
+        self.walk_java_evidence(root, &file, true)
+    }
+
+    fn collect_java_imports(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if node.kind() == "import_declaration" {
+            return self.add_java_import(node, owner);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_java_imports(child, owner)?;
+        }
+        Ok(())
+    }
+
+    fn add_java_import(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let raw = self.text(node);
+        let Some(mut target) = raw
+            .strip_prefix("import")
+            .map(str::trim)
+            .map(|value| value.trim_end_matches(';').trim())
+        else {
+            return Ok(());
+        };
+        let is_static = target.starts_with("static ");
+        if is_static {
+            target = target.trim_start_matches("static ").trim();
+        }
+        if target.is_empty() {
+            return Ok(());
+        }
+        let wildcard = target.ends_with(".*");
+        let local = if wildcard {
+            "*"
+        } else {
+            target.rsplit('.').next().unwrap_or(target)
+        };
+        let kind = if local == target {
+            BindingKind::Import
+        } else {
+            BindingKind::ImportAlias
+        };
+        let target_node = last_java_import_name(node).unwrap_or(node);
+        let binding_id = self.builder.bind(
+            kind,
+            local,
+            target,
+            None,
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, target_node),
+        )?;
+        self.record_import_binding(owner, local, target, &binding_id, 0);
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::Import,
+            &owner.fact_id,
+            local,
+            None,
+            Some(&owner.scope_id),
+            is_static.then_some("static"),
+            range_for_node(self.source_file, target_node),
+        )?;
+        self.builder.relate(
+            CandidateRelation::Imports,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            Some(&binding_id),
+            local,
+            ResolutionConstraint {
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: java_qualified_parent(target).map(str::to_owned),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: Some(target.to_owned()),
+                argument_count: None,
+                allowed_target_kinds: vec![
+                    "file".to_owned(),
+                    "package".to_owned(),
+                    "class".to_owned(),
+                    "interface".to_owned(),
+                    "enum".to_owned(),
+                    "record".to_owned(),
+                    "annotation_type".to_owned(),
+                    "method".to_owned(),
+                    "field".to_owned(),
+                ],
+                allow_external: true,
+            },
+        )?;
+        Ok(())
+    }
+
+    fn collect_java_declarations(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if let Some(kind) = java_container_kind(node.kind()) {
+            let Some(name_node) = node.child_by_field_name("name") else {
+                return Ok(());
+            };
+            let name = self.text(name_node);
+            if name.is_empty() {
+                return Ok(());
+            }
+            let qualified_name = java_child_qualified_name(owner, &name);
+            let graph_node_id = self.unique_graph_id(
+                make_id(&[&self.module_or_package, &qualified_name, kind]),
+                node,
+            );
+            let metadata = self.declaration_metadata(node);
+            let fact_id = self.builder.declare_with_metadata(
+                kind,
+                &graph_node_id,
+                &name,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, name_node),
+                metadata,
+            )?;
+            let scope_id = self.builder.open_scope(
+                kind,
+                Some(&fact_id),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, node),
+            )?;
+            self.scope_parents
+                .insert(scope_id.clone(), owner.scope_id.clone());
+            let context = DeclarationContext {
+                fact_id,
+                scope_id,
+                graph_node_id,
+                name: name.clone(),
+                qualified_name: qualified_name.clone(),
+                kind: kind.to_owned(),
+                enclosing_type_qualified_name: Some(qualified_name.clone()),
+            };
+            self.add_ownership(owner, &context)?;
+            self.local_targets
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .insert(name, qualified_name);
+            self.java_containers.insert(node.id(), context.clone());
+            self.declarations.insert(node.id(), context.clone());
+            let body = node.child_by_field_name("body").unwrap_or(node);
+            let mut cursor = body.walk();
+            for child in body.children(&mut cursor).filter(|child| child.is_named()) {
+                self.collect_java_member_declarations(child, &context)?;
+            }
+            return Ok(());
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_java_declarations(child, owner)?;
+        }
+        Ok(())
+    }
+
+    fn collect_java_member_declarations(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if java_container_kind(node.kind()).is_some() {
+            return self.collect_java_declarations(node, owner);
+        }
+        match node.kind() {
+            "method_declaration" | "constructor_declaration" => {
+                self.add_java_callable_declaration(node, owner)?;
+                return Ok(());
+            }
+            "field_declaration" | "constant_declaration" => {
+                self.add_java_field_declarations(node, owner)?;
+                return Ok(());
+            }
+            "enum_constant" => {
+                self.add_java_enum_member(node, owner)?;
+                return Ok(());
+            }
+            _ => {}
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_java_member_declarations(child, owner)?;
+        }
+        Ok(())
+    }
+
+    fn add_java_callable_declaration(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let constructor = node.kind() == "constructor_declaration";
+        let Some(name_node) = node.child_by_field_name("name") else {
+            return Ok(());
+        };
+        let source_name = self.text(name_node);
+        if source_name.is_empty() {
+            return Ok(());
+        }
+        let name = if constructor { "<init>" } else { &source_name };
+        let (parameters, parameter_count, variadic) = java_parameter_signature(node, self.source);
+        let signature = format!("{name}({parameters})");
+        let qualified_name = format!("{}::{name}", owner.qualified_name);
+        let graph_node_id = self.unique_graph_id(
+            make_id(&[
+                &self.module_or_package,
+                &owner.qualified_name,
+                if constructor { "constructor" } else { "method" },
+                name,
+                &parameters,
+            ]),
+            node,
+        );
+        let mut metadata = self.declaration_metadata(node);
+        metadata.signature = Some(signature);
+        metadata.parameter_count = Some(parameter_count);
+        metadata.variadic = variadic;
+        let kind = if constructor { "constructor" } else { "method" };
+        let fact_id = self.builder.declare_with_metadata(
+            kind,
+            &graph_node_id,
+            name,
+            &qualified_name,
+            Some(&self.module_or_package),
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, name_node),
+            metadata,
+        )?;
+        let scope_id = self.builder.open_scope(
+            kind,
+            Some(&fact_id),
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, node),
+        )?;
+        self.scope_parents
+            .insert(scope_id.clone(), owner.scope_id.clone());
+        let context = DeclarationContext {
+            fact_id: fact_id.clone(),
+            scope_id,
+            graph_node_id,
+            name: name.to_owned(),
+            qualified_name: qualified_name.clone(),
+            kind: kind.to_owned(),
+            enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+        };
+        self.add_ownership(owner, &context)?;
+        let binding_id = self.builder.bind(
+            BindingKind::Member,
+            name,
+            &qualified_name,
+            Some(&fact_id),
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, name_node),
+        )?;
+        self.local_bindings
+            .entry(owner.scope_id.clone())
+            .or_default()
+            .entry(name.to_owned())
+            .or_insert(binding_id);
+        self.declarations.insert(node.id(), context);
+        Ok(())
+    }
+
+    fn add_java_field_declarations(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let declared_type = node
+            .child_by_field_name("type")
+            .map(|type_node| java_normalize_type(&self.text(type_node)));
+        let mut declarators = Vec::new();
+        collect_direct_or_nested_nodes(node, "variable_declarator", &mut declarators);
+        for declarator in declarators {
+            let Some(name_node) = declarator.child_by_field_name("name") else {
+                continue;
+            };
+            let name = self.text(name_node);
+            if name.is_empty() {
+                continue;
+            }
+            let qualified_name = format!("{}::{name}", owner.qualified_name);
+            let graph_node_id = self.unique_graph_id(
+                make_id(&[&self.module_or_package, &qualified_name, "field"]),
+                declarator,
+            );
+            let fact_id = self.builder.declare(
+                "field",
+                &graph_node_id,
+                &name,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, name_node),
+            )?;
+            let context = DeclarationContext {
+                fact_id: fact_id.clone(),
+                scope_id: owner.scope_id.clone(),
+                graph_node_id,
+                name: name.clone(),
+                qualified_name: qualified_name.clone(),
+                kind: "field".to_owned(),
+                enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+            };
+            self.add_ownership(owner, &context)?;
+            self.builder.bind(
+                BindingKind::Member,
+                &name,
+                &qualified_name,
+                Some(&fact_id),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, name_node),
+            )?;
+            if let Some(declared_type) = declared_type.as_ref() {
+                self.java_value_types
+                    .entry(owner.scope_id.clone())
+                    .or_default()
+                    .insert(name, declared_type.clone());
+            }
+            self.declarations.insert(declarator.id(), context);
+        }
+        Ok(())
+    }
+
+    fn add_java_enum_member(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(name_node) = node.child_by_field_name("name") else {
+            return Ok(());
+        };
+        let name = self.text(name_node);
+        if name.is_empty() {
+            return Ok(());
+        }
+        let qualified_name = format!("{}::{name}", owner.qualified_name);
+        let graph_node_id = self.unique_graph_id(
+            make_id(&[&self.module_or_package, &qualified_name, "enum_member"]),
+            node,
+        );
+        let fact_id = self.builder.declare(
+            "enum_member",
+            &graph_node_id,
+            &name,
+            &qualified_name,
+            Some(&self.module_or_package),
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, name_node),
+        )?;
+        let context = DeclarationContext {
+            fact_id: fact_id.clone(),
+            scope_id: owner.scope_id.clone(),
+            graph_node_id,
+            name: name.clone(),
+            qualified_name: qualified_name.clone(),
+            kind: "enum_member".to_owned(),
+            enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+        };
+        self.add_ownership(owner, &context)?;
+        self.builder.bind(
+            BindingKind::Member,
+            &name,
+            &qualified_name,
+            Some(&fact_id),
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, name_node),
+        )?;
+        self.declarations.insert(node.id(), context);
+        Ok(())
+    }
+
+    fn collect_java_value_types(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let active = self
+            .declarations
+            .get(&node.id())
+            .cloned()
+            .unwrap_or_else(|| owner.clone());
+        if matches!(
+            node.kind(),
+            "method_declaration" | "constructor_declaration"
+        ) {
+            self.add_java_parameter_value_types(node, &active);
+        } else if node.kind() == "local_variable_declaration" {
+            self.add_java_local_value_types(node, &active);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_java_value_types(child, &active)?;
+        }
+        Ok(())
+    }
+
+    fn add_java_parameter_value_types(&mut self, node: Node<'_>, owner: &DeclarationContext) {
+        let Some(parameters) = node.child_by_field_name("parameters") else {
+            return;
+        };
+        let mut cursor = parameters.walk();
+        for parameter in parameters
+            .children(&mut cursor)
+            .filter(|child| child.is_named())
+        {
+            if !matches!(parameter.kind(), "formal_parameter" | "spread_parameter") {
+                continue;
+            }
+            let Some(name) = parameter
+                .child_by_field_name("name")
+                .map(|node| self.text(node))
+            else {
+                continue;
+            };
+            let Some(target) = parameter
+                .child_by_field_name("type")
+                .map(|node| java_normalize_type(&self.text(node)))
+            else {
+                continue;
+            };
+            self.java_value_types
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .insert(name, target);
+        }
+    }
+
+    fn add_java_local_value_types(&mut self, node: Node<'_>, owner: &DeclarationContext) {
+        let Some(target) = node
+            .child_by_field_name("type")
+            .map(|node| java_normalize_type(&self.text(node)))
+        else {
+            return;
+        };
+        let mut declarators = Vec::new();
+        collect_direct_or_nested_nodes(node, "variable_declarator", &mut declarators);
+        for declarator in declarators {
+            if let Some(name) = declarator
+                .child_by_field_name("name")
+                .map(|node| self.text(node))
+            {
+                self.java_value_types
+                    .entry(owner.scope_id.clone())
+                    .or_default()
+                    .insert(name, target.clone());
+            }
+        }
+    }
+
+    fn walk_java_evidence(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        root: bool,
+    ) -> Result<(), EvidenceError> {
+        let active = self
+            .declarations
+            .get(&node.id())
+            .cloned()
+            .unwrap_or_else(|| owner.clone());
+        if self.declarations.contains_key(&node.id()) {
+            self.add_java_annotations(node, &active)?;
+            self.add_java_type_relationships(node, &active)?;
+        }
+        match node.kind() {
+            "import_declaration" => return Ok(()),
+            "method_invocation" => self.add_java_method_call(node, &active)?,
+            "object_creation_expression" => self.add_java_construction(node, &active)?,
+            _ => {}
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            if !root && child.id() == node.id() {
+                continue;
+            }
+            self.walk_java_evidence(child, &active, false)?;
+        }
+        Ok(())
+    }
+
+    fn add_java_annotations(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(modifiers) = node.child_by_field_name("modifiers").or_else(|| {
+            let mut cursor = node.walk();
+            node.children(&mut cursor)
+                .find(|child| child.kind() == "modifiers")
+        }) else {
+            return Ok(());
+        };
+        let mut annotations = Vec::new();
+        collect_java_annotations(modifiers, &mut annotations);
+        for annotation in annotations {
+            let Some(name_node) = annotation
+                .child_by_field_name("name")
+                .or_else(|| first_java_type_name(annotation))
+            else {
+                continue;
+            };
+            self.add_java_named_relationship(
+                SemanticRole::Annotation,
+                CandidateRelation::Annotates,
+                owner,
+                name_node,
+                Some("annotation"),
+                vec!["annotation_type", "interface", "class"],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn add_java_type_relationships(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if java_container_kind(node.kind()).is_some() {
+            if let Some(superclass) = node.child_by_field_name("superclass") {
+                let mut names = Vec::new();
+                collect_java_type_nodes(superclass, &mut names);
+                if let Some(target) = names.first().copied() {
+                    self.add_java_named_relationship(
+                        SemanticRole::BaseType,
+                        CandidateRelation::Extends,
+                        owner,
+                        target,
+                        Some("superclass"),
+                        vec!["class", "record"],
+                    )?;
+                }
+            }
+            if let Some(interfaces) = node.child_by_field_name("interfaces") {
+                let mut names = Vec::new();
+                collect_java_type_nodes(interfaces, &mut names);
+                for target in names {
+                    self.add_java_named_relationship(
+                        SemanticRole::TypeReference,
+                        CandidateRelation::Implements,
+                        owner,
+                        target,
+                        Some("interface"),
+                        vec!["interface", "annotation_type"],
+                    )?;
+                }
+            }
+        }
+        let type_root = match node.kind() {
+            "method_declaration" => node.child_by_field_name("type"),
+            "field_declaration"
+            | "constant_declaration"
+            | "formal_parameter"
+            | "spread_parameter" => node.child_by_field_name("type"),
+            _ => None,
+        };
+        if let Some(type_root) = type_root {
+            let mut names = Vec::new();
+            collect_java_type_nodes(type_root, &mut names);
+            for target in names {
+                self.add_java_named_relationship(
+                    SemanticRole::TypeReference,
+                    CandidateRelation::References,
+                    owner,
+                    target,
+                    Some("type"),
+                    vec!["class", "interface", "enum", "record", "annotation_type"],
+                )?;
+            }
+        }
+        if matches!(
+            node.kind(),
+            "method_declaration" | "constructor_declaration"
+        ) && let Some(parameters) = node.child_by_field_name("parameters")
+        {
+            let mut parameter_types = Vec::new();
+            collect_java_parameter_type_nodes(parameters, &mut parameter_types);
+            for target in parameter_types {
+                self.add_java_named_relationship(
+                    SemanticRole::TypeReference,
+                    CandidateRelation::References,
+                    owner,
+                    target,
+                    Some("parameter_type"),
+                    vec!["class", "interface", "enum", "record", "annotation_type"],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn add_java_named_relationship(
+        &mut self,
+        role: SemanticRole,
+        relation: CandidateRelation,
+        owner: &DeclarationContext,
+        target: Node<'_>,
+        context: Option<&str>,
+        kinds: Vec<&str>,
+    ) -> Result<(), EvidenceError> {
+        let raw = self.text(target);
+        let normalized = java_normalize_type(&raw);
+        let (qualifier, spelling) = split_qualified(&normalized);
+        if spelling.is_empty() || java_primitive_type(spelling) {
+            return Ok(());
+        }
+        let qualified_name = self.java_qualified_type(owner, &normalized, target.start_byte());
+        let lookup = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+        let binding = self
+            .binding_for_occurrence(owner, lookup, target.start_byte(), true)
+            .cloned();
+        let occurrence_id = self.builder.occur_with_context(
+            role,
+            &owner.fact_id,
+            spelling,
+            qualifier,
+            Some(&owner.scope_id),
+            context,
+            range_for_node(self.source_file, target),
+        )?;
+        self.builder.relate(
+            relation,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            binding.as_deref(),
+            spelling,
+            ResolutionConstraint {
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: Some(self.module_or_package.clone()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: qualified_name.clone(),
+                argument_count: None,
+                allowed_target_kinds: kinds.into_iter().map(str::to_owned).collect(),
+                allow_external: qualified_name.is_some(),
+            },
+        )?;
+        Ok(())
+    }
+
+    fn add_java_method_call(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(name_node) = node.child_by_field_name("name") else {
+            return Ok(());
+        };
+        let spelling = self.text(name_node);
+        if spelling.is_empty() {
+            return Ok(());
+        }
+        let receiver = node
+            .child_by_field_name("object")
+            .map(|object| self.text(object));
+        let receiver_type = receiver
+            .as_deref()
+            .and_then(|receiver| self.java_receiver_type(owner, receiver, node.start_byte()));
+        let qualified_name = receiver_type
+            .as_ref()
+            .map(|receiver| format!("{receiver}::{spelling}"));
+        let lookup = receiver
+            .as_deref()
+            .map(qualified_binding_head)
+            .unwrap_or(&spelling);
+        let binding = self
+            .binding_for_occurrence(owner, lookup, node.start_byte(), true)
+            .cloned();
+        let argument_count = java_argument_count(node);
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::Call,
+            &owner.fact_id,
+            &spelling,
+            receiver.as_deref(),
+            Some(&owner.scope_id),
+            Some(&format!("arity:{argument_count}")),
+            range_for_node(self.source_file, name_node),
+        )?;
+        self.builder.relate(
+            CandidateRelation::Calls,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            binding.as_deref(),
+            &spelling,
+            ResolutionConstraint {
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: Some(self.module_or_package.clone()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name,
+                argument_count: Some(argument_count),
+                allowed_target_kinds: vec!["method".to_owned()],
+                allow_external: receiver_type.is_some(),
+            },
+        )?;
+        Ok(())
+    }
+
+    fn add_java_construction(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(type_node) = node.child_by_field_name("type") else {
+            return Ok(());
+        };
+        let normalized = java_normalize_type(&self.text(type_node));
+        let (qualifier, spelling) = split_qualified(&normalized);
+        if spelling.is_empty() {
+            return Ok(());
+        }
+        let qualified_name = self.java_qualified_type(owner, &normalized, type_node.start_byte());
+        let lookup = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+        let binding = self
+            .binding_for_occurrence(owner, lookup, type_node.start_byte(), true)
+            .cloned();
+        let argument_count = java_argument_count(node);
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::Construction,
+            &owner.fact_id,
+            spelling,
+            qualifier,
+            Some(&owner.scope_id),
+            Some(&format!("arity:{argument_count}")),
+            range_for_node(self.source_file, type_node),
+        )?;
+        self.builder.relate(
+            CandidateRelation::Constructs,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            binding.as_deref(),
+            spelling,
+            ResolutionConstraint {
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: Some(self.module_or_package.clone()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name,
+                argument_count: Some(argument_count),
+                allowed_target_kinds: vec!["class".to_owned(), "record".to_owned()],
+                allow_external: true,
+            },
+        )?;
+        Ok(())
+    }
+
+    fn java_qualified_type(
+        &self,
+        owner: &DeclarationContext,
+        raw: &str,
+        use_start: usize,
+    ) -> Option<String> {
+        let normalized = java_normalize_type(raw);
+        if normalized.is_empty() || java_primitive_type(&normalized) {
+            return None;
+        }
+        if normalized.contains('.') && normalized.starts_with(char::is_lowercase) {
+            return Some(normalized);
+        }
+        let (qualifier, spelling) = split_qualified(&normalized);
+        if let Some(qualifier) = qualifier {
+            return self
+                .imported_qualified_target_for(owner, qualifier, use_start, true)
+                .map(|target| format!("{target}.{spelling}"))
+                .or(Some(normalized));
+        }
+        self.imported_target_for_occurrence(owner, spelling, use_start, true)
+            .cloned()
+            .or_else(|| self.local_target_for(owner, spelling).cloned())
+            .or_else(|| java_lang_type(spelling).map(str::to_owned))
+            .or_else(|| Some(format!("{}.{}", self.module_or_package, spelling)))
+    }
+
+    fn java_receiver_type(
+        &self,
+        owner: &DeclarationContext,
+        receiver: &str,
+        use_start: usize,
+    ) -> Option<String> {
+        if receiver == "this" || receiver == "super" {
+            return owner.enclosing_type_qualified_name.clone();
+        }
+        if let Some(target) = self.local_java_value_type(owner, receiver) {
+            return self.java_qualified_type(owner, target, use_start);
+        }
+        if receiver
+            .rsplit('.')
+            .next()
+            .is_some_and(|name| name.starts_with(char::is_uppercase))
+        {
+            return self.java_qualified_type(owner, receiver, use_start);
+        }
+        None
+    }
+
+    fn local_java_value_type<'a>(
+        &'a self,
+        owner: &DeclarationContext,
+        name: &str,
+    ) -> Option<&'a String> {
+        let mut scope = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let current = scope?;
+            if let Some(target) = self
+                .java_value_types
+                .get(current)
+                .and_then(|values| values.get(name))
+            {
+                return Some(target);
+            }
+            scope = self.scope_parents.get(current).map(String::as_str);
+        }
+        None
     }
 
     fn extract_rust(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
@@ -1910,6 +2761,7 @@ impl<'source> DirectAdapterState<'source> {
                     module_or_package: rust_qualified_parent(&target).map(str::to_owned),
                     scope_id: Some(owner.scope_id.clone()),
                     qualified_name: Some(target.clone()),
+                    argument_count: None,
                     allowed_target_kinds: vec![
                         "file".to_owned(),
                         "module".to_owned(),
@@ -2079,6 +2931,7 @@ impl<'source> DirectAdapterState<'source> {
                 .or_else(|| Some(self.module_or_package.clone())),
             scope_id: Some(owner.scope_id.clone()),
             qualified_name: qualified_name.clone(),
+            argument_count: None,
             allowed_target_kinds: vec![
                 "enum_member".to_owned(),
                 "function".to_owned(),
@@ -2201,6 +3054,7 @@ impl<'source> DirectAdapterState<'source> {
                     .or_else(|| Some(self.module_or_package.clone())),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: qualified_name.clone(),
+                argument_count: None,
                 allowed_target_kinds: vec!["macro".to_owned()],
                 allow_external: qualified_name.as_deref().is_some_and(|qualified| {
                     !rust_identity_is_internal(&self.module_or_package, qualified)
@@ -2278,6 +3132,7 @@ impl<'source> DirectAdapterState<'source> {
                     .or_else(|| Some(self.module_or_package.clone())),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: qualified_name.map(str::to_owned),
+                argument_count: None,
                 allowed_target_kinds,
                 allow_external,
             },
@@ -2664,6 +3519,7 @@ impl<'source> DirectAdapterState<'source> {
                     module_or_package: Some(target.clone()),
                     scope_id: Some(owner.scope_id.clone()),
                     qualified_name: Some(target),
+                    argument_count: None,
                     allowed_target_kinds: vec!["file".to_owned(), "package".to_owned()],
                     allow_external: true,
                 },
@@ -2969,6 +3825,7 @@ impl<'source> DirectAdapterState<'source> {
                     .or_else(|| Some(self.module_or_package.clone())),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: qualified_name.clone(),
+                argument_count: None,
                 allowed_target_kinds: if construction {
                     vec![
                         "class".to_owned(),
@@ -3104,6 +3961,7 @@ impl<'source> DirectAdapterState<'source> {
                     .or_else(|| Some(self.module_or_package.clone())),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: qualified_name.clone(),
+                argument_count: None,
                 allowed_target_kinds: target_kinds_for_relation(relation),
                 allow_external: qualified_name.is_some(),
             },
@@ -3317,6 +4175,7 @@ impl<'source> DirectAdapterState<'source> {
                 module_or_package: Some(self.module_or_package.clone()),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: Some(child.qualified_name.clone()),
+                argument_count: None,
                 allowed_target_kinds: vec![child.kind.clone()],
                 allow_external: false,
             },
@@ -3342,6 +4201,286 @@ impl<'source> DirectAdapterState<'source> {
             .unwrap_or_default()
             .trim()
             .to_owned()
+    }
+}
+
+fn java_package_identity(source: &[u8]) -> Option<String> {
+    let source = std::str::from_utf8(source).ok()?;
+    let mut in_block_comment = false;
+    for line in source.lines() {
+        let mut line = line.trim();
+        if in_block_comment {
+            if let Some((_, rest)) = line.split_once("*/") {
+                in_block_comment = false;
+                line = rest.trim();
+            } else {
+                continue;
+            }
+        }
+        while let Some(rest) = line.strip_prefix("/*") {
+            if let Some((_, suffix)) = rest.split_once("*/") {
+                line = suffix.trim();
+            } else {
+                in_block_comment = true;
+                break;
+            }
+        }
+        if in_block_comment || line.starts_with("//") || line.is_empty() {
+            continue;
+        }
+        let Some(package) = line.strip_prefix("package ") else {
+            continue;
+        };
+        let package = package
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .split_whitespace()
+            .next()
+            .unwrap_or_default();
+        if !package.is_empty()
+            && package
+                .split('.')
+                .all(|part| !part.is_empty() && java_identifier(part))
+        {
+            return Some(package.to_owned());
+        }
+    }
+    None
+}
+
+fn java_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    chars
+        .next()
+        .is_some_and(|character| character == '_' || character == '$' || character.is_alphabetic())
+        && chars
+            .all(|character| character == '_' || character == '$' || character.is_alphanumeric())
+}
+
+fn java_container_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "class_declaration" => Some("class"),
+        "interface_declaration" => Some("interface"),
+        "enum_declaration" => Some("enum"),
+        "record_declaration" => Some("record"),
+        "annotation_type_declaration" => Some("annotation_type"),
+        _ => None,
+    }
+}
+
+fn java_child_qualified_name(owner: &DeclarationContext, name: &str) -> String {
+    if owner.kind == "file" {
+        match owner.qualified_name.as_str() {
+            "" => name.to_owned(),
+            package => format!("{package}.{name}"),
+        }
+    } else {
+        format!("{}::{name}", owner.qualified_name)
+    }
+}
+
+fn java_qualified_parent(target: &str) -> Option<&str> {
+    target
+        .trim_end_matches(".*")
+        .rsplit_once('.')
+        .map(|(parent, _)| parent)
+}
+
+fn last_java_import_name(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(|child| child.is_named())
+        .last()
+}
+
+fn java_parameter_signature(node: Node<'_>, source: &[u8]) -> (String, u32, bool) {
+    let Some(parameters) = node.child_by_field_name("parameters") else {
+        return (String::new(), 0, false);
+    };
+    let mut types = Vec::new();
+    let mut variadic = false;
+    let mut cursor = parameters.walk();
+    for parameter in parameters
+        .children(&mut cursor)
+        .filter(|child| child.is_named())
+    {
+        if !matches!(
+            parameter.kind(),
+            "formal_parameter" | "spread_parameter" | "receiver_parameter"
+        ) {
+            continue;
+        }
+        variadic |= parameter.kind() == "spread_parameter";
+        let Some(type_node) = parameter.child_by_field_name("type") else {
+            continue;
+        };
+        let raw = type_node.utf8_text(source).unwrap_or_default();
+        let mut normalized = java_normalize_type(raw);
+        if parameter.kind() == "spread_parameter" {
+            normalized.push_str("...");
+        }
+        if let Some(dimensions) = parameter.child_by_field_name("dimensions") {
+            normalized.push_str(
+                &dimensions
+                    .utf8_text(source)
+                    .unwrap_or_default()
+                    .chars()
+                    .filter(|character| !character.is_whitespace())
+                    .collect::<String>(),
+            );
+        }
+        types.push(normalized);
+    }
+    (
+        types.join(","),
+        u32::try_from(types.len()).unwrap_or(u32::MAX),
+        variadic,
+    )
+}
+
+fn java_normalize_type(raw: &str) -> String {
+    let mut normalized = String::with_capacity(raw.len());
+    let mut angle_depth = 0_u32;
+    for character in raw.chars() {
+        match character {
+            '<' => angle_depth = angle_depth.saturating_add(1),
+            '>' => angle_depth = angle_depth.saturating_sub(1),
+            _ if angle_depth > 0 => {}
+            character if character.is_whitespace() => {}
+            '[' | ']' | '.' | '$' | '_' => normalized.push(character),
+            character if character.is_alphanumeric() => normalized.push(character),
+            _ => {}
+        }
+    }
+    normalized.trim_end_matches("...").to_owned()
+}
+
+fn collect_direct_or_nested_nodes<'tree>(
+    node: Node<'tree>,
+    kind: &str,
+    output: &mut Vec<Node<'tree>>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        if child.kind() == kind {
+            output.push(child);
+        } else if !matches!(
+            child.kind(),
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "record_declaration"
+                | "annotation_type_declaration"
+                | "method_declaration"
+                | "constructor_declaration"
+        ) {
+            collect_direct_or_nested_nodes(child, kind, output);
+        }
+    }
+}
+
+fn collect_java_annotations<'tree>(node: Node<'tree>, output: &mut Vec<Node<'tree>>) {
+    if matches!(node.kind(), "annotation" | "marker_annotation") {
+        output.push(node);
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_java_annotations(child, output);
+    }
+}
+
+fn first_java_type_name(node: Node<'_>) -> Option<Node<'_>> {
+    if matches!(
+        node.kind(),
+        "type_identifier" | "scoped_type_identifier" | "identifier"
+    ) {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(|child| child.is_named())
+        .find_map(first_java_type_name)
+}
+
+fn collect_java_type_nodes<'tree>(node: Node<'tree>, output: &mut Vec<Node<'tree>>) {
+    if matches!(node.kind(), "type_identifier" | "scoped_type_identifier") {
+        output.push(node);
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_java_type_nodes(child, output);
+    }
+}
+
+fn collect_java_parameter_type_nodes<'tree>(
+    parameters: Node<'tree>,
+    output: &mut Vec<Node<'tree>>,
+) {
+    let mut cursor = parameters.walk();
+    for parameter in parameters
+        .children(&mut cursor)
+        .filter(|child| child.is_named())
+    {
+        if matches!(parameter.kind(), "formal_parameter" | "spread_parameter")
+            && let Some(type_node) = parameter.child_by_field_name("type")
+        {
+            collect_java_type_nodes(type_node, output);
+        }
+    }
+}
+
+fn java_argument_count(node: Node<'_>) -> u32 {
+    let Some(arguments) = node.child_by_field_name("arguments") else {
+        return 0;
+    };
+    let mut cursor = arguments.walk();
+    u32::try_from(
+        arguments
+            .children(&mut cursor)
+            .filter(|child| child.is_named())
+            .count(),
+    )
+    .unwrap_or(u32::MAX)
+}
+
+fn java_primitive_type(name: &str) -> bool {
+    matches!(
+        name,
+        "byte"
+            | "short"
+            | "int"
+            | "long"
+            | "float"
+            | "double"
+            | "boolean"
+            | "char"
+            | "void"
+            | "var"
+    )
+}
+
+fn java_lang_type(name: &str) -> Option<&'static str> {
+    match name {
+        "String" => Some("java.lang.String"),
+        "Object" => Some("java.lang.Object"),
+        "Class" => Some("java.lang.Class"),
+        "Integer" => Some("java.lang.Integer"),
+        "Long" => Some("java.lang.Long"),
+        "Double" => Some("java.lang.Double"),
+        "Float" => Some("java.lang.Float"),
+        "Boolean" => Some("java.lang.Boolean"),
+        "Byte" => Some("java.lang.Byte"),
+        "Short" => Some("java.lang.Short"),
+        "Character" => Some("java.lang.Character"),
+        "Throwable" => Some("java.lang.Throwable"),
+        "Exception" => Some("java.lang.Exception"),
+        "RuntimeException" => Some("java.lang.RuntimeException"),
+        "Enum" => Some("java.lang.Enum"),
+        "Record" => Some("java.lang.Record"),
+        _ => None,
     }
 }
 

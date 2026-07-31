@@ -47,6 +47,8 @@ fn valid_batch() -> SemanticEvidenceBatch {
             module_or_package: Some("example".to_owned()),
             scope_id: None,
             signature: None,
+            parameter_count: None,
+            variadic: false,
             signature_hash: None,
             implementation_hash: None,
             source_hash: None,
@@ -94,6 +96,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
                 module_or_package: Some("tools".to_owned()),
                 scope_id: Some("scope:caller".to_owned()),
                 qualified_name: Some("tools.execute".to_owned()),
+                argument_count: None,
                 allowed_target_kinds: vec!["function".to_owned()],
                 allow_external: true,
             },
@@ -263,7 +266,7 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
             .iter()
             .map(|profile| profile.language)
             .collect::<Vec<_>>(),
-        ["go", "python", "rust"]
+        ["go", "java", "python", "rust"]
     );
     assert!(
         profiles
@@ -289,7 +292,11 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
             .windows(2)
             .all(|pair| pair[0] < pair[1])
     }));
-    assert!(AdapterRegistry::universal_profile("java").is_none());
+    assert_eq!(
+        AdapterRegistry::universal_profile("java")
+            .map(|profile| (profile.version, profile.profile)),
+        Some((1, UniversalAdapterProfile::UniversalCandidate))
+    );
     assert_eq!(
         AdapterRegistry::universal_profile("rust").map(|profile| profile.version),
         Some(1)

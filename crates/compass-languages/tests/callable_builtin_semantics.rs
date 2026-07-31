@@ -141,7 +141,7 @@ fn caller() {
 "#,
         5,
     )?;
-    assert_local_builtin_collisions_resolve(
+    assert_universal_builtin_collisions_are_resolvable(
         Path::new("Collisions.java"),
         br#"
 class Collisions {

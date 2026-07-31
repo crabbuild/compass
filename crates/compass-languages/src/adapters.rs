@@ -136,6 +136,23 @@ const PYTHON_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::ExternalReferences,
 ];
 
+const JAVA_CAPABILITIES: &[LanguageCapability] = &[
+    LanguageCapability::Declarations,
+    LanguageCapability::LexicalScopes,
+    LanguageCapability::Namespaces,
+    LanguageCapability::Imports,
+    LanguageCapability::Aliases,
+    LanguageCapability::Calls,
+    LanguageCapability::Construction,
+    LanguageCapability::Decorators,
+    LanguageCapability::TypeReferences,
+    LanguageCapability::BaseTypes,
+    LanguageCapability::Members,
+    LanguageCapability::Ownership,
+    LanguageCapability::Receivers,
+    LanguageCapability::ExternalReferences,
+];
+
 const RUST_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::Declarations,
     LanguageCapability::LexicalScopes,
@@ -163,6 +180,14 @@ const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         profile: UniversalAdapterProfile::UniversalCandidate,
         capabilities: GO_CAPABILITIES,
+    },
+    AdapterProfile {
+        id: "compass.java",
+        language: "java",
+        version: 1,
+        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+        profile: UniversalAdapterProfile::UniversalCandidate,
+        capabilities: JAVA_CAPABILITIES,
     },
     AdapterProfile {
         id: "compass.python",

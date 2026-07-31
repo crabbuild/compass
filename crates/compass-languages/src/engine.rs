@@ -1183,17 +1183,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             if self.language == "python" {
                 self.add_python_parent_edges(node, &id);
                 self.add_python_decorators(node, &id);
-            } else if self.language == "java" {
-                self.add_java_parent_edges(node, &id);
-                if kind == "enum_declaration" {
-                    self.add_java_enum_constants(node, &id);
-                    let mut constructors = Vec::new();
-                    collect_nodes_of_kind(node, "constructor_declaration", &mut constructors);
-                    let duplicate_line =
-                        constructors.first().map_or(line(node), |node| line(*node));
-                    self.add_edge(&self.file_id.clone(), &id, "contains", duplicate_line, None);
-                    return;
-                }
             } else if self.language == "ruby" {
                 self.add_ruby_parent_edge(node, &id);
             } else if self.language == "kotlin" {
@@ -1261,8 +1250,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             if self.language == "python" {
                 self.add_python_function_references(node, &id);
                 self.add_python_decorators(node, &id);
-            } else if self.language == "java" {
-                self.add_java_function_references(node, &id);
             } else if self.language == "c" {
                 self.add_c_function_references(node, &id);
             } else if self.language == "kotlin" {
@@ -1603,11 +1590,10 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         {
             let candidates = self.callables.get(&call.name).cloned().unwrap_or_default();
             let defer_member = call.member
-                && (self.language == "java"
-                    || call
-                        .receiver
-                        .as_deref()
-                        .is_some_and(|receiver| receiver.starts_with(char::is_uppercase)));
+                && call
+                    .receiver
+                    .as_deref()
+                    .is_some_and(|receiver| receiver.starts_with(char::is_uppercase));
             let target = (!defer_member)
                 .then(|| candidates.last().cloned())
                 .flatten()
@@ -1652,7 +1638,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     source_location: format!("L{}", line(node)),
                     receiver: Some(call.receiver),
                     receiver_type: (self.language == "ruby" && call.member).then_some(None),
-                    lang: (self.language == "java").then(|| "java".to_owned()),
+                    lang: None,
                     extensions,
                 });
             }
@@ -1811,33 +1797,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 member: receiver.is_some(),
                 receiver,
             });
-        }
-        if self.language == "java" {
-            if node.kind() == "method_invocation" {
-                let name = node
-                    .child_by_field_name("name")
-                    .and_then(|name| self.node_text(name))
-                    .map(clean_name)?;
-                let receiver = node
-                    .child_by_field_name("object")
-                    .and_then(|receiver| self.node_text(receiver))
-                    .map(clean_name);
-                return Some(CallName {
-                    name,
-                    member: receiver.is_some(),
-                    receiver,
-                });
-            }
-            if node.kind() == "object_creation_expression" {
-                let type_node = node.child_by_field_name("type")?;
-                let name_node = first_identifier(type_node).unwrap_or(type_node);
-                let name = self.node_text(name_node).map(clean_name)?;
-                return Some(CallName {
-                    name,
-                    member: false,
-                    receiver: None,
-                });
-            }
         }
         let function = if self.config.call_function_field.is_empty() {
             None
@@ -2295,27 +2254,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         true
     }
 
-    fn add_java_parent_edges(&mut self, node: Node<'tree>, class_id: &str) {
-        if let Some(superclass) = node.child_by_field_name("superclass")
-            && let Some(name_node) = first_identifier(superclass)
-            && let Some(name) = self.node_text(name_node).map(clean_name)
-        {
-            let target = self.ensure_type_node(&name, false);
-            self.add_edge(class_id, &target, "inherits", line(node), None);
-        }
-        if let Some(interfaces) = node.child_by_field_name("interfaces") {
-            let mut names = Vec::new();
-            collect_type_names(interfaces, self.source, &mut names);
-            for name in names {
-                if java_builtin_type(&name) {
-                    continue;
-                }
-                let target = self.ensure_type_node(&name, false);
-                self.add_edge(class_id, &target, "implements", line(node), None);
-            }
-        }
-    }
-
     fn add_ts_class_decorators(&mut self, node: Node<'tree>, class_id: &str) {
         let mut decorators = Vec::new();
         let mut cursor = node.walk();
@@ -2712,81 +2650,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         }
     }
 
-    fn add_java_enum_constants(&mut self, node: Node<'tree>, enum_id: &str) {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.add_java_enum_constants_recursive(child, enum_id);
-        }
-    }
-
-    fn add_java_enum_constants_recursive(&mut self, node: Node<'tree>, enum_id: &str) {
-        if node.kind() == "enum_constant" {
-            if let Some(name) = node
-                .child_by_field_name("name")
-                .and_then(|name| self.node_text(name))
-                .map(clean_name)
-            {
-                let id = make_id(&[enum_id, &name]);
-                self.add_node(&id, &name, line(node), false, None);
-                self.add_edge(enum_id, &id, "case_of", line(node), None);
-            }
-            return;
-        }
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.add_java_enum_constants_recursive(child, enum_id);
-        }
-    }
-
-    fn add_java_function_references(&mut self, node: Node<'tree>, function_id: &str) {
-        let mut parameters = Vec::new();
-        collect_nodes_of_kind(node, "formal_parameter", &mut parameters);
-        for parameter in parameters {
-            if let Some(type_node) = parameter.child_by_field_name("type") {
-                let mut names = Vec::new();
-                collect_type_names(type_node, self.source, &mut names);
-                self.add_java_type_references(function_id, &names, "parameter_type", line(node));
-            }
-        }
-
-        if let Some(return_type) = node.child_by_field_name("type") {
-            let mut names = Vec::new();
-            collect_type_names(return_type, self.source, &mut names);
-            if let Some((base, generic)) = names.split_first() {
-                if !java_builtin_type(base) {
-                    let target = self.ensure_type_node(base, true);
-                    self.add_edge(
-                        function_id,
-                        &target,
-                        "references",
-                        line(node),
-                        Some("return_type"),
-                    );
-                }
-                self.add_java_type_references(function_id, generic, "generic_arg", line(node));
-            }
-        }
-
-        let mut annotations = Vec::new();
-        collect_nodes_of_kind(node, "marker_annotation", &mut annotations);
-        for annotation in annotations {
-            if let Some(name) = annotation
-                .child_by_field_name("name")
-                .and_then(|name| self.node_text(name))
-                .map(clean_name)
-            {
-                let target = self.ensure_type_node(&name, true);
-                self.add_edge(
-                    function_id,
-                    &target,
-                    "references",
-                    line(node),
-                    Some("attribute"),
-                );
-            }
-        }
-    }
-
     fn add_c_function_references(&mut self, node: Node<'tree>, function_id: &str) {
         if let Some(return_type) = node.child_by_field_name("type") {
             let mut names = Vec::new();
@@ -2829,22 +2692,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         line: usize,
     ) {
         for name in names {
-            let target = self.ensure_type_node(name, true);
-            self.add_edge(function_id, &target, "references", line, Some(context));
-        }
-    }
-
-    fn add_java_type_references(
-        &mut self,
-        function_id: &str,
-        names: &[String],
-        context: &str,
-        line: usize,
-    ) {
-        for name in names {
-            if java_builtin_type(name) {
-                continue;
-            }
             let target = self.ensure_type_node(name, true);
             self.add_edge(function_id, &target, "references", line, Some(context));
         }
@@ -3631,19 +3478,6 @@ fn angle_value(value: &str) -> Option<String> {
     Some(rest[..end].to_owned())
 }
 
-fn collect_type_names(node: Node<'_>, source: &[u8], output: &mut Vec<String>) {
-    if matches!(node.kind(), "type_identifier" | "scoped_type_identifier")
-        && let Ok(text) = node.utf8_text(source)
-    {
-        output.push(text.to_owned());
-        return;
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_type_names(child, source, output);
-    }
-}
-
 fn collect_c_type_names(node: Node<'_>, source: &[u8], output: &mut Vec<String>) {
     if node.kind() == "type_identifier" {
         if let Ok(text) = node.utf8_text(source) {
@@ -3784,25 +3618,6 @@ fn collect_nodes_of_kind<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<
             collect_nodes_of_kind(child, kind, output);
         }
     }
-}
-
-fn java_builtin_type(name: &str) -> bool {
-    matches!(
-        name,
-        "String"
-            | "List"
-            | "Map"
-            | "Set"
-            | "ArrayList"
-            | "HashMap"
-            | "Integer"
-            | "Long"
-            | "Double"
-            | "Float"
-            | "Boolean"
-            | "Object"
-            | "Class"
-    )
 }
 
 fn find_require_call<'tree>(node: Node<'tree>, source: &[u8]) -> Option<Node<'tree>> {

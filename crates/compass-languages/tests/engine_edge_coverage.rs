@@ -43,11 +43,17 @@ fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
         languages: &["java"],
         ..descriptor
     };
+    assert_eq!(FrameworkPackRegistry::validate_descriptors(&[java]), Ok(()));
+
+    let typescript = FrameworkPackDescriptor {
+        languages: &["typescript"],
+        ..descriptor
+    };
     assert_eq!(
-        FrameworkPackRegistry::validate_descriptors(&[java]),
+        FrameworkPackRegistry::validate_descriptors(&[typescript]),
         Err(FrameworkPackRegistryError::NonUniversalLanguage {
             pack: descriptor.id,
-            language: "java",
+            language: "typescript",
         })
     );
 
@@ -201,7 +207,7 @@ impl ChangeSink for ChangeCounts {
 }
 
 #[test]
-fn overloaded_methods_receive_explicit_stable_discriminators() -> Result<(), Box<dyn Error>> {
+fn overloaded_methods_emit_stable_universal_identities() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("Example.java");
     let source = br#"
@@ -212,23 +218,26 @@ class Example {
 "#;
 
     let extraction = Engine::default().extract_source(&path, source)?;
-    let methods = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Java universal evidence")?;
+    let methods = evidence
+        .declarations
         .iter()
-        .filter(|node| node.string("qualified_name") == "Example::run")
+        .filter(|declaration| declaration.qualified_name.ends_with("Example::run"))
         .collect::<Vec<_>>();
 
-    assert_eq!(methods.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(methods.len(), 2, "declarations={:?}", evidence.declarations);
     assert_eq!(
         methods
             .iter()
-            .map(|node| node.string("overload_discriminator"))
+            .map(|declaration| declaration.signature.as_deref())
             .collect::<std::collections::BTreeSet<_>>(),
-        ["overload:0", "overload:1"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect()
+        [Some("run()"), Some("run(int)")].into_iter().collect()
     );
+    assert_ne!(methods[0].graph_node_id, methods[1].graph_node_id);
+    assert!(extraction.nodes.is_empty() && extraction.edges.is_empty());
     Ok(())
 }
 
