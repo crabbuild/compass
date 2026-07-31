@@ -1115,16 +1115,18 @@ fn sanitize_document(
         .filter(|record| !incident_edges.contains(&record.id))
         .map(|record| record.id.clone())
         .collect::<BTreeSet<_>>();
+    let invalid_edge_anchors = document
+        .links
+        .iter()
+        .filter(|edge| invalid_edges.contains(&edge.id))
+        .map(|edge| (edge.id.clone(), edge.relationship_site.clone()))
+        .collect::<HashMap<_, _>>();
     for record in report
         .edge_errors
         .iter()
         .filter(|record| invalid_edges.contains(&record.id))
     {
-        let anchor = document
-            .links
-            .iter()
-            .find(|edge| edge.id == record.id)
-            .and_then(|edge| edge.relationship_site.clone());
+        let anchor = invalid_edge_anchors.get(&record.id).cloned().flatten();
         quarantine.omit_edge(&record.id, &record.errors.join("; "), anchor);
     }
 

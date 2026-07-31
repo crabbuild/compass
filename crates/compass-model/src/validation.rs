@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
+use rayon::prelude::*;
 use serde_json::Value;
 
 use crate::code_graph::{
@@ -297,110 +298,132 @@ pub fn validate_code_graph_records(document: &CodeGraphDocument) -> CodeGraphVal
         }
     }
 
-    let mut edge_ids = HashSet::new();
-    for edge in &document.links {
-        let mut errors = Vec::new();
-        if edge
-            .occurrence_rule
-            .as_ref()
-            .is_some_and(|rule| rule.is_endpoint_rewrite())
-        {
-            errors.push(format!(
-                "edge {} occurrence rule uses a reserved endpoint rewrite name",
-                edge.id
-            ));
-        }
-        if edge
-            .occurrence_rule
-            .as_ref()
-            .is_some_and(|rule| rule.as_str().trim().is_empty())
-        {
-            errors.push(format!("edge {} has an empty occurrence rule", edge.id));
-        }
-        if edge.id.trim().is_empty() || edge.id != edge.key {
-            errors.push(format!(
-                "edge {} must have a non-empty id matching its NetworkX key",
-                edge.id
-            ));
-        }
-        let expected_id = edge_id(
-            &edge.source,
-            edge.kind,
-            &edge.target,
-            edge.relationship_site.as_ref(),
-            edge.occurrence_rule.as_ref().map(|rule| rule.as_str()),
-        );
-        if edge.id != expected_id {
-            errors.push(format!(
-                "edge {} does not match its deterministic relationship identity",
-                edge.id
-            ));
-        }
-        if !edge_ids.insert(edge.id.as_str()) {
-            errors.push(format!("duplicate edge ID {}", edge.id));
-        }
-        let Some(source) = nodes.get(edge.source.as_str()) else {
-            errors.push(format!(
-                "edge {} source {} does not match a node",
-                edge.id, edge.source
-            ));
-            report.edge_errors.push(RecordValidationErrors {
-                id: edge.id.clone(),
-                errors,
-            });
-            continue;
-        };
-        let Some(target) = nodes.get(edge.target.as_str()) else {
-            errors.push(format!(
-                "edge {} target {} does not match a node",
-                edge.id, edge.target
-            ));
-            report.edge_errors.push(RecordValidationErrors {
-                id: edge.id.clone(),
-                errors,
-            });
-            continue;
-        };
-        if edge.source == edge.target && edge.kind != EdgeKind::Calls {
-            errors.push(format!("edge {} is an unsupported self-loop", edge.id));
-        }
-        if edge.evidence.is_empty() {
-            errors.push(format!("edge {} has no provenance", edge.id));
-        }
-        validate_evidence(&edge.id, &edge.evidence, &files, &mut errors);
-        if let Some(anchor) = &edge.relationship_site {
-            validate_anchor(&edge.id, anchor, &files, &mut errors);
-        }
-        if !endpoint_kinds_are_valid(source, edge.kind, target) {
-            let site = edge.relationship_site.as_ref().map_or_else(
-                || "<none>".to_owned(),
-                |anchor| {
-                    format!(
-                        "{}:{}:{}",
-                        anchor.file, anchor.start_line, anchor.start_column
-                    )
-                },
-            );
-            errors.push(format!(
-                "edge {} has invalid {} endpoints {} -> {}; source={} target={} site={}",
-                edge.id,
-                edge.kind.as_str(),
-                source.kind.as_str(),
-                target.kind.as_str(),
-                source.qualified_name,
-                target.qualified_name,
-                site
-            ));
-        }
-        if !errors.is_empty() {
-            report.edge_errors.push(RecordValidationErrors {
-                id: edge.id.clone(),
-                errors,
-            });
-        }
-    }
+    let mut edge_ids = HashSet::with_capacity(document.links.len());
+    let duplicate_edge_positions = document
+        .links
+        .iter()
+        .enumerate()
+        .filter_map(|(index, edge)| (!edge_ids.insert(edge.id.as_str())).then_some(index))
+        .collect::<HashSet<_>>();
+    let edge_errors = document
+        .links
+        .par_iter()
+        .enumerate()
+        .map(|(index, edge)| {
+            validate_code_graph_edge(
+                edge,
+                &nodes,
+                &files,
+                duplicate_edge_positions.contains(&index),
+            )
+        })
+        .collect::<Vec<_>>();
+    report.edge_errors.extend(edge_errors.into_iter().flatten());
 
     report
+}
+
+fn validate_code_graph_edge(
+    edge: &crate::code_graph::EdgeRecord,
+    nodes: &HashMap<&str, &crate::code_graph::NodeRecord>,
+    files: &HashMap<&str, u64>,
+    duplicate_id: bool,
+) -> Option<RecordValidationErrors> {
+    let mut errors = Vec::new();
+    if edge
+        .occurrence_rule
+        .as_ref()
+        .is_some_and(|rule| rule.is_endpoint_rewrite())
+    {
+        errors.push(format!(
+            "edge {} occurrence rule uses a reserved endpoint rewrite name",
+            edge.id
+        ));
+    }
+    if edge
+        .occurrence_rule
+        .as_ref()
+        .is_some_and(|rule| rule.as_str().trim().is_empty())
+    {
+        errors.push(format!("edge {} has an empty occurrence rule", edge.id));
+    }
+    if edge.id.trim().is_empty() || edge.id != edge.key {
+        errors.push(format!(
+            "edge {} must have a non-empty id matching its NetworkX key",
+            edge.id
+        ));
+    }
+    let expected_id = edge_id(
+        &edge.source,
+        edge.kind,
+        &edge.target,
+        edge.relationship_site.as_ref(),
+        edge.occurrence_rule.as_ref().map(|rule| rule.as_str()),
+    );
+    if edge.id != expected_id {
+        errors.push(format!(
+            "edge {} does not match its deterministic relationship identity",
+            edge.id
+        ));
+    }
+    if duplicate_id {
+        errors.push(format!("duplicate edge ID {}", edge.id));
+    }
+    let Some(source) = nodes.get(edge.source.as_str()) else {
+        errors.push(format!(
+            "edge {} source {} does not match a node",
+            edge.id, edge.source
+        ));
+        return Some(RecordValidationErrors {
+            id: edge.id.clone(),
+            errors,
+        });
+    };
+    let Some(target) = nodes.get(edge.target.as_str()) else {
+        errors.push(format!(
+            "edge {} target {} does not match a node",
+            edge.id, edge.target
+        ));
+        return Some(RecordValidationErrors {
+            id: edge.id.clone(),
+            errors,
+        });
+    };
+    if edge.source == edge.target && edge.kind != EdgeKind::Calls {
+        errors.push(format!("edge {} is an unsupported self-loop", edge.id));
+    }
+    if edge.evidence.is_empty() {
+        errors.push(format!("edge {} has no provenance", edge.id));
+    }
+    validate_evidence(&edge.id, &edge.evidence, files, &mut errors);
+    if let Some(anchor) = &edge.relationship_site {
+        validate_anchor(&edge.id, anchor, files, &mut errors);
+    }
+    if !endpoint_kinds_are_valid(source, edge.kind, target) {
+        let site = edge.relationship_site.as_ref().map_or_else(
+            || "<none>".to_owned(),
+            |anchor| {
+                format!(
+                    "{}:{}:{}",
+                    anchor.file, anchor.start_line, anchor.start_column
+                )
+            },
+        );
+        errors.push(format!(
+            "edge {} has invalid {} endpoints {} -> {}; source={} target={} site={}",
+            edge.id,
+            edge.kind.as_str(),
+            source.kind.as_str(),
+            target.kind.as_str(),
+            source.qualified_name,
+            target.qualified_name,
+            site
+        ));
+    }
+    (!errors.is_empty()).then(|| RecordValidationErrors {
+        id: edge.id.clone(),
+        errors,
+    })
 }
 
 /// Validate all cross-record invariants of a strict `compass.graph/1` document.

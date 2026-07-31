@@ -1223,6 +1223,7 @@ dependencies = [
 name = "compass-model"
 version = "0.1.10"
 dependencies = [
+ "rayon",
  "rmp-serde",
  "serde",
  "serde_json",
