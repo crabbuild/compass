@@ -874,7 +874,7 @@ Result:
   the same canonical digest, and zero added or removed topology. Its
   cold/warm graphs are byte-identical at 169,597,446 bytes.
 
-- [ ] **Step 4: Run complete verification and performance qualification**
+- [x] **Step 4: Run complete verification and performance qualification**
 
 Run the complete workspace tests, strict Python benchmark tests, formatting,
 linting, diff validation, release build, query oracles, and the standardized
@@ -882,7 +882,27 @@ three-repeat large-repository build suite. Compare instruction count, wall
 time, and peak RSS with phase three. Do not claim performance dominance when
 Entire remains below 5x or Compass memory remains higher than Graphify.
 
-- [ ] **Step 5: Record evidence and update PR #93**
+Result:
+
+- The complete workspace, strict Python, format, lint, release, and diff gates
+  pass.
+- The final all-workload qualification passes on current Django and pinned
+  Entire, including 10/10 eligible batches for every natural-language and
+  CompassQL workload.
+- The first all-workload run exposed an unused named-path allocation that
+  exceeded the 256 MiB Entire query limit. A conservative compiler
+  optimization removes only unreferenced, singly bound paths; the exact failed
+  query now passes with output byte-identical to the high-memory reference.
+- On the original pinned Django corpus, cold p50 changes by +2.46%, warm by
+  -0.44%, and incremental by -1.88% relative to phase three. On unchanged
+  Entire, the respective changes are +6.00%, +4.64%, and +4.50%.
+- Retained Graphify timing remains approximately 5.49x slower on Django and
+  3.23x slower on Entire. Compass peak memory remains higher, so performance
+  dominance is not claimed.
+- The macOS runner does not expose retired instruction counts; no instruction
+  delta is claimed.
+
+- [x] **Step 5: Record evidence and update PR #93**
 
 Add a phase-four review containing exact graph counts, topology deltas,
 independent audit results, comparator classifications, latency and memory,
