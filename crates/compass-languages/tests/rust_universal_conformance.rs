@@ -97,7 +97,8 @@ fn build() {
     }));
     assert!(evidence.candidates.iter().any(|candidate| {
         candidate.target_spelling == "new"
-            && candidate.constraints.qualified_name.is_none()
+            && candidate.constraints.qualified_name.as_deref()
+                == Some("crate::qualified::Beta::new")
             && !candidate.constraints.allow_external
     }));
     Ok(())

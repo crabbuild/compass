@@ -633,6 +633,45 @@ class CorrectnessTests(unittest.TestCase):
             result.metrics["graphify_edges_coverage_reasons"],
         )
 
+    def test_multiple_exact_occurrences_reject_absent_same_line_target(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"run","kind":"function",
+               "source_file":"src/main.rs","source_location":"L8","language":"rust"},
+              {"id":"first","label":"First::new","kind":"method",
+               "source_file":"src/first.rs","source_location":"L2","language":"rust"},
+              {"id":"second","label":"Second::new","kind":"method",
+               "source_file":"src/second.rs","source_location":"L2","language":"rust"},
+              {"id":"wrong","label":".new()","kind":"method",
+               "source_file":"src/wrong.rs","source_location":"L2","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"first","relation":"calls",
+               "source_file":"src/main.rs","source_location":"L10"},
+              {"source":"owner","target":"second","relation":"calls",
+               "source_file":"src/main.rs","source_location":"L10"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"owner","label":"run()",
+               "source_file":"src/main.rs","source_location":"L8"},
+              {"id":"wrong","label":".new()",
+               "source_file":"src/wrong.rs","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"wrong","relation":"calls",
+               "source_file":"src/main.rs","source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "rejected:exact_occurrence_target_conflict",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
     def test_exact_occurrence_resolves_an_ambiguous_sourceless_target(self) -> None:
         result = compare_documents(
             """

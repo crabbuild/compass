@@ -1562,6 +1562,14 @@ impl<'source> DirectAdapterState<'source> {
                 .cloned()
             {
                 self.add_ownership(&type_owner, &context)?;
+                self.builder.bind(
+                    BindingKind::Member,
+                    &name,
+                    &qualified_name,
+                    Some(&context.fact_id),
+                    Some(&type_owner.scope_id),
+                    range_for_node(self.source_file, name_node),
+                )?;
             } else {
                 self.add_ownership(owner, &context)?;
             }
@@ -1635,7 +1643,7 @@ impl<'source> DirectAdapterState<'source> {
                 trait_node,
                 Some(trait_qualified_name),
                 vec!["trait".to_owned()],
-                !trait_qualified_name.starts_with("crate"),
+                !rust_identity_is_internal(&self.module_or_package, trait_qualified_name),
             )?;
         }
         self.rust_impls.insert(node.id(), implementation.clone());
@@ -1837,6 +1845,7 @@ impl<'source> DirectAdapterState<'source> {
         let Some(argument) = node.child_by_field_name("argument") else {
             return Ok(());
         };
+        let reexport = rust_is_public_use(&self.text(node));
         let raw = self.text(argument);
         let mut flattened = Vec::new();
         expand_rust_use_tree(&raw, "", &mut flattened);
@@ -1861,7 +1870,9 @@ impl<'source> DirectAdapterState<'source> {
                 &local,
                 &raw_target,
             );
-            let kind = if !glob && local != rust_path_leaf(&target) {
+            let kind = if reexport {
+                BindingKind::Reexport
+            } else if !glob && local != rust_path_leaf(&target) {
                 BindingKind::ImportAlias
             } else {
                 BindingKind::Import
@@ -1874,9 +1885,7 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&owner.scope_id),
                 range.clone(),
             )?;
-            if !glob {
-                self.record_import_binding(owner, &local, &target, &binding_id, 0);
-            }
+            self.record_import_binding(owner, &local, &target, &binding_id, 0);
             let occurrence_id = self.builder.occur(
                 SemanticRole::Import,
                 &owner.fact_id,
@@ -1886,7 +1895,11 @@ impl<'source> DirectAdapterState<'source> {
                 range,
             )?;
             self.builder.relate(
-                CandidateRelation::Imports,
+                if reexport {
+                    CandidateRelation::Reexports
+                } else {
+                    CandidateRelation::Imports
+                },
                 &owner.fact_id,
                 Some(&occurrence_id),
                 Some(&binding_id),
@@ -1906,7 +1919,7 @@ impl<'source> DirectAdapterState<'source> {
                         "function".to_owned(),
                         "macro".to_owned(),
                     ],
-                    allow_external: !target.starts_with("crate"),
+                    allow_external: !rust_identity_is_internal(&self.module_or_package, &target),
                 },
             )?;
         }
@@ -2007,10 +2020,37 @@ impl<'source> DirectAdapterState<'source> {
         if self.import_binding_is_ambiguous(owner, binding_name) {
             return Ok(());
         }
-        let binding = self
+        let direct_binding = self
             .binding_for_occurrence(owner, binding_name, function.start_byte(), true)
             .cloned();
-        let qualified_name = self.rust_call_qualified_name(owner, qualifier, spelling);
+        let wildcard_binding = direct_binding
+            .is_none()
+            .then(|| {
+                let wildcard_eligible = qualifier.is_some_and(|value| {
+                    qualified_binding_head(value)
+                        .chars()
+                        .next()
+                        .is_some_and(char::is_uppercase)
+                }) || (qualifier.is_none()
+                    && spelling.chars().next().is_some_and(char::is_uppercase));
+                wildcard_eligible
+                    .then(|| self.rust_wildcard_binding(owner, function.start_byte()))
+                    .flatten()
+            })
+            .flatten()
+            .cloned();
+        let qualified_name = self
+            .rust_call_qualified_name(owner, qualifier, spelling)
+            .or_else(|| {
+                wildcard_binding.is_some().then(|| {
+                    qualifier.map_or_else(
+                        || spelling.to_owned(),
+                        |qualifier| rust_join_qualified(qualifier, spelling),
+                    )
+                })
+            });
+        let wildcard_bound = wildcard_binding.is_some();
+        let binding = direct_binding.or(wildcard_binding);
         let occurrence_id = self.builder.occur(
             SemanticRole::Call,
             &owner.fact_id,
@@ -2027,10 +2067,16 @@ impl<'source> DirectAdapterState<'source> {
                 .or_else(|| Some(self.module_or_package.clone())),
             scope_id: Some(owner.scope_id.clone()),
             qualified_name: qualified_name.clone(),
-            allowed_target_kinds: vec!["function".to_owned(), "method".to_owned()],
-            allow_external: qualified_name
-                .as_deref()
-                .is_some_and(|qualified| !qualified.starts_with("crate")),
+            allowed_target_kinds: vec![
+                "enum_member".to_owned(),
+                "function".to_owned(),
+                "method".to_owned(),
+                "struct".to_owned(),
+            ],
+            allow_external: qualified_name.as_deref().is_some_and(|qualified| {
+                (wildcard_bound || !qualifier.is_some_and(rust_deferred_owner))
+                    && !rust_identity_is_internal(&self.module_or_package, qualified)
+            }),
         };
         self.builder.relate(
             CandidateRelation::Calls,
@@ -2064,8 +2110,8 @@ impl<'source> DirectAdapterState<'source> {
                 .imported_target_for_occurrence(owner, spelling, 0, true)
                 .cloned();
         };
-        if qualifier == "Self"
-            && let Some(enclosing) = owner.enclosing_type_qualified_name.as_deref()
+        if (qualifier == "Self" || rust_receiver_is_self(qualifier))
+            && let Some(enclosing) = rust_callable_owner(owner)
         {
             return Some(rust_join_qualified(enclosing, spelling));
         }
@@ -2082,8 +2128,7 @@ impl<'source> DirectAdapterState<'source> {
                 spelling,
             ));
         }
-        (qualifier.contains("::") || qualifier.chars().next().is_some_and(char::is_lowercase))
-            .then(|| rust_join_qualified(qualifier, spelling))
+        Some(rust_join_qualified(qualifier, spelling))
     }
 
     fn add_rust_macro_invocation(
@@ -2106,6 +2151,7 @@ impl<'source> DirectAdapterState<'source> {
         let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
         let binding = self
             .binding_for_occurrence(owner, binding_name, node.start_byte(), true)
+            .or_else(|| self.rust_wildcard_binding(owner, node.start_byte()))
             .cloned();
         let qualified_name = qualifier
             .and_then(|qualifier| {
@@ -2144,9 +2190,9 @@ impl<'source> DirectAdapterState<'source> {
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: qualified_name.clone(),
                 allowed_target_kinds: vec!["macro".to_owned()],
-                allow_external: qualified_name
-                    .as_deref()
-                    .is_some_and(|qualified| !qualified.starts_with("crate")),
+                allow_external: qualified_name.as_deref().is_some_and(|qualified| {
+                    !rust_identity_is_internal(&self.module_or_package, qualified)
+                }),
             },
         )?;
         Ok(())
@@ -2170,9 +2216,9 @@ impl<'source> DirectAdapterState<'source> {
             node,
             qualified_name.as_deref(),
             allowed_target_kinds.unwrap_or_else(|| target_kinds_for_relation(relation)),
-            qualified_name
-                .as_deref()
-                .is_some_and(|qualified| !qualified.starts_with("crate")),
+            qualified_name.as_deref().is_some_and(|qualified| {
+                !rust_identity_is_internal(&self.module_or_package, qualified)
+            }),
         )?;
         let _ = (qualifier, spelling);
         Ok(())
@@ -2197,6 +2243,7 @@ impl<'source> DirectAdapterState<'source> {
         let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
         let binding = self
             .binding_for_occurrence(owner, binding_name, node.start_byte(), true)
+            .or_else(|| self.rust_wildcard_binding(owner, node.start_byte()))
             .cloned();
         let occurrence_id = self.builder.occur(
             role,
@@ -2224,6 +2271,18 @@ impl<'source> DirectAdapterState<'source> {
             },
         )?;
         Ok(())
+    }
+
+    fn rust_wildcard_binding(
+        &self,
+        owner: &DeclarationContext,
+        use_start: usize,
+    ) -> Option<&String> {
+        if self.import_binding_is_ambiguous(owner, "*") {
+            return None;
+        }
+        self.import_binding_version_at(owner, "*", use_start, true)
+            .map(|binding| &binding.binding_id)
     }
 
     fn extract_go(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
@@ -3307,23 +3366,26 @@ fn rust_qualified_parent(path: &str) -> Option<&str> {
 
 fn rust_module_identity(path: &Path, source_file: &str) -> String {
     let portable = Path::new(source_file);
-    let relative = portable
-        .components()
-        .skip_while(|component| component.as_os_str() != "src")
-        .skip(1)
-        .collect::<std::path::PathBuf>();
-    let relative = if relative.as_os_str().is_empty() {
-        path.file_name()
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default()
-    } else {
-        relative
-    };
-    let mut components = relative
+    let portable_components = portable
         .components()
         .filter_map(|component| component.as_os_str().to_str())
-        .map(str::to_owned)
         .collect::<Vec<_>>();
+    let source_root = portable_components
+        .iter()
+        .rposition(|component| *component == "src");
+    let crate_name = source_root
+        .and_then(|index| index.checked_sub(1))
+        .and_then(|index| portable_components.get(index).copied())
+        .filter(|component| !matches!(*component, "crates" | "src"))
+        .unwrap_or("crate");
+    let relative = if let Some(index) = source_root {
+        portable_components[index.saturating_add(1)..].to_vec()
+    } else {
+        path.file_name()
+            .and_then(|value| value.to_str())
+            .map_or_else(Vec::new, |value| vec![value])
+    };
+    let mut components = relative.into_iter().map(str::to_owned).collect::<Vec<_>>();
     if let Some(file) = components.pop() {
         let stem = Path::new(&file)
             .file_stem()
@@ -3334,9 +3396,9 @@ fn rust_module_identity(path: &Path, source_file: &str) -> String {
         }
     }
     if components.is_empty() {
-        "crate".to_owned()
+        crate_name.to_owned()
     } else {
-        format!("crate::{}", components.join("::"))
+        format!("{crate_name}::{}", components.join("::"))
     }
 }
 
@@ -3421,8 +3483,12 @@ fn rust_canonical_import_target(module: &str, raw: &str) -> String {
     if raw.is_empty() {
         return String::new();
     }
-    if raw == "crate" || raw.starts_with("crate::") {
-        return raw.to_owned();
+    let crate_name = module.split("::").next().unwrap_or("crate");
+    if raw == "crate" {
+        return crate_name.to_owned();
+    }
+    if let Some(suffix) = raw.strip_prefix("crate::") {
+        return rust_join_qualified(crate_name, suffix);
     }
     if raw == "self" {
         return module.to_owned();
@@ -3693,6 +3759,81 @@ fn rust_primitive_type(raw: &str) -> bool {
             | "Self"
             | "self"
     )
+}
+
+fn rust_prelude_symbol(raw: &str) -> bool {
+    matches!(
+        raw,
+        "Box"
+            | "Clone"
+            | "Copy"
+            | "Default"
+            | "DoubleEndedIterator"
+            | "Drop"
+            | "Eq"
+            | "Err"
+            | "ExactSizeIterator"
+            | "Extend"
+            | "Fn"
+            | "FnMut"
+            | "FnOnce"
+            | "From"
+            | "Into"
+            | "Iterator"
+            | "None"
+            | "Ok"
+            | "Option"
+            | "Ord"
+            | "PartialEq"
+            | "PartialOrd"
+            | "Result"
+            | "Send"
+            | "Sized"
+            | "Some"
+            | "String"
+            | "Sync"
+            | "ToOwned"
+            | "ToString"
+            | "Vec"
+    )
+}
+
+fn rust_deferred_owner(raw: &str) -> bool {
+    !raw.contains("::") && !rust_primitive_type(raw) && !rust_prelude_symbol(raw)
+}
+
+fn rust_is_public_use(raw: &str) -> bool {
+    raw.trim_start().strip_prefix("pub").is_some_and(|suffix| {
+        suffix
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_whitespace() || character == '(')
+    })
+}
+
+fn rust_receiver_is_self(raw: &str) -> bool {
+    let normalized = raw
+        .chars()
+        .filter(|character| {
+            !character.is_whitespace() && !matches!(character, '(' | ')' | '&' | '*')
+        })
+        .collect::<String>();
+    normalized.strip_prefix("mut").unwrap_or(&normalized) == "self"
+}
+
+fn rust_callable_owner(owner: &DeclarationContext) -> Option<&str> {
+    owner.enclosing_type_qualified_name.as_deref().or_else(|| {
+        (owner.kind == "method")
+            .then(|| rust_qualified_parent(&owner.qualified_name))
+            .flatten()
+    })
+}
+
+fn rust_identity_is_internal(module: &str, qualified: &str) -> bool {
+    let crate_name = module.split("::").next().unwrap_or("crate");
+    qualified == crate_name
+        || qualified.starts_with(&format!("{crate_name}::"))
+        || qualified.starts_with(&format!("<{crate_name}::"))
 }
 
 fn rust_is_type_node(kind: &str) -> bool {

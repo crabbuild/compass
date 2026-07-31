@@ -145,6 +145,7 @@ const RUST_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::Macros,
     LanguageCapability::Tests,
     LanguageCapability::Imports,
+    LanguageCapability::Reexports,
     LanguageCapability::Aliases,
     LanguageCapability::Calls,
     LanguageCapability::TypeReferences,

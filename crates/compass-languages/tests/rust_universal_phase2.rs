@@ -86,6 +86,12 @@ fn build(value: ExternalThing) -> Widget { local_macro!(); Widget { value: LIMIT
             && candidate.constraints.qualified_name.as_deref() == Some("crate::api::Render")
             && !candidate.constraints.allow_external
     }));
+    assert!(evidence.bindings.iter().any(|binding| {
+        binding.kind == BindingKind::Member
+            && binding.spelling == "render"
+            && binding.qualified_target == "<crate::api::Widget as crate::api::Render>::render"
+            && binding.target_declaration_id.is_some()
+    }));
     assert_eq!(
         evidence
             .occurrences
@@ -216,5 +222,81 @@ fn rust_phase2_distinguishes_same_named_module_and_function_candidates()
             .collect::<HashSet<_>>(),
         HashSet::from(["function".to_owned(), "module".to_owned()])
     );
+    Ok(())
+}
+
+#[test]
+fn rust_phase2_preserves_impl_self_constructors_and_public_wildcards() -> Result<(), Box<dyn Error>>
+{
+    let extraction = Engine::default().extract_source(
+        Path::new("src/lib.rs"),
+        br#"
+pub use external::prelude::*;
+struct Widget(u64);
+impl Widget {
+    fn first(&self) { self.second(); (*self).second(); }
+    fn second(&self) {}
+    fn new() -> Self { Self(0) }
+}
+impl Default for Widget {
+    fn default() -> Self { Self::new() }
+}
+fn build() -> Widget { Widget(1) }
+fn external() { External::load(); }
+"#,
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+
+    let self_calls = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "second"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(self_calls.len(), 2);
+    assert!(self_calls.iter().all(|candidate| {
+        candidate.constraints.qualified_name.as_deref() == Some("crate::Widget::second")
+            && !candidate.constraints.allow_external
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "new"
+            && candidate.constraints.qualified_name.as_deref() == Some("crate::Widget::new")
+            && !candidate.constraints.allow_external
+    }));
+
+    let constructor = evidence
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "Widget"
+        })
+        .ok_or("missing tuple-struct constructor")?;
+    assert!(
+        constructor
+            .constraints
+            .allowed_target_kinds
+            .contains(&"struct".to_owned())
+    );
+    assert!(evidence.bindings.iter().any(|binding| {
+        binding.spelling == "*"
+            && binding.qualified_target == "external::prelude"
+            && binding.kind == BindingKind::Reexport
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Reexports && candidate.target_spelling == "prelude"
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "load"
+            && candidate.binding_id.is_some()
+            && candidate.constraints.qualified_name.as_deref() == Some("External::load")
+            && candidate.constraints.allow_external
+    }));
     Ok(())
 }

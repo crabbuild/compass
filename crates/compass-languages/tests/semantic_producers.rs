@@ -471,7 +471,8 @@ fn build() {
         .candidates
         .iter()
         .find(|candidate| {
-            candidate.target_spelling == "new" && candidate.constraints.qualified_name.is_none()
+            candidate.target_spelling == "new"
+                && candidate.constraints.qualified_name.as_deref() == Some("HashMap::new")
         })
         .ok_or("missing HashMap::new candidate")?;
     assert!(!hash_map.constraints.allow_external);

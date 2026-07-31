@@ -1092,8 +1092,8 @@ def _classify_edges(
             if source is not None
             else set()
         )
-        if len(occurrence_targets) == 1 and target not in occurrence_targets:
-            resolved_target = next(iter(occurrence_targets))
+        if occurrence_targets and target not in occurrence_targets:
+            resolved_target = sorted(occurrence_targets)[0]
             status = (
                 "rejected"
                 if graphify_target is not None and graphify_target.source_file

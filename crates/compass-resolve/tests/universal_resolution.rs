@@ -872,3 +872,253 @@ func (body *Body) Encode() {
         edge.string("relation") != "calls" || edge.string("source_location") != "L6"
     }));
 }
+
+#[test]
+fn rust_impl_self_calls_and_tuple_struct_constructors_resolve_exactly() {
+    let source = br#"struct Widget(u64);
+impl Widget {
+    fn first(&self) { self.second(); (*self).second(); }
+    fn second(&self) {}
+}
+fn build() -> Widget { Widget(1) }
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let widget = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Widget")
+        .expect("Widget declaration");
+    let second = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Widget::second")
+        .expect("Widget.second declaration");
+
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.string("relation") == "calls"
+                    && edge.target == second.id
+                    && edge.string("source_location") == "L3"
+            })
+            .count(),
+        2
+    );
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == widget.id
+            && edge.string("source_location") == "L6"
+    }));
+}
+
+#[test]
+fn rust_local_qualified_call_resolves_before_a_wildcard_candidate() {
+    let source = br#"pub use crate::support::*;
+struct App;
+impl App { fn new() -> Self { Self } }
+fn builds() { App::new(); }
+"#;
+    let extracted = extract("crates/bevy_app/src/app.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "crates/bevy_app/src/app.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let target = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "bevy_app::app::App::new")
+        .expect("App.new declaration");
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.target == target.id
+                && edge.string("relation") == "calls"
+                && edge.string("source_location") == "L4"
+        }),
+        "edges={:#?}",
+        resolved.edges
+    );
+}
+
+#[test]
+fn rust_import_binding_resolves_the_qualified_associated_function() {
+    let provider = extract(
+        "src/api.rs",
+        b"pub struct Widget;\npub trait Build { fn build() -> Self; }\nimpl Widget { pub fn new() -> Self { Self } }\nimpl Build for Widget { fn build() -> Self { Self } }\n",
+    );
+    let caller_source =
+        b"use crate::api::Widget;\nfn build() { Widget::new(); Widget::build(); }\n";
+    let caller = extract("src/lib.rs", caller_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, caller],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(caller_source.to_vec()).expect("source"),
+        )]),
+    );
+    let widget = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::api::Widget")
+        .expect("Widget declaration");
+    let constructor = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::api::Widget::new")
+        .expect("Widget.new declaration");
+    let trait_constructor = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name") == "<crate::api::Widget as crate::api::Build>::build"
+        })
+        .expect("Widget trait build declaration");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.target == constructor.id
+            && edge.string("relation") == "calls"
+            && edge.string("source_location") == "L2"
+    }));
+    assert!(resolved.edges.iter().all(|edge| {
+        !(edge.target == widget.id
+            && edge.string("relation") == "calls"
+            && edge.string("source_location") == "L2")
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.target == trait_constructor.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "member-binding"
+            && edge.string("source_location") == "L2"
+    }));
+}
+
+#[test]
+fn rust_unresolved_lexical_receiver_is_deferred_without_becoming_external() {
+    let source = b"struct World;\nfn run(world: World) { world.spawn(); }\n";
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let deferred = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "world::spawn")
+        .expect("deferred world.spawn target");
+
+    assert_eq!(
+        deferred
+            .attributes
+            .get("placeholder")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        deferred
+            .attributes
+            .get("external")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        deferred
+            .attributes
+            .get("deferred_receiver")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.target == deferred.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "deferred-receiver"
+            && edge.string("source_location") == "L2"
+    }));
+}
+
+#[test]
+fn rust_wildcard_bindings_resolve_local_exports_and_preserve_external_candidates() {
+    let provider = extract(
+        "src/api.rs",
+        b"pub struct Widget(pub u64);\npub fn new() {}\n",
+    );
+    let local_source = b"use crate::api::*;\nfn build(value: u64) -> Widget { Widget(value) }\nfn boxed() { Box::new(1); }\n";
+    let local = extract("src/lib.rs", local_source);
+    let external_source =
+        b"use framework::prelude::*;\nfn load(value: External) -> External { External(value) }\n";
+    let external = extract("src/external.rs", external_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, local, external],
+        &HashMap::from([
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(local_source.to_vec()).expect("local source"),
+            ),
+            (
+                "src/external.rs".to_owned(),
+                String::from_utf8(external_source.to_vec()).expect("external source"),
+            ),
+        ]),
+    );
+    let widget = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::api::Widget")
+        .expect("local wildcard target");
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.target == widget.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "wildcard-binding"
+    }));
+    let box_new = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "Box::new")
+        .expect("qualified Box constructor placeholder");
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.target == box_new.id
+            && edge.string("relation") == "calls"
+            && edge.string("source_location") == "L3"
+    }));
+    let api_new = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::api::new")
+        .expect("api new declaration");
+    assert!(resolved.edges.iter().all(|edge| {
+        !(edge.target == api_new.id
+            && edge.string("relation") == "calls"
+            && edge.string("source_location") == "L3")
+    }));
+
+    let external = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "framework::prelude::External")
+        .expect("external wildcard placeholder");
+    assert_eq!(
+        external
+            .attributes
+            .get("placeholder")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.target == external.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "qualified-external"
+    }));
+}
