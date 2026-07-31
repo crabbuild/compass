@@ -113,4 +113,4 @@ Peak RSS is also material: the standardized Django run measured about 4.76 GiB c
 - [x] Run the retained Django comparison with the pinned source root and audit every changed classification population.
 - [x] Confirm the known `AdminEmailHandler.emit -> ServerFormatter.format` edge is absent without losing source-proven receiver edges.
 - [x] Record controlled performance evidence and clearly distinguish measured results from inference.
-- [ ] Commit cohesive changes, push the branch, and create a PR with exact commands, results, residual risks, and no perfection claim unsupported by evidence.
+- [x] Commit cohesive changes, push the branch, and create PR #94 with exact commands, results, residual risks, and no perfection claim unsupported by evidence.
