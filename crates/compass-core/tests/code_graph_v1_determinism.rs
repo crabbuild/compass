@@ -125,6 +125,66 @@ fn clean_warm_restored_and_checkout_root_builds_are_byte_identical() -> Result<(
     Ok(())
 }
 
+#[test]
+fn unrelated_incremental_edit_preserves_cached_framework_routes() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    for (relative, source) in [
+        (
+            "package.json",
+            r#"{"dependencies":{"react-router-dom":"7.0.0"}}"#,
+        ),
+        (
+            "src/routes.tsx",
+            r#"import { createBrowserRouter } from "react-router-dom";
+import AccountPage from "./AccountPage";
+import UserPage from "./UserPage";
+export const router = createBrowserRouter([
+  { path: "/account", Component: AccountPage },
+  { path: "/users/:id", Component: UserPage },
+]);
+"#,
+        ),
+        (
+            "src/AccountPage.tsx",
+            "export default function AccountPage() { return null; }\n",
+        ),
+        (
+            "src/UserPage.tsx",
+            "export default function UserPage() { return null; }\n",
+        ),
+        ("src/lib.rs", SOURCE),
+    ] {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, source)?;
+    }
+
+    let (clean, _) = build(root)?;
+    let clean_graph: GraphDocument = serde_json::from_slice(&clean)?;
+    assert_eq!(
+        clean_graph
+            .links
+            .iter()
+            .filter(|edge| edge.kind == EdgeKind::RoutesTo)
+            .count(),
+        2
+    );
+
+    fs::write(
+        root.join("src/lib.rs"),
+        format!("{SOURCE}\npub fn temporary_edit() {{}}\n"),
+    )?;
+    let _ = build(root)?;
+    fs::write(root.join("src/lib.rs"), SOURCE)?;
+    let (restored, _) = build(root)?;
+
+    assert_eq!(restored, clean);
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn cached_file_symlink_keeps_its_logical_graph_identity() -> Result<(), Box<dyn Error>> {

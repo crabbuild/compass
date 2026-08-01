@@ -10,7 +10,8 @@ const compatible: CapabilityReport = {
     progress: "compass.ide.progress/1"
   },
   features: {
-    graph: true
+    graph: true,
+    community_detail: true
   }
 };
 
@@ -35,6 +36,14 @@ describe("compatibilityIssue", () => {
   it("accepts a matching feature and contract", () => {
     expect(compatibilityIssue(compatible, undefined, COMPASS_REQUIREMENTS.graph))
       .toBeUndefined();
+  });
+
+  it("hard-requires current community drill-down support for graph workflows", () => {
+    expect(compatibilityIssue({
+      ...compatible,
+      features: { ...compatible.features, community_detail: false }
+    }, undefined, COMPASS_REQUIREMENTS.graph))
+      .toContain("'community_detail' feature");
   });
 
   it("requires the language-neutral call graph contract", () => {

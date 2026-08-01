@@ -2007,6 +2007,7 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
         let source_file = match fact {
             RawFrameworkFact::Route(route) => &mut route.anchor.source_file,
             RawFrameworkFact::Domain(domain) => &mut domain.anchor.source_file,
+            RawFrameworkFact::Annotation(annotation) => &mut annotation.anchor.source_file,
         };
         *source_file = normalize_origin_path(source_file);
     }
@@ -3594,6 +3595,7 @@ fn make_framework_fact_sources_portable(extraction: &mut Extraction, root: &Path
         let source_file = match fact {
             RawFrameworkFact::Route(route) => &mut route.anchor.source_file,
             RawFrameworkFact::Domain(domain) => &mut domain.anchor.source_file,
+            RawFrameworkFact::Annotation(annotation) => &mut annotation.anchor.source_file,
         };
         let path = Path::new(source_file);
         if !path.is_absolute() {
@@ -4368,25 +4370,48 @@ mod tests {
                     ("origin_file".to_owned(), Value::String(escaped.to_owned())),
                 ]),
             }],
-            framework_facts: vec![serde_json::from_value(json!({
-                "type": "domain",
-                "fact": {
-                    "framework": "aspnet",
-                    "kind": "controller",
-                    "name": "AspNetController",
-                    "declaringScope": "AspNetController",
-                    "anchor": {
-                        "sourceFile": escaped,
-                        "startByte": 0,
-                        "endByte": 5,
-                        "startLine": 1,
-                        "startColumn": 0,
-                        "endLine": 1,
-                        "endColumn": 5
-                    },
-                    "origin": "ast"
-                }
-            }))?],
+            framework_facts: vec![
+                serde_json::from_value(json!({
+                    "type": "domain",
+                    "fact": {
+                        "framework": "aspnet",
+                        "kind": "controller",
+                        "name": "AspNetController",
+                        "declaringScope": "AspNetController",
+                        "anchor": {
+                            "sourceFile": escaped,
+                            "startByte": 0,
+                            "endByte": 5,
+                            "startLine": 1,
+                            "startColumn": 0,
+                            "endLine": 1,
+                            "endColumn": 5
+                        },
+                        "origin": "ast"
+                    }
+                }))?,
+                serde_json::from_value(json!({
+                    "type": "annotation",
+                    "fact": {
+                        "packId": "spring-java",
+                        "framework": "spring",
+                        "annotationName": "Controller",
+                        "ownerDeclarationId": "controller-declaration",
+                        "ownerGraphNodeId": "controller",
+                        "ownerQualifiedName": "AspNetController",
+                        "ownerKind": "class",
+                        "anchor": {
+                            "sourceFile": escaped,
+                            "startByte": 0,
+                            "endByte": 5,
+                            "startLine": 1,
+                            "startColumn": 0,
+                            "endLine": 1,
+                            "endColumn": 5
+                        }
+                    }
+                }))?,
+            ],
             ..Extraction::default()
         };
 
@@ -4395,11 +4420,14 @@ mod tests {
         let expected = "fixtures/code-graph/routes/csharp/AspNetController.cs";
         assert_eq!(extraction.nodes[0].string("source_file"), expected);
         assert_eq!(extraction.nodes[0].string("origin_file"), expected);
-        let framework_source = match &extraction.framework_facts[0] {
-            RawFrameworkFact::Route(route) => &route.anchor.source_file,
-            RawFrameworkFact::Domain(domain) => &domain.anchor.source_file,
-        };
-        assert_eq!(framework_source, expected);
+        assert!(extraction.framework_facts.iter().all(|fact| {
+            let framework_source = match fact {
+                RawFrameworkFact::Route(route) => &route.anchor.source_file,
+                RawFrameworkFact::Domain(domain) => &domain.anchor.source_file,
+                RawFrameworkFact::Annotation(annotation) => &annotation.anchor.source_file,
+            };
+            framework_source == expected
+        }));
         Ok(())
     }
 

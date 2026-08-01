@@ -393,7 +393,21 @@ fn batched_cache_writes_are_portable_and_refresh_changed_sources() -> Result<(),
 
     let portable_first = json!({
         "nodes":[{"id":"first","source_file":"first.rs"}],
-        "edges":[]
+        "edges":[],
+        "framework_facts":[{
+            "type":"route",
+            "fact":{
+                "anchor":{
+                    "sourceFile":"first.rs",
+                    "startByte":0,
+                    "endByte":1,
+                    "startLine":1,
+                    "startColumn":0,
+                    "endLine":1,
+                    "endColumn":1
+                }
+            }
+        }]
     });
     cache.save_portable_ast_batch(&[(first.clone(), portable_first)])?;
     let canonical_first_value = json!({
@@ -401,7 +415,21 @@ fn batched_cache_writes_are_portable_and_refresh_changed_sources() -> Result<(),
             "id":"first",
             "source_file":fs::canonicalize(&first)?.to_string_lossy()
         }],
-        "edges":[]
+        "edges":[],
+        "framework_facts":[{
+            "type":"route",
+            "fact":{
+                "anchor":{
+                    "sourceFile":fs::canonicalize(&first)?.to_string_lossy(),
+                    "startByte":0,
+                    "endByte":1,
+                    "startLine":1,
+                    "startColumn":0,
+                    "endLine":1,
+                    "endColumn":1
+                }
+            }
+        }]
     });
     assert_eq!(
         cache.load(&first, &CacheKind::Ast, None, false)?,

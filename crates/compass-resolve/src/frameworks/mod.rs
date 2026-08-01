@@ -5,6 +5,7 @@ mod php;
 mod python;
 mod routes;
 mod ruby;
+mod spring;
 mod target_index;
 mod typescript;
 
@@ -16,6 +17,12 @@ pub use routes::{
     FrameworkResolutionError, ResolvedRoute, RouteStage, RouteStageRole, publish_resolved_routes,
     resolve_and_publish_framework_routes, resolve_routes,
 };
+
+pub(crate) fn expand_universal_framework_facts(
+    extraction: &mut compass_languages::Extraction,
+) -> Result<(), FrameworkResolutionError> {
+    spring::expand(extraction)
+}
 
 pub(crate) fn resolve_framework_facts(
     extraction: &compass_languages::Extraction,

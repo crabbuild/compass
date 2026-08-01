@@ -22,6 +22,7 @@ const capabilities: CapabilityReport = {
     update: true,
     watch: true,
     graph: true,
+    community_detail: true,
     call_graph: true,
     query: true,
     history: true

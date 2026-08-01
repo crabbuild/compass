@@ -11,23 +11,26 @@ mod play;
 mod python;
 mod ruby;
 mod rust;
+mod spring;
 mod swift;
 mod text;
 mod typescript;
 
 pub use model::{
-    FrameworkLimitError, FrameworkLimits, RawDomainFact, RawFrameworkAnchor, RawFrameworkFact,
-    RawFrameworkOrigin, RawRouteFact,
+    FrameworkLimitError, FrameworkLimits, RawDomainFact, RawFrameworkAnchor,
+    RawFrameworkAnnotationFact, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
 };
 pub use pack::{
-    FrameworkManifestPolicy, FrameworkOccurrencePolicy, FrameworkPackDescriptor, FrameworkPackKind,
-    FrameworkPackRegistry, FrameworkPackRegistryError,
+    FrameworkCapability, FrameworkManifestPolicy, FrameworkOccurrencePolicy,
+    FrameworkPackDescriptor, FrameworkPackKind, FrameworkPackRegistry, FrameworkPackRegistryError,
+    FrameworkRelation,
 };
 
 use std::path::Path;
 
 use tree_sitter::Node;
 
+use crate::SemanticEvidenceBatch;
 use crate::{Extraction, ProjectEvidence};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -55,6 +58,21 @@ struct SourcePack {
     dependency_markers: &'static [&'static str],
     manifest_policy: ManifestPolicy,
     detector: SourceDetector,
+}
+
+struct UniversalDetectionContext<'source, 'tree> {
+    source: &'source [u8],
+    root: Node<'tree>,
+    project: Option<&'source ProjectEvidence>,
+    evidence: &'source SemanticEvidenceBatch,
+}
+
+type UniversalSourceDetector =
+    for<'source, 'tree> fn(&UniversalDetectionContext<'source, 'tree>) -> Vec<RawFrameworkFact>;
+
+struct UniversalSourcePack {
+    descriptor: &'static FrameworkPackDescriptor,
+    detector: UniversalSourceDetector,
 }
 
 type ConfigMatcher = fn(&Path) -> bool;
@@ -86,13 +104,13 @@ const SOURCE_PACKS: &[SourcePack] = &[
     ),
     source_pack("rails-routes", &["ruby"], &["rails"], detect_ruby),
     source_pack(
-        "spring-web",
-        &["java", "kotlin"],
+        "spring-web-kotlin",
+        &["kotlin"],
         &[
             "org.springframework:spring-web",
             "org.springframework.boot:spring-boot",
         ],
-        detect_java,
+        detect_kotlin,
     ),
     source_pack("go-web", &["go"], &[], detect_go),
     source_pack("rust-web", &["rust"], &[], detect_rust),
@@ -129,7 +147,6 @@ const SOURCE_PACKS: &[SourcePack] = &[
             "typescript",
             "tsx",
             "javascript",
-            "java",
             "csharp",
             "ruby",
             "php",
@@ -141,6 +158,11 @@ const SOURCE_PACKS: &[SourcePack] = &[
         detector: detect_enterprise,
     },
 ];
+
+const UNIVERSAL_SOURCE_PACKS: &[UniversalSourcePack] = &[UniversalSourcePack {
+    descriptor: &pack::SPRING_JAVA_DESCRIPTOR,
+    detector: spring::detect,
+}];
 
 const CONFIG_PACKS: &[ConfigPack] = &[
     ConfigPack {
@@ -193,6 +215,21 @@ pub(crate) fn detect(
         project,
     };
     let mut facts = Vec::new();
+    if let Some(evidence) = extraction.semantic_evidence.as_ref() {
+        for pack in UNIVERSAL_SOURCE_PACKS {
+            debug_assert_eq!(pack.descriptor.kind, FrameworkPackKind::Source);
+            if pack.descriptor.languages.contains(&language)
+                && universal_pack_enabled(pack.descriptor, project)
+            {
+                facts.extend((pack.detector)(&UniversalDetectionContext {
+                    source,
+                    root,
+                    project,
+                    evidence,
+                }));
+            }
+        }
+    }
     for pack in SOURCE_PACKS {
         debug_assert!(!pack.id.is_empty());
         if pack.languages.contains(&language) && pack_enabled(pack, project) {
@@ -237,6 +274,18 @@ pub(crate) fn detect_template_file_route(
 
 fn pack_enabled(pack: &SourcePack, project: Option<&ProjectEvidence>) -> bool {
     manifest_policy_allows(pack.manifest_policy, pack.dependency_markers, project)
+}
+
+fn universal_pack_enabled(
+    descriptor: &FrameworkPackDescriptor,
+    project: Option<&ProjectEvidence>,
+) -> bool {
+    match descriptor.manifest_policy {
+        FrameworkManifestPolicy::Advisory => true,
+        FrameworkManifestPolicy::Required => {
+            project.is_none_or(|project| project.has_any_dependency(descriptor.dependency_markers))
+        }
+    }
 }
 
 fn template_pack_enabled(pack: &TemplatePack, project: Option<&ProjectEvidence>) -> bool {
@@ -287,7 +336,7 @@ fn detect_ruby(
     ruby::detect(context.path, context.source, context.root)
 }
 
-fn detect_java(
+fn detect_kotlin(
     context: &DetectionContext<'_, '_>,
     _extraction: &mut Extraction,
 ) -> Vec<RawFrameworkFact> {
@@ -392,7 +441,7 @@ mod tests {
             "python-web",
             "php-frameworks",
             "rails-routes",
-            "spring-web",
+            "spring-web-kotlin",
             "go-web",
             "rust-web",
             "aspnet-web",

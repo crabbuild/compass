@@ -135,13 +135,22 @@ function CompassGraphView({
   const canvasRef = useRef<GraphCanvasHandle>(null);
   const hostRef = useRef(host);
   hostRef.current = host;
-  const selected = model.nodes.find((node) => node.id === state.focusedNodeId);
-  const hovered = hover ? model.nodes.find((node) => node.id === hover.nodeId) : undefined;
+  const nodeById = useMemo(
+    () => new Map(model.nodes.map((node) => [node.id, node])),
+    [model.nodes]
+  );
+  const selected = state.focusedNodeId
+    ? nodeById.get(state.focusedNodeId)
+    : undefined;
+  const hovered = hover ? nodeById.get(hover.nodeId) : undefined;
   const hoveredActivation = hovered
     ? graphNodeActivation(model, hovered, detailCommunityId)
     : undefined;
-  const comparisonMode = model.nodes.some((node) => node.change !== undefined)
-    || model.edges.some((edge) => edge.change !== undefined);
+  const comparisonMode = useMemo(
+    () => model.nodes.some((node) => node.change !== undefined)
+      || model.edges.some((edge) => edge.change !== undefined),
+    [model.edges, model.nodes]
+  );
   const changeCounts = useMemo(() => {
     const counts = new Map<GraphChangeType, number>();
     for (const node of model.nodes) {
@@ -158,10 +167,16 @@ function CompassGraphView({
       if (edge.target === selected.id) ids.add(edge.source);
     }
     return [...ids]
-      .map((id) => model.nodes.find((node) => node.id === id))
+      .map((id) => nodeById.get(id))
       .filter((node) => node !== undefined)
       .sort((left, right) => left.label.localeCompare(right.label));
-  }, [model.edges, model.nodes, selected]);
+  }, [model.edges, nodeById, selected]);
+  const connectedEdges = useMemo(
+    () => selected
+      ? model.edges.filter((edge) => edge.source === selected.id || edge.target === selected.id)
+      : [],
+    [model.edges, selected]
+  );
   const matches = useMemo(() => {
     const query = state.query.trim().toLocaleLowerCase();
     if (!query) return [];
@@ -187,7 +202,7 @@ function CompassGraphView({
     dispatch({ type: "revealLayout" });
   }, []);
   const activateNode = useCallback((nodeId: string) => {
-    const node = model.nodes.find((candidate) => candidate.id === nodeId);
+    const node = nodeById.get(nodeId);
     if (!node) return;
     const activation = graphNodeActivation(model, node, detailCommunityId);
     if (activation.type === "community") {
@@ -201,7 +216,7 @@ function CompassGraphView({
     }
   }, [
     detailCommunityId,
-    model.nodes,
+    nodeById,
     model.stats.aggregated,
     sourceRevisions?.after,
     sourceRevisions?.before
@@ -332,9 +347,7 @@ function CompassGraphView({
           model={model}
           selected={selected}
           neighbors={neighbors}
-          connectedEdges={selected
-            ? model.edges.filter((edge) => edge.source === selected.id || edge.target === selected.id)
-            : []}
+          connectedEdges={connectedEdges}
           query={state.query}
           matches={matches}
           hiddenCommunities={state.hiddenCommunities}

@@ -413,6 +413,7 @@ fn validate_fact_limits(
         let file = match fact {
             RawFrameworkFact::Route(route) => route.anchor.source_file.as_str(),
             RawFrameworkFact::Domain(domain) => domain.anchor.source_file.as_str(),
+            RawFrameworkFact::Annotation(annotation) => annotation.anchor.source_file.as_str(),
         };
         *counts.entry(file).or_default() += 1;
     }
