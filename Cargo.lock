@@ -1341,8 +1341,10 @@ version = "0.1.10"
 dependencies = [
  "ahash",
  "compass-graph",
+ "compass-ir",
  "compass-languages",
  "compass-model",
+ "compass-program",
  "rayon",
  "regex",
  "serde",

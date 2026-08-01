@@ -37,7 +37,10 @@ use compass_output::{
     DetectionSummary, HtmlOptions, OutputError, ReportOptions, TokenCost, generate_report,
     graph_view_model_document, write_html,
 };
-use compass_resolve::{merge_decl_def_classes, resolve_owned_with_root};
+use compass_resolve::{
+    apply_program_projection, collect_program_projection_sites, merge_decl_def_classes,
+    resolve_owned_with_root,
+};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -978,9 +981,25 @@ fn build_graph_inner(
     };
     fresh_source_text.extend(cached_source_text);
     let source_text = fresh_source_text;
+    let program_projection_sites = collect_program_projection_sites(&ordered);
     let mut resolved = resolve_owned_with_root(ordered, &source_text, &root);
     profile_internal("cross-file resolution total", &mut internal_started);
     drop(source_text);
+    let defer_program_join = options.force && !options.no_cluster && !has_program_artifacts;
+    let mut program = if defer_program_join {
+        None
+    } else {
+        join_program_worker(program_handle.take(), &mut timings)?
+    };
+    profile_internal("wait for Program analysis", &mut internal_started);
+    if let Some(program) = program.as_ref() {
+        apply_program_projection(
+            &mut resolved,
+            &program_projection_sites,
+            &program.compiler_projection,
+        );
+    }
+    profile_internal("Program graph projection", &mut internal_started);
     finalize_ast_extraction(&mut resolved, &root);
     profile_internal("AST finalization", &mut internal_started);
     let ast_cache_elapsed = ast_cache_handle
@@ -989,13 +1008,6 @@ fn build_graph_inner(
     profile_internal_duration("AST cache publication worker", ast_cache_elapsed);
     internal_started = Instant::now();
     timings.deterministic_extract = stage_started.elapsed();
-    let defer_program_join = options.force && !options.no_cluster;
-    let mut program = if defer_program_join {
-        None
-    } else {
-        join_program_worker(program_handle.take(), &mut timings)?
-    };
-    profile_internal("wait for Program analysis", &mut internal_started);
     stage_started = Instant::now();
     if preserve_prior_semantic {
         let refreshed = semantic
