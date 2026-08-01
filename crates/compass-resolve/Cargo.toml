@@ -21,10 +21,12 @@ sha1.workspace = true
 thiserror.workspace = true
 compass-languages = { path = "../compass-languages", version = "0.1.4" }
 compass-model = { path = "../compass-model", version = "0.1.4" }
+compass-program = { path = "../compass-program", version = "0.1.4" }
 
 [lints]
 workspace = true
 
 [dev-dependencies]
+compass-ir = { path = "../compass-ir", version = "0.1.4" }
 compass-graph = { path = "../compass-graph", version = "0.1.4" }
 tempfile.workspace = true

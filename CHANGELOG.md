@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Use fresh, verified SCIP symbol evidence to disambiguate Java call targets in
+  `graph.json` through exact AST call and declaration anchors, while rejecting
+  non-call references, stale artifacts, ambiguous definitions, and conflicting
+  providers.
 - Introduce the first supported Compass code graph contract,
   `compass.graph/1`, as a strict versioned NetworkX-compatible multigraph with
   structural, framework, enterprise, messaging, job, schema, configuration,

@@ -3,8 +3,12 @@
 pub mod evidence;
 pub mod frameworks;
 mod members;
+mod program;
 
 pub use members::resolve_language_calls;
+pub use program::{
+    ProgramProjectionSites, apply_program_projection, collect_program_projection_sites,
+};
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;

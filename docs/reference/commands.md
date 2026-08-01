@@ -50,6 +50,7 @@ Make a saved current-tree graph match the project:
 
 ```text
 compass update [PATH]
+  [--program-artifact PATH]
   [--out DIR]
   [--no-cluster]
   [--force]
@@ -60,7 +61,10 @@ compass update [PATH]
   [--exclude-hubs N]
 ```
 
-Use for normal cold/incremental structural builds.
+Use for normal cold/incremental structural builds. Supply a verified offline
+SCIP index with repeatable `--program-artifact`. For Java, fresh exact symbol
+evidence can disambiguate AST-proven call sites in `graph.json`; stale,
+unverified, conflicting, and non-call references are not projected.
 
 ### `extract`
 
@@ -68,6 +72,7 @@ Expose the full build surface:
 
 ```text
 compass extract [PATH]
+  [--program-artifact PATH]
   [--code-only]
   [--cargo]
   [--google-workspace]
