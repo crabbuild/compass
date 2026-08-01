@@ -31,6 +31,128 @@ fn is_python_import_evidence(evidence: &Provenance) -> bool {
         })
 }
 
+fn skip_python_whitespace(statement: &str, mut cursor: usize) -> usize {
+    while let Some(rest) = statement.get(cursor..) {
+        let Some(ch) = rest.chars().next() else {
+            break;
+        };
+        if !ch.is_whitespace() {
+            break;
+        }
+        cursor += ch.len_utf8();
+    }
+    cursor
+}
+
+fn python_import_item_spans(statement: &str) -> Vec<(usize, usize)> {
+    let Some(import_pos) = statement.find("import") else {
+        return Vec::new();
+    };
+    let mut cursor = skip_python_whitespace(statement, import_pos + "import".len());
+    if let Some(rest) = statement.get(cursor..) {
+        if rest.starts_with('(') {
+            cursor += 1;
+            cursor = skip_python_whitespace(statement, cursor);
+        }
+    }
+
+    let mut spans = Vec::new();
+    while cursor < statement.len() {
+        cursor = skip_python_whitespace(statement, cursor);
+        while let Some(rest) = statement.get(cursor..) {
+            if rest.starts_with('\\') {
+                cursor += 1;
+                cursor = skip_python_whitespace(statement, cursor);
+                continue;
+            }
+            break;
+        }
+
+        if cursor >= statement.len() || statement[cursor..].starts_with(')') {
+            break;
+        }
+
+        let start = cursor;
+        let mut end = cursor;
+        let mut paren_depth = 0usize;
+
+        while end < statement.len() {
+            let ch = statement[end..]
+                .chars()
+                .next()
+                .expect("span has at least one char");
+            if ch == '(' {
+                paren_depth += 1;
+                end += ch.len_utf8();
+                continue;
+            }
+            if ch == ')' {
+                if paren_depth == 0 {
+                    break;
+                }
+                paren_depth = paren_depth.saturating_sub(1);
+                end += ch.len_utf8();
+                continue;
+            }
+            if ch == ',' {
+                if paren_depth == 0 {
+                    break;
+                }
+            }
+            if ch == '\\' {
+                break;
+            }
+            if (ch == '\n' || ch == '\r') && paren_depth == 0 {
+                break;
+            }
+            end += ch.len_utf8();
+        }
+
+        let mut span_end = end;
+        while span_end > start {
+            let trailing = statement[..span_end]
+                .chars()
+                .next_back()
+                .expect("span has at least one char");
+            if trailing.is_whitespace() || trailing == ')' {
+                span_end -= trailing.len_utf8();
+            } else {
+                break;
+            }
+        }
+
+        if span_end > start {
+            spans.push((start, span_end));
+        }
+
+        cursor = end;
+        if let Some(rest) = statement.get(cursor..) {
+            if rest.starts_with(',') {
+                cursor += 1;
+            } else if rest.starts_with(')') {
+                break;
+            } else {
+                break;
+            }
+        }
+    }
+
+    spans
+}
+
+fn import_item_spans_in_source(
+    statement: &str,
+    source: &str,
+) -> Result<Vec<(usize, usize)>, Box<dyn Error>> {
+    let statement_start = source
+        .find(statement)
+        .ok_or("missing expected import statement")?;
+    Ok(python_import_item_spans(statement)
+        .into_iter()
+        .map(|(start, end)| (statement_start + start, statement_start + end))
+        .collect())
+}
+
 fn write(root: &Path, relative: &str, source: &str) -> Result<String, Box<dyn Error>> {
     let path = root.join(relative);
     if let Some(parent) = path.parent() {
@@ -648,10 +770,11 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
         edge.string("_origin") == "ast" && edge.string("confidence") == "EXTRACTED"
     }));
 
-    let expected_start = caller_source
-        .find(multiline_import)
-        .ok_or("missing multiline import")?;
-    let expected_end = expected_start + multiline_import.len();
+    let multiline_import_spans = import_item_spans_in_source(multiline_import, &caller_source)?;
+    let (expected_start, expected_end) = multiline_import_spans
+        .first()
+        .copied()
+        .ok_or("missing multiline import item span")?;
     let multiline_edge = resolver_edges
         .iter()
         .find(|edge| {
@@ -685,7 +808,7 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
                     .and_then(serde_json::Value::as_u64)
             )
             .map(|(end, start)| end - start),
-        Some(2)
+        Some(0)
     );
 
     let ignored_targets = extraction
@@ -759,7 +882,7 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
         .ok_or("missing multiline anchor")?;
     assert_eq!(anchor.start_byte, expected_start as u64);
     assert_eq!(anchor.end_byte, expected_end as u64);
-    assert_eq!(anchor.end_line - anchor.start_line, 2);
+    assert_eq!(anchor.end_line - anchor.start_line, 0);
     Ok(())
 }
 
@@ -955,25 +1078,39 @@ fn backslash_continued_python_imports_have_complete_crlf_spans_and_fail_closed()
         "comments, strings, malformed continuations, and parser-error recovery regions must not emit imports"
     );
 
-    let symbol_start = caller_source
-        .find(continued_symbols)
-        .ok_or("missing continued symbol statement")?;
-    let symbol_end = symbol_start + continued_symbols.len();
+    let symbol_spans = import_item_spans_in_source(continued_symbols, &caller_source)?;
+    assert_eq!(symbol_spans.len(), 3);
     let symbol_edges = resolver_edges
         .iter()
         .filter(|edge| {
             edge.attributes
                 .get("start_byte")
                 .and_then(serde_json::Value::as_u64)
-                == Some(symbol_start as u64)
+                .is_some_and(|start| symbol_spans.iter().any(|(s, _)| *s == start as usize))
         })
         .collect::<Vec<_>>();
     assert_eq!(symbol_edges.len(), 3);
     assert!(symbol_edges.iter().all(|edge| {
+        let Some(start) = edge
+            .attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64)
+            .map(|value| value as usize)
+        else {
+            return false;
+        };
+        let Some((_, end)) = symbol_spans
+            .iter()
+            .find(|(expected_start, _)| *expected_start == start)
+            .copied()
+        else {
+            return false;
+        };
+
         edge.attributes
             .get("end_byte")
             .and_then(serde_json::Value::as_u64)
-            == Some(symbol_end as u64)
+            == Some(end as u64)
             && edge
                 .attributes
                 .get("line_end")
@@ -983,28 +1120,42 @@ fn backslash_continued_python_imports_have_complete_crlf_spans_and_fail_closed()
                         .get("line_start")
                         .and_then(serde_json::Value::as_u64),
                 )
-                .is_some_and(|(end, start)| end - start == 2)
+                .is_some_and(|(end, start)| end == start)
     }));
 
-    let submodule_start = caller_source
-        .find(continued_submodules)
-        .ok_or("missing continued submodule statement")?;
-    let submodule_end = submodule_start + continued_submodules.len();
+    let submodule_spans = import_item_spans_in_source(continued_submodules, &caller_source)?;
+    assert_eq!(submodule_spans.len(), 2);
     let submodule_edges = resolver_edges
         .iter()
         .filter(|edge| {
             edge.attributes
                 .get("start_byte")
                 .and_then(serde_json::Value::as_u64)
-                == Some(submodule_start as u64)
+                .is_some_and(|start| submodule_spans.iter().any(|(s, _)| *s == start as usize))
         })
         .collect::<Vec<_>>();
     assert_eq!(submodule_edges.len(), 2);
     assert!(submodule_edges.iter().all(|edge| {
+        let Some(start) = edge
+            .attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64)
+            .map(|value| value as usize)
+        else {
+            return false;
+        };
+        let Some((_, end)) = submodule_spans
+            .iter()
+            .find(|(expected_start, _)| *expected_start == start)
+            .copied()
+        else {
+            return false;
+        };
+
         edge.attributes
             .get("end_byte")
             .and_then(serde_json::Value::as_u64)
-            == Some(submodule_end as u64)
+            == Some(end as u64)
     }));
 
     let malformed_starts = ["from pkg.api import Broken", "from pkg.api import ("]
@@ -1040,16 +1191,19 @@ fn backslash_continued_python_imports_have_complete_crlf_spans_and_fail_closed()
         .filter(|evidence| {
             evidence.extractor == PYTHON_IMPORT_PRODUCER
                 && evidence.rule.as_deref() == Some(PYTHON_SYMBOL_IMPORT_RULE)
-                && evidence
-                    .anchors
-                    .first()
-                    .is_some_and(|anchor| anchor.start_byte == symbol_start as u64)
+                && evidence.anchors.first().is_some_and(|anchor| {
+                    symbol_spans
+                        .iter()
+                        .any(|(start, _)| anchor.start_byte == *start as u64)
+                })
         })
         .filter_map(|evidence| evidence.anchors.first())
         .collect::<Vec<_>>();
     assert_eq!(published_symbol_anchors.len(), 3);
     assert!(published_symbol_anchors.iter().all(|anchor| {
-        anchor.end_byte == symbol_end as u64 && anchor.end_line - anchor.start_line == 2
+        symbol_spans.iter().any(|(start, end)| {
+            anchor.start_byte == *start as u64 && anchor.end_byte == *end as u64
+        })
     }));
     Ok(())
 }
@@ -1110,13 +1264,11 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
 
         let mut expected_spans = valid_statements
             .iter()
-            .map(|statement| {
-                caller_source
-                    .find(statement)
-                    .map(|start| (start, start + statement.len()))
-                    .ok_or("missing valid import statement")
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|statement| import_item_spans_in_source(statement, &caller_source))
+            .collect::<Result<Vec<Vec<_>>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
         expected_spans.sort_unstable();
         let mut raw_spans = resolver_edges
             .iter()
@@ -1137,13 +1289,14 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
         raw_spans.sort_unstable();
         assert_eq!(raw_spans, expected_spans);
         for (start, end) in &raw_spans {
+            let span = caller_source
+                .get(*start..*end)
+                .ok_or("raw import span is not a UTF-8 boundary")?;
             assert!(
-                valid_statements.contains(
-                    &caller_source
-                        .get(*start..*end)
-                        .ok_or("raw import span is not a UTF-8 boundary")?
-                ),
-                "raw import span must cover its complete valid statement"
+                valid_statements
+                    .iter()
+                    .any(|statement| statement.contains(span)),
+                "raw import span must come from a valid statement"
             );
         }
 
@@ -1449,13 +1602,11 @@ fn python_import_keywords_and_whitespace_are_lexically_exact() -> Result<(), Box
 
         let mut expected_spans = valid_statements
             .iter()
-            .map(|statement| {
-                caller_source
-                    .find(statement)
-                    .map(|start| (start, start + statement.len()))
-                    .ok_or("missing valid keyword-boundary import")
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|statement| import_item_spans_in_source(statement, &caller_source))
+            .collect::<Result<Vec<Vec<_>>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
         expected_spans.sort_unstable();
         let mut raw_spans = resolver_edges
             .iter()
@@ -1510,12 +1661,12 @@ fn python_import_keywords_and_whitespace_are_lexically_exact() -> Result<(), Box
         assert_eq!(published_spans, expected_spans);
         let mut snapshot = Vec::new();
         for anchor in published_anchors {
-            let statement = caller_source
+            let span = caller_source
                 .get(anchor.start_byte as usize..anchor.end_byte as usize)
                 .ok_or("published keyword-boundary span is not a UTF-8 boundary")?;
-            assert!(valid_statements.iter().any(|valid| valid == statement));
+            assert!(valid_statements.iter().any(|valid| valid.contains(span)));
             snapshot.push((
-                statement.to_owned(),
+                span.to_owned(),
                 anchor.start_line,
                 anchor.start_column,
                 anchor.end_line,

@@ -1063,13 +1063,7 @@ impl<'source> DirectAdapterState<'source> {
                 )?;
                 continue;
             }
-            self.add_python_import_binding(
-                imported,
-                owner,
-                local,
-                binding_target,
-                import_target,
-            )?;
+            self.add_python_import_binding(imported, owner, local, binding_target, import_target)?;
         }
         Ok(())
     }
@@ -4069,8 +4063,22 @@ impl<'source> DirectAdapterState<'source> {
             .or_default()
             .entry(local.to_owned())
             .or_default();
+        let same_package = versions.iter().any(|version| {
+            let existing_root = version
+                .target
+                .split_once('.')
+                .map(|(root, _)| root)
+                .unwrap_or(version.target.as_str());
+            let new_root = target
+                .split_once('.')
+                .map(|(root, _)| root)
+                .unwrap_or(target);
+            existing_root == new_root
+        });
+
         if (self.language != "python" && !versions.is_empty())
             || (self.language == "python"
+                && same_package
                 && versions.iter().any(|version| version.target != target))
         {
             self.ambiguous_bindings
