@@ -171,12 +171,28 @@ then pass.
 `UniversalResolutionIndex` validates and merges batches, bounds every index,
 sorts candidate identities, and applies this order:
 
-1. exact declaration in the lexical scope or a parent scope;
-2. explicit import, alias, or re-export binding;
-3. exact qualified identity;
-4. unique same-module or same-package declaration;
-5. source-scoped qualified external endpoint when explicitly allowed;
-6. ambiguous or unresolved.
+1. typed hierarchy policy for direct bases and receiver dispatch;
+2. explicit import, alias, or re-export binding attached to the occurrence;
+3. exact declaration in the lexical scope or a parent scope;
+4. exact qualified identity;
+5. unique same-module or same-package declaration;
+6. source-scoped qualified external endpoint when explicitly allowed;
+7. ambiguous or unresolved.
+
+Explicit bindings precede lexical lookup because a source import is direct
+use-site evidence and must shadow a same-named enclosing declaration. A
+binding can name an exact declaration, qualified declaration, or source
+inventory endpoint. Resolution carries the exact target source temporarily
+through collision disambiguation and removes that internal attribute before
+publication. An identity alias such as `pkg.signals -> pkg.signals` is a
+terminal mapping; a multi-node alias cycle remains ambiguous and fails
+closed.
+
+Python file imports are visible at module scope. Function- and class-local
+imports are indexed only in their owning lexical scope, so they cannot leak to
+sibling functions or become file-owned facts. Each imported item retains its
+own parser range. Python source is not reparsed by the collection resolver,
+and there is no legacy import projection.
 
 Language and allowed target kinds are filtered before uniqueness is decided.
 Case-insensitive or terminal-name equality cannot select a target. Cross-
@@ -197,6 +213,57 @@ The following resolution behavior is forbidden:
 - inventing a call, reference, owner, or occurrence;
 - using Graphify at runtime; and
 - falling back to a removed language-specific resolver.
+
+### Owner-qualified receiver dispatch
+
+Receiver dispatch uses typed `HierarchyConstraint` values on the same
+language-neutral candidate contract:
+
+- every ordered direct-base occurrence carries
+  `DirectBase { base_set_complete }`;
+- a member use carries `ReceiverDispatch` with an exact receiver identity and
+  a registered linearization strategy; and
+- the adapter must advertise `HierarchyDispatch`, which also makes cached
+  evidence lacking these facts ineligible for reuse.
+
+The shared resolver builds bounded direct-base and directly-owned-member
+indices. Direct-base candidates are resolved by exact qualified identity
+before all lexical and module rules. They may publish an exact source class or
+a qualified external endpoint, but can never bind to a convenient same-named
+local class.
+
+`C3FromReceiver` checks the exact receiver first. It may then follow a
+source-proven prefix: a member declared directly by the exact first base is
+ordered before later bases, and a single-inheritance chain remains proven until
+it reaches a multiple-base fork. If that prefix does not resolve the member,
+the resolver requires the complete C3 linearization and selects the first class
+that directly declares it. Python emits this strategy for `self.member(...)`
+and `cls.member(...)`; neither form can fall through to lexical, imported,
+module, or repository-wide terminal-name lookup.
+
+`C3AfterReceiver` is used for zero-argument `super().member(...)`. It first
+checks the exact first base when that direct successor is source-proven, then
+uses the complete C3 linearization while skipping the receiver. Full C3
+resolution requires every base to resolve uniquely, an acyclic and
+C3-consistent hierarchy, a bounded traversal, and one unique selected member.
+
+The old single-direct-base and terminal-name shortcuts have been removed.
+Multiple inheritance and methods inherited beyond the direct base use the same
+shared C3 implementation.
+Dynamic receiver bases, incomplete receiver base lists, explicit-argument
+`super`, inconsistent hierarchies, ambiguous members, and bound overflows
+remain unresolved. An unresolved or external later ancestor blocks full C3
+recovery but does not invalidate a unique member declared directly on the
+exact first base. Nested sibling bases use their enclosing class identity. A
+receiver-dispatch candidate cannot also carry a qualified target and cannot
+fall through to a same-named local or imported symbol.
+
+Future adapters reuse the typed boundary with evidence appropriate to their
+language: compiler-selected overloads, trait or interface order, typed
+receivers, or statically resolved superclass members. A new language semantic
+must add and qualify its own explicit strategy; it must not reinterpret C3 or
+guess an owner because a member name is repository-unique. No version value
+changes for this extension.
 
 ## Framework pack registration
 
@@ -281,8 +348,9 @@ python3 benchmarks/performance/harness.py audit \
 ```
 
 The manifest schema is `compass.quality-audit`. It records pinned corpus
-commits and graph hashes, advertised adapter/framework capabilities, required
-relations, and records from three independent pools:
+commits and graph hashes, exact source-oracle provider identities and inventory
+digests, advertised adapter/framework capabilities, required relations, and
+records from three independent pools:
 
 - `accepted` audits Compass-published edges for precision;
 - `source_oracle` audits independently collected source constructs for
@@ -295,10 +363,13 @@ language, relation, confidence, target cluster, source and target
 expectations, exact occurrence range, normalized snippet SHA-256, judgment,
 and reason. `represented_elsewhere` also names the actual graph fact.
 
-The harness verifies corpus revision, graph digest, snippet bytes, and graph
-fact occurrence before calculating metrics. Invalid accepted edges remain in
-the precision denominator. Ambiguous and rejected hypotheses remain explicit.
-A conformance manifest is always ineligible for production claims.
+The harness reparses every pinned source-oracle corpus and verifies provider,
+complete file coverage, and the full construct-inventory digest. It also
+verifies corpus revision, graph digest, snippet bytes, and graph-fact occurrence
+before calculating metrics. A missing, unsupported, partially parsed, or stale
+source inventory fails closed. Invalid accepted edges remain in the precision
+denominator. Ambiguous and rejected hypotheses remain explicit. A conformance
+manifest is always ineligible for production claims.
 
 A qualification requires:
 

@@ -9,6 +9,8 @@ use super::FrameworkResolutionError;
 pub(super) struct ImportAlias {
     pub module: String,
     pub imported: String,
+    pub target_id: Option<String>,
+    pub target_source: Option<String>,
 }
 
 pub(super) type ImportAliases = HashMap<(String, String), ImportAlias>;
@@ -62,6 +64,8 @@ pub(super) fn import_alias_map(
             ImportAlias {
                 module: module.to_owned(),
                 imported: imported.to_owned(),
+                target_id: None,
+                target_source: None,
             },
         )?;
     }
@@ -74,6 +78,12 @@ pub(super) fn import_alias_map(
         if edge.attributes.get("language").and_then(Value::as_str) != Some("python") {
             continue;
         }
+        if !matches!(
+            edge.attributes.get("relation").and_then(Value::as_str),
+            Some("imports" | "imports_from" | "re_exports")
+        ) {
+            continue;
+        }
         let Some(source_file) = edge
             .attributes
             .get("source_file")
@@ -84,23 +94,23 @@ pub(super) fn import_alias_map(
         };
         let Some(local) = edge
             .attributes
-            .get("local_name")
+            .get("binding_name")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
         else {
             continue;
         };
-        let Some(imported) = edge
+        let Some(qualified_target) = edge
             .attributes
-            .get("imported_name")
+            .get("binding_qualified_target")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
         else {
             continue;
         };
-        let context = edge
-            .attributes
-            .get("context")
+        let target = nodes_by_id.get(edge.target.as_str()).copied();
+        let target_source = target
+            .and_then(|node| node.attributes.get("source_file"))
             .and_then(Value::as_str)
             .unwrap_or_default();
         let raw_module = edge
@@ -147,29 +157,23 @@ pub(super) fn import_alias_map(
             local,
             ImportAlias {
                 module: module.clone(),
-                imported: if context == "submodule_import" {
-                    "*".to_owned()
-                } else {
-                    imported.to_owned()
-                },
+                imported: imported.clone(),
+                target_id,
+                target_source: target_source.clone(),
             },
         )?;
-        if context == "import"
-            && let Some(namespace) = raw_module
-                .trim_start_matches('.')
-                .rsplit('.')
-                .next()
-                .filter(|value| !value.is_empty())
-        {
+        if let Some(namespace) = symbol_namespace {
             insert_alias(
                 &mut aliases,
                 &mut aliases_per_file,
                 limits,
                 source_file,
-                namespace,
+                &namespace,
                 ImportAlias {
                     module,
                     imported: "*".to_owned(),
+                    target_id: None,
+                    target_source,
                 },
             )?;
         }
@@ -199,20 +203,4 @@ fn insert_alias(
         });
     }
     Ok(())
-}
-
-fn python_module_path(module: &str) -> String {
-    let depth = module
-        .len()
-        .saturating_sub(module.trim_start_matches('.').len());
-    let bare = module.trim_start_matches('.').replace('.', "/");
-    if depth == 0 {
-        return bare;
-    }
-    let prefix = if depth == 1 {
-        "./".to_owned()
-    } else {
-        "../".repeat(depth - 1)
-    };
-    format!("{prefix}{bare}")
 }

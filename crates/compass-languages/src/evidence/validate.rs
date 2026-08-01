@@ -4,8 +4,9 @@ use std::path::{Component, Path};
 use serde::{Deserialize, Serialize};
 
 use super::model::{
-    BindingFact, DeclarationFact, EvidenceRange, LanguageCapability, OccurrenceFact,
-    RelationshipCandidate, ScopeFact, SemanticEvidenceBatch,
+    BindingFact, CandidateRelation, DeclarationFact, EvidenceRange, HierarchyConstraint,
+    LanguageCapability, OccurrenceFact, RelationshipCandidate, ScopeFact, SemanticEvidenceBatch,
+    SemanticRole,
 };
 
 /// Hard resource ceilings for a single adapter evidence batch.
@@ -410,6 +411,12 @@ fn validate_fact(
                 fact.constraints.scope_id.as_deref(),
                 scopes,
             )?;
+            require_optional_reference(
+                &fact.id,
+                "exact target declaration",
+                fact.constraints.exact_target_declaration_id.as_deref(),
+                declarations,
+            )?;
             if let Some(language) = fact.constraints.exact_language.as_deref()
                 && language != fact.language
             {
@@ -420,6 +427,58 @@ fn validate_fact(
                         fact.id, language
                     ),
                 ));
+            }
+            if let Some(hierarchy) = fact.constraints.hierarchy.as_ref() {
+                require_capability(
+                    &fact.id,
+                    LanguageCapability::HierarchyDispatch,
+                    capabilities,
+                )?;
+                let occurrence = fact
+                    .occurrence_id
+                    .as_deref()
+                    .and_then(|id| occurrences.get(id));
+                match hierarchy {
+                    HierarchyConstraint::DirectBase { .. }
+                        if fact.relation != CandidateRelation::Extends
+                            || occurrence
+                                .is_none_or(|fact| fact.role != SemanticRole::BaseType) =>
+                    {
+                        return Err(invalid_fact(
+                            &fact.id,
+                            "direct-base hierarchy evidence requires an extends/base-type occurrence",
+                        ));
+                    }
+                    HierarchyConstraint::ReceiverDispatch {
+                        receiver_qualified_name,
+                        ..
+                    } => {
+                        if !matches!(
+                            fact.relation,
+                            CandidateRelation::Calls
+                                | CandidateRelation::Constructs
+                                | CandidateRelation::AccessesMember
+                        ) {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "receiver dispatch requires a call, construction, or member-access candidate",
+                            ));
+                        }
+                        if receiver_qualified_name.is_empty() {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "receiver dispatch identity is empty",
+                            ));
+                        }
+                        if fact.constraints.qualified_name.is_some() {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "receiver dispatch cannot also select a qualified target",
+                            ));
+                        }
+                    }
+                    HierarchyConstraint::DirectBase { .. } => {}
+                }
             }
             if fact.constraints.allowed_target_kinds.len()
                 > limits.allowed_target_kinds_per_candidate

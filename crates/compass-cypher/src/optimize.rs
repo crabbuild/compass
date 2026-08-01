@@ -5,6 +5,7 @@ use crate::{
 
 #[must_use]
 pub fn optimize(mut plan: LogicalPlan) -> LogicalPlan {
+    let mut eliminated_path_bindings = 0usize;
     for part in &mut plan.ast.parts {
         eliminate_unused_path_bindings(part, &mut plan.optimizations);
         for clause in &mut part.clauses {
@@ -49,6 +50,14 @@ pub fn optimize(mut plan: LogicalPlan) -> LogicalPlan {
                 });
             }
         }
+    }
+    if eliminated_path_bindings > 0 {
+        plan.optimizations.push(OptimizationRecord {
+            rule: "unused-path-binding-elimination",
+            reason: format!(
+                "removed {eliminated_path_bindings} unreferenced path binding(s) before execution"
+            ),
+        });
     }
     plan
 }

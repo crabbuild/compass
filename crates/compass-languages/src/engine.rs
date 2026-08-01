@@ -1158,7 +1158,11 @@ fn source_node_text(node: Node<'_>, source: &[u8]) -> String {
 }
 
 impl<'source, 'tree> ExtractState<'source, 'tree> {
-    fn walk_declarations(&mut self, node: Node<'tree>, parent_class: Option<(&str, &str)>) {
+    fn walk_declarations(
+        &mut self,
+        node: Node<'tree>,
+        parent_declaration: Option<(&str, &str, bool, bool)>,
+    ) {
         let kind = node.kind();
         if self.config.import_types.contains(&kind) && !matches!(self.language, "kotlin" | "lua") {
             self.add_import(node);
@@ -1167,16 +1171,43 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         if self.config.class_types.contains(&kind)
             && let Some(name) = self.declaration_name(node)
         {
-            let semantic_scope = parent_class.map_or_else(
+            let semantic_scope = parent_declaration.map_or_else(
                 || name.clone(),
-                |(_, parent_scope)| format!("{parent_scope}::{name}"),
+                |(_, parent_scope, _, _)| format!("{parent_scope}::{name}"),
             );
-            let id = make_id(&[&self.stem, &semantic_scope]);
+            let base_id = parent_declaration.map_or_else(
+                || make_id(&[&self.stem, &name]),
+                |(parent_id, _, _, _)| make_id(&[parent_id, &name]),
+            );
+            let id = if self.seen_nodes.contains(&base_id) {
+                make_id(&[&base_id, "overload", &line(node).to_string()])
+            } else {
+                base_id
+            };
             self.add_node(&id, &name, line(node), true, None);
+            let runtime_nested = parent_declaration.is_some_and(|(_, _, _, nested)| nested);
+            if self.language == "python"
+                && runtime_nested
+                && let Some((_, semantic_owner, _, _)) = parent_declaration
+                && let Some(declaration) = self
+                    .extraction
+                    .nodes
+                    .iter_mut()
+                    .find(|declaration| declaration.id == id)
+            {
+                declaration.attributes.insert(
+                    "lexical_owner".to_owned(),
+                    Value::String(semantic_owner.to_owned()),
+                );
+                declaration.attributes.insert(
+                    "qualified_name".to_owned(),
+                    Value::String(format!("{semantic_owner}::{name}")),
+                );
+            }
             self.types.insert(name.clone(), id.clone());
             self.callables.entry(name).or_default().push(id.clone());
-            let source = parent_class
-                .map(|(class_id, _)| class_id)
+            let source = parent_declaration
+                .map(|(parent_id, _, _, _)| parent_id)
                 .unwrap_or(&self.file_id)
                 .to_owned();
             self.add_edge(&source, &id, "contains", line(node), None);
@@ -1195,7 +1226,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             }
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
-                self.walk_declarations(child, Some((&id, &semantic_scope)));
+                self.walk_declarations(child, Some((&id, &semantic_scope, true, runtime_nested)));
             }
             return;
         }
@@ -1203,34 +1234,39 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         if self.config.function_types.contains(&kind)
             && let Some(name) = self.function_name(node)
         {
-            let parent_id = parent_class.map(|(class_id, _)| class_id);
-            let base_id = parent_class.map_or_else(
+            let parent_id = parent_declaration.map(|(parent_id, _, _, _)| parent_id);
+            let parent_is_class = parent_declaration.is_some_and(|(_, _, is_class, _)| is_class);
+            let semantic_scope = parent_declaration.map_or_else(
+                || name.clone(),
+                |(_, parent_scope, _, _)| format!("{parent_scope}::{name}"),
+            );
+            let base_id = parent_declaration.map_or_else(
                 || make_id(&[&self.stem, &name]),
-                |(class_id, _)| make_id(&[class_id, &name]),
+                |(parent_id, _, _, _)| make_id(&[parent_id, &name]),
             );
             let id = if self.seen_nodes.contains(&base_id) {
                 make_id(&[&base_id, "overload", &line(node).to_string()])
             } else {
                 base_id
             };
-            let label = if parent_class.is_some() {
+            let label = if parent_is_class {
                 format!(".{name}()")
             } else {
                 format!("{name}()")
             };
             self.add_node(&id, &label, line(node), true, None);
-            if let Some((_, semantic_owner)) = parent_class
-                && let Some(method) = self
+            if let Some((_, semantic_owner, _, _)) = parent_declaration
+                && let Some(declaration) = self
                     .extraction
                     .nodes
                     .iter_mut()
-                    .find(|method| method.id == id)
+                    .find(|declaration| declaration.id == id)
             {
-                method.attributes.insert(
+                declaration.attributes.insert(
                     "lexical_owner".to_owned(),
                     Value::String(semantic_owner.to_owned()),
                 );
-                method.attributes.insert(
+                declaration.attributes.insert(
                     "qualified_name".to_owned(),
                     Value::String(format!("{semantic_owner}::{name}")),
                 );
@@ -1239,7 +1275,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             self.add_edge(
                 &source,
                 &id,
-                if parent_class.is_some() {
+                if parent_is_class {
                     "method"
                 } else {
                     "contains"
@@ -1259,19 +1295,26 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             }
             self.callables.entry(name).or_default().push(id.clone());
             self.functions.push(FunctionBody {
-                id,
+                id: id.clone(),
                 node,
-                top_level: parent_class.is_none()
+                top_level: parent_declaration.is_none()
                     && (self.language != "python"
                         || node
                             .parent()
                             .is_some_and(|parent| parent.kind() == "module")),
             });
+            if self.language == "python" {
+                let body = node.child_by_field_name("body").unwrap_or(node);
+                let mut cursor = body.walk();
+                for child in body.children(&mut cursor) {
+                    self.walk_declarations(child, Some((&id, &semantic_scope, false, true)));
+                }
+            }
             return;
         }
 
         if matches!(self.language, "javascript" | "typescript" | "tsx")
-            && parent_class.is_none()
+            && parent_declaration.is_none()
             && kind == "assignment_expression"
             && self.add_js_prototype_method(node)
         {
@@ -1279,7 +1322,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         }
 
         if self.language == "kotlin" && kind == "enum_entry" {
-            if let Some((class_id, _)) = parent_class
+            if let Some((class_id, _, _, _)) = parent_declaration
                 && let Some(name_node) = first_descendant(node, "simple_identifier")
                     .or_else(|| first_descendant(node, "identifier"))
                 && let Some(name) = self.node_text(name_node).map(clean_name)
@@ -1292,7 +1335,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         }
 
         if self.language == "kotlin" && kind == "property_declaration" {
-            if let Some((class_id, _)) = parent_class {
+            if let Some((class_id, _, _, _)) = parent_declaration {
                 self.add_kotlin_property_reference(node, class_id);
             }
             return;
@@ -1300,14 +1343,14 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
 
         if self.language == "scala"
             && matches!(kind, "val_definition" | "var_definition")
-            && let Some((class_id, _)) = parent_class
+            && let Some((class_id, _, _, _)) = parent_declaration
         {
             self.add_scala_field_reference(node, class_id);
         }
 
         if matches!(self.language, "javascript" | "typescript" | "tsx")
             && kind == "lexical_declaration"
-            && parent_class.is_none()
+            && parent_declaration.is_none()
             && node.parent().is_some_and(|parent| {
                 parent.kind() == "program"
                     || (parent.kind() == "export_statement"
@@ -1322,7 +1365,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
 
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            self.walk_declarations(child, parent_class);
+            self.walk_declarations(child, parent_declaration);
         }
     }
 

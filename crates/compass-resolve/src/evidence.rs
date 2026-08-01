@@ -35,14 +35,33 @@ impl Default for UniversalResolutionLimits {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResolutionRule {
+    ExactSourceDeclaration,
     ExactLexicalDeclaration,
     ExplicitBinding,
     MemberBinding,
     DeferredReceiver,
     WildcardBinding,
     UniqueModuleOrPackage,
+    ExactHierarchyBase,
+    DirectReceiverSuccessorDispatch,
+    LinearizedReceiverDispatch,
     ExactSourceInventory,
     QualifiedExternal,
+}
+
+#[derive(Clone, Debug)]
+struct DirectBaseLink {
+    qualified_name: Option<String>,
+    source_file: String,
+    start_byte: u64,
+    end_byte: u64,
+    candidate_id: String,
+}
+
+#[derive(Clone, Debug, Default)]
+struct DirectBaseSet {
+    links: Vec<DirectBaseLink>,
+    complete: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -85,6 +104,8 @@ pub struct UniversalResolutionIndex {
     by_module_name: AHashMap<(String, String, String), Vec<String>>,
     by_scope_name: AHashMap<(String, String, String), Vec<String>>,
     by_source_directory_name: AHashMap<(String, String, String), Vec<String>>,
+    direct_bases: AHashMap<(String, String), DirectBaseSet>,
+    members_by_owner: AHashMap<(String, String, String), Vec<String>>,
     inventory_by_qualified: AHashMap<(String, String), Vec<String>>,
     aliases: AHashMap<(String, String), Vec<String>>,
     wildcard_reexports_by_module: AHashMap<(String, String), Vec<String>>,
@@ -233,10 +254,7 @@ impl UniversalResolutionIndex {
         }
         profile_internal("universal source inventory index", &mut profile_started);
         let mut aliases = AHashMap::<_, Vec<_>>::new();
-        for binding in bindings
-            .values()
-            .filter(|binding| binding.kind == compass_languages::BindingKind::Reexport)
-        {
+        for binding in bindings.values() {
             let Some(owner) = binding
                 .scope_id
                 .as_deref()
@@ -324,6 +342,8 @@ impl UniversalResolutionIndex {
             by_module_name,
             by_scope_name,
             by_source_directory_name,
+            direct_bases,
+            members_by_owner,
             inventory_by_qualified,
             aliases,
             wildcard_reexports_by_module,
@@ -383,6 +403,35 @@ impl UniversalResolutionIndex {
             .exact_language
             .as_deref()
             .unwrap_or(&candidate.language);
+        if let Some(target) = candidate.constraints.exact_target_declaration_id.as_ref()
+            && self.declaration_allowed(target, candidate)
+        {
+            return ResolutionDecision::Resolved {
+                declaration_id: target.clone(),
+                evidence: ResolutionEvidence {
+                    rule: ResolutionRule::ExactSourceDeclaration,
+                    candidate_count: 1,
+                },
+            };
+        }
+        if let Some(HierarchyConstraint::ReceiverDispatch {
+            receiver_qualified_name,
+            strategy,
+        }) = candidate.constraints.hierarchy.as_ref()
+        {
+            return self.resolve_c3_receiver_dispatch(
+                language,
+                receiver_qualified_name,
+                *strategy,
+                candidate,
+            );
+        }
+        if matches!(
+            candidate.constraints.hierarchy.as_ref(),
+            Some(HierarchyConstraint::DirectBase { .. })
+        ) {
+            return self.resolve_direct_base(language, candidate);
+        }
         let occurrence = self.occurrence(candidate);
         let qualifier = occurrence.and_then(|occurrence| occurrence.qualifier.as_deref());
         let has_unbound_qualified_receiver = qualifier.is_some_and(|qualifier| {
@@ -868,9 +917,16 @@ impl UniversalResolutionIndex {
             } else {
                 (source, target)
             };
+            let exact_target = candidate
+                .constraints
+                .exact_target_declaration_id
+                .as_deref()
+                .and_then(|id| self.declarations.get(id));
             let relation = if self.occurrence(candidate).is_some_and(|occurrence| {
                 occurrence.role == compass_languages::SemanticRole::Receiver
-            }) {
+            }) || (candidate.relation == CandidateRelation::Contains
+                && exact_target.is_some_and(|target| target.kind == "method"))
+            {
                 "method"
             } else {
                 relation_name(candidate.relation)
@@ -878,6 +934,7 @@ impl UniversalResolutionIndex {
             let site = self
                 .occurrence(candidate)
                 .map(|occurrence| &occurrence.range)
+                .or_else(|| exact_target.map(|target| &target.range))
                 .or_else(|| {
                     matches!(
                         candidate.relation,
@@ -904,7 +961,7 @@ impl UniversalResolutionIndex {
             if !emitted_edges.insert(key) || source == target {
                 continue;
             }
-            edges.push(materialized_edge(
+            edges.push(materialized_edge(MaterializedEdge {
                 source,
                 target,
                 relation,
@@ -921,6 +978,317 @@ impl UniversalResolutionIndex {
             ));
         }
         profile_internal("universal candidate resolution", &mut profile_started);
+    }
+
+    fn resolve_c3_receiver_dispatch(
+        &self,
+        language: &str,
+        receiver_qualified_name: &str,
+        strategy: ReceiverDispatchStrategy,
+        candidate: &RelationshipCandidate,
+    ) -> ResolutionDecision {
+        match strategy {
+            ReceiverDispatchStrategy::C3FromReceiver => {
+                if let Some(decision) =
+                    self.resolve_exact_receiver_member(language, receiver_qualified_name, candidate)
+                {
+                    return decision;
+                }
+                // A direct member on the first base is source-proven even
+                // when a later external base prevents construction of the
+                // complete linearization. The same remains true through a
+                // chain of single inheritance: no sibling can precede the
+                // next class until the chain reaches a multiple-base fork.
+                if let Some(decision) = self.resolve_source_proven_receiver_prefix(
+                    language,
+                    receiver_qualified_name,
+                    candidate,
+                ) {
+                    return decision;
+                }
+            }
+            ReceiverDispatchStrategy::C3AfterReceiver => {
+                if let Some(decision) = self.resolve_direct_receiver_successor(
+                    language,
+                    receiver_qualified_name,
+                    candidate,
+                ) {
+                    return decision;
+                }
+            }
+        }
+        let mut memo = BTreeMap::new();
+        let mut visiting = BTreeSet::new();
+        let Ok(linearization) = self.c3_linearization(
+            language,
+            receiver_qualified_name,
+            &mut memo,
+            &mut visiting,
+            0,
+        ) else {
+            return ResolutionDecision::Unresolved;
+        };
+        if linearization.first().map(String::as_str) != Some(receiver_qualified_name) {
+            return ResolutionDecision::Unresolved;
+        }
+        for owner in linearization.iter().skip(1) {
+            let key = (
+                language.to_owned(),
+                owner.clone(),
+                candidate.target_spelling.clone(),
+            );
+            let Some(members) = self.members_by_owner.get(&key) else {
+                continue;
+            };
+            let eligible = members
+                .iter()
+                .filter(|id| self.declaration_allowed(id, candidate))
+                .take(self.limits.candidates_per_lookup.saturating_add(1))
+                .cloned()
+                .collect::<Vec<_>>();
+            match eligible.as_slice() {
+                [only] => {
+                    return ResolutionDecision::Resolved {
+                        declaration_id: only.clone(),
+                        evidence: ResolutionEvidence {
+                            rule: ResolutionRule::LinearizedReceiverDispatch,
+                            candidate_count: 1,
+                        },
+                    };
+                }
+                [] => {}
+                many => {
+                    return ResolutionDecision::Ambiguous {
+                        candidate_count: many.len(),
+                    };
+                }
+            }
+        }
+        ResolutionDecision::Unresolved
+    }
+
+    fn resolve_source_proven_receiver_prefix(
+        &self,
+        language: &str,
+        receiver_qualified_name: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        let mut receiver = self.exact_hierarchy_type(language, receiver_qualified_name)?;
+        let mut visited = BTreeSet::new();
+        for _ in 0..self.limits.candidates_per_lookup {
+            if !visited.insert(receiver.clone()) {
+                return None;
+            }
+            let base_set = self
+                .direct_bases
+                .get(&(language.to_owned(), receiver.clone()))?;
+            if !base_set.complete
+                || base_set.links.is_empty()
+                || base_set.links.len() > self.limits.candidates_per_lookup
+            {
+                return None;
+            }
+            let first_base = base_set.links[0]
+                .qualified_name
+                .as_deref()
+                .and_then(|name| self.exact_hierarchy_type(language, name))?;
+            if let Some(decision) =
+                self.resolve_exact_receiver_member(language, &first_base, candidate)
+            {
+                return Some(decision);
+            }
+            if base_set.links.len() != 1 {
+                return None;
+            }
+            receiver = first_base;
+        }
+        None
+    }
+
+    fn resolve_exact_receiver_member(
+        &self,
+        language: &str,
+        receiver_qualified_name: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        let receiver = self.exact_hierarchy_type(language, receiver_qualified_name)?;
+        let members = self.members_by_owner.get(&(
+            language.to_owned(),
+            receiver,
+            candidate.target_spelling.clone(),
+        ))?;
+        let eligible = members
+            .iter()
+            .filter(|id| self.declaration_allowed(id, candidate))
+            .take(self.limits.candidates_per_lookup.saturating_add(1))
+            .cloned()
+            .collect::<Vec<_>>();
+        match eligible.as_slice() {
+            [only] => Some(ResolutionDecision::Resolved {
+                declaration_id: only.clone(),
+                evidence: ResolutionEvidence {
+                    rule: ResolutionRule::LinearizedReceiverDispatch,
+                    candidate_count: 1,
+                },
+            }),
+            [] => None,
+            many => Some(ResolutionDecision::Ambiguous {
+                candidate_count: many.len(),
+            }),
+        }
+    }
+
+    fn resolve_direct_base(
+        &self,
+        language: &str,
+        candidate: &RelationshipCandidate,
+    ) -> ResolutionDecision {
+        let Some(qualified_name) = candidate.constraints.qualified_name.as_deref() else {
+            return ResolutionDecision::Unresolved;
+        };
+        let qualified_name = match self.follow_alias(language, qualified_name) {
+            Ok(qualified_name) => qualified_name,
+            Err(candidate_count) => {
+                return ResolutionDecision::Ambiguous { candidate_count };
+            }
+        };
+        let key = (language.to_owned(), qualified_name.clone());
+        if let Some(decision) = self.unique_decision(
+            self.by_qualified.get(&key),
+            candidate,
+            ResolutionRule::ExactHierarchyBase,
+        ) {
+            return decision;
+        }
+        if candidate.constraints.allow_external {
+            return ResolutionDecision::QualifiedExternal {
+                qualified_name,
+                evidence: ResolutionEvidence {
+                    rule: ResolutionRule::QualifiedExternal,
+                    candidate_count: 0,
+                },
+            };
+        }
+        ResolutionDecision::Unresolved
+    }
+
+    fn resolve_direct_receiver_successor(
+        &self,
+        language: &str,
+        receiver_qualified_name: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        let receiver = self.exact_hierarchy_type(language, receiver_qualified_name)?;
+        let base_set = self.direct_bases.get(&(language.to_owned(), receiver))?;
+        if !base_set.complete
+            || base_set.links.is_empty()
+            || base_set.links.len() > self.limits.candidates_per_lookup
+        {
+            return None;
+        }
+        let direct_successor = base_set.links[0]
+            .qualified_name
+            .as_deref()
+            .and_then(|name| self.exact_hierarchy_type(language, name))?;
+        let members = self.members_by_owner.get(&(
+            language.to_owned(),
+            direct_successor,
+            candidate.target_spelling.clone(),
+        ))?;
+        let eligible = members
+            .iter()
+            .filter(|id| self.declaration_allowed(id, candidate))
+            .take(self.limits.candidates_per_lookup.saturating_add(1))
+            .cloned()
+            .collect::<Vec<_>>();
+        match eligible.as_slice() {
+            [only] => Some(ResolutionDecision::Resolved {
+                declaration_id: only.clone(),
+                evidence: ResolutionEvidence {
+                    rule: ResolutionRule::DirectReceiverSuccessorDispatch,
+                    candidate_count: 1,
+                },
+            }),
+            [] => None,
+            many => Some(ResolutionDecision::Ambiguous {
+                candidate_count: many.len(),
+            }),
+        }
+    }
+
+    fn c3_linearization(
+        &self,
+        language: &str,
+        qualified_name: &str,
+        memo: &mut BTreeMap<(String, String), Result<Vec<String>, ()>>,
+        visiting: &mut BTreeSet<(String, String)>,
+        depth: usize,
+    ) -> Result<Vec<String>, ()> {
+        if depth >= self.limits.candidates_per_lookup {
+            return Err(());
+        }
+        let canonical = self
+            .exact_hierarchy_type(language, qualified_name)
+            .ok_or(())?;
+        let key = (language.to_owned(), canonical.clone());
+        if let Some(cached) = memo.get(&key) {
+            return cached.clone();
+        }
+        if !visiting.insert(key.clone()) {
+            return Err(());
+        }
+        let result = (|| {
+            let Some(base_set) = self.direct_bases.get(&key) else {
+                return Ok(vec![canonical.clone()]);
+            };
+            if !base_set.complete
+                || base_set.links.is_empty()
+                || base_set.links.len() > self.limits.candidates_per_lookup
+            {
+                return Err(());
+            }
+            let mut bases = Vec::with_capacity(base_set.links.len());
+            let mut sequences = Vec::with_capacity(base_set.links.len().saturating_add(1));
+            for link in &base_set.links {
+                let base = link
+                    .qualified_name
+                    .as_deref()
+                    .and_then(|name| self.exact_hierarchy_type(language, name))
+                    .ok_or(())?;
+                bases.push(base.clone());
+                sequences.push(self.c3_linearization(
+                    language,
+                    &base,
+                    memo,
+                    visiting,
+                    depth.saturating_add(1),
+                )?);
+            }
+            sequences.push(bases);
+            let mut linearization = vec![canonical.clone()];
+            linearization.extend(c3_merge(sequences, self.limits.candidates_per_lookup)?);
+            Ok(linearization)
+        })();
+        visiting.remove(&key);
+        memo.insert(key, result.clone());
+        result
+    }
+
+    fn exact_hierarchy_type(&self, language: &str, qualified_name: &str) -> Option<String> {
+        let qualified_name = self.follow_alias(language, qualified_name).ok()?;
+        let declarations = self
+            .by_qualified
+            .get(&(language.to_owned(), qualified_name))?;
+        let eligible = declarations
+            .iter()
+            .filter_map(|id| self.declarations.get(id))
+            .filter(|declaration| declaration.kind == "class")
+            .take(2)
+            .collect::<Vec<_>>();
+        let [declaration] = eligible.as_slice() else {
+            return None;
+        };
+        Some(declaration.qualified_name.clone())
     }
 
     fn occurrence(&self, candidate: &RelationshipCandidate) -> Option<&OccurrenceFact> {
@@ -1134,6 +1502,9 @@ impl UniversalResolutionIndex {
             let [target] = targets.as_slice() else {
                 return Err(targets.len());
             };
+            if target == &current {
+                return Ok(current);
+            }
             current.clone_from(target);
         }
         Err(64)
@@ -1697,6 +2068,24 @@ fn materialized_edge(
     }
     if !context.is_empty() {
         attributes.insert("context".to_owned(), Value::String(context.to_owned()));
+    }
+    if let Some(target_source_file) = target_source_file {
+        attributes.insert(
+            "target_file".to_owned(),
+            Value::String(target_source_file.to_owned()),
+        );
+    }
+    if let Some(binding) = binding {
+        attributes.extend([
+            (
+                "binding_name".to_owned(),
+                Value::String(binding.spelling.clone()),
+            ),
+            (
+                "binding_qualified_target".to_owned(),
+                Value::String(binding.qualified_target.clone()),
+            ),
+        ]);
     }
     EdgeRecord {
         source,

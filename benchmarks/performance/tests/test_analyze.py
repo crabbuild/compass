@@ -158,6 +158,11 @@ class AnalyzeTests(unittest.TestCase):
             self.assertTrue(corpus["comparison"]["passed"])
             report = (workspace / "REPORT.md").read_text(encoding="utf-8")
             self.assertIn("| sample | Python / Example | 3 | 2 | 2 | 1 |", report)
+            self.assertIn(
+                "| Corpus | Exact nodes | Dominated nodes | Ambiguous nodes | "
+                "Missing nodes |",
+                report,
+            )
 
 
 if __name__ == "__main__":

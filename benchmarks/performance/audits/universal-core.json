@@ -10,6 +10,16 @@
       "graphSha256": "44d735381ee2cb47f849cb2fd62ffe805a4bbf18f8d6c2a2ea33f8f40a94ff19"
     }
   ],
+  "sourceOracles": [
+    {
+      "corpus": "universal-core",
+      "adapter": "python",
+      "provider": "python_ast",
+      "scannedFiles": 1,
+      "parsedFiles": 1,
+      "inventorySha256": "d712cb2c65b2b3d73f2255970cf198fe46ef739c4ab505d46c43c5aadb60975e"
+    }
+  ],
   "advertisedCapabilities": [
     {"adapter": "python", "capability": "calls"},
     {"adapter": "python", "capability": "decorators"},

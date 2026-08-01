@@ -24,7 +24,11 @@ if __package__ in {None, ""}:
 
 from benchmarks.performance.compass import RUN_SCHEMA
 from benchmarks.performance.compass.adapters import CompassAdapter, GraphifyAdapter
-from benchmarks.performance.compass.audit import audit_result_json_value, run_audit
+from benchmarks.performance.compass.audit import (
+    audit_result_json_value,
+    export_comparison_candidates,
+    run_audit,
+)
 from benchmarks.performance.compass.config import load_suite
 from benchmarks.performance.compass.correctness import compare_graphs, index_graph
 from benchmarks.performance.compass.model import (
@@ -300,12 +304,17 @@ def _merge_gates(*reports: GateReport) -> GateReport:
     return GateReport(not issues, issues, ratios)
 
 
-def _shared_graph_gate(compass_graph: Path, graphify_graph: Path, repository: str) -> GateReport:
+def _shared_graph_gate(
+    compass_graph: Path,
+    graphify_graph: Path,
+    repository: str,
+    source_root: Path,
+) -> GateReport:
     database = sqlite3.connect(":memory:")
     try:
         index_graph("compass", compass_graph, database)
         index_graph("graphify", graphify_graph, database)
-        comparison = compare_graphs(database)
+        comparison = compare_graphs(database, source_root)
     finally:
         database.close()
     issues = tuple(
@@ -413,7 +422,12 @@ def qualify(args: argparse.Namespace, *, comparison: bool) -> int:
                         )
                     )
                 shared_gates.append(
-                    _shared_graph_gate(compass_graph, graphify_graph, repository.name)
+                    _shared_graph_gate(
+                        compass_graph,
+                        graphify_graph,
+                        repository.name,
+                        checkout,
+                    )
                 )
     tools = (compass.revision,) if graphify is None else (compass.revision, graphify.revision)
     completed = datetime.now(timezone.utc)
@@ -489,6 +503,19 @@ def audit(args: argparse.Namespace) -> int:
     return 0 if result.passed else 1
 
 
+def audit_candidates(args: argparse.Namespace) -> int:
+    destination = export_comparison_candidates(
+        args.database,
+        args.graph,
+        args.corpus,
+        args.name,
+        args.adapter,
+        args.output,
+    )
+    print(destination)
+    return 0
+
+
 def _common(parser: argparse.ArgumentParser, *, execution: bool = False) -> None:
     parser.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     parser.add_argument("--workspace", type=Path, default=DEFAULT_WORKSPACE)
@@ -536,6 +563,13 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--manifest", type=Path, required=True)
     audit_parser.add_argument("--graph", type=Path, required=True)
     audit_parser.add_argument("--corpus", type=Path, required=True)
+    candidate_parser = subparsers.add_parser("audit-candidates")
+    candidate_parser.add_argument("--database", type=Path, required=True)
+    candidate_parser.add_argument("--graph", type=Path, required=True)
+    candidate_parser.add_argument("--corpus", type=Path, required=True)
+    candidate_parser.add_argument("--name", required=True)
+    candidate_parser.add_argument("--adapter", required=True)
+    candidate_parser.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -561,6 +595,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return promote(args)
         if args.command == "audit":
             return audit(args)
+        if args.command == "audit-candidates":
+            return audit_candidates(args)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

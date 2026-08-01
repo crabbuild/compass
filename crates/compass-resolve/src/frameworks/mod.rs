@@ -20,11 +20,12 @@ pub use routes::{
 pub(crate) fn resolve_framework_facts(
     extraction: &compass_languages::Extraction,
     limits: compass_languages::FrameworkLimits,
+    root: &std::path::Path,
 ) -> (
     Result<Vec<ResolvedRoute>, FrameworkResolutionError>,
     Result<Vec<ResolvedDomainFact>, FrameworkResolutionError>,
 ) {
-    let targets = target_index::FrameworkTargetIndex::new(extraction);
+    let targets = target_index::FrameworkTargetIndex::new_with_root(extraction, Some(root));
     (
         routes::resolve_routes_with_targets(extraction, limits, &targets),
         domain::resolve_domains_with_targets(extraction, limits, &targets),

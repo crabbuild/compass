@@ -353,8 +353,11 @@ fn finish_resolution(
     profile_internal("resolver cross-file calls", &mut profile_started);
     members::resolve_language_call_facts(language_facts, &mut merged);
     profile_internal("resolver language calls", &mut profile_started);
-    let (routes, domains) =
-        frameworks::resolve_framework_facts(&merged, compass_languages::FrameworkLimits::default());
+    let (routes, domains) = frameworks::resolve_framework_facts(
+        &merged,
+        compass_languages::FrameworkLimits::default(),
+        &canonical_root,
+    );
     let route_result = routes.and_then(|routes| {
         frameworks::publish_resolved_routes(&mut merged, &routes)?;
         Ok(routes)
@@ -1879,7 +1882,7 @@ mod tests {
             ..Extraction::default()
         };
 
-        resolve_cross_file_calls_with_root(&mut extraction, &HashMap::new(), Path::new("/repo"));
+        resolve_cross_file_calls_with_root(&mut extraction, Path::new("/repo"));
 
         assert!(!extraction.edges.iter().any(|edge| {
             edge.source == "dispatch"
@@ -2177,7 +2180,6 @@ mod tests {
             EndpointRewriteRule::CsharpNamespaceCanonicalization,
             EndpointRewriteRule::LanguageFamilyStubResolution,
             EndpointRewriteRule::PhpQualifiedTypeResolution,
-            EndpointRewriteRule::PythonImportedTypeResolution,
             EndpointRewriteRule::CanonicalImportTarget,
             EndpointRewriteRule::UniqueStubEndpointResolution,
             EndpointRewriteRule::SourceScopedNodeDisambiguation,

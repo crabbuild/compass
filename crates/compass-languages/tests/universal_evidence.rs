@@ -92,12 +92,14 @@ fn valid_batch() -> SemanticEvidenceBatch {
             binding_id: Some("binding:helper".to_owned()),
             target_spelling: "helper".to_owned(),
             constraints: ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some("python".to_owned()),
                 module_or_package: Some("tools".to_owned()),
                 scope_id: Some("scope:caller".to_owned()),
                 qualified_name: Some("tools.execute".to_owned()),
                 argument_count: None,
                 allowed_target_kinds: vec!["function".to_owned()],
+                hierarchy: None,
                 allow_external: true,
             },
         }],
@@ -183,6 +185,12 @@ fn duplicate_ids_and_all_dangling_reference_kinds_are_rejected() {
     let mut missing_occurrence = valid_batch();
     missing_occurrence.candidates[0].occurrence_id = Some("occurrence:missing".to_owned());
     assert_code(&missing_occurrence, EvidenceErrorCode::MissingReference);
+
+    let mut missing_exact_target = valid_batch();
+    missing_exact_target.candidates[0]
+        .constraints
+        .exact_target_declaration_id = Some("decl:missing".to_owned());
+    assert_code(&missing_exact_target, EvidenceErrorCode::MissingReference);
 }
 
 #[test]
@@ -214,6 +222,32 @@ fn capabilities_and_language_constraints_fail_closed() {
         &undeclared_external,
         EvidenceErrorCode::UndeclaredCapability,
     );
+
+    let mut undeclared_hierarchy = valid_batch();
+    undeclared_hierarchy.candidates[0]
+        .constraints
+        .qualified_name = None;
+    undeclared_hierarchy.candidates[0].constraints.hierarchy =
+        Some(HierarchyConstraint::ReceiverDispatch {
+            receiver_qualified_name: "example.Owner".to_owned(),
+            strategy: ReceiverDispatchStrategy::C3AfterReceiver,
+        });
+    assert_code(
+        &undeclared_hierarchy,
+        EvidenceErrorCode::UndeclaredCapability,
+    );
+
+    let mut invalid_hierarchy_relation = undeclared_hierarchy;
+    invalid_hierarchy_relation
+        .adapter
+        .capabilities
+        .push(LanguageCapability::HierarchyDispatch);
+    invalid_hierarchy_relation.candidates[0]
+        .constraints
+        .hierarchy = Some(HierarchyConstraint::DirectBase {
+        base_set_complete: true,
+    });
+    assert_code(&invalid_hierarchy_relation, EvidenceErrorCode::InvalidFact);
 }
 
 #[test]

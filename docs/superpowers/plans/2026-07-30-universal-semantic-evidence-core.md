@@ -697,12 +697,451 @@ Update PR #88 if it remains open; otherwise create a new PR targeting current
 `origin/main`. State explicitly that Python and Go hard-cut in this increment;
 Java/Rust and framework packs follow through separate hard-cutover increments.
 
+---
+
+### Task 8: Phase-three exact receiver dispatch and honest residual accounting
+
+**Background:**
+
+The first real-corpus residual analysis found that Django still contained 730
+Graphify-only `super()` call hypotheses. The generic Python call extractor
+recorded `super()` as an unbound qualifier and correctly refused repository-
+wide terminal-name fallback, but it did not preserve enough owner context to
+select a proven base method. This was a recall gap, not permission to weaken
+resolution.
+
+The same analysis also found Graphify call/reference hypotheses whose
+generated endpoint identity differed from Compass even though Compass had one
+compatible target at the exact mapped owner, file, and use-site location.
+Those cases require semantic comparison, not new product graph edges.
+
+**Design:**
+
+- Keep declaration context aware of its enclosing type and the exact qualified
+  identities of explicit bases.
+- For Python `super().method(...)`, emit an exact qualified target only when
+  the enclosing type has one explicit base. The shared resolver still requires
+  that exact base method to exist as a source declaration.
+- Fail closed for multiple inheritance, dynamic bases, explicit-argument
+  `super`, absent direct methods, and external-only bases. MRO inference is a
+  future evidence capability, not a terminal-name fallback.
+- Reuse `ResolutionConstraint.qualified_name`; do not add or change any
+  version value.
+- Keep the mechanism language-neutral: future adapters may provide an exact
+  owner-qualified target from compiler, type, trait, or inheritance evidence
+  and use the same resolver rule.
+- In the external comparator, count a generated-identity hypothesis as
+  dominated only when the mapped source, relation, file, location, and one
+  compatible Compass target all agree. Multiple or incompatible targets remain
+  ambiguous or missing.
+
+- [x] **Step 1: Implement exact direct-base dispatch**
+
+Add enclosing-type context and a bounded base map to the direct adapter. Emit
+an exact `Base::method` constraint for the conservative Python case above.
+Implement production behavior before adding tests.
+
+- [x] **Step 2: Add post-implementation fail-closed coverage**
+
+Cover a cross-file imported single base as the positive case and multiple
+inheritance as the negative case. Verify that the shared resolver, rather than
+a Python-specific resolution branch, materializes the edge.
+
+- [x] **Step 3: Improve source-grounded comparison**
+
+Index exact relationship occurrences by relation, canonical owner, source
+file, and source location. Recover only one compatible target at that exact
+site. Report ambiguous node counts in the reusable analyzer.
+
+- [x] **Step 4: Verify on pinned Django and Entire**
+
+Use Django commit `1c5927f04a853c79ac9b098eab92fb328ff9e4ad` and Entire
+commit `279b988597f1037c14cdd4c46765a5552e067d17`. Retain the
+existing Graphify graphs; do not rerun Graphify and do not run
+`graphify update .`.
+
+Outcome:
+
+- Django gained 688 exact `super()` call edges and lost three incorrect
+  variable-target `copy` call edges, for a net 685 raw edges.
+- An independent Python AST audit verified all 688 new edges against the exact
+  source class, sole base, call occurrence, target class, and direct method
+  declaration: 688/688 correct.
+- Graphify edge coverage improved from 7,415 to 5,796 missing hypotheses across
+  the comparator and product changes. Strict superset quality still fails.
+- Entire graph topology did not change.
+- The standardized three-repeat Compass build suite passed, but the retained
+  Graphify comparison still misses the 5x cold-build target on Entire and
+  Compass still uses substantially more peak memory. Do not describe phase
+  three as performance dominance.
+
+- [x] **Step 5: Record evidence and publish**
+
+Record exact counts, coverage deltas, verification commands, performance,
+memory, and remaining gaps in
+`docs/superpowers/reviews/2026-07-30-semantic-dominance-phase-3.md`.
+Commit, push, and open a new PR against current `origin/main`.
+
+---
+
+### Task 9: Universal linearized receiver dispatch
+
+**Background:**
+
+Phase three intentionally resolved only zero-argument Python `super()` calls
+whose enclosing class had one statically named direct base and whose target
+method was declared directly on that base. The retained Graphify comparison
+still listed 456 `super()` call hypotheses as missing, but source inspection
+showed that many Graphify targets were incorrect: methods on `LazySettings`
+were pointed at `UserSettingsHolder`, and unrelated widget constructors were
+pointed at `AutocompleteMixin`. Matching those targets would improve the
+comparator score while degrading the product graph.
+
+The genuine recall gap is ordered receiver dispatch. Python may select a method
+from a later class in a C3 multiple-inheritance order or from an ancestor
+beyond the direct base. Per-file extraction cannot prove that target because
+the hierarchy crosses files. The shared resolver already sees the merged
+repository evidence and is the correct bounded policy boundary.
+
+**Design:**
+
+- Add typed hierarchy constraints to `ResolutionConstraint`: ordered
+  direct-base evidence carries whether the full source base set is known, and
+  receiver dispatch carries an exact receiver identity plus an explicit
+  linearization strategy.
+- Advertise a new `HierarchyDispatch` capability only for adapters that emit
+  the complete contract. The existing capability equality check makes cached
+  Python evidence without it a normal cache miss; no version value changes.
+- Hard-cut Python zero-argument `super()` away from the direct-base shortcut.
+  It emits receiver-dispatch evidence and cannot simultaneously emit a
+  qualified, lexical, local, imported, or external target.
+- Build bounded direct-base and directly-owned-member indices in the universal
+  resolver. Resolve direct-base publication only by exact qualified identity
+  or a qualified external endpoint; never fall through to lexical or
+  same-module name matching.
+- For `C3AfterReceiver`, recover a unique member declared by the exact first
+  base from a complete receiver base list, even when a later ancestor is
+  external. Otherwise require every ordered base to resolve to one exact
+  source class, require an acyclic and C3-consistent hierarchy within the
+  configured bound, and select only one direct member on the first matching
+  class in the linearization.
+- Fail closed for dynamic or incomplete receiver bases; unresolved ancestors
+  outside the proven direct-successor prefix; inconsistent or cyclic
+  hierarchies; ambiguous members; explicit-argument `super`; and any
+  resource-bound overflow.
+- Keep the mechanism extensible: future language adapters add an explicit,
+  qualified strategy backed by their compiler/type/trait evidence. They do not
+  reinterpret C3 and do not use terminal-name search.
+- Do not add a legacy projection, change any version value, rerun Graphify, or
+  run `graphify update .`.
+
+- [x] **Step 1: Implement the production hard cutover**
+
+Add the hierarchy model, capability gate, validation rules, exact base
+identity emission, bounded C3 resolver, and receiver-member selection.
+Remove the phase-three `direct_super_target` path. Implement production code
+before tests.
+
+- [x] **Step 2: Add post-implementation conformance coverage**
+
+Cover exact cross-file direct bases, multiple-base source order,
+inherited-beyond-direct-base selection, dynamic-base fail-closed behavior,
+capability validation, deterministic hierarchy evidence, and prevention of
+same-named import fallback.
+
+- [x] **Step 3: Verify real source-grounded graph changes**
+
+Rebuild pinned Django and Entire graphs cold. Require zero validation errors,
+byte-identical warm output, and no topology change in Entire. Independently
+audit every added or retargeted Django call against Python AST class order,
+complete base identities, C3 linearization, direct member ownership, target
+file, and target line. Treat every removed edge as a regression unless the old
+target is independently proven incorrect or the new exact target represents
+the same use.
+
+Result:
+
+- Django publishes 63,892 nodes and 148,710 canonical edges with zero
+  validation errors.
+- Relative to phase three, Django adds 473 independently verified `calls`
+  edges and removes none. The audit covers every added edge: 181 use the exact
+  direct-successor proof and 292 use complete C3 linearization.
+- Exact base publication rejects same-named local substitutions, including the
+  incorrect GIS-local `Transform`, while nested sibling bases resolve to their
+  exact enclosing-class declarations.
+- Django cold/warm graphs are byte-identical at 201,270,657 bytes.
+- Entire remains exactly unchanged at 58,391 nodes, 151,257 canonical edges,
+  the same canonical digest, and zero added or removed topology. Its
+  cold/warm graphs are byte-identical at 169,597,446 bytes.
+
+- [x] **Step 4: Run complete verification and performance qualification**
+
+Run the complete workspace tests, strict Python benchmark tests, formatting,
+linting, diff validation, release build, query oracles, and the standardized
+three-repeat large-repository build suite. Compare instruction count, wall
+time, and peak RSS with phase three. Do not claim performance dominance when
+Entire remains below 5x or Compass memory remains higher than Graphify.
+
+Result:
+
+- The complete workspace, strict Python, format, lint, release, and diff gates
+  pass.
+- The final all-workload qualification passes on current Django and pinned
+  Entire, including 10/10 eligible batches for every natural-language and
+  CompassQL workload.
+- The first all-workload run exposed an unused named-path allocation that
+  exceeded the 256 MiB Entire query limit. A conservative compiler
+  optimization removes only unreferenced, singly bound paths; the exact failed
+  query now passes with output byte-identical to the high-memory reference.
+- On the original pinned Django corpus, cold p50 changes by +2.46%, warm by
+  -0.44%, and incremental by -1.88% relative to phase three. On unchanged
+  Entire, the respective changes are +6.00%, +4.64%, and +4.50%.
+- Retained Graphify timing remains approximately 5.49x slower on Django and
+  3.23x slower on Entire. Compass peak memory remains higher, so performance
+  dominance is not claimed.
+- The macOS runner does not expose retired instruction counts; no instruction
+  delta is claimed.
+
+- [x] **Step 5: Record evidence and update PR #93**
+
+Add a phase-four review containing exact graph counts, topology deltas,
+independent audit results, comparator classifications, latency and memory,
+verification commands, and remaining gaps. Commit and push the hard cutover
+to the existing PR only after all required gates pass.
+
+---
+
+### Task 10: Remove the legacy Python import projection
+
+**Background:**
+
+The phase-four Django graph contains 13,802 raw V1 edges whose only
+producer is the pre-universal `compass.resolve.python-imports` source-text
+pass. This violates the hard-cutover invariant even though it is not used as
+a fallback for calls. The completed byte-range audit found 12,247 exact
+universal replacements, 258 scope-correct ownership replacements, 1,238
+corrected symbol exports, 33 corrected identities, 21 redundant module
+projections, and five nested runtime imports whose enclosing declarations are
+not represented as graph nodes. The typed evidence, not preservation of the
+old count or whole-statement anchor, determines whether each transition is
+correct.
+
+The direct adapter also stores every Python import in a file-wide lookup,
+including imports nested in functions. That can leak a local binding into an
+unrelated function. A hard cutover must remove both the second parser and this
+scope leak before claiming that universal import evidence is authoritative.
+
+**Design:**
+
+- Stop reparsing Python source in the generic cross-file resolver. Python and
+  Go raw calls are already excluded before that resolver; all Python import,
+  re-export, alias, decorator, annotation, base, construction, and call
+  connectivity must come from the universal batch.
+- Delete the legacy parser, definition matcher, re-export walker, edge
+  producer, producer name, resolution rules, and compatibility tests. Do not
+  retain a hidden feature flag or alternate path.
+- Store function-local Python imports only in the owning scope. File imports
+  remain module bindings. Duplicate names are ambiguous only within the same
+  scope, and a local binding never becomes visible to a sibling function.
+- Preserve one exact occurrence per imported item. Package initializer
+  `from ... import ...` bindings remain typed symbol re-exports; do not emit a
+  repeated edge that incorrectly describes the source module itself as the
+  exported value.
+- Keep all version values unchanged. Do not run Graphify or
+  `graphify update .`.
+
+- [x] **Step 1: Implement the production hard cutover**
+
+Remove legacy Python source reparsing and projection from
+`compass-resolve`. Make import binding and target lookup scope-aware in the
+direct Python evidence builder. Implement production code before changing
+tests.
+
+- [x] **Step 2: Add post-implementation conformance coverage**
+
+Replace legacy-producer tests with universal contracts for exact item spans,
+symbol and submodule resolution, multi-hop re-exports, function-local import
+ownership, sibling-scope isolation, deterministic input order, and complete
+absence of `compass.resolve.python-imports` or its old rules.
+
+- [x] **Step 3: Qualify the real topology transition**
+
+Rebuild pinned Django and Entire graphs. Require zero validation errors,
+byte-identical cold/warm output, and no legacy producer occurrence. A shared
+resolver correction may change Entire topology only when every added or
+retargeted fact has independent source proof; an unchanged count is not a
+quality gate. Classify every removed Django edge into exact universal
+replacement, more precise scoped ownership, corrected symbol-export
+semantics, corrected identity, redundant module projection, or an explicit
+remaining graph-model gap. Restore any genuine source-proven fact through
+universal evidence before proceeding.
+
+Result:
+
+- Pinned Django publishes 63,797 nodes, 145,219 raw edges, and 144,295
+  canonical edges. Pinned Entire publishes 58,391 nodes, 152,161 raw edges,
+  and 151,267 canonical edges. Both validate with zero errors and have
+  byte-identical cold/warm graphs.
+- All 13,802 retired legacy edges are classified: 12,247 exact replacements,
+  258 scope-correct ownership replacements, 1,238 corrected symbol exports,
+  33 corrected identities, 21 redundant module projections, and five
+  unrepresented nested-declaration imports. None is restored through the old
+  algorithm.
+- Exact import binding precedence also corrects 96 Django and 16 Entire
+  added or retargeted relationships. Independent Python AST/import and Go
+  import-path audits verified 96/96 and 16/16 respectively, with no failures.
+- Entire therefore changes by ten canonical edges. This is an audited shared
+  resolver improvement, not an assertion that a topology freeze is more
+  important than source-correct targets.
+
+- [x] **Step 4: Run complete correctness and performance verification**
+
+Run focused resolver/language tests, the full workspace, strict Python
+benchmark tests, format, lint, release build, query oracles, comparator, and
+the standardized large-repository performance suite. Record wall time and
+peak RSS honestly; do not infer performance dominance from edge removal.
+
+Result:
+
+- Focused resolver, language, core determinism, Python benchmark, release,
+  format, lint, and diff checks pass. The full locked workspace all-target
+  suite passes, including scale tests.
+- Standardized run `phase5-python-import-hard-cut-final` passes every gate on
+  current Django and Entire heads with 3/3 eligible cold, warm, and
+  incremental builds and 10/10 eligible samples for every query workload.
+- Django p50 is 11.635 seconds cold, 1.547 seconds warm, and 19.175 seconds
+  incremental. Entire p50 is 7.611, 0.891, and 15.146 seconds respectively.
+  Peak memory remains high, so this is not a performance-dominance claim.
+
+- [x] **Step 5: Record evidence and update PR #93**
+
+Add a phase-five review with exact topology classifications, scope-isolation
+evidence, graph counts and digests, Graphify comparison deltas, performance,
+verification commands, and remaining gaps. Commit and push only after all
+required gates pass.
+
+---
+
+### Task 11: Source-grounded runtime declaration ownership
+
+**Background:**
+
+Both the generic Python graph extractor and the direct universal evidence
+collector currently stop declaration discovery when they enter a function.
+That behavior omits source declarations created at runtime inside functions
+and methods. On pinned Django the omitted source population contains 1,068
+nested functions and 2,345 classes declared inside functions. It also causes
+the five phase-five runtime-import gaps: the import use is real, but its exact
+lexical owner has no graph node, so restoring the old file-owned edge would be
+incorrect.
+
+This is a graph-model recall gap, not permission to attach nested facts to an
+outer file or method. The source contains an exact declaration range, lexical
+parent, name, and declaration kind, so the universal evidence path can model
+the owner without guessing a runtime call target.
+
+**Design:**
+
+- Generalize Python declaration traversal from a class-only parent to an exact
+  lexical declaration parent. A nested function is owned by the enclosing
+  function or method; a runtime class is owned by the enclosing function; and
+  methods remain owned by their exact class.
+- Give every nested declaration a deterministic identity derived from its
+  lexical owner's graph identity and source name. Repeated same-named
+  declarations under one owner use the existing source-line discriminator.
+- Emit the raw source node and universal `DeclarationFact`, scope, and
+  containment candidate from the same parser declaration. Their graph IDs
+  must agree exactly so resolution never needs a compatibility projection.
+- Recurse into Python function bodies only. Other language adapters retain
+  their current behavior until their own atomic hard cutovers.
+- Imports, calls, decorators, annotations, bases, and further nested
+  declarations inside the new owner use that owner's scope. Never project a
+  nested fact to a file or sibling declaration.
+- Keep all version values unchanged. Do not run Graphify or
+  `graphify update .`.
+
+- [x] **Step 1: Implement lexical runtime declarations**
+
+Refactor the production generic Python declaration walk and direct evidence
+collector to emit source-backed nested function/class nodes, exact ownership,
+and aligned identities. Implement production behavior before tests.
+
+- [x] **Step 2: Add post-implementation conformance coverage**
+
+Cover nested functions, classes declared inside functions, methods of runtime
+classes, repeated same-named nested declarations, exact nested imports, and
+sibling-scope isolation. Assert raw graph IDs and universal declaration IDs
+materialize to the same nodes without dangling or file-owned fallback edges.
+
+- [x] **Step 3: Qualify the real topology transition**
+
+Rebuild pinned Django and Entire cold and warm. Require zero validation
+errors, byte-identical output, no topology change in Entire, and no remaining
+unrepresented phase-five runtime import. Independently audit every added node
+and relationship against Python AST declaration nesting, source range,
+lexical owner, import binding, and target source. Any relationship without
+exact source proof fails the phase.
+
+Result:
+
+- Pinned Django publishes 68,761 nodes, 157,056 raw edges, and 156,092
+  canonical edges with zero validation errors and byte-identical cold/warm
+  output. Pinned Entire remains byte-identical to phase five at 58,391 nodes,
+  152,161 raw edges, and 151,267 canonical edges.
+- All five phase-five runtime-import gaps are recovered under their exact
+  nested declaration owners. None is projected to a file or outer method.
+- The complete changed population is source-grounded: 4,662 added declaration
+  nodes match Python AST file, line, name, kind, and lexical ownership; 307
+  placeholders retain bounded source anchors; and all 11,941 added
+  relationships match exact declaration nesting or exact use sites with
+  bounded binding/target evidence.
+- Target confidence remains explicit: inferred external identities are not
+  described as exact internal declarations, and this changed-population audit
+  is not a repository-wide precision claim.
+
+- [x] **Step 4: Run complete verification and performance qualification**
+
+Run focused language/resolver tests, core determinism, the strict Python
+benchmark suite, the full locked workspace, format, lint, release build,
+query oracles, comparator, and the standardized large-repository suite. Record
+wall time and peak RSS honestly; added source declarations are a quality gain
+only when their ownership and downstream facts pass the complete audit.
+
+Result:
+
+- Focused language/resolver tests, core determinism, the strict 81-test Python
+  benchmark suite, full locked workspace all-target suite, format, production
+  and test lint, release build, diff check, comparator, and source audits pass.
+- Standardized run `phase6-runtime-declarations-final` passes every internal
+  correctness, determinism, natural-query, and CompassQL gate with 3/3 build
+  and 10/10 query samples eligible on current Django and Entire heads.
+- Performance is mixed and is not claimed as an improvement. In a
+  non-controlled comparison to phase five's different remote corpus commits,
+  Django incremental p50 rises 15.5%; peak build memory remains high.
+
+- [x] **Step 5: Record evidence and update PR #93**
+
+Add a phase-six review with exact topology deltas, complete changed-population
+audit, graph counts and digests, Graphify classifications, performance, and
+remaining gaps. Commit and push only after all required gates pass.
+
+Result: phase-six evidence is recorded in
+`docs/superpowers/reviews/2026-07-31-semantic-dominance-phase-6.md`.
+Implementation and qualification commits are pushed, and PR #93 contains the
+phase-six scope, results, performance caveats, and remaining gaps.
+
 ## Plan self-review
 
 - **Design coverage:** Tasks 1–6 cover the evidence model, adapter registry,
   direct Python/Go extraction, production resolver, framework-pack contract,
   and conformance harness. Task 7 covers extension documentation and
-  real-corpus hard-cutover qualification.
+  real-corpus hard-cutover qualification. Task 8 adds conservative
+  owner-qualified receiver dispatch and source-grounded residual accounting.
+  Task 9 replaces that conservative shortcut with typed, bounded linearized
+  dispatch in the shared resolver. Task 10 removes the residual pre-universal
+  Python import projection and makes direct import bindings scope-correct.
+  Task 11 closes the known runtime-declaration ownership gap without reviving
+  file-level projection.
 - **Scope:** This plan delivers the core plus Python/Go hard cutover. It claims
   quality only for capabilities that pass the audit; Java/Rust and framework
   hard cutovers remain separate increments.

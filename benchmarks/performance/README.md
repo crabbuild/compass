@@ -123,6 +123,71 @@ corpus, and `REPORT.md` under the run workspace. This is diagnostic evidence,
 not a promotable Compass performance baseline; use `harness.py compare` for
 qualification.
 
+The comparator uses each manifest's pinned `source` checkout to prove
+statement-level occurrence equivalence. For example, the first line of a
+multiline Python import and the exact imported-item line are equivalent only
+when both fall inside the same parsed import statement. Missing, unreadable,
+escaped, unsupported, or malformed source fails closed to exact-line matching.
+
+## Source-grounded quality audit
+
+Create an unjudged candidate set from a comparator database without rerunning
+either graph producer:
+
+```bash
+python3 benchmarks/performance/harness.py audit-candidates \
+  --database target/performance/manual/django-comparison.sqlite \
+  --graph /path/to/pinned/compass/graph.json \
+  --corpus /path/to/pinned/django \
+  --name django \
+  --adapter python \
+  --output target/performance/audits/django-candidates.json
+```
+
+The export requires the comparison database to contain the exact raw SHA-256
+of the supplied Compass graph; databases created before exact artifact identity
+was recorded fail closed and must be reindexed. It produces three explicitly
+separated populations:
+
+- every eligible Compass-published relationship with an exact in-repository
+  byte range (`compass_graph`, suggested `accepted` pool);
+- independently parsed Python call and import constructs
+  (`independent_source`, suggested `source_oracle` pool); and
+- Graphify comparison records (`graphify_comparison`, always a
+  `graphify_hypothesis`, even when Compass has a matching fact).
+
+All records pin the corpus commit and exact graph digest and leave `judgment`
+and adjudicator `reason` empty. Compass graph candidates already carry the
+exact published range and set `requiresExactGraphRange` to false. Independent
+source and Graphify candidates are discovery evidence; their owner, target,
+relation, and exact Compass representation must be adjudicated before they can
+enter a qualification manifest. Generated hypotheses can therefore never
+silently become positive precision evidence. Unsupported independent-source
+providers report an explicit zero population. Supported providers report every
+scanned, parsed, and rejected file and set `sourceOracleCoverage.complete` only
+when no file was skipped. Qualification still fails until the required complete
+source-oracle strata exist.
+
+After explicit adjudication, run the existing audit gate:
+
+```bash
+python3 benchmarks/performance/harness.py audit \
+  --manifest /path/to/qualification.json \
+  --graph /path/to/pinned/compass/graph.json \
+  --corpus /path/to/pinned/corpus
+```
+
+The qualification manifest must copy the candidate export's source-oracle
+provider, scanned/parsed counts, and inventory SHA-256 into its
+`sourceOracles` collection. The audit command independently regenerates that
+inventory from the pinned corpus; copying only selected records cannot conceal
+an unsupported, skipped, or stale source population.
+
+The checked-in `audits/universal-core.json` is only a small conformance fixture.
+Production qualification still requires the fixed sample, precision, Wilson
+lower-bound, capability, corpus, relation, diversity, and recall thresholds
+enforced by `compass/audit.py`.
+
 ## Output and interruption policy
 
 `run.json` contains exact tool, environment, corpus, command, timing, memory,

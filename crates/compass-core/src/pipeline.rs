@@ -20,7 +20,7 @@ use compass_graph::{
 use compass_languages::{
     EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL, EXTRACTION_QUALITY_REASON_EXTENSION,
     Engine, Extraction, ExtractorKind, FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, ProjectEvidenceIndex,
-    RawEdgeRecord, RawNodeRecord, Registry, file_stem, make_id,
+    RawEdgeRecord, RawFrameworkFact, RawNodeRecord, Registry, file_stem, make_id,
 };
 use compass_model::code_graph::{
     DiagnosticSeverity, ExtractionStatus, GraphDiagnostic, GraphDocument as V1GraphDocument,
@@ -3463,6 +3463,7 @@ fn prepare_extraction_for_publication(
     partials: &mut BTreeMap<PathBuf, String>,
 ) {
     let identity = canonical_identity(path);
+    make_framework_fact_sources_portable(extraction, root);
     if let Some(error) = extraction.error.take() {
         failures.insert(identity, portable_diagnostic_reason(&error, path, root));
         *extraction = Extraction::default();
@@ -3487,6 +3488,28 @@ fn prepare_extraction_for_publication(
     extraction.hyperedges.clear();
     extraction.framework_facts.clear();
     extraction.raw_calls = None;
+}
+
+fn make_framework_fact_sources_portable(extraction: &mut Extraction, root: &Path) {
+    if extraction.semantic_evidence.is_none() {
+        return;
+    }
+    for fact in &mut extraction.framework_facts {
+        let source_file = match fact {
+            RawFrameworkFact::Route(route) => &mut route.anchor.source_file,
+            RawFrameworkFact::Domain(domain) => &mut domain.anchor.source_file,
+        };
+        let path = Path::new(source_file);
+        if !path.is_absolute() {
+            *source_file = source_file.replace('\\', "/");
+            continue;
+        }
+        let canonical = canonicalize_allow_missing(path);
+        *source_file = canonical.strip_prefix(root).map_or_else(
+            |_| portable_out_of_root_source(&canonical, root),
+            |relative| relative.to_string_lossy().replace('\\', "/"),
+        );
+    }
 }
 
 fn portable_diagnostic_reason(reason: &str, path: &Path, root: &Path) -> String {

@@ -343,7 +343,10 @@ def _summary_after_validation_error(
 
 
 def compare(
-    database_path: Path, compass_path: Path, graphify_path: Path
+    database_path: Path,
+    compass_path: Path,
+    graphify_path: Path,
+    source_root: Path,
 ) -> dict[str, object]:
     if database_path.exists():
         database_path.unlink()
@@ -389,7 +392,7 @@ def compare(
             )
             graphify_summary = _summary_after_validation_error(database, "graphify", 0)
 
-        result = compare_graphs(database)
+        result = compare_graphs(database, source_root)
         return {
             "passed": result.passed,
             "failures": list(result.failures),
@@ -477,9 +480,10 @@ def markdown_report(payload: dict[str, object]) -> str:
             "`rejected` means a known unsafe/fabricated Graphify projection; `missing` "
             "means no source-compatible Compass fact was found.",
             "",
-            "| Corpus | Exact nodes | Dominated nodes | Missing nodes | Exact edges | "
-            "Dominated edges | Rejected edges | Ambiguous edges | Missing edges |",
-            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| Corpus | Exact nodes | Dominated nodes | Ambiguous nodes | Missing nodes | "
+            "Exact edges | Dominated edges | Rejected edges | Ambiguous edges | "
+            "Missing edges |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         )
     )
     for corpus in corpora:
@@ -488,6 +492,7 @@ def markdown_report(payload: dict[str, object]) -> str:
             f"| {corpus['name']} | "
             f"{metrics.get('exact_graphify_nodes', 0):,} | "
             f"{metrics.get('dominated_graphify_nodes', 0):,} | "
+            f"{metrics.get('ambiguous_graphify_nodes', 0):,} | "
             f"{metrics.get('missing_graphify_nodes', 0):,} | "
             f"{metrics.get('exact_graphify_edges', 0):,} | "
             f"{metrics.get('dominated_graphify_edges', 0):,} | "
@@ -568,6 +573,7 @@ def analyze(
                     metrics_directory / f"{name}.sqlite",
                     compass_path,
                     graphify_path,
+                    source,
                 ),
             }
         )
