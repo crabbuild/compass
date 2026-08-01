@@ -7,6 +7,7 @@ import unittest
 
 from benchmarks.performance.compass.jsonstream import (
     iter_top_level_array,
+    iter_top_level_object_array,
     read_top_level_object_value,
     read_top_level_value,
 )
@@ -47,6 +48,39 @@ class JsonStreamTests(unittest.TestCase):
             diagnostics = read_top_level_object_value(path, "graph", "diagnostics")
 
         self.assertEqual(diagnostics, [{"severity": "error"}])
+
+    def test_nested_array_streams_members_without_decoding_the_collection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write(
+                directory,
+                json.dumps(
+                    {
+                        "graph": {
+                            "note": "before",
+                            "diagnostics": [
+                                {"severity": "info", "code": "first"},
+                                {"severity": "error", "code": "second"},
+                            ],
+                            "after": {"nested": True},
+                        },
+                        "nodes": [],
+                    }
+                ),
+            )
+
+            diagnostics = list(
+                iter_top_level_object_array(
+                    path, "graph", "diagnostics", chunk_chars=1
+                )
+            )
+
+        self.assertEqual(
+            diagnostics,
+            [
+                {"severity": "info", "code": "first"},
+                {"severity": "error", "code": "second"},
+            ],
+        )
 
     def test_edges_fallback_is_a_caller_decision(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

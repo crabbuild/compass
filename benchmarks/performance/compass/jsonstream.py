@@ -266,3 +266,67 @@ def read_top_level_object_value(path: Path, object_key: str, key: str) -> Any:
                 member_first = False
     finally:
         reader.close()
+
+
+def iter_top_level_object_array(
+    path: Path,
+    object_key: str,
+    key: str,
+    *,
+    chunk_chars: int = _CHUNK_CHARS,
+) -> Iterator[dict[str, object]]:
+    """Stream one array nested directly inside a top-level object member."""
+    reader = _Reader(path, chunk_chars=chunk_chars)
+    found = False
+    try:
+        reader.expect("{")
+        first = True
+        while True:
+            reader.whitespace()
+            if reader.peek() == "}":
+                reader.take()
+                break
+            if not first:
+                reader.expect(",")
+            name = reader.decode()
+            if not isinstance(name, str):
+                raise ValueError(f"top-level JSON key is not a string in {path}")
+            reader.expect(":")
+            if name != object_key:
+                reader.skip_value()
+                first = False
+                continue
+
+            reader.expect("{")
+            member_first = True
+            while True:
+                reader.whitespace()
+                if reader.peek() == "}":
+                    reader.take()
+                    break
+                if not member_first:
+                    reader.expect(",")
+                member_name = reader.decode()
+                if not isinstance(member_name, str):
+                    raise ValueError(
+                        f"JSON member key is not a string in {path}"
+                    )
+                reader.expect(":")
+                if member_name == key:
+                    if found:
+                        raise ValueError(
+                            f"duplicate nested key {object_key!r}.{key!r} in {path}"
+                        )
+                    found = True
+                    yield from _array(reader)
+                else:
+                    reader.skip_value()
+                member_first = False
+            first = False
+        if not found:
+            raise KeyError(key)
+        reader.whitespace()
+        if reader.peek():
+            raise ValueError(f"trailing content after top-level object in {path}")
+    finally:
+        reader.close()

@@ -60,12 +60,14 @@ workspace:
 
 1. [Design principles](design/principles.md)
 2. [System architecture](design/architecture.md)
-3. [Workspace and crate tour](implementation/workspace-tour.md)
-4. [Extraction pipeline](implementation/extraction-pipeline.md)
-5. [Query engine](implementation/query-engine.md)
-6. [Semantic pipeline](implementation/semantic-pipeline.md)
-7. [Extending Compass](implementation/extending-compass.md)
-8. [Contributing](../CONTRIBUTING.md)
+3. [Language architecture](design/language-architecture.md)
+4. [Workspace and crate tour](implementation/workspace-tour.md)
+5. [Extraction pipeline](implementation/extraction-pipeline.md)
+6. [Universal evidence implementation](implementation/universal-evidence.md)
+7. [Query engine](implementation/query-engine.md)
+8. [Semantic pipeline](implementation/semantic-pipeline.md)
+9. [Extending Compass](implementation/extending-compass.md)
+10. [Contributing](../CONTRIBUTING.md)
 
 ## Documentation map
 
@@ -95,6 +97,7 @@ workspace:
 | --- | --- |
 | [Design principles](design/principles.md) | Local-first, deterministic, bounded, inspectable behavior |
 | [Architecture](design/architecture.md) | Major layers and the data that crosses them |
+| [Language architecture](design/language-architecture.md) | Grammar, adapter, evidence, resolution, and transition boundaries |
 | [Storage and history](design/storage-and-history.md) | Incremental artifacts and immutable historical realizations |
 | [Security and privacy](design/security-and-privacy.md) | Trust boundaries, credentials, and offline behavior |
 
@@ -104,6 +107,7 @@ workspace:
 | --- | --- |
 | [Workspace tour](implementation/workspace-tour.md) | Which crate owns which responsibility |
 | [Extraction pipeline](implementation/extraction-pipeline.md) | Discovery through atomic output publication |
+| [Universal evidence](implementation/universal-evidence.md) | Language contracts, crate boundaries, resolution, and qualification |
 | [Query engine](implementation/query-engine.md) | Discovery queries, traversal, and CompassQL |
 | [Semantic pipeline](implementation/semantic-pipeline.md) | Optional provider-backed extraction |
 | [Extending Compass](implementation/extending-compass.md) | Adding languages, relations, integrations, and commands |

@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 
-from benchmarks.performance.compass.adapters import ToolAdapter
+from benchmarks.performance.compass.adapters import GraphifyAdapter, ToolAdapter
 from benchmarks.performance.compass.model import QueryOracle, RepositorySpec, ToolRevision
 from benchmarks.performance.compass.workloads import (
     graph_neutral_mutation,
@@ -47,6 +47,24 @@ class FakeAdapter(ToolAdapter):
 
     def graph_path(self, output: Path) -> Path:
         return output / "graph.json"
+
+
+class CheckoutWritingAdapter(FakeAdapter):
+    def build_command(self, checkout: Path, output: Path, *, force: bool = False):
+        script = (
+            "from pathlib import Path; import shutil; "
+            f"checkout = Path({str(checkout)!r}); output = Path({str(output)!r}); "
+            f"fixture = Path({str(FIXTURE)!r}); "
+            "output.mkdir(parents=True, exist_ok=True); "
+            "shutil.copyfile(fixture, output / 'graph.json'); "
+            "cache = checkout / 'graphify-out' / 'cache'; "
+            "cache.mkdir(parents=True, exist_ok=True); "
+            "(cache / 'stat-index.json').write_text('{}')"
+        )
+        return (sys.executable, "-c", script)
+
+    def cleanup_checkout(self, checkout: Path) -> None:
+        GraphifyAdapter.cleanup_checkout(self, checkout)
 
 
 def git(cwd: Path, *arguments: str) -> str:
@@ -155,6 +173,31 @@ class WorkloadTests(unittest.TestCase):
             )
             self.assertTrue(all(result.correctness.passed for result in results))
             self.assertTrue(all(result.aggregate is not None for result in results))
+
+    def test_build_matrix_cleans_tool_owned_checkout_artifacts_after_every_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = QualificationWorkspace.create(root / "workspace")
+            checkout = self.make_checkout(workspace.root)
+            spec = RepositorySpec(
+                "fixture",
+                "https://example.invalid/fixture.git",
+                ".py",
+                (),
+            )
+            adapter = CheckoutWritingAdapter(Path(sys.executable), self.graphify_adapter().revision)
+
+            results = run_build_matrix(
+                adapter,
+                checkout,
+                workspace.root / "artifacts",
+                spec,
+                timeout_seconds=5,
+            )
+
+            self.assertTrue(all(result.correctness.passed for result in results))
+            self.assertFalse((checkout / "graphify-out").exists())
+            self.assertEqual(git(checkout, "status", "--porcelain"), "")
 
     def test_query_matrix_requires_oracle_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

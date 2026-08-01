@@ -222,10 +222,10 @@ def _run_build(
     error: str | None = None
     correctness_digest = ""
     evidence: dict[str, float | int | str | bool] = {}
-    if metrics.return_code != 0 or metrics.timed_out:
-        error = f"command failed with return code {metrics.return_code}"
-    else:
-        try:
+    try:
+        if metrics.return_code != 0 or metrics.timed_out:
+            error = f"command failed with return code {metrics.return_code}"
+        else:
             graph = adapter.graph_path(output)
             correctness = _validate_graph(adapter.name, graph)
             correctness_digest = correctness.digest
@@ -238,8 +238,16 @@ def _run_build(
                 )
             )
             adapter.prune_superseded_artifacts(output, graph)
-        except (OSError, RuntimeError) as exception:
-            error = str(exception)
+    except (OSError, RuntimeError) as exception:
+        error = str(exception)
+    finally:
+        try:
+            adapter.cleanup_checkout(checkout)
+        except (OSError, RuntimeError, ValueError) as exception:
+            if error is None:
+                error = f"checkout cleanup failed: {exception}"
+            else:
+                error = f"{error}; checkout cleanup failed: {exception}"
     sample = Sample(
         sample_id=f"{adapter.name}:{repository}:{workload}:{iteration}",
         tool=adapter.name,

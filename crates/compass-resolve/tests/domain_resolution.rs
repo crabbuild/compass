@@ -28,16 +28,38 @@ fn extract(relative: &str) -> Result<Extraction, Box<dyn Error>> {
     Ok(extraction)
 }
 
-fn merge(target: &mut Extraction, mut source: Extraction) {
-    target.nodes.append(&mut source.nodes);
-    target.edges.append(&mut source.edges);
-    target.framework_facts.append(&mut source.framework_facts);
+fn extract_and_resolve(relatives: &[&str]) -> Result<Extraction, Box<dyn Error>> {
+    let mut extractions = Vec::with_capacity(relatives.len());
+    let mut sources = HashMap::new();
+    for relative in relatives {
+        let path = fixture(relative);
+        let source = fs::read_to_string(&path)?;
+        let extraction = extract(relative)?;
+        sources.insert((*relative).to_owned(), source.clone());
+        sources.insert(path.to_string_lossy().into_owned(), source.clone());
+        for source_file in extraction
+            .nodes
+            .iter()
+            .map(|node| node.string("source_file"))
+            .filter(|source_file| !source_file.is_empty())
+            .chain(
+                extraction
+                    .semantic_evidence
+                    .iter()
+                    .flat_map(|batch| batch.declarations.iter())
+                    .map(|declaration| declaration.range.source_file.clone()),
+            )
+        {
+            sources.insert(source_file, source.clone());
+        }
+        extractions.push(extraction);
+    }
+    Ok(resolve(&extractions, &sources))
 }
 
 #[test]
 fn nest_and_spring_message_facts_preserve_direction_and_transport() -> Result<(), Box<dyn Error>> {
-    let mut extraction = extract("messaging/nest.ts")?;
-    merge(&mut extraction, extract("messaging/spring.java")?);
+    let mut extraction = extract_and_resolve(&["messaging/nest.ts", "messaging/spring.java"])?;
     let resolved =
         resolve_and_publish_framework_domains(&mut extraction, FrameworkLimits::default())?;
     assert!(resolved.iter().any(|fact| {
@@ -45,11 +67,14 @@ fn nest_and_spring_message_facts_preserve_direction_and_transport() -> Result<()
             && fact.fact.name == "orders.created"
             && fact.state == ResolutionState::Exact
     }));
-    assert!(resolved.iter().any(|fact| {
-        fact.fact.kind == "topic"
-            && fact.fact.name == "orders.created"
-            && fact.state == ResolutionState::Exact
-    }));
+    assert!(
+        resolved.iter().any(|fact| {
+            fact.fact.kind == "topic"
+                && fact.fact.name == "orders.created"
+                && fact.state == ResolutionState::Exact
+        }),
+        "resolved={resolved:#?}"
+    );
     assert!(resolved.iter().any(|fact| {
         fact.fact.kind == "queue"
             && fact.fact.name == "orders.queue"
@@ -81,10 +106,8 @@ fn nest_and_spring_message_facts_preserve_direction_and_transport() -> Result<()
 
 #[test]
 fn scheduled_and_hosted_jobs_publish_schedules_and_triggers() -> Result<(), Box<dyn Error>> {
-    let mut extraction = Extraction::default();
-    for fixture in ["jobs/spring.java", "jobs/aspnet.cs", "jobs/celery.py"] {
-        merge(&mut extraction, extract(fixture)?);
-    }
+    let mut extraction =
+        extract_and_resolve(&["jobs/spring.java", "jobs/aspnet.cs", "jobs/celery.py"])?;
     let resolved =
         resolve_and_publish_framework_domains(&mut extraction, FrameworkLimits::default())?;
     assert_eq!(
@@ -118,7 +141,6 @@ fn scheduled_and_hosted_jobs_publish_schedules_and_triggers() -> Result<(), Box<
 
 #[test]
 fn every_approved_orm_maps_only_to_existing_database_tables() -> Result<(), Box<dyn Error>> {
-    let database = extract("orm/database.sql")?;
     for fixture in [
         "orm/django.py",
         "orm/sqlalchemy.py",
@@ -130,8 +152,7 @@ fn every_approved_orm_maps_only_to_existing_database_tables() -> Result<(), Box<
         "orm/gorm.go",
         "orm/diesel.rs",
     ] {
-        let mut extraction = extract(fixture)?;
-        merge(&mut extraction, database.clone());
+        let mut extraction = extract_and_resolve(&[fixture, "orm/database.sql"])?;
         let resolved =
             resolve_and_publish_framework_domains(&mut extraction, FrameworkLimits::default())?;
         let mapping = resolved

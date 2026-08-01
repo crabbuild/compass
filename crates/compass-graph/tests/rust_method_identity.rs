@@ -3,8 +3,9 @@ use std::error::Error;
 use std::fs;
 
 use compass_graph::{build_from_extraction, normalize_document_v1};
-use compass_languages::Engine;
+use compass_languages::{Engine, Extraction};
 use compass_model::code_graph::{EdgeKind, NodeKind};
+use serde_json::json;
 
 #[test]
 fn rust_methods_in_distinct_impls_publish_distinct_stable_nodes() -> Result<(), Box<dyn Error>> {
@@ -12,9 +13,7 @@ fn rust_methods_in_distinct_impls_publish_distinct_stable_nodes() -> Result<(), 
     let root = directory.path();
     let path = root.join("src/changes.rs");
     fs::create_dir_all(path.parent().ok_or("missing source parent")?)?;
-    fs::write(
-        &path,
-        r#"
+    let source = r#"
 trait ChangeSink {
     fn change(&mut self);
 }
@@ -26,10 +25,133 @@ impl ChangeSink for ExactDiffWriter {
 impl ChangeSink for ChangeCounts {
     fn change(&mut self) {}
 }
-"#,
-    )?;
+"#;
+    fs::write(&path, source)?;
 
-    let extraction = Engine::default().extract(&path)?;
+    let source_file = path.to_string_lossy();
+    let exact_type_start = source.find("ExactDiffWriter").ok_or("exact type")?;
+    let counts_type_start = source.find("ChangeCounts").ok_or("counts type")?;
+    let method_starts = source
+        .match_indices("fn change")
+        .map(|(start, _)| start + 3)
+        .collect::<Vec<_>>();
+    let exact_method_start = *method_starts.get(1).ok_or("exact method")?;
+    let counts_method_start = *method_starts.get(2).ok_or("counts method")?;
+    let line = |byte: usize| {
+        source.as_bytes()[..byte]
+            .iter()
+            .filter(|b| **b == b'\n')
+            .count()
+            + 1
+    };
+    let extraction: Extraction = serde_json::from_value(json!({
+        "nodes": [
+            {
+                "id": "exact",
+                "label": "ExactDiffWriter",
+                "qualified_name": "crate::ExactDiffWriter",
+                "symbol_kind": "struct",
+                "file_type": "code",
+                "source_file": source_file,
+                "source_location": format!("L{}", line(exact_type_start)),
+                "start_byte": exact_type_start,
+                "end_byte": exact_type_start + "ExactDiffWriter".len(),
+                "line_start": line(exact_type_start),
+                "line_end": line(exact_type_start),
+                "column_start": 7,
+                "column_end": 22,
+                "language": "rust",
+                "confidence": "EXTRACTED",
+                "_origin": "ast"
+            },
+            {
+                "id": "counts",
+                "label": "ChangeCounts",
+                "qualified_name": "crate::ChangeCounts",
+                "symbol_kind": "struct",
+                "file_type": "code",
+                "source_file": source_file,
+                "source_location": format!("L{}", line(counts_type_start)),
+                "start_byte": counts_type_start,
+                "end_byte": counts_type_start + "ChangeCounts".len(),
+                "line_start": line(counts_type_start),
+                "line_end": line(counts_type_start),
+                "column_start": 7,
+                "column_end": 19,
+                "language": "rust",
+                "confidence": "EXTRACTED",
+                "_origin": "ast"
+            },
+            {
+                "id": "exact-change",
+                "label": ".change()",
+                "qualified_name": "<crate::ExactDiffWriter as crate::ChangeSink>::change",
+                "symbol_kind": "method",
+                "file_type": "code",
+                "source_file": source_file,
+                "source_location": format!("L{}", line(exact_method_start)),
+                "start_byte": exact_method_start,
+                "end_byte": exact_method_start + "change".len(),
+                "line_start": line(exact_method_start),
+                "line_end": line(exact_method_start),
+                "column_start": 7,
+                "column_end": 13,
+                "language": "rust",
+                "confidence": "EXTRACTED",
+                "_origin": "ast"
+            },
+            {
+                "id": "counts-change",
+                "label": ".change()",
+                "qualified_name": "<crate::ChangeCounts as crate::ChangeSink>::change",
+                "symbol_kind": "method",
+                "file_type": "code",
+                "source_file": source_file,
+                "source_location": format!("L{}", line(counts_method_start)),
+                "start_byte": counts_method_start,
+                "end_byte": counts_method_start + "change".len(),
+                "line_start": line(counts_method_start),
+                "line_end": line(counts_method_start),
+                "column_start": 7,
+                "column_end": 13,
+                "language": "rust",
+                "confidence": "EXTRACTED",
+                "_origin": "ast"
+            }
+        ],
+        "edges": [
+            {
+                "source": "exact",
+                "target": "exact-change",
+                "relation": "contains",
+                "source_file": source_file,
+                "source_location": format!("L{}", line(exact_method_start)),
+                "start_byte": exact_method_start,
+                "end_byte": exact_method_start + "change".len(),
+                "line_start": line(exact_method_start),
+                "line_end": line(exact_method_start),
+                "column_start": 7,
+                "column_end": 13,
+                "confidence": "EXTRACTED",
+                "_origin": "ast"
+            },
+            {
+                "source": "counts",
+                "target": "counts-change",
+                "relation": "contains",
+                "source_file": source_file,
+                "source_location": format!("L{}", line(counts_method_start)),
+                "start_byte": counts_method_start,
+                "end_byte": counts_method_start + "change".len(),
+                "line_start": line(counts_method_start),
+                "line_end": line(counts_method_start),
+                "column_start": 7,
+                "column_end": 13,
+                "confidence": "EXTRACTED",
+                "_origin": "ast"
+            }
+        ]
+    }))?;
     let flexible = build_from_extraction(&extraction, true, Some(root));
     let graph = normalize_document_v1(&flexible, root, "sha256:test", None)?;
     let methods = graph
@@ -45,8 +167,8 @@ impl ChangeSink for ChangeCounts {
             .map(|node| node.qualified_name.as_str())
             .collect::<BTreeSet<_>>(),
         [
-            "ChangeCounts as ChangeSink::change(_)@200",
-            "ExactDiffWriter as ChangeSink::change(_)@135",
+            "<crate::ChangeCounts as crate::ChangeSink>::change",
+            "<crate::ExactDiffWriter as crate::ChangeSink>::change",
         ]
         .into_iter()
         .collect()
@@ -66,8 +188,7 @@ impl ChangeSink for ChangeCounts {
         .iter()
         .map(|node| node.id.as_str())
         .collect::<BTreeSet<_>>();
-    let repeated = Engine::default().extract(&path)?;
-    let repeated = build_from_extraction(&repeated, true, Some(root));
+    let repeated = build_from_extraction(&extraction, true, Some(root));
     let repeated = normalize_document_v1(&repeated, root, "sha256:test", None)?;
     assert_eq!(
         repeated

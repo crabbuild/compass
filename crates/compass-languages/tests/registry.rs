@@ -1,8 +1,13 @@
+#![allow(clippy::expect_used)]
+
 use std::error::Error;
 use std::fs;
 use std::path::Path;
 
-use compass_languages::{Registry, file_stem, make_id, normalize_id};
+use compass_languages::{
+    AdapterRegistry, LanguageCapability, Registry, UNIVERSAL_EVIDENCE_SCHEMA,
+    UniversalAdapterProfile, file_stem, make_id, normalize_id,
+};
 
 #[test]
 fn registry_covers_every_python_dispatch_extension() -> Result<(), Box<dyn Error>> {
@@ -109,6 +114,59 @@ fn ids_match_python_unicode_casefold_contract() {
 }
 
 #[test]
+fn rust_is_a_version_one_hard_cut_candidate_descriptor() {
+    let rust = AdapterRegistry::universal_profile("rust").expect("Rust universal profile");
+    assert_eq!(rust.id, "compass.rust");
+    assert_eq!(rust.language, "rust");
+    assert_eq!(rust.evidence_schema, UNIVERSAL_EVIDENCE_SCHEMA);
+    assert_eq!(rust.version, 1);
+    assert_eq!(rust.profile, UniversalAdapterProfile::UniversalCandidate);
+    for capability in [
+        LanguageCapability::Namespaces,
+        LanguageCapability::Traits,
+        LanguageCapability::ImplOwnership,
+        LanguageCapability::Macros,
+        LanguageCapability::Tests,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::ExternalReferences,
+    ] {
+        assert!(
+            rust.capabilities.contains(&capability),
+            "missing {capability:?}: {rust:?}"
+        );
+    }
+
+    assert!(AdapterRegistry::universal_profile("typescript").is_none());
+}
+
+#[test]
+fn java_is_a_version_one_hard_cut_candidate_descriptor() {
+    let java = AdapterRegistry::universal_profile("java").expect("Java universal profile");
+    assert_eq!(java.id, "compass.java");
+    assert_eq!(java.language, "java");
+    assert_eq!(java.evidence_schema, UNIVERSAL_EVIDENCE_SCHEMA);
+    assert_eq!(java.version, 1);
+    assert_eq!(java.profile, UniversalAdapterProfile::UniversalCandidate);
+    for capability in [
+        LanguageCapability::Namespaces,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Construction,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Members,
+        LanguageCapability::ExternalReferences,
+    ] {
+        assert!(
+            java.capabilities.contains(&capability),
+            "missing {capability:?}: {java:?}"
+        );
+    }
+}
+
+#[test]
 fn only_hard_cut_languages_expose_universal_profiles() {
     let python = Registry::resolve(Path::new("src/example.py")).expect("python spec");
     let go = Registry::resolve(Path::new("src/example.go")).expect("go spec");
@@ -127,7 +185,10 @@ fn only_hard_cut_languages_expose_universal_profiles() {
         Registry::universal_profile_for_spec(java).map(|profile| profile.language),
         Some("java")
     );
-    assert!(Registry::universal_profile_for_spec(rust).is_none());
+    assert_eq!(
+        Registry::universal_profile_for_spec(rust).map(|profile| profile.language),
+        Some("rust")
+    );
     assert_eq!(
         Registry::universal_adapter(Path::new("src/example.py")).map(|profile| profile.language),
         Some("python")

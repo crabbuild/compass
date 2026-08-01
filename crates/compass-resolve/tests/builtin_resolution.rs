@@ -56,7 +56,9 @@ class Collisions {
     );
     assert_ne!(sites[0], sites[1], "repeated occurrences were coalesced");
     assert!(calls.iter().all(|edge| {
-        edge.string("language") == "java" && edge.string("extractor").contains(".universal")
+        edge.string("language") == "java"
+            && edge.string("extractor") == "compass.resolve.java.universal"
+            && edge.string("resolution_rule") == "explicit-binding"
     }));
     Ok(())
 }

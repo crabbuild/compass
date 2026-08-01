@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::error::Error;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use compass_languages::{Engine, Extraction, FrameworkLimits};
@@ -23,7 +25,11 @@ fn extract(relative: &str) -> Result<Extraction, Box<dyn Error>> {
 fn resolved(
     relative: &str,
 ) -> Result<Vec<compass_resolve::frameworks::ResolvedRoute>, Box<dyn Error>> {
-    let mut extraction = extract(relative)?;
+    let path = fixture(relative);
+    let source = fs::read_to_string(&path)?;
+    let extracted = extract(relative)?;
+    let sources = HashMap::from([(path.to_string_lossy().into_owned(), source)]);
+    let mut extraction = compass_resolve::resolve(&[extracted], &sources);
     Ok(resolve_and_publish_framework_routes(
         &mut extraction,
         FrameworkLimits::default(),

@@ -11,7 +11,7 @@ import re
 import sqlite3
 from typing import Any, Iterator
 
-from .jsonstream import iter_top_level_array, read_top_level_object_value
+from .jsonstream import iter_top_level_array, iter_top_level_object_array
 from .model import CorrectnessResult
 from .occurrences import SourceOccurrenceOracle
 
@@ -271,15 +271,13 @@ def _records(path: Path, preferred: str, fallback: str | None = None) -> Iterato
 
 def _validation_errors(path: Path) -> int:
     try:
-        diagnostics = read_top_level_object_value(path, "graph", "diagnostics")
+        diagnostics = iter_top_level_object_array(path, "graph", "diagnostics")
+        return sum(
+            str(item.get("severity", "")).lower() == "error"
+            for item in diagnostics
+        )
     except KeyError:
         return 0
-    if not isinstance(diagnostics, list):
-        return 1
-    return sum(
-        isinstance(item, dict) and str(item.get("severity", "")).lower() == "error"
-        for item in diagnostics
-    )
 
 
 def index_graph(
@@ -569,6 +567,25 @@ def _identifier_carries_module(identifier: str, module: str) -> bool:
     )
 
 
+def _terminal_symbol(normalized_label: str) -> str:
+    return re.split(r"::|\.", normalized_label)[-1]
+
+
+def _qualified_name_has_owner(qualified_name: str) -> bool:
+    return "." in qualified_name or "::" in qualified_name
+
+
+def _unverifiable_placeholder(node: NodeFact) -> bool:
+    return bool(
+        node.placeholder
+        and not node.source_file
+        and not node.kind
+        and not node.qualified_name
+        and not node.language
+        and not node.module
+    )
+
+
 def _classify_nodes(
     graphify_nodes: dict[str, NodeFact],
     compass_nodes: dict[str, NodeFact],
@@ -585,10 +602,30 @@ def _classify_nodes(
     excluded_kinds = {"file", "import", "export", "resource", "rationale"}
     for identifier, graphify in graphify_nodes.items():
         exact = compass_by_fact.get(graphify.fact_key, [])
-        if exact:
+        if exact and not _unverifiable_placeholder(graphify):
             coverage[identifier] = Coverage("exact", "source_fact", exact[0].identifier)
             if len(exact) == 1:
                 mapping[identifier] = exact[0].identifier
+            continue
+        if _unverifiable_placeholder(graphify):
+            generated_owner = [
+                candidate
+                for candidate in compass_by_label.get(graphify.normalized_label, [])
+                if _compatible_definition(graphify, candidate)
+                and candidate.module
+                and _identifier_carries_module(graphify.identifier, candidate.module)
+            ]
+            if len(generated_owner) == 1:
+                coverage[identifier] = Coverage(
+                    "dominated",
+                    "qualified_generated_owner",
+                    generated_owner[0].identifier,
+                )
+                mapping[identifier] = generated_owner[0].identifier
+            else:
+                coverage[identifier] = Coverage(
+                    "rejected", "unverifiable_placeholder", None
+                )
             continue
         if (
             not graphify.placeholder
@@ -695,6 +732,33 @@ def _occurrence_match(
     return "exact"
 
 
+def _line_number(location: str) -> int | None:
+    match = re.fullmatch(r"L([1-9][0-9]*)", location)
+    return int(match.group(1)) if match is not None else None
+
+
+def _precise_inheritance_occurrence(
+    graphify: EdgeFact,
+    compass: EdgeFact,
+    graphify_source: NodeFact | None,
+) -> bool:
+    if graphify_source is None:
+        return False
+    if (
+        graphify.occurrence_file != graphify_source.source_file
+        or graphify.occurrence_location != graphify_source.source_location
+        or compass.occurrence_file != graphify.occurrence_file
+    ):
+        return False
+    declaration_line = _line_number(graphify.occurrence_location)
+    base_line = _line_number(compass.occurrence_location)
+    return bool(
+        declaration_line is not None
+        and base_line is not None
+        and declaration_line <= base_line <= declaration_line + 8
+    )
+
+
 def _classify_edges(
     graphify_edges: list[EdgeFact],
     compass_edges: list[EdgeFact],
@@ -711,6 +775,16 @@ def _classify_edges(
     qualified_external_targets: dict[tuple[str, str, str, str], set[str]] = {}
     qualified_external_imports: dict[tuple[str, str], set[str]] = {}
     imported_symbol_targets: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
+    reexport_occurrence_targets: dict[
+        tuple[str, str, str, str], list[EdgeFact]
+    ] = {}
+    reexport_targets: dict[tuple[str, str, str], set[str]] = {}
+    exact_occurrence_targets: dict[
+        tuple[str, str, str, str, str], set[str]
+    ] = {}
+    inheritance_occurrence_targets: dict[
+        tuple[str, str, str, str], set[str]
+    ] = {}
     containment: dict[str, set[str]] = {}
     import_occurrences: set[tuple[str, str, str]] = set()
     for edges in (graphify_edges, compass_edges):
@@ -736,6 +810,22 @@ def _classify_edges(
         source = canonical_endpoints.get(edge.source, edge.source)
         target = canonical_endpoints.get(edge.target, edge.target)
         direct_index.setdefault((edge.relation, source, target), []).append(edge)
+        source_node = compass_nodes.get(edge.source)
+        if (
+            edge.relation in {"extends", "implements"}
+            and source_node is not None
+            and source_node.source_file == edge.occurrence_file
+            and source_node.source_location
+        ):
+            inheritance_occurrence_targets.setdefault(
+                (
+                    edge.relation,
+                    source,
+                    source_node.source_file,
+                    source_node.source_location,
+                ),
+                set(),
+            ).add(target)
         if edge.occurrence_file and edge.occurrence_location:
             occurrence_source_index.setdefault(
                 (
@@ -757,6 +847,30 @@ def _classify_edges(
             ).append(edge)
             target_node = compass_nodes.get(edge.target)
             if (
+                edge.relation
+                in {
+                    "calls",
+                    "references",
+                    "embeds",
+                    "extends",
+                    "implements",
+                    "imports",
+                    "exports",
+                }
+                and target_node is not None
+                and target_node.normalized_label
+            ):
+                exact_occurrence_targets.setdefault(
+                    (
+                        edge.relation,
+                        source,
+                        edge.occurrence_file,
+                        edge.occurrence_location,
+                        _terminal_symbol(target_node.normalized_label),
+                    ),
+                    set(),
+                ).add(target)
+            if (
                 edge.relation == "imports"
                 and target_node is not None
                 and target_node.placeholder
@@ -769,7 +883,7 @@ def _classify_edges(
             if (
                 target_node is not None
                 and target_node.placeholder
-                and "." in target_node.qualified_name
+                and _qualified_name_has_owner(target_node.qualified_name)
             ):
                 qualified_external_targets.setdefault(
                     (
@@ -782,6 +896,23 @@ def _classify_edges(
                 ).add(edge.target)
         if edge.relation == "contains":
             containment.setdefault(source, set()).add(target)
+        if (
+            edge.relation == "exports"
+            and edge.occurrence_file
+            and edge.occurrence_location
+        ):
+            reexport_occurrence_targets.setdefault(
+                (
+                    source,
+                    edge.target_fact_key,
+                    edge.occurrence_file,
+                    edge.occurrence_location,
+                ),
+                [],
+            ).append(edge)
+            reexport_targets.setdefault(
+                (source, edge.occurrence_file, edge.occurrence_location), set()
+            ).add(target)
         if edge.relation == "imports":
             target_node = compass_nodes.get(edge.target)
             if (
@@ -816,8 +947,16 @@ def _classify_edges(
             )
             continue
 
+        source_coverage = node_coverage.get(graphify.source)
+        target_coverage = node_coverage.get(graphify.target)
+        unverifiable_endpoint = any(
+            fact is not None
+            and fact.status == "rejected"
+            and fact.reason == "unverifiable_placeholder"
+            for fact in (source_coverage, target_coverage)
+        )
         exact = [
-            (edge, occurrence)
+            edge
             for edge in exact_index.get(
                 (
                     graphify.relation,
@@ -829,17 +968,8 @@ def _classify_edges(
             if (occurrence := _occurrence_match(graphify, edge, occurrence_oracle))
             is not None
         ]
-        if exact:
-            edge, occurrence = exact[0]
-            output.append(
-                Coverage(
-                    "exact" if occurrence == "exact" else "dominated",
-                    "relationship_fact"
-                    if occurrence == "exact"
-                    else "source_statement_occurrence",
-                    edge.payload_sha256,
-                )
-            )
+        if exact and not unverifiable_endpoint:
+            output.append(Coverage("exact", "relationship_fact", exact[0].payload_sha256))
             continue
 
         graphify_target = graphify_nodes.get(graphify.target)
@@ -896,7 +1026,7 @@ def _classify_edges(
             [],
         )
         if (
-            graphify.relation in {"calls", "references", "rationale_for"}
+            graphify.relation in {"calls", "references", "imports", "rationale_for"}
             and len(precise_owner) == 1
         ):
             output.append(
@@ -908,37 +1038,127 @@ def _classify_edges(
             )
             continue
 
-        source_coverage = node_coverage.get(graphify.source)
-        target_coverage = node_coverage.get(graphify.target)
         source = node_mapping.get(graphify.source)
         target = node_mapping.get(graphify.target)
-        source_occurrence = occurrence_source_index.get(
-            (
-                graphify.relation,
-                source or "",
-                graphify.occurrence_file,
-                graphify.occurrence_location,
-            ),
-            [],
-        )
-        if (
-            graphify.relation in {"calls", "references"}
-            and graphify_target is not None
-            and len(source_occurrence) == 1
-        ):
-            occurrence_target = compass_nodes.get(source_occurrence[0].target)
-            if (
-                occurrence_target is not None
-                and _compatible_definition(graphify_target, occurrence_target)
-            ):
+        graphify_source = graphify_nodes.get(graphify.source)
+        if graphify.relation == "imports" and source is not None:
+            exact_reexports = reexport_occurrence_targets.get(
+                (
+                    source,
+                    graphify.target_fact_key,
+                    graphify.occurrence_file,
+                    graphify.occurrence_location,
+                ),
+                [],
+            )
+            if len(exact_reexports) == 1:
                 output.append(
                     Coverage(
                         "dominated",
-                        "precise_occurrence_target",
-                        source_occurrence[0].payload_sha256,
+                        "symbol_reexport",
+                        exact_reexports[0].payload_sha256,
                     )
                 )
                 continue
+            if len(exact_reexports) > 1:
+                output.append(Coverage("ambiguous", "multiple_symbol_reexports", None))
+                continue
+            occurrence_reexports = reexport_targets.get(
+                (source, graphify.occurrence_file, graphify.occurrence_location), set()
+            )
+            if occurrence_reexports and target not in occurrence_reexports:
+                output.append(
+                    Coverage(
+                        "rejected",
+                        "reexport_target_conflict",
+                        sorted(occurrence_reexports)[0],
+                    )
+                )
+                continue
+        inheritance_targets = (
+            inheritance_occurrence_targets.get(
+                (
+                    graphify.relation,
+                    source,
+                    graphify.occurrence_file,
+                    graphify.occurrence_location,
+                ),
+                set(),
+            )
+            if source is not None
+            and graphify.relation in {"extends", "implements"}
+            and graphify_source is not None
+            and graphify.occurrence_file == graphify_source.source_file
+            and graphify.occurrence_location == graphify_source.source_location
+            else set()
+        )
+        if inheritance_targets:
+            placeholder_matches = (
+                {
+                    candidate
+                    for candidate in inheritance_targets
+                    if graphify_target is not None
+                    and candidate in compass_nodes
+                    and _terminal_symbol(compass_nodes[candidate].normalized_label)
+                    == _terminal_symbol(graphify_target.normalized_label)
+                }
+                if target is None
+                else set()
+            )
+            if len(placeholder_matches) == 1:
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "precise_inheritance_occurrence",
+                        next(iter(placeholder_matches)),
+                    )
+                )
+                continue
+            if len(placeholder_matches) > 1:
+                output.append(
+                    Coverage("ambiguous", "multiple_inheritance_occurrences", None)
+                )
+                continue
+            if target not in inheritance_targets:
+                output.append(
+                    Coverage(
+                        "rejected",
+                        "exact_inheritance_target_conflict",
+                        sorted(inheritance_targets)[0],
+                    )
+                )
+                continue
+        occurrence_targets = (
+            exact_occurrence_targets.get(
+                (
+                    graphify.relation,
+                    source,
+                    graphify.occurrence_file,
+                    graphify.occurrence_location,
+                    _terminal_symbol(graphify_target.normalized_label)
+                    if graphify_target is not None
+                    else "",
+                ),
+                set(),
+            )
+            if source is not None
+            else set()
+        )
+        if occurrence_targets and target not in occurrence_targets:
+            resolved_target = sorted(occurrence_targets)[0]
+            status = (
+                "rejected"
+                if graphify_target is not None and graphify_target.source_file
+                else "dominated"
+            )
+            output.append(
+                Coverage(
+                    status,
+                    "exact_occurrence_target_conflict",
+                    resolved_target,
+                )
+            )
+            continue
         if (
             graphify.relation == "imports"
             and source is not None
@@ -963,6 +1183,11 @@ def _classify_edges(
                     )
                 )
                 continue
+        if unverifiable_endpoint:
+            output.append(
+                Coverage("rejected", "unverifiable_placeholder_endpoint", None)
+            )
+            continue
         if source is None or target is None:
             status = (
                 "ambiguous"
@@ -976,6 +1201,47 @@ def _classify_edges(
             continue
 
         direct = direct_index.get((graphify.relation, source, target), [])
+        if graphify.relation in {"extends", "implements"}:
+            precise_inheritance = [
+                edge
+                for edge in direct
+                if _precise_inheritance_occurrence(graphify, edge, graphify_source)
+            ]
+            if len(precise_inheritance) == 1:
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "precise_inheritance_occurrence",
+                        precise_inheritance[0].payload_sha256,
+                    )
+                )
+                continue
+            if len(precise_inheritance) > 1:
+                output.append(
+                    Coverage("ambiguous", "multiple_inheritance_occurrences", None)
+                )
+                continue
+        if (
+            graphify.relation == "references"
+            and graphify_source is not None
+            and graphify.occurrence_file == graphify_source.source_file
+            and graphify.occurrence_location == graphify_source.source_location
+        ):
+            precise_references = [
+                edge
+                for edge in direct
+                if edge.occurrence_file == graphify.occurrence_file
+                and edge.occurrence_location != graphify.occurrence_location
+            ]
+            if precise_references:
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "precise_declaration_reference_occurrence",
+                        precise_references[0].payload_sha256,
+                    )
+                )
+                continue
         if graphify.relation == "contains":
             direct_paths = int(bool(direct))
             middle_nodes = {

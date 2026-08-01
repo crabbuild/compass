@@ -37,11 +37,23 @@ fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
         languages: &["rust"],
         ..descriptor
     };
+    assert_eq!(FrameworkPackRegistry::validate_descriptors(&[rust]), Ok(()));
+
+    let java = FrameworkPackDescriptor {
+        languages: &["java"],
+        ..descriptor
+    };
+    assert_eq!(FrameworkPackRegistry::validate_descriptors(&[java]), Ok(()));
+
+    let typescript = FrameworkPackDescriptor {
+        languages: &["typescript"],
+        ..descriptor
+    };
     assert_eq!(
-        FrameworkPackRegistry::validate_descriptors(&[rust]),
+        FrameworkPackRegistry::validate_descriptors(&[typescript]),
         Err(FrameworkPackRegistryError::NonUniversalLanguage {
             pack: descriptor.id,
-            language: "rust",
+            language: "typescript",
         })
     );
 
@@ -164,44 +176,38 @@ impl ChangeSink for ChangeCounts {
 "#;
 
     let extraction = Engine::default().extract_source(&path, source)?;
-    let methods = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let methods = evidence
+        .declarations
         .iter()
-        .filter(|node| node.label() == ".change()" && !node.string("lexical_owner").is_empty())
+        .filter(|declaration| {
+            declaration.kind == "method" && declaration.qualified_name.starts_with('<')
+        })
         .collect::<Vec<_>>();
 
-    assert_eq!(methods.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(methods.len(), 2, "declarations={:?}", evidence.declarations);
     assert_eq!(
         methods
             .iter()
-            .map(|node| node.string("lexical_owner"))
+            .map(|declaration| declaration.qualified_name.as_str())
             .collect::<std::collections::BTreeSet<_>>(),
         [
-            "ChangeCounts as ChangeSink",
-            "ExactDiffWriter as ChangeSink"
+            "<crate::changes::ChangeCounts as crate::changes::ChangeSink>::change",
+            "<crate::changes::ExactDiffWriter as crate::changes::ChangeSink>::change"
         ]
         .into_iter()
-        .map(str::to_owned)
         .collect()
     );
-    let qualified = methods
-        .iter()
-        .map(|node| node.string("qualified_name"))
-        .collect::<Vec<_>>();
-    for expected in [
-        "ChangeCounts as ChangeSink::change(",
-        "ExactDiffWriter as ChangeSink::change(",
-    ] {
-        assert!(
-            qualified.iter().any(|name| name.starts_with(expected)),
-            "qualified={qualified:?}"
-        );
-    }
+    assert!(extraction.nodes.is_empty());
+    assert!(extraction.edges.is_empty());
     Ok(())
 }
 
 #[test]
-fn overloaded_methods_receive_explicit_stable_discriminators() -> Result<(), Box<dyn Error>> {
+fn overloaded_methods_emit_stable_universal_identities() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("Example.java");
     let source = br#"
@@ -212,23 +218,26 @@ class Example {
 "#;
 
     let extraction = Engine::default().extract_source(&path, source)?;
-    let methods = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Java universal evidence")?;
+    let methods = evidence
+        .declarations
         .iter()
-        .filter(|node| node.string("qualified_name") == "Example::run")
+        .filter(|declaration| declaration.qualified_name.ends_with("Example::run"))
         .collect::<Vec<_>>();
 
-    assert_eq!(methods.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(methods.len(), 2, "declarations={:?}", evidence.declarations);
     assert_eq!(
         methods
             .iter()
-            .map(|node| node.string("overload_discriminator"))
+            .map(|declaration| declaration.signature.as_deref())
             .collect::<std::collections::BTreeSet<_>>(),
-        ["overload:0", "overload:1"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect()
+        [Some("run()"), Some("run(int)")].into_iter().collect()
     );
+    assert_ne!(methods[0].graph_node_id, methods[1].graph_node_id);
+    assert!(extraction.nodes.is_empty() && extraction.edges.is_empty());
     Ok(())
 }
 
@@ -327,59 +336,44 @@ fn repeated_rust_calls_keep_exact_sites_and_known_producer_metadata() -> Result<
     fs::write(&path, source)?;
 
     let extraction = Engine::default().extract(&path)?;
-    let calls = extraction
-        .edges
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let calls = evidence
+        .occurrences
         .iter()
-        .filter(|edge| edge.string("relation") == "calls")
+        .filter(|occurrence| {
+            occurrence.role == SemanticRole::Call && occurrence.spelling == "callee"
+        })
         .collect::<Vec<_>>();
 
-    assert_eq!(calls.len(), 2, "edges={:?}", extraction.edges);
-    assert!(
-        extraction
-            .nodes
-            .iter()
-            .all(|node| node.string("language") == "rust"
-                && node.string("extractor") == "compass.languages.rust"),
-        "nodes={:?}",
-        extraction.nodes
-    );
-    assert!(
-        extraction
-            .edges
-            .iter()
-            .all(|edge| edge.string("language") == "rust"
-                && edge.string("extractor") == "compass.languages.rust"),
-        "edges={:?}",
-        extraction.edges
+    assert_eq!(calls.len(), 2, "occurrences={:?}", evidence.occurrences);
+    assert_eq!(evidence.adapter.language, "rust");
+    assert_eq!(
+        evidence.adapter.producer,
+        "compass.languages.rust.universal"
     );
 
-    let sites = calls
+    let mut sites = calls
         .iter()
-        .map(|edge| {
-            let start = edge
-                .attributes
-                .get("start_byte")
-                .and_then(serde_json::Value::as_u64)
-                .ok_or("missing start_byte")?;
-            let end = edge
-                .attributes
-                .get("end_byte")
-                .and_then(serde_json::Value::as_u64)
-                .ok_or("missing end_byte")?;
-            let start = usize::try_from(start)?;
-            let end = usize::try_from(end)?;
-            Ok::<_, Box<dyn Error>>((start, end))
+        .map(|occurrence| {
+            (
+                usize::try_from(occurrence.range.start_byte),
+                usize::try_from(occurrence.range.end_byte),
+                occurrence.range.start_line,
+                occurrence.range.start_column,
+                occurrence.range.end_column,
+            )
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    assert_eq!(sites, [(26, 34), (35, 43)]);
-    assert_eq!(&source[sites[0].0..sites[0].1], b"callee()");
-    assert_eq!(&source[sites[1].0..sites[1].1], b"callee()");
-    assert_eq!(calls[0].attributes["line_start"], 1);
-    assert_eq!(calls[0].attributes["column_start"], 26);
-    assert_eq!(calls[0].attributes["column_end"], 34);
-    assert_eq!(calls[1].attributes["line_start"], 1);
-    assert_eq!(calls[1].attributes["column_start"], 35);
-    assert_eq!(calls[1].attributes["column_end"], 43);
+        .collect::<Vec<_>>();
+    sites.sort_unstable_by_key(|site| site.0.as_ref().copied().unwrap_or(usize::MAX));
+    assert_eq!(
+        sites,
+        [(Ok(26), Ok(32), 1, 26, 32), (Ok(35), Ok(41), 1, 35, 41)]
+    );
+    assert_eq!(&source[26..32], b"callee");
+    assert_eq!(&source[35..41], b"callee");
     Ok(())
 }
 
@@ -400,31 +394,40 @@ fn reject(message: String) {
     )?;
 
     let extraction = Engine::default().extract(&path)?;
-    let error_trait = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let error_trait = evidence
+        .declarations
         .iter()
-        .find(|node| {
-            node.string("symbol_kind") == "trait" && node.string("qualified_name").contains("Error")
-        })
+        .find(|declaration| declaration.kind == "trait" && declaration.name == "Error")
         .ok_or("missing Error trait")?;
-    let reject = extraction
-        .nodes
+    let reject = evidence
+        .declarations
         .iter()
-        .find(|node| {
-            matches!(node.string("symbol_kind").as_str(), "function" | "method")
-                && node.string("qualified_name").contains("reject")
-        })
+        .find(|declaration| declaration.kind == "function" && declaration.name == "reject")
         .ok_or("missing reject function")?;
 
     assert!(
-        !extraction.edges.iter().any(|edge| {
-            edge.string("relation") == "calls"
-                && edge.source == reject.id
-                && edge.target == error_trait.id
+        !evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.source_declaration_id == reject.id
+                && candidate.constraints.qualified_name.as_deref()
+                    == Some(error_trait.qualified_name.as_str())
         }),
-        "scoped enum construction bound to unrelated trait: {:?}",
-        extraction.edges
+        "scoped enum construction targeted unrelated trait: {:?}",
+        evidence.candidates
     );
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.source_declaration_id == reject.id
+            && candidate
+                .constraints
+                .qualified_name
+                .as_deref()
+                .is_some_and(|name| name.ends_with("RejectionReason::Error"))
+    }));
     Ok(())
 }
 
@@ -436,39 +439,35 @@ fn repeated_generic_calls_keep_each_ast_range() -> Result<(), Box<dyn Error>> {
     fs::write(&path, source)?;
 
     let extraction = Engine::default().extract(&path)?;
-    let calls = extraction
-        .edges
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Python semantic evidence")?;
+    let calls = evidence
+        .occurrences
         .iter()
-        .filter(|edge| edge.string("relation") == "calls")
+        .filter(|occurrence| {
+            occurrence.role == SemanticRole::Call && occurrence.spelling == "callee"
+        })
         .collect::<Vec<_>>();
-    let sites = calls
+    let mut sites = calls
         .iter()
-        .map(|edge| {
+        .map(|occurrence| {
             (
-                edge.attributes
-                    .get("start_byte")
-                    .and_then(|value| value.as_u64()),
-                edge.attributes
-                    .get("end_byte")
-                    .and_then(|value| value.as_u64()),
-                edge.attributes
-                    .get("column_start")
-                    .and_then(|value| value.as_u64()),
-                edge.attributes
-                    .get("column_end")
-                    .and_then(|value| value.as_u64()),
+                occurrence.range.start_byte,
+                occurrence.range.end_byte,
+                occurrence.range.start_column,
+                occurrence.range.end_column,
             )
         })
         .collect::<Vec<_>>();
+    sites.sort_unstable();
 
     assert_eq!(
         sites,
-        [
-            (Some(33), Some(41), Some(14), Some(22)),
-            (Some(43), Some(51), Some(24), Some(32))
-        ],
-        "edges={:?}",
-        extraction.edges
+        [(33, 39, 14, 20), (43, 49, 24, 30)],
+        "occurrences={:?}",
+        evidence.occurrences
     );
     Ok(())
 }
@@ -481,28 +480,21 @@ fn repeated_go_calls_keep_each_ast_range() -> Result<(), Box<dyn Error>> {
     fs::write(&path, source)?;
 
     let extraction = Engine::default().extract(&path)?;
-    let sites = extraction
-        .edges
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Go semantic evidence")?;
+    let sites = evidence
+        .occurrences
         .iter()
-        .filter(|edge| edge.string("relation") == "calls")
-        .map(|edge| {
-            (
-                edge.attributes
-                    .get("start_byte")
-                    .and_then(|value| value.as_u64()),
-                edge.attributes
-                    .get("end_byte")
-                    .and_then(|value| value.as_u64()),
-            )
+        .filter(|occurrence| {
+            occurrence.role == SemanticRole::Call && occurrence.spelling == "callee"
         })
+        .map(|occurrence| (occurrence.range.start_byte, occurrence.range.end_byte))
         .collect::<Vec<_>>();
 
-    assert_eq!(sites.len(), 2, "edges={:?}", extraction.edges);
-    assert!(
-        sites
-            .iter()
-            .all(|(start, end)| start.is_some() && end.is_some())
-    );
+    assert_eq!(sites.len(), 2, "occurrences={:?}", evidence.occurrences);
+    assert!(sites.iter().all(|(start, end)| start < end));
     assert_ne!(sites[0], sites[1]);
     Ok(())
 }
@@ -538,23 +530,31 @@ import "example.com/project/agent"
 type Local interface { agent.Agent }
 "#,
     )?;
-    let embedding = go
-        .edges
+    let evidence = go
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Go semantic evidence")?;
+    let embedding = evidence
+        .candidates
         .iter()
-        .find(|edge| edge.string("relation") == "embeds")
+        .find(|candidate| candidate.relation == CandidateRelation::Embeds)
         .ok_or("missing Go embedding")?;
-    assert_eq!(embedding.string("source_location"), "L3");
-    let target = go
-        .nodes
+    let occurrence_id = embedding
+        .occurrence_id
+        .as_deref()
+        .ok_or("embedding has no occurrence")?;
+    let occurrence = evidence
+        .occurrences
         .iter()
-        .find(|node| node.id == embedding.target)
-        .ok_or("missing embedding target")?;
-    assert_eq!(target.label(), "Agent");
-    assert_eq!(
-        target.string("qualified_name"),
-        "example.com/project/agent.Agent"
-    );
-    assert_eq!(target.string("go_target_package"), "agent");
+        .find(|occurrence| occurrence.id == occurrence_id)
+        .ok_or("missing embedding occurrence")?;
+    assert_eq!(occurrence.range.start_line, 3);
+    assert_eq!(occurrence.spelling, "Agent");
+    assert!(evidence.bindings.iter().any(|binding| {
+        embedding.binding_id.as_deref() == Some(binding.id.as_str())
+            && binding.qualified_target == "example.com/project/agent"
+    }));
+    assert!(embedding.constraints.allow_external);
     Ok(())
 }
 
@@ -570,30 +570,39 @@ class Consumer:
 "#;
     let extraction =
         Engine::default().extract_source(std::path::Path::new("app/consumer.py"), source)?;
-    let uses = extraction
-        .edges
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Python semantic evidence")?;
+    let uses = evidence
+        .occurrences
         .iter()
-        .filter(|edge| {
-            edge.string("relation") == "references" && edge.string("context") == "decorator"
+        .filter(|occurrence| {
+            occurrence.role == SemanticRole::Decorator && occurrence.spelling == "used"
         })
         .collect::<Vec<_>>();
-    assert_eq!(uses.len(), 2, "edges={:#?}", extraction.edges);
+    assert_eq!(uses.len(), 2, "occurrences={:#?}", evidence.occurrences);
     assert_eq!(
         uses.iter()
-            .map(|edge| edge.string("source_location"))
+            .map(|occurrence| occurrence.range.start_line)
             .collect::<Vec<_>>(),
-        ["L3", "L5"]
+        [3, 5]
     );
-    assert!(uses.iter().all(|edge| {
-        edge.string("target_qualified_name") == "framework.used"
-            && edge.attributes.contains_key("start_byte")
-            && edge.attributes.contains_key("end_byte")
+    assert!(uses.iter().all(|occurrence| {
+        occurrence.range.start_byte < occurrence.range.end_byte
+            && evidence.candidates.iter().any(|candidate| {
+                candidate.occurrence_id.as_deref() == Some(&occurrence.id)
+                    && candidate.constraints.qualified_name.as_deref() == Some("framework.used")
+            })
     }));
     assert!(
-        extraction
-            .edges
+        evidence
+            .candidates
             .iter()
-            .all(|edge| edge.string("target_qualified_name") != "framework.unused")
+            .filter(|candidate| candidate.relation == CandidateRelation::Decorates)
+            .all(|candidate| {
+                candidate.constraints.qualified_name.as_deref() != Some("framework.unused")
+            })
     );
     Ok(())
 }
@@ -831,7 +840,7 @@ fn python_indirect_rationale_types_and_binding_shapes_are_extracted() -> Result<
     let source = directory.path().join("advanced.py");
     fs::write(
         &source,
-        r#"""A module rationale long enough to become a rationale node."""
+        r#""""A module rationale long enough to become a rationale node."""
 from package import imported as alias
 from typing import Annotated, Callable, Generic, Optional, TypeVar, Union
 
@@ -885,14 +894,39 @@ def top_level(arg: InputType) -> OutputType:
             .iter()
             .any(|edge| edge.string("relation") == "rationale_for")
     );
-    let raw = extraction.raw_calls.as_deref().unwrap_or_default();
+    assert!(extraction.raw_calls.is_none());
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Python semantic evidence")?;
     for callee in ["set_handler", "external_result", "external_top"] {
         assert!(
-            raw.iter().any(|call| call.callee == callee),
-            "missing {callee}; calls={raw:?}"
+            evidence.occurrences.iter().any(|occurrence| {
+                occurrence.role == compass_languages::SemanticRole::CallableReference
+                    && occurrence.spelling == callee
+            }),
+            "missing {callee}; occurrences={:?}",
+            evidence.occurrences
         );
     }
-    assert!(extraction.nodes.len() >= 2);
+    assert!(
+        evidence
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "Service"),
+        "declarations={:?}; diagnostics={:?}",
+        evidence.declarations,
+        evidence.diagnostics
+    );
+    assert!(
+        evidence
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "top_level"),
+        "declarations={:?}; diagnostics={:?}",
+        evidence.declarations,
+        evidence.diagnostics
+    );
     Ok(())
 }
 
@@ -903,7 +937,7 @@ fn generated_python_javascript_exports_and_static_type_families_cover_rare_ast_s
     let fixtures = [
         (
             "migration.py",
-            r#"""This generated module rationale must be suppressed by migration detection."""
+            r#""""This generated module rationale must be suppressed by migration detection."""
 revision = "abc"
 down_revision = "def"
 def upgrade():
@@ -961,7 +995,14 @@ Result run(const Input *input, Output **output) { return helper(input); }
         let path = directory.path().join(name);
         fs::write(&path, text)?;
         let extraction = engine.extract(&path)?;
-        assert!(!extraction.nodes.is_empty(), "{name}");
+        assert!(
+            !extraction.nodes.is_empty()
+                || extraction
+                    .semantic_evidence
+                    .as_ref()
+                    .is_some_and(|evidence| !evidence.declarations.is_empty()),
+            "{name}"
+        );
     }
     let migration = engine.extract(&directory.path().join("migration.py"))?;
     assert!(
@@ -970,7 +1011,19 @@ Result run(const Input *input, Output **output) { return helper(input); }
             .iter()
             .any(|node| node.label().contains("generated module"))
     );
-    assert!(!migration.nodes.is_empty());
+    let migration_evidence = migration
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing migration Python evidence")?;
+    assert!(
+        migration_evidence
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "upgrade"),
+        "declarations={:?}; diagnostics={:?}",
+        migration_evidence.declarations,
+        migration_evidence.diagnostics
+    );
 
     let missing = directory.path().join("missing.py");
     assert!(matches!(
@@ -1222,28 +1275,32 @@ type (
 )
 "#;
     let extraction = Engine::default().extract_source(&path, source)?;
-    let later = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Go semantic evidence")?;
+    let later = evidence
+        .declarations
         .iter()
-        .find(|node| node.id == make_id(&["generated", "Later"]))
+        .find(|declaration| declaration.qualified_name == "generated.Later")
         .ok_or("missing later type")?;
-    assert_eq!(later.label(), "Later");
-    assert_eq!(later.string("source_location"), "L5");
-    assert_eq!(later.string("symbol_kind"), "class");
+    assert_eq!(later.name, "Later");
+    assert_eq!(later.range.start_line, 5);
+    assert_eq!(later.kind, "struct");
 
-    let option = extraction
-        .nodes
+    let option = evidence
+        .declarations
         .iter()
-        .find(|node| node.id == make_id(&["generated", "optionFunc"]))
+        .find(|declaration| declaration.qualified_name == "generated.optionFunc")
         .ok_or("missing grouped generic type")?;
-    assert_eq!(option.label(), "optionFunc");
-    assert_eq!(option.string("source_location"), "L10");
-    assert_eq!(option.string("symbol_kind"), "type_alias");
+    assert_eq!(option.name, "optionFunc");
+    assert_eq!(option.range.start_line, 10);
+    assert_eq!(option.kind, "type_alias");
     assert_eq!(
-        extraction
-            .nodes
+        evidence
+            .declarations
             .iter()
-            .filter(|node| node.id == later.id || node.id == option.id)
+            .filter(|declaration| declaration.id == later.id || declaration.id == option.id)
             .count(),
         2
     );
@@ -1337,6 +1394,30 @@ struct Wrapper { var service: Service<Concrete> }
         let path = directory.path().join(name);
         fs::write(&path, text)?;
         let extraction = engine.extract(&path)?;
+        if let Some(evidence) = extraction.semantic_evidence.as_ref() {
+            assert!(
+                evidence.declarations.len() >= 3,
+                "{name}: {:?}",
+                evidence.declarations
+            );
+            assert!(
+                !evidence.bindings.is_empty(),
+                "{name}: {:?}",
+                evidence.bindings
+            );
+            assert!(
+                evidence.candidates.iter().any(|candidate| matches!(
+                    candidate.relation,
+                    CandidateRelation::Calls
+                        | CandidateRelation::References
+                        | CandidateRelation::Embeds
+                        | CandidateRelation::Implements
+                )),
+                "{name}: {:?}",
+                evidence.candidates
+            );
+            continue;
+        }
         assert!(
             extraction.nodes.len() >= 3,
             "{name}: {:?}",

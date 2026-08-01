@@ -76,6 +76,13 @@ impl<'a> FrameworkTargetIndex<'a> {
         };
         for node in &extraction.nodes {
             let qualified = normalize_reference(&node.string("qualified_name"));
+            let signature_qualified = node
+                .attributes
+                .get("signature")
+                .and_then(Value::as_str)
+                .and_then(|signature| signature.find('(').map(|start| &signature[start..]))
+                .filter(|_| !qualified.is_empty())
+                .map(|parameters| format!("{qualified}{parameters}"));
             let raw_source = node
                 .attributes
                 .get("source_file")
@@ -111,6 +118,13 @@ impl<'a> FrameworkTargetIndex<'a> {
                     index
                         .by_qualified
                         .entry((family, qualified.clone()))
+                        .or_default()
+                        .push(position);
+                }
+                if let Some(signature_qualified) = signature_qualified.as_ref() {
+                    index
+                        .by_qualified
+                        .entry((family, signature_qualified.clone()))
                         .or_default()
                         .push(position);
                 }

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use regex::Regex;
-use serde_json::Map;
+use serde_json::{Map, Value};
 use tree_sitter::Node;
 
 use super::evidence::{EvidenceKind, EvidenceSet};
@@ -43,7 +43,7 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
         return Vec::new();
     };
     let Ok(java_method) = Regex::new(
-        r"\b(?:public|protected|private|static|final|synchronized|abstract|native|\s)+[A-Za-z0-9_<>,.?\[\]\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+        r"\b(?:public|protected|private|static|final|synchronized|abstract|native|\s)+[A-Za-z0-9_<>,.?\[\]\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)",
     ) else {
         return Vec::new();
     };
@@ -52,6 +52,7 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
     };
 
     let mut facts = Vec::new();
+    let package = java_package_name(body);
     let mut pending = Vec::<Mapping>::new();
     let mut class_name = None::<String>;
     let mut class_prefix = String::new();
@@ -87,9 +88,14 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
             offset = offset.saturating_add(line.len());
             continue;
         };
-        let Some(method_name) = java_method
-            .captures(line)
-            .or_else(|| kotlin_method.captures(line))
+        let java_capture = java_method.captures(line);
+        let kotlin_capture = java_capture
+            .is_none()
+            .then(|| kotlin_method.captures(line))
+            .flatten();
+        let Some(method_name) = java_capture
+            .as_ref()
+            .or(kotlin_capture.as_ref())
             .and_then(|capture| capture.get(1))
             .map(|value| value.as_str())
         else {
@@ -113,6 +119,17 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
                     join_route_path(&class_prefix, method_path)
                 };
                 for operation in &operations {
+                    let mut detail = Map::new();
+                    if let Some(capture) = java_capture.as_ref() {
+                        let parameters = capture.get(2).map_or("", |value| value.as_str());
+                        let (qualified, signature) =
+                            java_callable_target(&package, class_name, method_name, parameters);
+                        detail.insert("target_qualified_name".to_owned(), Value::String(qualified));
+                        detail.insert(
+                            "target_signature_qualified".to_owned(),
+                            Value::String(signature),
+                        );
+                    }
                     facts.push(RawFrameworkFact::Route(RawRouteFact {
                         framework: "spring".to_owned(),
                         operation: operation.clone(),
@@ -124,7 +141,7 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
                         middleware_references: Vec::new(),
                         origin: RawFrameworkOrigin::Ast,
                         rule: Some("spring-request-mapping".to_owned()),
-                        detail: Map::new(),
+                        detail,
                     }));
                 }
             }
@@ -132,6 +149,124 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
         offset = offset.saturating_add(line.len());
     }
     facts
+}
+
+pub(super) fn java_package_name(body: &str) -> String {
+    Regex::new(r"(?m)^\s*package\s+([A-Za-z_$][A-Za-z0-9_$.]*)\s*;")
+        .ok()
+        .and_then(|pattern| pattern.captures(body))
+        .and_then(|capture| capture.get(1))
+        .map(|value| value.as_str().to_owned())
+        .unwrap_or_else(|| "<default>".to_owned())
+}
+
+pub(super) fn java_callable_target(
+    package: &str,
+    owner: &str,
+    name: &str,
+    parameters: &str,
+) -> (String, String) {
+    let owner = if package.is_empty() {
+        owner.to_owned()
+    } else {
+        format!("{package}.{owner}")
+    };
+    let qualified = format!("{owner}.{name}");
+    let parameters = split_java_parameters(parameters)
+        .into_iter()
+        .filter_map(|parameter| java_parameter_type(&parameter))
+        .collect::<Vec<_>>()
+        .join(",");
+    let signature = format!("{qualified}({parameters})");
+    (qualified, signature)
+}
+
+fn split_java_parameters(parameters: &str) -> Vec<String> {
+    let mut output = Vec::new();
+    let mut start = 0;
+    let mut depth = 0_u32;
+    for (offset, character) in parameters.char_indices() {
+        match character {
+            '<' | '(' | '[' => depth = depth.saturating_add(1),
+            '>' | ')' | ']' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                output.push(parameters[start..offset].trim().to_owned());
+                start = offset.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+    let tail = parameters[start..].trim();
+    if !tail.is_empty() {
+        output.push(tail.to_owned());
+    }
+    output
+}
+
+fn java_parameter_type(parameter: &str) -> Option<String> {
+    let stripped = strip_java_parameter_annotations(parameter);
+    let stripped = stripped
+        .split_whitespace()
+        .filter(|token| !matches!(*token, "final" | "volatile" | "transient"))
+        .collect::<Vec<_>>();
+    if stripped.len() < 2 {
+        return None;
+    }
+    let raw_type = stripped[..stripped.len().saturating_sub(1)].join("");
+    let mut normalized = String::with_capacity(raw_type.len());
+    let mut generic_depth = 0_u32;
+    for character in raw_type.chars() {
+        match character {
+            '<' => generic_depth = generic_depth.saturating_add(1),
+            '>' => generic_depth = generic_depth.saturating_sub(1),
+            _ if generic_depth > 0 => {}
+            character if character.is_whitespace() => {}
+            character
+                if character.is_alphanumeric()
+                    || matches!(character, '_' | '$' | '.' | '[' | ']') =>
+            {
+                normalized.push(character);
+            }
+            _ => {}
+        }
+    }
+    parameter
+        .contains("...")
+        .then(|| normalized.push_str("..."));
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn strip_java_parameter_annotations(parameter: &str) -> String {
+    let mut output = String::with_capacity(parameter.len());
+    let chars = parameter.chars().collect::<Vec<_>>();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] != '@' {
+            output.push(chars[index]);
+            index += 1;
+            continue;
+        }
+        index += 1;
+        while index < chars.len()
+            && (chars[index].is_alphanumeric() || matches!(chars[index], '_' | '$' | '.'))
+        {
+            index += 1;
+        }
+        if index < chars.len() && chars[index] == '(' {
+            let mut depth = 1_u32;
+            index += 1;
+            while index < chars.len() && depth > 0 {
+                match chars[index] {
+                    '(' => depth = depth.saturating_add(1),
+                    ')' => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+                index += 1;
+            }
+        }
+        output.push(' ');
+    }
+    output
 }
 
 fn mapping_paths(arguments: &str) -> Vec<String> {

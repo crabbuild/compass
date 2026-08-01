@@ -115,7 +115,7 @@ impl Engine {
     ) -> Result<CombinedExtraction, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
-        if spec.kind == ExtractorKind::Generic && spec.name == "go" {
+        if spec.kind == ExtractorKind::Generic && matches!(spec.name, "go" | "java") {
             let tree = self.parse(path, spec, source)?;
             let mut graph =
                 self.extract_generic_from_tree(path, spec, source_file, source, tree.root_node());
@@ -174,6 +174,7 @@ impl Engine {
             tree.root_node(),
             &generic_config(spec),
             language,
+            true,
         );
         if language == "python" {
             add_python_rationale(path, source, tree.root_node(), &mut extraction);
@@ -259,27 +260,33 @@ impl Engine {
         root: Node<'_>,
     ) -> Extraction {
         let config = generic_config(spec);
-        let mut extraction = match spec.name {
-            "go" => crate::go::extract(path, source, root),
-            "rust" => crate::rust_lang::extract(path, source, root),
-            "bash" => crate::bash::extract(path, source, root),
-            "csharp" => crate::csharp::extract(path, source, root),
-            "cpp" => crate::cpp::extract(path, source, root),
-            "php" => crate::php::extract(path, source, root),
-            "swift" => crate::swift::extract(path, source, root),
-            "objc" => crate::objc::extract(path, source, root),
-            "powershell" => crate::powershell::extract(path, source, root),
-            "elixir" => crate::elixir::extract(path, source, root),
-            "julia" => crate::julia::extract(path, source, root),
-            "fortran" => crate::fortran::extract(path, source, root),
-            _ => extract_tree(path, source, root, &config, spec.name),
+        let universal_profile = Registry::universal_profile_for_spec(spec);
+        let mut extraction = if universal_profile.is_some() {
+            Extraction::default()
+        } else {
+            match spec.name {
+                "go" => crate::go::extract(path, source, root),
+                "bash" => crate::bash::extract(path, source, root),
+                "csharp" => crate::csharp::extract(path, source, root),
+                "cpp" => crate::cpp::extract(path, source, root),
+                "php" => crate::php::extract(path, source, root),
+                "swift" => crate::swift::extract(path, source, root),
+                "objc" => crate::objc::extract(path, source, root),
+                "powershell" => crate::powershell::extract(path, source, root),
+                "elixir" => crate::elixir::extract(path, source, root),
+                "julia" => crate::julia::extract(path, source, root),
+                "fortran" => crate::fortran::extract(path, source, root),
+                _ => extract_tree(path, source, root, &config, spec.name, true),
+            }
         };
         if spec.name == "python" {
             add_python_rationale(path, source, root, &mut extraction);
         }
-        attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
-        crate::semantic::enrich(path, source, root, spec.name, &mut extraction);
-        if let Some(profile) = Registry::universal_profile_for_spec(spec) {
+        if universal_profile.is_none() {
+            attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
+            crate::semantic::enrich(path, source, root, spec.name, &mut extraction);
+        }
+        if let Some(profile) = universal_profile {
             match crate::evidence::extract_tree_evidence(
                 path,
                 evidence_source_file,
@@ -287,7 +294,10 @@ impl Engine {
                 root,
                 profile,
             ) {
-                Ok(evidence) => extraction.semantic_evidence = Some(evidence),
+                Ok(evidence) => {
+                    extraction.semantic_evidence = Some(evidence);
+                    project_universal_declaration_sources(&mut extraction);
+                }
                 Err(error) => {
                     extraction.error = Some(format!(
                         "{} universal evidence extraction failed: {error}",
@@ -296,14 +306,20 @@ impl Engine {
                 }
             }
         }
+        let framework_path = universal_profile
+            .map(|_| Path::new(evidence_source_file))
+            .unwrap_or(path);
         crate::frameworks::detect(
-            path,
+            framework_path,
             source,
             root,
             spec.name,
             self.project_evidence(path),
             &mut extraction,
         );
+        if universal_profile.is_some() && extraction.semantic_evidence.is_some() {
+            extraction.raw_calls = None;
+        }
         if root.has_error() {
             extraction.extensions.insert(
                 EXTRACTION_QUALITY_EXTENSION.to_owned(),
@@ -454,6 +470,26 @@ impl Engine {
     }
 }
 
+fn project_universal_declaration_sources(extraction: &mut Extraction) {
+    let Some(evidence) = extraction.semantic_evidence.as_ref() else {
+        return;
+    };
+    let locations = evidence
+        .declarations
+        .iter()
+        .map(|declaration| (declaration.graph_node_id.as_str(), &declaration.range))
+        .collect::<HashMap<_, _>>();
+    for node in &mut extraction.nodes {
+        let Some(range) = locations.get(node.id.as_str()) else {
+            continue;
+        };
+        node.attributes.insert(
+            "source_file".to_owned(),
+            Value::String(range.source_file.clone()),
+        );
+    }
+}
+
 fn portable_evidence_source(path: &Path) -> String {
     if path.is_relative() {
         return path.to_string_lossy().replace('\\', "/");
@@ -504,11 +540,12 @@ fn extract_tree(
     root: Node<'_>,
     config: &GenericConfig,
     language: &'static str,
+    collect_calls: bool,
 ) -> Extraction {
     let source_file = path.to_string_lossy().into_owned();
     let stem = file_stem(path);
     let file_id = make_id(&[&source_file]);
-    let (python_import_aliases, python_import_targets) = if language == "python" {
+    let (python_import_aliases, python_import_targets) = if language == "python" && collect_calls {
         python_import_maps(root, source)
     } else {
         (HashMap::new(), HashMap::new())
@@ -536,14 +573,16 @@ fn extract_tree(
         .unwrap_or_default();
     state.add_node(&state.file_id.clone(), file_label, 1, false, None);
     state.walk_declarations(root, None);
-    if language == "python" {
+    if language == "python" && collect_calls {
         let module_bound = python_bound_names(root, source, true);
         state.walk_python_indirect(root, &state.file_id.clone(), true, &module_bound);
     } else if matches!(language, "javascript" | "typescript" | "tsx") {
         let module_bound = js_module_bound_names(root, source);
         state.walk_js_module_indirect(root, true, &module_bound);
     }
-    state.walk_function_calls();
+    if collect_calls {
+        state.walk_function_calls();
+    }
     state.extraction
 }
 
@@ -577,6 +616,13 @@ fn attach_definition_metadata(
         let Some(indices) = candidates.get_mut(&at_line) else {
             continue;
         };
+        let exact = indices.iter().position(|index| {
+            let record = &extraction.nodes[*index];
+            record.attributes.get("start_byte").and_then(Value::as_u64)
+                == Some(u64::try_from(definition.start_byte()).unwrap_or(u64::MAX))
+                && record.attributes.get("end_byte").and_then(Value::as_u64)
+                    == Some(u64::try_from(definition.end_byte()).unwrap_or(u64::MAX))
+        });
         let name = definition_name(definition, source);
         let matched = name.as_deref().and_then(|name| {
             indices.iter().position(|index| {
@@ -591,7 +637,13 @@ fn attach_definition_metadata(
                 .and_then(Value::as_bool)
                 == Some(true)
         });
-        let Some(position) = matched.or(fallback).or((indices.len() == 1).then_some(0)) else {
+        let unanchored_single = (indices.len() == 1
+            && extraction.nodes[indices[0]]
+                .attributes
+                .get("start_byte")
+                .is_none())
+        .then_some(0);
+        let Some(position) = exact.or(matched).or(fallback).or(unanchored_single) else {
             continue;
         };
         let index = indices.remove(position);
@@ -1162,17 +1214,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             if self.language == "python" {
                 self.add_python_parent_edges(node, &id);
                 self.add_python_decorators(node, &id);
-            } else if self.language == "java" {
-                self.add_java_parent_edges(node, &id);
-                if kind == "enum_declaration" {
-                    self.add_java_enum_constants(node, &id);
-                    let mut constructors = Vec::new();
-                    collect_nodes_of_kind(node, "constructor_declaration", &mut constructors);
-                    let duplicate_line =
-                        constructors.first().map_or(line(node), |node| line(*node));
-                    self.add_edge(&self.file_id.clone(), &id, "contains", duplicate_line, None);
-                    return;
-                }
             } else if self.language == "ruby" {
                 self.add_ruby_parent_edge(node, &id);
             } else if self.language == "kotlin" {
@@ -1245,8 +1286,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             if self.language == "python" {
                 self.add_python_function_references(node, &id);
                 self.add_python_decorators(node, &id);
-            } else if self.language == "java" {
-                self.add_java_function_references(node, &id);
             } else if self.language == "c" {
                 self.add_c_function_references(node, &id);
             } else if self.language == "kotlin" {
@@ -1594,11 +1633,10 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         {
             let candidates = self.callables.get(&call.name).cloned().unwrap_or_default();
             let defer_member = call.member
-                && (self.language == "java"
-                    || call
-                        .receiver
-                        .as_deref()
-                        .is_some_and(|receiver| receiver.starts_with(char::is_uppercase)));
+                && call
+                    .receiver
+                    .as_deref()
+                    .is_some_and(|receiver| receiver.starts_with(char::is_uppercase));
             let target = (!defer_member)
                 .then(|| candidates.last().cloned())
                 .flatten()
@@ -1643,7 +1681,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     source_location: format!("L{}", line(node)),
                     receiver: Some(call.receiver),
                     receiver_type: (self.language == "ruby" && call.member).then_some(None),
-                    lang: (self.language == "java").then(|| "java".to_owned()),
+                    lang: None,
                     extensions,
                 });
             }
@@ -1802,33 +1840,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 member: receiver.is_some(),
                 receiver,
             });
-        }
-        if self.language == "java" {
-            if node.kind() == "method_invocation" {
-                let name = node
-                    .child_by_field_name("name")
-                    .and_then(|name| self.node_text(name))
-                    .map(clean_name)?;
-                let receiver = node
-                    .child_by_field_name("object")
-                    .and_then(|receiver| self.node_text(receiver))
-                    .map(clean_name);
-                return Some(CallName {
-                    name,
-                    member: receiver.is_some(),
-                    receiver,
-                });
-            }
-            if node.kind() == "object_creation_expression" {
-                let type_node = node.child_by_field_name("type")?;
-                let name_node = first_identifier(type_node).unwrap_or(type_node);
-                let name = self.node_text(name_node).map(clean_name)?;
-                return Some(CallName {
-                    name,
-                    member: false,
-                    receiver: None,
-                });
-            }
         }
         let function = if self.config.call_function_field.is_empty() {
             None
@@ -2286,27 +2297,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         true
     }
 
-    fn add_java_parent_edges(&mut self, node: Node<'tree>, class_id: &str) {
-        if let Some(superclass) = node.child_by_field_name("superclass")
-            && let Some(name_node) = first_identifier(superclass)
-            && let Some(name) = self.node_text(name_node).map(clean_name)
-        {
-            let target = self.ensure_type_node(&name, false);
-            self.add_edge(class_id, &target, "inherits", line(node), None);
-        }
-        if let Some(interfaces) = node.child_by_field_name("interfaces") {
-            let mut names = Vec::new();
-            collect_type_names(interfaces, self.source, &mut names);
-            for name in names {
-                if java_builtin_type(&name) {
-                    continue;
-                }
-                let target = self.ensure_type_node(&name, false);
-                self.add_edge(class_id, &target, "implements", line(node), None);
-            }
-        }
-    }
-
     fn add_ts_class_decorators(&mut self, node: Node<'tree>, class_id: &str) {
         let mut decorators = Vec::new();
         let mut cursor = node.walk();
@@ -2703,81 +2693,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         }
     }
 
-    fn add_java_enum_constants(&mut self, node: Node<'tree>, enum_id: &str) {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.add_java_enum_constants_recursive(child, enum_id);
-        }
-    }
-
-    fn add_java_enum_constants_recursive(&mut self, node: Node<'tree>, enum_id: &str) {
-        if node.kind() == "enum_constant" {
-            if let Some(name) = node
-                .child_by_field_name("name")
-                .and_then(|name| self.node_text(name))
-                .map(clean_name)
-            {
-                let id = make_id(&[enum_id, &name]);
-                self.add_node(&id, &name, line(node), false, None);
-                self.add_edge(enum_id, &id, "case_of", line(node), None);
-            }
-            return;
-        }
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.add_java_enum_constants_recursive(child, enum_id);
-        }
-    }
-
-    fn add_java_function_references(&mut self, node: Node<'tree>, function_id: &str) {
-        let mut parameters = Vec::new();
-        collect_nodes_of_kind(node, "formal_parameter", &mut parameters);
-        for parameter in parameters {
-            if let Some(type_node) = parameter.child_by_field_name("type") {
-                let mut names = Vec::new();
-                collect_type_names(type_node, self.source, &mut names);
-                self.add_java_type_references(function_id, &names, "parameter_type", line(node));
-            }
-        }
-
-        if let Some(return_type) = node.child_by_field_name("type") {
-            let mut names = Vec::new();
-            collect_type_names(return_type, self.source, &mut names);
-            if let Some((base, generic)) = names.split_first() {
-                if !java_builtin_type(base) {
-                    let target = self.ensure_type_node(base, true);
-                    self.add_edge(
-                        function_id,
-                        &target,
-                        "references",
-                        line(node),
-                        Some("return_type"),
-                    );
-                }
-                self.add_java_type_references(function_id, generic, "generic_arg", line(node));
-            }
-        }
-
-        let mut annotations = Vec::new();
-        collect_nodes_of_kind(node, "marker_annotation", &mut annotations);
-        for annotation in annotations {
-            if let Some(name) = annotation
-                .child_by_field_name("name")
-                .and_then(|name| self.node_text(name))
-                .map(clean_name)
-            {
-                let target = self.ensure_type_node(&name, true);
-                self.add_edge(
-                    function_id,
-                    &target,
-                    "references",
-                    line(node),
-                    Some("attribute"),
-                );
-            }
-        }
-    }
-
     fn add_c_function_references(&mut self, node: Node<'tree>, function_id: &str) {
         if let Some(return_type) = node.child_by_field_name("type") {
             let mut names = Vec::new();
@@ -2820,22 +2735,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         line: usize,
     ) {
         for name in names {
-            let target = self.ensure_type_node(name, true);
-            self.add_edge(function_id, &target, "references", line, Some(context));
-        }
-    }
-
-    fn add_java_type_references(
-        &mut self,
-        function_id: &str,
-        names: &[String],
-        context: &str,
-        line: usize,
-    ) {
-        for name in names {
-            if java_builtin_type(name) {
-                continue;
-            }
             let target = self.ensure_type_node(name, true);
             self.add_edge(function_id, &target, "references", line, Some(context));
         }
@@ -3316,7 +3215,7 @@ fn python_import_entries(node: Node<'_>, source: &[u8]) -> Vec<(String, String)>
     output
 }
 
-fn python_bound_names(node: Node<'_>, source: &[u8], module: bool) -> HashSet<String> {
+pub(crate) fn python_bound_names(node: Node<'_>, source: &[u8], module: bool) -> HashSet<String> {
     let mut output = HashSet::new();
     if !module && let Some(parameters) = node.child_by_field_name("parameters") {
         let mut cursor = parameters.walk();
@@ -3491,7 +3390,10 @@ fn collect_js_collection_values<'tree>(node: Node<'tree>, output: &mut Vec<Node<
     }
 }
 
-fn collect_python_collection_values<'tree>(node: Node<'tree>, output: &mut Vec<Node<'tree>>) {
+pub(crate) fn collect_python_collection_values<'tree>(
+    node: Node<'tree>,
+    output: &mut Vec<Node<'tree>>,
+) {
     let mut cursor = node.walk();
     if node.kind() == "dictionary" {
         for pair in node
@@ -3513,7 +3415,10 @@ fn collect_python_collection_values<'tree>(node: Node<'tree>, output: &mut Vec<N
     }
 }
 
-fn collect_python_reference_values<'tree>(node: Node<'tree>, output: &mut Vec<Node<'tree>>) {
+pub(crate) fn collect_python_reference_values<'tree>(
+    node: Node<'tree>,
+    output: &mut Vec<Node<'tree>>,
+) {
     if node.kind() == "identifier" {
         output.push(node);
     } else if node.kind() == "expression_list" {
@@ -3614,19 +3519,6 @@ fn angle_value(value: &str) -> Option<String> {
     let rest = &value[start + 1..];
     let end = rest.find('>')?;
     Some(rest[..end].to_owned())
-}
-
-fn collect_type_names(node: Node<'_>, source: &[u8], output: &mut Vec<String>) {
-    if matches!(node.kind(), "type_identifier" | "scoped_type_identifier")
-        && let Ok(text) = node.utf8_text(source)
-    {
-        output.push(text.to_owned());
-        return;
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_type_names(child, source, output);
-    }
 }
 
 fn collect_c_type_names(node: Node<'_>, source: &[u8], output: &mut Vec<String>) {
@@ -3769,25 +3661,6 @@ fn collect_nodes_of_kind<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<
             collect_nodes_of_kind(child, kind, output);
         }
     }
-}
-
-fn java_builtin_type(name: &str) -> bool {
-    matches!(
-        name,
-        "String"
-            | "List"
-            | "Map"
-            | "Set"
-            | "ArrayList"
-            | "HashMap"
-            | "Integer"
-            | "Long"
-            | "Double"
-            | "Float"
-            | "Boolean"
-            | "Object"
-            | "Class"
-    )
 }
 
 fn find_require_call<'tree>(node: Node<'tree>, source: &[u8]) -> Option<Node<'tree>> {
@@ -3936,19 +3809,22 @@ mod rationale_tests {
         )?;
 
         let extraction = Engine::default().extract(&source)?;
-        let node = extraction
-            .nodes
+        let declaration = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing Python semantic evidence")?
+            .declarations
             .iter()
-            .find(|node| node.label() == "reveal()")
+            .find(|declaration| declaration.name == "reveal")
             .ok_or("missing reveal function")?;
 
-        assert_eq!(node.string("symbol_kind"), "function");
-        assert_eq!(node.string("language"), "python");
-        assert_eq!(node.attributes.get("line_start"), Some(&Value::from(1)));
-        assert_eq!(node.attributes.get("line_end"), Some(&Value::from(3)));
+        assert_eq!(declaration.kind, "function");
+        assert_eq!(declaration.language, "python");
+        assert_eq!(declaration.range.start_line, 1);
+        assert_eq!(declaration.range.end_line, 1);
         assert_eq!(
-            node.string("signature"),
-            "def reveal(t, hold_val=\"1\", start_val=\"0\")"
+            declaration.signature.as_deref(),
+            Some("def reveal(t, hold_val=\"1\", start_val=\"0\")")
         );
         Ok(())
     }
@@ -4006,25 +3882,22 @@ mod rationale_tests {
         )?;
 
         let extraction = Engine::default().extract(&source)?;
-        let example = extraction
-            .nodes
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing Python semantic evidence")?;
+        let example = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "Example")
+            .find(|declaration| declaration.name == "Example")
             .ok_or("missing Example class")?;
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.source == example.id
-                && edge.string("relation") == "inherits"
-                && edge.string("target_qualified_name") == "django.test.TestCase"
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.source_declaration_id == example.id
+                && candidate.relation == crate::CandidateRelation::Extends
+                && candidate.constraints.qualified_name.as_deref() == Some("django.test.TestCase")
         }));
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.string("relation") == "imports_from"
-                && edge
-                    .attributes
-                    .get("python_imports")
-                    .and_then(Value::as_object)
-                    .and_then(|imports| imports.get("TestCase"))
-                    .and_then(Value::as_str)
-                    == Some("django.test.TestCase")
+        assert!(evidence.bindings.iter().any(|binding| {
+            binding.spelling == "TestCase" && binding.qualified_target == "django.test.TestCase"
         }));
         Ok(())
     }
@@ -4041,25 +3914,30 @@ mod rationale_tests {
         )?;
 
         let extraction = Engine::default().extract(&source)?;
-        let call = extraction
-            .raw_calls
+        assert!(extraction.raw_calls.is_none());
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing Python semantic evidence")?;
+        let call = evidence
+            .occurrences
             .iter()
-            .flatten()
-            .find(|call| call.callee == "patch")
-            .ok_or("missing mock.patch raw call")?;
+            .find(|occurrence| {
+                occurrence.role == crate::SemanticRole::Call
+                    && occurrence.spelling == "patch"
+                    && occurrence.qualifier.as_deref() == Some("mock")
+            })
+            .ok_or("missing mock.patch occurrence")?;
+        let candidate = evidence
+            .candidates
+            .iter()
+            .find(|candidate| candidate.occurrence_id.as_deref() == Some(&call.id))
+            .ok_or("missing mock.patch candidate")?;
         assert_eq!(
-            call.extensions
-                .get("python_qualified_target")
-                .and_then(Value::as_str),
+            candidate.constraints.qualified_name.as_deref(),
             Some("unittest.mock.patch")
         );
-        assert!(
-            call.extensions
-                .get("start_byte")
-                .and_then(Value::as_u64)
-                .zip(call.extensions.get("end_byte").and_then(Value::as_u64))
-                .is_some_and(|(start, end)| start < end)
-        );
+        assert!(call.range.start_byte < call.range.end_byte);
 
         fs::write(
             &source,
@@ -4067,15 +3945,25 @@ mod rationale_tests {
              from vendor import mock\n\
              def exercise():\n    mock.patch('service.call')\n",
         )?;
-        let ambiguous = Engine::default().extract(&source)?;
-        assert!(
-            ambiguous
-                .raw_calls
-                .iter()
-                .flatten()
-                .filter(|call| call.callee == "patch")
-                .all(|call| !call.extensions.contains_key("python_qualified_target"))
-        );
+        let rebound = Engine::default().extract(&source)?;
+        assert!(rebound.raw_calls.is_none());
+        let rebound_evidence = rebound
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing rebound Python semantic evidence")?;
+        let rebound_call = rebound_evidence
+            .occurrences
+            .iter()
+            .find(|occurrence| {
+                occurrence.role == crate::SemanticRole::Call
+                    && occurrence.spelling == "patch"
+                    && occurrence.qualifier.as_deref() == Some("mock")
+            })
+            .ok_or("missing rebound mock.patch occurrence")?;
+        assert!(rebound_evidence.candidates.iter().any(|candidate| {
+            candidate.occurrence_id.as_deref() == Some(&rebound_call.id)
+                && candidate.constraints.qualified_name.as_deref() == Some("vendor.mock.patch")
+        }));
         Ok(())
     }
 
@@ -4158,23 +4046,35 @@ mod rationale_tests {
         )?;
 
         let extraction = Engine::default().extract(&source)?;
-        let import_uses = extraction
-            .raw_calls
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|call| {
-                call.extensions
-                    .get("symbol_import_use")
-                    .and_then(Value::as_bool)
-                    == Some(true)
+        assert!(extraction.raw_calls.is_none());
+        let evidence = extraction
+            .semantic_evidence
+            .ok_or("missing Python semantic evidence")?;
+        let import_uses = evidence
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.relation == crate::CandidateRelation::Calls)
+            .filter_map(|candidate| {
+                candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .map(|qualified_name| (candidate, qualified_name))
             })
             .collect::<Vec<_>>();
 
         assert_eq!(import_uses.len(), 2);
-        assert_eq!(import_uses[0].callee, "top");
-        assert_eq!(import_uses[0].source_location, "L3");
-        assert_eq!(import_uses[1].callee, "nested");
-        assert_eq!(import_uses[1].source_location, "L9");
+        assert!(import_uses.iter().any(|(candidate, qualified_name)| {
+            candidate.target_spelling == "module_alias" && *qualified_name == "package.top"
+        }));
+        assert!(import_uses.iter().any(|(candidate, qualified_name)| {
+            candidate.target_spelling == "local_alias" && *qualified_name == "package.nested"
+        }));
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.target_spelling == "local_alias"
+                && candidate.binding_id.is_none()
+                && candidate.constraints.qualified_name.is_none()
+        }));
         Ok(())
     }
 
@@ -4189,23 +4089,30 @@ mod rationale_tests {
         )?;
 
         let extraction = Engine::default().extract(&source)?;
-        let caller = extraction
-            .nodes
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing Rust semantic evidence")?;
+        let caller = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "caller()")
-            .map(|node| node.id.as_str())
+            .find(|declaration| declaration.name == "caller")
             .ok_or("missing caller")?;
         assert_eq!(
-            extraction
-                .edges
+            evidence
+                .candidates
                 .iter()
-                .filter(|edge| {
-                    edge.source == caller
-                        && edge.attributes.get("relation").and_then(Value::as_str) == Some("calls")
+                .filter(|candidate| {
+                    candidate.source_declaration_id == caller.id
+                        && candidate.relation == crate::CandidateRelation::Calls
+                        && matches!(candidate.target_spelling.as_str(), "open" | "list")
                 })
                 .count(),
             2
         );
+        assert!(extraction.nodes.is_empty());
+        assert!(extraction.edges.is_empty());
+        assert!(extraction.raw_calls.is_none());
         Ok(())
     }
 
@@ -4220,12 +4127,23 @@ mod rationale_tests {
         )?;
 
         let extraction = Engine::default().extract(&source)?;
-
-        assert!(extraction.raw_calls.unwrap_or_default().iter().any(|call| {
-            call.callee == "log_query"
-                && call.is_member_call == Some(true)
-                && call.receiver.as_ref().and_then(|value| value.as_deref()) == Some("querylog")
-                && call.source_location == "L3"
+        assert!(extraction.raw_calls.is_none());
+        let evidence = extraction
+            .semantic_evidence
+            .ok_or("missing Python semantic evidence")?;
+        let call = evidence
+            .occurrences
+            .iter()
+            .find(|occurrence| {
+                occurrence.role == crate::SemanticRole::Call
+                    && occurrence.spelling == "log_query"
+                    && occurrence.qualifier.as_deref() == Some("querylog")
+            })
+            .ok_or("missing querylog.log_query occurrence")?;
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.occurrence_id.as_deref() == Some(&call.id)
+                && candidate.constraints.qualified_name.as_deref()
+                    == Some("compass.querylog.log_query")
         }));
         Ok(())
     }

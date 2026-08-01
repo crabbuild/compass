@@ -266,7 +266,7 @@ fn java(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<R
     let mut facts = Vec::new();
     let class = Regex::new(r"\bclass\s+([A-Za-z_]\w*)").ok();
     let method = Regex::new(
-        r"\b(?:public|protected|private|static|final|synchronized|\s)+[A-Za-z0-9_<>,.?\[\]\s]+\s+([A-Za-z_]\w*)\s*\(",
+        r"\b(?:public|protected|private|static|final|synchronized|\s)+[A-Za-z0-9_<>,.?\[\]\s]+\s+([A-Za-z_]\w*)\s*\(([^)]*)\)",
     )
     .ok();
     let listener = Regex::new(
@@ -275,6 +275,7 @@ fn java(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<R
     .ok();
     let scheduled = Regex::new(r#"@Scheduled\s*\(([^)]*)\)"#).ok();
     let schedule_value = Regex::new(r#"(?:cron|fixedRate|fixedDelay)\s*=\s*["']?([^"',)]+)"#).ok();
+    let package = super::java::java_package_name(body);
     let mut owner = String::new();
     let mut pending_message = None::<(String, String, String, usize, String)>;
     let mut pending_job = None::<(String, usize, String)>;
@@ -332,20 +333,23 @@ fn java(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<R
                 .map(|value| value.as_str().to_owned())
                 .unwrap_or_else(|| args.to_owned());
             pending_job = Some((schedule, offset, line.to_owned()));
-        } else if let Some(name) = method
-            .as_ref()
-            .and_then(|pattern| pattern.captures(line))
-            .and_then(|capture| capture.get(1))
-        {
+        } else if let Some(capture) = method.as_ref().and_then(|pattern| pattern.captures(line)) {
+            let Some(name) = capture.get(1) else {
+                offset += line.len();
+                continue;
+            };
             let handler = if owner.is_empty() {
                 name.as_str().to_owned()
             } else {
                 format!("{}.{}", owner, name.as_str())
             };
+            let parameters = capture.get(2).map_or("", |value| value.as_str());
+            let (qualified_target, signature_target) =
+                super::java::java_callable_target(&package, &owner, name.as_str(), parameters);
             if evidence.activates("spring")
                 && let Some((kind, subject, relationship, at, anchor_line)) = pending_message.take()
             {
-                facts.push(message_fact(
+                let mut fact = message_fact(
                     "spring",
                     &kind,
                     &subject,
@@ -362,12 +366,14 @@ fn java(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<R
                     source,
                     at,
                     &anchor_line,
-                ));
+                );
+                stamp_java_framework_target(&mut fact, &qualified_target, &signature_target);
+                facts.push(fact);
             }
             if evidence.activates("spring")
                 && let Some((schedule, at, anchor_line)) = pending_job.take()
             {
-                facts.push(job_fact(
+                let mut fact = job_fact(
                     "spring",
                     &handler,
                     &handler,
@@ -377,7 +383,9 @@ fn java(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<R
                     source,
                     at,
                     &anchor_line,
-                ));
+                );
+                stamp_java_framework_target(&mut fact, &qualified_target, &signature_target);
+                facts.push(fact);
             }
         }
         offset += line.len();
@@ -386,6 +394,24 @@ fn java(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<R
         facts.extend(java_table_mappings(path, source, body));
     }
     facts
+}
+
+fn stamp_java_framework_target(
+    fact: &mut RawFrameworkFact,
+    qualified_target: &str,
+    signature_target: &str,
+) {
+    let RawFrameworkFact::Domain(fact) = fact else {
+        return;
+    };
+    fact.detail.insert(
+        "target_qualified_name".to_owned(),
+        Value::String(qualified_target.to_owned()),
+    );
+    fact.detail.insert(
+        "target_signature_qualified".to_owned(),
+        Value::String(signature_target.to_owned()),
+    );
 }
 
 fn csharp(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<RawFrameworkFact> {

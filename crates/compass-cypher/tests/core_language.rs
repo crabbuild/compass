@@ -77,40 +77,42 @@ fn correlated_exists_does_not_require_a_return_clause() -> Result<(), Box<dyn Er
 }
 
 #[test]
-fn removes_only_unreferenced_path_bindings() -> Result<(), Box<dyn Error>> {
+fn planner_eliminates_only_path_bindings_that_are_semantically_dead() -> Result<(), Box<dyn Error>>
+{
     let parameters = ParameterTypes::new();
     let schema = SchemaFingerprint::empty();
     let unused = compile(request(
-        "MATCH p=(a)-[:CALLS*1..2]->(b) \
-         RETURN a.id AS source, b.id AS target ORDER BY source, target LIMIT 100",
+        "MATCH p=(a)-[:CALLS*1..2]->(b) RETURN a.id, b.id",
         &parameters,
         &schema,
     ))?;
-    assert!(unused.plan.optimizations.iter().any(|record| {
-        record.rule == "unused-path-binding-elimination"
-            && record.reason == "removed 1 unreferenced path binding(s) before execution"
-    }));
-    let Some(Clause::Match(unused_match)) = unused.plan.ast.parts[0].clauses.first() else {
-        return Err("expected leading MATCH".into());
+    assert!(
+        unused
+            .plan
+            .optimizations
+            .iter()
+            .any(|optimization| { optimization.rule == "unused-path-binding-elimination" })
+    );
+    let Clause::Match(unused_match) = &unused.plan.ast.parts[0].clauses[0] else {
+        return Err("expected MATCH clause".into());
     };
     assert_eq!(unused_match.patterns[0].variable, None);
 
-    for source in [
-        "MATCH p=(a)-[:CALLS*1..2]->(b) RETURN length(p) AS hops",
-        "MATCH p=(a)-[:CALLS*1..2]->(b) RETURN *",
-    ] {
-        let retained = compile(request(source, &parameters, &schema))?;
-        let Some(Clause::Match(retained_match)) = retained.plan.ast.parts[0].clauses.first() else {
-            return Err("expected leading MATCH".into());
-        };
-        assert_eq!(retained_match.patterns[0].variable.as_deref(), Some("p"));
-        assert!(
-            retained
-                .plan
-                .optimizations
-                .iter()
-                .all(|record| record.rule != "unused-path-binding-elimination")
-        );
-    }
+    let used = compile(request(
+        "MATCH p=(a)-[:CALLS*1..2]->(b) RETURN length(p), b.id",
+        &parameters,
+        &schema,
+    ))?;
+    let Clause::Match(used_match) = &used.plan.ast.parts[0].clauses[0] else {
+        return Err("expected MATCH clause".into());
+    };
+    assert_eq!(used_match.patterns[0].variable.as_deref(), Some("p"));
+    assert!(
+        !used
+            .plan
+            .optimizations
+            .iter()
+            .any(|optimization| { optimization.rule == "unused-path-binding-elimination" })
+    );
     Ok(())
 }

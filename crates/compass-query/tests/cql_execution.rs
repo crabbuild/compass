@@ -31,6 +31,13 @@ fn graph() -> Result<Graph, Box<dyn Error>> {
 }
 
 fn run(source: &str) -> Result<compass_query::QueryResult, Box<dyn Error>> {
+    run_with_memory_limit(source, 16 * 1024 * 1024)
+}
+
+fn run_with_memory_limit(
+    source: &str,
+    max_memory_bytes: usize,
+) -> Result<compass_query::QueryResult, Box<dyn Error>> {
     let graph = graph()?;
     let parameters = Parameters::new();
     let parameter_types = ParameterTypes::new();
@@ -52,7 +59,7 @@ fn run(source: &str) -> Result<compass_query::QueryResult, Box<dyn Error>> {
             max_rows: 1_000,
             max_path_depth: 32,
             max_expanded_relationships: 10_000,
-            max_memory_bytes: 16 * 1024 * 1024,
+            max_memory_bytes,
         },
         cancellation: &cancellation,
     })?)
@@ -77,6 +84,18 @@ fn executes_bounded_paths_list_predicates_and_path_functions() -> Result<(), Box
     assert_eq!(result.rows.len(), 2);
     assert_eq!(result.rows[0][1], CompassValue::Integer(1));
     assert_eq!(result.rows[1][1], CompassValue::Integer(2));
+    Ok(())
+}
+
+#[test]
+fn unused_path_bindings_do_not_consume_the_bounded_query_memory_budget()
+-> Result<(), Box<dyn Error>> {
+    let result = run_with_memory_limit(
+        "MATCH p=(a)-[:CALLS*1..2]->(b) \
+         RETURN a.id AS source, b.id AS target ORDER BY source, target",
+        1_200,
+    )?;
+    assert_eq!(result.rows.len(), 3);
     Ok(())
 }
 

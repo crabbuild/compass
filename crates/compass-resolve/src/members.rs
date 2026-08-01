@@ -19,6 +19,7 @@ pub(crate) fn collect_language_call_facts(extractions: &[Extraction]) -> Languag
         tables: TypeTables::new(extractions),
         calls: extractions
             .iter()
+            .filter(|extraction| extraction.semantic_evidence.is_none())
             .flat_map(|extraction| extraction.raw_calls.iter().flatten().cloned())
             .collect(),
     }
@@ -30,7 +31,16 @@ pub(crate) fn collect_language_call_facts_owned(
     let tables = TypeTables::new(extractions);
     let calls = extractions
         .iter_mut()
-        .flat_map(|extraction| extraction.raw_calls.take().into_iter().flatten())
+        .flat_map(|extraction| {
+            let calls = extraction.raw_calls.take();
+            extraction
+                .semantic_evidence
+                .is_none()
+                .then_some(calls)
+                .into_iter()
+                .flatten()
+                .flatten()
+        })
         .collect();
     LanguageCallFacts { tables, calls }
 }
@@ -254,7 +264,10 @@ struct TypeTables {
 impl TypeTables {
     fn new(extractions: &[Extraction]) -> Self {
         let mut tables = Self::default();
-        for extraction in extractions {
+        for extraction in extractions
+            .iter()
+            .filter(|extraction| extraction.semantic_evidence.is_none())
+        {
             collect_table(extraction, "swift_type_table", &mut tables.swift);
             collect_table(extraction, "ts_type_table", &mut tables.typescript);
             collect_table(extraction, "cpp_type_table", &mut tables.cpp);
@@ -321,28 +334,6 @@ fn resolve_typed_members(
                     typed_owner(receiver, source, &tables.csharp, indexes, None)
                 }
             }
-            MemberFamily::Java => {
-                if language != Some("java") {
-                    None
-                } else if receiver == "this" {
-                    indexes
-                        .enclosing_method
-                        .get(&call.caller_nid)
-                        .cloned()
-                        .map(|owner| (owner, true))
-                } else {
-                    let explicit = call
-                        .receiver_type
-                        .as_ref()
-                        .and_then(|value| value.as_deref());
-                    let name = explicit.or_else(|| starts_upper(receiver).then_some(receiver));
-                    name.and_then(|name| {
-                        indexes
-                            .unique_type(name)
-                            .map(|owner| (owner.to_owned(), explicit.is_none()))
-                    })
-                }
-            }
             MemberFamily::Objc => {
                 if language != Some("objc") {
                     None
@@ -366,7 +357,7 @@ fn resolve_typed_members(
         } else {
             indexes.unique_method(&owner, &call.callee)
         };
-        let strict_method = matches!(family, MemberFamily::Csharp | MemberFamily::Java);
+        let strict_method = family == MemberFamily::Csharp;
         if strict_method && method.is_none() {
             continue;
         }
@@ -856,7 +847,6 @@ enum MemberFamily {
     Typescript,
     Cpp,
     Csharp,
-    Java,
     Objc,
     Other,
 }
@@ -865,7 +855,6 @@ fn member_family(source: &str, language: Option<&str>) -> MemberFamily {
     match language {
         Some("cpp") => MemberFamily::Cpp,
         Some("csharp") => MemberFamily::Csharp,
-        Some("java") => MemberFamily::Java,
         Some("objc") => MemberFamily::Objc,
         _ => match extension(source).as_str() {
             "swift" => MemberFamily::Swift,
@@ -967,7 +956,6 @@ mod tests {
         assert!(!is_bare_constant("notConstant"));
         assert_eq!(member_family("x.any", Some("cpp")), MemberFamily::Cpp);
         assert_eq!(member_family("x.any", Some("csharp")), MemberFamily::Csharp);
-        assert_eq!(member_family("x.any", Some("java")), MemberFamily::Java);
         assert_eq!(member_family("x.any", Some("objc")), MemberFamily::Objc);
         assert_eq!(member_family("x.swift", None), MemberFamily::Swift);
         assert_eq!(member_family("x.TSX", None), MemberFamily::Typescript);

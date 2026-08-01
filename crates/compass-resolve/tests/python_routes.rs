@@ -23,6 +23,19 @@ fn extract(path: &Path, fixture_name: &str) -> Result<Extraction, Box<dyn std::e
     Ok(Engine::default().extract_source(path, &source)?)
 }
 
+fn extract_resolved(
+    path: &Path,
+    fixture_name: &str,
+) -> Result<Extraction, Box<dyn std::error::Error>> {
+    let source = fs::read(fixture(fixture_name))?;
+    let extraction = Engine::default().extract_source(path, &source)?;
+    let sources = HashMap::from([(
+        path.to_string_lossy().into_owned(),
+        String::from_utf8(source)?,
+    )]);
+    Ok(resolve(&[extraction], &sources))
+}
+
 #[test]
 fn django_flask_and_fastapi_shapes_emit_framework_specific_route_facts()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -72,7 +85,7 @@ fn django_flask_and_fastapi_shapes_emit_framework_specific_route_facts()
 #[test]
 fn python_routes_resolve_handlers_and_dependencies_but_not_near_matches()
 -> Result<(), Box<dyn std::error::Error>> {
-    let mut fastapi = extract(Path::new("api.py"), "fastapi_app.py")?;
+    let mut fastapi = extract_resolved(Path::new("api.py"), "fastapi_app.py")?;
     let resolved = resolve_and_publish_framework_routes(&mut fastapi, FrameworkLimits::default())?;
     let create = resolved
         .iter()
@@ -115,14 +128,17 @@ urlpatterns = [path("users/<int:user_id>/", detail)]
     let mut engine = Engine::default();
     let root = engine.extract_source(Path::new("project/urls.py"), root_source)?;
     let child = engine.extract_source(Path::new("project/users/urls.py"), child_source)?;
-    let mut merged = Extraction::default();
-    for mut extraction in [root, child] {
-        merged.nodes.append(&mut extraction.nodes);
-        merged.edges.append(&mut extraction.edges);
-        merged
-            .framework_facts
-            .append(&mut extraction.framework_facts);
-    }
+    let sources = HashMap::from([
+        (
+            "project/urls.py".to_owned(),
+            String::from_utf8(root_source.to_vec())?,
+        ),
+        (
+            "project/users/urls.py".to_owned(),
+            String::from_utf8(child_source.to_vec())?,
+        ),
+    ]);
+    let merged = resolve(&[root, child], &sources);
     let resolved = resolve_routes(&merged, FrameworkLimits::default())?;
     assert!(resolved.iter().any(|route| {
         route.route.normalized_path == "/api/users/{user_id}"
