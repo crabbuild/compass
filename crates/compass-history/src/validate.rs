@@ -115,6 +115,17 @@ pub(crate) fn validate_publication_partition(
             partitioned.program_summaries.as_slice(),
         ),
     ] {
+        if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+            let bytes = entries.iter().fold(0_u64, |total, (key, value)| {
+                total
+                    .saturating_add(key.len() as u64)
+                    .saturating_add(value.len() as u64)
+            });
+            eprintln!(
+                "[compass history internal] {kind}: {} records, {bytes} bytes",
+                entries.len()
+            );
+        }
         validate_generated_partition_records(kind, entries, &mut total_bytes, &mut problems);
     }
     if !problems.is_empty() {
@@ -352,27 +363,57 @@ fn validate_record_size_limits(
     problems: &mut Vec<ValidationProblem>,
 ) {
     if exceeds_limit(key.len() as u64, MAX_KEY_BYTES as u64) {
-        problems.push(ValidationProblem::ResourceLimit {
-            kind: "key bytes",
-            limit: MAX_KEY_BYTES as u64,
-            actual: key.len() as u64,
-        });
+        record_resource_limit(
+            problems,
+            "key bytes",
+            MAX_KEY_BYTES as u64,
+            key.len() as u64,
+        );
     }
     if exceeds_limit(value.len() as u64, MAX_RECORD_VALUE_BYTES as u64) {
-        problems.push(ValidationProblem::ResourceLimit {
-            kind: "record value bytes",
-            limit: MAX_RECORD_VALUE_BYTES as u64,
-            actual: value.len() as u64,
-        });
+        record_resource_limit(
+            problems,
+            "record value bytes",
+            MAX_RECORD_VALUE_BYTES as u64,
+            value.len() as u64,
+        );
     }
     *total_bytes = total_bytes
         .saturating_add(key.len() as u64)
         .saturating_add(value.len() as u64);
     if exceeds_limit(*total_bytes, MAX_AUTHORITATIVE_BYTES) {
+        record_resource_limit(
+            problems,
+            "authoritative bytes",
+            MAX_AUTHORITATIVE_BYTES,
+            *total_bytes,
+        );
+    }
+}
+
+fn record_resource_limit(
+    problems: &mut Vec<ValidationProblem>,
+    kind: &'static str,
+    limit: u64,
+    actual: u64,
+) {
+    if let Some(ValidationProblem::ResourceLimit {
+        actual: recorded, ..
+    }) = problems.iter_mut().find(|problem| {
+        matches!(
+            problem,
+            ValidationProblem::ResourceLimit {
+                kind: recorded_kind,
+                ..
+            } if *recorded_kind == kind
+        )
+    }) {
+        *recorded = (*recorded).max(actual);
+    } else {
         problems.push(ValidationProblem::ResourceLimit {
-            kind: "authoritative bytes",
-            limit: MAX_AUTHORITATIVE_BYTES,
-            actual: *total_bytes,
+            kind,
+            limit,
+            actual,
         });
     }
 }
@@ -532,7 +573,8 @@ fn json_depth(value: &Value) -> usize {
 mod tests {
     use super::{
         MAX_AUTHORITATIVE_BYTES, MAX_DIAGNOSTIC_BYTES, MAX_JOB_BYTES, MAX_JSON_DEPTH,
-        MAX_KEY_BYTES, MAX_RECORD_VALUE_BYTES, MAX_RECORDS_PER_TREE, exceeds_limit,
+        MAX_KEY_BYTES, MAX_RECORD_VALUE_BYTES, MAX_RECORDS_PER_TREE, ValidationProblem,
+        exceeds_limit, record_resource_limit,
     };
 
     #[test]
@@ -549,5 +591,20 @@ mod tests {
             assert!(!exceeds_limit(limit, limit));
             assert!(exceeds_limit(limit + 1, limit));
         }
+    }
+
+    #[test]
+    fn repeated_resource_limit_failures_collapse_to_the_largest_observation() {
+        let mut problems = Vec::new();
+        record_resource_limit(&mut problems, "authoritative bytes", 10, 11);
+        record_resource_limit(&mut problems, "authoritative bytes", 10, 15);
+        assert_eq!(
+            problems,
+            vec![ValidationProblem::ResourceLimit {
+                kind: "authoritative bytes",
+                limit: 10,
+                actual: 15,
+            }]
+        );
     }
 }

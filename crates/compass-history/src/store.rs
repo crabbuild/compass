@@ -1,9 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 use prolly::{
-    Config, KeyBuilder, ManifestStoreScan, NamedRootUpdate, Prolly, SortedBatchBuilder,
+    BatchBuilder, Config, KeyBuilder, ManifestStoreScan, NamedRootUpdate, Prolly,
     TransactionUpdate, Tree,
 };
 use prolly_store_sqlite::{SqliteStore, SqliteStoreConfig};
@@ -187,7 +188,9 @@ impl HistoryStore {
             })
         };
 
+        let started = Instant::now();
         let validated = validate_publication_partition(request.artifacts, &request.completion)?;
+        profile_publication("artifact validation and partitioning", started);
         let report = validated.report;
         let partitioned = validated.partitioned;
         let node_count = report.nodes;
@@ -197,13 +200,15 @@ impl HistoryStore {
         let metadata_count = report.metadata_records;
         let program_fact_count = report.program_fact_records;
         let program_summary_count = report.program_summary_records;
-        let nodes = self.build_tree(partitioned.nodes)?;
-        let edges = self.build_tree(partitioned.edges)?;
-        let hyperedges = self.build_tree(partitioned.hyperedges)?;
-        let analysis = self.build_tree(partitioned.analysis)?;
-        let metadata = self.build_tree(partitioned.metadata)?;
-        let program_facts = self.build_tree(partitioned.program_facts)?;
-        let program_summaries = self.build_tree(partitioned.program_summaries)?;
+        let nodes = self.build_tree_profiled("nodes tree", partitioned.nodes)?;
+        let edges = self.build_tree_profiled("edges tree", partitioned.edges)?;
+        let hyperedges = self.build_tree_profiled("hyperedges tree", partitioned.hyperedges)?;
+        let analysis = self.build_tree_profiled("analysis tree", partitioned.analysis)?;
+        let metadata = self.build_tree_profiled("metadata tree", partitioned.metadata)?;
+        let program_facts =
+            self.build_tree_profiled("program facts tree", partitioned.program_facts)?;
+        let program_summaries =
+            self.build_tree_profiled("program summaries tree", partitioned.program_summaries)?;
         let profile_digest = hex(&request.profile.digest()?);
         let version = GraphVersion {
             schema_version: crate::HISTORY_SCHEMA_VERSION,
@@ -705,11 +710,22 @@ impl HistoryStore {
     }
 
     fn build_tree(&self, entries: Vec<(Vec<u8>, Vec<u8>)>) -> Result<Tree, HistoryError> {
-        let mut builder = SortedBatchBuilder::new(self.prolly.store().clone(), Config::default());
+        let mut builder = BatchBuilder::new(self.prolly.store().clone(), Config::default());
         for (key, value) in entries {
-            builder.add(key, value)?;
+            builder.add(key, value);
         }
         builder.build().map_err(HistoryError::from)
+    }
+
+    fn build_tree_profiled(
+        &self,
+        name: &'static str,
+        entries: Vec<(Vec<u8>, Vec<u8>)>,
+    ) -> Result<Tree, HistoryError> {
+        let started = Instant::now();
+        let tree = self.build_tree(entries)?;
+        profile_publication(name, started);
+        Ok(tree)
     }
 
     fn load_realization_root(
@@ -924,6 +940,15 @@ impl HistoryStore {
         } else {
             Err(HistoryError::IncompatibleStoreFormat)
         }
+    }
+}
+
+fn profile_publication(name: &str, started: Instant) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!(
+            "[compass history internal] {name}: {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
     }
 }
 

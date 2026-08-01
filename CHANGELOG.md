@@ -8,6 +8,10 @@
   security; Kotlin Spring remains on its established detector.
 - Advance universal extraction semantics to `compass.languages.extraction/4`
   so cached Java evidence cannot be reused across the Spring pack cutover.
+- Reduce immutable history build overhead by removing redundant trusted-graph,
+  ordering, source-inventory, and Program module/function storage; encode
+  independent records in parallel while retaining exact export and backward
+  read compatibility, and reject stale worktree paths in shared AST caches.
 - Use fresh, verified SCIP symbol evidence to disambiguate Java call targets in
   `graph.json` through exact AST call and declaration anchors, while rejecting
   non-call references, stale artifacts, ambiguous definitions, and conflicting
