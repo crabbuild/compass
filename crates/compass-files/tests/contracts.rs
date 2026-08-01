@@ -715,7 +715,7 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(
         default_cache
             .directory(&CacheKind::Ast, None)
-            .ends_with("ast/v3/e7")
+            .ends_with("ast/v5/e7")
     );
     assert!(!cache_root.join("compass-out/cache/ast/v0.9.21").exists());
 
