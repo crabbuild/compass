@@ -109,11 +109,39 @@ pub struct RawDomainFact {
     pub detail: Map<String, Value>,
 }
 
+/// Exact universal-language annotation evidence consumed by a framework pack.
+///
+/// The pack records the language fact without deciding project-wide framework
+/// meaning. Collection resolution can then correlate composed annotations,
+/// interface declarations, inheritance, and same-named types without falling
+/// back to terminal labels.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RawFrameworkAnnotationFact {
+    pub pack_id: String,
+    pub framework: String,
+    pub annotation_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotation_qualified_name: Option<String>,
+    pub owner_declaration_id: String,
+    pub owner_graph_node_id: String,
+    pub owner_qualified_name: String,
+    pub owner_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_signature: Option<String>,
+    pub anchor: RawFrameworkAnchor,
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub arguments: Map<String, Value>,
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub detail: Map<String, Value>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "fact", rename_all = "snake_case")]
 pub enum RawFrameworkFact {
     Route(RawRouteFact),
     Domain(RawDomainFact),
+    Annotation(RawFrameworkAnnotationFact),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

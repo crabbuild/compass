@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Hard-cut Java Spring framework extraction to the production universal
+  `spring-java` pack, including composed and inherited HTTP mappings, constants,
+  bean and injection topology, messaging, scheduling, JPA, transactions, and
+  security; Kotlin Spring remains on its established detector.
+- Advance universal extraction semantics to `compass.languages.extraction/4`
+  so cached Java evidence cannot be reused across the Spring pack cutover.
 - Reduce immutable history build overhead by removing redundant trusted-graph,
   ordering, source-inventory, and Program module/function storage; encode
   independent records in parallel while retaining exact export and backward

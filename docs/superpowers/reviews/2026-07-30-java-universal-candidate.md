@@ -171,7 +171,10 @@ confirmation.
 
 ### Remaining scope
 
-This closes Java's post-cutover candidate qualification, not all framework-pack
-work. Spring behavior remains covered through universal Java facts, but the
-production universal Spring descriptor list is still empty. Spring's registry
-hard cut is a separate follow-up and is not implied by this Java result.
+This closes Java's post-cutover candidate qualification without promoting Java
+past `UniversalCandidate`. The former Spring follow-up is now implemented by
+the production `spring-java` universal framework pack at Compass commit
+`1946012aa67bba474f4016aa2d9f79010a3c1476`; its independent evidence is
+recorded in the 2026-08-01 Spring universal-pack review. Java Spring no longer
+runs through the legacy source detector. Kotlin Spring remains on the
+established framework path and is not covered by the Java hard cut.

@@ -36,7 +36,7 @@ pub(super) fn resolve_domains_with_targets(
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Domain(fact) => Some(fact),
-            RawFrameworkFact::Route(_) => None,
+            RawFrameworkFact::Route(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     limits.check_facts(facts.len())?;
@@ -99,6 +99,71 @@ pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[Resolve
                     "model": fact.name,
                     "databaseTable": fact.detail.get("database_table"),
                     "source": fact.anchor.source_file,
+                    "line": fact.anchor.start_line,
+                    "resolution": resolution_name(resolved.state),
+                }));
+            }
+            continue;
+        }
+        if fact.kind == "framework_decoration" {
+            if resolved.state == ResolutionState::Exact
+                && let Some(trait_name) = fact.detail.get("trait").and_then(Value::as_str)
+            {
+                for candidate in &resolved.source_candidates {
+                    if let Some(node) = extraction
+                        .nodes
+                        .iter_mut()
+                        .find(|node| node.id == candidate.node_id)
+                    {
+                        let traits = node
+                            .attributes
+                            .entry("framework_traits".to_owned())
+                            .or_insert_with(|| Value::Array(Vec::new()));
+                        if let Some(traits) = traits.as_array_mut()
+                            && !traits
+                                .iter()
+                                .any(|value| value.as_str() == Some(trait_name))
+                        {
+                            traits.push(Value::String(trait_name.to_owned()));
+                            traits.sort_by(|left, right| left.as_str().cmp(&right.as_str()));
+                        }
+                    }
+                }
+            } else {
+                diagnostics.push(json!({
+                    "kind": "unresolved_framework_decoration",
+                    "framework": fact.framework,
+                    "trait": fact.name,
+                    "source": fact.anchor.source_file,
+                    "line": fact.anchor.start_line,
+                    "resolution": resolution_name(resolved.state),
+                }));
+            }
+            continue;
+        }
+        if fact.kind == "injection" {
+            if resolved.state == ResolutionState::Exact
+                && let ([source], [target]) = (
+                    resolved.source_candidates.as_slice(),
+                    resolved.target_candidates.as_slice(),
+                )
+            {
+                push_edge(
+                    extraction,
+                    &mut edges,
+                    &source.node_id,
+                    &target.node_id,
+                    "depends_on",
+                    fact,
+                    resolved.state,
+                );
+            } else {
+                diagnostics.push(json!({
+                    "kind": "unresolved_injection",
+                    "framework": fact.framework,
+                    "source": fact.detail.get("source_reference"),
+                    "target": fact.detail.get("target_reference"),
+                    "sourceFile": fact.anchor.source_file,
                     "line": fact.anchor.start_line,
                     "resolution": resolution_name(resolved.state),
                 }));
@@ -251,6 +316,38 @@ fn resolve_one(
             target_candidates: targets,
         });
     }
+    if fact.kind == "injection" {
+        let source = fact
+            .detail
+            .get("source_reference")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let target = fact
+            .detail
+            .get("target_reference")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let sources = resolve_reference(
+            targets,
+            source,
+            TargetKind::Type,
+            &fact.anchor.source_file,
+            limits,
+        )?;
+        let targets = resolve_reference(
+            targets,
+            target,
+            TargetKind::Type,
+            &fact.anchor.source_file,
+            limits,
+        )?;
+        return Ok(ResolvedDomainFact {
+            fact: fact.clone(),
+            state: pair_state(&sources, &targets),
+            source_candidates: sources,
+            target_candidates: targets,
+        });
+    }
     let signature_reference = fact
         .detail
         .get("target_signature_qualified")
@@ -278,6 +375,18 @@ fn resolve_one(
             targets,
             qualified_reference,
             TargetKind::Callable,
+            &fact.anchor.source_file,
+            limits,
+        )?;
+    }
+    if candidates.is_empty()
+        && fact.kind == "bean_definition"
+        && fact.detail.get("owner_kind").and_then(Value::as_str) != Some("method")
+    {
+        candidates = resolve_reference(
+            targets,
+            qualified_reference,
+            TargetKind::Type,
             &fact.anchor.source_file,
             limits,
         )?;
@@ -378,6 +487,7 @@ fn domain_node_kind(kind: &str) -> Option<&'static str> {
         "topic" => Some("topic"),
         "queue" => Some("queue"),
         "job" => Some("job"),
+        "bean_definition" => Some("component"),
         _ => None,
     }
 }
