@@ -446,12 +446,12 @@ def endpoint_allowed(source: dict[str, Any], edge: dict[str, Any], target: dict[
     if kind == "references":
         reference_source = CONTAINER | CALLABLE | TYPE_KINDS | {
             "file", "property", "field", "variable", "constant", "import",
-            "export", "type_alias", "resource", "schema", "query", "config_key",
-            "database_table", "database_view", "database_column",
-            "database_procedure", "database_trigger",
+            "export", "enum_member", "annotation", "type_alias", "resource",
+            "schema", "query", "config_key", "database_table", "database_view",
+            "database_column", "database_procedure", "database_trigger",
         }
         reference_target = reference_source | {
-            "database", "database_schema", "database_index",
+            "parameter", "database", "database_schema", "database_index",
             "database_constraint",
         }
         return s in reference_source and t in reference_target

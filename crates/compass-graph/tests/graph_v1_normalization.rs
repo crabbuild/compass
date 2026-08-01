@@ -989,7 +989,7 @@ fn open_producer_shapes_normalize_into_the_closed_endpoint_matrix()
     let mut annotation = raw_node(root, "raw:annotation", "logged", 70);
     annotation
         .attributes
-        .insert("symbol_kind".to_owned(), json!("annotation"));
+        .insert("symbol_kind".to_owned(), json!("annotation_type"));
     let edge = |source: &str, relation: &str, target: &str, start| RawEdgeRecord {
         source: source.to_owned(),
         target: target.to_owned(),
@@ -1016,6 +1016,12 @@ fn open_producer_shapes_normalize_into_the_closed_endpoint_matrix()
         .iter()
         .find(|node| node.name == "tests_target")
         .ok_or("missing test node")?;
+    assert!(
+        document
+            .nodes
+            .iter()
+            .any(|node| { node.name == "logged" && node.kind == NodeKind::Annotation })
+    );
     assert!(
         test.roles
             .contains(&compass_model::code_graph::NodeRole::Test)
