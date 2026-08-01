@@ -34,7 +34,7 @@ pub(crate) fn resolve_framework_facts(
 ) {
     let targets = target_index::FrameworkTargetIndex::new_with_root(extraction, Some(root));
     (
-        routes::resolve_routes_with_targets(extraction, limits, &targets),
+        routes::resolve_routes_with_targets(extraction, limits, &targets, Some(root)),
         domain::resolve_domains_with_targets(extraction, limits, &targets),
     )
 }

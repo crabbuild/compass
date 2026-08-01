@@ -518,6 +518,24 @@ fn seed_round_trip_includes_every_optional_authoritative_json_file()
     let loaded = compass_history::CompletedGraphArtifacts::load(directory.path(), completion())?;
     assert_eq!(loaded.artifacts, artifacts);
     assert_eq!(loaded.partition()?, artifacts.partition(&completion())?);
+    let publication = compass_history::CompletedGraphArtifacts::load_for_publication(
+        directory.path(),
+        completion(),
+    )?;
+    assert_eq!(
+        publication.partition()?,
+        artifacts.partition(&completion())?
+    );
+    assert_eq!(publication.artifacts.export_sidecars(), BTreeMap::new());
+
+    let mut noncanonical = std::fs::read(directory.path().join("program.json"))?;
+    noncanonical.extend_from_slice(b" \n");
+    std::fs::write(directory.path().join("program.json"), noncanonical)?;
+    let publication = compass_history::CompletedGraphArtifacts::load_for_publication(
+        directory.path(),
+        completion(),
+    )?;
+    assert!(publication.partition().is_err());
     Ok(())
 }
 

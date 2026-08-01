@@ -24,9 +24,9 @@ pub use history::{
 pub use merge::{MergeResult, merge_graphs};
 pub use pipeline::{
     BuildFileProgress, BuildOptions, BuildPurpose, BuildResult, BuildTimings, CoreError,
-    DEFAULT_MAX_SOURCE_BYTES, SemanticLayer, build_graph_with_layers,
+    DEFAULT_MAX_SOURCE_BYTES, RetainedBuildArtifacts, SemanticLayer, build_graph_with_layers,
     build_graph_with_layers_and_progress, build_graph_with_layers_and_tiebreaker,
-    build_graph_with_semantic, build_local_graph,
+    build_graph_with_layers_retained, build_graph_with_semantic, build_local_graph,
 };
 pub use watch::{
     WatchBackend, WatchBuildReason, WatchError, WatchOptions, WatchStatus, watch_local_graph,

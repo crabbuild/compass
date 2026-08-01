@@ -1,9 +1,10 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use compass_languages::{Extraction, FrameworkLimits};
 use serde_json::Value;
 
-use super::FrameworkResolutionError;
+use super::{FrameworkResolutionError, target_index::source_key};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ImportAlias {
@@ -18,6 +19,7 @@ pub(super) type ImportAliases = HashMap<(String, String), ImportAlias>;
 pub(super) fn import_alias_map(
     extraction: &Extraction,
     limits: FrameworkLimits,
+    root: Option<&Path>,
 ) -> Result<ImportAliases, FrameworkResolutionError> {
     let mut aliases = HashMap::new();
     let mut aliases_per_file = HashMap::new();
@@ -54,7 +56,7 @@ pub(super) fn import_alias_map(
         else {
             continue;
         };
-        let source_file = source_file.replace('\\', "/");
+        let source_file = source_key(source_file, root);
         insert_alias(
             &mut aliases,
             &mut aliases_per_file,
@@ -128,7 +130,7 @@ pub(super) fn import_alias_map(
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned)
         });
-        let source_file = source_file.replace('\\', "/");
+        let source_file = source_key(source_file, root);
         insert_alias(
             &mut aliases,
             &mut aliases_per_file,

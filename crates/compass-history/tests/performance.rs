@@ -242,11 +242,14 @@ fn real_artifact_publication_is_bounded() -> Result<(), Box<dyn std::error::Erro
     let commit = repository.resolve("HEAD")?;
     let mut profile = compass_history::BuildProfile::default();
     profile.insert("graph_schema", compass_history::HISTORY_GRAPH_SCHEMA)?;
-    let started = Instant::now();
+    let load_started = Instant::now();
+    let artifacts = GraphArtifacts::load(&artifacts_path)?;
+    let load_elapsed = load_started.elapsed();
+    let publish_started = Instant::now();
     let published = history.publish(PublishRequest {
         parents: repository.parents(&commit)?,
         profile,
-        artifacts: GraphArtifacts::load(&artifacts_path)?,
+        artifacts,
         completion: CompletionEvidence {
             extraction_succeeded: true,
             allow_partial: false,
@@ -259,8 +262,8 @@ fn real_artifact_publication_is_bounded() -> Result<(), Box<dyn std::error::Erro
         make_preferred: true,
     })?;
     println!(
-        "real_artifact_publish={:?} nodes={} edges={} metadata={} program_facts={} program_summaries={}",
-        started.elapsed(),
+        "real_artifact_load={load_elapsed:?} real_artifact_publish={:?} nodes={} edges={} metadata={} program_facts={} program_summaries={}",
+        publish_started.elapsed(),
         published.version.node_count,
         published.version.edge_count,
         published.version.metadata_count,

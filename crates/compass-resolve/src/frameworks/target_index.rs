@@ -281,7 +281,7 @@ impl<'a> FrameworkTargetIndex<'a> {
     }
 }
 
-fn source_key(source: &str, root: Option<&Path>) -> String {
+pub(super) fn source_key(source: &str, root: Option<&Path>) -> String {
     let path = Path::new(source);
     if path.is_absolute()
         && let Some(root) = root

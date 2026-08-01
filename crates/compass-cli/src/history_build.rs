@@ -5,11 +5,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 
-use compass_core::{CompleteGraphBuilder, MaterializeError};
-use compass_files::{DetectOptions, IgnorePolicy, Manifest, ManifestKind, detect};
+use compass_core::{
+    BuildOptions, BuildPurpose, CompleteGraphBuilder, MaterializeError, SemanticLayer,
+    build_graph_with_layers_retained,
+};
+use compass_files::{DetectOptions, IgnorePolicy, Manifest, ManifestKind, ProjectConfig, detect};
 use compass_history::{
-    BuildProfile, CompletedGraphArtifacts, CompletionEvidence, HISTORY_GRAPH_SCHEMA, HistoryError,
-    MAX_DIAGNOSTIC_BYTES,
+    BuildProfile, CompletedGraphArtifacts, CompletionEvidence, GraphArtifacts,
+    HISTORY_GRAPH_SCHEMA, HistoryError, MAX_DIAGNOSTIC_BYTES,
 };
 
 #[derive(Clone, Debug)]
@@ -938,6 +941,9 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
         checkout: &Path,
         output_root: &Path,
     ) -> Result<CompletedGraphArtifacts, MaterializeError> {
+        if let Some(completed) = self.build_in_process(checkout, output_root)? {
+            return Ok(completed);
+        }
         let mut command = Command::new(&self.executable);
         command
             .arg("extract")
@@ -1014,7 +1020,7 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
             .map_err(|_| MaterializeError::Builder("semantic corpus exceeds u64".to_owned()))?;
         let semantic_files_completed = u64::try_from(completed)
             .map_err(|_| MaterializeError::Builder("semantic completion exceeds u64".to_owned()))?;
-        CompletedGraphArtifacts::load(
+        CompletedGraphArtifacts::load_for_publication(
             &output_dir,
             CompletionEvidence {
                 extraction_succeeded: true,
@@ -1080,6 +1086,82 @@ impl NativeCompleteGraphBuilder {
             && self.gitignore
             && self.excludes.is_empty()
             && self.forwarded == ["--code-only", "--resolution", "1"].map(str::to_owned)
+    }
+
+    fn build_in_process(
+        &self,
+        checkout: &Path,
+        output_root: &Path,
+    ) -> Result<Option<CompletedGraphArtifacts>, MaterializeError> {
+        // Provider and focused-integration orchestration still belongs to the
+        // existing bounded subprocess path. The native code-only profile can
+        // retain the pipeline's typed artifacts and avoid the JSON handoff.
+        if !self.code_only || self.profile.value("cargo") == Some("true") {
+            return Ok(None);
+        }
+        let mut options = BuildOptions::new(checkout);
+        options.scope = ProjectConfig::load(checkout)?
+            .map(|config| config.build)
+            .unwrap_or_default();
+        options.output_root = Some(output_root.to_path_buf());
+        options.cache_root = self.shared_cache_root.clone();
+        options.no_viz = true;
+        options.gitignore = self.gitignore;
+        options.ignore_policy = IgnorePolicy::HistoricalCommit;
+        options.extra_excludes = self.excludes.clone();
+        options.resolution = self
+            .profile
+            .value("resolution")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(1.0);
+        options.exclude_hubs = self
+            .profile
+            .value("exclude_hubs")
+            .and_then(|value| value.parse().ok());
+        options.program_analysis = true;
+        options.purpose = BuildPurpose::Extract;
+        let repository = compass_history::Repository::discover(checkout)?;
+        options.built_at_commit = Some(repository.resolve("HEAD")?.to_string());
+        let semantic = SemanticLayer {
+            fragment: serde_json::json!({
+                "nodes": [],
+                "edges": [],
+                "hyperedges": [],
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "failed_chunks": 0,
+            }),
+            refreshed_files: Vec::new(),
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+        let (result, retained) = build_graph_with_layers_retained(&options, Some(&semantic), &[])
+            .map_err(|error| MaterializeError::Builder(error.to_string()))?;
+        let manifest_bytes =
+            fs::read(result.output_dir.join("manifest.json")).map_err(|source| {
+                compass_files::FileError::Io {
+                    path: result.output_dir.join("manifest.json"),
+                    source,
+                }
+            })?;
+        let manifest = serde_json::from_slice(&manifest_bytes)
+            .map_err(|error| MaterializeError::Builder(error.to_string()))?;
+        let artifacts = GraphArtifacts::from_trusted(
+            retained.document,
+            retained.program,
+            retained.analysis,
+            Some(manifest),
+        )?;
+        Ok(Some(CompletedGraphArtifacts {
+            artifacts,
+            completion: CompletionEvidence {
+                extraction_succeeded: true,
+                allow_partial: false,
+                semantic_files_expected: 0,
+                semantic_files_completed: 0,
+                failed_chunks: 0,
+            },
+        }))
     }
 }
 
@@ -1260,6 +1342,25 @@ mod tests {
                 .promote_current(directory.path(), &commit)?
                 .is_none()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn code_only_builder_retains_typed_artifacts_without_the_executable()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (directory, _commit, _output) = current_snapshot_fixture()?;
+        let output_root = tempfile::tempdir()?;
+        let options =
+            parse_build_command("build", &["HEAD".to_owned(), "--code-only".to_owned()])?.options;
+        let builder = options.builder(
+            PathBuf::from("/definitely/not/a/compass-binary"),
+            None,
+            None,
+        );
+
+        let completed = builder.build(directory.path(), output_root.path())?;
+        assert!(completed.artifacts.program.is_some());
+        assert!(!completed.partition()?.nodes.is_empty());
         Ok(())
     }
 
