@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
 
-use compass_languages::Engine;
+use compass_languages::{CandidateRelation, Engine, EvidenceLimits, validate_evidence};
 use compass_resolve::resolve;
 
 #[test]
@@ -189,6 +189,128 @@ public class Service {
                 .any(|load| load.id == edge.target && load.id != one_argument_load.id)
             && edge.string("relation") == "calls"
     }));
+    Ok(())
+}
+
+#[test]
+fn java_contains_references_and_declarations_survive_universal_publication()
+-> Result<(), Box<dyn Error>> {
+    let source = br#"package demo.catalog;
+
+interface Repository {
+    void enqueue(Catalog item);
+}
+
+class Catalog {}
+
+class Worker extends Catalog implements Repository {
+    public void enqueue(Catalog item) {
+        this.track(item);
+    }
+
+    void track(Catalog item) {}
+}
+
+class Service {
+    private final Catalog catalog;
+
+    public Service(Catalog catalog) {
+        this.catalog = catalog;
+    }
+
+    public Catalog run(Catalog item) {
+        return new Catalog();
+    }
+}
+"#;
+    let source_file = "src/main/java/demo/catalog/Service.java";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+
+    assert!(extracted.nodes.is_empty());
+    assert!(extracted.edges.is_empty());
+    assert!(extracted.raw_calls.is_none());
+    let evidence = extracted
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Java universal evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+    assert_eq!(evidence.adapter.id, "compass.java");
+    assert_eq!(evidence.adapter.version, 1);
+
+    let declaration_id = |qualified_name: &str| {
+        evidence
+            .declarations
+            .iter()
+            .find(|declaration| declaration.qualified_name == qualified_name)
+            .map(|declaration| declaration.id.as_str())
+    };
+    let service_id = declaration_id("demo.catalog.Service").ok_or("missing Service evidence")?;
+    let worker_id = declaration_id("demo.catalog.Worker").ok_or("missing Worker evidence")?;
+    let run_id = declaration_id("demo.catalog.Service::run").ok_or("missing run evidence")?;
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Contains
+            && candidate.source_declaration_id == service_id
+            && candidate.target_spelling == "run"
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Extends
+            && candidate.source_declaration_id == worker_id
+            && candidate.target_spelling == "Catalog"
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Implements
+            && candidate.source_declaration_id == worker_id
+            && candidate.target_spelling == "Repository"
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::References
+            && candidate.source_declaration_id == run_id
+            && candidate.target_spelling == "Catalog"
+    }));
+
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let node = |qualified_name: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+    };
+    let service = node("demo.catalog.Service").ok_or("missing published Service")?;
+    let worker = node("demo.catalog.Worker").ok_or("missing published Worker")?;
+    let catalog = node("demo.catalog.Catalog").ok_or("missing published Catalog")?;
+    let repository = node("demo.catalog.Repository").ok_or("missing published Repository")?;
+    let run = node("demo.catalog.Service::run").ok_or("missing published run")?;
+    for published in [service, worker, catalog, repository, run] {
+        assert_eq!(published.string("language"), "java");
+        assert_eq!(
+            published.string("extractor"),
+            "compass.languages.java.universal"
+        );
+        assert_eq!(published.string("source_file"), source_file);
+        assert!(!published.string("evidence_declaration_id").is_empty());
+    }
+    for (source_id, target_id, relation) in [
+        (service.id.as_str(), run.id.as_str(), "contains"),
+        (worker.id.as_str(), catalog.id.as_str(), "inherits"),
+        (worker.id.as_str(), repository.id.as_str(), "implements"),
+        (run.id.as_str(), catalog.id.as_str(), "references"),
+    ] {
+        assert!(
+            resolved.edges.iter().any(|edge| {
+                edge.source == source_id
+                    && edge.target == target_id
+                    && edge.string("relation") == relation
+                    && edge.string("extractor") == "compass.resolve.java.universal"
+            }),
+            "missing {relation} edge {source_id} -> {target_id}"
+        );
+    }
     Ok(())
 }
 
