@@ -128,7 +128,8 @@ export function graphNodeColor(
   model: GraphViewModel,
   node: GraphNode,
   contrastBorder?: string,
-  comparisonPalette?: ComparisonPalette
+  comparisonPalette?: ComparisonPalette,
+  communityColors?: ReadonlyMap<number, string>
 ) {
   const comparisonColor = node.change && comparisonPalette
     ? comparisonPalette[node.change]
@@ -136,6 +137,7 @@ export function graphNodeColor(
   const background = comparisonColor
     ? comparisonColor.background
     : node.color?.background
+    ?? communityColors?.get(node.community)
     ?? model.communities.find((candidate) => candidate.id === node.community)?.color
     ?? "#6688aa";
   return {
@@ -313,24 +315,41 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     physicsRunningRef.current = physicsRunning;
     const initialViewRef = useRef<{ position: { x: number; y: number }; scale: number } | null>(null);
     const themeRevision = useThemeRevision();
-    const maxDegree = useMemo(
-      () => Math.max(1, ...model.nodes.map((node) => node.degree ?? 1)),
-      [model.nodes]
+    const maxDegree = useMemo(() => {
+      let maximum = 1;
+      for (const node of model.nodes) maximum = Math.max(maximum, node.degree ?? 1);
+      return maximum;
+    }, [model.nodes]);
+    const communityColors = useMemo(
+      () => new Map(model.communities.map((community) => [community.id, community.color])),
+      [model.communities]
     );
     const labelColor = useMemo(
-      () => cssColor("--vscode-editor-foreground", "#eef5ff"),
+      () => cssColor(
+        "--vscode-editor-foreground",
+        cssColor("--foreground", "#eef5ff")
+      ),
       [themeRevision]
     );
     const edgeColor = useMemo(
-      () => cssColor("--vscode-descriptionForeground", "#60728b"),
+      () => cssColor(
+        "--vscode-descriptionForeground",
+        cssColor("--muted-foreground", "#60728b")
+      ),
       [themeRevision]
     );
     const edgeLabelColor = useMemo(
-      () => cssColor("--vscode-editor-foreground", "#eef5ff"),
+      () => cssColor(
+        "--vscode-editor-foreground",
+        cssColor("--foreground", "#eef5ff")
+      ),
       [themeRevision]
     );
     const edgeLabelBackground = useMemo(
-      () => cssColor("--vscode-editor-background", "#08111f"),
+      () => cssColor(
+        "--vscode-editor-background",
+        cssColor("--background", "#08111f")
+      ),
       [themeRevision]
     );
     const edgeLabelFont = useMemo(
@@ -338,7 +357,10 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       [themeRevision]
     );
     const comparisonPalette = useMemo<ComparisonPalette>(() => {
-      const background = cssColor("--vscode-editor-background", "#08111f");
+      const background = cssColor(
+        "--vscode-editor-background",
+        cssColor("--background", "#08111f")
+      );
       const dark = isDarkColor(background);
       return {
         added: comparisonColor(
@@ -411,7 +433,13 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         return {
           id: node.id,
           label: node.label,
-          color: graphNodeColor(model, node, undefined, fallbackComparisonPalette),
+          color: graphNodeColor(
+            model,
+            node,
+            undefined,
+            fallbackComparisonPalette,
+            communityColors
+          ),
           size,
           ...(position ?? {}),
           opacity: node.change === "unchanged" ? 0.58 : 1,
@@ -430,6 +458,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       automaticLabelIds,
       comparisonMode,
       comparisonPositions,
+      communityColors,
       maxDegree,
       model
     ]);
@@ -557,14 +586,20 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             ? comparisonOpacity
             : isVisible ? Math.max(comparisonOpacity, 0.72) : 0.08,
           borderWidth: isFocused ? 4 : contrastBorder ? 2.5 : 1.5,
-          color: graphNodeColor(model, node, contrastBorder, comparisonPalette),
+          color: graphNodeColor(
+            model,
+            node,
+            contrastBorder,
+            comparisonPalette,
+            communityColors
+          ),
           shadow: isFocused
             ? {
                 enabled: true,
                 color: node.change
                   ? comparisonPalette[node.change].border
                   : node.color?.background
-                    ?? model.communities.find((item) => item.id === node.community)?.color
+                    ?? communityColors.get(node.community)
                     ?? "#76b7ff",
                 size: 24,
                 x: 0,
@@ -605,6 +640,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     }, [
       contrastBorder,
       comparisonPalette,
+      communityColors,
       edgeColor,
       edgeData,
       focusedNodeId,

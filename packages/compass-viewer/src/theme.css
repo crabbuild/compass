@@ -105,6 +105,35 @@
   --workbench-progress: var(--vscode-progressBar-background, var(--ring));
 }
 
+@media (prefers-color-scheme: light) {
+  :root {
+    --background: var(--vscode-editor-background, #f7f9fc);
+    --foreground: var(--vscode-editor-foreground, #172033);
+    --card: var(--vscode-sideBar-background, #ffffff);
+    --card-foreground: var(--vscode-sideBar-foreground, #172033);
+    --popover: var(--vscode-menu-background, #ffffff);
+    --popover-foreground: var(--vscode-menu-foreground, #172033);
+    --primary: var(--vscode-button-background, #0969da);
+    --primary-foreground: var(--vscode-button-foreground, #ffffff);
+    --secondary: var(--vscode-button-secondaryBackground, #e8edf4);
+    --secondary-foreground: var(--vscode-button-secondaryForeground, #172033);
+    --muted: var(--vscode-list-inactiveSelectionBackground, #edf1f6);
+    --muted-foreground: var(--vscode-descriptionForeground, #576579);
+    --accent: var(--vscode-list-activeSelectionBackground, #dbeafe);
+    --accent-foreground: var(--vscode-list-activeSelectionForeground, #172033);
+    --border: var(--vscode-panel-border, #c8d1dc);
+    --input: var(--vscode-input-border, #aeb9c8);
+    --ring: var(--vscode-focusBorder, #0969da);
+    --compass-canvas: var(--vscode-editor-background, #f4f7fb);
+    --compass-canvas-deep: color-mix(in srgb, var(--compass-canvas) 94%, #dbe3ed);
+    --compass-panel: var(--vscode-sideBar-background, #ffffff);
+    --compass-panel-raised: var(--vscode-menu-background, #ffffff);
+    --compass-line: var(--vscode-panel-border, #ccd6e1);
+    --compass-line-strong: var(--vscode-contrastBorder, #9eacbd);
+    --compass-faint: var(--vscode-disabledForeground, #68778a);
+  }
+}
+
 body.vscode-light,
 body.vscode-high-contrast-light {
   color-scheme: light;

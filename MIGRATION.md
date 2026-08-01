@@ -35,6 +35,19 @@ graphify://... MCP resources     -> compass://...
 
 Compass does not fall back to the old names.
 
+## Regenerate HTML graph exports
+
+Current Compass releases use the shared graph workbench for `graph.html` and
+do not preserve the previous export's DOM, CSS selectors, or remote
+`vis-network` script boundary. Regenerate saved HTML exports with the current
+`compass export html` command. Any private CSS overrides or browser automation
+that targeted the old document structure must be updated to use visible roles
+and labels in the new workbench.
+
+The matching VS Code extension requires a CLI that advertises both `graph` and
+`community_detail`. Upgrade Compass and the extension together; the extension
+does not fall back to the older non-drill-down graph workflow.
+
 ## Replace commands
 
 Replace Python and legacy executable invocations with `compass`:
