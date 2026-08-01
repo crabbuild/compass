@@ -15,7 +15,8 @@ and fallback.
 > trust boundaries, machine contracts, crate ownership, implementation phases,
 > and acceptance criteria.
 >
-> **Prerequisites:** [Language architecture](language-architecture.md),
+> **Prerequisites:** [Managed language analyzers](managed-language-analyzers.md),
+> [Language architecture](language-architecture.md),
 > [Security and privacy](security-and-privacy.md), and
 > [Universal semantic evidence](../reference/universal-semantic-evidence.md).
 >
@@ -24,7 +25,11 @@ and fallback.
 ## Decision summary
 
 Compass will not embed a JVM or the full JDT language server into the Rust
-process. The integration has two optional provider modes:
+process. Shared installation, runtime, protocol, cache, history, and CLI
+lifecycle behavior follows
+[Managed language analyzers](managed-language-analyzers.md); this document owns
+the Java-specific provider and semantic policy. The integration has two
+optional provider modes:
 
 1. A small Compass-owned JVM bridge built on JDT Core performs bounded batch
    analysis for `update`, `extract`, history, and CI.
@@ -135,11 +140,11 @@ watch-mode provider, not the first batch implementation.
 The primary workflow is:
 
 ```text
-compass java setup
+compass analyzer setup java --provider jdt-core
 compass update
 ```
 
-`java setup` performs an explicit, transactional setup for the current
+`analyzer setup java` performs an explicit, transactional setup for the current
 project. In an interactive terminal it reports the selected provider, Java
 runtime, download size, installation location, project configuration change,
 and whether build-tool execution or network dependency resolution is enabled.
@@ -148,7 +153,7 @@ It obtains confirmation before any download unless `--yes` is present.
 Automation uses explicit options:
 
 ```text
-compass java setup \
+compass analyzer setup java \
   --provider jdt-core \
   --tool-version locked \
   --java-home /opt/jdk-21 \
@@ -171,9 +176,9 @@ compass watch
 Per-command overrides remain available:
 
 ```text
-compass update --java-semantics structural
-compass update --java-semantics jdt-core
-compass update --java-semantics scip --program-artifact index.scip
+compass update --analyzer java=structural
+compass update --analyzer java=jdt-core
+compass update --analyzer java=scip --program-artifact index.scip
 ```
 
 `structural` is the explicit native-only mode. `jdt-core` requests the batch
@@ -183,10 +188,10 @@ mode is limited to supported long-running workflows.
 ### Inspection and lifecycle
 
 ```text
-compass java status [--format text|json]
-compass java doctor [--format text|json]
-compass java update [--yes]
-compass java remove [--project|--tool|--all]
+compass analyzer status java [--format text|json]
+compass analyzer doctor java [--format text|json]
+compass analyzer update java [--yes]
+compass analyzer remove java [--project|--tool|--all]
 ```
 
 `status` is read-only and reports configuration plus installed identities.
@@ -222,8 +227,8 @@ different graph realization. Users can explicitly choose structural mode or
 Project configuration selects meaning-affecting behavior:
 
 ```toml
-[java]
-semantic_provider = "jdt-core"
+[analyzers.java]
+provider = "jdt-core"
 tool_version = "locked"
 runtime = "managed"
 language_level = "project"
@@ -362,8 +367,8 @@ validates its vendor, architecture, major version, executable path, and
 reported capabilities. It does not construct a shell command.
 
 A managed runtime is an optional platform-specific asset installed only by an
-explicit `java setup --managed-runtime` request. Compass never removes or
-updates a user-managed runtime.
+explicit `compass analyzer setup java --managed-runtime` request. Compass
+never removes or updates a user-managed runtime.
 
 ## Managed tool store
 
@@ -816,12 +821,13 @@ docs/reference schemas after contracts become public
 
 **Direction**
 
-- Create the focused `compass-java` crate.
+- Create the focused `compass-java` provider crate against the shared
+  `compass-analyzers` contracts.
 - Extract safe shared download/archive/atomic-install primitives from the
   existing upgrade implementation.
 - Implement runtime discovery and validation.
-- Implement `java setup`, `status`, `doctor`, `update`, and `remove` over a
-  mock or protocol-fixture bridge.
+- Implement `analyzer setup java`, `status`, `doctor`, `update`, and `remove`
+  over a mock or protocol-fixture bridge.
 - Add project and user configuration plus immutable installation leases.
 
 **Primary areas**
@@ -993,7 +999,8 @@ commands, configuration, outputs, and operations documentation
 
 **Acceptance criteria**
 
-- After `compass java setup`, `compass update` needs no Java-specific flags.
+- After `compass analyzer setup java`, `compass update` needs no Java-specific
+  flags.
 - An unchanged update reuses validated evidence and does not start the JVM.
 - Source, ABI, build option, classpath, tool, runtime, and provider changes
   cause the documented invalidations.
@@ -1109,8 +1116,8 @@ These decisions must be resolved before their corresponding phase starts:
    Compass release assets or also accepted from an explicit user installation.
 2. Which minimum Java runtime major the pinned bridge supports across all
    release platforms.
-3. Whether public tool commands live exclusively under `compass java` or a
-   future generic `compass tool` family owns shared lifecycle operations.
+3. Which Java-specific discovery aliases, if any, delegate to the shared
+   `compass analyzer` lifecycle without creating a second implementation.
 4. Which Maven and Gradle metadata can be interpreted without executing build
    logic and how unsupported dynamic configuration is represented.
 5. Whether exact external classpath definitions become graph nodes in Phase 3
@@ -1133,7 +1140,7 @@ The managed JDT integration is complete only when:
 - native Tree-sitter Java builds remain fully supported and unchanged when JDT
   is not configured;
 - setup, inspection, daily analysis, update, and removal are available through
-  the `compass` CLI;
+  the shared `compass analyzer` CLI;
 - every download and process boundary is explicit, bounded, validated, and
   tested without real credentials or services;
 - JDT evidence flows through the provider-neutral Program contract and exact
@@ -1149,6 +1156,7 @@ The managed JDT integration is complete only when:
 
 ## Related pages
 
+- [Managed language analyzers](managed-language-analyzers.md)
 - [Language architecture](language-architecture.md)
 - [System architecture](architecture.md)
 - [Security and privacy](security-and-privacy.md)
