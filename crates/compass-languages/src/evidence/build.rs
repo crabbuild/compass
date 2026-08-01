@@ -351,7 +351,7 @@ pub fn range_for_node(source_file: &str, node: Node<'_>) -> EvidenceRange {
     }
 }
 
-/// Extract Python or Go universal evidence directly from the parser tree.
+/// Extract universal evidence directly from the parser tree.
 ///
 /// This path never reads `RawNodeRecord`, `RawEdgeRecord`, or `RawCall`.
 pub(crate) fn extract_tree_evidence(
@@ -369,6 +369,7 @@ pub(crate) fn extract_tree_evidence(
     match profile.language {
         "python" => state.extract_python(root)?,
         "go" => state.extract_go(root)?,
+        "java" => state.extract_java(root)?,
         _ => {
             return Err(EvidenceError::new(
                 EvidenceErrorCode::InvalidAdapter,
@@ -432,6 +433,8 @@ impl<'source> DirectAdapterState<'source> {
         let stem = file_stem(path);
         let module_or_package = if profile.language == "python" {
             python_module_identity(path, source_file)
+        } else if profile.language == "java" {
+            java_file_package(path, source_file, source)
         } else {
             path.parent()
                 .and_then(Path::file_name)
@@ -508,6 +511,577 @@ impl<'source> DirectAdapterState<'source> {
         })?;
         self.collect_python_declarations(root, &file)?;
         self.walk_python_evidence(root, &file, true)
+    }
+
+    fn extract_java(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
+        let file = self.file.clone().ok_or_else(|| {
+            EvidenceError::new(
+                EvidenceErrorCode::InvalidFact,
+                "non-empty Java source has no file evidence",
+            )
+        })?;
+        self.collect_java_declarations(root, &file)?;
+        self.walk_java_evidence(root, &file, true)
+    }
+
+    fn add_java_type_reference(
+        &mut self,
+        owner: &DeclarationContext,
+        raw: &str,
+        node: Node<'_>,
+    ) -> Result<(), EvidenceError> {
+        let cleaned = clean_java_type(raw);
+        if cleaned.is_empty() || is_java_builtin_type(&cleaned) {
+            return Ok(());
+        }
+        let (qualifier, spelling) = split_qualified(&cleaned);
+        if spelling.is_empty() {
+            return Ok(());
+        }
+        let _qualified_name = qualifier
+            .and_then(|qualifier| {
+                self.local_target_for(owner, qualifier)
+                    .map(|target| format!("{target}.{spelling}"))
+            })
+            .or_else(|| {
+                qualifier
+                    .and_then(|qualifier| {
+                        self.imported_target_for(owner, qualifier).map(|target| {
+                            if target.ends_with('.') {
+                                format!("{target}{spelling}")
+                            } else {
+                                format!("{target}.{spelling}")
+                            }
+                        })
+                    })
+            })
+            .or_else(|| self.imported_target_for(owner, spelling).cloned())
+            .or_else(|| {
+                qualifier
+                    .filter(|qualifier| !qualifier.starts_with("new "))
+                    .map(|qualifier| format!("{qualifier}.{spelling}"))
+            });
+        let lookup_name = if let Some(qualifier) = qualifier {
+            format!("{qualifier}.{spelling}")
+        } else {
+            spelling.to_owned()
+        };
+        if self.binding_is_ambiguous(owner, &lookup_name) {
+            return Ok(());
+        }
+        self.add_relationship_occurrence(
+            SemanticRole::TypeReference,
+            CandidateRelation::References,
+            owner,
+            spelling,
+            qualifier,
+            node,
+        )?;
+        Ok(())
+    }
+
+    fn add_java_class_relationships(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let is_interface = owner.kind == "interface";
+        if let Some(superclass) = node.child_by_field_name("superclass") {
+            let mut names = Vec::new();
+            collect_named_targets(
+                superclass,
+                &["type_identifier", "scoped_type_identifier", "identifier", "annotation_type"],
+                &mut names,
+            );
+            if let Some(superclass_name) = names.into_iter().next() {
+                let target = self.text(superclass_name);
+                if !target.is_empty() {
+                    let target = clean_java_type(&target);
+                    if !target.is_empty() && !is_java_builtin_type(&target) {
+                        self.add_relationship_occurrence(
+                            SemanticRole::BaseType,
+                            CandidateRelation::Extends,
+                            owner,
+                            target.rsplit('.').next().unwrap_or(&target),
+                            target.rsplit_once('.').map(|(qualifier, _)| qualifier),
+                            superclass_name,
+                        )?;
+                        let _ = is_interface;
+                    }
+                }
+            }
+        }
+        if let Some(interfaces) = node.child_by_field_name("interfaces") {
+            let mut targets = Vec::new();
+            collect_named_targets(
+                interfaces,
+                &["type_identifier", "scoped_type_identifier", "identifier", "annotation_type"],
+                &mut targets,
+            );
+            let relation = if is_interface {
+                CandidateRelation::Extends
+            } else {
+                CandidateRelation::Implements
+            };
+            for target in targets {
+                let raw = self.text(target);
+                let cleaned = clean_java_type(&raw);
+                if cleaned.is_empty() || is_java_builtin_type(&cleaned) {
+                    continue;
+                }
+                let (qualifier, spelling) = split_qualified(&cleaned);
+                self.add_relationship_occurrence(
+                    SemanticRole::BaseType,
+                    relation,
+                    owner,
+                    spelling,
+                    qualifier,
+                    target,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn add_java_annotations(
+        &mut self,
+        declaration: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let mut annotations = Vec::new();
+        let mut cursor = declaration.walk();
+        annotations.extend(
+            declaration
+                .children(&mut cursor)
+                .filter(|child| child.kind() == "annotation" || child.kind() == "marker_annotation"),
+        );
+        for annotation in annotations {
+            let mut cursor = annotation.walk();
+            let Some(mut target) = annotation
+                .children(&mut cursor)
+                .find(|child| child.is_named())
+                .or_else(|| Some(annotation))
+            else {
+                continue;
+            };
+            if target.kind() == "annotation" {
+                target = target
+                    .child_by_field_name("name")
+                    .or_else(|| {
+                        first_identifier_like(
+                            target,
+                            &["identifier", "type_identifier", "scoped_type_identifier"],
+                        )
+                    })
+                    .unwrap_or(target);
+            }
+            let raw = self.text(target);
+            let raw = raw.trim().trim_start_matches('@');
+            if raw.is_empty() {
+                continue;
+            }
+            let (qualifier, spelling) = split_qualified(raw);
+            if spelling.is_empty() {
+                continue;
+            }
+            self.add_relationship_occurrence(
+                SemanticRole::Annotation,
+                CandidateRelation::Annotates,
+                owner,
+                spelling,
+                qualifier,
+                target,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn add_java_method_references(
+        &mut self,
+        declaration: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if let Some(parameters) = declaration.child_by_field_name("parameters") {
+            let mut cursor = parameters.walk();
+            for parameter in parameters.children(&mut cursor).filter(|child| child.is_named()) {
+                let mut names = Vec::new();
+                if let Some(type_node) = parameter.child_by_field_name("type") {
+                    collect_named_targets(
+                        type_node,
+                        &["type_identifier", "scoped_type_identifier", "generic_type", "identifier"],
+                        &mut names,
+                    );
+                    if names.is_empty() {
+                        names.push(type_node);
+                    }
+                } else {
+                    collect_named_targets(
+                        parameter,
+                        &["type_identifier", "scoped_type_identifier", "generic_type", "identifier"],
+                        &mut names,
+                    );
+                }
+                for target in names {
+                    let raw = self.text(target);
+                    self.add_java_type_reference(owner, &raw, target)?;
+                }
+            }
+        }
+        if let Some(returns) = declaration.child_by_field_name("type") {
+            let mut names = Vec::new();
+            collect_named_targets(
+                returns,
+                &["type_identifier", "scoped_type_identifier", "generic_type"],
+                &mut names,
+            );
+            if names.is_empty() {
+                names.push(returns);
+            }
+            for target in names {
+                let raw = self.text(target);
+                self.add_java_type_reference(owner, &raw, target)?;
+            }
+        }
+        if let Some(throws) = declaration.child_by_field_name("throws") {
+            let mut names = Vec::new();
+            collect_named_targets(
+                throws,
+                &["type_identifier", "scoped_type_identifier", "generic_type", "identifier"],
+                &mut names,
+            );
+            for target in names {
+                let raw = self.text(target);
+                self.add_java_type_reference(owner, &raw, target)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_java_declarations(
+        &mut self,
+        node: Node<'_>,
+        file: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if matches!(
+            node.kind(),
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "record_declaration"
+                | "method_declaration"
+                | "constructor_declaration"
+        ) {
+            let Some(name_node) = node.child_by_field_name("name") else {
+                return Ok(());
+            };
+            let name = self.text(name_node);
+            if name.is_empty() {
+                return Ok(());
+            }
+            let kind = match node.kind() {
+                "class_declaration" => "class",
+                "interface_declaration" => "interface",
+                "enum_declaration" => "class",
+                "record_declaration" => "class",
+                "method_declaration" | "constructor_declaration" => "method",
+                _ => "method",
+            };
+            let qualified_name = if file.kind == "file" {
+                format!("{}.{}", self.module_or_package, name)
+            } else {
+                format!("{}::{name}", file.qualified_name)
+            };
+            let graph_node_id = self.unique_graph_id(
+                if file.kind == "file" {
+                    make_id(&[&self.stem, &name])
+                } else {
+                    make_id(&[&file.graph_node_id, &name])
+                },
+                node,
+            );
+            let fact_id = self.builder.declare(
+                kind,
+                &graph_node_id,
+                &name,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&file.scope_id),
+                range_for_node(self.source_file, name_node),
+            )?;
+            let scope_id = self.builder.open_scope(
+                kind,
+                Some(&fact_id),
+                Some(&file.scope_id),
+                range_for_node(self.source_file, node),
+            )?;
+            let context = DeclarationContext {
+                fact_id: fact_id.clone(),
+                scope_id: scope_id.clone(),
+                graph_node_id,
+                name: name.clone(),
+                qualified_name: qualified_name.clone(),
+                kind: kind.to_owned(),
+                enclosing_type_qualified_name: if kind == "method" {
+                    file.qualified_name.rsplit("::").next().map(str::to_owned)
+                } else {
+                    None
+                },
+                runtime_nested: false,
+            };
+            self.add_ownership(file, &context)?;
+            if matches!(
+                node.kind(),
+                "class_declaration"
+                    | "interface_declaration"
+                    | "enum_declaration"
+                    | "record_declaration"
+            ) {
+                self.add_java_class_relationships(node, &context)?;
+                self.add_java_annotations(node, &context)?;
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+                    self.collect_java_declarations(child, &context)?;
+                }
+            }
+            if matches!(node.kind(), "method_declaration" | "constructor_declaration") {
+                self.add_java_method_references(node, &context)?;
+                self.add_java_annotations(node, &context)?;
+            }
+            self.declarations.insert(node.id(), context);
+            return Ok(());
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_java_declarations(child, file)?;
+        }
+        Ok(())
+    }
+
+    fn walk_java_evidence(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        root: bool,
+    ) -> Result<(), EvidenceError> {
+        let active = self
+            .declarations
+            .get(&node.id())
+            .cloned()
+            .unwrap_or_else(|| owner.clone());
+
+        match node.kind() {
+            "import_declaration" => {
+                self.add_java_imports(node, &active)?;
+                return Ok(());
+            }
+            "method_invocation" => {
+                self.add_java_call(node, &active)?;
+            }
+            "object_creation_expression" => {
+                self.add_java_constructor(node, &active)?;
+            }
+            "field_declaration" | "local_variable_declaration" => {
+                if let Some(type_node) = node.child_by_field_name("type") {
+                    let mut names = Vec::new();
+                    collect_named_targets(
+                        type_node,
+                        &["type_identifier", "scoped_type_identifier", "generic_type", "identifier"],
+                        &mut names,
+                    );
+                    for target in names {
+                        let raw = self.text(target);
+                        self.add_java_type_reference(&active, &raw, target)?;
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            if !root
+                && matches!(
+                    child.kind(),
+                    "class_declaration"
+                        | "interface_declaration"
+                        | "enum_declaration"
+                        | "record_declaration"
+                        | "method_declaration"
+                        | "constructor_declaration"
+                )
+                && !self.declarations.contains_key(&child.id())
+            {
+                continue;
+            }
+            self.walk_java_evidence(child, &active, false)?;
+        }
+        Ok(())
+    }
+
+    fn add_java_imports(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let mut text = self.text(node);
+        if text.is_empty() {
+            return Ok(());
+        }
+        if let Some(index) = text.find("import") {
+            text = text[index + "import".len()..].trim_start().to_owned();
+        }
+        if let Some(static_text) = text.strip_prefix("static ") {
+            text = static_text.trim_start().to_owned();
+        }
+        let target = text.trim().trim_end_matches(';').trim();
+        if target.is_empty() || target == "*" {
+            return Ok(());
+        }
+        if target.ends_with(".*") {
+            return Ok(());
+        }
+        let local = target
+            .rfind('.')
+            .map_or_else(|| target.to_owned(), |index| target[index + 1..].to_owned());
+        if local.is_empty() {
+            return Ok(());
+        }
+        let binding = self.builder.bind(
+            BindingKind::Import,
+            &local,
+            target,
+            None,
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, node),
+        )?;
+        if let Some(existing) = self.bindings.insert(local.clone(), binding.clone()) {
+            if existing != binding {
+                self.ambiguous_bindings.insert(local.clone());
+            }
+        }
+        self.imported_targets
+            .insert(local.clone(), target.to_owned());
+        let occurrence_id = self.builder.occur(
+            SemanticRole::Import,
+            &owner.fact_id,
+            &local,
+            None,
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, node),
+        )?;
+        self.builder.relate(
+            CandidateRelation::Imports,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            Some(&binding),
+            &local,
+            ResolutionConstraint {
+                exact_target_declaration_id: None,
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: Some(target.to_owned()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: Some(target.to_owned()),
+                allowed_target_kinds: vec![
+                    "file".to_owned(),
+                    "package".to_owned(),
+                    "package".to_owned(),
+                    "module".to_owned(),
+                    "class".to_owned(),
+                    "type_alias".to_owned(),
+                    "interface".to_owned(),
+                ],
+                hierarchy: None,
+                allow_external: true,
+            },
+        )?;
+        Ok(())
+    }
+
+    fn add_java_call(&mut self, node: Node<'_>, owner: &DeclarationContext) -> Result<(), EvidenceError> {
+        let Some(function) = node.child_by_field_name("name") else {
+            return Ok(());
+        };
+        let name = self.text(function);
+        let object = node
+            .child_by_field_name("object")
+            .and_then(|object| {
+                let raw = clean_java_type(&self.text(object));
+                (!raw.is_empty()).then_some(raw)
+            });
+        let name = if let Some(object) = object.as_deref() {
+            if object == "this" || object == "super" {
+                name
+            } else {
+                format!("{object}.{name}")
+            }
+        } else {
+            name
+        };
+        let name = clean_java_type(&name);
+        if name.is_empty() || is_java_builtin_type(&name) {
+            return Ok(());
+        }
+        let (qualifier, spelling) = split_qualified(&name);
+        if spelling.is_empty() {
+            return Ok(());
+        }
+        let lookup_name = qualifier.unwrap_or(spelling);
+        if self.binding_is_ambiguous(owner, lookup_name) {
+            return Ok(());
+        }
+        let node_for_range = node.child_by_field_name("name").unwrap_or(node);
+        self.add_relationship_occurrence(
+            SemanticRole::Call,
+            CandidateRelation::Calls,
+            owner,
+            spelling,
+            qualifier,
+            node_for_range,
+        )?;
+        Ok(())
+    }
+
+    fn add_java_constructor(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let type_node = node.child_by_field_name("type").unwrap_or(node);
+        let mut types = Vec::new();
+        collect_named_targets(
+            type_node,
+            &["type_identifier", "scoped_type_identifier", "generic_type", "identifier"],
+            &mut types,
+        );
+        if types.is_empty() {
+            types.push(type_node);
+        }
+        for type_node in types {
+            let raw = self.text(type_node);
+            let cleaned = clean_java_type(&raw);
+            if cleaned.is_empty() || is_java_builtin_type(&cleaned) {
+                continue;
+            }
+            let (qualifier, spelling) = split_qualified(&cleaned);
+            if spelling.is_empty() {
+                continue;
+            }
+            let lookup_name = qualifier
+                .map_or_else(|| spelling.to_owned(), |qualifier| format!("{qualifier}.{spelling}"));
+            if self.binding_is_ambiguous(owner, &lookup_name) {
+                continue;
+            }
+            self.add_relationship_occurrence(
+                SemanticRole::Construction,
+                CandidateRelation::Constructs,
+                owner,
+                spelling,
+                qualifier,
+                type_node,
+            )?;
+        }
+        Ok(())
     }
 
     fn collect_python_declarations(
@@ -1798,6 +2372,150 @@ fn go_receiver_name(node: Node<'_>, source: &[u8]) -> Option<String> {
                 .to_owned()
         })
         .filter(|name| !name.is_empty())
+}
+
+fn clean_java_type(raw: &str) -> String {
+    let mut value = raw.trim();
+    if value.is_empty() {
+        return String::new();
+    }
+    value = value.trim_start_matches('@');
+    while value.starts_with("new ") {
+        value = value.trim_start_matches("new ");
+        value = value.trim();
+    }
+    if let Some(suffix) = value.strip_prefix("extends ").or_else(|| value.strip_prefix("super ")) {
+        value = suffix.trim();
+    }
+    while let Some(suffix) = value.strip_prefix('?') {
+        value = suffix.trim();
+    }
+    if value.ends_with(".class") {
+        value = value.trim_end_matches(".class");
+    }
+    if let Some(index) = value.find('<') {
+        value = &value[..index];
+    }
+    value = value.trim();
+    while value.ends_with("...") {
+        value = value.trim_end_matches("...").trim_end();
+    }
+    while value.ends_with("[]") {
+        value = value.trim_end_matches("[]").trim_end();
+    }
+    value = value
+        .trim_start_matches(['&', '*', '?', '$', '(', ')'].as_ref())
+        .trim_end_matches([';', ',', '.'].as_ref());
+    value.trim().to_owned()
+}
+
+fn is_java_builtin_type(name: &str) -> bool {
+    matches!(
+        name,
+        "String"
+            | "StringBuilder"
+            | "List"
+            | "Map"
+            | "Set"
+            | "ArrayList"
+            | "HashMap"
+            | "Integer"
+            | "Long"
+            | "Double"
+            | "Float"
+            | "Boolean"
+            | "Object"
+            | "Class"
+            | "Throwable"
+            | "Exception"
+            | "RuntimeException"
+            | "Error"
+            | "void"
+            | "boolean"
+            | "char"
+            | "byte"
+            | "short"
+            | "int"
+            | "long"
+            | "float"
+            | "double"
+            | "any"
+    )
+}
+
+fn first_identifier_like<'tree>(node: Node<'tree>, kinds: &[&str]) -> Option<Node<'tree>> {
+    if kinds.contains(&node.kind()) {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        if let Some(found) = first_identifier_like(child, kinds) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn java_file_package(path: &Path, source_file: &str, source: &[u8]) -> String {
+    if let Ok(source) = std::str::from_utf8(source) {
+        let mut in_block_comment = false;
+        for line in source.lines() {
+            let mut text = line.trim();
+            if text.is_empty() {
+                continue;
+            }
+            if in_block_comment {
+                if let Some(end) = text.find("*/") {
+                    text = &text[end + 2..];
+                    in_block_comment = false;
+                } else {
+                    continue;
+                }
+            }
+            if text.starts_with("/*") {
+                if let Some(end) = text.find("*/") {
+                    text = &text[end + 2..];
+                    in_block_comment = false;
+                } else {
+                    in_block_comment = true;
+                    continue;
+                }
+            }
+            if text.starts_with("//") {
+                continue;
+            }
+            if text.trim().is_empty() {
+                continue;
+            }
+            let mut chunks = text.split_whitespace();
+            if let Some(prefix) = chunks.next()
+                && prefix == "package"
+            {
+                if let Some(raw_package) = chunks.next() {
+                    let package = raw_package.trim_end_matches(';').trim();
+                    if !package.is_empty() {
+                        return package.to_owned();
+                    }
+                }
+            }
+            break;
+        }
+    }
+    if source_file.contains('/') {
+        let trimmed = source_file.trim_end_matches(".java");
+        if trimmed.is_empty() {
+            return String::new();
+        }
+        return trimmed.replace('/', ".");
+    }
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(source_file);
+    if !stem.is_empty() {
+        return stem.to_owned();
+    }
+    "default".to_owned()
 }
 
 fn go_name_is_locally_bound(call: Node<'_>, spelling: &str, source: &[u8]) -> bool {

@@ -123,7 +123,10 @@ fn only_hard_cut_languages_expose_universal_profiles() {
         Registry::universal_profile_for_spec(go).map(|profile| profile.language),
         Some("go")
     );
-    assert!(Registry::universal_profile_for_spec(java).is_none());
+    assert_eq!(
+        Registry::universal_profile_for_spec(java).map(|profile| profile.language),
+        Some("java")
+    );
     assert!(Registry::universal_profile_for_spec(rust).is_none());
     assert_eq!(
         Registry::universal_adapter(Path::new("src/example.py")).map(|profile| profile.language),

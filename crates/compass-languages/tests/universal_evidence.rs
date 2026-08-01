@@ -287,7 +287,7 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
             .iter()
             .map(|profile| profile.language)
             .collect::<Vec<_>>(),
-        ["go", "python"]
+        ["go", "java", "python"]
     );
     assert!(
         profiles
@@ -300,7 +300,7 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
             .windows(2)
             .all(|pair| pair[0] < pair[1])
     }));
-    assert!(AdapterRegistry::universal_profile("java").is_none());
+    assert!(AdapterRegistry::universal_profile("java").is_some());
     assert!(AdapterRegistry::universal_profile("rust").is_none());
 }
 
@@ -566,6 +566,149 @@ class Dynamic(factory(Base)):
             .iter()
             .any(|binding| { binding.spelling == "helper" && binding.kind == BindingKind::Import })
     );
+}
+
+#[test]
+fn java_universal_evidence_emits_contains_references_and_publication_quality() {
+    let source = br#"package demo.catalog;
+
+interface Repository {
+    void enqueue(Catalog item);
+}
+
+class Catalog {}
+
+class Worker extends Catalog implements Repository {
+    public void enqueue(Catalog item) {
+        this.track(item);
+    }
+
+    void track(Catalog item) {}
+}
+
+class Service {
+    private final Catalog catalog;
+
+    public Service(Catalog catalog) {
+        this.catalog = catalog;
+    }
+
+    public Catalog run(Catalog item) {
+        return new Catalog();
+    }
+}
+"#;
+    let mut engine = Engine::default();
+    let extraction = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/src/main/java/catalog/Service.java"),
+            "src/main/java/catalog/Service.java",
+            source,
+        )
+        .expect("extract java");
+    let evidence = extraction
+        .graph
+        .semantic_evidence
+        .expect("java universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid java evidence");
+
+    let service = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "Service" && declaration.kind == "class")
+        .unwrap_or_else(|| panic!("missing declaration Service"));
+    let worker = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "Worker")
+        .unwrap_or_else(|| panic!("missing declaration Worker"));
+    let run = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "run" && declaration.kind == "method")
+        .unwrap_or_else(|| panic!("missing declaration run"));
+
+    assert_eq!(evidence.adapter.language, "java");
+    let service_contains = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Contains
+                && candidate.source_declaration_id == service.id
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        !service_contains.is_empty(),
+        "missing contains for service declaration: {:?}",
+        service_contains
+    );
+    assert!(
+        service_contains
+            .iter()
+            .any(|candidate| candidate.target_spelling == "run"),
+        "service contains missing run target: {:?}",
+        service_contains
+    );
+    assert!(evidence
+        .candidates
+        .iter()
+        .any(|candidate| {
+            candidate.relation == CandidateRelation::Extends
+                && candidate.source_declaration_id == worker.id
+                && candidate.target_spelling == "Catalog"
+        }));
+    assert!(evidence
+        .candidates
+        .iter()
+        .any(|candidate| {
+            candidate.relation == CandidateRelation::Implements
+                && candidate.source_declaration_id == worker.id
+                && candidate.target_spelling == "Repository"
+        }));
+    assert!(evidence
+        .candidates
+        .iter()
+        .any(|candidate| {
+            candidate.relation == CandidateRelation::References
+                && candidate.source_declaration_id == run.id
+                && candidate.target_spelling == "Catalog"
+        }));
+    let required_publication = [
+        ("Service", "class"),
+        ("Worker", "class"),
+        ("run", "method"),
+        ("Catalog", "class"),
+        ("Repository", "interface"),
+    ];
+    for (name, kind) in required_publication {
+        assert!(
+            evidence.declarations.iter().any(|declaration| {
+                declaration.name == name
+                    && declaration.kind == kind
+                    && extraction
+                        .graph
+                        .nodes
+                        .iter()
+                        .any(|node| node.id == declaration.graph_node_id)
+            }),
+            "missing publication node for declaration {name} ({kind})"
+        );
+    }
+
+    assert!(extraction
+        .graph
+        .edges
+        .iter()
+        .any(|edge| {
+            edge.source == service.graph_node_id
+                && extraction
+                    .graph
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == edge.target)
+                    .is_some_and(|node| node.string("label") == ".run()")
+                && edge.string("relation") == "method"
+        }));
 }
 
 #[test]

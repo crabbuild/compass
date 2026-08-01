@@ -85,6 +85,22 @@ const GO_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::ExternalReferences,
 ];
 
+const JAVA_CAPABILITIES: &[LanguageCapability] = &[
+    LanguageCapability::Declarations,
+    LanguageCapability::LexicalScopes,
+    LanguageCapability::Imports,
+    LanguageCapability::Aliases,
+    LanguageCapability::Calls,
+    LanguageCapability::Construction,
+    LanguageCapability::Decorators,
+    LanguageCapability::TypeReferences,
+    LanguageCapability::BaseTypes,
+    LanguageCapability::Members,
+    LanguageCapability::Ownership,
+    LanguageCapability::Receivers,
+    LanguageCapability::ExternalReferences,
+];
+
 const PYTHON_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::Declarations,
     LanguageCapability::LexicalScopes,
@@ -106,6 +122,10 @@ const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
     AdapterProfile {
         language: "go",
         capabilities: GO_CAPABILITIES,
+    },
+    AdapterProfile {
+        language: "java",
+        capabilities: JAVA_CAPABILITIES,
     },
     AdapterProfile {
         language: "python",
