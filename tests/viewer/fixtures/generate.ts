@@ -139,6 +139,10 @@ export default async function generate(): Promise<void> {
     path.join(output, "community.html"),
     communityHarness(communityOverview, communityDetail)
   );
+  await writeFile(
+    path.join(output, "exportCommunity.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass export community fixture</title><style>${viewerCss}</style></head><body><div id="compass-viewer-root"></div><script id="compass-viewer-model" type="application/json">${JSON.stringify(communityOverview)}</script><script type="application/json" data-compass-community="0">${JSON.stringify(communityDetail)}</script><script>${viewerJs}</script></body></html>`
+  );
   const architectureNodes = Array.from({ length: 31 }, (_, index) => ({
     id: index === 0 ? "authenticate" : index === 1 ? "database" : `symbol-${index}`,
     label: index === 0 ? "authenticate" : index === 1 ? "database" : `symbol${index}`,

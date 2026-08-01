@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Hard-require current Compass community-detail capabilities for the graph
+  workflow instead of entering a partially compatible viewer.
+- Speed large immutable graph snapshots with copy-on-write clones where the
+  host filesystem supports them, with a portable copy fallback.
+- Share improved graph lookup performance and standalone light/dark canvas
+  theming with `compass export html`.
+
 ## 0.1.9
 
 - Add first-run Compass CLI installation in a visible VS Code terminal on

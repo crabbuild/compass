@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Hard-cut `graph.html` onto the shared Compass/VS Code graph workbench. HTML
+  exports are now self-contained, follow light and dark system themes, validate
+  embedded community details on demand, and support double-click community
+  drill-down with immediate return to the overview.
+- Require the VS Code extension's current graph workflow to negotiate both the
+  `graph` and `community_detail` capabilities, accelerate immutable large-graph
+  snapshots with copy-on-write filesystem clones when available, and remove
+  repeated linear node lookups from graph interactions.
 - Use fresh, verified SCIP symbol evidence to disambiguate Java call targets in
   `graph.json` through exact AST call and declaration anchors, while rejecting
   non-call references, stale artifacts, ambiguous definitions, and conflicting

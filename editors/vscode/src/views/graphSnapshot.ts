@@ -1,3 +1,4 @@
+import { constants } from "node:fs";
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,7 +13,10 @@ export class CurrentGraphSnapshot {
     const directory = await mkdtemp(path.join(tmpdir(), "compass-vscode-graph-"));
     const graphPath = path.join(directory, "graph.json");
     try {
-      await copyFile(sourceGraphPath, graphPath);
+      // Prefer a copy-on-write clone for large graphs. Node falls back to a
+      // normal copy when the filesystem does not support reflinks, while the
+      // snapshot remains isolated from in-place source changes either way.
+      await copyFile(sourceGraphPath, graphPath, constants.COPYFILE_FICLONE);
       const sourceDirectory = path.dirname(sourceGraphPath);
       await Promise.all([
         this.copyOptional(
@@ -49,7 +53,7 @@ export class CurrentGraphSnapshot {
 
   private async copyOptional(source: string, destination: string): Promise<void> {
     try {
-      await copyFile(source, destination);
+      await copyFile(source, destination, constants.COPYFILE_FICLONE);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }

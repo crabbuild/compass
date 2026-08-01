@@ -9,7 +9,6 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::OutputError;
-use crate::json::python_json_compact;
 use crate::viewer_model::GraphViewModel;
 
 const DEFAULT_NODE_LIMIT: isize = 5_000;
@@ -64,7 +63,7 @@ pub fn html_document(
                 learning_overlay: options.learning_overlay,
             },
             Some((document, communities)),
-        );
+        )?;
         return Ok(Some(HtmlRender {
             nodes: meta.nodes.len(),
             edges: meta.links.len(),
@@ -73,7 +72,7 @@ pub fn html_document(
         }));
     }
     Ok(Some(HtmlRender {
-        html: render(document, communities, output_path.as_ref(), options, None),
+        html: render(document, communities, output_path.as_ref(), options, None)?,
         aggregated: false,
         nodes: document.nodes.len(),
         edges: document.links.len(),
@@ -252,68 +251,146 @@ fn render(
     output_path: &Path,
     options: &HtmlOptions<'_>,
     drilldown: Option<(&GraphDocument, &Communities)>,
-) -> String {
-    let nodes = node_values(document, communities, options);
-    let edges = document.links.iter().map(edge_value).collect::<Vec<_>>();
-    let mut legend = Vec::new();
-    if let Some(labels) = options.community_labels {
-        for community in labels.keys() {
-            let count = options.member_counts.map_or_else(
-                || communities.get(community).map(Vec::len).unwrap_or_default(),
-                |counts| {
-                    counts.get(community).copied().unwrap_or_else(|| {
-                        communities.get(community).map(Vec::len).unwrap_or_default()
-                    })
-                },
-            );
-            let mut item = Map::new();
-            item.insert("cid".into(), Value::from(*community));
-            item.insert(
-                "color".into(),
-                Value::String(COMMUNITY_COLORS[community % COMMUNITY_COLORS.len()].into()),
-            );
-            item.insert(
-                "label".into(),
-                Value::String(html_escape(&sanitize_label(&community_name(
-                    *community,
-                    options.community_labels,
-                )))),
-            );
-            item.insert("count".into(), Value::from(count));
-            legend.push(Value::Object(item));
+) -> Result<String, OutputError> {
+    let title = sanitize_label(&output_path.to_string_lossy());
+    let model = crate::viewer_model::graph_view_model(
+        document,
+        communities,
+        title.clone(),
+        options,
+        drilldown.is_some(),
+    );
+    let details = drilldown.map_or_else(
+        || Ok(BTreeMap::new()),
+        |(source, source_communities)| {
+            community_view_models(source, source_communities, &title, options)
+        },
+    )?;
+    Ok(crate::viewer_model::shared_viewer_html_with_communities(
+        &model, &details,
+    )?)
+}
+
+fn community_view_models(
+    document: &GraphDocument,
+    communities: &Communities,
+    title: &str,
+    options: &HtmlOptions<'_>,
+) -> Result<BTreeMap<usize, GraphViewModel>, OutputError> {
+    let node_community = communities
+        .iter()
+        .flat_map(|(community, members)| {
+            members
+                .iter()
+                .map(move |member| (member.as_str(), *community))
+        })
+        .collect::<HashMap<_, _>>();
+    let mut grouped_nodes = BTreeMap::<usize, Vec<NodeRecord>>::new();
+    for node in &document.nodes {
+        if let Some(community) = node_community.get(node.id.as_str()) {
+            grouped_nodes
+                .entry(*community)
+                .or_default()
+                .push(node.clone());
         }
     }
-    let hyperedges = document
+    for (community, members) in communities {
+        let found = grouped_nodes.get(community).map_or(0, Vec::len);
+        if found != members.len() {
+            return Err(OutputError::IncompleteCommunity {
+                community: *community,
+                missing: members.len().saturating_sub(found),
+            });
+        }
+    }
+    let mut grouped_links = BTreeMap::<usize, Vec<EdgeRecord>>::new();
+    for edge in &document.links {
+        let (Some(source), Some(target)) = (
+            node_community.get(edge.source.as_str()),
+            node_community.get(edge.target.as_str()),
+        ) else {
+            continue;
+        };
+        if source == target {
+            grouped_links.entry(*source).or_default().push(edge.clone());
+        }
+    }
+    let mut grouped_hyperedges = BTreeMap::<usize, Vec<Value>>::new();
+    for hyperedge in document
         .graph
         .get("hyperedges")
-        .cloned()
-        .unwrap_or_else(|| Value::Array(Vec::new()));
-    let details = drilldown.map_or_else(
-        || Value::Object(Map::new()),
-        |(source, source_communities)| community_details(source, source_communities, options),
-    );
-    let nodes_json = js_safe(&python_json_compact(&Value::Array(nodes)));
-    let edges_json = js_safe(&python_json_compact(&Value::Array(edges)));
-    let legend_json = js_safe(&python_json_compact(&Value::Array(legend)));
-    let hyperedges_json = js_safe(&python_json_compact(&hyperedges));
-    let details_json = js_safe(&python_json_compact(&details));
-    let title = html_escape(&sanitize_label(&output_path.to_string_lossy()));
-    let stats = format!(
-        "{} nodes &middot; {} edges &middot; {} communities",
-        document.nodes.len(),
-        document.links.len(),
-        communities.len()
-    );
-    page(
-        &title,
-        &stats,
-        &nodes_json,
-        &edges_json,
-        &legend_json,
-        &hyperedges_json,
-        &details_json,
-        drilldown.is_some(),
-    )
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(ids) = hyperedge.get("nodes").and_then(Value::as_array) else {
+            continue;
+        };
+        let mut owner = None;
+        let mut complete = ids.len() >= 2;
+        for id in ids {
+            let Some(id) = id.as_str() else {
+                complete = false;
+                break;
+            };
+            let Some(community) = node_community.get(id).copied() else {
+                complete = false;
+                break;
+            };
+            if owner.is_some_and(|owner| owner != community) {
+                complete = false;
+                break;
+            }
+            owner = Some(community);
+        }
+        if complete && let Some(community) = owner {
+            grouped_hyperedges
+                .entry(community)
+                .or_default()
+                .push(hyperedge.clone());
+        }
+    }
+    let detail_options = HtmlOptions {
+        community_labels: options.community_labels,
+        member_counts: None,
+        node_limit: None,
+        learning_overlay: options.learning_overlay,
+    };
+    let mut models = BTreeMap::new();
+    for (community, nodes) in grouped_nodes {
+        let mut graph = Map::new();
+        match grouped_hyperedges.remove(&community) {
+            Some(hyperedges) if !hyperedges.is_empty() => {
+                graph.insert("hyperedges".into(), Value::Array(hyperedges));
+            }
+            _ => {
+                graph.remove("hyperedges");
+            }
+        }
+        let detail = GraphDocument {
+            directed: document.directed,
+            multigraph: document.multigraph,
+            graph,
+            nodes,
+            links: grouped_links.remove(&community).unwrap_or_default(),
+            extras: BTreeMap::new(),
+        };
+        let detail_communities = BTreeMap::from([(
+            community,
+            detail.nodes.iter().map(|node| node.id.clone()).collect(),
+        )]);
+        models.insert(
+            community,
+            crate::viewer_model::graph_view_model(
+                &detail,
+                &detail_communities,
+                title,
+                &detail_options,
+                false,
+            ),
+        );
+    }
+    Ok(models)
 }
 
 pub(crate) fn node_values(
@@ -463,6 +540,7 @@ fn source_anchor_unsigned(node: &NodeRecord, legacy_key: &str, v1_key: &str) -> 
     })
 }
 
+#[allow(dead_code)]
 fn community_details(
     document: &GraphDocument,
     communities: &Communities,
@@ -853,6 +931,7 @@ fn html_escape(value: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
 }
+#[allow(dead_code)]
 fn js_safe(value: &str) -> String {
     value.replace("</", "<\\/")
 }
@@ -962,6 +1041,7 @@ fn resolve_learning_source(source: &str, output_path: &Path) -> Option<std::path
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 fn page(
     title: &str,
     stats: &str,
@@ -2221,9 +2301,9 @@ mod tests {
             &HtmlOptions::default(),
         )?
         .ok_or("HTML unexpectedly skipped")?;
-        assert!(rendered.html.contains("<\\/script>"));
-        assert!(!rendered.html.contains("onclick=\"focusNode("));
-        assert!(rendered.html.contains("data-nid=\"${esc(nid)}\""));
+        assert!(rendered.html.contains("\\u003c/script\\u003e"));
+        assert!(!rendered.html.contains("<script>alert(1)</script>"));
+        assert!(rendered.html.contains("id=\"compass-viewer-model\""));
         Ok(())
     }
 
@@ -2241,25 +2321,14 @@ mod tests {
         )?
         .ok_or("HTML unexpectedly skipped")?;
         for marker in [
-            "id=\"graph-toolbar\"",
-            "id=\"physics-toggle\"",
-            "id=\"fit-graph\"",
-            "id=\"reset-view\"",
-            "id=\"labels-toggle\"",
-            "id=\"viewer-status\"",
-            "id=\"sidebar\"",
-            "const viewerState =",
-            "function setPhysicsRunning(running)",
-            "network.stopSimulation()",
-            "network.once('stabilizationIterationsDone'",
-            "function applyRelationshipSpotlight(id)",
-            "function clearFocus()",
-            "function focusNode(id)",
-            "setPhysicsRunning(false);",
-            "applyRelationshipSpotlight(id);",
-            "focusNode(params.nodes[0]);",
-            "else clearFocus();",
-            "network.on('doubleClick'",
+            "id=\"compass-viewer-root\"",
+            "id=\"compass-viewer-model\"",
+            "Interactive Compass code graph",
+            "Graph controls",
+            "Graph inspector",
+            "compass-tool-button",
+            "doubleClick",
+            "compass:open-source",
         ] {
             assert!(rendered.html.contains(marker), "missing {marker}");
         }
@@ -2280,20 +2349,14 @@ mod tests {
         )?
         .ok_or("HTML unexpectedly skipped")?;
         for marker in [
-            "<strong>Compass</strong>",
-            "role=\"search\"",
-            "role=\"listbox\"",
-            "aria-controls=\"search-results\"",
-            "search.addEventListener('keydown'",
-            "case 'ArrowDown':",
-            "case 'ArrowUp':",
-            "case 'Enter':",
-            "case 'Escape':",
-            "@media (max-width: 760px)",
-            "@media (prefers-reduced-motion: reduce)",
+            "Search graph nodes",
+            "role:\"listbox\"",
+            "Back to community overview",
+            "@media(max-width:760px)",
+            "@media(prefers-reduced-motion:reduce)",
             ":focus-visible",
-            "class=\"node-identity\"",
-            "class=\"metadata-grid\"",
+            "compass-node-identity",
+            "compass-metadata-grid",
         ] {
             assert!(rendered.html.contains(marker), "missing {marker}");
         }
@@ -2337,16 +2400,15 @@ mod tests {
         assert_eq!((rendered.nodes, rendered.edges), (2, 1));
         assert!(rendered.html.contains("2 cross-community edges"));
         for marker in [
-            "const COMMUNITY_DETAILS =",
-            "const IS_AGGREGATED = true",
-            "function enterCommunity(community, focusId = null)",
-            "id=\"back-overview\"",
-            "\"symbol_kind\": \"function\"",
-            "\"language\": \"python\"",
-            "\"line_start\": 4",
-            "\"line_end\": 8",
-            "\"signature\": \"def A(value)\"",
-            "class=\\\"node-hover-card\\\"",
+            "data-compass-community=\"0\"",
+            "data-compass-community=\"1\"",
+            "compass:open-community",
+            "\"aggregated\":true",
+            "\"kind\":\"function\"",
+            "\"language\":\"python\"",
+            "\"startLine\":4",
+            "\"endLine\":8",
+            "\"signature\":\"def A(value)\"",
         ] {
             assert!(rendered.html.contains(marker), "missing {marker}");
         }
@@ -2380,8 +2442,8 @@ mod tests {
             &HtmlOptions::default(),
         )?
         .ok_or("HTML unexpectedly skipped")?;
-        assert!(rendered.html.contains("\"learning_status\": \"preferred\""));
-        assert!(rendered.html.contains("\"learning_stale\": false"));
+        assert!(rendered.html.contains("\"learningStatus\":\"preferred\""));
+        assert!(rendered.html.contains("\"learningStale\":false"));
         Ok(())
     }
 
