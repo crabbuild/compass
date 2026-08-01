@@ -3498,6 +3498,7 @@ fn make_framework_fact_sources_portable(extraction: &mut Extraction, root: &Path
         let source_file = match fact {
             RawFrameworkFact::Route(route) => &mut route.anchor.source_file,
             RawFrameworkFact::Domain(domain) => &mut domain.anchor.source_file,
+            RawFrameworkFact::Annotation(annotation) => &mut annotation.anchor.source_file,
         };
         let path = Path::new(source_file);
         if !path.is_absolute() {

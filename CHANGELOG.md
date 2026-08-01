@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Hard-cut Java Spring framework extraction to the production universal
+  `spring-java` pack, including composed and inherited HTTP mappings, constants,
+  bean and injection topology, messaging, scheduling, JPA, transactions, and
+  security; Kotlin Spring remains on its established detector.
+- Advance universal extraction semantics to `compass.languages.extraction/4`
+  so cached Java evidence cannot be reused across the Spring pack cutover.
 - Introduce the first supported Compass code graph contract,
   `compass.graph/1`, as a strict versioned NetworkX-compatible multigraph with
   structural, framework, enterprise, messaging, job, schema, configuration,

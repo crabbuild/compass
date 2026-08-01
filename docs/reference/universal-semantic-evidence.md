@@ -271,10 +271,11 @@ changes for this extension.
 derived from universal language evidence. It declares:
 
 - stable pack ID and source, config, or template kind;
-- universal languages and required capabilities;
+- universal languages, required language capabilities, and framework
+  capabilities;
 - dependency markers and manifest policy;
 - named activation rules;
-- accepted semantic roles and emitted relation families;
+- accepted semantic roles and typed framework relation families;
 - exact-evidence or exact-anchored-heuristic occurrence policy; and
 - nonzero candidate, include-depth, alias-expansion, and per-file fact limits.
 
@@ -291,9 +292,9 @@ descriptor and implementation together.
 
 ```rust
 use compass_languages::{
-    CandidateRelation, FrameworkLimits, FrameworkManifestPolicy,
+    FrameworkCapability, FrameworkLimits, FrameworkManifestPolicy,
     FrameworkOccurrencePolicy, FrameworkPackDescriptor, FrameworkPackKind,
-    FrameworkPackRegistry, LanguageCapability, SemanticRole,
+    FrameworkPackRegistry, FrameworkRelation, LanguageCapability, SemanticRole,
 };
 
 let descriptor = FrameworkPackDescriptor {
@@ -301,11 +302,12 @@ let descriptor = FrameworkPackDescriptor {
     kind: FrameworkPackKind::Source,
     languages: &["python"],
     required_capabilities: &[LanguageCapability::Calls],
+    framework_capabilities: &[FrameworkCapability::Messaging],
     dependency_markers: &["example/framework"],
     manifest_policy: FrameworkManifestPolicy::Required,
     activation_rules: &["decorated-handler"],
     accepted_roles: &[SemanticRole::Call],
-    emitted_relation_families: &[CandidateRelation::Calls],
+    emitted_relation_families: &[FrameworkRelation::Handles],
     occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
     limits: FrameworkLimits::default(),
 };
@@ -393,8 +395,10 @@ Python or Go has met the production qualification gates.
 
 ## Current qualification boundary
 
-Python and Go are the only universal adapters in this increment. The contract
-is designed for any language or framework, but Java, Rust, other languages,
-and existing framework packs are not yet cut over or qualified. Do not infer
-support from file extensions, existing raw graph output, or total node and
-edge counts.
+Python, Go, Rust, and Java are hard-cut universal language adapters. Rust and
+Java remain `UniversalCandidate`; this framework change does not promote Java.
+`spring-java` is the first production universal framework pack and advertises
+typed HTTP, bean, injection, messaging, scheduling, persistence, transaction,
+and security capabilities. Kotlin Spring remains on its established detector.
+Do not infer support for another language or framework from file extensions,
+raw graph output, or total node and edge counts.

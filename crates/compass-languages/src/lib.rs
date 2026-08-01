@@ -18,7 +18,7 @@ mod fortran;
 pub mod frameworks;
 
 /// Version of the extraction contract consumed by graph publication.
-pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/3";
+pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/4";
 mod go;
 mod groovy;
 mod ids;
@@ -60,9 +60,10 @@ pub use evidence::{
 };
 pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
 pub use frameworks::{
-    FrameworkLimitError, FrameworkLimits, FrameworkManifestPolicy, FrameworkOccurrencePolicy,
-    FrameworkPackDescriptor, FrameworkPackKind, FrameworkPackRegistry, FrameworkPackRegistryError,
-    RawDomainFact, RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
+    FrameworkCapability, FrameworkLimitError, FrameworkLimits, FrameworkManifestPolicy,
+    FrameworkOccurrencePolicy, FrameworkPackDescriptor, FrameworkPackKind, FrameworkPackRegistry,
+    FrameworkPackRegistryError, FrameworkRelation, RawDomainFact, RawFrameworkAnchor,
+    RawFrameworkAnnotationFact, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
 };
 pub use ids::{file_stem, make_id, normalize_id};
 pub use program::{TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
