@@ -1885,7 +1885,7 @@ mod tests {
             ..Extraction::default()
         };
 
-        resolve_cross_file_calls_with_root(&mut extraction, Path::new("/repo"));
+        resolve_cross_file_calls_with_root(&mut extraction, &HashMap::new(), Path::new("/repo"));
 
         assert!(!extraction.edges.iter().any(|edge| {
             edge.source == "dispatch"
