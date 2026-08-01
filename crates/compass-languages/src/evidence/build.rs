@@ -1030,7 +1030,7 @@ impl<'source> DirectAdapterState<'source> {
             if !valid_python_import_target(&target_name)
                 || alias_node
                     .as_ref()
-                    .is_some_and(|alias_node| alias.is_none() && self.text(*alias_node) != "")
+                    .is_some_and(|alias_node| alias.is_none() && !self.text(*alias_node).is_empty())
             {
                 continue;
             }

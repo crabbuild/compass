@@ -956,7 +956,7 @@ def _classify_edges(
             for fact in (source_coverage, target_coverage)
         )
         exact = [
-            (edge, occurrence)
+            edge
             for edge in exact_index.get(
                 (
                     graphify.relation,
