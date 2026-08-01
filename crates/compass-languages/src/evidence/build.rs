@@ -991,7 +991,6 @@ impl<'source> DirectAdapterState<'source> {
         {
             return Ok(());
         }
-        let occurrence_range = range_for_node(self.source_file, node);
         let module = node.child_by_field_name("module_name").map(|module| {
             resolve_python_module(
                 &self.module_or_package,
@@ -1070,7 +1069,6 @@ impl<'source> DirectAdapterState<'source> {
                 local,
                 binding_target,
                 import_target,
-                occurrence_range.clone(),
             )?;
         }
         Ok(())
@@ -1083,7 +1081,6 @@ impl<'source> DirectAdapterState<'source> {
         local: String,
         binding_target: String,
         import_target: String,
-        occurrence_range: EvidenceRange,
     ) -> Result<(), EvidenceError> {
         let is_reexport = owner.kind == "file"
             && self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py");
@@ -1120,7 +1117,7 @@ impl<'source> DirectAdapterState<'source> {
             &local,
             None,
             Some(&owner.scope_id),
-            occurrence_range,
+            range.clone(),
         )?;
         let target_spelling = import_target.rsplit('.').next().unwrap_or(&import_target);
         self.builder.relate(
@@ -4072,7 +4069,10 @@ impl<'source> DirectAdapterState<'source> {
             .or_default()
             .entry(local.to_owned())
             .or_default();
-        if self.language != "python" && !versions.is_empty() {
+        if (self.language != "python" && !versions.is_empty())
+            || (self.language == "python"
+                && versions.iter().any(|version| version.target != target))
+        {
             self.ambiguous_bindings
                 .insert((scope_id.clone(), local.to_owned()));
         }

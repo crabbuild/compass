@@ -346,7 +346,7 @@ fn identity_module_alias_resolves_to_the_exact_source_inventory() -> Result<(), 
         edge.source == caller.id
             && edge.target == signals.id
             && edge.string("relation") == "imports_from"
-            && edge.string("resolution_rule") == "explicitbinding"
+            && edge.string("resolution_rule") == "explicit-binding"
     }));
     Ok(())
 }
@@ -534,7 +534,7 @@ fn universal_python_reexports_follow_a_bounded_multi_hop_alias_chain_determinist
         })
         .collect::<Vec<_>>();
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].string("resolution_rule"), "explicitbinding");
+    assert_eq!(calls[0].string("resolution_rule"), "explicit-binding");
     Ok(())
 }
 
