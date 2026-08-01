@@ -590,7 +590,7 @@ fn collect_route_config(
         Map::new(),
     ) {
         RawFrameworkFact::Route(route) => route,
-        RawFrameworkFact::Domain(_) => unreachable!(),
+        RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => unreachable!(),
     };
     fact.middleware_references = middleware;
     facts.push(RawFrameworkFact::Route(fact));

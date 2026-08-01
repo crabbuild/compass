@@ -42,7 +42,6 @@ const TRUSTED_EDGE_RECORD: &str = TRUSTED_EDGE_RECORD_ATTRIBUTE;
 const TRUSTED_GRAPH_COVERAGE: &str = "_compass_v1_graph_coverage";
 const TRUSTED_GRAPH_DIAGNOSTICS: &str = "_compass_v1_graph_diagnostics";
 const CANONICAL_RAW_ORDER: &str = "_compass_v1_canonical_raw_order";
-const CANONICAL_EXTERNAL_SYMBOL: &str = "_canonical_external_symbol";
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
 const MAX_EXTERNAL_REFERENCE_DIAGNOSTICS: usize = 100;
 
@@ -1531,11 +1530,6 @@ fn split_sourceless_placeholders(
             node.attributes.get(TRUSTED_NODE_RECORD).is_none()
                 && optional_source_path(&node.attributes, "source_file").is_none()
                 && !node.attributes.contains_key("source_anchor")
-                && node
-                    .attributes
-                    .get(CANONICAL_EXTERNAL_SYMBOL)
-                    .and_then(Value::as_bool)
-                    != Some(true)
         })
         .map(|node| node.id.clone())
         .collect::<BTreeSet<_>>();
@@ -1850,6 +1844,11 @@ fn mark_external_placeholder(
     attributes.insert(
         "extractor".to_owned(),
         Value::String("compass.graph.external-placeholder".to_owned()),
+    );
+    attributes.insert("_origin".to_owned(), Value::String("heuristic".to_owned()));
+    attributes.insert(
+        "confidence".to_owned(),
+        Value::String("INFERRED".to_owned()),
     );
     if let Some(scope) = stable_scope {
         attributes.insert(
@@ -2741,11 +2740,6 @@ fn normalize_node(
     } else {
         None
     };
-    let canonical_external = raw
-        .attributes
-        .get(CANONICAL_EXTERNAL_SYMBOL)
-        .and_then(Value::as_bool)
-        == Some(true);
     if source.is_none()
         && external_wiring_site.is_none()
         && optional_string(&raw.attributes, "extractor").as_deref()
@@ -2848,11 +2842,7 @@ fn normalize_node(
         &qualified_name,
         &raw.id,
         details.as_ref(),
-        if canonical_external {
-            source.as_ref()
-        } else {
-            source.as_ref().or(external_wiring_site.as_ref())
-        },
+        source.as_ref().or(external_wiring_site.as_ref()),
     )?;
     let diagnostics = external_wiring_site
         .as_ref()
@@ -3185,6 +3175,11 @@ fn normalize_provenance(
             ));
         }
     };
+    let confidence = if heuristic_default {
+        EvidenceConfidence::Inferred
+    } else {
+        confidence
+    };
     let rule = optional_string(attributes, "rule")
         .or_else(|| normalization_rule.map(str::to_owned))
         .or_else(|| {
@@ -3220,6 +3215,11 @@ fn normalize_provenance(
                 &format!("unknown provenance origin {value:?}"),
             ));
         }
+    };
+    let origin = if heuristic_default {
+        EvidenceOrigin::Heuristic
+    } else {
+        origin
     };
     let extractor = if raw_origin.as_deref() == Some("semantic") {
         SEMANTIC_LAYER_EXTRACTOR.to_owned()

@@ -1400,6 +1400,13 @@ fn sourceless_placeholder_identity_unifies_same_file_occurrences_with_typed_defe
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let external_name = "Illuminate\\Database\\Eloquent\\Model";
+    let mut external = raw_external_node("raw:model", external_name);
+    external
+        .attributes
+        .insert("_origin".to_owned(), json!("ast"));
+    external
+        .attributes
+        .insert("confidence".to_owned(), json!("EXTRACTED"));
     let mut inheritance = raw_php_edge(root, "src/lib.rs", "raw:user", "raw:model", "inherits", 70);
     append_endpoint_rewrite_evidence(
         &mut inheritance.attributes,
@@ -1412,7 +1419,7 @@ fn sourceless_placeholder_identity_unifies_same_file_occurrences_with_typed_defe
         nodes: vec![
             raw_file_node(root, "raw:file", "src/lib.rs"),
             raw_class_node(root, "raw:user", "src/lib.rs", "App\\User", 10),
-            raw_external_node("raw:model", external_name),
+            external,
         ],
         edges: vec![
             raw_php_edge(root, "src/lib.rs", "raw:file", "raw:model", "imports", 50),
@@ -1649,6 +1656,53 @@ fn semantic_external_marker_defers_project_placeholder_edges_for_any_known_produ
             && evidence.rule.as_deref() == Some("external-symbol-placeholder")
             && evidence.wiring_site.is_some()
     }));
+    Ok(())
+}
+
+#[test]
+fn canonical_external_exact_binding_is_published_as_inferred_placeholder()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut external = raw_external_node("raw:blueprint", "flask.Blueprint");
+    external.attributes.extend(Map::from_iter([
+        ("symbol_kind".to_owned(), json!("class")),
+        ("language".to_owned(), json!("python")),
+        (
+            "extractor".to_owned(),
+            json!("compass.resolve.python.universal"),
+        ),
+        ("_origin".to_owned(), json!("ast")),
+        ("confidence".to_owned(), json!("EXTRACTED")),
+        ("_canonical_external_symbol".to_owned(), json!(true)),
+    ]));
+    let graph = Extraction {
+        nodes: vec![raw_file_node(root, "raw:file", "src/lib.rs"), external],
+        edges: vec![raw_php_edge(
+            root,
+            "src/lib.rs",
+            "raw:file",
+            "raw:blueprint",
+            "imports",
+            50,
+        )],
+        ..Extraction::default()
+    };
+
+    let document = normalize_v1(graph, build_evidence(root)?)?;
+    let external = document
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "flask.Blueprint")
+        .ok_or("missing canonical external placeholder")?;
+    assert!(external.evidence.iter().any(|evidence| {
+        evidence.extractor == "compass.graph.external-placeholder"
+            && evidence.origin == EvidenceOrigin::Heuristic
+            && evidence.confidence == EvidenceConfidence::Inferred
+            && evidence.rule.as_deref() == Some("external-symbol-placeholder")
+            && evidence.wiring_site.is_some()
+    }));
+    assert!(document.links.first().is_some_and(|edge| edge.deferred));
     Ok(())
 }
 

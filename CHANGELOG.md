@@ -10,6 +10,25 @@
   `graph` and `community_detail` capabilities, accelerate immutable large-graph
   snapshots with copy-on-write filesystem clones when available, and remove
   repeated linear node lookups from graph interactions.
+
+## 0.2.0 - 2026-08-01
+
+- Preserve framework routes and domain facts across incremental AST cache
+  reloads by re-rooting cached framework anchors consistently with node and
+  edge source paths.
+- Publish unresolved external symbols as source-scoped, inferred placeholders
+  with deferred incident edges, while retaining canonical resolver work
+  internally.
+- Hard-cut Java Spring framework extraction to the production universal
+  `spring-java` pack, including composed and inherited HTTP mappings, constants,
+  bean and injection topology, messaging, scheduling, JPA, transactions, and
+  security; Kotlin Spring remains on its established detector.
+- Advance universal extraction semantics to `compass.languages.extraction/4`
+  so cached Java evidence cannot be reused across the Spring pack cutover.
+- Reduce immutable history build overhead by removing redundant trusted-graph,
+  ordering, source-inventory, and Program module/function storage; encode
+  independent records in parallel while retaining exact export and backward
+  read compatibility, and reject stale worktree paths in shared AST caches.
 - Use fresh, verified SCIP symbol evidence to disambiguate Java call targets in
   `graph.json` through exact AST call and declaration anchors, while rejecting
   non-call references, stale artifacts, ambiguous definitions, and conflicting

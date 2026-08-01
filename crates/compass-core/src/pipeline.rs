@@ -1857,26 +1857,32 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
         return;
     };
     let portable = relative.to_string_lossy().replace('\\', "/");
+    let normalize_path = |value: &str| {
+        let path = Path::new(value);
+        let canonical = if path.is_absolute() {
+            canonicalize_allow_missing(path)
+        } else {
+            canonicalize_allow_missing(&root.join(path))
+        };
+        canonical.strip_prefix(root).map_or_else(
+            |_| portable_out_of_root_source(&canonical, root),
+            |relative| relative.to_string_lossy().replace('\\', "/"),
+        )
+    };
+    let normalize_origin_path = |value: &str| {
+        let path = Path::new(value);
+        let canonical_value = if path.is_absolute() {
+            canonicalize_allow_missing(path)
+        } else {
+            canonicalize_allow_missing(&root.join(path))
+        };
+        if path == source || canonical_value == canonical {
+            portable.clone()
+        } else {
+            normalize_path(value)
+        }
+    };
     let set_portable = |attributes: &mut serde_json::Map<String, serde_json::Value>| {
-        let normalize_path = |value: &str| {
-            let path = Path::new(value);
-            if path.is_absolute() {
-                let canonical = canonicalize_allow_missing(path);
-                canonical.strip_prefix(root).map_or_else(
-                    |_| portable_out_of_root_source(&canonical, root),
-                    |relative| relative.to_string_lossy().replace('\\', "/"),
-                )
-            } else {
-                value.replace('\\', "/")
-            }
-        };
-        let normalize_origin_path = |value: &str| {
-            if Path::new(value) == source {
-                portable.clone()
-            } else {
-                normalize_path(value)
-            }
-        };
         for key in ["source_file", "origin_file"] {
             let Some(value) = attributes
                 .get(key)
@@ -1925,6 +1931,14 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
         if let Some(attributes) = hyperedge.as_object_mut() {
             set_portable(attributes);
         }
+    }
+    for fact in &mut extraction.framework_facts {
+        let source_file = match fact {
+            RawFrameworkFact::Route(route) => &mut route.anchor.source_file,
+            RawFrameworkFact::Domain(domain) => &mut domain.anchor.source_file,
+            RawFrameworkFact::Annotation(annotation) => &mut annotation.anchor.source_file,
+        };
+        *source_file = normalize_origin_path(source_file);
     }
     if let Some(calls) = extraction.raw_calls.as_mut() {
         for call in calls {
@@ -3510,6 +3524,7 @@ fn make_framework_fact_sources_portable(extraction: &mut Extraction, root: &Path
         let source_file = match fact {
             RawFrameworkFact::Route(route) => &mut route.anchor.source_file,
             RawFrameworkFact::Domain(domain) => &mut domain.anchor.source_file,
+            RawFrameworkFact::Annotation(annotation) => &mut annotation.anchor.source_file,
         };
         let path = Path::new(source_file);
         if !path.is_absolute() {
@@ -4263,6 +4278,85 @@ mod tests {
         );
         assert_eq!(extraction.edges[0].target, "ext_core_core_csproj");
         assert_eq!(extraction.edges[0].source, source_id);
+        Ok(())
+    }
+
+    #[test]
+    fn portable_ast_cache_removes_worktree_relative_source_paths() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let worktrees = directory.path().join("tmp");
+        let root = worktrees.join("worktree-current/checkout");
+        let source = root.join("fixtures/code-graph/routes/csharp/AspNetController.cs");
+        fs::create_dir_all(source.parent().ok_or("source path has no parent")?)?;
+        fs::write(&source, "class AspNetController {}\n")?;
+        let escaped =
+            "../../worktree-current/checkout/fixtures/code-graph/routes/csharp/AspNetController.cs";
+        let mut extraction = Extraction {
+            nodes: vec![RawNodeRecord {
+                id: "controller".to_owned(),
+                attributes: Map::from_iter([
+                    ("source_file".to_owned(), Value::String(escaped.to_owned())),
+                    ("origin_file".to_owned(), Value::String(escaped.to_owned())),
+                ]),
+            }],
+            framework_facts: vec![
+                serde_json::from_value(json!({
+                    "type": "domain",
+                    "fact": {
+                        "framework": "aspnet",
+                        "kind": "controller",
+                        "name": "AspNetController",
+                        "declaringScope": "AspNetController",
+                        "anchor": {
+                            "sourceFile": escaped,
+                            "startByte": 0,
+                            "endByte": 5,
+                            "startLine": 1,
+                            "startColumn": 0,
+                            "endLine": 1,
+                            "endColumn": 5
+                        },
+                        "origin": "ast"
+                    }
+                }))?,
+                serde_json::from_value(json!({
+                    "type": "annotation",
+                    "fact": {
+                        "packId": "spring-java",
+                        "framework": "spring",
+                        "annotationName": "Controller",
+                        "ownerDeclarationId": "controller-declaration",
+                        "ownerGraphNodeId": "controller",
+                        "ownerQualifiedName": "AspNetController",
+                        "ownerKind": "class",
+                        "anchor": {
+                            "sourceFile": escaped,
+                            "startByte": 0,
+                            "endByte": 5,
+                            "startLine": 1,
+                            "startColumn": 0,
+                            "endLine": 1,
+                            "endColumn": 5
+                        }
+                    }
+                }))?,
+            ],
+            ..Extraction::default()
+        };
+
+        prepare_portable_ast_cache_entry(&mut extraction, &source, &root);
+
+        let expected = "fixtures/code-graph/routes/csharp/AspNetController.cs";
+        assert_eq!(extraction.nodes[0].string("source_file"), expected);
+        assert_eq!(extraction.nodes[0].string("origin_file"), expected);
+        assert!(extraction.framework_facts.iter().all(|fact| {
+            let framework_source = match fact {
+                RawFrameworkFact::Route(route) => &route.anchor.source_file,
+                RawFrameworkFact::Domain(domain) => &domain.anchor.source_file,
+                RawFrameworkFact::Annotation(annotation) => &annotation.anchor.source_file,
+            };
+            framework_source == expected
+        }));
         Ok(())
     }
 

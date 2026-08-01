@@ -304,14 +304,13 @@ Framework detection is downstream of language parsing but upstream of final
 Code Graph v1 publication. Packs emit anchored route or domain facts; the
 framework resolver validates targets and materializes typed relationships.
 
-The universal pack descriptor and validator exist, but its production registry
-is currently empty. Python web, Rails, Spring, Go web, Rust web, ASP.NET,
-Vapor, TypeScript web, filesystem-route, enterprise-domain, config, and
-template packs therefore retain their established pack registries today. Each
-pack transitions atomically to the universal interface only after its declared
-activation evidence, accepted roles, target constraints, occurrence policy,
-limits, and language capabilities validate. No established detector is
-silently translated into a universal pack.
+The Java Spring source pack is the first production universal framework pack.
+It consumes exact Java annotation, call, import, type, ownership, and hierarchy
+evidence and derives HTTP, bean, injection, messaging, scheduling, persistence,
+transaction, and security meaning before framework resolution. Its Java legacy
+detectors are removed atomically; Kotlin Spring routing remains on its explicit
+established pack until Kotlin has a universal language adapter. Other packs
+retain their established registries until their own qualification and hard cut.
 
 ## Quality and failure boundaries
 

@@ -67,7 +67,7 @@ fn laravel_routes_expand_resources_prefixes_and_handler_syntaxes() -> Result<(),
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -141,7 +141,7 @@ Route::prefix('/wrong')->group(function () {
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(routes.len(), 4, "routes={routes:#?}");
@@ -220,12 +220,25 @@ fn spring_composes_class_and_method_mappings_without_custom_annotation_matches()
     let mut extraction = extract_and_resolve(&["jvm/SpringController.java"])?;
     let resolved =
         resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
-    assert!(resolved.iter().any(|route| {
-        route.route.operation == "GET"
-            && route.route.normalized_path == "/api/users/{id}"
-            && route.route.handler_reference == "SpringController.show"
-            && route.state == ResolutionState::Exact
-    }));
+    let show = resolved
+        .iter()
+        .find(|route| {
+            route.route.operation == "GET"
+                && route.route.normalized_path == "/api/users/{id}"
+                && route.state == ResolutionState::Exact
+        })
+        .ok_or("missing exact Spring GET route")?;
+    let [candidate] = show.candidates.as_slice() else {
+        return Err("Spring GET route did not resolve uniquely".into());
+    };
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .find(|node| node.id == candidate.node_id)
+            .map(|node| node.string("qualified_name")),
+        Some("example.SpringController::show".to_owned())
+    );
     assert_eq!(
         resolved
             .iter()

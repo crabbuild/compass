@@ -19,7 +19,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-postgres.workspace = true
 tokio-postgres-rustls.workspace = true
-compass-languages = { path = "../compass-languages", version = "0.1.4" }
+compass-languages = { path = "../compass-languages", version = "0.2.0" }
 
 [dev-dependencies]
 tempfile.workspace = true
