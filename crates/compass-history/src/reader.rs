@@ -130,9 +130,24 @@ impl RealizationReader<'_> {
                     OwnedHistoryRecordKey::Node(_) => {
                         HistoryRecord::Node(crate::artifacts::decode_compatible_node(&bytes)?)
                     }
-                    OwnedHistoryRecordKey::ProgramModule(_) => HistoryRecord::ProgramModule(
-                        crate::artifacts::decode_typed(&bytes, schema)?,
-                    ),
+                    OwnedHistoryRecordKey::ProgramModule(_) => {
+                        let module = match crate::artifacts::decode_program_module(&bytes)? {
+                            crate::artifacts::DecodedProgramModule::Embedded(module) => module,
+                            crate::artifacts::DecodedProgramModule::Indexed(indexed) => {
+                                hydrate_indexed_module(indexed, |symbol_id| {
+                                    match self.read(HistoryRecordKey::ProgramFunction(symbol_id))? {
+                                        Some(HistoryRecord::ProgramFunction(function)) => {
+                                            Ok(function)
+                                        }
+                                        _ => Err(HistoryError::CorruptHistory(format!(
+                                            "program module references missing function {symbol_id}"
+                                        ))),
+                                    }
+                                })?
+                            }
+                        };
+                        HistoryRecord::ProgramModule(module)
+                    }
                     OwnedHistoryRecordKey::ProgramFunction(_) => HistoryRecord::ProgramFunction(
                         crate::artifacts::decode_typed(&bytes, schema)?,
                     ),
@@ -158,5 +173,74 @@ impl RealizationReader<'_> {
 
     pub(crate) fn tree(&self, stored: &StoredTree) -> Tree {
         stored.to_tree()
+    }
+}
+
+fn hydrate_indexed_module(
+    mut indexed: crate::artifacts::IndexedProgramModule,
+    mut read_function: impl FnMut(&str) -> Result<compass_ir::FunctionIr, HistoryError>,
+) -> Result<compass_ir::ModuleIr, HistoryError> {
+    indexed.module.functions = indexed
+        .function_ids
+        .iter()
+        .map(|symbol_id| read_function(symbol_id))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(indexed.module)
+}
+
+#[cfg(test)]
+mod tests {
+    use compass_ir::{ExecutionMode, FunctionIr, ModuleIr, SourceAnchor, Visibility, hex_sha256};
+
+    use super::hydrate_indexed_module;
+    use crate::artifacts::IndexedProgramModule;
+
+    #[test]
+    fn indexed_module_reads_functions_in_declared_order() -> Result<(), crate::HistoryError> {
+        let function = |symbol_id: &str| FunctionIr {
+            symbol_id: symbol_id.to_owned(),
+            name: symbol_id.to_owned(),
+            graph_node_id: None,
+            signature_digest: hex_sha256(symbol_id.as_bytes()),
+            body_digest: hex_sha256(b"body"),
+            visibility: Visibility::Public,
+            execution_mode: ExecutionMode::Sync,
+            is_test: false,
+            anchor: SourceAnchor {
+                source_file: "src/lib.rs".to_owned(),
+                start_byte: 0,
+                end_byte: 1,
+            },
+            parameters: Vec::new(),
+            return_type: None,
+            blocks: Vec::new(),
+            coverage: Default::default(),
+            evidence: Vec::new(),
+        };
+        let module = ModuleIr {
+            source_file: "src/lib.rs".to_owned(),
+            language: "rust".to_owned(),
+            source_digest: hex_sha256(b"source"),
+            graph_node_id: None,
+            functions: Vec::new(),
+            coverage: Default::default(),
+            evidence: Vec::new(),
+        };
+        let hydrated = hydrate_indexed_module(
+            IndexedProgramModule {
+                module,
+                function_ids: vec!["second".to_owned(), "first".to_owned()],
+            },
+            |symbol_id| Ok(function(symbol_id)),
+        )?;
+        assert_eq!(
+            hydrated
+                .functions
+                .iter()
+                .map(|function| function.symbol_id.as_str())
+                .collect::<Vec<_>>(),
+            ["second", "first"]
+        );
+        Ok(())
     }
 }

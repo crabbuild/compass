@@ -11,7 +11,7 @@ use compass_ir::{
 };
 use compass_model::GraphDocument;
 use compass_model::identity::file_id;
-use prolly::VersionedValue;
+use prolly::{VersionedValue, decode_segments};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -108,6 +108,65 @@ fn trusted_graph_partitions_store_full_typed_node_records() -> Result<(), Box<dy
     assert_eq!(payload["evidence"][0]["origin"], "config");
     assert_eq!(payload["coverage"][0]["status"], "partial");
     assert_eq!(payload["diagnostics"][0]["code"], "fixture");
+    Ok(())
+}
+
+#[test]
+fn trusted_graph_partition_does_not_duplicate_full_graph_as_metadata()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = empty_trusted_graph();
+    let graph_bytes = canonical_json_bytes(&graph)?;
+    std::fs::write(directory.path().join("graph.json"), &graph_bytes)?;
+
+    let partition = GraphArtifacts::load(directory.path())?.partition(&completion())?;
+    assert!(partition.metadata.iter().all(|(key, _)| {
+        !matches!(
+            decode_segments(key).as_deref(),
+            Ok([_, _, kind, path])
+                if kind == b"sidecar" && path == b".compass-history/graph.v1.json"
+        )
+    }));
+    assert!(partition.metadata.iter().all(|(key, _)| {
+        !matches!(
+            decode_segments(key).as_deref(),
+            Ok([_, _, kind, _]) if kind == b"node-order" || kind == b"edge-order"
+        )
+    }));
+
+    let restored = GraphArtifacts::reconstruct(&partition)?;
+    assert_eq!(restored.graph_json_bytes()?, graph_bytes);
+    Ok(())
+}
+
+#[test]
+fn source_inventory_uses_one_decomposed_canonical_record() -> Result<(), Box<dyn std::error::Error>>
+{
+    let inventory = canonical_json_bytes(&json!({
+        "schema": "compass.history.source_inventory/1",
+        "code_files": {"src/lib.rs": {"git_object": "fixture"}}
+    }))?;
+    let mut artifacts = empty_trusted_artifacts()?;
+    artifacts.authoritative_sidecars.insert(
+        ".compass_source_inventory.json".to_owned(),
+        inventory.clone(),
+    );
+
+    let registry = artifacts.artifact_registry()?;
+    let entry = registry
+        .iter()
+        .find(|entry| entry.relative_path == ".compass_source_inventory.json")
+        .ok_or("source inventory registry entry missing")?;
+    assert!(entry.storage.is_none());
+
+    let partition = artifacts.partition(&completion())?;
+    assert_eq!(GraphArtifacts::reconstruct(&partition)?, artifacts);
+    assert!(partition.metadata.iter().any(|(key, _)| {
+        matches!(
+            decode_segments(key).as_deref(),
+            Ok([_, _, name]) if name == b"source-inventory"
+        )
+    }));
     Ok(())
 }
 
@@ -265,6 +324,16 @@ fn complete_graph_and_build_state_round_trip() -> Result<(), Box<dyn std::error:
     );
     assert_eq!(partitioned.program_facts.len(), 5);
     assert_eq!(partitioned.program_summaries.len(), 2);
+    let module_record = partitioned
+        .program_facts
+        .iter()
+        .find(|(key, _)| matches!(decode_segments(key).as_deref(), Ok([kind, _]) if kind == b"module"))
+        .ok_or("missing indexed module record")?;
+    let module = VersionedValue::from_bytes(&module_record.1)?;
+    assert_eq!(module.schema, "compass.program.module-index");
+    let module: Value = serde_json::from_slice(&module.payload)?;
+    assert_eq!(module["module"]["functions"], json!([]));
+    assert_eq!(module["function_ids"], json!(["run"]));
     Ok(())
 }
 

@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use crate::{FileError, StatHashIndex, file_hash, io_error, write_bytes_atomic, write_json_atomic};
 
 /// Changes whenever cached extraction semantics change, even if the wire encoding does not.
-pub const AST_CACHE_VERSION: &str = "3";
+pub const AST_CACHE_VERSION: &str = "5";
 /// Portable cache encoding version used in the on-disk namespace.
 pub const CACHE_ENCODING_VERSION: u32 = 7;
 const MESSAGEPACK_EXTENSION: &str = "msgpack";
