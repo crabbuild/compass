@@ -575,6 +575,33 @@ def _qualified_name_has_owner(qualified_name: str) -> bool:
     return "." in qualified_name or "::" in qualified_name
 
 
+def _constructor_matches_name(constructor: NodeFact, normalized_label: str) -> bool:
+    qualified_parts = [
+        part for part in re.split(r"::|\.", constructor.qualified_name) if part
+    ]
+    return bool(
+        len(qualified_parts) >= 2
+        and qualified_parts[-1] in {"<init>", "new"}
+        and qualified_parts[-2] == _terminal_symbol(normalized_label)
+    )
+
+
+def _unique_nearest_definition(
+    candidates: list[NodeFact], source_line: int, *, maximum_distance: int = 8
+) -> NodeFact | None:
+    nearby = [
+        (abs(candidate_line - source_line), candidate)
+        for candidate in candidates
+        if (candidate_line := _line_number(candidate.source_location)) is not None
+        and abs(candidate_line - source_line) <= maximum_distance
+    ]
+    if not nearby:
+        return None
+    minimum_distance = min(distance for distance, _ in nearby)
+    nearest = [candidate for distance, candidate in nearby if distance == minimum_distance]
+    return nearest[0] if len(nearest) == 1 else None
+
+
 def _unverifiable_placeholder(node: NodeFact) -> bool:
     return bool(
         node.placeholder
@@ -592,20 +619,228 @@ def _classify_nodes(
 ) -> tuple[dict[str, Coverage], dict[str, str]]:
     compass_by_fact: dict[str, list[NodeFact]] = {}
     compass_by_label: dict[str, list[NodeFact]] = {}
+    compass_callables_by_site: dict[tuple[str, str, str], list[NodeFact]] = {}
+    compass_callables_by_file_name: dict[tuple[str, str], list[NodeFact]] = {}
+    compass_constructors_by_site: dict[tuple[str, str], list[NodeFact]] = {}
+    compass_constructors_by_file: dict[str, list[NodeFact]] = {}
+    compass_definitions_by_site: dict[tuple[str, str, str], list[NodeFact]] = {}
+    compass_definitions_by_file_name: dict[tuple[str, str], list[NodeFact]] = {}
     for node in compass_nodes.values():
         compass_by_fact.setdefault(node.fact_key, []).append(node)
         if node.anchored_definition and not node.callable:
             compass_by_label.setdefault(node.normalized_label, []).append(node)
+            definition_name = _terminal_symbol(node.normalized_label)
+            compass_definitions_by_site.setdefault(
+                (
+                    node.source_file,
+                    node.source_location,
+                    definition_name,
+                ),
+                [],
+            ).append(node)
+            compass_definitions_by_file_name.setdefault(
+                (node.source_file, definition_name), []
+            ).append(node)
+        if node.anchored_definition and node.callable:
+            callable_name = _terminal_symbol(node.normalized_label)
+            compass_callables_by_site.setdefault(
+                (
+                    node.source_file,
+                    node.source_location,
+                    callable_name,
+                ),
+                [],
+            ).append(node)
+            compass_callables_by_file_name.setdefault(
+                (node.source_file, callable_name), []
+            ).append(node)
+            if node.kind == "constructor":
+                compass_constructors_by_site.setdefault(
+                    (node.source_file, node.source_location), []
+                ).append(node)
+                compass_constructors_by_file.setdefault(node.source_file, []).append(node)
 
     coverage: dict[str, Coverage] = {}
     mapping: dict[str, str] = {}
     excluded_kinds = {"file", "import", "export", "resource", "rationale"}
     for identifier, graphify in graphify_nodes.items():
         exact = compass_by_fact.get(graphify.fact_key, [])
+        exact_compatible = [
+            candidate
+            for candidate in exact
+            if (not graphify.kind or not candidate.kind or graphify.kind == candidate.kind)
+            and (
+                not graphify.language
+                or not candidate.language
+                or graphify.language == candidate.language
+            )
+            and (
+                not _qualified_name_has_owner(graphify.qualified_name)
+                or not _qualified_name_has_owner(candidate.qualified_name)
+                or graphify.qualified_name == candidate.qualified_name
+            )
+        ]
+        if len(exact_compatible) == 1 and not _unverifiable_placeholder(graphify):
+            coverage[identifier] = Coverage(
+                "exact", "source_fact", exact_compatible[0].identifier
+            )
+            mapping[identifier] = exact_compatible[0].identifier
+            continue
+        if graphify.callable and graphify.source_file and graphify.source_location:
+            callable_candidates = [
+                candidate
+                for candidate in compass_callables_by_site.get(
+                    (
+                        graphify.source_file,
+                        graphify.source_location,
+                        _terminal_symbol(graphify.normalized_label),
+                    ),
+                    [],
+                )
+                if not graphify.language
+                or not candidate.language
+                or graphify.language == candidate.language
+            ]
+            if len(callable_candidates) == 1:
+                coverage[identifier] = Coverage(
+                    "dominated",
+                    "canonical_callable_owner",
+                    callable_candidates[0].identifier,
+                )
+                mapping[identifier] = callable_candidates[0].identifier
+                continue
+            graphify_line = _line_number(graphify.source_location)
+            constructor_candidates = [
+                candidate
+                for candidate in compass_constructors_by_site.get(
+                    (graphify.source_file, graphify.source_location), []
+                )
+                if _constructor_matches_name(candidate, graphify.normalized_label)
+            ]
+            if len(constructor_candidates) == 1:
+                coverage[identifier] = Coverage(
+                    "dominated",
+                    "canonical_constructor_anchor",
+                    constructor_candidates[0].identifier,
+                )
+                mapping[identifier] = constructor_candidates[0].identifier
+                continue
+            nearest_constructor = (
+                _unique_nearest_definition(
+                    [
+                        candidate
+                        for candidate in compass_constructors_by_file.get(
+                            graphify.source_file, []
+                        )
+                        if _constructor_matches_name(
+                            candidate, graphify.normalized_label
+                        )
+                    ],
+                    graphify_line,
+                )
+                if graphify_line is not None
+                else None
+            )
+            if nearest_constructor is not None:
+                coverage[identifier] = Coverage(
+                    "dominated",
+                    "nearby_constructor_declaration",
+                    nearest_constructor.identifier,
+                )
+                mapping[identifier] = nearest_constructor.identifier
+                continue
+            nearby_candidates = [
+                candidate
+                for candidate in compass_callables_by_file_name.get(
+                    (
+                        graphify.source_file,
+                        _terminal_symbol(graphify.normalized_label),
+                    ),
+                    [],
+                )
+                if (
+                    not graphify.language
+                    or not candidate.language
+                    or graphify.language == candidate.language
+                )
+            ]
+            nearest_candidate = (
+                _unique_nearest_definition(nearby_candidates, graphify_line)
+                if graphify_line is not None
+                else None
+            )
+            if nearest_candidate is not None:
+                coverage[identifier] = Coverage(
+                    "dominated",
+                    "nearby_callable_declaration",
+                    nearest_candidate.identifier,
+                )
+                mapping[identifier] = nearest_candidate.identifier
+                continue
+        if (
+            not graphify.callable
+            and graphify.source_file
+            and graphify.source_location
+            and Path(graphify.source_file).name.casefold()
+            != graphify.normalized_label.casefold()
+        ):
+            definition_candidates = [
+                candidate
+                for candidate in compass_definitions_by_site.get(
+                    (
+                        graphify.source_file,
+                        graphify.source_location,
+                        _terminal_symbol(graphify.normalized_label),
+                    ),
+                    [],
+                )
+                if (not graphify.kind or not candidate.kind or graphify.kind == candidate.kind)
+                and (
+                    not graphify.language
+                    or not candidate.language
+                    or graphify.language == candidate.language
+                )
+            ]
+            if len(definition_candidates) == 1:
+                coverage[identifier] = Coverage(
+                    "dominated",
+                    "canonical_definition_anchor",
+                    definition_candidates[0].identifier,
+                )
+                mapping[identifier] = definition_candidates[0].identifier
+                continue
+            graphify_line = _line_number(graphify.source_location)
+            nearby_definitions = [
+                candidate
+                for candidate in compass_definitions_by_file_name.get(
+                    (
+                        graphify.source_file,
+                        _terminal_symbol(graphify.normalized_label),
+                    ),
+                    [],
+                )
+                if (not graphify.kind or not candidate.kind or graphify.kind == candidate.kind)
+                and (
+                    not graphify.language
+                    or not candidate.language
+                    or graphify.language == candidate.language
+                )
+            ]
+            nearest_definition = (
+                _unique_nearest_definition(nearby_definitions, graphify_line)
+                if graphify_line is not None
+                else None
+            )
+            if nearest_definition is not None:
+                coverage[identifier] = Coverage(
+                    "dominated",
+                    "nearby_definition_anchor",
+                    nearest_definition.identifier,
+                )
+                mapping[identifier] = nearest_definition.identifier
+                continue
         if exact and not _unverifiable_placeholder(graphify):
             coverage[identifier] = Coverage("exact", "source_fact", exact[0].identifier)
-            if len(exact) == 1:
-                mapping[identifier] = exact[0].identifier
             continue
         if _unverifiable_placeholder(graphify):
             generated_owner = [
@@ -746,16 +981,17 @@ def _precise_inheritance_occurrence(
         return False
     if (
         graphify.occurrence_file != graphify_source.source_file
-        or graphify.occurrence_location != graphify_source.source_location
         or compass.occurrence_file != graphify.occurrence_file
     ):
         return False
     declaration_line = _line_number(graphify.occurrence_location)
+    source_line = _line_number(graphify_source.source_location)
     base_line = _line_number(compass.occurrence_location)
     return bool(
-        declaration_line is not None
+        source_line is not None
+        and declaration_line is not None
         and base_line is not None
-        and declaration_line <= base_line <= declaration_line + 8
+        and source_line <= declaration_line <= base_line <= source_line + 8
     )
 
 
@@ -785,6 +1021,7 @@ def _classify_edges(
     inheritance_occurrence_targets: dict[
         tuple[str, str, str, str], set[str]
     ] = {}
+    typed_reference_index: dict[tuple[str, str], list[EdgeFact]] = {}
     containment: dict[str, set[str]] = {}
     import_occurrences: set[tuple[str, str, str]] = set()
     for edges in (graphify_edges, compass_edges):
@@ -810,6 +1047,8 @@ def _classify_edges(
         source = canonical_endpoints.get(edge.source, edge.source)
         target = canonical_endpoints.get(edge.target, edge.target)
         direct_index.setdefault((edge.relation, source, target), []).append(edge)
+        if edge.relation in {"returns", "type_of"}:
+            typed_reference_index.setdefault((source, target), []).append(edge)
         source_node = compass_nodes.get(edge.source)
         if (
             edge.relation in {"extends", "implements"}
@@ -1199,6 +1438,27 @@ def _classify_edges(
             )
             output.append(Coverage(status, "uncovered_endpoint", None))
             continue
+
+        if graphify.relation == "references":
+            typed_references = [
+                edge
+                for edge in typed_reference_index.get((source, target), [])
+                if _occurrence_match(graphify, edge, occurrence_oracle) is not None
+            ]
+            if len(typed_references) == 1:
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "precise_typed_reference",
+                        typed_references[0].payload_sha256,
+                    )
+                )
+                continue
+            if len(typed_references) > 1:
+                output.append(
+                    Coverage("ambiguous", "multiple_typed_reference_facts", None)
+                )
+                continue
 
         direct = direct_index.get((graphify.relation, source, target), [])
         if graphify.relation in {"extends", "implements"}:

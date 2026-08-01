@@ -3363,7 +3363,7 @@ fn map_node_kind(
         "import" => NodeKind::Import,
         "export" => NodeKind::Export,
         "macro" => NodeKind::Macro,
-        "annotation" => NodeKind::Annotation,
+        "annotation" | "annotation_type" => NodeKind::Annotation,
         "route" => NodeKind::Route,
         "component" => NodeKind::Component,
         "event" => NodeKind::Event,

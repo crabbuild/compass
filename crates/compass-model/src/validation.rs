@@ -948,8 +948,10 @@ const fn is_import_target(kind: NodeKind) -> bool {
                 | NodeKind::TypeAlias
                 | NodeKind::Variable
                 | NodeKind::Constant
+                | NodeKind::Field
                 | NodeKind::EnumMember
                 | NodeKind::Resource
+                | NodeKind::Annotation
                 | NodeKind::ConfigKey
         )
 }
@@ -1021,8 +1023,10 @@ const fn is_reference_source(kind: NodeKind) -> bool {
                 | NodeKind::Variable
                 | NodeKind::Constant
                 | NodeKind::Import
+                | NodeKind::EnumMember
                 | NodeKind::Export
                 | NodeKind::TypeAlias
+                | NodeKind::Annotation
                 | NodeKind::Resource
                 | NodeKind::Schema
                 | NodeKind::Query
@@ -1051,6 +1055,7 @@ const fn is_reference_target(kind: NodeKind) -> bool {
                 | NodeKind::Import
                 | NodeKind::Export
                 | NodeKind::TypeAlias
+                | NodeKind::Annotation
                 | NodeKind::Resource
                 | NodeKind::Schema
                 | NodeKind::Query

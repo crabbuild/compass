@@ -1569,7 +1569,33 @@ impl<'source> DirectAdapterState<'source> {
             enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
             runtime_nested: false,
         };
-        self.add_ownership(owner, &context)?;
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::Ownership,
+            &owner.fact_id,
+            name,
+            None,
+            Some(&owner.scope_id),
+            None,
+            range_for_node(self.source_file, name_node),
+        )?;
+        self.builder.relate(
+            CandidateRelation::Contains,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            None,
+            name,
+            ResolutionConstraint {
+                exact_target_declaration_id: None,
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: Some(self.module_or_package.clone()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: Some(qualified_name.clone()),
+                argument_count: Some(parameter_count),
+                allowed_target_kinds: vec![kind.to_owned()],
+                hierarchy: None,
+                allow_external: false,
+            },
+        )?;
         let binding_id = self.builder.bind(
             BindingKind::Member,
             name,
@@ -1862,7 +1888,7 @@ impl<'source> DirectAdapterState<'source> {
             }
             if let Some(interfaces) = node.child_by_field_name("interfaces") {
                 let mut names = Vec::new();
-                collect_java_type_nodes(interfaces, &mut names);
+                collect_java_direct_supertype_nodes(interfaces, &mut names);
                 for target in names {
                     self.add_java_named_relationship(
                         SemanticRole::TypeReference,
@@ -4506,6 +4532,32 @@ fn collect_java_type_nodes<'tree>(node: Node<'tree>, output: &mut Vec<Node<'tree
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
         collect_java_type_nodes(child, output);
+    }
+}
+
+fn collect_java_direct_supertype_nodes<'tree>(node: Node<'tree>, output: &mut Vec<Node<'tree>>) {
+    if matches!(node.kind(), "type_identifier" | "scoped_type_identifier") {
+        output.push(node);
+        return;
+    }
+    if node.kind() == "generic_type" {
+        if let Some(target) = node
+            .child_by_field_name("type")
+            .or_else(|| first_java_type_name(node))
+        {
+            output.push(target);
+        }
+        return;
+    }
+    if matches!(
+        node.kind(),
+        "type_arguments" | "annotation" | "marker_annotation"
+    ) {
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_java_direct_supertype_nodes(child, output);
     }
 }
 

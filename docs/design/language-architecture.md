@@ -39,7 +39,7 @@ This architecture is transitioning one language at a time. The status labels bel
 | Available now | The vendored package supplies 37 pinned static Tree-sitter grammars |
 | Available now | Python and Go are registered hard-cut version-1 adapters: they emit semantic evidence and use shared resolution and projection |
 | Available now | Rust Phase 2 is a quality-gated, hard-cut version-1 `UniversalCandidate`; its replaced publisher and collection resolution branches are removed |
-| Available now | Java is a hard-cut version-1 `UniversalCandidate`; its replaced publisher and Java member resolver are removed, and final pinned-corpus qualification is in progress |
+| Available now | Java is a hard-cut version-1 `UniversalCandidate`; its replaced publisher and Java member resolver are removed, and post-cutover pinned-corpus qualification is complete |
 | Available now | The remaining production languages keep their established extraction and resolution paths |
 | Planned | Later languages transition independently after language-specific qualification |
 
