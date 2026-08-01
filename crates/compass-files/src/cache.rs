@@ -657,44 +657,62 @@ fn source_items_mut(value: &mut Value, mut visit: impl FnMut(&mut serde_json::Ma
             }
         }
     }
+    let Some(facts) = object
+        .get_mut("framework_facts")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for fact in facts {
+        let Some(anchor) = fact
+            .get_mut("fact")
+            .and_then(Value::as_object_mut)
+            .and_then(|fact| fact.get_mut("anchor"))
+            .and_then(Value::as_object_mut)
+        else {
+            continue;
+        };
+        visit(anchor);
+    }
 }
 
 fn relativize_source_files(value: &mut Value, root: &Path) {
     source_items_mut(value, |item| {
-        let Some(source) = item.get("source_file").and_then(Value::as_str) else {
-            return;
-        };
-        if source.is_empty() {
-            return;
+        for key in ["source_file", "sourceFile"] {
+            let Some(source) = item.get(key).and_then(Value::as_str).map(str::to_owned) else {
+                continue;
+            };
+            if source.is_empty() {
+                continue;
+            }
+            let path = Path::new(&source);
+            if !path.is_absolute() {
+                continue;
+            }
+            let Ok(relative) = path.strip_prefix(root) else {
+                continue;
+            };
+            item.insert(
+                key.to_owned(),
+                Value::String(relative.to_string_lossy().replace('\\', "/")),
+            );
         }
-        let path = Path::new(source);
-        if !path.is_absolute() {
-            return;
-        }
-        let Ok(relative) = path.strip_prefix(root) else {
-            return;
-        };
-        item.insert(
-            "source_file".to_owned(),
-            Value::String(relative.to_string_lossy().replace('\\', "/")),
-        );
     });
 }
 
 fn absolutize_source_files(value: &mut Value, root: &Path) {
     source_items_mut(value, |item| {
-        let Some(source) = item.get("source_file").and_then(Value::as_str) else {
-            return;
-        };
-        if source.is_empty() {
-            return;
+        for key in ["source_file", "sourceFile"] {
+            let Some(source) = item.get(key).and_then(Value::as_str).map(str::to_owned) else {
+                continue;
+            };
+            if source.is_empty() || Path::new(&source).is_absolute() {
+                continue;
+            }
+            item.insert(
+                key.to_owned(),
+                Value::String(root.join(source).to_string_lossy().into_owned()),
+            );
         }
-        if Path::new(source).is_absolute() {
-            return;
-        }
-        item.insert(
-            "source_file".to_owned(),
-            Value::String(root.join(source).to_string_lossy().into_owned()),
-        );
     });
 }

@@ -9,7 +9,7 @@
       "path": "/qualification-health",
       "routeSource": "fixtures/code-graph/routes/python/django/qualification/urls.py",
       "handler": {
-        "qualifiedName": "qualification_health()"
+        "qualifiedName": "fixtures.code-graph.routes.python.django.qualification.urls.qualification_health"
       },
       "handlerSource": "fixtures/code-graph/routes/python/django/qualification/urls.py",
       "relationship": "routes_to",
@@ -36,7 +36,7 @@
       "path": "/health",
       "routeSource": "fixtures/code-graph/routes/python/flask_app.py",
       "handler": {
-        "qualifiedName": "health()"
+        "qualifiedName": "fixtures.code-graph.routes.python.flask_app.health"
       },
       "handlerSource": "fixtures/code-graph/routes/python/flask_app.py",
       "relationship": "routes_to",
@@ -63,7 +63,7 @@
       "path": "/v1/users",
       "routeSource": "fixtures/code-graph/routes/python/fastapi_app.py",
       "handler": {
-        "qualifiedName": "create_user()"
+        "qualifiedName": "fixtures.code-graph.routes.python.fastapi_app.create_user"
       },
       "handlerSource": "fixtures/code-graph/routes/python/fastapi_app.py",
       "relationship": "routes_to",
@@ -252,7 +252,7 @@
       "path": "/api/users/{id}",
       "routeSource": "fixtures/code-graph/routes/jvm/SpringController.java",
       "handler": {
-        "qualifiedName": "SpringController::show"
+        "qualifiedName": "example.SpringController::show"
       },
       "handlerSource": "fixtures/code-graph/routes/jvm/SpringController.java",
       "relationship": "routes_to",
@@ -279,7 +279,7 @@
       "path": "/java/:id",
       "routeSource": "fixtures/code-graph/routes/jvm/play/conf/routes",
       "handler": {
-        "qualifiedName": "PlayController::show"
+        "qualifiedName": "controllers.PlayController::show"
       },
       "handlerSource": "fixtures/code-graph/routes/jvm/PlayController.java",
       "relationship": "routes_to",
@@ -306,7 +306,7 @@
       "path": "/api/users",
       "routeSource": "fixtures/code-graph/routes/go/gin.go",
       "handler": {
-        "qualifiedName": "listUsers()"
+        "qualifiedName": "fixtures/code-graph/routes/go.listUsers"
       },
       "handlerSource": "fixtures/code-graph/routes/go/gin.go",
       "relationship": "routes_to",
@@ -333,7 +333,7 @@
       "path": "/users/{id}",
       "routeSource": "fixtures/code-graph/routes/go/chi.go",
       "handler": {
-        "qualifiedName": "showUser()"
+        "qualifiedName": "fixtures/code-graph/routes/go.showUser"
       },
       "handlerSource": "fixtures/code-graph/routes/go/chi.go",
       "relationship": "routes_to",
@@ -360,7 +360,7 @@
       "path": "/users/{id}",
       "routeSource": "fixtures/code-graph/routes/go/gorilla.go",
       "handler": {
-        "qualifiedName": "updateUser()"
+        "qualifiedName": "fixtures/code-graph/routes/go.updateUser"
       },
       "handlerSource": "fixtures/code-graph/routes/go/gorilla.go",
       "relationship": "routes_to",
@@ -387,7 +387,7 @@
       "path": "/users/:id",
       "routeSource": "fixtures/code-graph/routes/rust/axum.rs",
       "handler": {
-        "qualifiedName": "show_user()@43"
+        "qualifiedName": "crate::axum::show_user"
       },
       "handlerSource": "fixtures/code-graph/routes/rust/axum.rs",
       "relationship": "routes_to",
@@ -414,7 +414,7 @@
       "path": "/users",
       "routeSource": "fixtures/code-graph/routes/rust/actix.rs",
       "handler": {
-        "qualifiedName": "list_users()@28"
+        "qualifiedName": "crate::actix::list_users"
       },
       "handlerSource": "fixtures/code-graph/routes/rust/actix.rs",
       "relationship": "routes_to",
@@ -441,7 +441,7 @@
       "path": "/users/<id>",
       "routeSource": "fixtures/code-graph/routes/rust/rocket.rs",
       "handler": {
-        "qualifiedName": "show_user(u64)@40"
+        "qualifiedName": "crate::rocket::show_user"
       },
       "handlerSource": "fixtures/code-graph/routes/rust/rocket.rs",
       "relationship": "routes_to",
@@ -850,8 +850,8 @@
       "id": "node-struct",
       "kind": "struct",
       "source": "fixtures/code-graph/qualification/rich.rs",
-      "qualifiedName": "Receipt@101",
-      "producer": "compass.languages.rust",
+      "qualifiedName": "crate::rich::Receipt",
+      "producer": "compass.languages.rust.universal",
       "origins": [
         "ast"
       ],
@@ -872,8 +872,8 @@
       "id": "node-trait",
       "kind": "trait",
       "source": "fixtures/code-graph/qualification/rich.rs",
-      "qualifiedName": "Renderable@0",
-      "producer": "compass.languages.rust",
+      "qualifiedName": "crate::rich::Renderable",
+      "producer": "compass.languages.rust.universal",
       "origins": [
         "ast"
       ],
@@ -894,8 +894,8 @@
       "id": "node-enum",
       "kind": "enum",
       "source": "fixtures/code-graph/qualification/rich.rs",
-      "qualifiedName": "Mode@147",
-      "producer": "compass.languages.rust",
+      "qualifiedName": "crate::rich::Mode",
+      "producer": "compass.languages.rust.universal",
       "origins": [
         "ast"
       ],
@@ -905,8 +905,8 @@
       "id": "node-enum_member",
       "kind": "enum_member",
       "source": "fixtures/code-graph/qualification/rich.rs",
-      "qualifiedName": "Mode@147::Fast@167",
-      "producer": "compass.languages.rust",
+      "qualifiedName": "crate::rich::Mode::Fast",
+      "producer": "compass.languages.rust.universal",
       "origins": [
         "ast"
       ],
@@ -916,8 +916,8 @@
       "id": "node-type_alias",
       "kind": "type_alias",
       "source": "fixtures/code-graph/qualification/rich.rs",
-      "qualifiedName": "WidgetId@186",
-      "producer": "compass.languages.rust",
+      "qualifiedName": "crate::rich::WidgetId",
+      "producer": "compass.languages.rust.universal",
       "origins": [
         "ast"
       ],
@@ -1037,8 +1037,8 @@
       "id": "node-macro",
       "kind": "macro",
       "source": "fixtures/code-graph/qualification/rich.rs",
-      "qualifiedName": "widget@252",
-      "producer": "compass.languages.rust",
+      "qualifiedName": "crate::rich::widget",
+      "producer": "compass.languages.rust.universal",
       "origins": [
         "ast"
       ],
@@ -1304,7 +1304,7 @@
       "kind": "calls",
       "source": "fixtures/code-graph/qualification/rich.rs",
       "qualifiedName": "*",
-      "producer": "compass.languages.rust",
+      "producer": "compass.resolve.rust.universal",
       "origins": [
         "ast"
       ],
@@ -1368,9 +1368,9 @@
     {
       "id": "edge-type_of",
       "kind": "type_of",
-      "source": "fixtures/code-graph/qualification/rich.rs",
+      "source": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.rust",
+      "producer": "compass.languages.csharp",
       "origins": [
         "ast"
       ],
@@ -1379,9 +1379,9 @@
     {
       "id": "edge-returns",
       "kind": "returns",
-      "source": "fixtures/code-graph/qualification/rich.rs",
+      "source": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.rust",
+      "producer": "compass.languages.csharp",
       "origins": [
         "ast"
       ],
@@ -1557,7 +1557,7 @@
       "kind": "tests",
       "source": "fixtures/code-graph/qualification/rich.rs",
       "qualifiedName": "*",
-      "producer": "compass.languages.rust",
+      "producer": "compass.resolve.rust.universal",
       "origins": [
         "ast"
       ],
@@ -1599,15 +1599,15 @@
   ],
   "languages": {
     "source": "corpus",
-    "producerVersion": "compass-languages/0.1.10"
+    "producerVersion": "compass-languages/0.2.0"
   },
   "occurrences": [
     {
       "id": "repeated-rust-call",
       "kind": "calls",
       "source": "fixtures/code-graph/qualification/rich.rs",
-      "sourceQualifiedName": "Widget as Renderable::render(_)@345",
-      "targetQualifiedName": "target()@441",
+      "sourceQualifiedName": "<crate::rich::Widget as crate::rich::Renderable>::render",
+      "targetQualifiedName": "crate::rich::target",
       "minimum": 2
     }
   ],

@@ -10,3 +10,10 @@ public class UsersController : ControllerBase
     [HttpPost]
     public object Create() => new();
 }
+
+public class QualificationPayload {}
+
+public class QualificationTypes
+{
+    public QualificationPayload Echo(QualificationPayload value) => value;
+}

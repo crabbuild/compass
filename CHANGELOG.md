@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-08-01
+
+- Preserve framework routes and domain facts across incremental AST cache
+  reloads by re-rooting cached framework anchors consistently with node and
+  edge source paths.
+- Publish unresolved external symbols as source-scoped, inferred placeholders
+  with deferred incident edges, while retaining canonical resolver work
+  internally.
 - Hard-cut Java Spring framework extraction to the production universal
   `spring-java` pack, including composed and inherited HTTP mappings, constants,
   bean and injection topology, messaging, scheduling, JPA, transactions, and

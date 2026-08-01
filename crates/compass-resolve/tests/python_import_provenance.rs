@@ -1414,7 +1414,7 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
 }
 
 #[test]
-fn qualified_external_python_calls_are_canonical_and_follow_rebindings()
+fn qualified_external_python_calls_are_canonical_internally_and_source_scoped_on_publication()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -1547,13 +1547,13 @@ fn qualified_external_python_calls_are_canonical_and_follow_rebindings()
         .collect::<Vec<_>>();
     assert_eq!(
         published_placeholders.len(),
-        2,
-        "published canonical placeholders: {published_placeholders:#?}"
+        4,
+        "published source-scoped placeholders: {published_placeholders:#?}"
     );
     assert!(published_placeholders.iter().all(|node| {
         node.evidence.iter().any(|evidence| {
             evidence.origin == EvidenceOrigin::Heuristic
-                && evidence.confidence == EvidenceConfidence::Exact
+                && evidence.confidence == EvidenceConfidence::Inferred
                 && evidence.anchors.is_empty()
                 && evidence.wiring_site.is_some()
         })
