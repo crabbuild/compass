@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import sqlite3
 import subprocess
+import shutil
 from typing import Iterator
 
 from .adapters import ToolAdapter
@@ -77,6 +78,15 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _prune_graphify_mutation_artifacts(checkout: Path) -> None:
+    graphify_cache = checkout / "graphify-out" / "cache"
+    if graphify_cache.exists():
+        shutil.rmtree(graphify_cache, ignore_errors=True)
+        graphify_parent = graphify_cache.parent
+        if graphify_parent.is_dir() and not any(graphify_parent.iterdir()):
+            graphify_parent.rmdir()
+
+
 def select_mutation_file(checkout: Path, suffix: str) -> Path:
     raw = _git(checkout, "ls-files", "-z")
     candidates: list[Path] = []
@@ -101,6 +111,7 @@ def select_mutation_file(checkout: Path, suffix: str) -> Path:
 
 @contextmanager
 def graph_neutral_mutation(checkout: Path, path: Path) -> Iterator[None]:
+    _prune_graphify_mutation_artifacts(checkout)
     original = path.read_bytes()
     original_digest = hashlib.sha256(original).hexdigest()
     path.write_bytes(original + b"\n")
@@ -111,6 +122,7 @@ def graph_neutral_mutation(checkout: Path, path: Path) -> Iterator[None]:
         for line in _git(checkout, "status", "--porcelain=v1", "--untracked-files=all").splitlines()
         if line
     ]
+    status = [line for line in status if "graphify-out/cache/" not in line[3:]]
     relative = path.relative_to(checkout).as_posix()
     if len(status) != 1 or status[0][3:] != relative:
         path.write_bytes(original)
@@ -121,7 +133,11 @@ def graph_neutral_mutation(checkout: Path, path: Path) -> Iterator[None]:
         path.write_bytes(original)
         if _file_sha256(path) != original_digest:
             raise RuntimeError(f"failed to restore {path}")
+        _prune_graphify_mutation_artifacts(checkout)
         restored = _git(checkout, "status", "--porcelain=v1", "--untracked-files=all").strip()
+        restored = "\n".join(
+            line for line in restored.splitlines() if "graphify-out/cache/" not in line[3:]
+        )
         if restored:
             raise RuntimeError(f"checkout remained dirty after restoration: {restored}")
 

@@ -117,6 +117,20 @@ class WorkloadTests(unittest.TestCase):
             self.assertEqual(source.read_bytes(), original)
             self.assertEqual(git(checkout, "status", "--porcelain"), "")
 
+    def test_mutation_allows_graphify_cache_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = self.make_checkout(Path(directory))
+            cache = checkout / "graphify-out" / "cache"
+            cache.mkdir(parents=True)
+            (cache / "stat-index.json").write_text("{}", encoding="utf-8")
+            source = select_mutation_file(checkout, ".py")
+            original = source.read_bytes()
+            with graph_neutral_mutation(checkout, source):
+                self.assertNotEqual(source.read_bytes(), original)
+            self.assertEqual(source.read_bytes(), original)
+            self.assertEqual(git(checkout, "status", "--porcelain"), "")
+            self.assertFalse(cache.exists())
+
     def test_build_matrix_produces_three_correct_workloads(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
