@@ -98,6 +98,7 @@ workspace:
 | [Design principles](design/principles.md) | Local-first, deterministic, bounded, inspectable behavior |
 | [Architecture](design/architecture.md) | Major layers and the data that crosses them |
 | [Language architecture](design/language-architecture.md) | Grammar, adapter, evidence, resolution, and transition boundaries |
+| [Managed JDT integration](design/java-jdt-integration.md) | Planned Java semantic tooling, trust boundaries, phases, and acceptance criteria |
 | [Storage and history](design/storage-and-history.md) | Incremental artifacts and immutable historical realizations |
 | [Security and privacy](design/security-and-privacy.md) | Trust boundaries, credentials, and offline behavior |
 
