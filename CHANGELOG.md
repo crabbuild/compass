@@ -2,10 +2,15 @@
 
 ## Unreleased
 
-- Reduce immutable history build overhead by removing redundant trusted-graph,
-  ordering, source-inventory, and Program module/function storage; encode
-  independent records in parallel while retaining exact export and backward
-  read compatibility, and reject stale worktree paths in shared AST caches.
+- Reduce immutable history build overhead with stage-level artifact-load
+  instrumentation, verified single-pass graph and Program loading, concurrent
+  graph/Program reads, and an in-process typed-artifact handoff for native
+  code-only builds. Also remove redundant trusted-graph, ordering,
+  source-inventory, and Program module/function storage; encode independent
+  records in parallel while retaining exact export and backward read
+  compatibility, and reject stale worktree paths in shared AST caches.
+- Preserve exact framework route aliases when incremental builds mix portable
+  cache paths with absolute universal bindings.
 - Use fresh, verified SCIP symbol evidence to disambiguate Java call targets in
   `graph.json` through exact AST call and declaration anchors, while rejecting
   non-call references, stale artifacts, ambiguous definitions, and conflicting

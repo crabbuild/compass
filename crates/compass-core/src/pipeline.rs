@@ -43,7 +43,7 @@ use compass_resolve::{
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::build_state::{
@@ -223,6 +223,14 @@ pub struct BuildResult {
     pub timings: BuildTimings,
 }
 
+/// Typed authoritative output retained by an in-process history build.
+#[derive(Clone, Debug)]
+pub struct RetainedBuildArtifacts {
+    pub document: V1GraphDocument,
+    pub program: Option<compass_analysis::AnalysisBundle>,
+    pub analysis: Option<Value>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BuildFileProgress {
     pub current: usize,
@@ -345,6 +353,28 @@ pub fn build_graph_with_layers(
     build_graph(options, semantic, &supplemental, None, None)
 }
 
+/// Build and retain typed authoritative artifacts for an in-process history
+/// publisher, avoiding a filesystem serialization/deserialization handoff.
+pub fn build_graph_with_layers_retained(
+    options: &BuildOptions,
+    semantic: Option<&SemanticLayer>,
+    supplemental: &[serde_json::Value],
+) -> Result<(BuildResult, RetainedBuildArtifacts), CoreError> {
+    let supplemental = supplemental
+        .iter()
+        .cloned()
+        .map(serde_json::from_value)
+        .collect::<Result<Vec<Extraction>, _>>()
+        .map_err(CoreError::InvalidSupplementalFragment)?;
+    let (result, retained) = build_graph_inner(options, semantic, &supplemental, None, None, true)?;
+    let retained = retained.ok_or_else(|| {
+        CoreError::InvalidBuildState(
+            "build completed before authoritative artifacts were available".to_owned(),
+        )
+    })?;
+    Ok((result, retained))
+}
+
 pub fn build_graph_with_layers_and_progress(
     options: &BuildOptions,
     semantic: Option<&SemanticLayer>,
@@ -382,7 +412,8 @@ fn build_graph(
     tiebreaker: Option<&mut dyn EntityTiebreaker>,
     progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
 ) -> Result<BuildResult, CoreError> {
-    build_graph_inner(options, semantic, supplemental, tiebreaker, progress)
+    build_graph_inner(options, semantic, supplemental, tiebreaker, progress, false)
+        .map(|(result, _)| result)
 }
 
 fn build_graph_inner(
@@ -391,7 +422,8 @@ fn build_graph_inner(
     supplemental: &[Extraction],
     tiebreaker: Option<&mut dyn EntityTiebreaker>,
     progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
-) -> Result<BuildResult, CoreError> {
+    retain_artifacts: bool,
+) -> Result<(BuildResult, Option<RetainedBuildArtifacts>), CoreError> {
     let mut timings = BuildTimings::default();
     let mut stage_started = Instant::now();
     if !options.root.exists() {
@@ -541,36 +573,39 @@ fn build_graph_inner(
             }
             remove_if_exists(&output_dir.join("needs_update"))?;
             let published_output_dir = commit_generation(guard, &output_container)?;
-            return Ok(BuildResult {
-                root,
-                output_dir: published_output_dir,
-                detection,
-                files_considered: state.stats.files,
-                files_extracted: 0,
-                files_cached: state.stats.files,
-                empty_files: Vec::new(),
-                nodes: state.stats.nodes,
-                edges: state.stats.edges,
-                communities: state.stats.communities,
-                omitted_nodes: state.stats.omitted_nodes,
-                omitted_edges: state.stats.omitted_edges,
-                identity_collisions: state.stats.identity_collisions,
-                partial_graph: state.stats.omitted_nodes > 0
-                    || state.stats.omitted_edges > 0
-                    || state.stats.identity_collisions > 0,
-                html_written: output_dir.join("graph.html").is_file(),
-                outputs_changed: false,
-                program_modules: state.stats.program_modules,
-                program_summaries: state.stats.program_summaries,
-                program_syntax_analyzed: 0,
-                program_syntax_reused: state.stats.program_modules,
-                program_artifacts_loaded: 0,
-                program_artifacts_reused: 0,
-                program_artifact_documents_analyzed: 0,
-                program_artifact_documents_reused: 0,
-                program_conflicts: state.stats.program_conflicts,
-                timings,
-            });
+            return Ok((
+                BuildResult {
+                    root,
+                    output_dir: published_output_dir,
+                    detection,
+                    files_considered: state.stats.files,
+                    files_extracted: 0,
+                    files_cached: state.stats.files,
+                    empty_files: Vec::new(),
+                    nodes: state.stats.nodes,
+                    edges: state.stats.edges,
+                    communities: state.stats.communities,
+                    omitted_nodes: state.stats.omitted_nodes,
+                    omitted_edges: state.stats.omitted_edges,
+                    identity_collisions: state.stats.identity_collisions,
+                    partial_graph: state.stats.omitted_nodes > 0
+                        || state.stats.omitted_edges > 0
+                        || state.stats.identity_collisions > 0,
+                    html_written: output_dir.join("graph.html").is_file(),
+                    outputs_changed: false,
+                    program_modules: state.stats.program_modules,
+                    program_summaries: state.stats.program_summaries,
+                    program_syntax_analyzed: 0,
+                    program_syntax_reused: state.stats.program_modules,
+                    program_artifacts_loaded: 0,
+                    program_artifacts_reused: 0,
+                    program_artifact_documents_analyzed: 0,
+                    program_artifact_documents_reused: 0,
+                    program_conflicts: state.stats.program_conflicts,
+                    timings,
+                },
+                None,
+            ));
         }
     }
     let unchanged_program = if options.program_analysis
@@ -609,42 +644,45 @@ fn build_graph_inner(
             unchanged_program.as_ref(),
         )?;
         let published_output_dir = commit_generation(guard, &output_container)?;
-        return Ok(BuildResult {
-            root,
-            output_dir: published_output_dir,
-            detection,
-            files_considered: sources.len(),
-            files_extracted: 0,
-            files_cached: sources.len(),
-            empty_files: Vec::new(),
-            nodes: stats.nodes,
-            edges: stats.edges,
-            communities: stats.communities,
-            omitted_nodes: stats.omitted_nodes,
-            omitted_edges: stats.omitted_edges,
-            identity_collisions: stats.identity_collisions,
-            partial_graph: stats.omissions().is_partial(),
-            html_written: output_dir.join("graph.html").is_file(),
-            outputs_changed: false,
-            program_modules: program_modules(unchanged_program.as_ref()),
-            program_summaries: program_summaries(unchanged_program.as_ref()),
-            program_syntax_analyzed: 0,
-            program_syntax_reused: unchanged_program
-                .as_ref()
-                .map_or(0, |program| program.syntax_reused),
-            program_artifacts_loaded: 0,
-            program_artifacts_reused: unchanged_program
-                .as_ref()
-                .map_or(0, |program| program.artifacts_reused),
-            program_artifact_documents_analyzed: 0,
-            program_artifact_documents_reused: unchanged_program
-                .as_ref()
-                .map_or(0, |program| program.artifact_documents_reused),
-            program_conflicts: unchanged_program
-                .as_ref()
-                .map_or(0, |program| program.conflicts),
-            timings,
-        });
+        return Ok((
+            BuildResult {
+                root,
+                output_dir: published_output_dir,
+                detection,
+                files_considered: sources.len(),
+                files_extracted: 0,
+                files_cached: sources.len(),
+                empty_files: Vec::new(),
+                nodes: stats.nodes,
+                edges: stats.edges,
+                communities: stats.communities,
+                omitted_nodes: stats.omitted_nodes,
+                omitted_edges: stats.omitted_edges,
+                identity_collisions: stats.identity_collisions,
+                partial_graph: stats.omissions().is_partial(),
+                html_written: output_dir.join("graph.html").is_file(),
+                outputs_changed: false,
+                program_modules: program_modules(unchanged_program.as_ref()),
+                program_summaries: program_summaries(unchanged_program.as_ref()),
+                program_syntax_analyzed: 0,
+                program_syntax_reused: unchanged_program
+                    .as_ref()
+                    .map_or(0, |program| program.syntax_reused),
+                program_artifacts_loaded: 0,
+                program_artifacts_reused: unchanged_program
+                    .as_ref()
+                    .map_or(0, |program| program.artifacts_reused),
+                program_artifact_documents_analyzed: 0,
+                program_artifact_documents_reused: unchanged_program
+                    .as_ref()
+                    .map_or(0, |program| program.artifact_documents_reused),
+                program_conflicts: unchanged_program
+                    .as_ref()
+                    .map_or(0, |program| program.conflicts),
+                timings,
+            },
+            None,
+        ));
     }
 
     let output_cache_root = (output_root != root).then_some(output_root.as_path());
@@ -1084,44 +1122,47 @@ fn build_graph_inner(
             program.as_ref(),
         )?;
         let published_output_dir = commit_generation(guard, &output_container)?;
-        return Ok(BuildResult {
-            root,
-            output_dir: published_output_dir,
-            detection,
-            files_considered: sources.len(),
-            files_extracted: 0,
-            files_cached: sources.len(),
-            empty_files,
-            nodes: document.nodes.len(),
-            edges: document.links.len(),
-            communities: 0,
-            omitted_nodes: omissions.nodes,
-            omitted_edges: omissions.edges,
-            identity_collisions: omissions.identity_collisions,
-            partial_graph: omissions.is_partial(),
-            html_written: false,
-            outputs_changed: false,
-            program_modules: program_modules(program.as_ref()),
-            program_summaries: program_summaries(program.as_ref()),
-            program_syntax_analyzed: program
-                .as_ref()
-                .map_or(0, |program| program.syntax_analyzed),
-            program_syntax_reused: program.as_ref().map_or(0, |program| program.syntax_reused),
-            program_artifacts_loaded: program
-                .as_ref()
-                .map_or(0, |program| program.artifacts_loaded),
-            program_artifacts_reused: program
-                .as_ref()
-                .map_or(0, |program| program.artifacts_reused),
-            program_artifact_documents_analyzed: program
-                .as_ref()
-                .map_or(0, |program| program.artifact_documents_analyzed),
-            program_artifact_documents_reused: program
-                .as_ref()
-                .map_or(0, |program| program.artifact_documents_reused),
-            program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
-            timings,
-        });
+        return Ok((
+            BuildResult {
+                root,
+                output_dir: published_output_dir,
+                detection,
+                files_considered: sources.len(),
+                files_extracted: 0,
+                files_cached: sources.len(),
+                empty_files,
+                nodes: document.nodes.len(),
+                edges: document.links.len(),
+                communities: 0,
+                omitted_nodes: omissions.nodes,
+                omitted_edges: omissions.edges,
+                identity_collisions: omissions.identity_collisions,
+                partial_graph: omissions.is_partial(),
+                html_written: false,
+                outputs_changed: false,
+                program_modules: program_modules(program.as_ref()),
+                program_summaries: program_summaries(program.as_ref()),
+                program_syntax_analyzed: program
+                    .as_ref()
+                    .map_or(0, |program| program.syntax_analyzed),
+                program_syntax_reused: program.as_ref().map_or(0, |program| program.syntax_reused),
+                program_artifacts_loaded: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifacts_loaded),
+                program_artifacts_reused: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifacts_reused),
+                program_artifact_documents_analyzed: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifact_documents_analyzed),
+                program_artifact_documents_reused: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifact_documents_reused),
+                program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
+                timings,
+            },
+            None,
+        ));
     }
     if options.no_cluster {
         let nodes = dedupe_nodes(&resolved.nodes);
@@ -1190,44 +1231,47 @@ fn build_graph_inner(
         )?;
         let published_output_dir = commit_generation(guard, &output_container)?;
         timings.publish = stage_started.elapsed();
-        return Ok(BuildResult {
-            root,
-            output_dir: published_output_dir,
-            detection,
-            files_considered: sources.len(),
-            files_extracted: missing.len(),
-            files_cached: sources.len().saturating_sub(missing.len()),
-            empty_files,
-            nodes: published_nodes,
-            edges: published_edges,
-            communities: 0,
-            omitted_nodes: omissions.nodes,
-            omitted_edges: omissions.edges,
-            identity_collisions: omissions.identity_collisions,
-            partial_graph: omissions.is_partial(),
-            html_written: false,
-            outputs_changed: true,
-            program_modules: program_modules(program.as_ref()),
-            program_summaries: program_summaries(program.as_ref()),
-            program_syntax_analyzed: program
-                .as_ref()
-                .map_or(0, |program| program.syntax_analyzed),
-            program_syntax_reused: program.as_ref().map_or(0, |program| program.syntax_reused),
-            program_artifacts_loaded: program
-                .as_ref()
-                .map_or(0, |program| program.artifacts_loaded),
-            program_artifacts_reused: program
-                .as_ref()
-                .map_or(0, |program| program.artifacts_reused),
-            program_artifact_documents_analyzed: program
-                .as_ref()
-                .map_or(0, |program| program.artifact_documents_analyzed),
-            program_artifact_documents_reused: program
-                .as_ref()
-                .map_or(0, |program| program.artifact_documents_reused),
-            program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
-            timings,
-        });
+        return Ok((
+            BuildResult {
+                root,
+                output_dir: published_output_dir,
+                detection,
+                files_considered: sources.len(),
+                files_extracted: missing.len(),
+                files_cached: sources.len().saturating_sub(missing.len()),
+                empty_files,
+                nodes: published_nodes,
+                edges: published_edges,
+                communities: 0,
+                omitted_nodes: omissions.nodes,
+                omitted_edges: omissions.edges,
+                identity_collisions: omissions.identity_collisions,
+                partial_graph: omissions.is_partial(),
+                html_written: false,
+                outputs_changed: true,
+                program_modules: program_modules(program.as_ref()),
+                program_summaries: program_summaries(program.as_ref()),
+                program_syntax_analyzed: program
+                    .as_ref()
+                    .map_or(0, |program| program.syntax_analyzed),
+                program_syntax_reused: program.as_ref().map_or(0, |program| program.syntax_reused),
+                program_artifacts_loaded: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifacts_loaded),
+                program_artifacts_reused: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifacts_reused),
+                program_artifact_documents_analyzed: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifact_documents_analyzed),
+                program_artifact_documents_reused: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifact_documents_reused),
+                program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
+                timings,
+            },
+            None,
+        ));
     }
     let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
     profile_internal("graph document build and dedup", &mut internal_started);
@@ -1298,44 +1342,49 @@ fn build_graph_inner(
                 program.as_ref(),
             )?;
             let published_output_dir = commit_generation(guard, &output_container)?;
-            return Ok(BuildResult {
-                root,
-                output_dir: published_output_dir,
-                detection,
-                files_considered: sources.len(),
-                files_extracted: missing.len(),
-                files_cached: sources.len().saturating_sub(missing.len()),
-                empty_files,
-                nodes: document.nodes.len(),
-                edges: document.links.len(),
-                communities,
-                omitted_nodes: 0,
-                omitted_edges: 0,
-                identity_collisions: 0,
-                partial_graph: false,
-                html_written: output_dir.join("graph.html").is_file(),
-                outputs_changed: false,
-                program_modules: program_modules(program.as_ref()),
-                program_summaries: program_summaries(program.as_ref()),
-                program_syntax_analyzed: program
-                    .as_ref()
-                    .map_or(0, |program| program.syntax_analyzed),
-                program_syntax_reused: program.as_ref().map_or(0, |program| program.syntax_reused),
-                program_artifacts_loaded: program
-                    .as_ref()
-                    .map_or(0, |program| program.artifacts_loaded),
-                program_artifacts_reused: program
-                    .as_ref()
-                    .map_or(0, |program| program.artifacts_reused),
-                program_artifact_documents_analyzed: program
-                    .as_ref()
-                    .map_or(0, |program| program.artifact_documents_analyzed),
-                program_artifact_documents_reused: program
-                    .as_ref()
-                    .map_or(0, |program| program.artifact_documents_reused),
-                program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
-                timings,
-            });
+            return Ok((
+                BuildResult {
+                    root,
+                    output_dir: published_output_dir,
+                    detection,
+                    files_considered: sources.len(),
+                    files_extracted: missing.len(),
+                    files_cached: sources.len().saturating_sub(missing.len()),
+                    empty_files,
+                    nodes: document.nodes.len(),
+                    edges: document.links.len(),
+                    communities,
+                    omitted_nodes: 0,
+                    omitted_edges: 0,
+                    identity_collisions: 0,
+                    partial_graph: false,
+                    html_written: output_dir.join("graph.html").is_file(),
+                    outputs_changed: false,
+                    program_modules: program_modules(program.as_ref()),
+                    program_summaries: program_summaries(program.as_ref()),
+                    program_syntax_analyzed: program
+                        .as_ref()
+                        .map_or(0, |program| program.syntax_analyzed),
+                    program_syntax_reused: program
+                        .as_ref()
+                        .map_or(0, |program| program.syntax_reused),
+                    program_artifacts_loaded: program
+                        .as_ref()
+                        .map_or(0, |program| program.artifacts_loaded),
+                    program_artifacts_reused: program
+                        .as_ref()
+                        .map_or(0, |program| program.artifacts_reused),
+                    program_artifact_documents_analyzed: program
+                        .as_ref()
+                        .map_or(0, |program| program.artifact_documents_analyzed),
+                    program_artifact_documents_reused: program
+                        .as_ref()
+                        .map_or(0, |program| program.artifact_documents_reused),
+                    program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
+                    timings,
+                },
+                None,
+            ));
         }
     }
 
@@ -1375,7 +1424,17 @@ fn build_graph_inner(
     let labels = label_communities_by_hub(&document, &communities);
     profile_internal("community labeling", &mut internal_started);
 
-    let graph_output = || -> Result<(Duration, PublicationOmissions, usize, usize), CoreError> {
+    let graph_output = ||
+     -> Result<
+        (
+            Duration,
+            PublicationOmissions,
+            usize,
+            usize,
+            Option<V1GraphDocument>,
+        ),
+        CoreError,
+    > {
         let started = Instant::now();
         let mut output_profile_started = Instant::now();
         let configuration_digest = graph_configuration_digest(options, &output_dir)?;
@@ -1426,9 +1485,10 @@ fn build_graph_inner(
             published.omissions,
             published_nodes,
             published_edges,
+            retain_artifacts.then_some(published.document),
         ))
     };
-    let graph_analyses = || -> Result<(bool, Duration), CoreError> {
+    let graph_analyses = || -> Result<(bool, Duration, Option<Value>), CoreError> {
         let started = Instant::now();
         let analysis_compute_started = Instant::now();
         let (cohesion, (gods, surprises, questions)) = rayon::join(
@@ -1529,11 +1589,16 @@ fn build_graph_inner(
             "graph analysis and report rendering",
             analysis_render_started.elapsed(),
         );
-        Ok((html_written, started.elapsed()))
+        Ok((
+            html_written,
+            started.elapsed(),
+            retain_artifacts.then_some(analysis),
+        ))
     };
     let (graph_output_elapsed, analysis_result) = rayon::join(graph_output, graph_analyses);
-    let (graph_output_elapsed, omissions, published_nodes, published_edges) = graph_output_elapsed?;
-    let (html_written, analysis_elapsed) = analysis_result?;
+    let (graph_output_elapsed, omissions, published_nodes, published_edges, retained_document) =
+        graph_output_elapsed?;
+    let (html_written, analysis_elapsed, retained_analysis) = analysis_result?;
     profile_internal_duration("graph and overview publication", graph_output_elapsed);
     profile_internal_duration(
         "parallel graph analyses and report publication",
@@ -1585,7 +1650,7 @@ fn build_graph_inner(
     )?;
     profile_internal("Program output and build seals", &mut internal_started);
     let published_output_dir = commit_generation(guard, &output_container)?;
-    Ok(BuildResult {
+    let result = BuildResult {
         root,
         output_dir: published_output_dir,
         detection,
@@ -1622,7 +1687,13 @@ fn build_graph_inner(
             .map_or(0, |program| program.artifact_documents_reused),
         program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
         timings,
-    })
+    };
+    let retained = retained_document.map(|document| RetainedBuildArtifacts {
+        document,
+        program: program.map(|program| program.analysis),
+        analysis: retained_analysis,
+    });
+    Ok((result, retained))
 }
 
 fn oversized_source_extraction(
