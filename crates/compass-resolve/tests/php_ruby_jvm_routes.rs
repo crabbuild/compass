@@ -1,11 +1,13 @@
+use std::collections::HashMap;
 use std::error::Error;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use compass_languages::{
     Engine, Extraction, ExtractorKind, FrameworkLimits, RawFrameworkFact, Registry,
 };
 use compass_model::provenance::ResolutionState;
-use compass_resolve::frameworks::resolve_and_publish_framework_routes;
+use compass_resolve::{frameworks::resolve_and_publish_framework_routes, resolve};
 
 fn fixture(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -26,6 +28,35 @@ fn merge(target: &mut Extraction, mut source: Extraction) {
     target.nodes.append(&mut source.nodes);
     target.edges.append(&mut source.edges);
     target.framework_facts.append(&mut source.framework_facts);
+}
+
+fn extract_and_resolve(relatives: &[&str]) -> Result<Extraction, Box<dyn Error>> {
+    let mut extractions = Vec::with_capacity(relatives.len());
+    let mut sources = HashMap::new();
+    for relative in relatives {
+        let path = fixture(relative);
+        let source = fs::read_to_string(&path)?;
+        let extraction = extract(relative)?;
+        sources.insert((*relative).to_owned(), source.clone());
+        sources.insert(path.to_string_lossy().into_owned(), source.clone());
+        for source_file in extraction
+            .nodes
+            .iter()
+            .map(|node| node.string("source_file"))
+            .filter(|source_file| !source_file.is_empty())
+            .chain(
+                extraction
+                    .semantic_evidence
+                    .iter()
+                    .flat_map(|batch| batch.declarations.iter())
+                    .map(|declaration| declaration.range.source_file.clone()),
+            )
+        {
+            sources.insert(source_file, source.clone());
+        }
+        extractions.push(extraction);
+    }
+    Ok(resolve(&extractions, &sources))
 }
 
 #[test]
@@ -186,7 +217,7 @@ fn rails_routes_resolve_to_controller_actions_and_compose_namespaces() -> Result
 #[test]
 fn spring_composes_class_and_method_mappings_without_custom_annotation_matches()
 -> Result<(), Box<dyn Error>> {
-    let mut extraction = extract("jvm/SpringController.java")?;
+    let mut extraction = extract_and_resolve(&["jvm/SpringController.java"])?;
     let resolved =
         resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
     assert!(resolved.iter().any(|route| {
@@ -203,6 +234,76 @@ fn spring_composes_class_and_method_mappings_without_custom_annotation_matches()
         2
     );
     assert!(extract("jvm/NearMatches.java")?.framework_facts.is_empty());
+    Ok(())
+}
+
+#[test]
+fn spring_uses_package_and_signature_targets_for_overloaded_controllers()
+-> Result<(), Box<dyn Error>> {
+    let first_source = br#"package first.api;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+@RestController
+class UserController {
+    @GetMapping("/name")
+    public String show(String id) { return id; }
+    @GetMapping("/count")
+    public String show(int count) { return String.valueOf(count); }
+}
+"#;
+    let second_source = br#"package second.api;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+@RestController
+class UserController {
+    @GetMapping("/other")
+    public String show(String id) { return id; }
+}
+"#;
+    let first_path = Path::new("src/main/java/first/api/UserController.java");
+    let second_path = Path::new("src/main/java/second/api/UserController.java");
+    let first = Engine::default().extract_source(first_path, first_source)?;
+    let second = Engine::default().extract_source(second_path, second_source)?;
+    let sources = HashMap::from([
+        (
+            first_path.to_string_lossy().into_owned(),
+            String::from_utf8(first_source.to_vec())?,
+        ),
+        (
+            second_path.to_string_lossy().into_owned(),
+            String::from_utf8(second_source.to_vec())?,
+        ),
+    ]);
+    let mut extraction = resolve(&[first, second], &sources);
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+    assert_eq!(resolved.len(), 3, "routes={resolved:#?}");
+    assert!(
+        resolved
+            .iter()
+            .all(|route| route.state == ResolutionState::Exact),
+        "routes={resolved:#?}"
+    );
+    for (path, qualified, signature) in [
+        ("/name", "first.api.UserController::show", "show(String)"),
+        ("/count", "first.api.UserController::show", "show(int)"),
+        ("/other", "second.api.UserController::show", "show(String)"),
+    ] {
+        let route = resolved
+            .iter()
+            .find(|route| route.route.normalized_path == path)
+            .ok_or_else(|| format!("missing route {path}"))?;
+        let [candidate] = route.candidates.as_slice() else {
+            return Err(format!("route {path} is not exact: {route:#?}").into());
+        };
+        let target = extraction
+            .nodes
+            .iter()
+            .find(|node| node.id == candidate.node_id)
+            .ok_or_else(|| format!("missing target for {path}"))?;
+        assert_eq!(target.string("qualified_name"), qualified);
+        assert_eq!(target.string("signature"), signature);
+    }
     Ok(())
 }
 
@@ -245,9 +346,11 @@ fn play_config_routes_resolve_java_scala_and_injected_controllers() -> Result<()
     let spec = Registry::resolve(&route_path).ok_or("Play routes are not registered")?;
     assert_eq!(spec.kind, ExtractorKind::FrameworkConfig);
 
-    let mut extraction = extract("jvm/play/conf/routes")?;
-    merge(&mut extraction, extract("jvm/PlayController.java")?);
-    merge(&mut extraction, extract("jvm/PlayController.scala")?);
+    let mut extraction = extract_and_resolve(&[
+        "jvm/play/conf/routes",
+        "jvm/PlayController.java",
+        "jvm/PlayController.scala",
+    ])?;
     let resolved =
         resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
     assert_eq!(resolved.len(), 3);

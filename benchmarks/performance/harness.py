@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import socket
 import sqlite3
@@ -35,6 +36,7 @@ from benchmarks.performance.compass.model import (
     GateIssue,
     GateReport,
     QualificationRun,
+    RepositorySpec,
 )
 from benchmarks.performance.compass.report import (
     compare_baseline,
@@ -61,6 +63,7 @@ DEFAULT_WORKSPACE = SOURCE_ROOT / "target" / "performance" / "workspace"
 DEFAULT_RUNS = SOURCE_ROOT / "target" / "performance" / "runs"
 FULL_SUITE_DISK_BYTES = 100 * 1024**3
 SELECTED_REPOSITORY_DISK_BYTES = 5 * 1024**3
+_OBJECT_ID = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
 def _command(arguments: Sequence[str], cwd: Path = SOURCE_ROOT) -> str:
@@ -145,6 +148,26 @@ def _selected(suite_path: Path, names: Sequence[str]):
     if missing:
         raise ValueError(f"unknown repositories: {', '.join(sorted(missing))}")
     return suite, selected
+
+
+def requested_repository_commits(
+    values: Sequence[str],
+    selected: Sequence[RepositorySpec],
+) -> dict[str, str]:
+    selected_names = {repository.name for repository in selected}
+    commits: dict[str, str] = {}
+    for value in values:
+        name, separator, commit = value.partition("=")
+        if not separator or not name or _OBJECT_ID.fullmatch(commit) is None:
+            raise ValueError(
+                f"invalid repository commit override {value!r}; expected NAME=40_HEX_SHA"
+            )
+        if name not in selected_names:
+            raise ValueError(f"repository commit override is not selected: {name}")
+        if name in commits:
+            raise ValueError(f"duplicate repository commit override: {name}")
+        commits[name] = commit.lower()
+    return commits
 
 
 def _existing_ancestor(path: Path) -> Path:
@@ -303,6 +326,13 @@ def _shared_graph_gate(
 
 def qualify(args: argparse.Namespace, *, comparison: bool) -> int:
     suite, repositories = _selected(args.suite, args.repository)
+    repository_commits = requested_repository_commits(
+        args.repository_commit,
+        repositories,
+    )
+    graphify_commit = getattr(args, "graphify_commit", None)
+    if graphify_commit is not None and _OBJECT_ID.fullmatch(graphify_commit) is None:
+        raise ValueError("--graphify-commit must be a 40-character hexadecimal SHA")
     workspace = QualificationWorkspace.create(args.workspace)
     started = datetime.now(timezone.utc)
     run_id = args.run_id or started.strftime("%Y%m%dT%H%M%SZ")
@@ -313,13 +343,22 @@ def qualify(args: argparse.Namespace, *, comparison: bool) -> int:
     shared_gates: list[GateReport] = []
     with workspace.acquire():
         compass = CompassAdapter.prepare(args.source_root)
-        graphify = GraphifyAdapter.prepare(workspace) if comparison else None
+        graphify = (
+            GraphifyAdapter.prepare(workspace, commit=graphify_commit)
+            if comparison
+            else None
+        )
         for repository in repositories:
-            _, commit = resolve_remote_head(repository.url)
+            pinned_commit = repository_commits.get(repository.name)
+            if pinned_commit is None:
+                _, commit = resolve_remote_head(repository.url)
+            else:
+                commit = pinned_commit
             identity = prepare_checkout(
                 repository,
                 commit,
                 workspace.root / "corpora" / repository.name,
+                pinned=pinned_commit is not None,
             )
             corpora.append(identity)
             checkout = Path(identity.path)
@@ -493,6 +532,12 @@ def _common(parser: argparse.ArgumentParser, *, execution: bool = False) -> None
         parser.add_argument("--build-timeout", type=float, default=1800)
         parser.add_argument("--query-timeout", type=float, default=120)
         parser.add_argument("--baseline", type=Path)
+        parser.add_argument(
+            "--repository-commit",
+            action="append",
+            default=[],
+            metavar="NAME=SHA",
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -506,6 +551,8 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("run", "compare"):
         execution_parser = subparsers.add_parser(name)
         _common(execution_parser, execution=True)
+        if name == "compare":
+            execution_parser.add_argument("--graphify-commit")
     report_parser = subparsers.add_parser("report")
     report_parser.add_argument("run", type=Path)
     report_parser.add_argument("--output", type=Path)

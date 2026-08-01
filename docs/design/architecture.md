@@ -123,11 +123,21 @@ Owns statically linked structural extraction:
 The vendored tree-sitter language pack supplies deterministic parser
 definitions and queries.
 
+The [language architecture](language-architecture.md) separates this grammar
+substrate from adapter-local semantic policy and universal evidence. Python,
+Go, Rust, and Java have hard-cut to the shared evidence and resolution path on
+this branch. Rust has passed its Phase 2 qualification; Java is registered as
+a version-1 `UniversalCandidate` while its pinned-corpus qualification is
+completed. Other registered languages keep their established extraction paths
+until their own independently qualified transitions.
+
 ### `compass-resolve`
 
 Owns cross-file resolution over extraction facts:
 
 - import target canonicalization;
+- universal declaration, scope, binding, occurrence, and candidate indexes;
+- shared projection for hard-cut language adapters;
 - JavaScript/TypeScript re-export handling;
 - cross-file calls;
 - language member-call facts;
@@ -137,6 +147,54 @@ Owns cross-file resolution over extraction facts:
 
 It converts per-file facts into a coherent project-wide extraction without
 making query or rendering decisions.
+
+## Universal language path in the system
+
+Universal evidence is inside the deterministic construction layer. It is not
+a parser replacement, a graph database, or a second semantic-provider path.
+The vendored package prepares syntax; a language adapter records source-backed
+facts; `compass-resolve` selects defensible project-wide targets; and the
+shared projector creates Code Graph v1 records.
+
+```text
+source files
+    |
+    v
+compass-files: discovery, fingerprints, cache identity
+    |
+    v
+compass-languages: source registry
+    |
+    +---------------- established language route ------------------+
+    |                                                              |
+    v                                                              v
+vendored static Tree-sitter grammar                        established adapter
+    |                                                              |
+    v                                                              v
+one prepared AST                                           graph facts/call facts
+    |                                                              |
+    v                                                              |
+universal adapter policy                                           |
+Python | Go | Rust | Java                                          |
+    |                                                              |
+    v                                                              |
+SemanticEvidenceBatch v1                                           |
+    |                                                              |
+    +--------------------------+-----------------------------------+
+                               v
+compass-resolve: project-wide indexes and framework target resolution
+                               |
+                               v
+compass-graph: normalize, deduplicate, cluster, analyze
+                               |
+                               v
+graph.json | cache | history | query surfaces
+```
+
+The registry chooses one publication route per language. A hard-cut adapter
+does not dual-run its replaced publisher and does not translate old graph
+records into evidence. The established route remains a first-class production
+architecture for languages that have not yet made their own transition.
 
 ### `compass-graph`
 
@@ -372,7 +430,9 @@ When a change crosses layers:
 ## Related pages
 
 - [Workspace tour](../implementation/workspace-tour.md)
+- [Language architecture](language-architecture.md)
 - [Extraction pipeline](../implementation/extraction-pipeline.md)
+- [Universal evidence implementation](../implementation/universal-evidence.md)
 - [Storage and history](storage-and-history.md)
 - [Extending Compass](../implementation/extending-compass.md)
 

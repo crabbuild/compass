@@ -48,7 +48,7 @@ pub(crate) fn generic_config(spec: LanguageSpec) -> GenericConfig {
             "object",
             &[],
         ),
-        "java" | "groovy" => config(
+        "groovy" => config(
             &[
                 "class_declaration",
                 "interface_declaration",

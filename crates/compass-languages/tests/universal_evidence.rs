@@ -1,9 +1,11 @@
+#![allow(clippy::expect_used)]
+
 use compass_languages::{
     AdapterIdentity, AdapterRegistry, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
     Engine, EvidenceErrorCode, EvidenceLimits, EvidenceRange, Extraction, HierarchyConstraint,
     LanguageCapability, OccurrenceFact, ReceiverDispatchStrategy, RelationshipCandidate,
-    ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole, file_stem, make_id,
-    validate_evidence,
+    ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole,
+    UNIVERSAL_EVIDENCE_SCHEMA, UniversalAdapterProfile, validate_evidence,
 };
 
 fn range(start: u64, end: u64) -> EvidenceRange {
@@ -21,7 +23,11 @@ fn range(start: u64, end: u64) -> EvidenceRange {
 fn valid_batch() -> SemanticEvidenceBatch {
     SemanticEvidenceBatch {
         adapter: AdapterIdentity {
+            id: "compass.python".to_owned(),
             language: "python".to_owned(),
+            version: 1,
+            evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA.to_owned(),
+            profile: UniversalAdapterProfile::UniversalCandidate,
             producer: "tree-sitter-python".to_owned(),
             capabilities: vec![
                 LanguageCapability::Declarations,
@@ -41,6 +47,12 @@ fn valid_batch() -> SemanticEvidenceBatch {
             qualified_name: "example.caller".to_owned(),
             module_or_package: Some("example".to_owned()),
             scope_id: None,
+            signature: None,
+            parameter_count: None,
+            variadic: false,
+            signature_hash: None,
+            implementation_hash: None,
+            source_hash: None,
             range: range(0, 6),
         }],
         scopes: vec![ScopeFact {
@@ -68,6 +80,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
             owner_declaration_id: "decl:caller".to_owned(),
             spelling: "helper".to_owned(),
             qualifier: None,
+            context: None,
             scope_id: Some("scope:caller".to_owned()),
             range: range(14, 20),
         }],
@@ -85,6 +98,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
                 module_or_package: Some("tools".to_owned()),
                 scope_id: Some("scope:caller".to_owned()),
                 qualified_name: Some("tools.execute".to_owned()),
+                argument_count: None,
                 allowed_target_kinds: vec!["function".to_owned()],
                 hierarchy: None,
                 allow_external: true,
@@ -287,7 +301,7 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
             .iter()
             .map(|profile| profile.language)
             .collect::<Vec<_>>(),
-        ["go", "python"]
+        ["go", "java", "python", "rust"]
     );
     assert!(
         profiles
@@ -295,13 +309,61 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
             .all(|profile| !profile.capabilities.is_empty())
     );
     assert!(profiles.iter().all(|profile| {
+        !profile.id.is_empty()
+            && profile.version == 1
+            && profile.evidence_schema == UNIVERSAL_EVIDENCE_SCHEMA
+    }));
+    assert_eq!(
+        profiles
+            .iter()
+            .map(|profile| profile.id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        profiles.len()
+    );
+    assert!(profiles.iter().all(|profile| {
         profile
             .capabilities
             .windows(2)
             .all(|pair| pair[0] < pair[1])
     }));
-    assert!(AdapterRegistry::universal_profile("java").is_none());
-    assert!(AdapterRegistry::universal_profile("rust").is_none());
+    assert_eq!(
+        AdapterRegistry::universal_profile("java")
+            .map(|profile| (profile.version, profile.profile)),
+        Some((1, UniversalAdapterProfile::UniversalCandidate))
+    );
+    assert_eq!(
+        AdapterRegistry::universal_profile("rust").map(|profile| profile.version),
+        Some(1)
+    );
+}
+
+#[test]
+fn empty_hard_cut_sources_emit_zero_width_file_inventory_evidence() {
+    for (path, source_file, language) in [
+        ("/repo/pkg/__init__.py", "pkg/__init__.py", "python"),
+        ("/repo/pkg/empty.go", "pkg/empty.go", "go"),
+        ("/repo/pkg/empty.rs", "pkg/empty.rs", "rust"),
+    ] {
+        let mut engine = Engine::default();
+        let evidence = engine
+            .extract_source_combined(std::path::Path::new(path), source_file, b"")
+            .expect("extract empty hard-cut source")
+            .graph
+            .semantic_evidence
+            .expect("empty source evidence");
+        validate_evidence(&evidence, EvidenceLimits::default()).expect("valid empty evidence");
+
+        assert_eq!(evidence.adapter.language, language);
+        assert_eq!(evidence.declarations.len(), 1);
+        assert_eq!(evidence.declarations[0].kind, "file");
+        assert_eq!(evidence.declarations[0].range.source_file, source_file);
+        assert_eq!(evidence.declarations[0].range.start_byte, 0);
+        assert_eq!(evidence.declarations[0].range.end_byte, 0);
+        assert_eq!(evidence.scopes.len(), 1);
+        assert_eq!(evidence.scopes[0].kind, "module");
+        assert_eq!(evidence.scopes[0].range, evidence.declarations[0].range);
+    }
 }
 
 #[test]
@@ -322,6 +384,14 @@ class Derived(Base):
             source,
         )
         .expect("extract python");
+    assert!(
+        extraction.graph.raw_calls.is_none(),
+        "hard-cut Python extraction must not publish replaced raw call facts"
+    );
+    assert!(
+        extraction.graph.nodes.is_empty() && extraction.graph.edges.is_empty(),
+        "hard-cut Python extraction must not construct its replaced raw graph"
+    );
     let evidence = extraction
         .graph
         .semantic_evidence
@@ -360,130 +430,43 @@ class Derived(Base):
 }
 
 #[test]
-fn python_emits_ordered_direct_bases_and_receiver_dispatch_constraints() {
-    let source = br#"class Root:
-    def run(self):
-        return None
-
-class Mixin:
-    pass
-
-class Child(Mixin, Root):
-    class Product:
-        pass
-
-    def local(self):
-        return None
-
-    @classmethod
-    def make(cls):
-        cls.local()
-
-    def run(self):
-        self.local()
-        self.Product()
-        super().run()
-"#;
-    let mut engine = Engine::default();
-    let extraction = engine
-        .extract_source_combined(
-            std::path::Path::new("/repo/pkg/models.py"),
-            "pkg/models.py",
-            source,
-        )
-        .expect("extract python");
-    let evidence = extraction
-        .graph
-        .semantic_evidence
-        .expect("python universal evidence");
-    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid hierarchy evidence");
-
-    assert!(
-        evidence
-            .adapter
-            .capabilities
-            .contains(&LanguageCapability::HierarchyDispatch)
-    );
-    let mut bases = evidence
-        .candidates
-        .iter()
-        .filter(|candidate| {
-            candidate.relation == CandidateRelation::Extends
-                && matches!(
-                    candidate.constraints.hierarchy.as_ref(),
-                    Some(HierarchyConstraint::DirectBase {
-                        base_set_complete: true
-                    })
-                )
-        })
-        .map(|candidate| {
-            (
-                evidence
-                    .occurrences
-                    .iter()
-                    .find(|occurrence| candidate.occurrence_id.as_ref() == Some(&occurrence.id))
-                    .expect("base occurrence")
-                    .range
-                    .start_byte,
-                candidate
-                    .constraints
-                    .qualified_name
-                    .clone()
-                    .expect("exact base identity"),
+fn universal_declarations_preserve_signature_and_implementation_change_metadata() {
+    fn function_declaration(source: &[u8]) -> DeclarationFact {
+        let mut engine = Engine::default();
+        engine
+            .extract_source_combined(
+                std::path::Path::new("/repo/src/example.py"),
+                "src/example.py",
+                source,
             )
-        })
-        .collect::<Vec<_>>();
-    bases.sort_unstable();
-    assert_eq!(
-        bases
+            .expect("extract python")
+            .graph
+            .semantic_evidence
+            .expect("python universal evidence")
+            .declarations
             .into_iter()
-            .map(|(_, qualified)| qualified)
-            .collect::<Vec<_>>(),
-        ["pkg.models.Mixin", "pkg.models.Root"]
-    );
-    assert!(evidence.candidates.iter().any(|candidate| {
-        candidate.target_spelling == "run"
-            && matches!(
-                candidate.constraints.hierarchy.as_ref(),
-                Some(HierarchyConstraint::ReceiverDispatch {
-                    receiver_qualified_name,
-                    strategy: ReceiverDispatchStrategy::C3AfterReceiver,
-                }) if receiver_qualified_name == "pkg.models.Child"
-            )
-            && candidate.constraints.qualified_name.is_none()
-            && !candidate.constraints.allow_external
-    }));
-    for qualifier in ["self", "cls"] {
-        assert!(evidence.candidates.iter().any(|candidate| {
-            candidate.target_spelling == "local"
-                && candidate
-                    .occurrence_id
-                    .as_deref()
-                    .and_then(|id| evidence.occurrences.iter().find(|fact| fact.id == id))
-                    .and_then(|fact| fact.qualifier.as_deref())
-                    == Some(qualifier)
-                && matches!(
-                    candidate.constraints.hierarchy.as_ref(),
-                    Some(HierarchyConstraint::ReceiverDispatch {
-                        receiver_qualified_name,
-                        strategy: ReceiverDispatchStrategy::C3FromReceiver,
-                    }) if receiver_qualified_name == "pkg.models.Child"
-                )
-                && candidate.constraints.qualified_name.is_none()
-                && !candidate.constraints.allow_external
-        }));
+            .find(|declaration| declaration.kind == "function")
+            .expect("function declaration")
     }
-    assert!(evidence.candidates.iter().any(|candidate| {
-        candidate.relation == CandidateRelation::Constructs
-            && candidate.target_spelling == "Product"
-            && matches!(
-                candidate.constraints.hierarchy.as_ref(),
-                Some(HierarchyConstraint::ReceiverDispatch {
-                    receiver_qualified_name,
-                    strategy: ReceiverDispatchStrategy::C3FromReceiver,
-                }) if receiver_qualified_name == "pkg.models.Child"
-            )
-    }));
+
+    let original = function_declaration(b"def value() -> int:\n    return 1\n");
+    let changed = function_declaration(b"def value() -> int:\n    return 2\n");
+
+    assert_eq!(original.signature.as_deref(), Some("def value() -> int"));
+    assert_eq!(original.signature_hash, changed.signature_hash);
+    assert_ne!(original.implementation_hash, changed.implementation_hash);
+    assert_ne!(original.source_hash, changed.source_hash);
+    for digest in [
+        original.signature_hash.as_deref(),
+        original.implementation_hash.as_deref(),
+        original.source_hash.as_deref(),
+    ] {
+        assert_eq!(digest.expect("declaration digest").len(), 64);
+    }
+    let serialized = serde_json::to_value(original).expect("serialize declaration metadata");
+    assert!(serialized.get("signatureHash").is_some());
+    assert!(serialized.get("implementationHash").is_some());
+    assert!(serialized.get("sourceHash").is_some());
 }
 
 #[test]
@@ -569,135 +552,81 @@ class Dynamic(factory(Base)):
 }
 
 #[test]
-fn python_runtime_declarations_have_exact_lexical_owners_and_aligned_graph_ids() {
-    let source = br#"def outer(flag):
-    if flag:
-        def duplicate():
-            return 1
-    else:
-        def duplicate():
-            return 2
-    def inner():
-        from helpers import execute
-        return execute()
-    class Runtime:
-        def run(self):
-            return inner()
-    return Runtime
+fn python_preindexes_imports_without_violating_same_scope_execution_order() {
+    let source = br#"def before():
+    callback()
+    return callback
+
+EARLY = [callback]
+from tools.runner import execute as callback
+LATE = [callback]
+import pkg.api
+import other.tools as alias
+
+def dotted():
+    pkg.api.execute()
+    alias.execute()
 "#;
-    let path = std::path::Path::new("pkg/runtime.py");
     let mut engine = Engine::default();
-    let extraction = engine
-        .extract_source_combined(path, "pkg/runtime.py", source)
-        .expect("extract nested Python declarations");
-    let graph = extraction.graph;
-    assert_eq!(graph.error, None);
-
-    let stem = file_stem(path);
-    let outer_id = make_id(&[&stem, "outer"]);
-    let duplicate_id = make_id(&[&outer_id, "duplicate"]);
-    let duplicate_overload_id = make_id(&[&duplicate_id, "overload", "6"]);
-    let inner_id = make_id(&[&outer_id, "inner"]);
-    let runtime_id = make_id(&[&outer_id, "Runtime"]);
-    let run_id = make_id(&[&runtime_id, "run"]);
-
-    for (id, label) in [
-        (&outer_id, "outer()"),
-        (&duplicate_id, "duplicate()"),
-        (&duplicate_overload_id, "duplicate()"),
-        (&inner_id, "inner()"),
-        (&runtime_id, "Runtime"),
-        (&run_id, ".run()"),
-    ] {
-        assert!(
-            graph
-                .nodes
-                .iter()
-                .any(|node| node.id == *id && node.label() == label),
-            "missing source declaration {id} ({label})"
-        );
-    }
-    assert_eq!(
-        graph
-            .nodes
-            .iter()
-            .find(|node| node.id == runtime_id)
-            .expect("runtime class")
-            .string("qualified_name"),
-        "outer::Runtime"
-    );
-    for (source, target, relation) in [
-        (&outer_id, &duplicate_id, "contains"),
-        (&outer_id, &duplicate_overload_id, "contains"),
-        (&outer_id, &inner_id, "contains"),
-        (&outer_id, &runtime_id, "contains"),
-        (&runtime_id, &run_id, "method"),
-    ] {
-        assert!(graph.edges.iter().any(|edge| {
-            edge.source == *source && edge.target == *target && edge.string("relation") == relation
-        }));
-    }
-
-    let evidence = graph
+    let evidence = engine
+        .extract_source_combined(std::path::Path::new("/repo/app.py"), "app.py", source)
+        .expect("extract python")
+        .graph
         .semantic_evidence
-        .as_ref()
-        .expect("Python universal evidence");
-    validate_evidence(evidence, EvidenceLimits::default()).expect("valid nested evidence");
-    let declaration = |graph_id: &str| {
-        evidence
-            .declarations
-            .iter()
-            .find(|declaration| declaration.graph_node_id == graph_id)
-            .unwrap_or_else(|| panic!("missing evidence declaration for {graph_id}"))
-    };
-    let outer = declaration(&outer_id);
-    let duplicate = declaration(&duplicate_id);
-    let duplicate_overload = declaration(&duplicate_overload_id);
-    let inner = declaration(&inner_id);
-    let runtime = declaration(&runtime_id);
-    let run = declaration(&run_id);
-    assert_eq!(inner.qualified_name, "pkg.runtime.outer::inner");
-    assert_eq!(runtime.qualified_name, "pkg.runtime.outer::Runtime");
-    assert_eq!(run.qualified_name, "pkg.runtime.outer::Runtime::run");
-    for child in [duplicate, duplicate_overload, inner, runtime] {
-        assert!(evidence.candidates.iter().any(|candidate| {
-            candidate.relation == CandidateRelation::Contains
-                && candidate.source_declaration_id == outer.id
-                && candidate.constraints.exact_target_declaration_id.as_deref()
-                    == Some(child.id.as_str())
-        }));
-    }
+        .expect("python universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid Python evidence");
 
-    let inner_scope = evidence
-        .scopes
-        .iter()
-        .find(|scope| scope.owner_declaration_id.as_deref() == Some(inner.id.as_str()))
-        .expect("inner scope");
-    assert!(
-        evidence.scopes.iter().any(|scope| {
-            scope.owner_declaration_id.as_deref() == Some(inner.id.as_str())
-                && scope.parent_scope_id.as_deref()
-                    == evidence
-                        .scopes
-                        .iter()
-                        .find(|scope| {
-                            scope.owner_declaration_id.as_deref() == Some(outer.id.as_str())
-                        })
-                        .map(|scope| scope.id.as_str())
-        }),
-        "inner declaration is not lexically scoped to outer"
-    );
-    let binding = evidence
+    let callback = evidence
         .bindings
         .iter()
-        .find(|binding| binding.spelling == "execute")
-        .expect("nested import binding");
-    assert_eq!(binding.scope_id.as_deref(), Some(inner_scope.id.as_str()));
+        .find(|binding| binding.spelling == "callback")
+        .expect("callback import binding");
+    assert_eq!(callback.qualified_target, "tools.runner.execute");
+    let package = evidence
+        .bindings
+        .iter()
+        .find(|binding| binding.spelling == "pkg")
+        .expect("top-level dotted package binding");
+    assert_eq!(package.kind, BindingKind::Import);
+    assert_eq!(package.qualified_target, "pkg");
+    let alias = evidence
+        .bindings
+        .iter()
+        .find(|binding| binding.spelling == "alias")
+        .expect("dotted import alias");
+    assert_eq!(alias.qualified_target, "other.tools");
+
     assert!(evidence.candidates.iter().any(|candidate| {
         candidate.relation == CandidateRelation::Calls
-            && candidate.source_declaration_id == inner.id
-            && candidate.binding_id.as_deref() == Some(binding.id.as_str())
+            && candidate.target_spelling == "callback"
+            && candidate.binding_id.as_deref() == Some(&callback.id)
+            && candidate.constraints.qualified_name.as_deref() == Some("tools.runner.execute")
     }));
+    for qualified in ["pkg.api.execute", "other.tools.execute"] {
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.constraints.qualified_name.as_deref() == Some(qualified)
+        }));
+    }
+    let callback_references = evidence
+        .occurrences
+        .iter()
+        .filter(|occurrence| {
+            occurrence.role == SemanticRole::CallableReference && occurrence.spelling == "callback"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        callback_references.len(),
+        2,
+        "the deferred function body and post-import collection are valid; the pre-import module use is not"
+    );
+    assert_eq!(
+        callback_references
+            .iter()
+            .map(|occurrence| occurrence.context.as_deref())
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from([Some("collection"), Some("return")])
+    );
 }
 
 #[test]
@@ -727,6 +656,14 @@ func (d *Derived) Handle(value alias.Input) alias.Output {
             source,
         )
         .expect("extract go");
+    assert!(
+        extraction.graph.raw_calls.is_none(),
+        "hard-cut Go extraction must not publish replaced raw call facts"
+    );
+    assert!(
+        extraction.graph.nodes.is_empty() && extraction.graph.edges.is_empty(),
+        "hard-cut Go extraction must not construct its replaced raw graph"
+    );
     let evidence = extraction
         .graph
         .semantic_evidence
@@ -766,6 +703,68 @@ func (d *Derived) Handle(value alias.Input) alias.Output {
             && candidate.binding_id.as_deref() == Some(&receiver_binding.id)
             && candidate.constraints.qualified_name.as_deref() == Some("sample.Derived::Handle")
     }));
+}
+
+#[test]
+fn go_emits_direct_and_grouped_aliases_with_closure_signature_references() {
+    let source = br#"package sample
+
+import "example.com/types"
+
+type Direct = types.Token
+type (
+    Grouped = types.Skill
+)
+
+type Event struct {
+    Token *Direct
+    Skill Grouped
+}
+
+func use() {
+    _ = func(value types.Input) {}
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/sample/example.go"),
+            "sample/example.go",
+            source,
+        )
+        .expect("extract go")
+        .graph
+        .semantic_evidence
+        .expect("go universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid go evidence");
+
+    for name in ["Direct", "Grouped"] {
+        assert!(
+            evidence.declarations.iter().any(|declaration| {
+                declaration.name == name && declaration.kind == "type_alias"
+            })
+        );
+    }
+    for (target, qualifier) in [
+        ("Token", Some("types")),
+        ("Skill", Some("types")),
+        ("Direct", None),
+        ("Grouped", None),
+        ("Input", Some("types")),
+    ] {
+        assert!(evidence.occurrences.iter().any(|occurrence| {
+            occurrence.role == SemanticRole::TypeReference
+                && occurrence.spelling == target
+                && occurrence.qualifier.as_deref() == qualifier
+        }));
+    }
+    for (member, target) in [("Token", "sample.Direct"), ("Skill", "sample.Grouped")] {
+        assert!(evidence.bindings.iter().any(|binding| {
+            binding.kind == BindingKind::Member
+                && binding.spelling == member
+                && binding.qualified_target == target
+        }));
+    }
 }
 
 #[test]
@@ -812,6 +811,58 @@ func run() {
     assert!(evidence.candidates.iter().all(|candidate| {
         candidate.target_spelling != "Base" || candidate.relation != CandidateRelation::References
     }));
+}
+
+#[test]
+fn go_calls_respect_block_lifetimes_and_captured_callback_bindings() {
+    let source = br#"package sample
+
+func target() {}
+
+func caller(callback func()) {
+    {
+        target := func() {}
+        target()
+    }
+    target()
+    invoke := func() {
+        callback()
+    }
+    invoke()
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/sample/example.go"),
+            "sample/example.go",
+            source,
+        )
+        .expect("extract go")
+        .graph
+        .semantic_evidence
+        .expect("go universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid go evidence");
+
+    let calls = evidence
+        .occurrences
+        .iter()
+        .filter(|occurrence| occurrence.role == SemanticRole::Call)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|occurrence| occurrence.spelling == "target")
+            .count(),
+        1,
+        "the block-local callback must not suppress the later package function call"
+    );
+    assert!(
+        calls
+            .iter()
+            .all(|occurrence| !matches!(occurrence.spelling.as_str(), "callback" | "invoke")),
+        "parameters, captures, and function-valued locals must not resolve as package calls"
+    );
 }
 
 #[test]

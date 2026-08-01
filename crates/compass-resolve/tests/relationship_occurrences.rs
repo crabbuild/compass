@@ -9,8 +9,9 @@ fn deferred_calls_retain_each_exact_producer_stamped_occurrence() -> Result<(), 
     let directory = tempfile::tempdir()?;
     let caller_path = directory.path().join("caller.rs");
     let callee_path = directory.path().join("callee.rs");
-    let caller_source = "fn caller(){callee();callee();}\n";
-    let callee_source = "fn callee(){}\n";
+    let caller_source =
+        "mod callee;\nuse crate::callee::callee;\nfn caller(){callee();callee();}\n";
+    let callee_source = "pub fn callee(){}\n";
     fs::write(&caller_path, caller_source)?;
     fs::write(&callee_path, callee_source)?;
 
@@ -49,9 +50,19 @@ fn deferred_calls_retain_each_exact_producer_stamped_occurrence() -> Result<(), 
         .collect::<Vec<_>>();
     sites.sort_unstable();
 
-    assert_eq!(sites, [(Some(12), Some(20)), (Some(21), Some(29))]);
+    let expected = caller_source
+        .match_indices("callee()")
+        .map(|(start, _)| -> Result<_, std::num::TryFromIntError> {
+            Ok((
+                Some(u64::try_from(start)?),
+                Some(u64::try_from(start + "callee".len())?),
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(sites, expected);
     assert!(calls.iter().all(|edge| {
-        edge.string("language") == "rust" && edge.string("extractor") == "compass.languages.rust"
+        edge.string("language") == "rust"
+            && edge.string("extractor") == "compass.resolve.rust.universal"
     }));
     Ok(())
 }

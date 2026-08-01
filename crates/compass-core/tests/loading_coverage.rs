@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::Path;
@@ -18,9 +19,33 @@ fn semantic_edge_extraction(
     source: &[u8],
     relation: &str,
 ) -> Result<Extraction, Box<dyn Error>> {
+    semantic_edge_extraction_with_nodes(path, source, relation, false)
+}
+
+fn semantic_owned_edge_extraction(
+    path: &Path,
+    source: &[u8],
+    relation: &str,
+) -> Result<Extraction, Box<dyn Error>> {
+    semantic_edge_extraction_with_nodes(path, source, relation, true)
+}
+
+fn semantic_edge_extraction_with_nodes(
+    path: &Path,
+    source: &[u8],
+    relation: &str,
+    retain_endpoint_nodes: bool,
+) -> Result<Extraction, Box<dyn Error>> {
     let mut engine = Engine::default();
-    let mut extraction = engine.extract_source(path, source)?;
-    extraction.nodes.clear();
+    let extracted = engine.extract_source(path, source)?;
+    let sources = HashMap::from([(
+        path.to_string_lossy().into_owned(),
+        String::from_utf8(source.to_vec())?,
+    )]);
+    let mut extraction = compass_resolve::resolve(&[extracted], &sources);
+    if !retain_endpoint_nodes {
+        extraction.nodes.clear();
+    }
     extraction.edges.retain(|edge| {
         edge.attributes
             .get("relation")
@@ -45,7 +70,12 @@ fn semantic_method_alias_extraction(
     source: &[u8],
 ) -> Result<Extraction, Box<dyn Error>> {
     let mut engine = Engine::default();
-    let mut extraction = engine.extract_source(path, source)?;
+    let extracted = engine.extract_source(path, source)?;
+    let sources = HashMap::from([(
+        path.to_string_lossy().into_owned(),
+        String::from_utf8(source.to_vec())?,
+    )]);
+    let mut extraction = compass_resolve::resolve(&[extracted], &sources);
     let method_ids = extraction
         .nodes
         .iter()
@@ -73,6 +103,30 @@ fn semantic_method_alias_extraction(
     extraction.raw_calls = None;
     extraction.hyperedges.clear();
     Ok(extraction)
+}
+
+fn semantic_layer(extraction: Extraction) -> Result<SemanticLayer, Box<dyn Error>> {
+    Ok(SemanticLayer {
+        fragment: serde_json::to_value(extraction)?,
+        refreshed_files: Vec::new(),
+        partial_files: Vec::new(),
+        allow_partial: false,
+    })
+}
+
+fn semantic_links_without_transport_rewrites(
+    graph: &compass_model::code_graph::GraphDocument,
+) -> Vec<compass_model::code_graph::EdgeRecord> {
+    graph
+        .links
+        .iter()
+        .cloned()
+        .map(|mut edge| {
+            edge.evidence
+                .retain(|evidence| evidence.rule.as_deref() != Some("graph-ghost-endpoint-remap"));
+            edge
+        })
+        .collect()
 }
 
 #[test]
@@ -350,6 +404,7 @@ fn incremental_mixed_origin_nodes_use_fresh_ast_typed_data() -> Result<(), Box<d
         initial.output_dir.join("graph.json"),
         serde_json::to_vec_pretty(&initial_graph)?,
     )?;
+    fs::write(initial.output_dir.join(".compass_semantic_marker"), b"{}")?;
 
     fs::write(
         &source,
@@ -443,6 +498,7 @@ fn incremental_mixed_origin_edges_use_fresh_ast_relationship_sites() -> Result<(
         initial.output_dir.join("graph.json"),
         serde_json::to_vec_pretty(&initial_graph)?,
     )?;
+    fs::write(initial.output_dir.join(".compass_semantic_marker"), b"{}")?;
 
     fs::write(
         &source,
@@ -481,13 +537,14 @@ fn incremental_deleted_mixed_occurrence_keeps_only_revalidated_semantic_evidence
     let source = root.join("main.rs");
     let initial_source = b"pub fn caller() { target(); }\npub fn target() {}\n";
     fs::write(&source, initial_source)?;
-    let initial_semantic = semantic_edge_extraction(Path::new("main.rs"), initial_source, "calls")?;
+    let initial_semantic =
+        semantic_owned_edge_extraction(Path::new("main.rs"), initial_source, "calls")?;
 
     let mut options = BuildOptions::new(root.to_path_buf());
     options.no_cluster = true;
     options.no_viz = true;
-    let initial =
-        build_graph_with_layers(&options, None, &[serde_json::to_value(initial_semantic)?])?;
+    let initial_layer = semantic_layer(initial_semantic)?;
+    let initial = build_graph_with_layers(&options, Some(&initial_layer), &[])?;
     let initial_graph =
         compass_model::code_graph::GraphDocument::load(&initial.output_dir.join("graph.json"))?;
     let mut final_semantic_call = initial_graph
@@ -561,14 +618,14 @@ fn incremental_deleted_mixed_occurrence_keeps_only_revalidated_semantic_evidence
     clean_options.no_viz = true;
     clean_options.force = true;
     clean_options.purpose = BuildPurpose::Extract;
-    let clean = build_graph_with_layers(
-        &clean_options,
-        None,
-        &[serde_json::to_value(final_semantic)?],
-    )?;
+    let final_layer = semantic_layer(final_semantic)?;
+    let clean = build_graph_with_layers(&clean_options, Some(&final_layer), &[])?;
     let clean_graph =
         compass_model::code_graph::GraphDocument::load(&clean.output_dir.join("graph.json"))?;
-    assert_eq!(incremental_graph.links, clean_graph.links);
+    assert_eq!(
+        semantic_links_without_transport_rewrites(&incremental_graph),
+        semantic_links_without_transport_rewrites(&clean_graph)
+    );
     Ok(())
 }
 
@@ -580,13 +637,14 @@ fn incremental_deleted_remapped_mixed_occurrence_rebinds_trusted_semantic_residu
     let source = root.join("main.rs");
     let initial_source = b"pub fn caller() { target(); }\npub fn target() {}\n";
     fs::write(&source, initial_source)?;
-    let initial_semantic = semantic_edge_extraction(Path::new("main.rs"), initial_source, "calls")?;
+    let initial_semantic =
+        semantic_owned_edge_extraction(Path::new("main.rs"), initial_source, "calls")?;
 
     let mut options = BuildOptions::new(root.to_path_buf());
     options.no_cluster = true;
     options.no_viz = true;
-    let initial =
-        build_graph_with_layers(&options, None, &[serde_json::to_value(initial_semantic)?])?;
+    let initial_layer = semantic_layer(initial_semantic)?;
+    let initial = build_graph_with_layers(&options, Some(&initial_layer), &[])?;
     let graph_path = initial.output_dir.join("graph.json");
     let initial_graph = compass_model::code_graph::GraphDocument::load(&graph_path)?;
     let canonical_target = initial_graph
@@ -699,17 +757,16 @@ fn incremental_deleted_remapped_mixed_occurrence_rebinds_trusted_semantic_residu
     clean_options.no_viz = true;
     clean_options.force = true;
     clean_options.purpose = BuildPurpose::Extract;
-    let clean = build_graph_with_layers(
-        &clean_options,
-        None,
-        &[serde_json::to_value(final_semantic)?],
-    )?;
+    let final_layer = semantic_layer(final_semantic)?;
+    let clean = build_graph_with_layers(&clean_options, Some(&final_layer), &[])?;
     let clean_graph =
         compass_model::code_graph::GraphDocument::load(&clean.output_dir.join("graph.json"))?;
-    assert_eq!(incremental_graph.links, clean_graph.links);
+    let incremental_semantics = semantic_links_without_transport_rewrites(&incremental_graph);
+    let clean_semantics = semantic_links_without_transport_rewrites(&clean_graph);
+    assert_eq!(incremental_semantics, clean_semantics);
     assert_eq!(
-        serde_json::to_vec(&incremental_graph.links)?,
-        serde_json::to_vec(&clean_graph.links)?
+        serde_json::to_vec(&incremental_semantics)?,
+        serde_json::to_vec(&clean_semantics)?
     );
     Ok(())
 }
@@ -723,14 +780,15 @@ fn incremental_mixed_occurrence_cardinality_matches_exact_sites_and_preserves_re
     let initial_source =
         b"pub fn caller() {\n    target();\n    target();\n    target();\n}\npub fn target() {}\n";
     fs::write(&source, initial_source)?;
-    let initial_semantic = semantic_edge_extraction(Path::new("main.rs"), initial_source, "calls")?;
+    let initial_semantic =
+        semantic_owned_edge_extraction(Path::new("main.rs"), initial_source, "calls")?;
     assert_eq!(initial_semantic.edges.len(), 3);
 
     let mut options = BuildOptions::new(root.to_path_buf());
     options.no_cluster = true;
     options.no_viz = true;
-    let initial =
-        build_graph_with_layers(&options, None, &[serde_json::to_value(initial_semantic)?])?;
+    let initial_layer = semantic_layer(initial_semantic)?;
+    let initial = build_graph_with_layers(&options, Some(&initial_layer), &[])?;
     let initial_graph =
         compass_model::code_graph::GraphDocument::load(&initial.output_dir.join("graph.json"))?;
     let mut initial_calls = initial_graph
@@ -853,7 +911,7 @@ fn incremental_mixed_occurrence_cardinality_matches_exact_sites_and_preserves_re
     );
     assert!(matched.evidence.iter().any(|evidence| {
         evidence.origin == compass_model::provenance::EvidenceOrigin::Heuristic
-            && evidence.rule.as_deref() == Some("semantic-extraction")
+            && evidence.rule.as_deref() == Some("universal-call-exact-lexical-declaration")
     }));
     let semantic_only = incremental_calls
         .iter()
@@ -902,14 +960,14 @@ fn incremental_mixed_occurrence_cardinality_matches_exact_sites_and_preserves_re
     clean_options.no_viz = true;
     clean_options.force = true;
     clean_options.purpose = BuildPurpose::Extract;
-    let clean = build_graph_with_layers(
-        &clean_options,
-        None,
-        &[serde_json::to_value(final_semantic)?],
-    )?;
+    let final_layer = semantic_layer(final_semantic)?;
+    let clean = build_graph_with_layers(&clean_options, Some(&final_layer), &[])?;
     let clean_graph =
         compass_model::code_graph::GraphDocument::load(&clean.output_dir.join("graph.json"))?;
-    assert_eq!(incremental_graph.links, clean_graph.links);
+    assert_eq!(
+        semantic_links_without_transport_rewrites(&incremental_graph),
+        semantic_links_without_transport_rewrites(&clean_graph)
+    );
     Ok(())
 }
 
@@ -927,8 +985,8 @@ fn incremental_mixed_origin_alias_edges_use_canonical_fresh_relationship_sites()
     let mut options = BuildOptions::new(root.to_path_buf());
     options.no_cluster = true;
     options.no_viz = true;
-    let initial =
-        build_graph_with_layers(&options, None, &[serde_json::to_value(initial_semantic)?])?;
+    let initial_layer = semantic_layer(initial_semantic)?;
+    let initial = build_graph_with_layers(&options, Some(&initial_layer), &[])?;
     let initial_graph =
         compass_model::code_graph::GraphDocument::load(&initial.output_dir.join("graph.json"))?;
     assert!(initial_graph.links.iter().any(|edge| {
@@ -976,11 +1034,8 @@ fn incremental_mixed_origin_alias_edges_use_canonical_fresh_relationship_sites()
     clean_options.no_viz = true;
     clean_options.force = true;
     clean_options.purpose = BuildPurpose::Extract;
-    let clean = build_graph_with_layers(
-        &clean_options,
-        None,
-        &[serde_json::to_value(final_semantic)?],
-    )?;
+    let final_layer = semantic_layer(final_semantic)?;
+    let clean = build_graph_with_layers(&clean_options, Some(&final_layer), &[])?;
     let clean_graph =
         compass_model::code_graph::GraphDocument::load(&clean.output_dir.join("graph.json"))?;
     assert_eq!(incremental_graph.links, clean_graph.links);
@@ -1001,8 +1056,8 @@ fn refreshed_mixed_edge_drops_stale_incremental_endpoint_remap_evidence()
     let mut options = BuildOptions::new(root.to_path_buf());
     options.no_cluster = true;
     options.no_viz = true;
-    let initial =
-        build_graph_with_layers(&options, None, &[serde_json::to_value(initial_semantic)?])?;
+    let initial_layer = semantic_layer(initial_semantic)?;
+    let initial = build_graph_with_layers(&options, Some(&initial_layer), &[])?;
     let graph_path = initial.output_dir.join("graph.json");
     let mut initial_graph = compass_model::code_graph::GraphDocument::load(&graph_path)?;
     let target_id = initial_graph
@@ -1073,11 +1128,8 @@ fn refreshed_mixed_edge_drops_stale_incremental_endpoint_remap_evidence()
     clean_options.no_viz = true;
     clean_options.force = true;
     clean_options.purpose = BuildPurpose::Extract;
-    let clean = build_graph_with_layers(
-        &clean_options,
-        None,
-        &[serde_json::to_value(final_semantic)?],
-    )?;
+    let final_layer = semantic_layer(final_semantic)?;
+    let clean = build_graph_with_layers(&clean_options, Some(&final_layer), &[])?;
     let clean_graph =
         compass_model::code_graph::GraphDocument::load(&clean.output_dir.join("graph.json"))?;
     assert_eq!(incremental_graph.links, clean_graph.links);
@@ -1091,9 +1143,15 @@ fn incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence()
     let root = directory.path();
     let source = root.join("main.rs");
     let notes = root.join("notes.md");
-    fs::write(&source, "pub fn target() {}\n")?;
+    let source_text = "pub fn target() {}\n";
+    fs::write(&source, source_text)?;
     fs::write(&notes, "# Semantic caller\n")?;
-    let ast = Engine::default().extract(&source)?;
+    let extracted = Engine::default().extract_source(&source, source_text.as_bytes())?;
+    let sources = HashMap::from([(
+        source.to_string_lossy().into_owned(),
+        source_text.to_owned(),
+    )]);
+    let ast = compass_resolve::resolve_with_root(&[extracted], &sources, root);
     let mut semantic_target = ast
         .nodes
         .iter()
@@ -1161,7 +1219,8 @@ fn incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence()
     options.no_cluster = true;
     options.no_viz = true;
 
-    let initial = build_graph_with_layers(&options, None, &[serde_json::to_value(supplemental)?])?;
+    let initial_layer = semantic_layer(supplemental)?;
+    let initial = build_graph_with_layers(&options, Some(&initial_layer), &[])?;
     let initial_path = initial.output_dir.join("graph.json");
     let mut initial_graph = compass_model::code_graph::GraphDocument::load(&initial_path)?;
     assert!(

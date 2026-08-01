@@ -159,11 +159,16 @@ type External interface {
     let external_context = resolved
         .nodes
         .iter()
-        .find(|node| {
-            node.string("qualified_name") == "context.Context"
-                && node.string("source_file") == caller_path.to_string_lossy()
-        })
+        .find(|node| node.string("qualified_name") == "context.Context")
         .ok_or("missing qualified standard-library Context")?;
+    assert_eq!(
+        external_context
+            .attributes
+            .get("external")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert!(external_context.string("source_file").is_empty());
     assert_ne!(external_context.id, local_context.id);
     assert!(resolved.edges.iter().any(|edge| {
         edge.string("relation") == "references" && edge.target == external_context.id

@@ -88,6 +88,41 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(git(destination, "status", "--porcelain"), "")
             self.assertTrue((workspace.root / "identities" / "fixture.json").is_file())
 
+    def test_pinned_checkout_accepts_an_exact_non_head_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source = base / "source"
+            remote = base / "remote.git"
+            source.mkdir()
+            git(source, "init", "-q", "-b", "main")
+            git(source, "config", "user.name", "Compass")
+            git(source, "config", "user.email", "compass@example.invalid")
+            tracked = source / "main.py"
+            tracked.write_text("first = 1\n", encoding="utf-8")
+            git(source, "add", "main.py")
+            git(source, "commit", "-q", "-m", "first")
+            first_commit = git(source, "rev-parse", "HEAD")
+            tracked.write_text("second = 2\n", encoding="utf-8")
+            git(source, "commit", "-q", "-am", "second")
+            git(base, "clone", "-q", "--bare", str(source), str(remote))
+
+            workspace = QualificationWorkspace.create(base / "workspace")
+            spec = RepositorySpec("fixture", str(remote), ".py", ())
+            destination = workspace.root / "corpora" / "fixture"
+
+            with self.assertRaisesRegex(RuntimeError, "remote HEAD changed"):
+                prepare_checkout(spec, first_commit, destination)
+
+            identity = prepare_checkout(
+                spec,
+                first_commit,
+                destination,
+                pinned=True,
+            )
+            self.assertEqual(first_commit, identity.commit)
+            self.assertEqual(first_commit, git(destination, "rev-parse", "HEAD"))
+            self.assertEqual("first = 1\n", (destination / "main.py").read_text())
+
 
 if __name__ == "__main__":
     unittest.main()

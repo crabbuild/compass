@@ -177,10 +177,7 @@ pub fn resolve_with_root(
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
-    let mut language_facts = members::collect_language_call_facts(extractions);
-    language_facts
-        .calls
-        .retain(|call| !matches!(call.lang.as_deref(), Some("python" | "go")));
+    let language_facts = members::collect_language_call_facts(extractions);
     let evidence_batches = extractions
         .iter()
         .filter_map(|extraction| extraction.semantic_evidence.clone())
@@ -237,10 +234,7 @@ pub fn resolve_owned_with_root(
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
-    let mut language_facts = members::collect_language_call_facts_owned(&mut extractions);
-    language_facts
-        .calls
-        .retain(|call| !matches!(call.lang.as_deref(), Some("python" | "go")));
+    let language_facts = members::collect_language_call_facts_owned(&mut extractions);
     let mut evidence_batches = Vec::new();
     let mut merged = Extraction::default();
     for extraction in &mut extractions {
@@ -320,8 +314,6 @@ fn finish_resolution(
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     resolve_javascript_reexports(&mut merged);
     profile_internal("resolver JavaScript re-exports", &mut profile_started);
-    canonicalize_import_targets(&mut merged);
-    profile_internal("resolver import canonicalization", &mut profile_started);
     if !evidence_batches.is_empty() {
         match evidence::UniversalResolutionIndex::new_with_inventory(
             &evidence_batches,
@@ -331,6 +323,9 @@ fn finish_resolution(
         ) {
             Ok(index) => index.materialize(&mut merged.nodes, &mut merged.edges),
             Err(error) => {
+                if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+                    eprintln!("[compass internal] universal resolution failed: {error}");
+                }
                 merged
                     .error
                     .get_or_insert_with(|| format!("universal resolution failed: {error}"));
@@ -338,6 +333,11 @@ fn finish_resolution(
         }
     }
     profile_internal("resolver universal evidence", &mut profile_started);
+    canonicalize_file_targets(&mut merged, root);
+    profile_internal(
+        "resolver file-target canonicalization",
+        &mut profile_started,
+    );
     disambiguate_colliding_node_ids_with_calls(
         &mut merged,
         &canonical_root,
@@ -352,7 +352,7 @@ fn finish_resolution(
     profile_internal("resolver family stubs", &mut profile_started);
     rewire_unique_stub_nodes(&mut merged);
     profile_internal("resolver unique stubs", &mut profile_started);
-    resolve_cross_file_calls_with_root_calls(&mut merged, root, &language_facts.calls);
+    resolve_cross_file_calls_with_root_calls(&mut merged, &language_facts.calls);
     profile_internal("resolver cross-file calls", &mut profile_started);
     members::resolve_language_call_facts(language_facts, &mut merged);
     profile_internal("resolver language calls", &mut profile_started);
@@ -520,7 +520,7 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
         if label.is_empty() {
             continue;
         }
-        if source.is_empty() {
+        if source.is_empty() && !is_canonical_external_symbol(node) {
             stubs.insert(node.id.clone(), label);
         } else if is_type_like_definition(node)
             && let Some(family @ "jvm") = language_family(&source)
@@ -772,23 +772,34 @@ fn drop_unreferenced_nodes(extraction: &mut Extraction, candidates: &HashSet<Str
         .retain(|node| !candidates.contains(&node.id) || referenced.contains(&node.id));
 }
 
-fn canonicalize_import_targets(extraction: &mut Extraction) {
-    let aliases = extraction
-        .nodes
-        .iter()
-        .filter_map(|node| {
-            let source = string_attribute(node, "source_file");
-            is_file_node(node, &source).then_some((make_id(&[&source]), node.id.clone()))
-        })
-        .collect::<HashMap<_, _>>();
+fn canonicalize_file_targets(extraction: &mut Extraction, root: &Path) {
+    let mut aliases = HashMap::new();
+    for node in &extraction.nodes {
+        let source = string_attribute(node, "source_file");
+        if !is_file_node(node, &source) {
+            continue;
+        }
+        aliases.insert(make_id(&[&source]), node.id.clone());
+        let source_path = Path::new(&source);
+        let absolute = if source_path.is_absolute() {
+            source_path.to_path_buf()
+        } else {
+            root.join(source_path)
+        };
+        aliases.insert(make_id(&[&absolute.to_string_lossy()]), node.id.clone());
+    }
     for edge in &mut extraction.edges {
-        if matches!(
-            relation(edge),
-            "imports" | "imports_from" | "exports" | "re_exports"
-        ) && let Some(target) = aliases.get(&edge.target)
-        {
+        if let Some(target) = aliases.get(&edge.target) {
+            let rule = if matches!(
+                relation(edge),
+                "imports" | "imports_from" | "exports" | "re_exports"
+            ) {
+                EndpointRewriteRule::CanonicalImportTarget
+            } else {
+                EndpointRewriteRule::CanonicalFileTarget
+            };
             edge.target.clone_from(target);
-            stamp_endpoint_rewrite(edge, EndpointRewriteRule::CanonicalImportTarget, 1.0);
+            stamp_endpoint_rewrite(edge, rule, 1.0);
         }
     }
 }
@@ -815,7 +826,7 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
         }
         let source = string_attribute(node, "source_file");
         source_by_id.insert(node.id.clone(), source.clone());
-        if source.is_empty() {
+        if source.is_empty() && !is_canonical_external_symbol(node) {
             stubs.push((node.id.clone(), label));
         } else if is_type_like_definition(node) {
             types
@@ -976,6 +987,13 @@ fn is_type_like_definition(node: &NodeRecord) -> bool {
     }
     let label = node.label().trim();
     !label.is_empty() && !label.ends_with(')') && !label.starts_with('.') && !label.contains('.')
+}
+
+fn is_canonical_external_symbol(node: &NodeRecord) -> bool {
+    node.attributes
+        .get("_canonical_external_symbol")
+        .and_then(Value::as_bool)
+        == Some(true)
 }
 
 #[cfg(test)]
@@ -1150,21 +1168,22 @@ fn source_key(source: &str, root: &Path) -> String {
 }
 
 /// Resolve non-member raw calls using unique definitions and import evidence.
-pub fn resolve_cross_file_calls(extraction: &mut Extraction, sources: &HashMap<String, String>) {
-    let _ = sources;
-    resolve_cross_file_calls_with_root(extraction, Path::new("."));
-}
-
-fn resolve_cross_file_calls_with_root(extraction: &mut Extraction, root: &Path) {
+pub fn resolve_cross_file_calls(extraction: &mut Extraction, _sources: &HashMap<String, String>) {
     let raw_calls = extraction.raw_calls.clone().unwrap_or_default();
-    resolve_cross_file_calls_with_root_calls(extraction, root, &raw_calls);
+    resolve_cross_file_calls_with_root_calls(extraction, &raw_calls);
 }
 
-fn resolve_cross_file_calls_with_root_calls(
+#[cfg(test)]
+fn resolve_cross_file_calls_with_root(
     extraction: &mut Extraction,
+    _sources: &HashMap<String, String>,
     _root: &Path,
-    raw_calls: &[RawCall],
 ) {
+    let raw_calls = extraction.raw_calls.clone().unwrap_or_default();
+    resolve_cross_file_calls_with_root_calls(extraction, &raw_calls);
+}
+
+fn resolve_cross_file_calls_with_root_calls(extraction: &mut Extraction, raw_calls: &[RawCall]) {
     let mut profile_started = Instant::now();
     let mut exact = AHashMap::<String, Vec<String>>::new();
     let mut folded = AHashMap::<String, Vec<String>>::new();
@@ -1681,10 +1700,11 @@ fn string_attribute(node: &NodeRecord, key: &str) -> String {
 
 fn is_file_node(node: &NodeRecord, source: &str) -> bool {
     !source.is_empty()
-        && Path::new(source)
-            .file_name()
-            .and_then(|value| value.to_str())
-            == Some(node.label())
+        && (string_attribute(node, "symbol_kind") == "file"
+            || Path::new(source)
+                .file_name()
+                .and_then(|value| value.to_str())
+                == Some(node.label()))
 }
 
 fn is_generic_call_target(node: &NodeRecord) -> bool {
@@ -1942,48 +1962,6 @@ mod tests {
             "javascript",
             "project_function"
         ));
-    }
-
-    #[test]
-    fn resolve_requires_universal_evidence_for_python_imports_and_calls() {
-        let file_a = make_id(&["app/a.py"]);
-        let file_b = make_id(&["app/b.py"]);
-        let mut import_call = raw("caller", "run", "app/a.py");
-        import_call
-            .extensions
-            .insert("symbol_import_use".to_owned(), Value::Bool(true));
-        let extraction = Extraction {
-            nodes: vec![
-                node(&file_a, "a.py", "app/a.py", "file"),
-                node(&file_b, "b.py", "app/b.py", "file"),
-                node("caller", "caller()", "app/a.py", "function"),
-                node("local-class", "Local", "app/a.py", "class"),
-                node("helper", "helper()", "app/b.py", "function"),
-                node("widget", "Widget", "app/b.py", "class"),
-            ],
-            raw_calls: Some(vec![import_call]),
-            ..Extraction::default()
-        };
-        let sources = HashMap::from([(
-            "app/a.py".to_owned(),
-            "from .b import helper as run\nfrom .b import Widget\nrun()\n".to_owned(),
-        )]);
-        let resolved = resolve(&[extraction], &sources);
-        assert!(resolved.edges.iter().all(|candidate| {
-            candidate.source != "caller"
-                || candidate.target != "helper"
-                || relation(candidate) != "calls"
-        }));
-        assert!(resolved.edges.iter().all(|candidate| {
-            candidate.source != "local-class"
-                || candidate.target != "widget"
-                || relation(candidate) != "uses"
-        }));
-        assert!(resolved.edges.iter().all(|candidate| {
-            candidate.source != file_a
-                || candidate.target != "helper"
-                || relation(candidate) != "imports"
-        }));
     }
 
     #[test]

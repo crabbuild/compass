@@ -211,15 +211,40 @@ fn resolve_one_route(
         ));
     }
 
-    let candidates = resolve_reference(
-        &route.handler_reference,
-        &route.framework,
-        &route.declaring_scope,
-        &route.anchor.source_file,
-        targets,
-        aliases,
-        limits,
-    )?;
+    let signature_reference = route
+        .detail
+        .get("target_signature_qualified")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let qualified_reference = route
+        .detail
+        .get("target_qualified_name")
+        .and_then(Value::as_str)
+        .unwrap_or(&route.handler_reference);
+    let mut candidates = if signature_reference.is_empty() {
+        Vec::new()
+    } else {
+        resolve_reference(
+            signature_reference,
+            &route.framework,
+            &route.declaring_scope,
+            &route.anchor.source_file,
+            targets,
+            aliases,
+            limits,
+        )?
+    };
+    if candidates.is_empty() {
+        candidates = resolve_reference(
+            qualified_reference,
+            &route.framework,
+            &route.declaring_scope,
+            &route.anchor.source_file,
+            targets,
+            aliases,
+            limits,
+        )?;
+    }
     let state = candidate_state(&candidates);
     stages.push(resolved_stage(
         &route,
@@ -669,7 +694,11 @@ fn mark_stage_role(nodes: &mut [RawNodeRecord], target: &str, role: RouteStageRo
 }
 
 fn node_anchor(node: &RawNodeRecord) -> Option<SourceAnchor> {
-    let source_file = node.attributes.get("source_file").and_then(Value::as_str)?;
+    let source_file = node
+        .attributes
+        .get("source_file")
+        .and_then(Value::as_str)
+        .filter(|source_file| !source_file.trim().is_empty())?;
     let start_line = node
         .attributes
         .get("line_start")

@@ -1,10 +1,16 @@
 use serde::{Deserialize, Serialize};
 
+use crate::UniversalAdapterProfile;
+
 /// Identity and truthful capability declaration for one semantic adapter.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AdapterIdentity {
+    pub id: String,
     pub language: String,
+    pub version: u32,
+    pub evidence_schema: String,
+    pub profile: UniversalAdapterProfile,
     pub producer: String,
     pub capabilities: Vec<LanguageCapability>,
 }
@@ -28,6 +34,11 @@ pub struct EvidenceRange {
 pub enum LanguageCapability {
     Declarations,
     LexicalScopes,
+    Namespaces,
+    Traits,
+    ImplOwnership,
+    Macros,
+    Tests,
     Imports,
     Reexports,
     Aliases,
@@ -52,6 +63,7 @@ pub enum SemanticRole {
     Reexport,
     Alias,
     Call,
+    CallableReference,
     Construction,
     Decorator,
     Annotation,
@@ -61,6 +73,8 @@ pub enum SemanticRole {
     Ownership,
     Receiver,
     Embedding,
+    TraitBound,
+    MacroInvocation,
 }
 
 impl SemanticRole {
@@ -70,7 +84,7 @@ impl SemanticRole {
             Self::Import => LanguageCapability::Imports,
             Self::Reexport => LanguageCapability::Reexports,
             Self::Alias => LanguageCapability::Aliases,
-            Self::Call => LanguageCapability::Calls,
+            Self::Call | Self::CallableReference => LanguageCapability::Calls,
             Self::Construction => LanguageCapability::Construction,
             Self::Decorator => LanguageCapability::Decorators,
             Self::Annotation | Self::TypeReference => LanguageCapability::TypeReferences,
@@ -79,6 +93,8 @@ impl SemanticRole {
             Self::Ownership => LanguageCapability::Ownership,
             Self::Receiver => LanguageCapability::Receivers,
             Self::Embedding => LanguageCapability::Embedding,
+            Self::TraitBound => LanguageCapability::Traits,
+            Self::MacroInvocation => LanguageCapability::Macros,
         }
     }
 }
@@ -92,6 +108,7 @@ pub enum BindingKind {
     Reexport,
     LocalAlias,
     Package,
+    Member,
 }
 
 impl BindingKind {
@@ -101,6 +118,7 @@ impl BindingKind {
             Self::Import | Self::Package => LanguageCapability::Imports,
             Self::ImportAlias | Self::LocalAlias => LanguageCapability::Aliases,
             Self::Reexport => LanguageCapability::Reexports,
+            Self::Member => LanguageCapability::Members,
         }
     }
 }
@@ -110,6 +128,7 @@ impl BindingKind {
 #[serde(rename_all = "snake_case")]
 pub enum CandidateRelation {
     Calls,
+    IndirectCalls,
     Constructs,
     Decorates,
     Annotates,
@@ -122,13 +141,15 @@ pub enum CandidateRelation {
     Embeds,
     Imports,
     Reexports,
+    InvokesMacro,
+    Tests,
 }
 
 impl CandidateRelation {
     #[must_use]
     pub const fn required_capability(self) -> LanguageCapability {
         match self {
-            Self::Calls => LanguageCapability::Calls,
+            Self::Calls | Self::IndirectCalls => LanguageCapability::Calls,
             Self::Constructs => LanguageCapability::Construction,
             Self::Decorates => LanguageCapability::Decorators,
             Self::Annotates | Self::References | Self::Implements => {
@@ -140,6 +161,8 @@ impl CandidateRelation {
             Self::Embeds => LanguageCapability::Embedding,
             Self::Imports => LanguageCapability::Imports,
             Self::Reexports => LanguageCapability::Reexports,
+            Self::InvokesMacro => LanguageCapability::Macros,
+            Self::Tests => LanguageCapability::Tests,
         }
     }
 
@@ -164,6 +187,20 @@ pub struct DeclarationFact {
     pub module_or_package: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    /// Number of source-level parameters when this declaration is callable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameter_count: Option<u32>,
+    /// Whether the final source-level parameter accepts a variable arity.
+    #[serde(default)]
+    pub variadic: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implementation_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
     pub range: EvidenceRange,
 }
 
@@ -209,6 +246,8 @@ pub struct OccurrenceFact {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub qualifier: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope_id: Option<String>,
     pub range: EvidenceRange,
 }
@@ -228,6 +267,9 @@ pub struct ResolutionConstraint {
     pub scope_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub qualified_name: Option<String>,
+    /// Number of source-level arguments at a callable occurrence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub argument_count: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_target_kinds: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -303,10 +303,18 @@ impl Renderable for Product {
 pub fn target(product: Product) -> Product { product }
 #[test]
 fn target_is_rendered() { target(Product { value: 1 }); }
+fn macro_is_invoked() { product!(); }
 "#;
     let extraction = Engine::default().extract_source(&path, source)?;
-    let node_kinds = kinds(&extraction);
-    let edge_kinds = relations(&extraction);
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let declaration_kinds = evidence
+        .declarations
+        .iter()
+        .map(|declaration| declaration.kind.as_str())
+        .collect::<HashSet<_>>();
 
     for expected in [
         "trait",
@@ -314,57 +322,163 @@ fn target_is_rendered() { target(Product { value: 1 }); }
         "type_alias",
         "field",
         "constant",
-        "parameter",
         "macro",
+        "method",
+        "function",
     ] {
         assert!(
-            node_kinds.contains(expected),
-            "missing {expected}: nodes={:?}",
-            extraction.nodes
+            declaration_kinds.contains(expected),
+            "missing {expected}: declarations={:?}",
+            evidence.declarations
         );
     }
-    let macro_node = extraction
-        .nodes
+    let macro_declaration = evidence
+        .declarations
         .iter()
-        .find(|node| node.string("symbol_kind") == "macro")
+        .find(|declaration| declaration.kind == "macro")
         .ok_or("missing macro")?;
     assert!(
-        macro_node.string("qualified_name").starts_with("product@"),
-        "top-level macro identity must be lexical, not checkout-dependent: {macro_node:?}"
+        macro_declaration.qualified_name.ends_with("::product"),
+        "top-level macro identity must be lexical: {macro_declaration:?}"
     );
     assert!(
-        !macro_node
-            .string("qualified_name")
+        !macro_declaration
+            .qualified_name
             .contains(&directory.path().to_string_lossy().replace(['/', '\\'], "_")),
-        "top-level macro identity embedded the checkout path: {macro_node:?}"
+        "top-level macro identity embedded the checkout path: {macro_declaration:?}"
     );
-    for expected in ["type_of", "returns", "overrides", "aliases", "tests"] {
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Implements
+            && candidate.constraints.qualified_name.as_deref()
+                == Some("crate::semantic::Renderable")
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::InvokesMacro
+            && candidate.target_spelling == "product"
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::References
+            && candidate.target_spelling == "Product"
+    }));
+    let test = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "target_is_rendered")
+        .ok_or("missing test function")?;
+    assert_eq!(test.kind, "function");
+    for occurrence in &evidence.occurrences {
+        let start = occurrence.range.start_byte;
+        let end = occurrence.range.end_byte;
         assert!(
-            edge_kinds.contains(expected),
-            "missing {expected}: edges={:?}",
-            extraction.edges
+            start < end && end <= source.len() as u64,
+            "occurrence={occurrence:?}"
         );
     }
-    let test = extraction
-        .nodes
+    assert!(extraction.nodes.is_empty());
+    assert!(extraction.edges.is_empty());
+    assert!(extraction.raw_calls.is_none());
+    Ok(())
+}
+
+#[test]
+fn rust_universal_occurrences_preserve_qualified_call_sites() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("qualified.rs");
+    let source = br#"
+struct Graph {}
+impl Graph {
+    fn new() -> Self { Self {} }
+    fn add_edge(&mut self) {}
+}
+fn build(mut graph: Graph) {
+    Graph::new();
+    HashMap::new();
+    graph.add_edge();
+}
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust universal evidence")?;
+    assert_eq!(
+        evidence.adapter.evidence_schema,
+        "compass.languages.evidence/1"
+    );
+    assert_eq!(evidence.adapter.id, "compass.rust");
+    assert_eq!(evidence.adapter.version, 1);
+
+    let calls = evidence
+        .occurrences
         .iter()
-        .find(|node| node.label().contains("target_is_rendered"))
-        .ok_or("missing test function")?;
-    assert_eq!(test.attributes["roles"], serde_json::json!(["test"]));
-    for edge in extraction.edges.iter().filter(|edge| {
-        matches!(
-            edge.string("relation").as_str(),
-            "type_of" | "returns" | "overrides" | "aliases" | "tests"
-        )
-    }) {
-        let start = edge.attributes["start_byte"]
-            .as_u64()
-            .ok_or("missing start byte")?;
-        let end = edge.attributes["end_byte"]
-            .as_u64()
-            .ok_or("missing end byte")?;
-        assert!(start < end && end <= source.len() as u64, "edge={edge:?}");
+        .filter(|occurrence| occurrence.role == compass_languages::SemanticRole::Call)
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 3, "occurrences={calls:#?}");
+    for (spelling, qualifier) in [("new", "Graph"), ("new", "HashMap"), ("add_edge", "graph")] {
+        let occurrence = calls
+            .iter()
+            .find(|occurrence| {
+                occurrence.spelling == spelling
+                    && occurrence.qualifier.as_deref() == Some(qualifier)
+            })
+            .ok_or_else(|| format!("missing {qualifier}::{spelling}: {calls:#?}"))?;
+        let start = usize::try_from(occurrence.range.start_byte)?;
+        let end = usize::try_from(occurrence.range.end_byte)?;
+        assert!(start < end && end <= source.len());
+        assert_eq!(
+            std::str::from_utf8(&source[start..end])?.replace('.', "::"),
+            format!("{qualifier}::{spelling}")
+        );
     }
+    assert!(
+        calls.windows(2).all(|pair| pair[0].range != pair[1].range),
+        "each source use must keep a distinct occurrence: {calls:#?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_qualified_calls_emit_exact_owner_constraints_and_fail_closed() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("qualified.rs");
+    let source = br#"
+struct Graph {}
+impl Graph {
+    fn new() -> Self { Self {} }
+}
+fn build() {
+    Graph::new();
+    HashMap::new();
+}
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing universal evidence")?;
+    let local = evidence
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.target_spelling == "new"
+                && candidate.constraints.qualified_name.as_deref()
+                    == Some("crate::qualified::Graph::new")
+        })
+        .ok_or("missing exact Graph::new candidate")?;
+    assert!(!local.constraints.allow_external);
+    let hash_map = evidence
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.target_spelling == "new"
+                && candidate.constraints.qualified_name.as_deref() == Some("HashMap::new")
+        })
+        .ok_or("missing HashMap::new candidate")?;
+    assert!(!hash_map.constraints.allow_external);
+    assert!(extraction.nodes.is_empty());
+    assert!(extraction.edges.is_empty());
+    assert!(extraction.raw_calls.is_none());
     Ok(())
 }
 
@@ -583,21 +697,30 @@ mod alpha { pub struct Item { pub value: u8 } }
 mod beta { pub struct Item { pub value: u16 } }
 "#;
     let rust = Engine::default().extract_source(&rust_path, rust_source)?;
-    let rust_items = rust
-        .nodes
+    let rust_evidence = rust
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let rust_items = rust_evidence
+        .declarations
         .iter()
-        .filter(|node| node.string("symbol_kind") == "struct" && node.label() == "Item")
+        .filter(|declaration| declaration.kind == "struct" && declaration.name == "Item")
         .collect::<Vec<_>>();
-    assert_eq!(rust_items.len(), 2, "nodes={:?}", rust.nodes);
-    assert!(
-        rust_items
-            .iter()
-            .any(|node| node.string("qualified_name").contains("alpha::Item"))
+    assert_eq!(
+        rust_items.len(),
+        2,
+        "declarations={:?}",
+        rust_evidence.declarations
     );
     assert!(
         rust_items
             .iter()
-            .any(|node| node.string("qualified_name").contains("beta::Item"))
+            .any(|declaration| declaration.qualified_name.ends_with("::alpha::Item"))
+    );
+    assert!(
+        rust_items
+            .iter()
+            .any(|declaration| declaration.qualified_name.ends_with("::beta::Item"))
     );
 
     let ts_path = directory.path().join("scoped.ts");
@@ -707,20 +830,37 @@ mod two {
 }
 "#;
     let rust = Engine::default().extract_source(&rust_path, rust_source)?;
-    for (target, owner) in [
-        ("Shared@", None),
-        ("one::Contract@", Some("one")),
-        ("one::Item@", Some("one")),
-        ("one::Mode@", Some("one")),
-        ("two::Contract@", Some("two")),
-        ("two::Item@", Some("two")),
-        ("two::Mode@", Some("two")),
-        ("two::Shared@", Some("two")),
+    let rust_evidence = rust
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    for target in [
+        "crate::ownership::Shared",
+        "crate::ownership::one::Contract",
+        "crate::ownership::one::Item",
+        "crate::ownership::one::Mode",
+        "crate::ownership::two::Contract",
+        "crate::ownership::two::Item",
+        "crate::ownership::two::Mode",
+        "crate::ownership::two::Shared",
     ] {
-        assert_exact_containment(&rust, target, owner)?;
+        assert!(
+            rust_evidence.declarations.iter().any(|declaration| {
+                declaration.qualified_name == target
+                    && rust_evidence.candidates.iter().any(|candidate| {
+                        candidate.relation == compass_languages::CandidateRelation::Contains
+                            && candidate.constraints.qualified_name.as_deref() == Some(target)
+                    })
+            }),
+            "missing declaration or containment for {target}: {rust_evidence:#?}"
+        );
     }
-    assert_unique_node_ids(&rust);
-    assert_containment_sites_belong_to_targets(&rust);
+    let graph_ids = rust_evidence
+        .declarations
+        .iter()
+        .map(|declaration| declaration.graph_node_id.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(graph_ids.len(), rust_evidence.declarations.len());
 
     let ts_path = directory.path().join("ownership.ts");
     let ts_source = br#"class Shared {}
@@ -853,13 +993,27 @@ fn target() {}
 fn checks_target() { target(); panic!("expected"); }
 "#;
     let extraction = Engine::default().extract_source(&rust, rust_source)?;
-    let test = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let test = evidence
+        .declarations
         .iter()
-        .find(|node| node.label().contains("checks_target"))
+        .find(|declaration| declaration.name == "checks_target")
         .ok_or("missing multi-attribute test")?;
-    assert_eq!(test.attributes["roles"], serde_json::json!(["test"]));
-    assert!(relations(&extraction).contains("tests"));
+    assert_eq!(test.kind, "function");
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.source_declaration_id == test.id
+            && candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "target"
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.source_declaration_id == test.id
+            && candidate.relation == compass_languages::CandidateRelation::InvokesMacro
+            && candidate.target_spelling == "panic"
+    }));
+    assert!(!extraction.extensions.contains_key("_semantic_work"));
     Ok(())
 }
 
@@ -941,7 +1095,7 @@ fn markdown_occurrences_fences_and_config_relationships_have_exact_ranges()
 }
 
 #[test]
-fn semantic_inventory_reports_bounded_deterministic_work() -> Result<(), Box<dyn Error>> {
+fn rust_universal_evidence_is_bounded_and_deterministic() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("many_tests.rs");
     let mut source = String::new();
@@ -949,29 +1103,30 @@ fn semantic_inventory_reports_bounded_deterministic_work() -> Result<(), Box<dyn
     for index in 0..64 {
         source.push_str(&format!("#[test]\nfn checks_{index}() {{ target(); }}\n"));
     }
-    let extraction = Engine::default().extract_source(&path, source.as_bytes())?;
-    let work = extraction
-        .extensions
-        .get("_semantic_work")
-        .and_then(serde_json::Value::as_object)
-        .ok_or("missing semantic work counter")?;
-    let visits = work["ast_visits"].as_u64().ok_or("missing visits")?;
-    let scans = work["inventory_scan_visits"]
-        .as_u64()
-        .ok_or("missing inventory scan visits")?;
-    assert!(scans < visits * 24, "work={work:?}");
-    assert_eq!(work["call_index_writes"], serde_json::json!(64));
-    assert_eq!(work["call_index_reads"], serde_json::json!(64));
-    assert_eq!(work["test_call_visits"], serde_json::json!(64));
-    assert_eq!(work["callable_scan_visits"], serde_json::json!(130));
+    let first = Engine::default().extract_source(&path, source.as_bytes())?;
+    let second = Engine::default().extract_source(&path, source.as_bytes())?;
+    assert_eq!(first.semantic_evidence, second.semantic_evidence);
+    let evidence = first
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
     assert_eq!(
-        extraction
-            .edges
+        evidence
+            .candidates
             .iter()
-            .filter(|edge| edge.string("relation") == "tests")
+            .filter(|candidate| {
+                candidate.relation == compass_languages::CandidateRelation::Calls
+                    && candidate.target_spelling == "target"
+            })
             .count(),
         64
     );
+    assert!(
+        evidence.declarations.len() <= compass_languages::EvidenceLimits::default().declarations
+    );
+    assert!(evidence.occurrences.len() <= compass_languages::EvidenceLimits::default().occurrences);
+    assert!(!first.extensions.contains_key("_semantic_work"));
+    assert!(first.nodes.is_empty() && first.edges.is_empty() && first.raw_calls.is_none());
 
     let deep_path = directory.path().join("deep.rs");
     let mut deep_source = String::new();
@@ -983,15 +1138,19 @@ fn semantic_inventory_reports_bounded_deterministic_work() -> Result<(), Box<dyn
         deep_source.push_str(" }");
     }
     let deep = Engine::default().extract_source(&deep_path, deep_source.as_bytes())?;
-    let deep_work = deep
-        .extensions
-        .get("_semantic_work")
-        .and_then(serde_json::Value::as_object)
-        .ok_or("missing deep semantic work counter")?;
+    let deep_evidence = deep
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing deep Rust semantic evidence")?;
     assert_eq!(
-        deep_work["scope_frame_extensions"],
-        serde_json::json!(65),
-        "work={deep_work:?}"
+        deep_evidence
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.kind == "module")
+            .count(),
+        64,
+        "evidence={deep_evidence:?}"
     );
+    assert!(deep_evidence.scopes.len() <= compass_languages::EvidenceLimits::default().scopes);
     Ok(())
 }

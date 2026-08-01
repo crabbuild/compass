@@ -8,9 +8,8 @@ use crate::{AdapterProfile, EXTRACTION_SEMANTICS_VERSION, file_stem, make_id};
 
 use super::model::{
     AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
-    EvidenceDiagnostic, EvidenceRange, HierarchyConstraint, OccurrenceFact,
-    ReceiverDispatchStrategy, RelationshipCandidate, ResolutionConstraint, ScopeFact,
-    SemanticEvidenceBatch, SemanticRole,
+    EvidenceDiagnostic, EvidenceRange, HierarchyConstraint, OccurrenceFact, RelationshipCandidate,
+    ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate_evidence};
 
@@ -19,6 +18,16 @@ pub struct EvidenceBuilder {
     batch: SemanticEvidenceBatch,
     source_file: String,
     limits: EvidenceLimits,
+}
+
+#[derive(Default)]
+struct DeclarationMetadata {
+    signature: Option<String>,
+    parameter_count: Option<u32>,
+    variadic: bool,
+    signature_hash: Option<String>,
+    implementation_hash: Option<String>,
+    source_hash: Option<String>,
 }
 
 impl EvidenceBuilder {
@@ -32,7 +41,11 @@ impl EvidenceBuilder {
         Self {
             batch: SemanticEvidenceBatch {
                 adapter: AdapterIdentity {
+                    id: profile.id.to_owned(),
                     language: profile.language.to_owned(),
+                    version: profile.version,
+                    evidence_schema: profile.evidence_schema.to_owned(),
+                    profile: profile.profile,
                     producer: producer.into(),
                     capabilities: profile.capabilities.to_vec(),
                 },
@@ -58,6 +71,30 @@ impl EvidenceBuilder {
         module_or_package: Option<&str>,
         scope_id: Option<&str>,
         range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
+        self.declare_with_metadata(
+            kind,
+            graph_node_id,
+            name,
+            qualified_name,
+            module_or_package,
+            scope_id,
+            range,
+            DeclarationMetadata::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn declare_with_metadata(
+        &mut self,
+        kind: &str,
+        graph_node_id: &str,
+        name: &str,
+        qualified_name: &str,
+        module_or_package: Option<&str>,
+        scope_id: Option<&str>,
+        range: EvidenceRange,
+        metadata: DeclarationMetadata,
     ) -> Result<String, EvidenceError> {
         ensure_capacity(
             "declarations",
@@ -86,6 +123,12 @@ impl EvidenceBuilder {
             qualified_name: qualified_name.to_owned(),
             module_or_package: module_or_package.map(str::to_owned),
             scope_id: scope_id.map(str::to_owned),
+            signature: metadata.signature,
+            parameter_count: metadata.parameter_count,
+            variadic: metadata.variadic,
+            signature_hash: metadata.signature_hash,
+            implementation_hash: metadata.implementation_hash,
+            source_hash: metadata.source_hash,
             range,
         });
         Ok(id)
@@ -166,6 +209,28 @@ impl EvidenceBuilder {
         scope_id: Option<&str>,
         range: EvidenceRange,
     ) -> Result<String, EvidenceError> {
+        self.occur_with_context(
+            role,
+            owner_declaration_id,
+            spelling,
+            qualifier,
+            scope_id,
+            None,
+            range,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn occur_with_context(
+        &mut self,
+        role: SemanticRole,
+        owner_declaration_id: &str,
+        spelling: &str,
+        qualifier: Option<&str>,
+        scope_id: Option<&str>,
+        context: Option<&str>,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
         ensure_capacity(
             "occurrences",
             self.batch.occurrences.len(),
@@ -179,6 +244,7 @@ impl EvidenceBuilder {
                 spelling,
                 qualifier.unwrap_or_default(),
                 scope_id.unwrap_or_default(),
+                context.unwrap_or_default(),
                 &range.start_byte.to_string(),
                 &range.end_byte.to_string(),
             ],
@@ -190,6 +256,7 @@ impl EvidenceBuilder {
             owner_declaration_id: owner_declaration_id.to_owned(),
             spelling: spelling.to_owned(),
             qualifier: qualifier.map(str::to_owned),
+            context: context.map(str::to_owned),
             scope_id: scope_id.map(str::to_owned),
             range,
         });
@@ -204,33 +271,38 @@ impl EvidenceBuilder {
         occurrence_id: Option<&str>,
         binding_id: Option<&str>,
         target_spelling: &str,
-        constraints: ResolutionConstraint,
+        mut constraints: ResolutionConstraint,
     ) -> Result<String, EvidenceError> {
         ensure_capacity(
             "candidates",
             self.batch.candidates.len(),
             self.limits.candidates,
         )?;
-        let hierarchy_identity = hierarchy_constraint_identity(constraints.hierarchy.as_ref());
-        let id = self.stable_id(
-            "candidate",
-            &[
-                candidate_relation_name(relation),
-                source_declaration_id,
-                occurrence_id.unwrap_or_default(),
-                binding_id.unwrap_or_default(),
-                target_spelling,
-                constraints
-                    .exact_target_declaration_id
-                    .as_deref()
-                    .unwrap_or_default(),
-                constraints.exact_language.as_deref().unwrap_or_default(),
-                constraints.module_or_package.as_deref().unwrap_or_default(),
-                constraints.scope_id.as_deref().unwrap_or_default(),
-                constraints.qualified_name.as_deref().unwrap_or_default(),
-                &hierarchy_identity,
-            ],
-        );
+        constraints.allowed_target_kinds.sort_unstable();
+        constraints.allowed_target_kinds.dedup();
+        let argument_count_identity = constraints
+            .argument_count
+            .map(|count| count.to_string())
+            .unwrap_or_default();
+        let mut identity = vec![
+            candidate_relation_name(relation),
+            source_declaration_id,
+            occurrence_id.unwrap_or_default(),
+            binding_id.unwrap_or_default(),
+            target_spelling,
+            constraints.exact_language.as_deref().unwrap_or_default(),
+            constraints.module_or_package.as_deref().unwrap_or_default(),
+            constraints.scope_id.as_deref().unwrap_or_default(),
+            constraints.qualified_name.as_deref().unwrap_or_default(),
+            argument_count_identity.as_str(),
+        ];
+        identity.extend(constraints.allowed_target_kinds.iter().map(String::as_str));
+        identity.push(if constraints.allow_external {
+            "allow_external"
+        } else {
+            "internal_only"
+        });
+        let id = self.stable_id("candidate", &identity);
         self.batch.candidates.push(RelationshipCandidate {
             id: id.clone(),
             language: self.batch.adapter.language.clone(),
@@ -351,7 +423,7 @@ pub fn range_for_node(source_file: &str, node: Node<'_>) -> EvidenceRange {
     }
 }
 
-/// Extract Python or Go universal evidence directly from the parser tree.
+/// Extract hard-cut universal evidence directly from the parser tree.
 ///
 /// This path never reads `RawNodeRecord`, `RawEdgeRecord`, or `RawCall`.
 pub(crate) fn extract_tree_evidence(
@@ -362,13 +434,16 @@ pub(crate) fn extract_tree_evidence(
     profile: &'static AdapterProfile,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
     let mut state = DirectAdapterState::new(path, source_file, source, profile);
+    state.add_file(root)?;
     if root.end_byte() == root.start_byte() {
         return state.builder.finish();
     }
-    state.add_file(root)?;
+    state.capture_parser_errors(root);
     match profile.language {
         "python" => state.extract_python(root)?,
         "go" => state.extract_go(root)?,
+        "java" => state.extract_java(root)?,
+        "rust" => state.extract_rust(root)?,
         _ => {
             return Err(EvidenceError::new(
                 EvidenceErrorCode::InvalidAdapter,
@@ -402,6 +477,26 @@ struct DeclarationContext {
     runtime_nested: bool,
 }
 
+struct ImportBindingVersion {
+    binding_id: String,
+    target: String,
+    active_from: usize,
+}
+
+#[derive(Default)]
+struct PythonTypeBases {
+    complete: bool,
+    qualified_names: Vec<String>,
+}
+
+#[derive(Clone)]
+struct RustImplContext {
+    scope_id: String,
+    type_qualified_name: String,
+    trait_qualified_name: Option<String>,
+    owner_declaration_id: Option<String>,
+}
+
 struct DirectAdapterState<'source> {
     path: &'source Path,
     source_file: &'source str,
@@ -411,14 +506,25 @@ struct DirectAdapterState<'source> {
     stem: String,
     file: Option<DeclarationContext>,
     declarations: HashMap<usize, DeclarationContext>,
-    bindings: HashMap<String, String>,
-    imported_targets: HashMap<String, String>,
+    import_bindings: HashMap<String, HashMap<String, Vec<ImportBindingVersion>>>,
     local_bindings: HashMap<String, HashMap<String, String>>,
     local_targets: HashMap<String, HashMap<String, String>>,
-    local_import_targets: HashMap<String, HashMap<String, String>>,
-    ambiguous_bindings: HashSet<String>,
-    ambiguous_local_bindings: HashMap<String, HashSet<String>>,
+    local_shadows: HashMap<String, HashSet<String>>,
+    scope_parents: HashMap<String, String>,
+    ambiguous_bindings: HashSet<(String, String)>,
+    python_module_bound_names: HashSet<String>,
+    python_type_bases: HashMap<String, PythonTypeBases>,
+    rust_containers: HashMap<usize, DeclarationContext>,
+    rust_impls: HashMap<usize, RustImplContext>,
+    rust_types_by_qualified_name: HashMap<String, DeclarationContext>,
+    rust_types_by_name: HashMap<String, Vec<DeclarationContext>>,
+    rust_import_nodes: HashSet<usize>,
+    rust_test_declarations: HashSet<String>,
+    go_lexical_bindings: HashMap<usize, Vec<GoLexicalBinding>>,
+    java_containers: HashMap<usize, DeclarationContext>,
+    java_value_types: HashMap<String, HashMap<String, String>>,
     graph_ids: HashSet<String>,
+    parser_error_ranges: Vec<(usize, usize)>,
     builder: EvidenceBuilder,
 }
 
@@ -432,6 +538,12 @@ impl<'source> DirectAdapterState<'source> {
         let stem = file_stem(path);
         let module_or_package = if profile.language == "python" {
             python_module_identity(path, source_file)
+        } else if profile.language == "go" {
+            go_package_identity(path, source_file)
+        } else if profile.language == "java" {
+            java_package_identity(source).unwrap_or_else(|| "<default>".to_owned())
+        } else if profile.language == "rust" {
+            rust_module_identity(path, source_file)
         } else {
             path.parent()
                 .and_then(Path::file_name)
@@ -448,14 +560,25 @@ impl<'source> DirectAdapterState<'source> {
             stem,
             file: None,
             declarations: HashMap::new(),
-            bindings: HashMap::new(),
-            imported_targets: HashMap::new(),
+            import_bindings: HashMap::new(),
             local_bindings: HashMap::new(),
             local_targets: HashMap::new(),
-            local_import_targets: HashMap::new(),
+            local_shadows: HashMap::new(),
+            scope_parents: HashMap::new(),
             ambiguous_bindings: HashSet::new(),
-            ambiguous_local_bindings: HashMap::new(),
+            python_module_bound_names: HashSet::new(),
+            python_type_bases: HashMap::new(),
+            rust_containers: HashMap::new(),
+            rust_impls: HashMap::new(),
+            rust_types_by_qualified_name: HashMap::new(),
+            rust_types_by_name: HashMap::new(),
+            rust_import_nodes: HashSet::new(),
+            rust_test_declarations: HashSet::new(),
+            go_lexical_bindings: HashMap::new(),
+            java_containers: HashMap::new(),
+            java_value_types: HashMap::new(),
             graph_ids: HashSet::new(),
+            parser_error_ranges: Vec::new(),
             builder: EvidenceBuilder::new(
                 profile,
                 format!("compass.languages.{}.universal", profile.language),
@@ -465,13 +588,66 @@ impl<'source> DirectAdapterState<'source> {
         }
     }
 
+    fn capture_parser_errors(&mut self, root: Node<'_>) {
+        collect_parser_error_ranges(root, &mut self.parser_error_ranges);
+        self.parser_error_ranges.sort_unstable();
+        self.parser_error_ranges.dedup();
+    }
+
+    fn overlaps_parser_error(&self, node: Node<'_>) -> bool {
+        let start = node.start_byte();
+        let end = node.end_byte();
+        let line_end = self.source[end..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(self.source.len(), |offset| end.saturating_add(offset));
+        self.parser_error_ranges
+            .iter()
+            .any(|(error_start, error_end)| {
+                if error_start == error_end {
+                    start <= *error_start && *error_start <= line_end
+                } else {
+                    *error_start <= line_end && start < *error_end
+                }
+            })
+    }
+
+    fn has_invalid_python_line_prefix(&self, node: Node<'_>) -> bool {
+        let start = node.start_byte();
+        let line_start = self.source[..start]
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map_or(0, |position| position.saturating_add(1));
+        std::str::from_utf8(&self.source[line_start..start])
+            .is_ok_and(|prefix| !valid_python_import_whitespace(prefix))
+    }
+
+    fn declaration_metadata(&self, node: Node<'_>) -> DeclarationMetadata {
+        let body = evidence_declaration_body(node);
+        DeclarationMetadata {
+            signature: evidence_readable_signature(node, body, self.source),
+            parameter_count: None,
+            variadic: false,
+            signature_hash: Some(evidence_ast_hash(
+                node,
+                self.source,
+                body.map(|body| body.id()),
+            )),
+            implementation_hash: body.map(|body| evidence_ast_hash(body, self.source, None)),
+            source_hash: self
+                .source
+                .get(node.start_byte()..node.end_byte())
+                .map(evidence_normalized_source_hash),
+        }
+    }
+
     fn add_file(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
         let label = self
             .path
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or(self.source_file);
-        let graph_node_id = make_id(&[&self.path.to_string_lossy()]);
+        let graph_node_id = make_id(&[self.source_file]);
         self.graph_ids.insert(graph_node_id.clone());
         let range = range_for_node(self.source_file, root);
         let fact_id = self.builder.declare(
@@ -507,7 +683,35 @@ impl<'source> DirectAdapterState<'source> {
             )
         })?;
         self.collect_python_declarations(root, &file)?;
+        self.collect_python_imports(root, &file)?;
+        let module_bound = crate::engine::python_bound_names(root, self.source, true);
+        self.python_module_bound_names.clone_from(&module_bound);
+        self.walk_python_indirect(root, &file, true, &module_bound)?;
         self.walk_python_evidence(root, &file, true)
+    }
+
+    fn collect_python_imports(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let active = if matches!(node.kind(), "class_definition" | "function_definition") {
+            let Some(context) = self.declarations.get(&node.id()).cloned() else {
+                return Ok(());
+            };
+            context
+        } else {
+            owner.clone()
+        };
+        if matches!(node.kind(), "import_statement" | "import_from_statement") {
+            self.add_python_imports(node, &active)?;
+            return Ok(());
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_python_imports(child, &active)?;
+        }
+        Ok(())
     }
 
     fn collect_python_declarations(
@@ -545,7 +749,8 @@ impl<'source> DirectAdapterState<'source> {
             } else {
                 "function"
             };
-            let fact_id = self.builder.declare(
+            let metadata = self.declaration_metadata(node);
+            let fact_id = self.builder.declare_with_metadata(
                 kind,
                 &graph_node_id,
                 &name,
@@ -553,6 +758,7 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&self.module_or_package),
                 Some(&owner.scope_id),
                 range_for_node(self.source_file, name_node),
+                metadata,
             )?;
             let scope_id = self.builder.open_scope(
                 kind,
@@ -560,6 +766,8 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&owner.scope_id),
                 range_for_node(self.source_file, node),
             )?;
+            self.scope_parents
+                .insert(scope_id.clone(), owner.scope_id.clone());
             let context = DeclarationContext {
                 fact_id,
                 scope_id,
@@ -608,12 +816,14 @@ impl<'source> DirectAdapterState<'source> {
                 self.add_python_bases(node, &active)?;
             }
             self.add_python_annotations(node, &active)?;
+            if node.kind() == "function_definition" {
+                let body = node.child_by_field_name("body").unwrap_or(node);
+                let bound = crate::engine::python_bound_names(node, self.source, false);
+                self.walk_python_indirect(body, &active, true, &bound)?;
+            }
         }
         match node.kind() {
-            "import_statement" | "import_from_statement" => {
-                self.add_python_imports(node, &active)?;
-                return Ok(());
-            }
+            "import_statement" | "import_from_statement" => return Ok(()),
             "call" => self.add_call(node, &active, "call")?,
             _ => {}
         }
@@ -630,11 +840,158 @@ impl<'source> DirectAdapterState<'source> {
         Ok(())
     }
 
+    fn walk_python_indirect(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        root: bool,
+        bound: &HashSet<String>,
+    ) -> Result<(), EvidenceError> {
+        if !root && matches!(node.kind(), "function_definition" | "class_definition") {
+            return Ok(());
+        }
+        if owner.kind != "file"
+            && node.kind() == "call"
+            && let Some(arguments) = node.child_by_field_name("arguments")
+        {
+            let mut cursor = arguments.walk();
+            for argument in arguments.children(&mut cursor) {
+                let candidate = if argument.kind() == "identifier" {
+                    Some(argument)
+                } else if argument.kind() == "keyword_argument" {
+                    argument.child_by_field_name("value")
+                } else {
+                    None
+                };
+                if candidate.is_some_and(|candidate| candidate.kind() == "identifier") {
+                    self.add_python_callable_reference(owner, candidate, "argument", bound)?;
+                }
+            }
+        }
+        if matches!(node.kind(), "dictionary" | "list" | "set" | "tuple") {
+            let mut identifiers = Vec::new();
+            crate::engine::collect_python_collection_values(node, &mut identifiers);
+            for identifier in identifiers {
+                self.add_python_callable_reference(owner, Some(identifier), "collection", bound)?;
+            }
+        } else if node.kind() == "assignment"
+            && let Some(value) = node.child_by_field_name("right")
+        {
+            let mut identifiers = Vec::new();
+            crate::engine::collect_python_reference_values(value, &mut identifiers);
+            for identifier in identifiers {
+                self.add_python_callable_reference(owner, Some(identifier), "assignment", bound)?;
+            }
+        } else if node.kind() == "return_statement" {
+            let mut cursor = node.walk();
+            if let Some(value) = node.children(&mut cursor).find(|child| child.is_named()) {
+                let mut identifiers = Vec::new();
+                crate::engine::collect_python_reference_values(value, &mut identifiers);
+                for identifier in identifiers {
+                    self.add_python_callable_reference(owner, Some(identifier), "return", bound)?;
+                }
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.walk_python_indirect(child, owner, false, bound)?;
+        }
+        Ok(())
+    }
+
+    fn add_python_callable_reference(
+        &mut self,
+        owner: &DeclarationContext,
+        node: Option<Node<'_>>,
+        context: &str,
+        bound: &HashSet<String>,
+    ) -> Result<(), EvidenceError> {
+        let Some(node) = node else {
+            return Ok(());
+        };
+        let spelling = self.text(node);
+        if spelling.is_empty()
+            || bound.contains(&spelling)
+            || !valid_python_identifier(&spelling)
+            || self.overlaps_parser_error(node)
+        {
+            return Ok(());
+        }
+        let allow_later_file_binding = matches!(owner.kind.as_str(), "function" | "method");
+        if self.import_binding_declared_but_not_visible(
+            owner,
+            &spelling,
+            node.start_byte(),
+            allow_later_file_binding,
+        ) {
+            return Ok(());
+        }
+        let binding = self
+            .binding_for_occurrence(
+                owner,
+                &spelling,
+                node.start_byte(),
+                allow_later_file_binding,
+            )
+            .cloned();
+        let qualified_name = self
+            .imported_target_for_occurrence(
+                owner,
+                &spelling,
+                node.start_byte(),
+                allow_later_file_binding,
+            )
+            .cloned();
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::CallableReference,
+            &owner.fact_id,
+            &spelling,
+            None,
+            Some(&owner.scope_id),
+            Some(context),
+            range_for_node(self.source_file, node),
+        )?;
+        self.builder.relate(
+            CandidateRelation::IndirectCalls,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            binding.as_deref(),
+            &spelling,
+            ResolutionConstraint {
+                exact_target_declaration_id: None,
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: qualified_name
+                    .as_deref()
+                    .and_then(|qualified| qualified.rsplit_once('.').map(|(module, _)| module))
+                    .map(str::to_owned)
+                    .or_else(|| Some(self.module_or_package.clone())),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: qualified_name.clone(),
+                argument_count: None,
+                allowed_target_kinds: vec!["function".to_owned(), "method".to_owned()],
+                hierarchy: None,
+                allow_external: qualified_name.is_some(),
+            },
+        )?;
+        Ok(())
+    }
+
     fn add_python_imports(
         &mut self,
         node: Node<'_>,
         owner: &DeclarationContext,
     ) -> Result<(), EvidenceError> {
+        if self.overlaps_parser_error(node) || self.has_invalid_python_line_prefix(node) {
+            return Ok(());
+        }
+        let statement = self.text(node);
+        if !valid_python_import_whitespace(&statement)
+            || !valid_python_line_continuations(&statement)
+            || python_import_contains_wildcard(&statement)
+        {
+            return Ok(());
+        }
+        let occurrence_range = range_for_node(self.source_file, node);
         let module = node.child_by_field_name("module_name").map(|module| {
             resolve_python_module(
                 &self.module_or_package,
@@ -643,7 +1000,21 @@ impl<'source> DirectAdapterState<'source> {
             )
         });
         let mut cursor = node.walk();
-        for imported in node.children_by_field_name("name", &mut cursor) {
+        let imported_names = node
+            .children_by_field_name("name", &mut cursor)
+            .collect::<Vec<_>>();
+        if imported_names.iter().any(|imported| {
+            if imported.kind() == "aliased_import" {
+                imported
+                    .child_by_field_name("name")
+                    .is_some_and(|target| self.text(target) == "*")
+            } else {
+                self.text(*imported) == "*"
+            }
+        }) {
+            return Ok(());
+        }
+        for imported in imported_names {
             let (target_name, alias) = if imported.kind() == "aliased_import" {
                 let Some(target) = imported.child_by_field_name("name") else {
                     continue;
@@ -657,24 +1028,34 @@ impl<'source> DirectAdapterState<'source> {
             } else {
                 (self.text(imported), None)
             };
+            if !valid_python_import_target(&target_name)
+                || alias
+                    .as_deref()
+                    .is_some_and(|alias| !valid_python_identifier(alias))
+            {
+                continue;
+            }
             if target_name.is_empty() || target_name == "*" {
                 continue;
             }
-            let (local, target) = if let Some(module) = module.as_deref() {
+            let (local, binding_target, import_target) = if let Some(module) = module.as_deref() {
                 let local = alias.unwrap_or_else(|| target_name.clone());
                 let target = if module.is_empty() {
                     target_name
                 } else {
                     format!("{module}.{target_name}")
                 };
-                (local, target)
+                (local, target.clone(), target)
+            } else if let Some(alias) = alias {
+                (alias, target_name.clone(), target_name)
             } else {
-                let local = alias.unwrap_or_else(|| {
-                    target_name.split('.').next().unwrap_or_default().to_owned()
-                });
-                (local, target_name)
+                let local = target_name.split('.').next().unwrap_or_default().to_owned();
+                (local.clone(), local, target_name)
             };
-            if local.is_empty() || target.rsplit('.').next().is_none_or(str::is_empty) {
+            if local.is_empty()
+                || binding_target.rsplit('.').next().is_none_or(str::is_empty)
+                || import_target.rsplit('.').next().is_none_or(str::is_empty)
+            {
                 self.builder.diagnose(
                     "unsupported_import_target",
                     Some(&owner.fact_id),
@@ -683,7 +1064,14 @@ impl<'source> DirectAdapterState<'source> {
                 )?;
                 continue;
             }
-            self.add_python_import_binding(imported, owner, local, target)?;
+            self.add_python_import_binding(
+                imported,
+                owner,
+                local,
+                binding_target,
+                import_target,
+                occurrence_range.clone(),
+            )?;
         }
         Ok(())
     }
@@ -693,13 +1081,15 @@ impl<'source> DirectAdapterState<'source> {
         imported: Node<'_>,
         owner: &DeclarationContext,
         local: String,
-        target: String,
+        binding_target: String,
+        import_target: String,
+        occurrence_range: EvidenceRange,
     ) -> Result<(), EvidenceError> {
         let is_reexport = owner.kind == "file"
             && self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py");
         let kind = if is_reexport {
             BindingKind::Reexport
-        } else if local == target.rsplit('.').next().unwrap_or_default() {
+        } else if local == binding_target.rsplit('.').next().unwrap_or_default() {
             BindingKind::Import
         } else {
             BindingKind::ImportAlias
@@ -708,38 +1098,18 @@ impl<'source> DirectAdapterState<'source> {
         let binding_id = self.builder.bind(
             kind,
             &local,
-            &target,
+            &binding_target,
             None,
             Some(&owner.scope_id),
             range.clone(),
         )?;
-        if owner.kind == "file" {
-            if self
-                .bindings
-                .insert(local.clone(), binding_id.clone())
-                .is_some()
-            {
-                self.ambiguous_bindings.insert(local.clone());
-            }
-            self.imported_targets.insert(local.clone(), target.clone());
-        } else {
-            if self
-                .local_bindings
-                .entry(owner.scope_id.clone())
-                .or_default()
-                .insert(local.clone(), binding_id.clone())
-                .is_some()
-            {
-                self.ambiguous_local_bindings
-                    .entry(owner.scope_id.clone())
-                    .or_default()
-                    .insert(local.clone());
-            }
-            self.local_import_targets
-                .entry(owner.scope_id.clone())
-                .or_default()
-                .insert(local.clone(), target.clone());
-        }
+        self.record_import_binding(
+            owner,
+            &local,
+            &binding_target,
+            &binding_id,
+            usize::try_from(range.end_byte).unwrap_or(usize::MAX),
+        );
         let occurrence_id = self.builder.occur(
             if is_reexport {
                 SemanticRole::Reexport
@@ -750,9 +1120,9 @@ impl<'source> DirectAdapterState<'source> {
             &local,
             None,
             Some(&owner.scope_id),
-            range,
+            occurrence_range,
         )?;
-        let target_spelling = target.rsplit('.').next().unwrap_or(&target);
+        let target_spelling = import_target.rsplit('.').next().unwrap_or(&import_target);
         self.builder.relate(
             if is_reexport {
                 CandidateRelation::Reexports
@@ -766,9 +1136,12 @@ impl<'source> DirectAdapterState<'source> {
             ResolutionConstraint {
                 exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
-                module_or_package: target.rsplit_once('.').map(|(module, _)| module.to_owned()),
+                module_or_package: import_target
+                    .rsplit_once('.')
+                    .map(|(module, _)| module.to_owned()),
                 scope_id: Some(owner.scope_id.clone()),
-                qualified_name: Some(target.clone()),
+                qualified_name: Some(import_target.clone()),
+                argument_count: None,
                 allowed_target_kinds: vec![
                     "file".to_owned(),
                     "module".to_owned(),
@@ -830,7 +1203,11 @@ impl<'source> DirectAdapterState<'source> {
         let Some(arguments) = declaration.child_by_field_name("superclasses") else {
             return Ok(());
         };
-        let mut bases = Vec::new();
+        let mut bases = PythonTypeBases {
+            complete: true,
+            qualified_names: Vec::new(),
+        };
+        let mut relationships = Vec::new();
         let mut cursor = arguments.walk();
         for argument in arguments
             .children(&mut cursor)
@@ -843,23 +1220,27 @@ impl<'source> DirectAdapterState<'source> {
                     .filter(|value| matches!(value.kind(), "identifier" | "attribute")),
                 _ => None,
             };
-            let target = target.unwrap_or(argument);
+            let Some(target) = target else {
+                bases.complete = false;
+                continue;
+            };
             let raw = self.text(target);
             let (qualifier, spelling) = split_qualified(&raw);
-            if spelling.is_empty() {
-                continue;
+            let qualified_name =
+                self.python_base_qualified_name(owner, qualifier, spelling, target.start_byte());
+            if let Some(qualified_name) = qualified_name.as_ref() {
+                bases.qualified_names.push(qualified_name.clone());
+            } else {
+                bases.complete = false;
             }
-            let qualified_name = self.python_base_qualified_name(owner, qualifier, spelling);
-            bases.push((
+            relationships.push((
                 target,
-                qualifier.map(str::to_owned),
                 spelling.to_owned(),
+                qualifier.map(str::to_owned),
                 qualified_name,
             ));
         }
-        let base_set_complete =
-            !bases.is_empty() && bases.iter().all(|(_, _, _, qualified)| qualified.is_some());
-        for (target, qualifier, spelling, qualified_name) in bases {
+        for (target, spelling, qualifier, qualified_name) in relationships {
             self.add_relationship_occurrence_with_hierarchy(
                 SemanticRole::BaseType,
                 CandidateRelation::Extends,
@@ -868,9 +1249,15 @@ impl<'source> DirectAdapterState<'source> {
                 qualifier.as_deref(),
                 target,
                 qualified_name,
-                Some(HierarchyConstraint::DirectBase { base_set_complete }),
+                Some(HierarchyConstraint::DirectBase {
+                    base_set_complete: bases.complete,
+                }),
             )?;
         }
+        bases.qualified_names.sort();
+        bases.qualified_names.dedup();
+        self.python_type_bases
+            .insert(owner.qualified_name.clone(), bases);
         Ok(())
     }
 
@@ -913,6 +1300,1903 @@ impl<'source> DirectAdapterState<'source> {
         Ok(())
     }
 
+    fn extract_java(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
+        let file = self.file.clone().ok_or_else(|| {
+            EvidenceError::new(
+                EvidenceErrorCode::InvalidFact,
+                "non-empty Java source has no file evidence",
+            )
+        })?;
+        self.collect_java_imports(root, &file)?;
+        self.collect_java_declarations(root, &file)?;
+        self.collect_java_value_types(root, &file)?;
+        self.walk_java_evidence(root, &file, true)
+    }
+
+    fn collect_java_imports(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if node.kind() == "import_declaration" {
+            return self.add_java_import(node, owner);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_java_imports(child, owner)?;
+        }
+        Ok(())
+    }
+
+    fn add_java_import(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let raw = self.text(node);
+        let Some(mut target) = raw
+            .strip_prefix("import")
+            .map(str::trim)
+            .map(|value| value.trim_end_matches(';').trim())
+        else {
+            return Ok(());
+        };
+        let is_static = target.starts_with("static ");
+        if is_static {
+            target = target.trim_start_matches("static ").trim();
+        }
+        if target.is_empty() {
+            return Ok(());
+        }
+        let wildcard = target.ends_with(".*");
+        let local = if wildcard {
+            "*"
+        } else {
+            target.rsplit('.').next().unwrap_or(target)
+        };
+        let kind = if local == target {
+            BindingKind::Import
+        } else {
+            BindingKind::ImportAlias
+        };
+        let target_node = last_java_import_name(node).unwrap_or(node);
+        let binding_id = self.builder.bind(
+            kind,
+            local,
+            target,
+            None,
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, target_node),
+        )?;
+        self.record_import_binding(owner, local, target, &binding_id, 0);
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::Import,
+            &owner.fact_id,
+            local,
+            None,
+            Some(&owner.scope_id),
+            is_static.then_some("static"),
+            range_for_node(self.source_file, target_node),
+        )?;
+        self.builder.relate(
+            CandidateRelation::Imports,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            Some(&binding_id),
+            local,
+            ResolutionConstraint {
+                exact_target_declaration_id: None,
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: java_qualified_parent(target).map(str::to_owned),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: Some(target.to_owned()),
+                argument_count: None,
+                allowed_target_kinds: vec![
+                    "file".to_owned(),
+                    "package".to_owned(),
+                    "class".to_owned(),
+                    "interface".to_owned(),
+                    "enum".to_owned(),
+                    "record".to_owned(),
+                    "annotation_type".to_owned(),
+                    "method".to_owned(),
+                    "field".to_owned(),
+                ],
+                hierarchy: None,
+                allow_external: true,
+            },
+        )?;
+        Ok(())
+    }
+
+    fn collect_java_declarations(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if let Some(kind) = java_container_kind(node.kind()) {
+            let Some(name_node) = node.child_by_field_name("name") else {
+                return Ok(());
+            };
+            let name = self.text(name_node);
+            if name.is_empty() {
+                return Ok(());
+            }
+            let qualified_name = java_child_qualified_name(owner, &name);
+            let graph_node_id = self.unique_graph_id(
+                make_id(&[&self.module_or_package, &qualified_name, kind]),
+                node,
+            );
+            let metadata = self.declaration_metadata(node);
+            let fact_id = self.builder.declare_with_metadata(
+                kind,
+                &graph_node_id,
+                &name,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, name_node),
+                metadata,
+            )?;
+            let scope_id = self.builder.open_scope(
+                kind,
+                Some(&fact_id),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, node),
+            )?;
+            self.scope_parents
+                .insert(scope_id.clone(), owner.scope_id.clone());
+            let context = DeclarationContext {
+                fact_id,
+                scope_id,
+                graph_node_id,
+                name: name.clone(),
+                qualified_name: qualified_name.clone(),
+                kind: kind.to_owned(),
+                enclosing_type_qualified_name: Some(qualified_name.clone()),
+                runtime_nested: false,
+            };
+            self.add_ownership(owner, &context)?;
+            self.local_targets
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .insert(name, qualified_name);
+            self.java_containers.insert(node.id(), context.clone());
+            self.declarations.insert(node.id(), context.clone());
+            let body = node.child_by_field_name("body").unwrap_or(node);
+            let mut cursor = body.walk();
+            for child in body.children(&mut cursor).filter(|child| child.is_named()) {
+                self.collect_java_member_declarations(child, &context)?;
+            }
+            return Ok(());
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_java_declarations(child, owner)?;
+        }
+        Ok(())
+    }
+
+    fn collect_java_member_declarations(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if java_container_kind(node.kind()).is_some() {
+            return self.collect_java_declarations(node, owner);
+        }
+        match node.kind() {
+            "method_declaration" | "constructor_declaration" => {
+                self.add_java_callable_declaration(node, owner)?;
+                return Ok(());
+            }
+            "field_declaration" | "constant_declaration" => {
+                self.add_java_field_declarations(node, owner)?;
+                return Ok(());
+            }
+            "enum_constant" => {
+                self.add_java_enum_member(node, owner)?;
+                return Ok(());
+            }
+            _ => {}
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_java_member_declarations(child, owner)?;
+        }
+        Ok(())
+    }
+
+    fn add_java_callable_declaration(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let constructor = node.kind() == "constructor_declaration";
+        let Some(name_node) = node.child_by_field_name("name") else {
+            return Ok(());
+        };
+        let source_name = self.text(name_node);
+        if source_name.is_empty() {
+            return Ok(());
+        }
+        let name = if constructor { "<init>" } else { &source_name };
+        let (parameters, parameter_count, variadic) = java_parameter_signature(node, self.source);
+        let signature = format!("{name}({parameters})");
+        let qualified_name = format!("{}::{name}", owner.qualified_name);
+        let graph_node_id = self.unique_graph_id(
+            make_id(&[
+                &self.module_or_package,
+                &owner.qualified_name,
+                if constructor { "constructor" } else { "method" },
+                name,
+                &parameters,
+            ]),
+            node,
+        );
+        let mut metadata = self.declaration_metadata(node);
+        metadata.signature = Some(signature);
+        metadata.parameter_count = Some(parameter_count);
+        metadata.variadic = variadic;
+        let kind = if constructor { "constructor" } else { "method" };
+        let fact_id = self.builder.declare_with_metadata(
+            kind,
+            &graph_node_id,
+            name,
+            &qualified_name,
+            Some(&self.module_or_package),
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, name_node),
+            metadata,
+        )?;
+        let scope_id = self.builder.open_scope(
+            kind,
+            Some(&fact_id),
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, node),
+        )?;
+        self.scope_parents
+            .insert(scope_id.clone(), owner.scope_id.clone());
+        let context = DeclarationContext {
+            fact_id: fact_id.clone(),
+            scope_id,
+            graph_node_id,
+            name: name.to_owned(),
+            qualified_name: qualified_name.clone(),
+            kind: kind.to_owned(),
+            enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+            runtime_nested: false,
+        };
+        self.add_ownership(owner, &context)?;
+        let binding_id = self.builder.bind(
+            BindingKind::Member,
+            name,
+            &qualified_name,
+            Some(&fact_id),
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, name_node),
+        )?;
+        self.local_bindings
+            .entry(owner.scope_id.clone())
+            .or_default()
+            .entry(name.to_owned())
+            .or_insert(binding_id);
+        self.declarations.insert(node.id(), context);
+        Ok(())
+    }
+
+    fn add_java_field_declarations(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let declared_type = node
+            .child_by_field_name("type")
+            .map(|type_node| java_normalize_type(&self.text(type_node)));
+        let mut declarators = Vec::new();
+        collect_direct_or_nested_nodes(node, "variable_declarator", &mut declarators);
+        for declarator in declarators {
+            let Some(name_node) = declarator.child_by_field_name("name") else {
+                continue;
+            };
+            let name = self.text(name_node);
+            if name.is_empty() {
+                continue;
+            }
+            let qualified_name = format!("{}::{name}", owner.qualified_name);
+            let graph_node_id = self.unique_graph_id(
+                make_id(&[&self.module_or_package, &qualified_name, "field"]),
+                declarator,
+            );
+            let fact_id = self.builder.declare(
+                "field",
+                &graph_node_id,
+                &name,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, name_node),
+            )?;
+            let context = DeclarationContext {
+                fact_id: fact_id.clone(),
+                scope_id: owner.scope_id.clone(),
+                graph_node_id,
+                name: name.clone(),
+                qualified_name: qualified_name.clone(),
+                kind: "field".to_owned(),
+                enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+                runtime_nested: false,
+            };
+            self.add_ownership(owner, &context)?;
+            self.builder.bind(
+                BindingKind::Member,
+                &name,
+                &qualified_name,
+                Some(&fact_id),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, name_node),
+            )?;
+            if let Some(declared_type) = declared_type.as_ref() {
+                self.java_value_types
+                    .entry(owner.scope_id.clone())
+                    .or_default()
+                    .insert(name, declared_type.clone());
+            }
+            self.declarations.insert(declarator.id(), context);
+        }
+        Ok(())
+    }
+
+    fn add_java_enum_member(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(name_node) = node.child_by_field_name("name") else {
+            return Ok(());
+        };
+        let name = self.text(name_node);
+        if name.is_empty() {
+            return Ok(());
+        }
+        let qualified_name = format!("{}::{name}", owner.qualified_name);
+        let graph_node_id = self.unique_graph_id(
+            make_id(&[&self.module_or_package, &qualified_name, "enum_member"]),
+            node,
+        );
+        let fact_id = self.builder.declare(
+            "enum_member",
+            &graph_node_id,
+            &name,
+            &qualified_name,
+            Some(&self.module_or_package),
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, name_node),
+        )?;
+        let context = DeclarationContext {
+            fact_id: fact_id.clone(),
+            scope_id: owner.scope_id.clone(),
+            graph_node_id,
+            name: name.clone(),
+            qualified_name: qualified_name.clone(),
+            kind: "enum_member".to_owned(),
+            enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+            runtime_nested: false,
+        };
+        self.add_ownership(owner, &context)?;
+        self.builder.bind(
+            BindingKind::Member,
+            &name,
+            &qualified_name,
+            Some(&fact_id),
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, name_node),
+        )?;
+        self.declarations.insert(node.id(), context);
+        Ok(())
+    }
+
+    fn collect_java_value_types(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let active = self
+            .declarations
+            .get(&node.id())
+            .cloned()
+            .unwrap_or_else(|| owner.clone());
+        if matches!(
+            node.kind(),
+            "method_declaration" | "constructor_declaration"
+        ) {
+            self.add_java_parameter_value_types(node, &active);
+        } else if node.kind() == "local_variable_declaration" {
+            self.add_java_local_value_types(node, &active);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_java_value_types(child, &active)?;
+        }
+        Ok(())
+    }
+
+    fn add_java_parameter_value_types(&mut self, node: Node<'_>, owner: &DeclarationContext) {
+        let Some(parameters) = node.child_by_field_name("parameters") else {
+            return;
+        };
+        let mut cursor = parameters.walk();
+        for parameter in parameters
+            .children(&mut cursor)
+            .filter(|child| child.is_named())
+        {
+            if !matches!(parameter.kind(), "formal_parameter" | "spread_parameter") {
+                continue;
+            }
+            let Some(name) = parameter
+                .child_by_field_name("name")
+                .map(|node| self.text(node))
+            else {
+                continue;
+            };
+            let Some(target) = parameter
+                .child_by_field_name("type")
+                .map(|node| java_normalize_type(&self.text(node)))
+            else {
+                continue;
+            };
+            self.java_value_types
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .insert(name, target);
+        }
+    }
+
+    fn add_java_local_value_types(&mut self, node: Node<'_>, owner: &DeclarationContext) {
+        let Some(target) = node
+            .child_by_field_name("type")
+            .map(|node| java_normalize_type(&self.text(node)))
+        else {
+            return;
+        };
+        let mut declarators = Vec::new();
+        collect_direct_or_nested_nodes(node, "variable_declarator", &mut declarators);
+        for declarator in declarators {
+            if let Some(name) = declarator
+                .child_by_field_name("name")
+                .map(|node| self.text(node))
+            {
+                self.java_value_types
+                    .entry(owner.scope_id.clone())
+                    .or_default()
+                    .insert(name, target.clone());
+            }
+        }
+    }
+
+    fn walk_java_evidence(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        root: bool,
+    ) -> Result<(), EvidenceError> {
+        let active = self
+            .declarations
+            .get(&node.id())
+            .cloned()
+            .unwrap_or_else(|| owner.clone());
+        if self.declarations.contains_key(&node.id()) {
+            self.add_java_annotations(node, &active)?;
+            self.add_java_type_relationships(node, &active)?;
+        }
+        match node.kind() {
+            "import_declaration" => return Ok(()),
+            "method_invocation" => self.add_java_method_call(node, &active)?,
+            "object_creation_expression" => self.add_java_construction(node, &active)?,
+            _ => {}
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            if !root && child.id() == node.id() {
+                continue;
+            }
+            self.walk_java_evidence(child, &active, false)?;
+        }
+        Ok(())
+    }
+
+    fn add_java_annotations(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(modifiers) = node.child_by_field_name("modifiers").or_else(|| {
+            let mut cursor = node.walk();
+            node.children(&mut cursor)
+                .find(|child| child.kind() == "modifiers")
+        }) else {
+            return Ok(());
+        };
+        let mut annotations = Vec::new();
+        collect_java_annotations(modifiers, &mut annotations);
+        for annotation in annotations {
+            let Some(name_node) = annotation
+                .child_by_field_name("name")
+                .or_else(|| first_java_type_name(annotation))
+            else {
+                continue;
+            };
+            self.add_java_named_relationship(
+                SemanticRole::Annotation,
+                CandidateRelation::Annotates,
+                owner,
+                name_node,
+                Some("annotation"),
+                vec!["annotation_type", "interface", "class"],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn add_java_type_relationships(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if java_container_kind(node.kind()).is_some() {
+            if let Some(superclass) = node.child_by_field_name("superclass") {
+                let mut names = Vec::new();
+                collect_java_type_nodes(superclass, &mut names);
+                if let Some(target) = names.first().copied() {
+                    self.add_java_named_relationship(
+                        SemanticRole::BaseType,
+                        CandidateRelation::Extends,
+                        owner,
+                        target,
+                        Some("superclass"),
+                        vec!["class", "record"],
+                    )?;
+                }
+            }
+            if let Some(interfaces) = node.child_by_field_name("interfaces") {
+                let mut names = Vec::new();
+                collect_java_type_nodes(interfaces, &mut names);
+                for target in names {
+                    self.add_java_named_relationship(
+                        SemanticRole::TypeReference,
+                        CandidateRelation::Implements,
+                        owner,
+                        target,
+                        Some("interface"),
+                        vec!["interface", "annotation_type"],
+                    )?;
+                }
+            }
+        }
+        let type_root = match node.kind() {
+            "method_declaration" => node.child_by_field_name("type"),
+            "field_declaration"
+            | "constant_declaration"
+            | "formal_parameter"
+            | "spread_parameter" => node.child_by_field_name("type"),
+            _ => None,
+        };
+        if let Some(type_root) = type_root {
+            let mut names = Vec::new();
+            collect_java_type_nodes(type_root, &mut names);
+            for target in names {
+                self.add_java_named_relationship(
+                    SemanticRole::TypeReference,
+                    CandidateRelation::References,
+                    owner,
+                    target,
+                    Some("type"),
+                    vec!["class", "interface", "enum", "record", "annotation_type"],
+                )?;
+            }
+        }
+        if matches!(
+            node.kind(),
+            "method_declaration" | "constructor_declaration"
+        ) && let Some(parameters) = node.child_by_field_name("parameters")
+        {
+            let mut parameter_types = Vec::new();
+            collect_java_parameter_type_nodes(parameters, &mut parameter_types);
+            for target in parameter_types {
+                self.add_java_named_relationship(
+                    SemanticRole::TypeReference,
+                    CandidateRelation::References,
+                    owner,
+                    target,
+                    Some("parameter_type"),
+                    vec!["class", "interface", "enum", "record", "annotation_type"],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn add_java_named_relationship(
+        &mut self,
+        role: SemanticRole,
+        relation: CandidateRelation,
+        owner: &DeclarationContext,
+        target: Node<'_>,
+        context: Option<&str>,
+        kinds: Vec<&str>,
+    ) -> Result<(), EvidenceError> {
+        let raw = self.text(target);
+        let normalized = java_normalize_type(&raw);
+        let (qualifier, spelling) = split_qualified(&normalized);
+        if spelling.is_empty() || java_primitive_type(spelling) {
+            return Ok(());
+        }
+        let qualified_name = self.java_qualified_type(owner, &normalized, target.start_byte());
+        let lookup = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+        let binding = self
+            .binding_for_occurrence(owner, lookup, target.start_byte(), true)
+            .cloned();
+        let occurrence_id = self.builder.occur_with_context(
+            role,
+            &owner.fact_id,
+            spelling,
+            qualifier,
+            Some(&owner.scope_id),
+            context,
+            range_for_node(self.source_file, target),
+        )?;
+        self.builder.relate(
+            relation,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            binding.as_deref(),
+            spelling,
+            ResolutionConstraint {
+                exact_target_declaration_id: None,
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: Some(self.module_or_package.clone()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: qualified_name.clone(),
+                argument_count: None,
+                allowed_target_kinds: kinds.into_iter().map(str::to_owned).collect(),
+                hierarchy: None,
+                allow_external: qualified_name.is_some(),
+            },
+        )?;
+        Ok(())
+    }
+
+    fn add_java_method_call(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(name_node) = node.child_by_field_name("name") else {
+            return Ok(());
+        };
+        let spelling = self.text(name_node);
+        if spelling.is_empty() {
+            return Ok(());
+        }
+        let receiver = node
+            .child_by_field_name("object")
+            .map(|object| self.text(object));
+        let receiver_type = receiver
+            .as_deref()
+            .and_then(|receiver| self.java_receiver_type(owner, receiver, node.start_byte()));
+        let qualified_name = receiver_type
+            .as_ref()
+            .map(|receiver| format!("{receiver}::{spelling}"));
+        let lookup = receiver
+            .as_deref()
+            .map(qualified_binding_head)
+            .unwrap_or(&spelling);
+        let binding = self
+            .binding_for_occurrence(owner, lookup, node.start_byte(), true)
+            .cloned();
+        let argument_count = java_argument_count(node);
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::Call,
+            &owner.fact_id,
+            &spelling,
+            receiver.as_deref(),
+            Some(&owner.scope_id),
+            Some(&format!("arity:{argument_count}")),
+            range_for_node(self.source_file, name_node),
+        )?;
+        self.builder.relate(
+            CandidateRelation::Calls,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            binding.as_deref(),
+            &spelling,
+            ResolutionConstraint {
+                exact_target_declaration_id: None,
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: Some(self.module_or_package.clone()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name,
+                argument_count: Some(argument_count),
+                allowed_target_kinds: vec!["method".to_owned()],
+                hierarchy: None,
+                allow_external: receiver_type.is_some(),
+            },
+        )?;
+        Ok(())
+    }
+
+    fn add_java_construction(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(type_node) = node.child_by_field_name("type") else {
+            return Ok(());
+        };
+        let normalized = java_normalize_type(&self.text(type_node));
+        let (qualifier, spelling) = split_qualified(&normalized);
+        if spelling.is_empty() {
+            return Ok(());
+        }
+        let qualified_name = self.java_qualified_type(owner, &normalized, type_node.start_byte());
+        let lookup = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+        let binding = self
+            .binding_for_occurrence(owner, lookup, type_node.start_byte(), true)
+            .cloned();
+        let argument_count = java_argument_count(node);
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::Construction,
+            &owner.fact_id,
+            spelling,
+            qualifier,
+            Some(&owner.scope_id),
+            Some(&format!("arity:{argument_count}")),
+            range_for_node(self.source_file, type_node),
+        )?;
+        self.builder.relate(
+            CandidateRelation::Constructs,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            binding.as_deref(),
+            spelling,
+            ResolutionConstraint {
+                exact_target_declaration_id: None,
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: Some(self.module_or_package.clone()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name,
+                argument_count: Some(argument_count),
+                allowed_target_kinds: vec!["class".to_owned(), "record".to_owned()],
+                hierarchy: None,
+                allow_external: true,
+            },
+        )?;
+        Ok(())
+    }
+
+    fn java_qualified_type(
+        &self,
+        owner: &DeclarationContext,
+        raw: &str,
+        use_start: usize,
+    ) -> Option<String> {
+        let normalized = java_normalize_type(raw);
+        if normalized.is_empty() || java_primitive_type(&normalized) {
+            return None;
+        }
+        if normalized.contains('.') && normalized.starts_with(char::is_lowercase) {
+            return Some(normalized);
+        }
+        let (qualifier, spelling) = split_qualified(&normalized);
+        if let Some(qualifier) = qualifier {
+            return self
+                .imported_qualified_target_for(owner, qualifier, use_start, true)
+                .map(|target| format!("{target}.{spelling}"))
+                .or(Some(normalized));
+        }
+        self.imported_target_for_occurrence(owner, spelling, use_start, true)
+            .cloned()
+            .or_else(|| self.local_target_for(owner, spelling).cloned())
+            .or_else(|| java_lang_type(spelling).map(str::to_owned))
+            .or_else(|| Some(format!("{}.{}", self.module_or_package, spelling)))
+    }
+
+    fn java_receiver_type(
+        &self,
+        owner: &DeclarationContext,
+        receiver: &str,
+        use_start: usize,
+    ) -> Option<String> {
+        if receiver == "this" || receiver == "super" {
+            return owner.enclosing_type_qualified_name.clone();
+        }
+        if let Some(target) = self.local_java_value_type(owner, receiver) {
+            return self.java_qualified_type(owner, target, use_start);
+        }
+        if receiver
+            .rsplit('.')
+            .next()
+            .is_some_and(|name| name.starts_with(char::is_uppercase))
+        {
+            return self.java_qualified_type(owner, receiver, use_start);
+        }
+        None
+    }
+
+    fn local_java_value_type<'a>(
+        &'a self,
+        owner: &DeclarationContext,
+        name: &str,
+    ) -> Option<&'a String> {
+        let mut scope = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let current = scope?;
+            if let Some(target) = self
+                .java_value_types
+                .get(current)
+                .and_then(|values| values.get(name))
+            {
+                return Some(target);
+            }
+            scope = self.scope_parents.get(current).map(String::as_str);
+        }
+        None
+    }
+
+    fn extract_rust(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
+        let file = self.file.clone().ok_or_else(|| {
+            EvidenceError::new(
+                EvidenceErrorCode::InvalidFact,
+                "non-empty Rust source has no file evidence",
+            )
+        })?;
+        self.collect_rust_containers(root, &file)?;
+        self.collect_rust_module_imports(root, &file)?;
+        self.collect_rust_declarations(root, &file, None)?;
+        self.collect_rust_imports(root, &file)?;
+        self.walk_rust_evidence(root, &file, true)
+    }
+
+    fn collect_rust_module_imports(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if matches!(
+            node.kind(),
+            "function_item" | "function_signature_item" | "impl_item"
+        ) {
+            return Ok(());
+        }
+        let active = self
+            .rust_containers
+            .get(&node.id())
+            .filter(|context| context.kind == "module")
+            .cloned()
+            .unwrap_or_else(|| owner.clone());
+        if node.kind() == "use_declaration" {
+            if self.rust_import_nodes.insert(node.id()) {
+                self.add_rust_use(node, &active)?;
+            }
+            return Ok(());
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_rust_module_imports(child, &active)?;
+        }
+        Ok(())
+    }
+
+    fn collect_rust_containers(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if matches!(node.kind(), "function_item" | "function_signature_item") {
+            return Ok(());
+        }
+        if let Some(kind) = rust_container_kind(node.kind()) {
+            let Some(name_node) = node.child_by_field_name("name") else {
+                return Ok(());
+            };
+            let name = self.text(name_node);
+            if name.is_empty() {
+                return Ok(());
+            }
+            let qualified_name = rust_join_qualified(&owner.qualified_name, &name);
+            let graph_node_id =
+                self.unique_graph_id(make_id(&[&self.module_or_package, &qualified_name]), node);
+            let metadata = self.declaration_metadata(node);
+            let fact_id = self.builder.declare_with_metadata(
+                kind,
+                &graph_node_id,
+                &name,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, name_node),
+                metadata,
+            )?;
+            let scope_id = self.builder.open_scope(
+                kind,
+                Some(&fact_id),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, node),
+            )?;
+            self.scope_parents
+                .insert(scope_id.clone(), owner.scope_id.clone());
+            let context = DeclarationContext {
+                fact_id,
+                scope_id,
+                graph_node_id,
+                name: name.clone(),
+                qualified_name: qualified_name.clone(),
+                kind: kind.to_owned(),
+                enclosing_type_qualified_name: matches!(kind, "trait" | "struct" | "enum")
+                    .then_some(qualified_name.clone()),
+                runtime_nested: false,
+            };
+            self.add_ownership(owner, &context)?;
+            self.local_targets
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .insert(name.clone(), qualified_name.clone());
+            self.rust_containers.insert(node.id(), context.clone());
+            self.declarations.insert(node.id(), context.clone());
+            if matches!(kind, "trait" | "struct" | "enum") {
+                self.rust_types_by_qualified_name
+                    .insert(qualified_name, context.clone());
+                self.rust_types_by_name
+                    .entry(name)
+                    .or_default()
+                    .push(context.clone());
+            }
+            if node.kind() == "mod_item"
+                && let Some(body) = node.child_by_field_name("body")
+            {
+                let mut cursor = body.walk();
+                for child in body.children(&mut cursor).filter(|child| child.is_named()) {
+                    self.collect_rust_containers(child, &context)?;
+                }
+            }
+            return Ok(());
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_rust_containers(child, owner)?;
+        }
+        Ok(())
+    }
+
+    fn collect_rust_declarations(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        active_impl: Option<&RustImplContext>,
+    ) -> Result<(), EvidenceError> {
+        if let Some(container) = self.rust_containers.get(&node.id()).cloned() {
+            match node.kind() {
+                "mod_item" | "trait_item" => {
+                    if let Some(body) = node.child_by_field_name("body") {
+                        let mut cursor = body.walk();
+                        for child in body.children(&mut cursor).filter(|child| child.is_named()) {
+                            self.collect_rust_declarations(child, &container, None)?;
+                        }
+                    }
+                }
+                "struct_item" => self.add_rust_struct_fields(node, &container)?,
+                "enum_item" => self.add_rust_enum_members(node, &container)?,
+                _ => {}
+            }
+            return Ok(());
+        }
+        match node.kind() {
+            "impl_item" => {
+                self.add_rust_impl(node, owner)?;
+                return Ok(());
+            }
+            "function_item" | "function_signature_item" => {
+                self.add_rust_callable(node, owner, active_impl)?;
+                return Ok(());
+            }
+            "type_item" => {
+                self.add_rust_named_declaration(node, owner, "type_alias")?;
+                return Ok(());
+            }
+            "const_item" | "static_item" => {
+                self.add_rust_named_declaration(node, owner, "constant")?;
+                return Ok(());
+            }
+            "macro_definition" => {
+                self.add_rust_named_declaration(node, owner, "macro")?;
+                return Ok(());
+            }
+            _ => {}
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_rust_declarations(child, owner, active_impl)?;
+        }
+        Ok(())
+    }
+
+    fn add_rust_named_declaration(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        kind: &str,
+    ) -> Result<Option<DeclarationContext>, EvidenceError> {
+        let Some(name_node) = node.child_by_field_name("name") else {
+            return Ok(None);
+        };
+        let name = self.text(name_node);
+        if name.is_empty() {
+            return Ok(None);
+        }
+        let qualified_name = rust_join_qualified(&owner.qualified_name, &name);
+        let graph_node_id =
+            self.unique_graph_id(make_id(&[&self.module_or_package, &qualified_name]), node);
+        let metadata = self.declaration_metadata(node);
+        let fact_id = self.builder.declare_with_metadata(
+            kind,
+            &graph_node_id,
+            &name,
+            &qualified_name,
+            Some(&self.module_or_package),
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, name_node),
+            metadata,
+        )?;
+        let scope_id = if matches!(kind, "function" | "method") {
+            let scope_id = self.builder.open_scope(
+                "callable",
+                Some(&fact_id),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, node),
+            )?;
+            self.scope_parents
+                .insert(scope_id.clone(), owner.scope_id.clone());
+            scope_id
+        } else {
+            owner.scope_id.clone()
+        };
+        let context = DeclarationContext {
+            fact_id,
+            scope_id,
+            graph_node_id,
+            name: name.clone(),
+            qualified_name: qualified_name.clone(),
+            kind: kind.to_owned(),
+            enclosing_type_qualified_name: owner.enclosing_type_qualified_name.clone(),
+            runtime_nested: false,
+        };
+        self.add_ownership(owner, &context)?;
+        self.local_targets
+            .entry(owner.scope_id.clone())
+            .or_default()
+            .insert(name, qualified_name);
+        self.declarations.insert(node.id(), context.clone());
+        Ok(Some(context))
+    }
+
+    fn add_rust_callable(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        active_impl: Option<&RustImplContext>,
+    ) -> Result<(), EvidenceError> {
+        let Some(name_node) = node.child_by_field_name("name") else {
+            return Ok(());
+        };
+        let name = self.text(name_node);
+        if name.is_empty() {
+            return Ok(());
+        }
+        let method = active_impl.is_some() || owner.kind == "trait";
+        let qualified_owner = active_impl.map_or_else(
+            || owner.qualified_name.clone(),
+            |implementation| {
+                implementation.trait_qualified_name.as_ref().map_or_else(
+                    || implementation.type_qualified_name.clone(),
+                    |trait_name| {
+                        format!("<{} as {}>", implementation.type_qualified_name, trait_name)
+                    },
+                )
+            },
+        );
+        let qualified_name = rust_join_qualified(&qualified_owner, &name);
+        let graph_node_id =
+            self.unique_graph_id(make_id(&[&self.module_or_package, &qualified_name]), node);
+        let metadata = self.declaration_metadata(node);
+        let parent_scope =
+            active_impl.map_or(owner.scope_id.as_str(), |value| value.scope_id.as_str());
+        let fact_id = self.builder.declare_with_metadata(
+            if method { "method" } else { "function" },
+            &graph_node_id,
+            &name,
+            &qualified_name,
+            Some(&self.module_or_package),
+            Some(parent_scope),
+            range_for_node(self.source_file, name_node),
+            metadata,
+        )?;
+        let scope_id = self.builder.open_scope(
+            "callable",
+            Some(&fact_id),
+            Some(parent_scope),
+            range_for_node(self.source_file, node),
+        )?;
+        self.scope_parents
+            .insert(scope_id.clone(), parent_scope.to_owned());
+        let context = DeclarationContext {
+            fact_id,
+            scope_id,
+            graph_node_id,
+            name: name.clone(),
+            qualified_name: qualified_name.clone(),
+            kind: if method { "method" } else { "function" }.to_owned(),
+            enclosing_type_qualified_name: active_impl
+                .map(|implementation| implementation.type_qualified_name.clone())
+                .or_else(|| owner.enclosing_type_qualified_name.clone()),
+            runtime_nested: false,
+        };
+        if let Some(implementation) = active_impl {
+            if let Some(type_owner) = implementation
+                .owner_declaration_id
+                .as_deref()
+                .and_then(|id| self.rust_declaration_context(id))
+                .cloned()
+            {
+                self.add_ownership(&type_owner, &context)?;
+                self.builder.bind(
+                    BindingKind::Member,
+                    &name,
+                    &qualified_name,
+                    Some(&context.fact_id),
+                    Some(&type_owner.scope_id),
+                    range_for_node(self.source_file, name_node),
+                )?;
+            } else {
+                self.add_ownership(owner, &context)?;
+            }
+        } else {
+            self.add_ownership(owner, &context)?;
+        }
+        self.local_targets
+            .entry(parent_scope.to_owned())
+            .or_default()
+            .insert(name, qualified_name);
+        if rust_has_test_attribute(node, self.source) {
+            self.rust_test_declarations.insert(context.fact_id.clone());
+        }
+        self.declarations.insert(node.id(), context);
+        Ok(())
+    }
+
+    fn rust_declaration_context(&self, fact_id: &str) -> Option<&DeclarationContext> {
+        self.declarations
+            .values()
+            .find(|context| context.fact_id == fact_id)
+    }
+
+    fn add_rust_impl(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(type_node) = node.child_by_field_name("type") else {
+            return Ok(());
+        };
+        let type_name = self.text(type_node);
+        let type_context = self.rust_type_context(owner, &type_name).cloned();
+        let type_qualified_name = type_context.as_ref().map_or_else(
+            || rust_qualify_local_path(&owner.qualified_name, &type_name),
+            |context| context.qualified_name.clone(),
+        );
+        let trait_node = node.child_by_field_name("trait");
+        let trait_name = trait_node.map(|value| self.text(value));
+        let trait_qualified_name = trait_name.as_deref().map(|name| {
+            self.rust_type_context(owner, name).map_or_else(
+                || rust_qualify_imported_path(self, owner, name, node.start_byte()),
+                |context| context.qualified_name.clone(),
+            )
+        });
+        let scope_id = self.builder.open_scope(
+            "impl",
+            type_context
+                .as_ref()
+                .map(|context| context.fact_id.as_str()),
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, node),
+        )?;
+        self.scope_parents
+            .insert(scope_id.clone(), owner.scope_id.clone());
+        let implementation = RustImplContext {
+            scope_id,
+            type_qualified_name,
+            trait_qualified_name: trait_qualified_name.clone(),
+            owner_declaration_id: type_context.as_ref().map(|context| context.fact_id.clone()),
+        };
+        if let (Some(type_context), Some(trait_node), Some(trait_qualified_name)) = (
+            type_context.as_ref(),
+            trait_node,
+            trait_qualified_name.as_ref(),
+        ) {
+            self.add_rust_occurrence_candidate(
+                SemanticRole::TraitBound,
+                CandidateRelation::Implements,
+                type_context,
+                trait_node,
+                Some(trait_qualified_name),
+                vec!["trait".to_owned()],
+                !rust_identity_is_internal(&self.module_or_package, trait_qualified_name),
+            )?;
+        }
+        self.rust_impls.insert(node.id(), implementation.clone());
+        if let Some(body) = node.child_by_field_name("body") {
+            let mut cursor = body.walk();
+            for child in body.children(&mut cursor).filter(|child| child.is_named()) {
+                self.collect_rust_declarations(child, owner, Some(&implementation))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn rust_type_context(
+        &self,
+        owner: &DeclarationContext,
+        raw: &str,
+    ) -> Option<&DeclarationContext> {
+        let raw = raw.trim().trim_start_matches(['&', '*']);
+        let qualified = rust_qualify_local_path(&owner.qualified_name, raw);
+        self.rust_types_by_qualified_name
+            .get(&qualified)
+            .or_else(|| {
+                let leaf = rust_path_leaf(raw);
+                self.rust_types_by_name
+                    .get(leaf)
+                    .filter(|contexts| contexts.len() == 1)
+                    .and_then(|contexts| contexts.first())
+            })
+    }
+
+    fn rust_enclosing_module(&self, owner: &DeclarationContext) -> String {
+        if matches!(owner.kind.as_str(), "file" | "module") {
+            return owner.qualified_name.clone();
+        }
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let Some(current) = scope_id else {
+                break;
+            };
+            if let Some(context) = self
+                .rust_containers
+                .values()
+                .find(|context| context.kind == "module" && context.scope_id == current)
+            {
+                return context.qualified_name.clone();
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        self.module_or_package.clone()
+    }
+
+    fn add_rust_struct_fields(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(body) = node.child_by_field_name("body") else {
+            return Ok(());
+        };
+        let mut cursor = body.walk();
+        let mut tuple_index = 0usize;
+        for field in body.children(&mut cursor).filter(|child| child.is_named()) {
+            if field.kind() == "field_declaration" {
+                self.add_rust_field(field, owner, None)?;
+            } else if rust_is_type_node(field.kind()) {
+                self.add_rust_field(field, owner, Some(tuple_index))?;
+                tuple_index = tuple_index.saturating_add(1);
+            }
+        }
+        Ok(())
+    }
+
+    fn add_rust_enum_members(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(body) = node.child_by_field_name("body") else {
+            return Ok(());
+        };
+        let mut cursor = body.walk();
+        for variant in body
+            .children(&mut cursor)
+            .filter(|child| child.kind() == "enum_variant")
+        {
+            let Some(name_node) = variant.child_by_field_name("name") else {
+                continue;
+            };
+            let name = self.text(name_node);
+            if name.is_empty() {
+                continue;
+            }
+            let qualified_name = rust_join_qualified(&owner.qualified_name, &name);
+            let graph_node_id = self.unique_graph_id(
+                make_id(&[&self.module_or_package, &qualified_name]),
+                variant,
+            );
+            let fact_id = self.builder.declare_with_metadata(
+                "enum_member",
+                &graph_node_id,
+                &name,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, name_node),
+                self.declaration_metadata(variant),
+            )?;
+            let context = DeclarationContext {
+                fact_id,
+                scope_id: owner.scope_id.clone(),
+                graph_node_id,
+                name,
+                qualified_name,
+                kind: "enum_member".to_owned(),
+                enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+                runtime_nested: false,
+            };
+            self.add_ownership(owner, &context)?;
+            self.add_rust_declaration_references(variant, owner)?;
+            self.declarations.insert(variant.id(), context);
+        }
+        Ok(())
+    }
+
+    fn add_rust_field(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        tuple_index: Option<usize>,
+    ) -> Result<(), EvidenceError> {
+        let name_node = node.child_by_field_name("name");
+        let name = name_node.map_or_else(
+            || tuple_index.unwrap_or_default().to_string(),
+            |value| self.text(value),
+        );
+        if name.is_empty() {
+            return Ok(());
+        }
+        let qualified_name = rust_join_qualified(&owner.qualified_name, &name);
+        let graph_node_id =
+            self.unique_graph_id(make_id(&[&self.module_or_package, &qualified_name]), node);
+        let fact_id = self.builder.declare_with_metadata(
+            "field",
+            &graph_node_id,
+            &name,
+            &qualified_name,
+            Some(&self.module_or_package),
+            Some(&owner.scope_id),
+            name_node.map_or_else(
+                || range_for_node(self.source_file, node),
+                |value| range_for_node(self.source_file, value),
+            ),
+            self.declaration_metadata(node),
+        )?;
+        let context = DeclarationContext {
+            fact_id,
+            scope_id: owner.scope_id.clone(),
+            graph_node_id,
+            name,
+            qualified_name,
+            kind: "field".to_owned(),
+            enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+            runtime_nested: false,
+        };
+        self.add_ownership(owner, &context)?;
+        self.declarations.insert(node.id(), context);
+        Ok(())
+    }
+
+    fn collect_rust_imports(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let active = self
+            .declarations
+            .get(&node.id())
+            .filter(|context| matches!(context.kind.as_str(), "module" | "function" | "method"))
+            .cloned()
+            .unwrap_or_else(|| owner.clone());
+        if node.kind() == "use_declaration" {
+            if self.rust_import_nodes.insert(node.id()) {
+                self.add_rust_use(node, &active)?;
+            }
+            return Ok(());
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_rust_imports(child, &active)?;
+        }
+        Ok(())
+    }
+
+    fn add_rust_use(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if self.overlaps_parser_error(node) {
+            return Ok(());
+        }
+        let Some(argument) = node.child_by_field_name("argument") else {
+            return Ok(());
+        };
+        let reexport = rust_is_public_use(&self.text(node));
+        let raw = self.text(argument);
+        let mut flattened = Vec::new();
+        expand_rust_use_tree(&raw, "", &mut flattened);
+        for (raw_target, alias, glob) in flattened {
+            let target =
+                rust_canonical_import_target(&self.rust_enclosing_module(owner), &raw_target);
+            if target.is_empty() {
+                continue;
+            }
+            let local = if glob {
+                "*".to_owned()
+            } else {
+                alias.unwrap_or_else(|| rust_path_leaf(&target).to_owned())
+            };
+            if local.is_empty() {
+                continue;
+            }
+            let range = rust_use_binding_range(
+                self.source_file,
+                self.source,
+                argument,
+                &local,
+                &raw_target,
+            );
+            let kind = if reexport {
+                BindingKind::Reexport
+            } else if !glob && local != rust_path_leaf(&target) {
+                BindingKind::ImportAlias
+            } else {
+                BindingKind::Import
+            };
+            let binding_id = self.builder.bind(
+                kind,
+                &local,
+                &target,
+                None,
+                Some(&owner.scope_id),
+                range.clone(),
+            )?;
+            self.record_import_binding(owner, &local, &target, &binding_id, 0);
+            let occurrence_id = self.builder.occur(
+                SemanticRole::Import,
+                &owner.fact_id,
+                &local,
+                None,
+                Some(&owner.scope_id),
+                range,
+            )?;
+            self.builder.relate(
+                if reexport {
+                    CandidateRelation::Reexports
+                } else {
+                    CandidateRelation::Imports
+                },
+                &owner.fact_id,
+                Some(&occurrence_id),
+                Some(&binding_id),
+                rust_path_leaf(&target),
+                ResolutionConstraint {
+                    exact_target_declaration_id: None,
+                    exact_language: Some(self.language.to_owned()),
+                    module_or_package: rust_qualified_parent(&target).map(str::to_owned),
+                    scope_id: Some(owner.scope_id.clone()),
+                    qualified_name: Some(target.clone()),
+                    argument_count: None,
+                    allowed_target_kinds: vec![
+                        "file".to_owned(),
+                        "module".to_owned(),
+                        "trait".to_owned(),
+                        "struct".to_owned(),
+                        "enum".to_owned(),
+                        "type_alias".to_owned(),
+                        "function".to_owned(),
+                        "macro".to_owned(),
+                    ],
+                    hierarchy: None,
+                    allow_external: !rust_identity_is_internal(&self.module_or_package, &target),
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    fn walk_rust_evidence(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        root: bool,
+    ) -> Result<(), EvidenceError> {
+        let active = self
+            .declarations
+            .get(&node.id())
+            .cloned()
+            .unwrap_or_else(|| owner.clone());
+        if self.declarations.contains_key(&node.id()) {
+            self.add_rust_declaration_references(node, &active)?;
+        }
+        match node.kind() {
+            "use_declaration" => return Ok(()),
+            "call_expression" => self.add_rust_call(node, &active)?,
+            "macro_invocation" => self.add_rust_macro_invocation(node, &active)?,
+            _ => {}
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            if !root
+                && matches!(child.kind(), "function_item" | "function_signature_item")
+                && !self.declarations.contains_key(&child.id())
+            {
+                continue;
+            }
+            self.walk_rust_evidence(child, &active, false)?;
+        }
+        Ok(())
+    }
+
+    fn add_rust_declaration_references(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let body_start = if matches!(
+            node.kind(),
+            "function_item"
+                | "function_signature_item"
+                | "trait_item"
+                | "struct_item"
+                | "enum_item"
+                | "mod_item"
+        ) {
+            node.child_by_field_name("body")
+                .map_or(node.end_byte(), |body| body.start_byte())
+        } else {
+            node.end_byte()
+        };
+        let name_id = node.child_by_field_name("name").map(|name| name.id());
+        let mut targets = Vec::new();
+        collect_rust_type_nodes(node, body_start, name_id, &mut targets);
+        for target in targets {
+            let raw = self.text(target);
+            if raw.is_empty() || rust_primitive_type(&raw) || raw == owner.name {
+                continue;
+            }
+            let relation = if node.kind() == "trait_item"
+                && rust_node_has_ancestor_before(target, node, "trait_bounds")
+            {
+                CandidateRelation::Extends
+            } else {
+                CandidateRelation::References
+            };
+            let role = if relation == CandidateRelation::Extends {
+                SemanticRole::TraitBound
+            } else {
+                SemanticRole::TypeReference
+            };
+            self.add_rust_path_candidate(role, relation, owner, target, None)?;
+        }
+        Ok(())
+    }
+
+    fn add_rust_call(
+        &mut self,
+        call: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(function) = call.child_by_field_name("function") else {
+            return Ok(());
+        };
+        let function = if function.kind() == "generic_function" {
+            function.child_by_field_name("function").unwrap_or(function)
+        } else {
+            function
+        };
+        if !matches!(
+            function.kind(),
+            "identifier" | "scoped_identifier" | "field_expression"
+        ) {
+            return Ok(());
+        }
+        let raw = self.text(function);
+        let (qualifier, spelling) = split_qualified(&raw);
+        if spelling.is_empty() {
+            return Ok(());
+        }
+        let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+        if self.import_binding_is_ambiguous(owner, binding_name) {
+            return Ok(());
+        }
+        let direct_binding = self
+            .binding_for_occurrence(owner, binding_name, function.start_byte(), true)
+            .cloned();
+        let wildcard_binding = direct_binding
+            .is_none()
+            .then(|| {
+                let wildcard_eligible = qualifier.is_some_and(|value| {
+                    qualified_binding_head(value)
+                        .chars()
+                        .next()
+                        .is_some_and(char::is_uppercase)
+                }) || (qualifier.is_none()
+                    && spelling.chars().next().is_some_and(char::is_uppercase));
+                wildcard_eligible
+                    .then(|| self.rust_wildcard_binding(owner, function.start_byte()))
+                    .flatten()
+            })
+            .flatten()
+            .cloned();
+        let qualified_name = self
+            .rust_call_qualified_name(owner, qualifier, spelling)
+            .or_else(|| {
+                wildcard_binding.is_some().then(|| {
+                    qualifier.map_or_else(
+                        || spelling.to_owned(),
+                        |qualifier| rust_join_qualified(qualifier, spelling),
+                    )
+                })
+            });
+        let wildcard_bound = wildcard_binding.is_some();
+        let binding = direct_binding.or(wildcard_binding);
+        let occurrence_id = self.builder.occur(
+            SemanticRole::Call,
+            &owner.fact_id,
+            spelling,
+            qualifier,
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, function),
+        )?;
+        let constraints = ResolutionConstraint {
+            exact_target_declaration_id: None,
+            exact_language: Some(self.language.to_owned()),
+            module_or_package: qualified_name
+                .as_deref()
+                .and_then(|qualified| rust_qualified_parent(qualified).map(str::to_owned))
+                .or_else(|| Some(self.module_or_package.clone())),
+            scope_id: Some(owner.scope_id.clone()),
+            qualified_name: qualified_name.clone(),
+            argument_count: None,
+            allowed_target_kinds: vec![
+                "enum_member".to_owned(),
+                "function".to_owned(),
+                "method".to_owned(),
+                "struct".to_owned(),
+            ],
+            hierarchy: None,
+            allow_external: qualified_name.as_deref().is_some_and(|qualified| {
+                (wildcard_bound || !qualifier.is_some_and(rust_deferred_owner))
+                    && !rust_identity_is_internal(&self.module_or_package, qualified)
+            }),
+        };
+        self.builder.relate(
+            CandidateRelation::Calls,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            binding.as_deref(),
+            spelling,
+            constraints.clone(),
+        )?;
+        if self.rust_test_declarations.contains(&owner.fact_id) {
+            self.builder.relate(
+                CandidateRelation::Tests,
+                &owner.fact_id,
+                Some(&occurrence_id),
+                binding.as_deref(),
+                spelling,
+                constraints,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn rust_call_qualified_name(
+        &self,
+        owner: &DeclarationContext,
+        qualifier: Option<&str>,
+        spelling: &str,
+    ) -> Option<String> {
+        let Some(qualifier) = qualifier else {
+            return self
+                .imported_target_for_occurrence(owner, spelling, 0, true)
+                .cloned();
+        };
+        if (qualifier == "Self" || rust_receiver_is_self(qualifier))
+            && let Some(enclosing) = rust_callable_owner(owner)
+        {
+            return Some(rust_join_qualified(enclosing, spelling));
+        }
+        if let Some(target) = self.local_target_for(owner, qualifier) {
+            return Some(rust_join_qualified(target, spelling));
+        }
+        if let Some(target) = self.imported_qualified_target_for(owner, qualifier, 0, true) {
+            return Some(rust_join_qualified(&target, spelling));
+        }
+        let first = qualified_binding_head(qualifier);
+        if matches!(first, "crate" | "self" | "super") {
+            return Some(rust_join_qualified(
+                &rust_canonical_import_target(&self.rust_enclosing_module(owner), qualifier),
+                spelling,
+            ));
+        }
+        Some(rust_join_qualified(qualifier, spelling))
+    }
+
+    fn add_rust_macro_invocation(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let raw = self.text(node);
+        let Some(raw_path) = raw
+            .split('!')
+            .next()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(());
+        };
+        let path_end = node.start_byte().saturating_add(raw_path.len());
+        let range = range_for_byte_span(self.source_file, self.source, node.start_byte(), path_end);
+        let (qualifier, spelling) = split_qualified(raw_path);
+        let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+        let binding = self
+            .binding_for_occurrence(owner, binding_name, node.start_byte(), true)
+            .or_else(|| self.rust_wildcard_binding(owner, node.start_byte()))
+            .cloned();
+        let qualified_name = qualifier
+            .and_then(|qualifier| {
+                self.imported_qualified_target_for(owner, qualifier, node.start_byte(), true)
+            })
+            .map(|target| rust_join_qualified(&target, spelling))
+            .or_else(|| {
+                self.imported_target_for_occurrence(owner, spelling, node.start_byte(), true)
+                    .cloned()
+            })
+            .or_else(|| {
+                qualifier
+                    .filter(|value| value.contains("::"))
+                    .map(|value| rust_join_qualified(value, spelling))
+            });
+        let occurrence_id = self.builder.occur(
+            SemanticRole::MacroInvocation,
+            &owner.fact_id,
+            spelling,
+            qualifier,
+            Some(&owner.scope_id),
+            range,
+        )?;
+        self.builder.relate(
+            CandidateRelation::InvokesMacro,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            binding.as_deref(),
+            spelling,
+            ResolutionConstraint {
+                exact_target_declaration_id: None,
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: qualified_name
+                    .as_deref()
+                    .and_then(|qualified| rust_qualified_parent(qualified).map(str::to_owned))
+                    .or_else(|| Some(self.module_or_package.clone())),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: qualified_name.clone(),
+                argument_count: None,
+                allowed_target_kinds: vec!["macro".to_owned()],
+                hierarchy: None,
+                allow_external: qualified_name.as_deref().is_some_and(|qualified| {
+                    !rust_identity_is_internal(&self.module_or_package, qualified)
+                }),
+            },
+        )?;
+        Ok(())
+    }
+
+    fn add_rust_path_candidate(
+        &mut self,
+        role: SemanticRole,
+        relation: CandidateRelation,
+        owner: &DeclarationContext,
+        node: Node<'_>,
+        allowed_target_kinds: Option<Vec<String>>,
+    ) -> Result<(), EvidenceError> {
+        let raw = self.text(node);
+        let (qualifier, spelling) = split_qualified(&raw);
+        let qualified_name = rust_qualify_evidence_path(self, owner, &raw, node.start_byte());
+        self.add_rust_occurrence_candidate(
+            role,
+            relation,
+            owner,
+            node,
+            qualified_name.as_deref(),
+            allowed_target_kinds.unwrap_or_else(|| target_kinds_for_relation(relation)),
+            qualified_name.as_deref().is_some_and(|qualified| {
+                !rust_identity_is_internal(&self.module_or_package, qualified)
+            }),
+        )?;
+        let _ = (qualifier, spelling);
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_rust_occurrence_candidate(
+        &mut self,
+        role: SemanticRole,
+        relation: CandidateRelation,
+        owner: &DeclarationContext,
+        node: Node<'_>,
+        qualified_name: Option<&str>,
+        allowed_target_kinds: Vec<String>,
+        allow_external: bool,
+    ) -> Result<(), EvidenceError> {
+        let raw = self.text(node);
+        let (qualifier, spelling) = split_qualified(&raw);
+        if spelling.is_empty() {
+            return Ok(());
+        }
+        let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+        let binding = self
+            .binding_for_occurrence(owner, binding_name, node.start_byte(), true)
+            .or_else(|| self.rust_wildcard_binding(owner, node.start_byte()))
+            .cloned();
+        let occurrence_id = self.builder.occur(
+            role,
+            &owner.fact_id,
+            spelling,
+            qualifier,
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, node),
+        )?;
+        self.builder.relate(
+            relation,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            binding.as_deref(),
+            spelling,
+            ResolutionConstraint {
+                exact_target_declaration_id: None,
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: qualified_name
+                    .and_then(|qualified| rust_qualified_parent(qualified).map(str::to_owned))
+                    .or_else(|| Some(self.module_or_package.clone())),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: qualified_name.map(str::to_owned),
+                argument_count: None,
+                allowed_target_kinds,
+                hierarchy: None,
+                allow_external,
+            },
+        )?;
+        Ok(())
+    }
+
+    fn rust_wildcard_binding(
+        &self,
+        owner: &DeclarationContext,
+        use_start: usize,
+    ) -> Option<&String> {
+        if self.import_binding_is_ambiguous(owner, "*") {
+            return None;
+        }
+        self.import_binding_version_at(owner, "*", use_start, true)
+            .map(|binding| &binding.binding_id)
+    }
+
     fn extract_go(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
         let file = self.file.clone().ok_or_else(|| {
             EvidenceError::new(
@@ -929,20 +3213,23 @@ impl<'source> DirectAdapterState<'source> {
         node: Node<'_>,
         file: &DeclarationContext,
     ) -> Result<(), EvidenceError> {
-        if node.kind() == "type_spec" {
+        if matches!(node.kind(), "type_spec" | "type_alias") {
             if let Some(name_node) = node.child_by_field_name("name") {
                 let name = self.text(name_node);
                 let qualified_name = format!("{}.{}", self.module_or_package, name);
                 let graph_node_id =
                     self.unique_graph_id(make_id(&[&self.module_or_package, &name]), node);
-                let kind = if has_descendant(node, "struct_type") {
+                let kind = if node.kind() == "type_alias" {
+                    "type_alias"
+                } else if has_descendant(node, "struct_type") {
                     "struct"
                 } else if has_descendant(node, "interface_type") {
                     "interface"
                 } else {
                     "type_alias"
                 };
-                let fact_id = self.builder.declare(
+                let metadata = self.declaration_metadata(node);
+                let fact_id = self.builder.declare_with_metadata(
                     kind,
                     &graph_node_id,
                     &name,
@@ -950,6 +3237,7 @@ impl<'source> DirectAdapterState<'source> {
                     Some(&self.module_or_package),
                     Some(&file.scope_id),
                     range_for_node(self.source_file, name_node),
+                    metadata,
                 )?;
                 let scope_id = self.builder.open_scope(
                     kind,
@@ -957,6 +3245,8 @@ impl<'source> DirectAdapterState<'source> {
                     Some(&file.scope_id),
                     range_for_node(self.source_file, node),
                 )?;
+                self.scope_parents
+                    .insert(scope_id.clone(), file.scope_id.clone());
                 let context = DeclarationContext {
                     fact_id,
                     scope_id,
@@ -997,7 +3287,8 @@ impl<'source> DirectAdapterState<'source> {
             } else {
                 "function"
             };
-            let fact_id = self.builder.declare(
+            let metadata = self.declaration_metadata(node);
+            let fact_id = self.builder.declare_with_metadata(
                 kind,
                 &graph_node_id,
                 &name,
@@ -1005,6 +3296,7 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&self.module_or_package),
                 Some(&file.scope_id),
                 range_for_node(self.source_file, name_node),
+                metadata,
             )?;
             let scope_id = self.builder.open_scope(
                 kind,
@@ -1012,6 +3304,8 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&file.scope_id),
                 range_for_node(self.source_file, node),
             )?;
+            self.scope_parents
+                .insert(scope_id.clone(), file.scope_id.clone());
             let context = DeclarationContext {
                 fact_id,
                 scope_id,
@@ -1039,11 +3333,23 @@ impl<'source> DirectAdapterState<'source> {
         owner: &DeclarationContext,
         root: bool,
     ) -> Result<(), EvidenceError> {
-        let active = self
+        let mut active = self
             .declarations
             .get(&node.id())
             .cloned()
             .unwrap_or_else(|| owner.clone());
+        if node.kind() == "func_literal" && self.go_has_named_parameters(node) {
+            let parent_scope_id = active.scope_id.clone();
+            let scope_id = self.builder.open_scope(
+                "closure",
+                None,
+                Some(&parent_scope_id),
+                range_for_node(self.source_file, node),
+            )?;
+            self.scope_parents.insert(scope_id.clone(), parent_scope_id);
+            active.scope_id = scope_id;
+            self.add_go_typed_bindings(node, &active)?;
+        }
         if matches!(node.kind(), "function_declaration" | "method_declaration") {
             self.add_go_typed_bindings(node, &active)?;
         }
@@ -1058,10 +3364,12 @@ impl<'source> DirectAdapterState<'source> {
             "type_elem" => self.add_go_embedded_types(node, &active)?,
             _ => {}
         }
-        if matches!(node.kind(), "function_declaration" | "method_declaration")
-            || (node.kind() == "type_spec"
-                && !has_descendant(node, "struct_type")
-                && !has_descendant(node, "interface_type"))
+        if matches!(
+            node.kind(),
+            "function_declaration" | "method_declaration" | "func_literal"
+        ) || (matches!(node.kind(), "type_spec" | "type_alias")
+            && !has_descendant(node, "struct_type")
+            && !has_descendant(node, "interface_type"))
         {
             self.add_go_type_references(node, &active)?;
         }
@@ -1070,7 +3378,7 @@ impl<'source> DirectAdapterState<'source> {
             if !root
                 && matches!(
                     child.kind(),
-                    "function_declaration" | "method_declaration" | "type_spec"
+                    "function_declaration" | "method_declaration" | "type_spec" | "type_alias"
                 )
                 && !self.declarations.contains_key(&child.id())
             {
@@ -1096,7 +3404,30 @@ impl<'source> DirectAdapterState<'source> {
                 "parameter_declaration",
                 &mut parameter_declarations,
             );
+            collect_nodes(
+                parameters,
+                "variadic_parameter_declaration",
+                &mut parameter_declarations,
+            );
             for parameter in parameter_declarations {
+                let mut cursor = parameter.walk();
+                let names = parameter
+                    .children_by_field_name("name", &mut cursor)
+                    .filter_map(|name_node| {
+                        let name = self.text(name_node);
+                        (!name.is_empty() && name != "_").then_some((name, name_node))
+                    })
+                    .collect::<Vec<_>>();
+                if names.is_empty() {
+                    continue;
+                }
+                self.local_shadows
+                    .entry(owner.scope_id.clone())
+                    .or_default()
+                    .extend(names.iter().map(|(name, _)| name.clone()));
+                if parameter.kind() == "variadic_parameter_declaration" {
+                    continue;
+                }
                 let Some(type_node) = parameter.child_by_field_name("type") else {
                     continue;
                 };
@@ -1115,17 +3446,19 @@ impl<'source> DirectAdapterState<'source> {
                     continue;
                 }
                 let qualified_target = qualifier
-                    .and_then(|qualifier| self.imported_targets.get(qualifier))
+                    .and_then(|qualifier| {
+                        self.imported_target_for_occurrence(
+                            owner,
+                            qualifier,
+                            parameter.start_byte(),
+                            true,
+                        )
+                    })
                     .map_or_else(
                         || format!("{}.{}", self.module_or_package, spelling),
                         |module| format!("{module}.{spelling}"),
                     );
-                let mut cursor = parameter.walk();
-                for name_node in parameter.children_by_field_name("name", &mut cursor) {
-                    let name = self.text(name_node);
-                    if name.is_empty() || name == "_" {
-                        continue;
-                    }
+                for (name, name_node) in names {
                     let binding_id = self.builder.bind(
                         BindingKind::LocalAlias,
                         &name,
@@ -1146,6 +3479,32 @@ impl<'source> DirectAdapterState<'source> {
             }
         }
         Ok(())
+    }
+
+    fn go_has_named_parameters(&self, declaration: Node<'_>) -> bool {
+        let Some(parameters) = declaration.child_by_field_name("parameters") else {
+            return false;
+        };
+        let mut parameter_declarations = Vec::new();
+        collect_nodes(
+            parameters,
+            "parameter_declaration",
+            &mut parameter_declarations,
+        );
+        collect_nodes(
+            parameters,
+            "variadic_parameter_declaration",
+            &mut parameter_declarations,
+        );
+        parameter_declarations.into_iter().any(|parameter| {
+            let mut cursor = parameter.walk();
+            parameter
+                .children_by_field_name("name", &mut cursor)
+                .any(|name_node| {
+                    let name = self.text(name_node);
+                    !name.is_empty() && name != "_"
+                })
+        })
     }
 
     fn add_go_imports(
@@ -1186,14 +3545,7 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&owner.scope_id),
                 range_for_node(self.source_file, spec),
             )?;
-            if self
-                .bindings
-                .insert(local.clone(), binding_id.clone())
-                .is_some()
-            {
-                self.ambiguous_bindings.insert(local.clone());
-            }
-            self.imported_targets.insert(local.clone(), target.clone());
+            self.record_import_binding(owner, &local, &target, &binding_id, spec.end_byte());
             let occurrence_id = self.builder.occur(
                 SemanticRole::Import,
                 &owner.fact_id,
@@ -1215,6 +3567,7 @@ impl<'source> DirectAdapterState<'source> {
                     module_or_package: Some(target.clone()),
                     scope_id: Some(owner.scope_id.clone()),
                     qualified_name: Some(target),
+                    argument_count: None,
                     allowed_target_kinds: vec!["file".to_owned(), "package".to_owned()],
                     hierarchy: None,
                     allow_external: true,
@@ -1259,6 +3612,26 @@ impl<'source> DirectAdapterState<'source> {
         }) else {
             return Ok(());
         };
+        if has_name
+            && let Some(target) = go_direct_type_target(type_node)
+            && let Some(qualified_target) = self.go_qualified_type_target(owner, target)
+        {
+            let mut names = Vec::new();
+            collect_nodes(field, "field_identifier", &mut names);
+            for name_node in names {
+                let name = self.text(name_node);
+                if !name.is_empty() && name != "_" {
+                    self.builder.bind(
+                        BindingKind::Member,
+                        &name,
+                        &qualified_target,
+                        None,
+                        Some(&owner.scope_id),
+                        range_for_node(self.source_file, name_node),
+                    )?;
+                }
+            }
+        }
         let mut targets = Vec::new();
         collect_named_targets(
             type_node,
@@ -1282,6 +3655,28 @@ impl<'source> DirectAdapterState<'source> {
             self.add_relationship_occurrence(role, relation, owner, spelling, qualifier, target)?;
         }
         Ok(())
+    }
+
+    fn go_qualified_type_target(
+        &self,
+        owner: &DeclarationContext,
+        target: Node<'_>,
+    ) -> Option<String> {
+        let raw = self.text(target);
+        let (qualifier, spelling) = split_qualified(&raw);
+        if spelling.is_empty() || is_go_predeclared_type(spelling) {
+            return None;
+        }
+        Some(
+            qualifier
+                .and_then(|qualifier| {
+                    self.imported_target_for_occurrence(owner, qualifier, target.start_byte(), true)
+                })
+                .map_or_else(
+                    || format!("{}.{}", self.module_or_package, spelling),
+                    |module| format!("{module}.{spelling}"),
+                ),
+        )
     }
 
     fn add_go_embedded_types(
@@ -1327,7 +3722,7 @@ impl<'source> DirectAdapterState<'source> {
         let mut roots = Vec::new();
         if matches!(
             declaration.kind(),
-            "function_declaration" | "method_declaration"
+            "function_declaration" | "method_declaration" | "func_literal"
         ) {
             roots.extend(
                 ["receiver", "parameters", "result"]
@@ -1376,13 +3771,37 @@ impl<'source> DirectAdapterState<'source> {
         if spelling.is_empty() {
             return Ok(());
         }
-        let lookup_name = qualifier.unwrap_or(spelling);
-        if self.binding_is_ambiguous(owner, lookup_name) {
+        let python_super_receiver = (self.language == "python")
+            .then(|| python_super_receiver(function, self.source))
+            .flatten();
+        let exact_super_target = if let Some(receiver) = python_super_receiver {
+            if !python_super_call_is_builtin(receiver, call, owner, self) {
+                return Ok(());
+            }
+            let Some(target) = self.direct_python_super_target(owner, spelling) else {
+                return Ok(());
+            };
+            Some(target)
+        } else {
+            None
+        };
+        let lookup_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+        let allow_later_file_binding =
+            self.language == "python" && matches!(owner.kind.as_str(), "function" | "method");
+        if self.import_binding_declared_but_not_visible(
+            owner,
+            lookup_name,
+            function.start_byte(),
+            allow_later_file_binding,
+        ) {
+            return Ok(());
+        }
+        if self.import_binding_is_ambiguous(owner, lookup_name) {
             return Ok(());
         }
         if self.language == "go"
             && qualifier.is_none()
-            && go_name_is_locally_bound(call, spelling, self.source)
+            && self.go_name_is_locally_bound(call, spelling)
         {
             return Ok(());
         }
@@ -1394,49 +3813,41 @@ impl<'source> DirectAdapterState<'source> {
             (SemanticRole::Call, CandidateRelation::Calls)
         };
         let binding = self
-            .binding_for(owner, qualifier.unwrap_or(spelling))
+            .binding_for_occurrence(
+                owner,
+                qualifier.map(qualified_binding_head).unwrap_or(spelling),
+                function.start_byte(),
+                allow_later_file_binding,
+            )
             .cloned();
-        let hierarchy =
-            match (self.language, qualifier) {
-                ("python", Some("self" | "cls")) => owner
-                    .enclosing_type_qualified_name
-                    .as_ref()
-                    .map(
-                        |receiver_qualified_name| HierarchyConstraint::ReceiverDispatch {
-                            receiver_qualified_name: receiver_qualified_name.clone(),
-                            strategy: ReceiverDispatchStrategy::C3FromReceiver,
-                        },
-                    ),
-                ("python", Some("super()")) => {
-                    owner
-                        .enclosing_type_qualified_name
-                        .as_ref()
-                        .map(
-                            |receiver_qualified_name| HierarchyConstraint::ReceiverDispatch {
-                                receiver_qualified_name: receiver_qualified_name.clone(),
-                                strategy: ReceiverDispatchStrategy::C3AfterReceiver,
-                            },
-                        )
-                }
-                _ => None,
-            };
-        let qualified_name = hierarchy
-            .is_none()
-            .then(|| {
-                qualifier
-                    .and_then(|qualifier| {
-                        self.local_target_for(owner, qualifier)
-                            .map(|target| format!("{target}::{spelling}"))
-                    })
-                    .or_else(|| {
-                        qualifier.and_then(|qualifier| {
-                            self.imported_target_for(owner, qualifier)
-                                .map(|target| format!("{target}.{spelling}"))
+        let qualified_name = exact_super_target.or_else(|| {
+            qualifier
+                .and_then(|qualifier| {
+                    self.local_target_for(owner, qualifier)
+                        .map(|target| format!("{target}::{spelling}"))
+                })
+                .or_else(|| {
+                    qualifier
+                        .and_then(|qualifier| {
+                            self.imported_qualified_target_for(
+                                owner,
+                                qualifier,
+                                function.start_byte(),
+                                allow_later_file_binding,
+                            )
                         })
-                    })
-                    .or_else(|| self.imported_target_for(owner, spelling).cloned())
-            })
-            .flatten();
+                        .map(|target| format!("{target}.{spelling}"))
+                })
+                .or_else(|| {
+                    self.imported_target_for_occurrence(
+                        owner,
+                        spelling,
+                        function.start_byte(),
+                        allow_later_file_binding,
+                    )
+                    .cloned()
+                })
+        });
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
@@ -1464,6 +3875,7 @@ impl<'source> DirectAdapterState<'source> {
                     .or_else(|| Some(self.module_or_package.clone())),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: qualified_name.clone(),
+                argument_count: None,
                 allowed_target_kinds: if construction {
                     vec![
                         "class".to_owned(),
@@ -1473,12 +3885,25 @@ impl<'source> DirectAdapterState<'source> {
                 } else {
                     vec!["function".to_owned(), "method".to_owned()]
                 },
-                hierarchy,
-                allow_external: qualified_name.is_some() && qualifier != Some("super()"),
+                hierarchy: None,
+                allow_external: qualified_name.is_some() && python_super_receiver.is_none(),
             },
         )?;
         let _ = call_kind;
         Ok(())
+    }
+
+    fn direct_python_super_target(
+        &self,
+        owner: &DeclarationContext,
+        spelling: &str,
+    ) -> Option<String> {
+        let enclosing_type = owner.enclosing_type_qualified_name.as_deref()?;
+        let bases = self.python_type_bases.get(enclosing_type)?;
+        let [base] = bases.qualified_names.as_slice() else {
+            return None;
+        };
+        bases.complete.then(|| format!("{base}::{spelling}"))
     }
 
     fn python_base_qualified_name(
@@ -1486,39 +3911,19 @@ impl<'source> DirectAdapterState<'source> {
         owner: &DeclarationContext,
         qualifier: Option<&str>,
         spelling: &str,
+        use_start: usize,
     ) -> Option<String> {
         if spelling.is_empty() || is_python_builtin_type(spelling) {
             return None;
         }
         match qualifier {
             None => self
-                .imported_target_for(owner, spelling)
+                .imported_target_for_occurrence(owner, spelling, use_start, false)
                 .cloned()
-                .or_else(|| {
-                    owner
-                        .qualified_name
-                        .rsplit_once("::")
-                        .map(|(parent, _)| format!("{parent}::{spelling}"))
-                        .filter(|qualified| {
-                            self.declarations.values().any(|declaration| {
-                                declaration.kind == "class"
-                                    && declaration.qualified_name == *qualified
-                            })
-                        })
-                        .or_else(|| Some(format!("{}.{}", self.module_or_package, spelling)))
-                }),
-            Some(qualifier) => {
-                let (root, suffix) = qualifier
-                    .split_once('.')
-                    .map_or((qualifier, ""), |(root, suffix)| (root, suffix));
-                self.imported_target_for(owner, root).map(|target| {
-                    if suffix.is_empty() {
-                        format!("{target}.{spelling}")
-                    } else {
-                        format!("{target}.{suffix}.{spelling}")
-                    }
-                })
-            }
+                .or_else(|| Some(format!("{}.{}", self.module_or_package, spelling))),
+            Some(qualifier) => self
+                .imported_qualified_target_for(owner, qualifier, use_start, false)
+                .map(|target| format!("{target}.{spelling}")),
         }
     }
 
@@ -1551,12 +3956,26 @@ impl<'source> DirectAdapterState<'source> {
         if spelling.is_empty() {
             return Ok(());
         }
-        let lookup_name = qualifier.unwrap_or(spelling);
-        if self.binding_is_ambiguous(owner, lookup_name) {
+        let lookup_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+        let allow_later_file_binding = self.language != "python";
+        if self.import_binding_declared_but_not_visible(
+            owner,
+            lookup_name,
+            node.start_byte(),
+            allow_later_file_binding,
+        ) {
+            return Ok(());
+        }
+        if self.import_binding_is_ambiguous(owner, lookup_name) {
             return Ok(());
         }
         let binding = self
-            .binding_for(owner, qualifier.unwrap_or(spelling))
+            .binding_for_occurrence(
+                owner,
+                qualifier.map(qualified_binding_head).unwrap_or(spelling),
+                node.start_byte(),
+                allow_later_file_binding,
+            )
             .cloned();
         let qualified_name = qualified_name_override
             .or_else(|| {
@@ -1567,10 +3986,25 @@ impl<'source> DirectAdapterState<'source> {
             })
             .or_else(|| {
                 qualifier
-                    .and_then(|qualifier| self.imported_target_for(owner, qualifier))
+                    .and_then(|qualifier| {
+                        self.imported_qualified_target_for(
+                            owner,
+                            qualifier,
+                            node.start_byte(),
+                            allow_later_file_binding,
+                        )
+                    })
                     .map(|target| format!("{target}.{spelling}"))
             })
-            .or_else(|| self.imported_target_for(owner, spelling).cloned());
+            .or_else(|| {
+                self.imported_target_for_occurrence(
+                    owner,
+                    spelling,
+                    node.start_byte(),
+                    allow_later_file_binding,
+                )
+                .cloned()
+            });
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
@@ -1598,6 +4032,7 @@ impl<'source> DirectAdapterState<'source> {
                     .or_else(|| Some(self.module_or_package.clone())),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: qualified_name.clone(),
+                argument_count: None,
                 allowed_target_kinds: target_kinds_for_relation(relation),
                 hierarchy,
                 allow_external: qualified_name.is_some(),
@@ -1606,38 +4041,194 @@ impl<'source> DirectAdapterState<'source> {
         Ok(())
     }
 
-    fn binding_for(&self, owner: &DeclarationContext, name: &str) -> Option<&String> {
-        self.local_bindings
-            .get(&owner.scope_id)
-            .and_then(|bindings| bindings.get(name))
-            .or_else(|| self.bindings.get(name))
+    fn go_name_is_locally_bound(&mut self, call: Node<'_>, spelling: &str) -> bool {
+        let Some(callable) = go_enclosing_callable(call) else {
+            return false;
+        };
+        let source = self.source;
+        self.go_lexical_bindings
+            .entry(callable.id())
+            .or_insert_with(|| go_lexical_bindings(callable, source))
+            .iter()
+            .any(|binding| {
+                binding.name == spelling
+                    && binding.active_from <= call.start_byte()
+                    && call.start_byte() < binding.active_until
+            })
+    }
+
+    fn record_import_binding(
+        &mut self,
+        owner: &DeclarationContext,
+        local: &str,
+        target: &str,
+        binding_id: &str,
+        active_from: usize,
+    ) {
+        let scope_id = owner.scope_id.clone();
+        let versions = self
+            .import_bindings
+            .entry(scope_id.clone())
+            .or_default()
+            .entry(local.to_owned())
+            .or_default();
+        if self.language != "python" && !versions.is_empty() {
+            self.ambiguous_bindings
+                .insert((scope_id.clone(), local.to_owned()));
+        }
+        versions.push(ImportBindingVersion {
+            binding_id: binding_id.to_owned(),
+            target: target.to_owned(),
+            active_from,
+        });
+    }
+
+    fn import_binding_scope<'a>(
+        &'a self,
+        owner: &'a DeclarationContext,
+        name: &str,
+    ) -> Option<&'a str> {
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let current = scope_id?;
+            if self
+                .import_bindings
+                .get(current)
+                .is_some_and(|bindings| bindings.contains_key(name))
+            {
+                return Some(current);
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        None
+    }
+
+    fn import_binding_version_at(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+        use_start: usize,
+        allow_later_file_binding: bool,
+    ) -> Option<&ImportBindingVersion> {
+        let scope_id = self.import_binding_scope(owner, name)?;
+        let versions = self.import_bindings.get(scope_id)?.get(name)?;
+        if scope_id != owner.scope_id && allow_later_file_binding {
+            return versions.last();
+        }
+        versions
+            .iter()
+            .rev()
+            .find(|binding| binding.active_from <= use_start)
+    }
+
+    fn import_binding_declared_but_not_visible(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+        use_start: usize,
+        allow_later_file_binding: bool,
+    ) -> bool {
+        self.import_binding_scope(owner, name).is_some()
+            && self
+                .import_binding_version_at(owner, name, use_start, allow_later_file_binding)
+                .is_none()
+    }
+
+    fn binding_for_occurrence(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+        use_start: usize,
+        allow_later_file_binding: bool,
+    ) -> Option<&String> {
+        self.local_binding_for(owner, name).or_else(|| {
+            self.import_binding_version_at(owner, name, use_start, allow_later_file_binding)
+                .map(|binding| &binding.binding_id)
+        })
+    }
+
+    fn imported_target_for_occurrence(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+        use_start: usize,
+        allow_later_file_binding: bool,
+    ) -> Option<&String> {
+        self.import_binding_version_at(owner, name, use_start, allow_later_file_binding)
+            .map(|binding| &binding.target)
+    }
+
+    fn imported_qualified_target_for(
+        &self,
+        owner: &DeclarationContext,
+        qualifier: &str,
+        use_start: usize,
+        allow_later_file_binding: bool,
+    ) -> Option<String> {
+        let (head, suffix) = split_qualified_head(qualifier);
+        let separator = if qualifier.contains("::") { "::" } else { "." };
+        self.imported_target_for_occurrence(owner, head, use_start, allow_later_file_binding)
+            .map(|target| {
+                suffix.map_or_else(
+                    || target.clone(),
+                    |suffix| format!("{target}{separator}{suffix}"),
+                )
+            })
+    }
+
+    fn import_binding_is_ambiguous(&self, owner: &DeclarationContext, name: &str) -> bool {
+        if self.local_binding_for(owner, name).is_some() {
+            return false;
+        }
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let Some(current) = scope_id else {
+                break;
+            };
+            if self
+                .import_bindings
+                .get(current)
+                .is_some_and(|bindings| bindings.contains_key(name))
+            {
+                return self
+                    .ambiguous_bindings
+                    .contains(&(current.to_owned(), name.to_owned()));
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        false
     }
 
     fn local_target_for(&self, owner: &DeclarationContext, name: &str) -> Option<&String> {
-        self.local_targets
-            .get(&owner.scope_id)
-            .and_then(|targets| targets.get(name))
+        self.local_value_for(&self.local_targets, owner, name)
     }
 
-    fn imported_target_for(&self, owner: &DeclarationContext, name: &str) -> Option<&String> {
-        self.local_import_targets
-            .get(&owner.scope_id)
-            .and_then(|targets| targets.get(name))
-            .or_else(|| self.imported_targets.get(name))
+    fn local_binding_for(&self, owner: &DeclarationContext, name: &str) -> Option<&String> {
+        self.local_value_for(&self.local_bindings, owner, name)
     }
 
-    fn binding_is_ambiguous(&self, owner: &DeclarationContext, name: &str) -> bool {
-        if self
-            .local_bindings
-            .get(&owner.scope_id)
-            .is_some_and(|bindings| bindings.contains_key(name))
-        {
-            return self
-                .ambiguous_local_bindings
-                .get(&owner.scope_id)
-                .is_some_and(|bindings| bindings.contains(name));
+    fn local_value_for<'a>(
+        &'a self,
+        values: &'a HashMap<String, HashMap<String, String>>,
+        owner: &DeclarationContext,
+        name: &str,
+    ) -> Option<&'a String> {
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let current = scope_id?;
+            if let Some(value) = values.get(current).and_then(|scope| scope.get(name)) {
+                return Some(value);
+            }
+            if self
+                .local_shadows
+                .get(current)
+                .is_some_and(|shadows| shadows.contains(name))
+            {
+                return None;
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
         }
-        self.ambiguous_bindings.contains(name)
+        None
     }
 
     fn add_ownership(
@@ -1658,6 +4249,7 @@ impl<'source> DirectAdapterState<'source> {
                 module_or_package: Some(self.module_or_package.clone()),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: Some(child.qualified_name.clone()),
+                argument_count: None,
                 allowed_target_kinds: vec![child.kind.clone()],
                 hierarchy: None,
                 allow_external: false,
@@ -1687,12 +4279,887 @@ impl<'source> DirectAdapterState<'source> {
     }
 }
 
+fn java_package_identity(source: &[u8]) -> Option<String> {
+    let source = std::str::from_utf8(source).ok()?;
+    let mut in_block_comment = false;
+    for line in source.lines() {
+        let mut line = line.trim();
+        if in_block_comment {
+            if let Some((_, rest)) = line.split_once("*/") {
+                in_block_comment = false;
+                line = rest.trim();
+            } else {
+                continue;
+            }
+        }
+        while let Some(rest) = line.strip_prefix("/*") {
+            if let Some((_, suffix)) = rest.split_once("*/") {
+                line = suffix.trim();
+            } else {
+                in_block_comment = true;
+                break;
+            }
+        }
+        if in_block_comment || line.starts_with("//") || line.is_empty() {
+            continue;
+        }
+        let Some(package) = line.strip_prefix("package ") else {
+            continue;
+        };
+        let package = package
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .split_whitespace()
+            .next()
+            .unwrap_or_default();
+        if !package.is_empty()
+            && package
+                .split('.')
+                .all(|part| !part.is_empty() && java_identifier(part))
+        {
+            return Some(package.to_owned());
+        }
+    }
+    None
+}
+
+fn java_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    chars
+        .next()
+        .is_some_and(|character| character == '_' || character == '$' || character.is_alphabetic())
+        && chars
+            .all(|character| character == '_' || character == '$' || character.is_alphanumeric())
+}
+
+fn java_container_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "class_declaration" => Some("class"),
+        "interface_declaration" => Some("interface"),
+        "enum_declaration" => Some("enum"),
+        "record_declaration" => Some("record"),
+        "annotation_type_declaration" => Some("annotation_type"),
+        _ => None,
+    }
+}
+
+fn java_child_qualified_name(owner: &DeclarationContext, name: &str) -> String {
+    if owner.kind == "file" {
+        match owner.qualified_name.as_str() {
+            "" => name.to_owned(),
+            package => format!("{package}.{name}"),
+        }
+    } else {
+        format!("{}::{name}", owner.qualified_name)
+    }
+}
+
+fn java_qualified_parent(target: &str) -> Option<&str> {
+    target
+        .trim_end_matches(".*")
+        .rsplit_once('.')
+        .map(|(parent, _)| parent)
+}
+
+fn last_java_import_name(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(|child| child.is_named())
+        .last()
+}
+
+fn java_parameter_signature(node: Node<'_>, source: &[u8]) -> (String, u32, bool) {
+    let Some(parameters) = node.child_by_field_name("parameters") else {
+        return (String::new(), 0, false);
+    };
+    let mut types = Vec::new();
+    let mut variadic = false;
+    let mut cursor = parameters.walk();
+    for parameter in parameters
+        .children(&mut cursor)
+        .filter(|child| child.is_named())
+    {
+        if !matches!(
+            parameter.kind(),
+            "formal_parameter" | "spread_parameter" | "receiver_parameter"
+        ) {
+            continue;
+        }
+        variadic |= parameter.kind() == "spread_parameter";
+        let Some(type_node) = parameter.child_by_field_name("type") else {
+            continue;
+        };
+        let raw = type_node.utf8_text(source).unwrap_or_default();
+        let mut normalized = java_normalize_type(raw);
+        if parameter.kind() == "spread_parameter" {
+            normalized.push_str("...");
+        }
+        if let Some(dimensions) = parameter.child_by_field_name("dimensions") {
+            normalized.push_str(
+                &dimensions
+                    .utf8_text(source)
+                    .unwrap_or_default()
+                    .chars()
+                    .filter(|character| !character.is_whitespace())
+                    .collect::<String>(),
+            );
+        }
+        types.push(normalized);
+    }
+    (
+        types.join(","),
+        u32::try_from(types.len()).unwrap_or(u32::MAX),
+        variadic,
+    )
+}
+
+fn java_normalize_type(raw: &str) -> String {
+    let mut normalized = String::with_capacity(raw.len());
+    let mut angle_depth = 0_u32;
+    for character in raw.chars() {
+        match character {
+            '<' => angle_depth = angle_depth.saturating_add(1),
+            '>' => angle_depth = angle_depth.saturating_sub(1),
+            _ if angle_depth > 0 => {}
+            character if character.is_whitespace() => {}
+            '[' | ']' | '.' | '$' | '_' => normalized.push(character),
+            character if character.is_alphanumeric() => normalized.push(character),
+            _ => {}
+        }
+    }
+    normalized.trim_end_matches("...").to_owned()
+}
+
+fn collect_direct_or_nested_nodes<'tree>(
+    node: Node<'tree>,
+    kind: &str,
+    output: &mut Vec<Node<'tree>>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        if child.kind() == kind {
+            output.push(child);
+        } else if !matches!(
+            child.kind(),
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "record_declaration"
+                | "annotation_type_declaration"
+                | "method_declaration"
+                | "constructor_declaration"
+        ) {
+            collect_direct_or_nested_nodes(child, kind, output);
+        }
+    }
+}
+
+fn collect_java_annotations<'tree>(node: Node<'tree>, output: &mut Vec<Node<'tree>>) {
+    if matches!(node.kind(), "annotation" | "marker_annotation") {
+        output.push(node);
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_java_annotations(child, output);
+    }
+}
+
+fn first_java_type_name(node: Node<'_>) -> Option<Node<'_>> {
+    if matches!(
+        node.kind(),
+        "type_identifier" | "scoped_type_identifier" | "identifier"
+    ) {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(|child| child.is_named())
+        .find_map(first_java_type_name)
+}
+
+fn collect_java_type_nodes<'tree>(node: Node<'tree>, output: &mut Vec<Node<'tree>>) {
+    if matches!(node.kind(), "type_identifier" | "scoped_type_identifier") {
+        output.push(node);
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_java_type_nodes(child, output);
+    }
+}
+
+fn collect_java_parameter_type_nodes<'tree>(
+    parameters: Node<'tree>,
+    output: &mut Vec<Node<'tree>>,
+) {
+    let mut cursor = parameters.walk();
+    for parameter in parameters
+        .children(&mut cursor)
+        .filter(|child| child.is_named())
+    {
+        if matches!(parameter.kind(), "formal_parameter" | "spread_parameter")
+            && let Some(type_node) = parameter.child_by_field_name("type")
+        {
+            collect_java_type_nodes(type_node, output);
+        }
+    }
+}
+
+fn java_argument_count(node: Node<'_>) -> u32 {
+    let Some(arguments) = node.child_by_field_name("arguments") else {
+        return 0;
+    };
+    let mut cursor = arguments.walk();
+    u32::try_from(
+        arguments
+            .children(&mut cursor)
+            .filter(|child| child.is_named())
+            .count(),
+    )
+    .unwrap_or(u32::MAX)
+}
+
+fn java_primitive_type(name: &str) -> bool {
+    matches!(
+        name,
+        "byte"
+            | "short"
+            | "int"
+            | "long"
+            | "float"
+            | "double"
+            | "boolean"
+            | "char"
+            | "void"
+            | "var"
+    )
+}
+
+fn java_lang_type(name: &str) -> Option<&'static str> {
+    match name {
+        "String" => Some("java.lang.String"),
+        "Object" => Some("java.lang.Object"),
+        "Class" => Some("java.lang.Class"),
+        "Integer" => Some("java.lang.Integer"),
+        "Long" => Some("java.lang.Long"),
+        "Double" => Some("java.lang.Double"),
+        "Float" => Some("java.lang.Float"),
+        "Boolean" => Some("java.lang.Boolean"),
+        "Byte" => Some("java.lang.Byte"),
+        "Short" => Some("java.lang.Short"),
+        "Character" => Some("java.lang.Character"),
+        "Throwable" => Some("java.lang.Throwable"),
+        "Exception" => Some("java.lang.Exception"),
+        "RuntimeException" => Some("java.lang.RuntimeException"),
+        "Enum" => Some("java.lang.Enum"),
+        "Record" => Some("java.lang.Record"),
+        _ => None,
+    }
+}
+
+fn rust_container_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "mod_item" => Some("module"),
+        "trait_item" => Some("trait"),
+        "struct_item" => Some("struct"),
+        "enum_item" => Some("enum"),
+        _ => None,
+    }
+}
+
+fn rust_join_qualified(owner: &str, name: &str) -> String {
+    match (owner.trim_matches(':'), name.trim_matches(':')) {
+        ("", name) => name.to_owned(),
+        (owner, "") => owner.to_owned(),
+        (owner, name) => format!("{owner}::{name}"),
+    }
+}
+
+fn rust_path_leaf(path: &str) -> &str {
+    path.trim()
+        .trim_end_matches("::*")
+        .trim_end_matches("::")
+        .rsplit("::")
+        .next()
+        .unwrap_or_default()
+}
+
+fn rust_qualified_parent(path: &str) -> Option<&str> {
+    path.rsplit_once("::").map(|(parent, _)| parent)
+}
+
+fn rust_module_identity(path: &Path, source_file: &str) -> String {
+    let portable = Path::new(source_file);
+    let portable_components = portable
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    let source_root = portable_components
+        .iter()
+        .rposition(|component| *component == "src");
+    let crate_name = source_root
+        .and_then(|index| index.checked_sub(1))
+        .and_then(|index| portable_components.get(index).copied())
+        .filter(|component| !matches!(*component, "crates" | "src"))
+        .unwrap_or("crate");
+    let relative = if let Some(index) = source_root {
+        portable_components[index.saturating_add(1)..].to_vec()
+    } else {
+        path.file_name()
+            .and_then(|value| value.to_str())
+            .map_or_else(Vec::new, |value| vec![value])
+    };
+    let mut components = relative.into_iter().map(str::to_owned).collect::<Vec<_>>();
+    if let Some(file) = components.pop() {
+        let stem = Path::new(&file)
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        if !matches!(stem, "lib" | "main" | "mod") && !stem.is_empty() {
+            components.push(stem.to_owned());
+        }
+    }
+    if components.is_empty() {
+        crate_name.to_owned()
+    } else {
+        format!("{crate_name}::{}", components.join("::"))
+    }
+}
+
+fn rust_qualify_local_path(module: &str, raw: &str) -> String {
+    let raw = raw.trim().trim_start_matches(['&', '*']);
+    if raw.is_empty() {
+        return module.to_owned();
+    }
+    if raw == "Self" {
+        return module.to_owned();
+    }
+    rust_canonical_import_target(module, raw)
+}
+
+fn rust_qualify_imported_path(
+    state: &DirectAdapterState<'_>,
+    owner: &DeclarationContext,
+    raw: &str,
+    use_start: usize,
+) -> String {
+    let (qualifier, spelling) = split_qualified(raw);
+    if let Some(target) = state.imported_target_for_occurrence(
+        owner,
+        qualifier.map(qualified_binding_head).unwrap_or(spelling),
+        use_start,
+        true,
+    ) {
+        if qualifier.is_some() {
+            return rust_join_qualified(target, spelling);
+        }
+        return target.clone();
+    }
+    rust_canonical_import_target(&state.rust_enclosing_module(owner), raw)
+}
+
+fn rust_qualify_evidence_path(
+    state: &DirectAdapterState<'_>,
+    owner: &DeclarationContext,
+    raw: &str,
+    use_start: usize,
+) -> Option<String> {
+    let raw = raw.trim().trim_start_matches(['&', '*']);
+    if raw.is_empty() || rust_primitive_type(raw) {
+        return None;
+    }
+    let (qualifier, spelling) = split_qualified(raw);
+    let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+    if let Some(target) = state.imported_target_for_occurrence(owner, binding_name, use_start, true)
+    {
+        return Some(if qualifier.is_some() {
+            rust_join_qualified(target, spelling)
+        } else {
+            target.clone()
+        });
+    }
+    if let Some(target) = state.local_target_for(owner, binding_name) {
+        return Some(if qualifier.is_some() {
+            rust_join_qualified(target, spelling)
+        } else {
+            target.clone()
+        });
+    }
+    if matches!(binding_name, "crate" | "self" | "super") {
+        return Some(rust_canonical_import_target(
+            &state.rust_enclosing_module(owner),
+            raw,
+        ));
+    }
+    if qualifier.is_some_and(|value| {
+        value.contains("::") || value.chars().next().is_some_and(char::is_lowercase)
+    }) {
+        return Some(raw.to_owned());
+    }
+    Some(rust_join_qualified(
+        &state.rust_enclosing_module(owner),
+        raw,
+    ))
+}
+
+fn rust_canonical_import_target(module: &str, raw: &str) -> String {
+    let raw = raw.trim().trim_start_matches("::").trim_end_matches("::*");
+    if raw.is_empty() {
+        return String::new();
+    }
+    let crate_name = module.split("::").next().unwrap_or("crate");
+    if raw == "crate" {
+        return crate_name.to_owned();
+    }
+    if let Some(suffix) = raw.strip_prefix("crate::") {
+        return rust_join_qualified(crate_name, suffix);
+    }
+    if raw == "self" {
+        return module.to_owned();
+    }
+    if let Some(suffix) = raw.strip_prefix("self::") {
+        return rust_join_qualified(module, suffix);
+    }
+    if raw == "super" || raw.starts_with("super::") {
+        let mut base = module;
+        let mut remainder = raw;
+        while let Some(suffix) = remainder.strip_prefix("super") {
+            base = rust_qualified_parent(base).unwrap_or("crate");
+            remainder = suffix.strip_prefix("::").unwrap_or(suffix);
+            if !remainder.starts_with("super") {
+                break;
+            }
+        }
+        return if remainder.is_empty() {
+            base.to_owned()
+        } else {
+            rust_join_qualified(base, remainder)
+        };
+    }
+    raw.to_owned()
+}
+
+fn expand_rust_use_tree(raw: &str, prefix: &str, output: &mut Vec<(String, Option<String>, bool)>) {
+    let raw = raw.trim().trim_matches(',');
+    if raw.is_empty() {
+        return;
+    }
+    if let Some(open) = top_level_byte(raw, b'{')
+        && let Some(close) = matching_brace(raw, open)
+    {
+        let base = raw[..open].trim().trim_end_matches("::");
+        let next_prefix = rust_use_join(prefix, base);
+        for item in split_top_level_rust_items(&raw[open + 1..close]) {
+            expand_rust_use_tree(item, &next_prefix, output);
+        }
+        return;
+    }
+    if raw == "self" && !prefix.is_empty() {
+        output.push((prefix.to_owned(), None, false));
+        return;
+    }
+    if raw == "*" {
+        output.push((prefix.to_owned(), None, true));
+        return;
+    }
+    if let Some(base) = raw.strip_suffix("::*") {
+        output.push((rust_use_join(prefix, base), None, true));
+        return;
+    }
+    if let Some(index) = top_level_as(raw) {
+        let target = rust_use_join(prefix, raw[..index].trim());
+        let alias = raw[index + 4..].trim();
+        if !target.is_empty() && !alias.is_empty() {
+            output.push((target, Some(alias.to_owned()), false));
+        }
+        return;
+    }
+    output.push((rust_use_join(prefix, raw), None, false));
+}
+
+fn rust_use_join(prefix: &str, suffix: &str) -> String {
+    let prefix = prefix.trim().trim_end_matches("::");
+    let suffix = suffix.trim().trim_start_matches("::");
+    if prefix.is_empty() {
+        suffix.to_owned()
+    } else if suffix.is_empty() {
+        prefix.to_owned()
+    } else {
+        format!("{prefix}::{suffix}")
+    }
+}
+
+fn top_level_byte(raw: &str, target: u8) -> Option<usize> {
+    let mut depth = 0usize;
+    for (index, byte) in raw.bytes().enumerate() {
+        match byte {
+            b'{' | b'(' | b'[' if byte != target => depth = depth.saturating_add(1),
+            b'}' | b')' | b']' => depth = depth.saturating_sub(1),
+            _ if byte == target && depth == 0 => return Some(index),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn matching_brace(raw: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (offset, byte) in raw.as_bytes()[open..].iter().copied().enumerate() {
+        match byte {
+            b'{' => depth = depth.saturating_add(1),
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(open + offset);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn split_top_level_rust_items(raw: &str) -> Vec<&str> {
+    let mut output = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (index, byte) in raw.bytes().enumerate() {
+        match byte {
+            b'{' | b'(' | b'[' => depth = depth.saturating_add(1),
+            b'}' | b')' | b']' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => {
+                output.push(&raw[start..index]);
+                start = index.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+    output.push(&raw[start..]);
+    output
+}
+
+fn top_level_as(raw: &str) -> Option<usize> {
+    let bytes = raw.as_bytes();
+    let mut depth = 0usize;
+    let mut index = 0usize;
+    while index + 4 <= bytes.len() {
+        match bytes[index] {
+            b'{' | b'(' | b'[' => depth = depth.saturating_add(1),
+            b'}' | b')' | b']' => depth = depth.saturating_sub(1),
+            b' ' if depth == 0 && &bytes[index..index + 4] == b" as " => {
+                return Some(index);
+            }
+            _ => {}
+        }
+        index = index.saturating_add(1);
+    }
+    None
+}
+
+fn rust_use_binding_range(
+    source_file: &str,
+    source: &[u8],
+    argument: Node<'_>,
+    local: &str,
+    raw_target: &str,
+) -> EvidenceRange {
+    let bytes = &source[argument.start_byte()..argument.end_byte()];
+    let needle = if local == "*" {
+        "*"
+    } else if !local.is_empty() {
+        local
+    } else {
+        rust_path_leaf(raw_target)
+    };
+    let offset = std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|text| text.rfind(needle))
+        .unwrap_or_default();
+    let start = argument.start_byte().saturating_add(offset);
+    range_for_byte_span(
+        source_file,
+        source,
+        start,
+        start.saturating_add(needle.len()),
+    )
+}
+
+fn range_for_byte_span(
+    source_file: &str,
+    source: &[u8],
+    start_byte: usize,
+    end_byte: usize,
+) -> EvidenceRange {
+    let (start_line, start_column) = source_position(source, start_byte);
+    let (end_line, end_column) = source_position(source, end_byte);
+    EvidenceRange {
+        source_file: source_file.to_owned(),
+        start_byte: u64::try_from(start_byte).unwrap_or(u64::MAX),
+        end_byte: u64::try_from(end_byte).unwrap_or(u64::MAX),
+        start_line,
+        start_column,
+        end_line,
+        end_column,
+    }
+}
+
+fn source_position(source: &[u8], byte: usize) -> (u32, u32) {
+    let byte = byte.min(source.len());
+    let prefix = &source[..byte];
+    let line = prefix.iter().filter(|value| **value == b'\n').count();
+    let column = prefix
+        .iter()
+        .rposition(|value| *value == b'\n')
+        .map_or(byte, |position| {
+            byte.saturating_sub(position.saturating_add(1))
+        });
+    (
+        u32::try_from(line.saturating_add(1)).unwrap_or(u32::MAX),
+        u32::try_from(column).unwrap_or(u32::MAX),
+    )
+}
+
+fn collect_rust_type_nodes<'tree>(
+    node: Node<'tree>,
+    body_start: usize,
+    declaration_name: Option<usize>,
+    output: &mut Vec<Node<'tree>>,
+) {
+    if node.start_byte() >= body_start || declaration_name == Some(node.id()) {
+        return;
+    }
+    match node.kind() {
+        "scoped_type_identifier" => {
+            output.push(node);
+            return;
+        }
+        "type_identifier" => {
+            output.push(node);
+            return;
+        }
+        "primitive_type" => return,
+        _ => {}
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_rust_type_nodes(child, body_start, declaration_name, output);
+    }
+}
+
+fn rust_node_has_ancestor_before(node: Node<'_>, boundary: Node<'_>, kind: &str) -> bool {
+    let mut parent = node.parent();
+    while let Some(current) = parent {
+        if current.id() == boundary.id() {
+            return false;
+        }
+        if current.kind() == kind {
+            return true;
+        }
+        parent = current.parent();
+    }
+    false
+}
+
+fn rust_primitive_type(raw: &str) -> bool {
+    matches!(
+        raw,
+        "bool"
+            | "char"
+            | "str"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "isize"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "usize"
+            | "f32"
+            | "f64"
+            | "Self"
+            | "self"
+    )
+}
+
+fn rust_prelude_symbol(raw: &str) -> bool {
+    matches!(
+        raw,
+        "Box"
+            | "Clone"
+            | "Copy"
+            | "Default"
+            | "DoubleEndedIterator"
+            | "Drop"
+            | "Eq"
+            | "Err"
+            | "ExactSizeIterator"
+            | "Extend"
+            | "Fn"
+            | "FnMut"
+            | "FnOnce"
+            | "From"
+            | "Into"
+            | "Iterator"
+            | "None"
+            | "Ok"
+            | "Option"
+            | "Ord"
+            | "PartialEq"
+            | "PartialOrd"
+            | "Result"
+            | "Send"
+            | "Sized"
+            | "Some"
+            | "String"
+            | "Sync"
+            | "ToOwned"
+            | "ToString"
+            | "Vec"
+    )
+}
+
+fn rust_deferred_owner(raw: &str) -> bool {
+    !raw.contains("::") && !rust_primitive_type(raw) && !rust_prelude_symbol(raw)
+}
+
+fn rust_is_public_use(raw: &str) -> bool {
+    raw.trim_start().strip_prefix("pub").is_some_and(|suffix| {
+        suffix
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_whitespace() || character == '(')
+    })
+}
+
+fn rust_receiver_is_self(raw: &str) -> bool {
+    let normalized = raw
+        .chars()
+        .filter(|character| {
+            !character.is_whitespace() && !matches!(character, '(' | ')' | '&' | '*')
+        })
+        .collect::<String>();
+    normalized.strip_prefix("mut").unwrap_or(&normalized) == "self"
+}
+
+fn rust_callable_owner(owner: &DeclarationContext) -> Option<&str> {
+    owner.enclosing_type_qualified_name.as_deref().or_else(|| {
+        (owner.kind == "method")
+            .then(|| rust_qualified_parent(&owner.qualified_name))
+            .flatten()
+    })
+}
+
+fn rust_identity_is_internal(module: &str, qualified: &str) -> bool {
+    let crate_name = module.split("::").next().unwrap_or("crate");
+    qualified == crate_name
+        || qualified.starts_with(&format!("{crate_name}::"))
+        || qualified.starts_with(&format!("<{crate_name}::"))
+}
+
+fn rust_is_type_node(kind: &str) -> bool {
+    matches!(
+        kind,
+        "type_identifier"
+            | "scoped_type_identifier"
+            | "generic_type"
+            | "reference_type"
+            | "primitive_type"
+            | "tuple_type"
+            | "array_type"
+    )
+}
+
 fn split_qualified(raw: &str) -> (Option<&str>, &str) {
     let raw = raw.trim().trim_start_matches(['*', '&']);
-    raw.rsplit_once('.')
+    raw.rsplit_once("::")
+        .or_else(|| raw.rsplit_once('.'))
         .map_or((None, raw), |(qualifier, spelling)| {
             (Some(qualifier), spelling)
         })
+}
+
+fn split_qualified_head(raw: &str) -> (&str, Option<&str>) {
+    raw.split_once("::")
+        .or_else(|| raw.split_once('.'))
+        .map_or((raw, None), |(head, suffix)| (head, Some(suffix)))
+}
+
+fn python_super_receiver<'tree>(function: Node<'tree>, source: &[u8]) -> Option<Node<'tree>> {
+    if function.kind() != "attribute" {
+        return None;
+    }
+    let receiver = function.child_by_field_name("object")?;
+    if receiver.kind() != "call" {
+        return None;
+    }
+    let callable = receiver.child_by_field_name("function")?;
+    (callable.kind() == "identifier"
+        && callable.utf8_text(source).ok().map(str::trim) == Some("super"))
+    .then_some(receiver)
+}
+
+fn python_super_call_is_builtin(
+    receiver: Node<'_>,
+    call: Node<'_>,
+    owner: &DeclarationContext,
+    state: &DirectAdapterState<'_>,
+) -> bool {
+    if owner.kind != "method" || owner.enclosing_type_qualified_name.is_none() {
+        return false;
+    }
+    if receiver
+        .child_by_field_name("arguments")
+        .is_none_or(|arguments| arguments.named_child_count() != 0)
+    {
+        return false;
+    }
+    if state
+        .binding_for_occurrence(owner, "super", receiver.start_byte(), true)
+        .is_some()
+        || state.python_module_bound_names.contains("super")
+        || state.declarations.values().any(|declaration| {
+            declaration.qualified_name == format!("{}.super", state.module_or_package)
+        })
+    {
+        return false;
+    }
+
+    let mut ancestor = call.parent();
+    while let Some(node) = ancestor {
+        if matches!(
+            node.kind(),
+            "lambda"
+                | "list_comprehension"
+                | "dictionary_comprehension"
+                | "set_comprehension"
+                | "generator_expression"
+        ) {
+            return false;
+        }
+        if node.kind() == "function_definition" {
+            let owned_by_current_method = state
+                .declarations
+                .get(&node.id())
+                .is_some_and(|declaration| declaration.fact_id == owner.fact_id);
+            let has_first_argument = node
+                .child_by_field_name("parameters")
+                .is_some_and(|parameters| parameters.named_child_count() != 0);
+            return owned_by_current_method
+                && has_first_argument
+                && !crate::engine::python_bound_names(node, state.source, false).contains("super");
+        }
+        if node.kind() == "class_definition" {
+            return false;
+        }
+        ancestor = node.parent();
+    }
+    false
 }
 
 fn resolve_python_module(current: &str, imported: &str, current_is_package: bool) -> String {
@@ -1746,6 +5213,144 @@ fn python_module_identity(path: &Path, source_file: &str) -> String {
     }
 }
 
+fn go_package_identity(path: &Path, source_file: &str) -> String {
+    let source = source_file.replace('\\', "/");
+    let directory = source
+        .rsplit_once('/')
+        .map(|(directory, _)| directory.trim_matches('/'))
+        .filter(|directory| !directory.is_empty() && *directory != ".");
+    directory.map_or_else(
+        || {
+            path.parent()
+                .and_then(Path::file_name)
+                .and_then(|value| value.to_str())
+                .map_or_else(|| file_stem(path), str::to_owned)
+        },
+        str::to_owned,
+    )
+}
+
+fn collect_parser_error_ranges(node: Node<'_>, output: &mut Vec<(usize, usize)>) {
+    if node.is_error() {
+        let mut cursor = node.walk();
+        let children = node.children(&mut cursor).collect::<Vec<_>>();
+        if children.is_empty() {
+            output.push((node.start_byte(), node.end_byte()));
+        } else {
+            for child in children {
+                collect_parser_error_ranges(child, output);
+            }
+        }
+        return;
+    }
+    if node.is_missing() {
+        if let Some(parent) = node.parent() {
+            output.push((parent.start_byte(), parent.end_byte()));
+        } else {
+            output.push((node.start_byte(), node.end_byte()));
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_parser_error_ranges(child, output);
+    }
+}
+
+fn valid_python_import_target(target: &str) -> bool {
+    target.split('.').all(valid_python_identifier)
+}
+
+fn valid_python_identifier(identifier: &str) -> bool {
+    let mut characters = identifier.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    (first == '_' || first.is_alphabetic())
+        && characters.all(|character| character == '_' || character.is_alphanumeric())
+        && !is_python_hard_keyword(identifier)
+}
+
+fn is_python_hard_keyword(identifier: &str) -> bool {
+    matches!(
+        identifier,
+        "False"
+            | "None"
+            | "True"
+            | "and"
+            | "as"
+            | "assert"
+            | "async"
+            | "await"
+            | "break"
+            | "class"
+            | "continue"
+            | "def"
+            | "del"
+            | "elif"
+            | "else"
+            | "except"
+            | "finally"
+            | "for"
+            | "from"
+            | "global"
+            | "if"
+            | "import"
+            | "in"
+            | "is"
+            | "lambda"
+            | "nonlocal"
+            | "not"
+            | "or"
+            | "pass"
+            | "raise"
+            | "return"
+            | "try"
+            | "while"
+            | "with"
+            | "yield"
+    )
+}
+
+fn valid_python_import_whitespace(statement: &str) -> bool {
+    statement.chars().all(|character| {
+        !character.is_whitespace() || matches!(character, ' ' | '\t' | '\r' | '\n' | '\u{000c}')
+    })
+}
+
+fn valid_python_line_continuations(statement: &str) -> bool {
+    let bytes = statement.as_bytes();
+    let mut index = 0_usize;
+    while index < bytes.len() {
+        if bytes[index] != b'\\' {
+            index += 1;
+            continue;
+        }
+        index += 1;
+        if bytes.get(index) == Some(&b'\r') {
+            index += 1;
+        }
+        if bytes.get(index) != Some(&b'\n') {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+fn python_import_contains_wildcard(statement: &str) -> bool {
+    let mut comment = false;
+    for byte in statement.bytes() {
+        match byte {
+            b'\n' | b'\r' => comment = false,
+            b'#' if !comment => comment = true,
+            b'*' if !comment => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 fn collect_nodes<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tree>>) {
     if node.kind() == kind {
         output.push(node);
@@ -1765,6 +5370,25 @@ fn collect_named_targets<'tree>(node: Node<'tree>, kinds: &[&str], output: &mut 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
         collect_named_targets(child, kinds, output);
+    }
+}
+
+fn go_direct_type_target(node: Node<'_>) -> Option<Node<'_>> {
+    match node.kind() {
+        "type_identifier" | "qualified_type" => Some(node),
+        "pointer_type" | "parenthesized_type" => {
+            let mut cursor = node.walk();
+            let mut children = node.children(&mut cursor).filter(|child| child.is_named());
+            let child = children.next()?;
+            children
+                .next()
+                .is_none()
+                .then(|| go_direct_type_target(child))?
+        }
+        "generic_type" => node
+            .child_by_field_name("type")
+            .and_then(go_direct_type_target),
+        _ => None,
     }
 }
 
@@ -1800,67 +5424,152 @@ fn go_receiver_name(node: Node<'_>, source: &[u8]) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
-fn go_name_is_locally_bound(call: Node<'_>, spelling: &str, source: &[u8]) -> bool {
+struct GoLexicalBinding {
+    name: String,
+    active_from: usize,
+    active_until: usize,
+}
+
+fn go_enclosing_callable(call: Node<'_>) -> Option<Node<'_>> {
     let mut ancestor = call.parent();
+    let mut outer_literal = None;
     while let Some(node) = ancestor {
-        if matches!(
-            node.kind(),
-            "function_declaration" | "method_declaration" | "func_literal"
-        ) {
-            let mut binding_nodes = Vec::new();
-            for field in ["receiver", "parameters"] {
-                if let Some(parameters) = node.child_by_field_name(field) {
-                    binding_nodes.push(parameters);
-                }
-            }
-            collect_go_prior_binding_nodes(node, call.start_byte(), &mut binding_nodes);
-            return binding_nodes.into_iter().any(|binding| {
-                let mut identifiers = Vec::new();
-                collect_named_targets(binding, &["identifier"], &mut identifiers);
-                identifiers
-                    .into_iter()
-                    .any(|identifier| identifier.utf8_text(source).ok() == Some(spelling))
-            });
+        match node.kind() {
+            "function_declaration" | "method_declaration" => return Some(node),
+            "func_literal" => outer_literal = Some(node),
+            _ => {}
         }
         ancestor = node.parent();
     }
-    false
+    outer_literal
 }
 
-fn collect_go_prior_binding_nodes<'tree>(
-    node: Node<'tree>,
-    before: usize,
-    output: &mut Vec<Node<'tree>>,
-) {
-    if node.start_byte() >= before {
-        return;
-    }
-    match node.kind() {
-        "short_var_declaration" => {
-            if node.end_byte() <= before
-                && let Some(left) = node.child_by_field_name("left")
-            {
-                output.push(left);
-            }
+fn go_lexical_bindings(callable: Node<'_>, source: &[u8]) -> Vec<GoLexicalBinding> {
+    fn collect_binding_identifiers(node: Node<'_>, source: &[u8], names: &mut Vec<String>) {
+        if node.kind() == "identifier"
+            && let Ok(name) = node.utf8_text(source)
+            && !name.is_empty()
+        {
+            names.push(name.to_owned());
             return;
         }
-        "var_spec" => {
-            if node.end_byte() <= before {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            collect_binding_identifiers(child, source, names);
+        }
+    }
+
+    fn push_bindings(
+        names_node: Node<'_>,
+        source: &[u8],
+        active_from: usize,
+        active_until: usize,
+        bindings: &mut Vec<GoLexicalBinding>,
+    ) {
+        let mut names = Vec::new();
+        collect_binding_identifiers(names_node, source, &mut names);
+        names.sort();
+        names.dedup();
+        bindings.extend(names.into_iter().map(|name| GoLexicalBinding {
+            name,
+            active_from,
+            active_until,
+        }));
+    }
+
+    fn walk(node: Node<'_>, source: &[u8], scope_end: usize, bindings: &mut Vec<GoLexicalBinding>) {
+        if node.kind() == "func_literal"
+            && let Some(body) = node.child_by_field_name("body")
+        {
+            if let Some(parameters) = node.child_by_field_name("parameters") {
+                push_bindings(
+                    parameters,
+                    source,
+                    body.start_byte(),
+                    body.end_byte(),
+                    bindings,
+                );
+            }
+            walk(body, source, body.end_byte(), bindings);
+            return;
+        }
+        let scope_end = if matches!(
+            node.kind(),
+            "block"
+                | "if_statement"
+                | "for_statement"
+                | "expression_switch_statement"
+                | "type_switch_statement"
+                | "select_statement"
+                | "communication_case"
+                | "expression_case"
+                | "type_case"
+        ) {
+            node.end_byte()
+        } else {
+            scope_end
+        };
+        match node.kind() {
+            "var_spec" => {
                 let type_node = node.child_by_field_name("type");
                 let value_node = node.child_by_field_name("value");
                 let mut cursor = node.walk();
-                output.extend(node.children(&mut cursor).filter(|child| {
+                for child in node.children(&mut cursor).filter(|child| {
                     child.is_named() && Some(*child) != type_node && Some(*child) != value_node
-                }));
+                }) {
+                    if child.kind() == "identifier" {
+                        push_bindings(child, source, node.end_byte(), scope_end, bindings);
+                    }
+                }
             }
-            return;
+            "short_var_declaration" => {
+                if let Some(left) = node.child_by_field_name("left") {
+                    push_bindings(left, source, node.end_byte(), scope_end, bindings);
+                }
+            }
+            "for_statement" => {
+                let body = node.child_by_field_name("body");
+                let mut cursor = node.walk();
+                if let Some(range) = node
+                    .children(&mut cursor)
+                    .find(|child| child.kind() == "range_clause")
+                    && range.utf8_text(source).unwrap_or_default().contains(":=")
+                    && let Some(left) = range.child_by_field_name("left")
+                {
+                    push_bindings(
+                        left,
+                        source,
+                        range.end_byte(),
+                        body.map_or(node.end_byte(), |body| body.end_byte()),
+                        bindings,
+                    );
+                }
+            }
+            _ => {}
         }
-        _ => {}
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            walk(child, source, scope_end, bindings);
+        }
     }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_go_prior_binding_nodes(child, before, output);
+
+    let Some(body) = callable.child_by_field_name("body") else {
+        return Vec::new();
+    };
+    let mut bindings = Vec::new();
+    for field in ["receiver", "parameters"] {
+        if let Some(parameters) = callable.child_by_field_name(field) {
+            push_bindings(
+                parameters,
+                source,
+                body.start_byte(),
+                body.end_byte(),
+                &mut bindings,
+            );
+        }
     }
+    walk(body, source, body.end_byte(), &mut bindings);
+    bindings
 }
 
 fn is_python_builtin_type(name: &str) -> bool {
@@ -1910,9 +5619,15 @@ fn is_go_predeclared_type(name: &str) -> bool {
     )
 }
 
+fn qualified_binding_head(qualifier: &str) -> &str {
+    split_qualified_head(qualifier).0
+}
+
 fn target_kinds_for_relation(relation: CandidateRelation) -> Vec<String> {
     match relation {
-        CandidateRelation::Calls => vec!["function".to_owned(), "method".to_owned()],
+        CandidateRelation::Calls | CandidateRelation::IndirectCalls | CandidateRelation::Tests => {
+            vec!["function".to_owned(), "method".to_owned()]
+        }
         CandidateRelation::Constructs => {
             vec![
                 "class".to_owned(),
@@ -1928,15 +5643,114 @@ fn target_kinds_for_relation(relation: CandidateRelation) -> Vec<String> {
         | CandidateRelation::Embeds => vec![
             "class".to_owned(),
             "struct".to_owned(),
+            "enum".to_owned(),
             "interface".to_owned(),
+            "trait".to_owned(),
             "type_alias".to_owned(),
         ],
         CandidateRelation::AccessesMember => vec!["field".to_owned(), "method".to_owned()],
+        CandidateRelation::InvokesMacro => vec!["macro".to_owned()],
         CandidateRelation::Contains | CandidateRelation::Owns => Vec::new(),
         CandidateRelation::Imports | CandidateRelation::Reexports => {
             vec!["file".to_owned(), "module".to_owned(), "package".to_owned()]
         }
     }
+}
+
+fn evidence_declaration_body(node: Node<'_>) -> Option<Node<'_>> {
+    node.child_by_field_name("body").or_else(|| {
+        let mut cursor = node.walk();
+        node.children(&mut cursor).find(|child| {
+            matches!(
+                child.kind(),
+                "body" | "block" | "compound_statement" | "class_body" | "declaration_list"
+            )
+        })
+    })
+}
+
+fn evidence_readable_signature(
+    node: Node<'_>,
+    body: Option<Node<'_>>,
+    source: &[u8],
+) -> Option<String> {
+    let end = body.map_or(node.end_byte(), |body| body.start_byte());
+    let raw = source.get(node.start_byte()..end)?;
+    let compact = String::from_utf8_lossy(raw)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let compact = compact
+        .trim()
+        .trim_end_matches(['{', ':', ';'])
+        .trim()
+        .to_owned();
+    if compact.is_empty() {
+        return None;
+    }
+    let mut chars = compact.chars();
+    let signature = chars.by_ref().take(500).collect::<String>();
+    Some(if chars.next().is_some() {
+        format!("{signature}…")
+    } else {
+        signature
+    })
+}
+
+fn evidence_ast_hash(node: Node<'_>, source: &[u8], excluded: Option<usize>) -> String {
+    let mut digest = Sha256::new();
+    hash_evidence_ast_node(node, source, excluded, &mut digest);
+    hex_sha256_digest(&digest.finalize())
+}
+
+fn hash_evidence_ast_node(
+    node: Node<'_>,
+    source: &[u8],
+    excluded: Option<usize>,
+    digest: &mut Sha256,
+) {
+    if excluded == Some(node.id()) || node.kind().contains("comment") {
+        return;
+    }
+    digest.update(b"(");
+    digest.update(node.kind().as_bytes());
+    if node.child_count() == 0 {
+        digest.update(b":");
+        if let Some(bytes) = source.get(node.start_byte()..node.end_byte()) {
+            digest.update(bytes);
+        }
+    } else {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            hash_evidence_ast_node(child, source, excluded, digest);
+        }
+    }
+    digest.update(b")");
+}
+
+fn evidence_normalized_source_hash(source: &[u8]) -> String {
+    let mut normalized = Vec::with_capacity(source.len());
+    let mut index = 0;
+    while index < source.len() {
+        if source[index] == b'\r' && source.get(index + 1) == Some(&b'\n') {
+            normalized.push(b'\n');
+            index += 2;
+        } else {
+            normalized.push(source[index]);
+            index += 1;
+        }
+    }
+    hex_sha256_digest(&Sha256::digest(normalized))
+}
+
+fn hex_sha256_digest(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+
+    let mut value = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(value, "{byte:02x}");
+    }
+    value
 }
 
 fn ensure_capacity(name: &str, current: usize, limit: usize) -> Result<(), EvidenceError> {
@@ -1956,6 +5770,7 @@ const fn binding_kind_name(kind: BindingKind) -> &'static str {
         BindingKind::Reexport => "reexport",
         BindingKind::LocalAlias => "local_alias",
         BindingKind::Package => "package",
+        BindingKind::Member => "member",
     }
 }
 
@@ -1965,6 +5780,7 @@ const fn semantic_role_name(role: SemanticRole) -> &'static str {
         SemanticRole::Reexport => "reexport",
         SemanticRole::Alias => "alias",
         SemanticRole::Call => "call",
+        SemanticRole::CallableReference => "callable_reference",
         SemanticRole::Construction => "construction",
         SemanticRole::Decorator => "decorator",
         SemanticRole::Annotation => "annotation",
@@ -1974,12 +5790,15 @@ const fn semantic_role_name(role: SemanticRole) -> &'static str {
         SemanticRole::Ownership => "ownership",
         SemanticRole::Receiver => "receiver",
         SemanticRole::Embedding => "embedding",
+        SemanticRole::TraitBound => "trait_bound",
+        SemanticRole::MacroInvocation => "macro_invocation",
     }
 }
 
 const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
     match relation {
         CandidateRelation::Calls => "calls",
+        CandidateRelation::IndirectCalls => "indirect_calls",
         CandidateRelation::Constructs => "constructs",
         CandidateRelation::Decorates => "decorates",
         CandidateRelation::Annotates => "annotates",
@@ -1992,22 +5811,38 @@ const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::Embeds => "embeds",
         CandidateRelation::Imports => "imports",
         CandidateRelation::Reexports => "reexports",
+        CandidateRelation::InvokesMacro => "invokes_macro",
+        CandidateRelation::Tests => "tests",
     }
 }
 
-fn hierarchy_constraint_identity(constraint: Option<&HierarchyConstraint>) -> String {
-    match constraint {
-        None => String::new(),
-        Some(HierarchyConstraint::DirectBase { base_set_complete }) => {
-            format!("direct_base:{base_set_complete}")
+fn rust_has_test_attribute(node: Node<'_>, source: &[u8]) -> bool {
+    let is_test = |attribute: Node<'_>| {
+        let text = String::from_utf8_lossy(&source[attribute.start_byte()..attribute.end_byte()]);
+        let compact = text
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>();
+        let path = compact
+            .strip_prefix("#[")
+            .and_then(|value| value.strip_suffix(']'))
+            .unwrap_or(&compact)
+            .split('(')
+            .next()
+            .unwrap_or_default();
+        path.rsplit("::").next() == Some("test")
+    };
+    let mut sibling = node.prev_named_sibling();
+    while let Some(attribute) = sibling {
+        if attribute.kind() != "attribute_item" {
+            break;
         }
-        Some(HierarchyConstraint::ReceiverDispatch {
-            receiver_qualified_name,
-            strategy: ReceiverDispatchStrategy::C3FromReceiver,
-        }) => format!("receiver_dispatch:c3_from_receiver:{receiver_qualified_name}"),
-        Some(HierarchyConstraint::ReceiverDispatch {
-            receiver_qualified_name,
-            strategy: ReceiverDispatchStrategy::C3AfterReceiver,
-        }) => format!("receiver_dispatch:c3_after_receiver:{receiver_qualified_name}"),
+        if is_test(attribute) {
+            return true;
+        }
+        sibling = attribute.prev_named_sibling();
     }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .any(|child| child.kind() == "attribute_item" && is_test(child))
 }

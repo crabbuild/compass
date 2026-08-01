@@ -159,6 +159,8 @@ def prepare_checkout(
     spec: RepositorySpec,
     commit: str,
     destination: Path,
+    *,
+    pinned: bool = False,
 ) -> CheckoutIdentity:
     if _OBJECT_ID.fullmatch(commit) is None:
         raise ValueError(f"invalid commit for {spec.name}: {commit}")
@@ -175,7 +177,7 @@ def prepare_checkout(
     if actual != commit:
         raise RuntimeError(f"checkout resolved {actual}, expected {commit}")
     branch, remote_commit = resolve_remote_head(spec.url)
-    if remote_commit != commit:
+    if not pinned and remote_commit != commit:
         raise RuntimeError(
             f"remote HEAD changed while preparing {spec.name}: {commit} -> {remote_commit}"
         )

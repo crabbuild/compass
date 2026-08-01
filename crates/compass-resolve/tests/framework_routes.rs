@@ -542,6 +542,34 @@ fn single_low_confidence_route_candidate_normalizes_as_unresolved()
 }
 
 #[test]
+fn sourceless_route_candidates_remain_anchorless_and_publishable()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/routes.rs"), vec![b'x'; 256])?;
+    let mut candidate = node("external", "show_user", "external.show_user");
+    candidate
+        .attributes
+        .insert("source_file".into(), Value::String(String::new()));
+    let mut extraction = Extraction {
+        nodes: vec![candidate],
+        framework_facts: vec![RawFrameworkFact::Route(route("show_user"))],
+        ..Extraction::default()
+    };
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+    assert_eq!(resolved[0].candidates.len(), 1);
+    assert!(resolved[0].candidates[0].anchor.is_none());
+    extraction.nodes.retain(|node| node.id != "external");
+
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:test")?;
+    let graph = normalize_v1(extraction, evidence)?;
+    assert!(graph.nodes.iter().any(|node| node.kind == NodeKind::Route));
+    Ok(())
+}
+
+#[test]
 fn incremental_resolution_replaces_the_changed_handler_without_stale_targets() {
     let mut first = route("first_handler");
     first.normalized_path = "/incremental".to_owned();

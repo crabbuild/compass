@@ -1,23 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fs;
 use std::path::Path;
 
 use compass_graph::{BuildEvidence, normalize_v1};
-use compass_languages::{Engine, Extraction};
+use compass_languages::Engine;
 use compass_model::code_graph::{EdgeKind, GraphDocument, NodeKind};
-
-fn append(target: &mut Extraction, mut source: Extraction) {
-    target.nodes.append(&mut source.nodes);
-    target.edges.append(&mut source.edges);
-    target.framework_facts.append(&mut source.framework_facts);
-    if let Some(raw_calls) = source.raw_calls {
-        target
-            .raw_calls
-            .get_or_insert_with(Vec::new)
-            .extend(raw_calls);
-    }
-}
 
 fn write(root: &Path, relative: &str, source: &[u8]) -> Result<(), Box<dyn Error>> {
     let path = root.join(relative);
@@ -259,7 +247,8 @@ namespace Two {
         b"class Shared {} namespace One { class Item { void Run(int value) {} } class Outer { class Leaf {} } } namespace Two { class Item { void Run(int value) {} } class Shared {} }\n",
     )?;
 
-    let mut extraction = Extraction::default();
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
     let mut engine = Engine::default();
     for path in [
         "runtime.rs",
@@ -273,8 +262,14 @@ namespace Two {
         "ts_ownership.ts",
         "CsharpOwnership.cs",
     ] {
-        append(&mut extraction, engine.extract(&root.join(path))?);
+        let absolute = root.join(path);
+        sources.insert(
+            absolute.to_string_lossy().into_owned(),
+            fs::read_to_string(&absolute)?,
+        );
+        extractions.push(engine.extract(&absolute)?);
     }
+    let extraction = compass_resolve::resolve_with_root(&extractions, &sources, root);
     let enum_ids = extraction
         .nodes
         .iter()
@@ -354,14 +349,42 @@ namespace Two {
     assert_eq!(target.kind, NodeKind::ConfigKey);
 
     for (file, target, owner) in [
-        ("rust_ownership.rs", "Shared@", None),
-        ("rust_ownership.rs", "one::Contract@", Some("one")),
-        ("rust_ownership.rs", "one::Item@", Some("one")),
-        ("rust_ownership.rs", "one::Mode@", Some("one")),
-        ("rust_ownership.rs", "two::Contract@", Some("two")),
-        ("rust_ownership.rs", "two::Item@", Some("two")),
-        ("rust_ownership.rs", "two::Mode@", Some("two")),
-        ("rust_ownership.rs", "two::Shared@", Some("two")),
+        ("rust_ownership.rs", "crate::rust_ownership::Shared", None),
+        (
+            "rust_ownership.rs",
+            "crate::rust_ownership::one::Contract",
+            Some("crate::rust_ownership::one"),
+        ),
+        (
+            "rust_ownership.rs",
+            "crate::rust_ownership::one::Item",
+            Some("crate::rust_ownership::one"),
+        ),
+        (
+            "rust_ownership.rs",
+            "crate::rust_ownership::one::Mode",
+            Some("crate::rust_ownership::one"),
+        ),
+        (
+            "rust_ownership.rs",
+            "crate::rust_ownership::two::Contract",
+            Some("crate::rust_ownership::two"),
+        ),
+        (
+            "rust_ownership.rs",
+            "crate::rust_ownership::two::Item",
+            Some("crate::rust_ownership::two"),
+        ),
+        (
+            "rust_ownership.rs",
+            "crate::rust_ownership::two::Mode",
+            Some("crate::rust_ownership::two"),
+        ),
+        (
+            "rust_ownership.rs",
+            "crate::rust_ownership::two::Shared",
+            Some("crate::rust_ownership::two"),
+        ),
         ("ts_ownership.ts", "Shared@", None),
         ("ts_ownership.ts", "One::Item@", Some("One")),
         ("ts_ownership.ts", "One::Nested::Leaf@", Some("One::Nested")),

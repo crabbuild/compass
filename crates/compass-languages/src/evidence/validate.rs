@@ -219,7 +219,7 @@ pub fn validate_evidence(
             ));
         }
         if let Some(range) = diagnostic.range.as_ref() {
-            validate_range(range, &diagnostic.code)?;
+            validate_range(range, &diagnostic.code, false)?;
         }
     }
 
@@ -296,7 +296,7 @@ fn validate_fact(
     match fact {
         Fact::Declaration(fact) => {
             validate_language(&fact.id, &fact.language, adapter_language)?;
-            validate_range(&fact.range, &fact.id)?;
+            validate_range(&fact.range, &fact.id, fact.kind == "file")?;
             require_capability(&fact.id, LanguageCapability::Declarations, capabilities)?;
             if fact.graph_node_id.is_empty()
                 || fact.kind.is_empty()
@@ -309,7 +309,13 @@ fn validate_fact(
         }
         Fact::Scope(fact) => {
             validate_language(&fact.id, &fact.language, adapter_language)?;
-            validate_range(&fact.range, &fact.id)?;
+            let empty_file_scope = fact.kind == "module"
+                && fact
+                    .owner_declaration_id
+                    .as_deref()
+                    .and_then(|id| declarations.get(id))
+                    .is_some_and(|owner| owner.kind == "file" && owner.range == fact.range);
+            validate_range(&fact.range, &fact.id, empty_file_scope)?;
             require_capability(&fact.id, LanguageCapability::LexicalScopes, capabilities)?;
             if fact.kind.is_empty() {
                 return Err(invalid_fact(&fact.id, "scope kind is empty"));
@@ -329,7 +335,7 @@ fn validate_fact(
         }
         Fact::Binding(fact) => {
             validate_language(&fact.id, &fact.language, adapter_language)?;
-            validate_range(&fact.range, &fact.id)?;
+            validate_range(&fact.range, &fact.id, false)?;
             require_capability(&fact.id, fact.kind.required_capability(), capabilities)?;
             if fact.spelling.is_empty() || fact.qualified_target.is_empty() {
                 return Err(invalid_fact(&fact.id, "binding identity is empty"));
@@ -344,7 +350,7 @@ fn validate_fact(
         }
         Fact::Occurrence(fact) => {
             validate_language(&fact.id, &fact.language, adapter_language)?;
-            validate_range(&fact.range, &fact.id)?;
+            validate_range(&fact.range, &fact.id, false)?;
             require_capability(&fact.id, fact.role.required_capability(), capabilities)?;
             if fact.spelling.is_empty() {
                 return Err(invalid_fact(&fact.id, "occurrence spelling is empty"));
@@ -515,7 +521,11 @@ fn validate_language(
     Ok(())
 }
 
-fn validate_range(range: &EvidenceRange, id: &str) -> Result<(), EvidenceError> {
+fn validate_range(
+    range: &EvidenceRange,
+    id: &str,
+    allow_zero_width: bool,
+) -> Result<(), EvidenceError> {
     let path = Path::new(&range.source_file);
     let path_is_safe = !range.source_file.is_empty()
         && !range.source_file.contains('\\')
@@ -535,10 +545,15 @@ fn validate_range(range: &EvidenceRange, id: &str) -> Result<(), EvidenceError> 
             format!("fact {id:?} has unsafe source path {:?}", range.source_file),
         ));
     }
-    let position_is_valid = range.start_byte < range.end_byte
-        && range.start_line > 0
-        && range.end_line >= range.start_line
+    let non_empty_position = range.start_byte < range.end_byte
         && (range.end_line != range.start_line || range.end_column > range.start_column);
+    let empty_position = allow_zero_width
+        && range.start_byte == range.end_byte
+        && range.start_line == range.end_line
+        && range.start_column == range.end_column;
+    let position_is_valid = (non_empty_position || empty_position)
+        && range.start_line > 0
+        && range.end_line >= range.start_line;
     if !position_is_valid {
         return Err(EvidenceError::new(
             EvidenceErrorCode::InvalidRange,
