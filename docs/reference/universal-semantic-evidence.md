@@ -265,6 +265,27 @@ must add and qualify its own explicit strategy; it must not reinterpret C3 or
 guess an owner because a member name is repository-unique. No version value
 changes for this extension.
 
+### Offline compiler evidence
+
+Offline SCIP batches are Program evidence, not `SemanticEvidenceBatch`
+records. For Java calls, Compass can join their symbol identities to this
+contract without weakening its invariants: the compiler reference must match
+an adapter-emitted call occurrence by normalized source path and exact
+half-open byte range, and the compiler definition must match an adapter-emitted
+declaration the same way. Only fresh, unanimous, locally defined targets are
+projected. Non-call references, stale or unverified documents, ambiguous
+definition anchors, and provider conflicts do not create or retarget an edge.
+
+The resulting graph provenance has artifact origin and the
+`compiler-exact-anchor` rule while retaining the adapter's exact occurrence as
+the relationship site. Tree-sitter-only builds and `--no-program` builds keep
+the existing structural behavior.
+
+The compact projection type also admits `Project` providers, but the current
+pipeline does not run `javac`, JDT, or a language server. Adding one requires a
+separately bounded and qualified `ProjectAnalyzer`; parser availability alone
+does not enable it.
+
 ## Framework pack registration
 
 `FrameworkPackDescriptor` is the registration contract for framework meaning

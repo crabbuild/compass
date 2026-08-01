@@ -165,6 +165,66 @@ fn write_multi_scip(
     Ok(())
 }
 
+fn write_java_overload_scip(
+    artifact: &Path,
+    source_path: &str,
+    source: &str,
+) -> Result<(), Box<dyn Error>> {
+    let int_symbol = "java maven fixture 1.0 Demo#pick(int).";
+    let string_symbol = "java maven fixture 1.0 Demo#pick(java.lang.String).";
+    let use_symbol = "java maven fixture 1.0 Demo#use().";
+    let mut occurrences = Vec::new();
+    for (range, symbol, role) in [
+        (vec![1, 7, 11], int_symbol, SymbolRole::Definition),
+        (vec![2, 7, 11], string_symbol, SymbolRole::Definition),
+        (vec![3, 7, 10], use_symbol, SymbolRole::Definition),
+        (vec![3, 15, 19], string_symbol, SymbolRole::ReadAccess),
+    ] {
+        let mut occurrence = Occurrence::new();
+        occurrence.range = range;
+        occurrence.symbol = symbol.to_owned();
+        occurrence.symbol_roles = role as i32;
+        occurrences.push(occurrence);
+    }
+    let symbols = [int_symbol, string_symbol, use_symbol]
+        .into_iter()
+        .map(|symbol| {
+            let mut information = SymbolInformation::new();
+            information.symbol = symbol.to_owned();
+            information
+        })
+        .collect();
+    let mut document = Document::new();
+    document.language = "java".to_owned();
+    document.relative_path = source_path.to_owned();
+    document.occurrences = occurrences;
+    document.symbols = symbols;
+    document.text = source.to_owned();
+    document.position_encoding =
+        EnumOrUnknown::new(PositionEncoding::UTF8CodeUnitOffsetFromLineStart);
+    let mut tool = ToolInfo::new();
+    tool.name = "fixture-indexer".to_owned();
+    tool.version = "1.0".to_owned();
+    let mut metadata = Metadata::new();
+    metadata.tool_info = MessageField::some(tool);
+    metadata.text_document_encoding = EnumOrUnknown::new(TextEncoding::UTF8);
+    let mut index = Index::new();
+    index.metadata = MessageField::some(metadata);
+    index.documents = vec![document];
+    let bytes = index.write_to_bytes()?;
+    fs::write(artifact, &bytes)?;
+    let companion = artifact.with_file_name("index.scip.compass-manifest.json");
+    fs::write(
+        companion,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": "compass.scip-manifest/1",
+            "index_sha256": hex_sha256(&bytes),
+            "documents": {source_path: hex_sha256(source.as_bytes())},
+        }))?,
+    )?;
+    Ok(())
+}
+
 #[test]
 fn program_pipeline_is_deterministic_incremental_and_uses_program_json()
 -> Result<(), Box<dyn Error>> {
@@ -394,6 +454,56 @@ fn scip_cache_tracks_artifact_manifest_and_source_freshness() -> Result<(), Box<
     assert!(
         !String::from_utf8_lossy(&fs::read(deleted.output_dir.join("program.json"))?)
             .contains("src/app.ts")
+    );
+    Ok(())
+}
+
+#[test]
+fn fresh_scip_symbols_resolve_java_overloads_in_graph_json() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let source_text = "class Demo {\n  void pick(int x) {}\n  void pick(String x) {}\n  void use() { pick(\"x\"); }\n}\n";
+    fs::create_dir(directory.path().join("src"))?;
+    fs::write(directory.path().join("src/Demo.java"), source_text)?;
+    write_java_overload_scip(
+        &directory.path().join("index.scip"),
+        "src/Demo.java",
+        source_text,
+    )?;
+
+    let result = build_local_graph(&program_options(directory.path()))?;
+    let graph =
+        compass_model::code_graph::GraphDocument::load(&result.output_dir.join("graph.json"))?;
+    let compiler_call = graph
+        .links
+        .iter()
+        .find(|edge| {
+            edge.kind == compass_model::code_graph::EdgeKind::Calls
+                && edge
+                    .evidence
+                    .iter()
+                    .any(|evidence| evidence.rule.as_deref() == Some("compiler-exact-anchor"))
+        })
+        .ok_or("missing compiler-resolved Java call")?;
+    assert!(compiler_call.evidence.iter().any(|evidence| {
+        evidence.origin == compass_model::provenance::EvidenceOrigin::Artifact
+            && evidence.confidence == compass_model::provenance::EvidenceConfidence::Exact
+            && evidence.extractor == "compass.resolve.java.program"
+    }));
+    let target = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == compiler_call.target)
+        .ok_or("missing compiler-resolved target")?;
+    assert_eq!(
+        target.source.as_ref().map(|source| source.start_line),
+        Some(3)
+    );
+    assert_eq!(
+        compiler_call
+            .relationship_site
+            .as_ref()
+            .map(|source| (source.start_line, source.start_column)),
+        Some((4, 15))
     );
     Ok(())
 }
