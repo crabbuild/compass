@@ -37,11 +37,10 @@ This architecture is transitioning one language at a time. The status labels bel
 | Status | Behavior |
 | --- | --- |
 | Available now | The vendored package supplies 37 pinned static Tree-sitter grammars |
-| Available now | Python and Go are registered hard-cut adapters: they emit semantic evidence and use shared resolution and projection |
-| Available now | Rust Phase 1 emits initial compatibility evidence alongside its established graph records; it is not registered as hard-cut |
-| Available now | Java and the remaining production languages keep their established extraction and resolution paths |
-| Planned | Rust Phase 2 removes its replaced direct publisher and uses shared projection exclusively |
-| Planned | Java becomes a version-1 `UniversalCandidate` after Rust passes its blocking gates |
+| Available now | Python and Go are registered hard-cut version-1 adapters: they emit semantic evidence and use shared resolution and projection |
+| Available now | Rust Phase 2 is a quality-gated, hard-cut version-1 `UniversalCandidate`; its replaced publisher and collection resolution branches are removed |
+| Available now | Java is a hard-cut version-1 `UniversalCandidate`; its replaced publisher and Java member resolver are removed, and final pinned-corpus qualification is in progress |
+| Available now | The remaining production languages keep their established extraction and resolution paths |
 | Planned | Later languages transition independently after language-specific qualification |
 
 The transition is language-by-language, not a migration away from a deprecated
@@ -75,7 +74,7 @@ files + project manifests
               |                      |                              |
               v                      v                              |
        hard-cut adapter       established adapter                   |
-       Python / Go now        Rust / Java / others now              |
+ Python / Go / Rust / Java    remaining languages                   |
               |                      |                              |
               v                      v                              |
     SemanticEvidenceBatch v1   graph facts + unresolved calls       |
@@ -99,7 +98,9 @@ Framework packs consume normalized declarations and exact occurrences after lang
 
 The hard-cut route is selected by `AdapterRegistry`. Presence in the source
 registry or availability of a grammar does not select it. On the current
-branch, the hard-cut registry contains only `go` and `python`.
+branch, the registry contains `go`, `java`, `python`, and `rust`, all at
+adapter version 1. Candidate status describes qualification maturity; it does
+not re-enable the removed direct route.
 
 ## Grammar substrate
 
@@ -215,7 +216,8 @@ Resolution considers:
 2. exact lexical scope
 3. explicit import
 4. same package or module
-5. explicit external identity
+5. compatible signature or argument count
+6. explicit external identity
 
 Multiple valid targets remain unresolved. Wildcard and terminal-name matches never outrank exact evidence.
 
@@ -228,7 +230,7 @@ Profiles describe publication architecture, not implementation quality.
 | Profile | Meaning |
 | --- | --- |
 | `Direct` | The established adapter publishes its current graph and unresolved-call records |
-| `UniversalCandidate` | The adapter publishes universal evidence and has passed candidate gates |
+| `UniversalCandidate` | The hard-cut adapter publishes universal evidence and is being qualified against candidate gates |
 | `UniversalComplete` | The adapter has passed the complete capability and conformance gates |
 
 Documentation uses **established** or `Direct` for the active non-universal

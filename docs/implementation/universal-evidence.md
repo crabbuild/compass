@@ -32,17 +32,18 @@ Universal evidence is the semantic boundary between source-specific extraction a
 
 ## Implementation status
 
-The contracts on this page combine available and approved planned behavior.
+The contracts on this page distinguish implemented hard cuts from approved
+future work.
 
 | Status | Implementation |
 | --- | --- |
 | Available now | `compass-languages` owns the source registry, parsers, established adapters, and semantic evidence version 1 |
-| Available now | Python and Go are the only entries in the hard-cut `AdapterRegistry` |
-| Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for Python and Go |
+| Available now | Python, Go, Rust, and Java are entries in the hard-cut `AdapterRegistry`, all at adapter version 1 |
+| Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all four hard-cut languages |
 | Available now | `UniversalResolutionIndex` resolves and projects hard-cut evidence without a language-name branch |
-| Available now | Rust emits separate Phase 1 compatibility evidence alongside its established graph records |
+| Available now | Rust has passed Phase 2 qualification; Java is registered as `UniversalCandidate` and is completing pinned-corpus qualification |
 | Planned | `GrammarProvider`, grammar provenance, and producer-registry validation |
-| Planned | Rust Phase 2 hard transition, followed by Java candidate transition |
+| Planned | Independently qualified hard cuts for the remaining registered languages |
 
 Do not treat a planned interface as a shipped public API until its implementation and qualification commits land.
 
@@ -55,7 +56,7 @@ Each crate has one primary responsibility in the language pipeline.
 | `vendor/compass-tree-sitter-language-pack` | Pinned grammars, static linkage, parser creation, and grammar metadata |
 | `compass-languages::registry` | Source recognition, producer selection, adapter descriptors, capabilities, and budgets |
 | `compass-languages::evidence` | Hard-cut semantic evidence model and bounded AST-backed builder |
-| `compass-languages::universal` | Rust Phase 1 compatibility evidence and adapter descriptor |
+| `compass-languages::adapters` | Hard-cut adapter profiles, version-1 capability declarations, and registry validation |
 | Adapter modules | Language-specific syntax classification and identity normalization |
 | `compass-resolve::evidence` | Collection indexes, fail-closed target selection, and shared graph projection |
 | Framework modules | Activation evidence, target constraints, occurrence policy, and framework relations |
@@ -65,7 +66,7 @@ The vendored package must not import Compass evidence, graph, resolver, or frame
 
 ## Current source locations
 
-These files define the current implementation before the Rust Phase 2 changes.
+These files define the current implementation.
 
 | Source | Current role |
 | --- | --- |
@@ -75,8 +76,7 @@ These files define the current implementation before the Rust Phase 2 changes.
 | [`crates/compass-languages/src/adapters.rs`](../../crates/compass-languages/src/adapters.rs) | Hard-cut language registry and capability declarations |
 | [`crates/compass-languages/src/engine.rs`](../../crates/compass-languages/src/engine.rs) | Parsing, mutually exclusive adapter dispatch, and framework detection |
 | [`crates/compass-languages/src/evidence/`](../../crates/compass-languages/src/evidence/) | Hard-cut evidence model, validation, limits, and AST builder |
-| [`crates/compass-languages/src/universal.rs`](../../crates/compass-languages/src/universal.rs) | Rust Phase 1 compatibility evidence types |
-| [`crates/compass-languages/src/rust_lang.rs`](../../crates/compass-languages/src/rust_lang.rs) | Rust Phase 1 direct output and evidence emission |
+| [`crates/compass-languages/src/evidence/build.rs`](../../crates/compass-languages/src/evidence/build.rs) | AST-to-evidence policy for the hard-cut language set |
 | [`crates/compass-languages/src/facts.rs`](../../crates/compass-languages/src/facts.rs) | Per-file extraction container |
 | [`crates/compass-resolve/src/lib.rs`](../../crates/compass-resolve/src/lib.rs) | Collection merge and current resolution sequence |
 | [`crates/compass-resolve/src/evidence.rs`](../../crates/compass-resolve/src/evidence.rs) | Universal indexes, resolution rules, and shared materialization |
@@ -181,6 +181,60 @@ The builder must:
 - mark incomplete batches
 
 Adapters do not create graph nodes, graph edges, or `RawCall` records after their universal transition.
+
+## End-to-end ownership map
+
+The following diagram shows the runtime boundary, not crate dependencies alone.
+
+```text
+compass-core build orchestration
+            |
+            v
+compass-files discovers and fingerprints source
+            |
+            v
+compass-languages::Registry selects LanguageSpec
+            |
+            +--> AdapterRegistry miss ------------------------------+
+            |                                                       |
+            |                                                       v
+            |                                             established extractor
+            |                                                       |
+            v                                                       v
+AdapterRegistry hit                                      graph/raw/language facts
+            |
+            v
+vendored grammar -> one Tree-sitter AST
+            |
+            v
+adapter-local AST policy
+            |
+            v
+EvidenceBuilder -> SemanticEvidenceBatch v1
+            |
+            +--------------------------+----------------------------+
+                                       v
+                         compass-resolve collection merge
+                                       |
+                         +-------------+--------------+
+                         |                            |
+                         v                            v
+               UniversalResolutionIndex      established resolvers
+                         |                            |
+                         +-------------+--------------+
+                                       v
+                         framework target resolution
+                                       |
+                                       v
+                           normalized Extraction
+                                       |
+                                       v
+                              compass-graph
+```
+
+The two routes meet only after each has produced project-resolvable facts.
+The universal route never reconstructs evidence from graph rows, and the
+established route is not forced through a compatibility translator.
 
 ## Per-file lifecycle
 
@@ -316,19 +370,20 @@ A failed gate returns work to the candidate implementation. It does not weaken t
 
 ## Current language profiles
 
-This table describes the current branch before Rust Phase 2.
+This table describes the current branch.
 
 | Language | Profile | Publication path |
 | --- | --- | --- |
 | Python | Hard-cut universal | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced collection resolver |
 | Go | Hard-cut universal | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced Go collection resolver |
-| Rust | Phase 1 compatibility candidate | Established graph records plus separate initial compatibility evidence; not in the hard-cut registry |
-| Java | Established adapter | Generic Java extraction and member resolution |
+| Rust | Hard-cut `UniversalCandidate` | Version-1 evidence plus shared resolution and projection; Phase 2 qualified and replaced Rust paths removed |
+| Java | Hard-cut `UniversalCandidate` | Version-1 evidence plus shared resolution and projection; replaced Java paths removed and final corpus qualification in progress |
 | Remaining registered languages | Established direct adapters | Current language-specific or generic extraction paths |
 
-Python and Go are already hard-cut. The Rust Phase 2 gate precedes Java. Each
-later language reuses the same hard-cut registry, evidence model, resolver, and
-projector without adding language cases to the central publisher.
+Python, Go, Rust, and Java are hard-cut on this branch. Each later language
+reuses the same hard-cut registry, evidence model, resolver, and projector
+without adding language cases to the central publisher. A language's
+transition does not alter the publication route of any other language.
 
 ## Framework-pack status
 
