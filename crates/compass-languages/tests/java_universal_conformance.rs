@@ -17,7 +17,7 @@ import static org.example.util.Helpers.map;
 import org.example.model.*;
 
 @Deprecated
-public class Service extends BaseService implements Runnable, AutoCloseable {
+public class Service extends BaseService implements Runnable<String, Result>, AutoCloseable {
     private final Repository repository;
     private List<String> names;
 
@@ -121,8 +121,9 @@ enum Status { READY, DONE }
             .candidates
             .iter()
             .filter(|candidate| candidate.relation == CandidateRelation::Implements)
-            .count(),
-        2
+            .map(|candidate| candidate.target_spelling.as_str())
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from(["AutoCloseable", "Runnable"])
     );
     assert!(evidence.occurrences.iter().any(|occurrence| {
         occurrence.role == SemanticRole::Annotation && occurrence.spelling == "Override"

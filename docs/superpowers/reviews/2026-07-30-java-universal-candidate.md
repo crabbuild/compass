@@ -92,5 +92,86 @@ classifier: overall strict coverage must exceed 71.04%, no relation-family
 handled percentage may decrease, every Compass workload must remain eligible
 and deterministic, and Compass cold/warm medians must remain below Graphify.
 
-This is baseline evidence only. It does not qualify Java as a universal
-candidate and does not authorize a dual-run or translation path.
+The section above is the pre-cutover baseline. It does not authorize a
+dual-run or translation path.
+
+## Post-cutover qualification
+
+Java's hard-cut version-1 universal path was qualified on 2026-08-01 from the
+working tree based at Compass commit `dd14b3ce99b02fd82aa5df199cd5769869916c97`.
+The pinned Spring and Graphify revisions are unchanged from the baseline. Java
+remains `UniversalCandidate`; this review does not promote it to
+`UniversalComplete`.
+
+The six checked Java fixtures were extracted three times with the final release
+binary. All three graph files were byte-identical, their canonical graph
+digests matched, and their occurrence digests matched:
+
+- graph bytes SHA-256:
+  `40524a2d9ce8169348572ba7eb082338c648c740688a9a03e31648b2f4d82af0`
+- canonical graph SHA-256:
+  `43c72e8038181fdf44a635a93eb9f5be27813903a930c35de979faf0bf00ebcd`
+- occurrence SHA-256:
+  `3e1916d0cc1f11db3ecd5c9b4f7e486531b265d3e8092250c3b201fbad54f1a3`
+- each run: 45 nodes, 60 edges, and no graph diagnostics
+
+The candidate handled all 28 established fixture relationships and all 41
+valid Graphify fixture relationships. The Graphify fixture output contained
+one dangling import to `RequestMethod`; it was recorded and removed before
+strict comparison. Candidate fixture retention is therefore 100%, above the
+95% baseline-retention gate, with no missing or ambiguous relationship in any
+checked family. Imports handled 10/10 Graphify facts and references handled
+13/13.
+
+### Final pinned Spring quality
+
+The final strict index contained 168,475 Compass nodes and 650,782 canonical
+Compass edges. It compared them with 138,830 Graphify nodes and 477,066
+Graphify edges. Both inputs had zero validation errors and zero dangling
+edges. The same final classifier was also run over the established Compass
+graph, so the family comparison below is apples-to-apples.
+
+| Relation | Graphify | Established handled | Candidate exact | Candidate dominated | Candidate rejected | Candidate missing | Candidate ambiguous | Candidate handled |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| calls | 112,195 | 48.51% | 15,016 | 65,581 | 7,415 | 24,183 | 0 | 78.45% |
+| case_of | 872 | 0.00% | 0 | 0 | 0 | 872 | 0 | 0.00% |
+| contains | 102,310 | 95.19% | 32,694 | 65,506 | 0 | 4,103 | 7 | 95.98% |
+| extends | 4,454 | 86.06% | 2,130 | 1,630 | 144 | 537 | 13 | 87.65% |
+| implements | 4,379 | 95.39% | 1,988 | 2,054 | 202 | 132 | 3 | 96.92% |
+| imports | 126,118 | 59.13% | 31,055 | 38,021 | 56,183 | 859 | 0 | 99.32% |
+| references | 126,738 | 81.94% | 12,009 | 86,429 | 14,361 | 13,931 | 8 | 89.00% |
+
+Overall handled coverage is 432,418/477,066, or **90.64%**, compared with
+338,261/477,066, or **70.90%**, for the established graph under the final
+classifier. Candidate coverage is 127.84% of the established baseline and
+exceeds it by 19.74 percentage points. No relationship family regressed;
+`case_of` is unchanged and every other family improved.
+
+The largest implementation gaps discovered during qualification were in
+calls, imports, and containment. The final candidate adds source-anchored,
+arity-constrained ownership for Java methods and constructors, preserves
+annotation types through Code Graph v1 normalization and endpoint validation,
+and makes the comparator distinguish Java owner spelling and annotation-shifted
+declaration anchors without selecting arbitrary candidates.
+
+### Final pinned Spring performance
+
+The three-sample candidate measurements before the final ownership correction
+had medians of 82.86 seconds cold and 3.23 seconds warm. The final binary was
+then confirmed at 85.46 seconds cold and 3.55 seconds warm on the same pinned
+Spring checkout (`compass --timing` reported 79.41 and 3.53 seconds inside
+those process-wall measurements). Its cold and warm graph files were
+byte-identical with SHA-256
+`5d312789a82d8763173e496a76af055d17ffef17e3aad46de1e6a4e1fe51cd69`.
+The pinned Graphify medians were 171.07 seconds cold and 64.70 seconds warm.
+Compass therefore remained lower-latency for both blocking workloads; final
+cold was 2.00x faster and final warm was 18.23x faster. Peak RSS remained
+non-blocking and was recorded at 8.61 GiB cold and 51.72 MiB warm for the final
+confirmation.
+
+### Remaining scope
+
+This closes Java's post-cutover candidate qualification, not all framework-pack
+work. Spring behavior remains covered through universal Java facts, but the
+production universal Spring descriptor list is still empty. Spring's registry
+hard cut is a separate follow-up and is not implied by this Java result.

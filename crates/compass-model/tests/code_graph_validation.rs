@@ -359,9 +359,17 @@ fn top_level_instantiations_accept_file_and_module_sources() {
 }
 
 #[test]
-fn rust_enum_members_are_importable_referenceable_and_constructible() {
+fn language_specific_declarations_use_supported_endpoint_shapes() {
     for (kind, source_kind, target_kind) in [
         (EdgeKind::Imports, NodeKind::File, NodeKind::EnumMember),
+        (EdgeKind::Imports, NodeKind::File, NodeKind::Annotation),
+        (EdgeKind::Imports, NodeKind::File, NodeKind::Field),
+        (EdgeKind::References, NodeKind::Method, NodeKind::Annotation),
+        (
+            EdgeKind::References,
+            NodeKind::Annotation,
+            NodeKind::Annotation,
+        ),
         (EdgeKind::References, NodeKind::Method, NodeKind::EnumMember),
         (EdgeKind::References, NodeKind::Struct, NodeKind::Parameter),
         (

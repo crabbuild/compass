@@ -41,7 +41,7 @@ future work.
 | Available now | Python, Go, Rust, and Java are entries in the hard-cut `AdapterRegistry`, all at adapter version 1 |
 | Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all four hard-cut languages |
 | Available now | `UniversalResolutionIndex` resolves and projects hard-cut evidence without a language-name branch |
-| Available now | Rust has passed Phase 2 qualification; Java is registered as `UniversalCandidate` and is completing pinned-corpus qualification |
+| Available now | Rust has passed Phase 2 qualification; Java remains `UniversalCandidate` after completing post-cutover pinned-corpus qualification |
 | Planned | `GrammarProvider`, grammar provenance, and producer-registry validation |
 | Planned | Independently qualified hard cuts for the remaining registered languages |
 
@@ -377,7 +377,7 @@ This table describes the current branch.
 | Python | Hard-cut universal | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced collection resolver |
 | Go | Hard-cut universal | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced Go collection resolver |
 | Rust | Hard-cut `UniversalCandidate` | Version-1 evidence plus shared resolution and projection; Phase 2 qualified and replaced Rust paths removed |
-| Java | Hard-cut `UniversalCandidate` | Version-1 evidence plus shared resolution and projection; replaced Java paths removed and final corpus qualification in progress |
+| Java | Hard-cut `UniversalCandidate` | Version-1 evidence plus shared resolution and projection; replaced Java paths removed and post-cutover corpus qualification complete |
 | Remaining registered languages | Established direct adapters | Current language-specific or generic extraction paths |
 
 Python, Go, Rust, and Java are hard-cut on this branch. Each later language

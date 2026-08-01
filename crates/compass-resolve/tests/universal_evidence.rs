@@ -249,10 +249,18 @@ class Service {
     let service_id = declaration_id("demo.catalog.Service").ok_or("missing Service evidence")?;
     let worker_id = declaration_id("demo.catalog.Worker").ok_or("missing Worker evidence")?;
     let run_id = declaration_id("demo.catalog.Service::run").ok_or("missing run evidence")?;
+    declaration_id("demo.catalog.Service::<init>").ok_or("missing Service constructor evidence")?;
     assert!(evidence.candidates.iter().any(|candidate| {
         candidate.relation == CandidateRelation::Contains
             && candidate.source_declaration_id == service_id
             && candidate.target_spelling == "run"
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Contains
+            && candidate.source_declaration_id == service_id
+            && candidate.target_spelling == "<init>"
+            && candidate.constraints.exact_target_declaration_id.is_none()
+            && candidate.constraints.argument_count == Some(1)
     }));
     assert!(evidence.candidates.iter().any(|candidate| {
         candidate.relation == CandidateRelation::Extends
@@ -286,7 +294,9 @@ class Service {
     let catalog = node("demo.catalog.Catalog").ok_or("missing published Catalog")?;
     let repository = node("demo.catalog.Repository").ok_or("missing published Repository")?;
     let run = node("demo.catalog.Service::run").ok_or("missing published run")?;
-    for published in [service, worker, catalog, repository, run] {
+    let constructor =
+        node("demo.catalog.Service::<init>").ok_or("missing published Service constructor")?;
+    for published in [service, worker, catalog, repository, run, constructor] {
         assert_eq!(published.string("language"), "java");
         assert_eq!(
             published.string("extractor"),
@@ -297,6 +307,7 @@ class Service {
     }
     for (source_id, target_id, relation) in [
         (service.id.as_str(), run.id.as_str(), "contains"),
+        (service.id.as_str(), constructor.id.as_str(), "contains"),
         (worker.id.as_str(), catalog.id.as_str(), "inherits"),
         (worker.id.as_str(), repository.id.as_str(), "implements"),
         (run.id.as_str(), catalog.id.as_str(), "references"),
