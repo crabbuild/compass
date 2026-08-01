@@ -2,9 +2,10 @@
 
 use compass_languages::{
     AdapterIdentity, AdapterRegistry, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
-    Engine, EvidenceErrorCode, EvidenceLimits, EvidenceRange, Extraction, LanguageCapability,
-    OccurrenceFact, RelationshipCandidate, ResolutionConstraint, ScopeFact, SemanticEvidenceBatch,
-    SemanticRole, UNIVERSAL_EVIDENCE_SCHEMA, UniversalAdapterProfile, validate_evidence,
+    Engine, EvidenceErrorCode, EvidenceLimits, EvidenceRange, Extraction, HierarchyConstraint,
+    LanguageCapability, OccurrenceFact, ReceiverDispatchStrategy, RelationshipCandidate,
+    ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole,
+    UNIVERSAL_EVIDENCE_SCHEMA, UniversalAdapterProfile, validate_evidence,
 };
 
 fn range(start: u64, end: u64) -> EvidenceRange {

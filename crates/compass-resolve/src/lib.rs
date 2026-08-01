@@ -323,6 +323,9 @@ fn finish_resolution(
         ) {
             Ok(index) => index.materialize(&mut merged.nodes, &mut merged.edges),
             Err(error) => {
+                if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+                    eprintln!("[compass internal] universal resolution failed: {error}");
+                }
                 merged
                     .error
                     .get_or_insert_with(|| format!("universal resolution failed: {error}"));

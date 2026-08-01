@@ -83,7 +83,7 @@ impl<'a> FrameworkTargetIndex<'a> {
                 .and_then(|signature| signature.find('(').map(|start| &signature[start..]))
                 .filter(|_| !qualified.is_empty())
                 .map(|parameters| format!("{qualified}{parameters}"));
-            let source = node
+            let raw_source = node
                 .attributes
                 .get("source_file")
                 .and_then(Value::as_str)

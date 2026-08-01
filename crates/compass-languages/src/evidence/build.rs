@@ -8,9 +8,8 @@ use crate::{AdapterProfile, EXTRACTION_SEMANTICS_VERSION, file_stem, make_id};
 
 use super::model::{
     AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
-    EvidenceDiagnostic, EvidenceRange, HierarchyConstraint, OccurrenceFact,
-    ReceiverDispatchStrategy, RelationshipCandidate, ResolutionConstraint, ScopeFact,
-    SemanticEvidenceBatch, SemanticRole,
+    EvidenceDiagnostic, EvidenceRange, HierarchyConstraint, OccurrenceFact, RelationshipCandidate,
+    ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate_evidence};
 
@@ -475,6 +474,7 @@ struct DeclarationContext {
     qualified_name: String,
     kind: String,
     enclosing_type_qualified_name: Option<String>,
+    runtime_nested: bool,
 }
 
 struct ImportBindingVersion {
@@ -670,6 +670,7 @@ impl<'source> DirectAdapterState<'source> {
             qualified_name: self.module_or_package.clone(),
             kind: "file".to_owned(),
             enclosing_type_qualified_name: None,
+            runtime_nested: false,
         });
         Ok(())
     }
@@ -681,7 +682,7 @@ impl<'source> DirectAdapterState<'source> {
                 "non-empty Python source has no file evidence",
             )
         })?;
-        self.collect_python_declarations(root, &file, None)?;
+        self.collect_python_declarations(root, &file)?;
         self.collect_python_imports(root, &file)?;
         let module_bound = crate::engine::python_bound_names(root, self.source, true);
         self.python_module_bound_names.clone_from(&module_bound);
@@ -774,9 +775,13 @@ impl<'source> DirectAdapterState<'source> {
                 name,
                 qualified_name,
                 kind: kind.to_owned(),
-                enclosing_type_qualified_name: (!is_class)
-                    .then(|| class_owner.map(|owner| owner.qualified_name.clone()))
-                    .flatten(),
+                enclosing_type_qualified_name: if owner.kind == "class" {
+                    Some(owner.qualified_name.clone())
+                } else {
+                    owner.enclosing_type_qualified_name.clone()
+                },
+                runtime_nested: owner.runtime_nested
+                    || matches!(owner.kind.as_str(), "function" | "method"),
             };
             self.add_ownership(owner, &context)?;
             self.declarations.insert(node.id(), context.clone());
@@ -953,6 +958,7 @@ impl<'source> DirectAdapterState<'source> {
             binding.as_deref(),
             &spelling,
             ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: qualified_name
                     .as_deref()
@@ -963,6 +969,7 @@ impl<'source> DirectAdapterState<'source> {
                 qualified_name: qualified_name.clone(),
                 argument_count: None,
                 allowed_target_kinds: vec!["function".to_owned(), "method".to_owned()],
+                hierarchy: None,
                 allow_external: qualified_name.is_some(),
             },
         )?;
@@ -1200,6 +1207,7 @@ impl<'source> DirectAdapterState<'source> {
             complete: true,
             qualified_names: Vec::new(),
         };
+        let mut relationships = Vec::new();
         let mut cursor = arguments.walk();
         for argument in arguments
             .children(&mut cursor)
@@ -1218,14 +1226,22 @@ impl<'source> DirectAdapterState<'source> {
             };
             let raw = self.text(target);
             let (qualifier, spelling) = split_qualified(&raw);
-            if let Some(qualified_name) =
-                self.python_base_qualified_name(owner, qualifier, spelling, target.start_byte())
-            {
-                bases.qualified_names.push(qualified_name);
+            let qualified_name =
+                self.python_base_qualified_name(owner, qualifier, spelling, target.start_byte());
+            if let Some(qualified_name) = qualified_name.as_ref() {
+                bases.qualified_names.push(qualified_name.clone());
             } else {
                 bases.complete = false;
             }
-            self.add_relationship_occurrence(
+            relationships.push((
+                target,
+                spelling.to_owned(),
+                qualifier.map(str::to_owned),
+                qualified_name,
+            ));
+        }
+        for (target, spelling, qualifier, qualified_name) in relationships {
+            self.add_relationship_occurrence_with_hierarchy(
                 SemanticRole::BaseType,
                 CandidateRelation::Extends,
                 owner,
@@ -1233,7 +1249,9 @@ impl<'source> DirectAdapterState<'source> {
                 qualifier.as_deref(),
                 target,
                 qualified_name,
-                Some(HierarchyConstraint::DirectBase { base_set_complete }),
+                Some(HierarchyConstraint::DirectBase {
+                    base_set_complete: bases.complete,
+                }),
             )?;
         }
         bases.qualified_names.sort();
@@ -1367,6 +1385,7 @@ impl<'source> DirectAdapterState<'source> {
             Some(&binding_id),
             local,
             ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: java_qualified_parent(target).map(str::to_owned),
                 scope_id: Some(owner.scope_id.clone()),
@@ -1383,6 +1402,7 @@ impl<'source> DirectAdapterState<'source> {
                     "method".to_owned(),
                     "field".to_owned(),
                 ],
+                hierarchy: None,
                 allow_external: true,
             },
         )?;
@@ -1434,6 +1454,7 @@ impl<'source> DirectAdapterState<'source> {
                 qualified_name: qualified_name.clone(),
                 kind: kind.to_owned(),
                 enclosing_type_qualified_name: Some(qualified_name.clone()),
+                runtime_nested: false,
             };
             self.add_ownership(owner, &context)?;
             self.local_targets
@@ -1544,6 +1565,7 @@ impl<'source> DirectAdapterState<'source> {
             qualified_name: qualified_name.clone(),
             kind: kind.to_owned(),
             enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+            runtime_nested: false,
         };
         self.add_ownership(owner, &context)?;
         let binding_id = self.builder.bind(
@@ -1603,6 +1625,7 @@ impl<'source> DirectAdapterState<'source> {
                 qualified_name: qualified_name.clone(),
                 kind: "field".to_owned(),
                 enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+                runtime_nested: false,
             };
             self.add_ownership(owner, &context)?;
             self.builder.bind(
@@ -1658,6 +1681,7 @@ impl<'source> DirectAdapterState<'source> {
             qualified_name: qualified_name.clone(),
             kind: "enum_member".to_owned(),
             enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+            runtime_nested: false,
         };
         self.add_ownership(owner, &context)?;
         self.builder.bind(
@@ -1928,12 +1952,14 @@ impl<'source> DirectAdapterState<'source> {
             binding.as_deref(),
             spelling,
             ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: Some(self.module_or_package.clone()),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: qualified_name.clone(),
                 argument_count: None,
                 allowed_target_kinds: kinds.into_iter().map(str::to_owned).collect(),
+                hierarchy: None,
                 allow_external: qualified_name.is_some(),
             },
         )?;
@@ -1985,12 +2011,14 @@ impl<'source> DirectAdapterState<'source> {
             binding.as_deref(),
             &spelling,
             ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: Some(self.module_or_package.clone()),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name,
                 argument_count: Some(argument_count),
                 allowed_target_kinds: vec!["method".to_owned()],
+                hierarchy: None,
                 allow_external: receiver_type.is_some(),
             },
         )?;
@@ -2032,12 +2060,14 @@ impl<'source> DirectAdapterState<'source> {
             binding.as_deref(),
             spelling,
             ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: Some(self.module_or_package.clone()),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name,
                 argument_count: Some(argument_count),
                 allowed_target_kinds: vec!["class".to_owned(), "record".to_owned()],
+                hierarchy: None,
                 allow_external: true,
             },
         )?;
@@ -2204,6 +2234,7 @@ impl<'source> DirectAdapterState<'source> {
                 kind: kind.to_owned(),
                 enclosing_type_qualified_name: matches!(kind, "trait" | "struct" | "enum")
                     .then_some(qualified_name.clone()),
+                runtime_nested: false,
             };
             self.add_ownership(owner, &context)?;
             self.local_targets
@@ -2337,6 +2368,7 @@ impl<'source> DirectAdapterState<'source> {
             qualified_name: qualified_name.clone(),
             kind: kind.to_owned(),
             enclosing_type_qualified_name: owner.enclosing_type_qualified_name.clone(),
+            runtime_nested: false,
         };
         self.add_ownership(owner, &context)?;
         self.local_targets
@@ -2406,6 +2438,7 @@ impl<'source> DirectAdapterState<'source> {
             enclosing_type_qualified_name: active_impl
                 .map(|implementation| implementation.type_qualified_name.clone())
                 .or_else(|| owner.enclosing_type_qualified_name.clone()),
+            runtime_nested: false,
         };
         if let Some(implementation) = active_impl {
             if let Some(type_owner) = implementation
@@ -2612,6 +2645,7 @@ impl<'source> DirectAdapterState<'source> {
                 qualified_name,
                 kind: "enum_member".to_owned(),
                 enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+                runtime_nested: false,
             };
             self.add_ownership(owner, &context)?;
             self.add_rust_declaration_references(variant, owner)?;
@@ -2658,6 +2692,7 @@ impl<'source> DirectAdapterState<'source> {
             qualified_name,
             kind: "field".to_owned(),
             enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+            runtime_nested: false,
         };
         self.add_ownership(owner, &context)?;
         self.declarations.insert(node.id(), context);
@@ -2759,6 +2794,7 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&binding_id),
                 rust_path_leaf(&target),
                 ResolutionConstraint {
+                    exact_target_declaration_id: None,
                     exact_language: Some(self.language.to_owned()),
                     module_or_package: rust_qualified_parent(&target).map(str::to_owned),
                     scope_id: Some(owner.scope_id.clone()),
@@ -2774,6 +2810,7 @@ impl<'source> DirectAdapterState<'source> {
                         "function".to_owned(),
                         "macro".to_owned(),
                     ],
+                    hierarchy: None,
                     allow_external: !rust_identity_is_internal(&self.module_or_package, &target),
                 },
             )?;
@@ -2926,6 +2963,7 @@ impl<'source> DirectAdapterState<'source> {
             range_for_node(self.source_file, function),
         )?;
         let constraints = ResolutionConstraint {
+            exact_target_declaration_id: None,
             exact_language: Some(self.language.to_owned()),
             module_or_package: qualified_name
                 .as_deref()
@@ -2940,6 +2978,7 @@ impl<'source> DirectAdapterState<'source> {
                 "method".to_owned(),
                 "struct".to_owned(),
             ],
+            hierarchy: None,
             allow_external: qualified_name.as_deref().is_some_and(|qualified| {
                 (wildcard_bound || !qualifier.is_some_and(rust_deferred_owner))
                     && !rust_identity_is_internal(&self.module_or_package, qualified)
@@ -3049,6 +3088,7 @@ impl<'source> DirectAdapterState<'source> {
             binding.as_deref(),
             spelling,
             ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: qualified_name
                     .as_deref()
@@ -3058,6 +3098,7 @@ impl<'source> DirectAdapterState<'source> {
                 qualified_name: qualified_name.clone(),
                 argument_count: None,
                 allowed_target_kinds: vec!["macro".to_owned()],
+                hierarchy: None,
                 allow_external: qualified_name.as_deref().is_some_and(|qualified| {
                     !rust_identity_is_internal(&self.module_or_package, qualified)
                 }),
@@ -3128,6 +3169,7 @@ impl<'source> DirectAdapterState<'source> {
             binding.as_deref(),
             spelling,
             ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: qualified_name
                     .and_then(|qualified| rust_qualified_parent(qualified).map(str::to_owned))
@@ -3136,6 +3178,7 @@ impl<'source> DirectAdapterState<'source> {
                 qualified_name: qualified_name.map(str::to_owned),
                 argument_count: None,
                 allowed_target_kinds,
+                hierarchy: None,
                 allow_external,
             },
         )?;
@@ -3212,6 +3255,7 @@ impl<'source> DirectAdapterState<'source> {
                     qualified_name,
                     kind: kind.to_owned(),
                     enclosing_type_qualified_name: None,
+                    runtime_nested: false,
                 };
                 self.add_ownership(file, &context)?;
                 self.declarations.insert(node.id(), context);
@@ -3270,6 +3314,7 @@ impl<'source> DirectAdapterState<'source> {
                 qualified_name,
                 kind: kind.to_owned(),
                 enclosing_type_qualified_name: None,
+                runtime_nested: false,
             };
             self.add_ownership(file, &context)?;
             self.declarations.insert(node.id(), context);
@@ -3840,6 +3885,7 @@ impl<'source> DirectAdapterState<'source> {
                 } else {
                     vec!["function".to_owned(), "method".to_owned()]
                 },
+                hierarchy: None,
                 allow_external: qualified_name.is_some() && python_super_receiver.is_none(),
             },
         )?;
@@ -4183,27 +4229,6 @@ impl<'source> DirectAdapterState<'source> {
             scope_id = self.scope_parents.get(current).map(String::as_str);
         }
         None
-    }
-
-    fn imported_target_for(&self, owner: &DeclarationContext, name: &str) -> Option<&String> {
-        self.local_import_targets
-            .get(&owner.scope_id)
-            .and_then(|targets| targets.get(name))
-            .or_else(|| self.imported_targets.get(name))
-    }
-
-    fn binding_is_ambiguous(&self, owner: &DeclarationContext, name: &str) -> bool {
-        if self
-            .local_bindings
-            .get(&owner.scope_id)
-            .is_some_and(|bindings| bindings.contains_key(name))
-        {
-            return self
-                .ambiguous_local_bindings
-                .get(&owner.scope_id)
-                .is_some_and(|bindings| bindings.contains(name));
-        }
-        self.ambiguous_bindings.contains(name)
     }
 
     fn add_ownership(

@@ -191,3 +191,53 @@ public class Service {
     }));
     Ok(())
 }
+
+#[test]
+fn java_collection_source_paths_keep_duplicate_class_copies_distinct() -> Result<(), Box<dyn Error>>
+{
+    let source = br#"package org.example.shared;
+public class Duplicate { public void run() {} }
+"#;
+    let first_source = "module-a/src/main/java/org/example/shared/Duplicate.java";
+    let second_source = "module-b/src/test/java/org/example/shared/Duplicate.java";
+    let mut engine = Engine::default();
+    let first = engine
+        .extract_source_combined(
+            Path::new("/repo/module-a/src/main/java/org/example/shared/Duplicate.java"),
+            first_source,
+            source,
+        )?
+        .graph;
+    let second = engine
+        .extract_source_combined(
+            Path::new("/repo/module-b/src/test/java/org/example/shared/Duplicate.java"),
+            second_source,
+            source,
+        )?
+        .graph;
+    let sources = HashMap::from([
+        (first_source.to_owned(), String::from_utf8(source.to_vec())?),
+        (
+            second_source.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ),
+    ]);
+
+    let merged = resolve(&[first, second], &sources);
+    assert!(merged.error.is_none(), "{:#?}", merged.error);
+    let duplicates = merged
+        .nodes
+        .iter()
+        .filter(|node| node.string("qualified_name") == "org.example.shared.Duplicate")
+        .collect::<Vec<_>>();
+    assert_eq!(duplicates.len(), 2, "{:#?}", merged.nodes);
+    assert_ne!(duplicates[0].id, duplicates[1].id);
+    assert_eq!(
+        duplicates
+            .iter()
+            .map(|node| node.string("source_file"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from([first_source.to_owned(), second_source.to_owned()])
+    );
+    Ok(())
+}

@@ -1,17 +1,20 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fs;
 use std::path::Path;
 
 use compass_graph::{BuildEvidence, normalize_v1};
-use compass_languages::{Engine, RawEdgeRecord};
+use compass_languages::{Engine, Extraction, RawEdgeRecord};
 use compass_model::code_graph::{EdgeKind, NodeKind};
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance};
 use compass_resolve::resolve_with_root;
 
 const PYTHON_IMPORT_PRODUCER: &str = "compass.resolve.python.universal";
+const UNIVERSAL_PYTHON_PRODUCER: &str = PYTHON_IMPORT_PRODUCER;
+const RETIRED_PYTHON_PRODUCER: &str = "compass.resolve.python-imports";
 const PYTHON_SYMBOL_IMPORT_RULE: &str = "universal-import-explicit-binding";
 const PYTHON_REEXPORT_RULE: &str = "universal-reexport-explicit-binding";
+type ResolvedFixture = (tempfile::TempDir, Extraction, HashMap<String, String>);
 
 fn is_python_import_edge(edge: &RawEdgeRecord) -> bool {
     edge.string("extractor") == PYTHON_IMPORT_PRODUCER
@@ -26,6 +29,15 @@ fn is_python_import_evidence(evidence: &Provenance) -> bool {
         && evidence.rule.as_deref().is_some_and(|rule| {
             rule.starts_with("universal-import-") || rule.starts_with("universal-reexport-")
         })
+}
+
+fn write(root: &Path, relative: &str, source: &str) -> Result<String, Box<dyn Error>> {
+    let path = root.join(relative);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, source)?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 fn extract(
@@ -556,24 +568,24 @@ fn universal_python_decorators_resolve_through_package_reexports() -> Result<(),
         .iter()
         .filter(|edge| edge.string("context") == "decorator")
         .collect::<Vec<_>>();
-    assert_eq!(decorator_edges.len(), 2, "edges={:#?}", extraction.edges);
+    assert_eq!(decorators.len(), 2, "edges={:#?}", resolved.edges);
     assert!(
-        decorator_edges.iter().all(|edge| edge.target == target.id),
-        "target={target:#?} edges={decorator_edges:#?}"
+        decorators.iter().all(|edge| edge.target == target.id),
+        "target={target:#?} edges={decorators:#?}"
     );
     assert_eq!(
-        decorator_edges
+        decorators
             .iter()
             .map(|edge| edge.string("source_location"))
             .collect::<Vec<_>>(),
         ["L3", "L5"]
     );
-    assert!(decorator_edges.iter().all(|edge| {
+    assert!(decorators.iter().all(|edge| {
         edge.attributes.contains_key("start_byte")
             && edge.attributes.contains_key("end_byte")
             && edge.string("resolution_rule") == "explicit-binding"
     }));
-    assert!(extraction.edges.iter().all(|edge| {
+    assert!(resolved.edges.iter().all(|edge| {
         edge.string("target_qualified_name") != "framework.unused"
             && edge.string("rule") != "python-imported-class-use-inference"
     }));

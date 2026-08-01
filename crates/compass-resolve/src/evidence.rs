@@ -4,8 +4,9 @@ use std::time::Instant;
 
 use ahash::AHashMap;
 use compass_languages::{
-    BindingFact, CandidateRelation, DeclarationFact, EvidenceLimits, OccurrenceFact,
-    RelationshipCandidate, SemanticEvidenceBatch, make_id, validate_evidence,
+    BindingFact, CandidateRelation, DeclarationFact, EvidenceLimits, HierarchyConstraint,
+    OccurrenceFact, ReceiverDispatchStrategy, RelationshipCandidate, SemanticEvidenceBatch,
+    make_id, validate_evidence,
 };
 use compass_model::provenance::OCCURRENCE_RULE_ATTRIBUTE;
 use serde_json::{Map, Value};
@@ -279,6 +280,81 @@ impl UniversalResolutionIndex {
             targets.dedup();
         }
         profile_internal("universal alias index", &mut profile_started);
+        let mut direct_bases = AHashMap::<(String, String), DirectBaseSet>::new();
+        for candidate in candidates.values() {
+            let Some(HierarchyConstraint::DirectBase { base_set_complete }) =
+                candidate.constraints.hierarchy.as_ref()
+            else {
+                continue;
+            };
+            let Some(owner) = declarations.get(&candidate.source_declaration_id) else {
+                continue;
+            };
+            let range = candidate
+                .occurrence_id
+                .as_deref()
+                .and_then(|id| occurrences.get(id))
+                .map(|occurrence| &occurrence.range);
+            let entry = direct_bases
+                .entry((candidate.language.clone(), owner.qualified_name.clone()))
+                .or_insert_with(|| DirectBaseSet {
+                    links: Vec::new(),
+                    complete: true,
+                });
+            entry.complete &= *base_set_complete;
+            if entry.links.len() <= limits.candidates_per_lookup {
+                entry.links.push(DirectBaseLink {
+                    qualified_name: candidate.constraints.qualified_name.clone(),
+                    source_file: range.map_or_else(String::new, |range| range.source_file.clone()),
+                    start_byte: range.map_or(u64::MAX, |range| range.start_byte),
+                    end_byte: range.map_or(u64::MAX, |range| range.end_byte),
+                    candidate_id: candidate.id.clone(),
+                });
+            } else {
+                entry.complete = false;
+            }
+        }
+        for bases in direct_bases.values_mut() {
+            bases.links.sort_unstable_by(|left, right| {
+                left.source_file
+                    .cmp(&right.source_file)
+                    .then_with(|| left.start_byte.cmp(&right.start_byte))
+                    .then_with(|| left.end_byte.cmp(&right.end_byte))
+                    .then_with(|| left.candidate_id.cmp(&right.candidate_id))
+            });
+            if bases.links.len() > limits.candidates_per_lookup {
+                bases.complete = false;
+                bases.links.truncate(limits.candidates_per_lookup);
+            }
+        }
+        let mut members_by_owner = AHashMap::<_, Vec<_>>::new();
+        for declaration in declarations.values() {
+            let Some(owner) = declaration
+                .scope_id
+                .as_deref()
+                .and_then(|id| scopes.get(id))
+                .and_then(|scope| scope.owner_declaration_id.as_deref())
+                .and_then(|id| declarations.get(id))
+            else {
+                continue;
+            };
+            members_by_owner
+                .entry((
+                    declaration.language.clone(),
+                    owner.qualified_name.clone(),
+                    declaration.name.clone(),
+                ))
+                .or_default()
+                .push(declaration.id.clone());
+        }
+        for members in members_by_owner.values_mut() {
+            members.sort_unstable();
+            members.dedup();
+            if members.len() > limits.candidates_per_lookup {
+                members.truncate(limits.candidates_per_lookup);
+            }
+        }
+        profile_internal("universal hierarchy indices", &mut profile_started);
         let mut wildcard_reexports_by_module = AHashMap::<_, Vec<_>>::new();
         for binding in bindings.values().filter(|binding| binding.spelling == "*") {
             let Some(scope_id) = binding.scope_id.as_ref() else {
@@ -426,12 +502,6 @@ impl UniversalResolutionIndex {
                 candidate,
             );
         }
-        if matches!(
-            candidate.constraints.hierarchy.as_ref(),
-            Some(HierarchyConstraint::DirectBase { .. })
-        ) {
-            return self.resolve_direct_base(language, candidate);
-        }
         let occurrence = self.occurrence(candidate);
         let qualifier = occurrence.and_then(|occurrence| occurrence.qualifier.as_deref());
         let has_unbound_qualified_receiver = qualifier.is_some_and(|qualifier| {
@@ -446,6 +516,12 @@ impl UniversalResolutionIndex {
 
         if let Some(decision) = self.resolve_explicit_binding(language, candidate) {
             return decision;
+        }
+        if matches!(
+            candidate.constraints.hierarchy.as_ref(),
+            Some(HierarchyConstraint::DirectBase { .. })
+        ) {
+            return self.resolve_direct_base(language, candidate);
         }
 
         if matches!(
@@ -715,7 +791,7 @@ impl UniversalResolutionIndex {
                 if let Some(decision) = self.unique_decision(
                     self.by_qualified.get(&key),
                     candidate,
-                    ResolutionRule::ExplicitBinding,
+                    ResolutionRule::MemberBinding,
                 ) {
                     return Some(decision);
                 }
@@ -752,11 +828,22 @@ impl UniversalResolutionIndex {
             }
         };
         let key = (language.to_owned(), qualified.clone());
-        if let Some(decision) = self.unique_decision(
-            self.by_qualified.get(&key),
-            candidate,
-            ResolutionRule::ExplicitBinding,
-        ) {
+        let qualified_rule = if language == "rust"
+            && qualified_occurrence
+            && matches!(
+                candidate.relation,
+                CandidateRelation::Calls
+                    | CandidateRelation::IndirectCalls
+                    | CandidateRelation::Constructs
+                    | CandidateRelation::AccessesMember
+            ) {
+            ResolutionRule::MemberBinding
+        } else {
+            ResolutionRule::ExplicitBinding
+        };
+        if let Some(decision) =
+            self.unique_decision(self.by_qualified.get(&key), candidate, qualified_rule)
+        {
             return Some(decision);
         }
         if let Some(decision) = self.member_decision(language, &qualified, candidate) {
@@ -961,7 +1048,7 @@ impl UniversalResolutionIndex {
             if !emitted_edges.insert(key) || source == target {
                 continue;
             }
-            edges.push(materialized_edge(MaterializedEdge {
+            edges.push(materialized_edge(
                 source,
                 target,
                 relation,
@@ -972,6 +1059,7 @@ impl UniversalResolutionIndex {
                     .as_deref()
                     .and_then(|binding_id| self.bindings.get(binding_id)),
                 target_kind.as_deref(),
+                target_site.map(|range| range.source_file.as_str()),
                 site,
                 resolution_rule,
                 &candidate.language,
@@ -1586,6 +1674,35 @@ fn materialized_declaration_ids<'a>(
     ids
 }
 
+fn c3_merge(mut sequences: Vec<Vec<String>>, limit: usize) -> Result<Vec<String>, ()> {
+    let mut merged = Vec::new();
+    loop {
+        sequences.retain(|sequence| !sequence.is_empty());
+        if sequences.is_empty() {
+            return Ok(merged);
+        }
+        if merged.len() >= limit {
+            return Err(());
+        }
+        let candidate = sequences
+            .iter()
+            .map(|sequence| &sequence[0])
+            .find(|head| {
+                sequences
+                    .iter()
+                    .all(|sequence| !sequence.iter().skip(1).any(|item| item == *head))
+            })
+            .cloned()
+            .ok_or(())?;
+        merged.push(candidate.clone());
+        for sequence in &mut sequences {
+            if sequence.first() == Some(&candidate) {
+                sequence.remove(0);
+            }
+        }
+    }
+}
+
 fn profile_internal(label: &str, started: &mut Instant) {
     if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
         eprintln!(
@@ -1937,6 +2054,7 @@ fn materialized_edge(
     occurrence: Option<&OccurrenceFact>,
     binding: Option<&BindingFact>,
     target_kind: Option<&str>,
+    target_source_file: Option<&str>,
     range: &compass_languages::EvidenceRange,
     resolution_rule: ResolutionRule,
     language: &str,
@@ -2159,12 +2277,16 @@ const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
 
 const fn resolution_rule_name(rule: ResolutionRule) -> &'static str {
     match rule {
+        ResolutionRule::ExactSourceDeclaration => "exact-source-declaration",
         ResolutionRule::ExactLexicalDeclaration => "exact-lexical-declaration",
         ResolutionRule::ExplicitBinding => "explicit-binding",
         ResolutionRule::MemberBinding => "member-binding",
         ResolutionRule::DeferredReceiver => "deferred-receiver",
         ResolutionRule::WildcardBinding => "wildcard-binding",
         ResolutionRule::UniqueModuleOrPackage => "unique-module-or-package",
+        ResolutionRule::ExactHierarchyBase => "exact-hierarchy-base",
+        ResolutionRule::DirectReceiverSuccessorDispatch => "direct-receiver-successor-dispatch",
+        ResolutionRule::LinearizedReceiverDispatch => "linearized-receiver-dispatch",
         ResolutionRule::ExactSourceInventory => "exact-source-inventory",
         ResolutionRule::QualifiedExternal => "qualified-external",
     }

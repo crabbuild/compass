@@ -115,7 +115,7 @@ impl Engine {
     ) -> Result<CombinedExtraction, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
-        if spec.kind == ExtractorKind::Generic && spec.name == "go" {
+        if spec.kind == ExtractorKind::Generic && matches!(spec.name, "go" | "java") {
             let tree = self.parse(path, spec, source)?;
             let mut graph =
                 self.extract_generic_from_tree(path, spec, source_file, source, tree.root_node());
