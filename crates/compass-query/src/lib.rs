@@ -82,6 +82,48 @@ mod tests {
     }
 
     #[test]
+    fn natural_query_projects_typed_source_location_and_community() -> Result<(), Box<dyn Error>> {
+        let graph = load(
+            r#"{
+                "directed": true, "multigraph": true, "graph": {},
+                "nodes": [{
+                    "id": "method",
+                    "kind": "method",
+                    "name": ".process_delayed_slices()",
+                    "qualifiedName": "crate::RedisMetaStore::process_delayed_slices",
+                    "source": {
+                        "file": "src/meta/stores/redis/mod.rs",
+                        "startByte": 100,
+                        "endByte": 122,
+                        "startLine": 3086,
+                        "startColumn": 13,
+                        "endLine": 3086,
+                        "endColumn": 35
+                    },
+                    "community": {"id": 4, "label": "RedisMetaStore"}
+                }],
+                "links": []
+            }"#,
+        )?;
+
+        let output = query_graph_text(
+            &graph,
+            "process_delayed_slices",
+            TraversalMode::Bfs,
+            2,
+            2000,
+            &[],
+            &HashMap::new(),
+        );
+
+        assert!(output.contains(
+            "NODE .process_delayed_slices() [src=src/meta/stores/redis/mod.rs \
+             loc=L3086:13-L3086:35 community=RedisMetaStore]"
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn omitted_multigraph_preserves_parallel_edge_hub_semantics() -> Result<(), Box<dyn Error>> {
         let links = std::iter::once(serde_json::json!({
             "source": "seed",

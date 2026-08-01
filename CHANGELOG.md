@@ -2,7 +2,6 @@
 
 ## Unreleased
 
-
 - Reduce immutable history build overhead with stage-level artifact-load
   instrumentation, verified single-pass graph and Program loading, concurrent
   graph/Program reads, and an in-process typed-artifact handoff for native
@@ -21,6 +20,8 @@
   `graph` and `community_detail` capabilities, accelerate immutable large-graph
   snapshots with copy-on-write filesystem clones when available, and remove
   repeated linear node lookups from graph interactions.
+- Restore source ranges and named communities in natural-language query output
+  when reading typed `compass.graph/1` nodes and relationships.
 
 ## 0.2.0 - 2026-08-01
 
