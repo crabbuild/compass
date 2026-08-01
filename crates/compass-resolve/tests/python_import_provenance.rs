@@ -140,14 +140,70 @@ fn python_import_item_spans(statement: &str) -> Vec<(usize, usize)> {
     spans
 }
 
-fn import_item_spans_in_source(
+fn python_import_item_token_spans(statement: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut cursor = 0usize;
+    while cursor < statement.len() {
+        cursor = skip_python_whitespace(statement, cursor);
+        if cursor >= statement.len() {
+            break;
+        }
+        let start = cursor;
+        while cursor < statement.len() {
+            let ch = statement[cursor..]
+                .chars()
+                .next()
+                .expect("span has at least one char");
+            if ch.is_whitespace() {
+                break;
+            }
+            cursor += ch.len_utf8();
+        }
+        if start < cursor {
+            spans.push((start, cursor));
+        }
+    }
+
+    spans
+}
+
+fn python_import_local_occurrence_span(item: &str) -> Option<(usize, usize)> {
+    let tokens = python_import_item_token_spans(item);
+    let mut saw_as = false;
+    for (start, end) in tokens {
+        let token = item.get(start..end).unwrap_or("");
+        if saw_as {
+            return Some((start, end));
+        }
+        if token == "as" {
+            saw_as = true;
+        }
+    }
+    None
+}
+
+fn python_import_occurrence_spans(statement: &str) -> Vec<(usize, usize)> {
+    python_import_item_spans(statement)
+        .into_iter()
+        .filter_map(|(start, end)| {
+            if start >= end {
+                return None;
+            }
+            let item = statement.get(start..end)?;
+            let span = python_import_local_occurrence_span(item).unwrap_or((0, end - start));
+            Some((start + span.0, start + span.1))
+        })
+        .collect()
+}
+
+fn import_occurrence_spans_in_source(
     statement: &str,
     source: &str,
 ) -> Result<Vec<(usize, usize)>, Box<dyn Error>> {
     let statement_start = source
         .find(statement)
         .ok_or("missing expected import statement")?;
-    Ok(python_import_item_spans(statement)
+    Ok(python_import_occurrence_spans(statement)
         .into_iter()
         .map(|(start, end)| (statement_start + start, statement_start + end))
         .collect())
@@ -268,9 +324,11 @@ fn universal_python_imports_publish_exact_item_spans_and_no_legacy_projection()
         })
         .collect::<Vec<_>>();
     assert_eq!(caller_imports.len(), 2);
-    assert!(caller_imports.iter().any(|edge| {
-        edge.target == widget_id && edge_span(edge, caller) == "Widget as LocalWidget"
-    }));
+    assert!(
+        caller_imports
+            .iter()
+            .any(|edge| edge.target == widget_id && edge_span(edge, caller) == "LocalWidget")
+    );
     assert!(
         caller_imports
             .iter()
@@ -770,7 +828,8 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
         edge.string("_origin") == "ast" && edge.string("confidence") == "EXTRACTED"
     }));
 
-    let multiline_import_spans = import_item_spans_in_source(multiline_import, &caller_source)?;
+    let multiline_import_spans =
+        import_occurrence_spans_in_source(multiline_import, &caller_source)?;
     let (expected_start, expected_end) = multiline_import_spans
         .first()
         .copied()
@@ -1078,7 +1137,7 @@ fn backslash_continued_python_imports_have_complete_crlf_spans_and_fail_closed()
         "comments, strings, malformed continuations, and parser-error recovery regions must not emit imports"
     );
 
-    let symbol_spans = import_item_spans_in_source(continued_symbols, &caller_source)?;
+    let symbol_spans = import_occurrence_spans_in_source(continued_symbols, &caller_source)?;
     assert_eq!(symbol_spans.len(), 3);
     let symbol_edges = resolver_edges
         .iter()
@@ -1123,7 +1182,7 @@ fn backslash_continued_python_imports_have_complete_crlf_spans_and_fail_closed()
                 .is_some_and(|(end, start)| end == start)
     }));
 
-    let submodule_spans = import_item_spans_in_source(continued_submodules, &caller_source)?;
+    let submodule_spans = import_occurrence_spans_in_source(continued_submodules, &caller_source)?;
     assert_eq!(submodule_spans.len(), 2);
     let submodule_edges = resolver_edges
         .iter()
@@ -1264,7 +1323,7 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
 
         let mut expected_spans = valid_statements
             .iter()
-            .map(|statement| import_item_spans_in_source(statement, &caller_source))
+            .map(|statement| import_occurrence_spans_in_source(statement, &caller_source))
             .collect::<Result<Vec<Vec<_>>, _>>()?
             .into_iter()
             .flatten()
@@ -1602,7 +1661,7 @@ fn python_import_keywords_and_whitespace_are_lexically_exact() -> Result<(), Box
 
         let mut expected_spans = valid_statements
             .iter()
-            .map(|statement| import_item_spans_in_source(statement, &caller_source))
+            .map(|statement| import_occurrence_spans_in_source(statement, &caller_source))
             .collect::<Result<Vec<Vec<_>>, _>>()?
             .into_iter()
             .flatten()

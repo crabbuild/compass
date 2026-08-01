@@ -1014,23 +1014,23 @@ impl<'source> DirectAdapterState<'source> {
             return Ok(());
         }
         for imported in imported_names {
-            let (target_name, alias) = if imported.kind() == "aliased_import" {
+            let (target_name, alias, alias_node) = if imported.kind() == "aliased_import" {
                 let Some(target) = imported.child_by_field_name("name") else {
                     continue;
                 };
-                (
-                    self.text(target),
-                    imported
-                        .child_by_field_name("alias")
-                        .map(|alias| self.text(alias)),
-                )
+                let alias_node = imported.child_by_field_name("alias");
+                let alias = alias_node.as_ref().and_then(|alias| {
+                    let alias = self.text(*alias);
+                    valid_python_identifier(&alias).then_some(alias)
+                });
+                (self.text(target), alias, alias_node)
             } else {
-                (self.text(imported), None)
+                (self.text(imported), None, None)
             };
             if !valid_python_import_target(&target_name)
-                || alias
-                    .as_deref()
-                    .is_some_and(|alias| !valid_python_identifier(alias))
+                || alias_node
+                    .as_ref()
+                    .is_some_and(|alias_node| alias.is_none() && self.text(*alias_node) != "")
             {
                 continue;
             }
@@ -1063,7 +1063,14 @@ impl<'source> DirectAdapterState<'source> {
                 )?;
                 continue;
             }
-            self.add_python_import_binding(imported, owner, local, binding_target, import_target)?;
+            self.add_python_import_binding(
+                imported,
+                owner,
+                local,
+                binding_target,
+                import_target,
+                alias_node,
+            )?;
         }
         Ok(())
     }
@@ -1075,6 +1082,7 @@ impl<'source> DirectAdapterState<'source> {
         local: String,
         binding_target: String,
         import_target: String,
+        alias_name_node: Option<Node<'_>>,
     ) -> Result<(), EvidenceError> {
         let is_reexport = owner.kind == "file"
             && self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py");
@@ -1085,21 +1093,24 @@ impl<'source> DirectAdapterState<'source> {
         } else {
             BindingKind::ImportAlias
         };
-        let range = range_for_node(self.source_file, imported);
+        let binding_range = range_for_node(self.source_file, imported);
+        let occurrence_range = alias_name_node
+            .map(|alias_name_node| range_for_node(self.source_file, alias_name_node))
+            .unwrap_or_else(|| binding_range.clone());
         let binding_id = self.builder.bind(
             kind,
             &local,
             &binding_target,
             None,
             Some(&owner.scope_id),
-            range.clone(),
+            binding_range,
         )?;
         self.record_import_binding(
             owner,
             &local,
             &binding_target,
             &binding_id,
-            usize::try_from(range.end_byte).unwrap_or(usize::MAX),
+            usize::try_from(occurrence_range.end_byte).unwrap_or(usize::MAX),
         );
         let occurrence_id = self.builder.occur(
             if is_reexport {
@@ -1111,7 +1122,7 @@ impl<'source> DirectAdapterState<'source> {
             &local,
             None,
             Some(&owner.scope_id),
-            range.clone(),
+            occurrence_range,
         )?;
         let target_spelling = import_target.rsplit('.').next().unwrap_or(&import_target);
         self.builder.relate(
