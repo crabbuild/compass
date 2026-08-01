@@ -3,23 +3,26 @@
 pub mod evidence;
 pub mod frameworks;
 mod members;
+mod program;
 
 pub use members::resolve_language_calls;
+pub use program::{
+    ProgramProjectionSites, apply_program_projection, collect_program_projection_sites,
+};
 
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use ahash::{AHashMap, AHashSet};
 use compass_languages::{
     Extraction, RawCall, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord,
-    SemanticEvidenceBatch, is_language_builtin_global, make_id,
+    SemanticEvidenceBatch, file_stem, is_language_builtin_global, make_id,
 };
 use compass_model::provenance::{
     EndpointRewriteEvidence, EndpointRewriteRule, append_endpoint_rewrite_evidence,
     preserve_occurrence_rule,
 };
-use rayon::prelude::*;
 use regex::Regex;
 use serde_json::{Map, Value};
 use sha1::{Digest, Sha1};
@@ -277,7 +280,7 @@ pub fn resolve_owned_with_root(
             evidence_batches.push(batch);
         }
     }
-    extractions.into_par_iter().for_each(drop);
+    drop(extractions);
     finish_resolution(merged, language_facts, evidence_batches, sources, root)
 }
 
@@ -312,11 +315,20 @@ fn finish_resolution(
 ) -> Extraction {
     let mut profile_started = Instant::now();
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    if let Err(error) = resolve_javascript_workspace_modules(&mut merged, &canonical_root) {
+        merged
+            .error
+            .get_or_insert_with(|| format!("JavaScript workspace resolution failed: {error}"));
+    }
+    profile_internal(
+        "resolver JavaScript workspace modules",
+        &mut profile_started,
+    );
     resolve_javascript_reexports(&mut merged);
     profile_internal("resolver JavaScript re-exports", &mut profile_started);
     if !evidence_batches.is_empty() {
-        match evidence::UniversalResolutionIndex::new_with_inventory(
-            &evidence_batches,
+        match evidence::UniversalResolutionIndex::new_with_inventory_owned(
+            evidence_batches,
             &merged.nodes,
             &canonical_root,
             evidence::UniversalResolutionLimits::default(),
@@ -344,6 +356,11 @@ fn finish_resolution(
         &mut language_facts.calls,
     );
     profile_internal("resolver collision disambiguation", &mut profile_started);
+    resolve_javascript_workspace_symbols(&mut merged);
+    profile_internal(
+        "resolver JavaScript workspace symbols",
+        &mut profile_started,
+    );
     canonicalize_csharp_namespace_nodes(&mut merged);
     profile_internal("resolver C# namespace normalization", &mut profile_started);
     resolve_php_type_references(&mut merged, sources);
@@ -394,6 +411,389 @@ fn profile_internal(label: &str, started: &mut Instant) {
         );
     }
     *started = Instant::now();
+}
+
+const MAX_JAVASCRIPT_PACKAGE_MANIFESTS: usize = 4_096;
+const MAX_JAVASCRIPT_PACKAGE_EXPORTS: usize = 4_096;
+const MAX_JAVASCRIPT_PACKAGE_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Resolve repository-local npm package specifiers through their declared
+/// package exports. Only targets that are already present in the source
+/// inventory are eligible, and duplicate package names remain unresolved.
+fn resolve_javascript_workspace_modules(
+    extraction: &mut Extraction,
+    root: &Path,
+) -> Result<(), String> {
+    let mut file_by_source = BTreeMap::<String, (String, String)>::new();
+    let mut manifests = BTreeSet::new();
+    for node in &extraction.nodes {
+        let source = string_attribute(node, "source_file");
+        if source.is_empty() {
+            continue;
+        }
+        if is_file_node(node, &source) {
+            file_by_source
+                .entry(source_key(&source, root))
+                .or_insert_with(|| (node.id.clone(), source.clone()));
+        }
+        if Path::new(&source)
+            .file_name()
+            .and_then(|name| name.to_str())
+            == Some("package.json")
+        {
+            manifests.insert(source);
+        }
+    }
+    if manifests.len() > MAX_JAVASCRIPT_PACKAGE_MANIFESTS {
+        return Err(format!(
+            "package manifest count {} exceeds limit {MAX_JAVASCRIPT_PACKAGE_MANIFESTS}",
+            manifests.len()
+        ));
+    }
+
+    let mut targets = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut export_count = 0_usize;
+    for manifest in manifests {
+        let manifest_path = rooted_source_path(root, &manifest)?;
+        let source =
+            match compass_files::read_source_lossy(&manifest_path, MAX_JAVASCRIPT_PACKAGE_BYTES) {
+                Ok(source) => source,
+                Err(_) => continue,
+            };
+        let Ok(value) = serde_json::from_str::<Value>(&source) else {
+            continue;
+        };
+        let Some(name) = value.get("name").and_then(Value::as_str).filter(|name| {
+            !name.is_empty()
+                && name.len() <= 4_096
+                && !name.contains(['\\', '\0'])
+                && !name
+                    .split('/')
+                    .any(|part| part.is_empty() || matches!(part, "." | ".."))
+        }) else {
+            continue;
+        };
+        let manifest_directory = manifest_path.parent().unwrap_or(root);
+        let mut exports = BTreeMap::<String, BTreeSet<String>>::new();
+        if let Some(value) = value.get("exports") {
+            collect_javascript_package_exports(value, &mut exports, 0)?;
+        } else {
+            for field in ["module", "main"] {
+                if let Some(target) = value.get(field).and_then(Value::as_str) {
+                    exports
+                        .entry(".".to_owned())
+                        .or_default()
+                        .insert(target.to_owned());
+                }
+            }
+        }
+        for (subpath, candidates) in exports {
+            export_count = export_count.saturating_add(candidates.len());
+            if export_count > MAX_JAVASCRIPT_PACKAGE_EXPORTS {
+                return Err(format!(
+                    "package export count exceeds limit {MAX_JAVASCRIPT_PACKAGE_EXPORTS}"
+                ));
+            }
+            let resolved = candidates
+                .into_iter()
+                .filter_map(|candidate| {
+                    javascript_package_target(manifest_directory, root, &candidate)
+                })
+                .map(|candidate| source_key(&candidate.to_string_lossy(), root))
+                .filter(|candidate| file_by_source.contains_key(candidate))
+                .collect::<BTreeSet<_>>();
+            if resolved.len() != 1 {
+                continue;
+            }
+            let specifier = if subpath == "." {
+                name.to_owned()
+            } else if let Some(subpath) = subpath.strip_prefix("./") {
+                format!("{name}/{subpath}")
+            } else {
+                continue;
+            };
+            targets.entry(specifier).or_default().extend(resolved);
+        }
+    }
+
+    for edge in &mut extraction.edges {
+        if relation(edge) != "imports_from" {
+            continue;
+        }
+        let module = edge.string("module");
+        let Some(candidates) = targets.get(&module) else {
+            continue;
+        };
+        if candidates.len() != 1 {
+            continue;
+        }
+        let Some(target_source) = candidates.iter().next() else {
+            continue;
+        };
+        let Some((target_id, original_source)) = file_by_source.get(target_source) else {
+            continue;
+        };
+        if edge.target != *target_id {
+            edge.target.clone_from(target_id);
+            edge.attributes.insert(
+                "target_file".to_owned(),
+                Value::String(original_source.clone()),
+            );
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::CanonicalImportTarget, 1.0);
+        }
+    }
+    Ok(())
+}
+
+fn rooted_source_path(root: &Path, source: &str) -> Result<PathBuf, String> {
+    let path = Path::new(source);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    let normalized = std::fs::canonicalize(&absolute)
+        .map_err(|error| format!("cannot resolve package manifest {source:?}: {error}"))?;
+    if !normalized.starts_with(root) {
+        return Err(format!(
+            "package manifest escapes repository root: {source:?}"
+        ));
+    }
+    Ok(normalized)
+}
+
+fn lexical_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn javascript_package_target(directory: &Path, root: &Path, target: &str) -> Option<PathBuf> {
+    if !target.starts_with("./") || target.len() > 4_096 || target.contains(['\\', '\0']) {
+        return None;
+    }
+    let target = lexical_path(&directory.join(target));
+    target.starts_with(root).then_some(target)
+}
+
+fn collect_javascript_package_exports(
+    value: &Value,
+    exports: &mut BTreeMap<String, BTreeSet<String>>,
+    depth: usize,
+) -> Result<(), String> {
+    if depth > 16 {
+        return Err("package exports nesting exceeds limit 16".to_owned());
+    }
+    match value {
+        Value::String(target) => {
+            exports
+                .entry(".".to_owned())
+                .or_default()
+                .insert(target.clone());
+        }
+        Value::Object(entries) => {
+            for (key, value) in entries {
+                if key == "." || key.starts_with("./") {
+                    let mut values = BTreeSet::new();
+                    collect_javascript_export_targets(value, &mut values, depth + 1)?;
+                    exports.entry(key.clone()).or_default().extend(values);
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn collect_javascript_export_targets(
+    value: &Value,
+    targets: &mut BTreeSet<String>,
+    depth: usize,
+) -> Result<(), String> {
+    if depth > 16 {
+        return Err("package export condition nesting exceeds limit 16".to_owned());
+    }
+    match value {
+        Value::String(target) => {
+            targets.insert(target.clone());
+        }
+        Value::Array(values) => {
+            for value in values.iter().take(256) {
+                collect_javascript_export_targets(value, targets, depth + 1)?;
+            }
+            if values.len() > 256 {
+                return Err("package export fallback count exceeds limit 256".to_owned());
+            }
+        }
+        Value::Object(values) => {
+            if values.len() > 256 {
+                return Err("package export condition count exceeds limit 256".to_owned());
+            }
+            for value in values.values() {
+                collect_javascript_export_targets(value, targets, depth + 1)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Repoint named imports to the unique declaration exported by the resolved
+/// package entry point. Wildcard barrel traversal is bounded and ambiguity is
+/// deliberately left unresolved.
+fn resolve_javascript_workspace_symbols(extraction: &mut Extraction) {
+    let mut file_by_source = HashMap::new();
+    let mut file_ids = HashSet::new();
+    for node in &extraction.nodes {
+        let source = string_attribute(node, "source_file");
+        if is_file_node(node, &source) {
+            file_ids.insert(node.id.clone());
+            file_by_source
+                .entry(source)
+                .or_insert_with(|| node.id.clone());
+        }
+    }
+    let mut package_roots = HashMap::<(String, String), Vec<String>>::new();
+    let mut reexports = HashMap::<String, Vec<String>>::new();
+    for edge in &extraction.edges {
+        if relation(edge) == "imports_from" && file_ids.contains(&edge.target) {
+            let module = edge.string("module");
+            if !module.starts_with('.') && !module.is_empty() {
+                package_roots
+                    .entry((edge.source.clone(), module))
+                    .or_default()
+                    .push(edge.target.clone());
+            }
+        }
+        if relation(edge) == "re_exports"
+            && file_ids.contains(&edge.source)
+            && file_ids.contains(&edge.target)
+        {
+            reexports
+                .entry(edge.source.clone())
+                .or_default()
+                .push(edge.target.clone());
+        }
+    }
+    for values in package_roots.values_mut().chain(reexports.values_mut()) {
+        values.sort_unstable();
+        values.dedup();
+    }
+
+    let mut declarations = HashMap::<(String, String), Vec<String>>::new();
+    for node in &extraction.nodes {
+        let source = string_attribute(node, "source_file");
+        let kind = string_attribute(node, "symbol_kind");
+        if !is_javascript(&source) || !javascript_export_candidate(&kind) {
+            continue;
+        }
+        let Some(file_id) = file_by_source.get(&source) else {
+            continue;
+        };
+        let spelling = node
+            .label()
+            .split_once('(')
+            .map_or_else(|| node.label(), |(name, _)| name)
+            .trim();
+        if !spelling.is_empty() {
+            declarations
+                .entry((file_id.clone(), spelling.to_owned()))
+                .or_default()
+                .push(node.id.clone());
+        }
+    }
+    for values in declarations.values_mut() {
+        values.sort_unstable();
+        values.dedup();
+    }
+
+    let mut repointed = HashSet::new();
+    for edge in &mut extraction.edges {
+        if relation(edge) != "imports" {
+            continue;
+        }
+        let module = edge.string("module");
+        let imported_name = edge.string("imported_name");
+        if module.starts_with('.') || module.is_empty() || imported_name.is_empty() {
+            continue;
+        }
+        let Some(roots) = package_roots.get(&(edge.source.clone(), module)) else {
+            continue;
+        };
+        let mut queue = roots.iter().cloned().collect::<VecDeque<_>>();
+        let mut visited = BTreeSet::new();
+        let mut candidates = BTreeSet::new();
+        while let Some(file) = queue.pop_front() {
+            if !visited.insert(file.clone()) || visited.len() > 4_096 {
+                continue;
+            }
+            if let Some(ids) = declarations.get(&(file.clone(), imported_name.clone())) {
+                candidates.extend(ids.iter().cloned());
+            }
+            if let Some(targets) = reexports.get(&file) {
+                queue.extend(targets.iter().cloned());
+            }
+        }
+        if candidates.len() != 1 {
+            continue;
+        }
+        let Some(target) = candidates.into_iter().next() else {
+            continue;
+        };
+        if edge.target != target {
+            repointed.insert(edge.target.clone());
+            edge.target = target;
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::CanonicalImportTarget, 1.0);
+        }
+    }
+    let mut imported_bindings = HashMap::<(String, String), BTreeSet<String>>::new();
+    for edge in &extraction.edges {
+        if relation(edge) == "imports" {
+            let local_name = edge.string("local_name");
+            if !local_name.is_empty() {
+                imported_bindings
+                    .entry((edge.source.clone(), local_name))
+                    .or_default()
+                    .insert(edge.target.clone());
+            }
+        }
+    }
+    for edge in &mut extraction.edges {
+        if relation(edge) != "references" {
+            continue;
+        }
+        let binding_name = edge.string("binding_name");
+        let Some(targets) = imported_bindings.get(&(edge.source.clone(), binding_name)) else {
+            continue;
+        };
+        if targets.len() != 1 {
+            continue;
+        }
+        let Some(target) = targets.iter().next() else {
+            continue;
+        };
+        if edge.target != *target {
+            repointed.insert(edge.target.clone());
+            edge.target.clone_from(target);
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::CanonicalImportTarget, 1.0);
+        }
+    }
+    drop_unreferenced_nodes(extraction, &repointed);
+}
+
+fn javascript_export_candidate(kind: &str) -> bool {
+    matches!(
+        kind,
+        "class" | "enum" | "function" | "interface" | "type_alias" | "variable" | "constant"
+    )
 }
 
 /// Compass's per-file JavaScript extractor emits only the explicit
@@ -773,22 +1173,64 @@ fn drop_unreferenced_nodes(extraction: &mut Extraction, candidates: &HashSet<Str
 }
 
 fn canonicalize_file_targets(extraction: &mut Extraction, root: &Path) {
-    let mut aliases = HashMap::new();
+    let mut alias_candidates = HashMap::<String, Vec<String>>::new();
+    let node_ids = extraction
+        .nodes
+        .iter()
+        .map(|node| node.id.clone())
+        .collect::<HashSet<_>>();
     for node in &extraction.nodes {
         let source = string_attribute(node, "source_file");
         if !is_file_node(node, &source) {
             continue;
         }
-        aliases.insert(make_id(&[&source]), node.id.clone());
         let source_path = Path::new(&source);
         let absolute = if source_path.is_absolute() {
             source_path.to_path_buf()
         } else {
             root.join(source_path)
         };
-        aliases.insert(make_id(&[&absolute.to_string_lossy()]), node.id.clone());
+        let mut source_aliases = vec![source_path.to_path_buf(), absolute.clone()];
+        let runtime_extension = match source_path.extension().and_then(|value| value.to_str()) {
+            Some("ts") => Some("js"),
+            Some("tsx") => Some("jsx"),
+            Some("mts") => Some("mjs"),
+            Some("cts") => Some("cjs"),
+            _ => None,
+        };
+        if let Some(extension) = runtime_extension {
+            source_aliases.push(source_path.with_extension(extension));
+            source_aliases.push(absolute.with_extension(extension));
+        }
+        let mut aliases = vec![
+            make_id(&[&source]),
+            make_id(&[&file_stem(source_path)]),
+            make_id(&[&absolute.to_string_lossy()]),
+        ];
+        aliases.extend(
+            source_aliases
+                .into_iter()
+                .map(|alias| make_id(&[&alias.to_string_lossy().replace('\\', "/")])),
+        );
+        for alias in aliases {
+            alias_candidates
+                .entry(alias)
+                .or_default()
+                .push(node.id.clone());
+        }
     }
+    let aliases = alias_candidates
+        .into_iter()
+        .filter_map(|(alias, mut candidates)| {
+            candidates.sort();
+            candidates.dedup();
+            (candidates.len() == 1).then(|| (alias, candidates.pop().unwrap_or_default()))
+        })
+        .collect::<HashMap<_, _>>();
     for edge in &mut extraction.edges {
+        if node_ids.contains(&edge.target) {
+            continue;
+        }
         if let Some(target) = aliases.get(&edge.target) {
             let rule = if matches!(
                 relation(edge),
@@ -807,7 +1249,7 @@ fn canonicalize_file_targets(extraction: &mut Extraction, root: &Path) {
 fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
     let mut types = HashMap::<String, Vec<String>>::new();
     let mut types_ci = HashMap::<String, Vec<String>>::new();
-    let mut functions = HashMap::<String, Vec<String>>::new();
+    let mut callables = HashMap::<String, Vec<String>>::new();
     let mut source_by_id = HashMap::<String, String>::new();
     let mut stubs = Vec::<(String, String)>::new();
     for node in &extraction.nodes {
@@ -828,6 +1270,8 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
         source_by_id.insert(node.id.clone(), source.clone());
         if source.is_empty() && !is_canonical_external_symbol(node) {
             stubs.push((node.id.clone(), label));
+        } else if is_generic_call_target(node) {
+            callables.entry(label).or_default().push(node.id.clone());
         } else if is_type_like_definition(node) {
             types
                 .entry(label.clone())
@@ -839,8 +1283,6 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
                     .or_default()
                     .push(node.id.clone());
             }
-        } else if node.label().ends_with("()") && !node.label().starts_with('.') {
-            functions.entry(label).or_default().push(node.id.clone());
         }
     }
     let supertype_stubs = extraction
@@ -859,6 +1301,7 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
     let mut stub_source_files = HashMap::<String, HashSet<String>>::new();
     let mut imports = HashMap::<String, HashSet<String>>::new();
     let mut imports_by_file = HashMap::<String, HashSet<String>>::new();
+    let mut stub_relations = HashMap::<String, HashSet<String>>::new();
     for edge in &extraction.edges {
         if matches!(relation(edge), "imports" | "imports_from") {
             imports
@@ -875,6 +1318,10 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
         };
         for endpoint in [&edge.source, &edge.target] {
             if stub_ids.contains(endpoint.as_str()) {
+                stub_relations
+                    .entry(endpoint.clone())
+                    .or_default()
+                    .insert(relation(edge).to_owned());
                 stub_families
                     .entry(endpoint.clone())
                     .or_default()
@@ -938,14 +1385,25 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
                 .collect::<Vec<_>>();
             (compatible.len() == 1).then(|| compatible[0].clone())
         };
-        let candidate = compatible_unique(types.get(&label))
-            .or_else(|| compatible_unique(types_ci.get(&label.to_ascii_lowercase())))
-            .or_else(|| {
-                if supertype_stubs.contains(stub.as_str()) {
-                    return None;
-                }
-                compatible_unique(functions.get(&label))
-            });
+        let relations = stub_relations.get(&stub);
+        let call_only = relations.is_some_and(|relations| {
+            !relations.is_empty()
+                && relations.iter().all(|relation| {
+                    matches!(relation.as_str(), "calls" | "indirect_call" | "tests")
+                })
+        });
+        let candidate = if call_only {
+            compatible_unique(callables.get(&label))
+        } else {
+            compatible_unique(types.get(&label))
+                .or_else(|| compatible_unique(types_ci.get(&label.to_ascii_lowercase())))
+                .or_else(|| {
+                    if supertype_stubs.contains(stub.as_str()) {
+                        return None;
+                    }
+                    compatible_unique(callables.get(&label))
+                })
+        };
         if let Some(target) = candidate
             && target != stub
         {
@@ -969,6 +1427,9 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
             stamp_endpoint_rewrite(edge, EndpointRewriteRule::UniqueStubEndpointResolution, 0.8);
         }
     }
+    extraction
+        .edges
+        .retain(|edge| edge.source != edge.target || relation(edge) == "calls");
     let referenced = extraction
         .edges
         .iter()
@@ -984,6 +1445,21 @@ fn is_type_like_definition(node: &NodeRecord) -> bool {
         || string_attribute(node, "file_type") != "code"
     {
         return false;
+    }
+    let kind = string_attribute(node, "symbol_kind");
+    if !kind.is_empty() {
+        return matches!(
+            kind.as_str(),
+            "class"
+                | "component"
+                | "enum"
+                | "interface"
+                | "protocol"
+                | "record"
+                | "struct"
+                | "trait"
+                | "type_alias"
+        );
     }
     let label = node.label().trim();
     !label.is_empty() && !label.ends_with(')') && !label.starts_with('.') && !label.contains('.')
@@ -1826,6 +2302,33 @@ mod tests {
         }
     }
 
+    #[test]
+    fn portable_file_stem_aliases_require_a_unique_target() {
+        let mut extraction = Extraction {
+            nodes: vec![node(
+                "rust-file",
+                "documented.rs",
+                "src/documented.rs",
+                "file",
+            )],
+            edges: vec![edge("guide", "src_documented", "documents", "guide.md")],
+            ..Extraction::default()
+        };
+
+        canonicalize_file_targets(&mut extraction, Path::new("/repo"));
+        assert_eq!(extraction.edges[0].target, "rust-file");
+
+        extraction.nodes.push(node(
+            "python-file",
+            "documented.py",
+            "src/documented.py",
+            "file",
+        ));
+        extraction.edges[0].target = "src_documented".to_owned();
+        canonicalize_file_targets(&mut extraction, Path::new("/repo"));
+        assert_eq!(extraction.edges[0].target, "src_documented");
+    }
+
     fn raw(caller: &str, callee: &str, source_file: &str) -> RawCall {
         RawCall {
             caller_nid: caller.to_owned(),
@@ -2135,10 +2638,13 @@ mod tests {
                 node("stub", "Widget", "", "stub"),
                 node("func", "run()", "src/run.py", "function"),
                 node("func-stub", "run()", "", "stub"),
+                node("recursive", "recursive()", "src/test.py", "function"),
+                node("recursive-stub", "recursive()", "", "stub"),
             ],
             edges: vec![
                 edge("stub", "func-stub", "uses", "src/use.py"),
                 edge("type", "stub", "inherits", "src/widget.py"),
+                edge("recursive", "recursive-stub", "tests", "src/test.py"),
             ],
             ..Extraction::default()
         };
@@ -2160,6 +2666,12 @@ mod tests {
                 .nodes
                 .iter()
                 .all(|candidate| candidate.id != "func-stub")
+        );
+        assert!(
+            extraction
+                .edges
+                .iter()
+                .all(|candidate| candidate.source != candidate.target)
         );
         for edge in &extraction.edges {
             assert!(

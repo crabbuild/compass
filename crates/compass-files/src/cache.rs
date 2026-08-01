@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use crate::{FileError, StatHashIndex, file_hash, io_error, write_bytes_atomic, write_json_atomic};
 
 /// Changes whenever cached extraction semantics change, even if the wire encoding does not.
-pub const AST_CACHE_VERSION: &str = "3";
+pub const AST_CACHE_VERSION: &str = "5";
 /// Portable cache encoding version used in the on-disk namespace.
 pub const CACHE_ENCODING_VERSION: u32 = 7;
 const MESSAGEPACK_EXTENSION: &str = "msgpack";
@@ -273,7 +273,7 @@ impl Cache {
             jobs.push((directory.join(format!("{key}.{extension}")), value));
         }
         let root = &self.root;
-        jobs.into_par_iter().try_for_each(|(destination, value)| {
+        let write_job = |(destination, value): (PathBuf, &Value)| {
             let mut on_disk = value.clone();
             relativize_source_files(&mut on_disk, root);
             if deterministic_binary_kind(kind) {
@@ -287,7 +287,12 @@ impl Cache {
             } else {
                 write_json_atomic(destination, &on_disk, false)
             }
-        })
+        };
+        if jobs.len() < 256 {
+            jobs.into_iter().try_for_each(write_job)
+        } else {
+            jobs.into_par_iter().try_for_each(write_job)
+        }
     }
 
     /// Persist AST values whose source paths are already repository-relative.
@@ -313,14 +318,19 @@ impl Cache {
                 value,
             ));
         }
-        jobs.into_par_iter().try_for_each(|(destination, value)| {
+        let write_job = |(destination, value): (PathBuf, &T)| {
             let bytes =
                 rmp_serde::to_vec_named(value).map_err(|source| FileError::MessagePackEncode {
                     path: destination.clone(),
                     source,
                 })?;
             write_cache_bytes(&destination, &bytes)
-        })
+        };
+        if jobs.len() < 256 {
+            jobs.into_iter().try_for_each(write_job)
+        } else {
+            jobs.into_par_iter().try_for_each(write_job)
+        }
     }
 
     /// Load a Program IR cache value by a caller-owned logical input key.

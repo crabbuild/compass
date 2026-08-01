@@ -283,6 +283,95 @@ fn parser_recovery_is_partial_deterministic_and_publishes_no_exact_edges()
 }
 
 #[test]
+fn typescript_type_star_reexport_keeps_barrel_file_exact() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    write(
+        directory.path(),
+        "src/value.ts",
+        "export const value = 1;\n",
+    )?;
+    write(
+        directory.path(),
+        "src/types.ts",
+        "export interface Value {}\n",
+    )?;
+    write(
+        directory.path(),
+        "src/index.ts",
+        "export * from './value.ts';\nexport type * from './types.ts';\n",
+    )?;
+
+    let graph = build(directory.path())?;
+    let barrel = graph
+        .graph
+        .files
+        .iter()
+        .find(|file| file.path == "src/index.ts")
+        .ok_or("missing TypeScript barrel input")?;
+    assert_eq!(barrel.extraction_status, ExtractionStatus::Extracted);
+    assert_eq!(
+        graph
+            .links
+            .iter()
+            .filter(|edge| {
+                edge.kind.as_str() == "exports"
+                    && edge.relationship_site.as_ref().is_some_and(|site| {
+                        site.file == "src/index.ts" && matches!(site.start_line, 1 | 2)
+                    })
+            })
+            .count(),
+        2
+    );
+    Ok(())
+}
+
+#[test]
+fn typescript_interface_heritage_resolves_to_the_imported_definition() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    write(
+        directory.path(),
+        "src/types.ts",
+        "export interface ContextOptions<T> {}\n",
+    )?;
+    write(
+        directory.path(),
+        "src/add.ts",
+        "import type { ContextOptions as BaseOptions } from './types.ts';\nexport interface AddOptions<T> extends BaseOptions<T> {}\n",
+    )?;
+
+    let graph = build(directory.path())?;
+    let add_options = graph
+        .nodes
+        .iter()
+        .find(|node| {
+            node.name == "AddOptions"
+                && node.kind == NodeKind::Interface
+                && node.source_file() == Some("src/add.ts")
+        })
+        .ok_or("missing AddOptions interface")?;
+    let context_options = graph
+        .nodes
+        .iter()
+        .find(|node| {
+            node.name == "ContextOptions"
+                && node.kind == NodeKind::Interface
+                && node.source_file() == Some("src/types.ts")
+        })
+        .ok_or("missing ContextOptions interface")?;
+    assert!(graph.links.iter().any(|edge| {
+        edge.source == add_options.id
+            && edge.target == context_options.id
+            && edge.kind.as_str() == "extends"
+            && edge
+                .relationship_site
+                .as_ref()
+                .is_some_and(|site| site.file == "src/add.ts" && site.start_line == 2)
+    }));
+    Ok(())
+}
+
+#[test]
 fn legacy_markerless_ast_cache_is_reextracted_conservatively() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let source = directory.path().join("src/recovered.rs");

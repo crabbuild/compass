@@ -50,7 +50,9 @@ Make a saved current-tree graph match the project:
 
 ```text
 compass update [PATH]
+  [--program-artifact PATH]
   [--out DIR]
+  [--no-program]
   [--no-cluster]
   [--force]
   [--no-viz]
@@ -60,7 +62,12 @@ compass update [PATH]
   [--exclude-hubs N]
 ```
 
-Use for normal cold/incremental structural builds.
+Use for normal cold/incremental structural builds. The default also publishes
+`program.json`; use `--no-program` when only `graph.json` is required. Supply a
+verified offline SCIP index with repeatable `--program-artifact`. For Java,
+fresh exact symbol evidence can disambiguate AST-proven call sites in
+`graph.json`; stale, unverified, conflicting, and non-call references are not
+projected. `--no-program` conflicts with `--program-artifact`.
 
 ### `extract`
 
@@ -68,6 +75,8 @@ Expose the full build surface:
 
 ```text
 compass extract [PATH]
+  [--program-artifact PATH]
+  [--no-program]
   [--code-only]
   [--cargo]
   [--google-workspace]

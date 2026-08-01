@@ -359,19 +359,50 @@ fn top_level_instantiations_accept_file_and_module_sources() {
 }
 
 #[test]
+fn declaration_initializers_accept_calls_and_instantiations() {
+    for (kind, source_kind, target_kind) in [
+        (EdgeKind::Calls, NodeKind::Variable, NodeKind::Function),
+        (EdgeKind::Calls, NodeKind::Field, NodeKind::Method),
+        (EdgeKind::Calls, NodeKind::Constant, NodeKind::Function),
+        (EdgeKind::Instantiates, NodeKind::Variable, NodeKind::Class),
+        (EdgeKind::Instantiates, NodeKind::Field, NodeKind::Class),
+        (EdgeKind::Instantiates, NodeKind::Constant, NodeKind::Class),
+        (EdgeKind::Calls, NodeKind::EnumMember, NodeKind::Method),
+        (
+            EdgeKind::Instantiates,
+            NodeKind::EnumMember,
+            NodeKind::Class,
+        ),
+    ] {
+        let mut graph = document();
+        graph.nodes[0].kind = source_kind;
+        graph.nodes[1].kind = target_kind;
+        graph.links[0].kind = kind;
+        let id = edge_id("route", kind, "handler", Some(&anchor()), None);
+        graph.links[0].id.clone_from(&id);
+        graph.links[0].key = id;
+        assert!(
+            validate_code_graph(&graph).is_ok(),
+            "rejected initializer relationship {kind:?} {source_kind:?} -> {target_kind:?}"
+        );
+    }
+}
+
+#[test]
 fn language_specific_declarations_use_supported_endpoint_shapes() {
     for (kind, source_kind, target_kind) in [
         (EdgeKind::Imports, NodeKind::File, NodeKind::EnumMember),
-        (EdgeKind::Imports, NodeKind::File, NodeKind::Annotation),
-        (EdgeKind::Imports, NodeKind::File, NodeKind::Field),
-        (EdgeKind::References, NodeKind::Method, NodeKind::Annotation),
+        (EdgeKind::References, NodeKind::Method, NodeKind::EnumMember),
         (
             EdgeKind::References,
-            NodeKind::Annotation,
+            NodeKind::EnumMember,
             NodeKind::Annotation,
         ),
-        (EdgeKind::References, NodeKind::Method, NodeKind::EnumMember),
         (EdgeKind::References, NodeKind::Struct, NodeKind::Parameter),
+        (EdgeKind::Imports, NodeKind::File, NodeKind::Annotation),
+        (EdgeKind::Imports, NodeKind::File, NodeKind::Field),
+        (EdgeKind::Contains, NodeKind::EnumMember, NodeKind::Method),
+        (EdgeKind::Contains, NodeKind::Field, NodeKind::Method),
         (
             EdgeKind::Instantiates,
             NodeKind::Method,
@@ -536,15 +567,20 @@ fn endpoint_matrix_closes_relationships_that_require_both_endpoint_shapes() {
 
 #[test]
 fn tests_edge_accepts_an_explicit_test_role_and_testable_target() {
-    let mut graph = document();
-    graph.nodes[0].kind = NodeKind::Function;
-    graph.nodes[0].roles = vec![NodeRole::Test];
-    graph.nodes[1].kind = NodeKind::Function;
-    graph.links[0].kind = EdgeKind::Tests;
-    let id = edge_id("route", EdgeKind::Tests, "handler", Some(&anchor()), None);
-    graph.links[0].id.clone_from(&id);
-    graph.links[0].key = id;
-    assert!(validate_code_graph(&graph).is_ok());
+    for target_kind in [NodeKind::Function, NodeKind::EnumMember] {
+        let mut graph = document();
+        graph.nodes[0].kind = NodeKind::Function;
+        graph.nodes[0].roles = vec![NodeRole::Test];
+        graph.nodes[1].kind = target_kind;
+        graph.links[0].kind = EdgeKind::Tests;
+        let id = edge_id("route", EdgeKind::Tests, "handler", Some(&anchor()), None);
+        graph.links[0].id.clone_from(&id);
+        graph.links[0].key = id;
+        assert!(
+            validate_code_graph(&graph).is_ok(),
+            "rejected test target {target_kind:?}"
+        );
+    }
 }
 
 #[test]
@@ -562,6 +598,10 @@ fn endpoint_matrix_accepts_nested_dynamic_and_database_producer_shapes() {
         (EdgeKind::Calls, NodeKind::Function, NodeKind::Variable),
         (EdgeKind::Calls, NodeKind::Function, NodeKind::Import),
         (EdgeKind::Calls, NodeKind::Function, NodeKind::TypeAlias),
+        (EdgeKind::References, NodeKind::Method, NodeKind::Annotation),
+        (EdgeKind::References, NodeKind::Function, NodeKind::Macro),
+        (EdgeKind::References, NodeKind::Module, NodeKind::Macro),
+        (EdgeKind::References, NodeKind::Macro, NodeKind::Macro),
         (EdgeKind::Imports, NodeKind::File, NodeKind::Variable),
         (
             EdgeKind::Triggers,

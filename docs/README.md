@@ -108,6 +108,7 @@ workspace:
 | [Workspace tour](implementation/workspace-tour.md) | Which crate owns which responsibility |
 | [Extraction pipeline](implementation/extraction-pipeline.md) | Discovery through atomic output publication |
 | [Universal evidence](implementation/universal-evidence.md) | Language contracts, crate boundaries, resolution, and qualification |
+| [Code-graph parity qualification](implementation/code-graph-parity-qualification.md) | Pinned real-repository Graphify comparison and open quality gaps |
 | [Query engine](implementation/query-engine.md) | Discovery queries, traversal, and CompassQL |
 | [Semantic pipeline](implementation/semantic-pipeline.md) | Optional provider-backed extraction |
 | [Extending Compass](implementation/extending-compass.md) | Adding languages, relations, integrations, and commands |

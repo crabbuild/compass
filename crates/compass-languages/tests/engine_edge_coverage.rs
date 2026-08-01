@@ -2,9 +2,10 @@ use std::error::Error;
 use std::fs;
 
 use compass_languages::{
-    CandidateRelation, Engine, ExtractError, FrameworkLimits, FrameworkManifestPolicy,
-    FrameworkOccurrencePolicy, FrameworkPackDescriptor, FrameworkPackKind, FrameworkPackRegistry,
-    FrameworkPackRegistryError, LanguageCapability, Registry, SemanticRole, make_id,
+    CandidateRelation, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL, Engine,
+    ExtractError, FrameworkLimits, FrameworkManifestPolicy, FrameworkOccurrencePolicy,
+    FrameworkPackDescriptor, FrameworkPackKind, FrameworkPackRegistry, FrameworkPackRegistryError,
+    LanguageCapability, Registry, SemanticRole, make_id,
 };
 
 fn valid_universal_framework_pack(id: &'static str) -> FrameworkPackDescriptor {
@@ -1174,6 +1175,139 @@ fn javascript_modules_reexports_require_and_decorators_keep_compass_contracts()
 }
 
 #[test]
+fn typescript_type_star_reexports_do_not_discard_earlier_barrel_edges() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let value = directory.path().join("value.ts");
+    let types = directory.path().join("types.ts");
+    let barrel = directory.path().join("index.ts");
+    fs::write(&value, "export const value = 1;\n")?;
+    fs::write(&types, "export interface Value {}\n")?;
+    fs::write(
+        &barrel,
+        "export * from './value.ts';\nexport type * from './types.ts';\n",
+    )?;
+
+    let mut engine = Engine::default();
+    let extraction = engine.extract(&barrel)?;
+    assert_ne!(
+        extraction
+            .extensions
+            .get(EXTRACTION_QUALITY_EXTENSION)
+            .and_then(serde_json::Value::as_str),
+        Some(EXTRACTION_QUALITY_PARTIAL),
+        "a supported type-only star re-export must not mark the whole file partial"
+    );
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.string("relation") == "imports_from" && edge.string("context") == "re-export"
+            })
+            .count(),
+        2,
+        "both star re-exports must remain source-grounded"
+    );
+    Ok(())
+}
+
+#[test]
+fn typescript_import_type_query_gap_does_not_quarantine_namespace_heritage()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("types.ts");
+    fs::write(
+        &path,
+        r#"export namespace Docs {
+  export interface Parent {}
+  export interface Before extends Parent {}
+  export type Item = (typeof import("./items.ts").items)[number];
+  export interface After extends Parent {}
+}
+"#,
+    )?;
+
+    let mut engine = Engine::default();
+    let extraction = engine.extract(&path)?;
+    assert_ne!(
+        extraction
+            .extensions
+            .get(EXTRACTION_QUALITY_EXTENSION)
+            .and_then(serde_json::Value::as_str),
+        Some(EXTRACTION_QUALITY_PARTIAL)
+    );
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| edge.string("relation") == "inherits")
+            .count(),
+        2
+    );
+    Ok(())
+}
+
+#[test]
+fn javascript_and_typescript_heritage_edges_keep_exact_base_sites() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let typescript = directory.path().join("types.ts");
+    let javascript = directory.path().join("classes.js");
+    fs::write(
+        &typescript,
+        "interface ContextOptions {}\ninterface AddOptions<T> extends ContextOptions {}\nclass Base {}\nclass Derived extends Base implements ContextOptions {}\n",
+    )?;
+    fs::write(
+        &javascript,
+        "class ErrorBase {}\nclass DomainError extends ErrorBase {}\n",
+    )?;
+
+    let mut engine = Engine::default();
+    let typescript_facts = engine.extract(&typescript)?;
+    let type_id = |label: &str| {
+        typescript_facts
+            .nodes
+            .iter()
+            .find(|node| node.label() == label)
+            .map(|node| node.id.as_str())
+    };
+    assert!(typescript_facts.edges.iter().any(|edge| {
+        Some(edge.source.as_str()) == type_id("AddOptions")
+            && Some(edge.target.as_str()) == type_id("ContextOptions")
+            && edge.string("relation") == "inherits"
+            && edge.string("source_location") == "L2"
+    }));
+    assert!(typescript_facts.edges.iter().any(|edge| {
+        Some(edge.source.as_str()) == type_id("Derived")
+            && Some(edge.target.as_str()) == type_id("Base")
+            && edge.string("relation") == "inherits"
+            && edge.string("source_location") == "L4"
+    }));
+    assert!(typescript_facts.edges.iter().any(|edge| {
+        Some(edge.source.as_str()) == type_id("Derived")
+            && Some(edge.target.as_str()) == type_id("ContextOptions")
+            && edge.string("relation") == "implements"
+            && edge.string("source_location") == "L4"
+    }));
+
+    let javascript_facts = engine.extract(&javascript)?;
+    let javascript_id = |label: &str| {
+        javascript_facts
+            .nodes
+            .iter()
+            .find(|node| node.label() == label)
+            .map(|node| node.id.as_str())
+    };
+    assert!(javascript_facts.edges.iter().any(|edge| {
+        Some(edge.source.as_str()) == javascript_id("DomainError")
+            && Some(edge.target.as_str()) == javascript_id("ErrorBase")
+            && edge.string("relation") == "inherits"
+            && edge.string("source_location") == "L2"
+    }));
+    Ok(())
+}
+
+#[test]
 fn javascript_module_object_bindings_have_explicit_variable_kind() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("app.ts");
@@ -1183,13 +1317,21 @@ fn javascript_module_object_bindings_have_explicit_variable_kind() -> Result<(),
 import express from "express";
 const app = express();
 const settings = { enabled: true };
+const { EventEmitter, PassThrough: Stream } = require("events");
+const [nodeMajorVersion] = process.versions.node.split(".");
 app.get("/health", health);
 function health() { return "ok"; }
 "#,
     )?;
 
     let extraction = Engine::default().extract(&path)?;
-    for name in ["app", "settings"] {
+    for name in [
+        "app",
+        "settings",
+        "EventEmitter",
+        "Stream",
+        "nodeMajorVersion",
+    ] {
         let binding = extraction
             .nodes
             .iter()
@@ -1201,6 +1343,12 @@ function health() { return "ok"; }
             "binding={binding:#?}"
         );
     }
+    assert!(!extraction.nodes.iter().any(|node| {
+        matches!(
+            node.label(),
+            "EventEmitterPassThroughStream" | "nodeMajorVersionprocessversionsnodesplit"
+        )
+    }));
     Ok(())
 }
 

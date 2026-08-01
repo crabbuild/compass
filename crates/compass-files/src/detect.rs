@@ -938,11 +938,19 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
     let mut word_count_paths = Vec::new();
     let cache_root = options.cache_root.as_deref().unwrap_or(&root);
     let mut stat_index = StatHashIndex::load(cache_root, &options.output_name);
-    let classifications = state
-        .all_files
-        .par_iter()
-        .map(|path| classify_file(path))
-        .collect::<Vec<_>>();
+    let classifications = if state.all_files.len() < 512 {
+        state
+            .all_files
+            .iter()
+            .map(|path| classify_file(path))
+            .collect::<Vec<_>>()
+    } else {
+        state
+            .all_files
+            .par_iter()
+            .map(|path| classify_file(path))
+            .collect::<Vec<_>>()
+    };
     for (path, file_type) in state.all_files.into_iter().zip(classifications) {
         let in_memory = path.starts_with(&memory);
         // The walker already pruned ignored ancestor directories. Rechecking

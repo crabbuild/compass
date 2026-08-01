@@ -86,7 +86,7 @@ Common explicit options:
 | scope | positional `PATH`, `--exclude PATTERN` |
 | ignore | default Git ignore or `--no-gitignore` |
 | rebuild | `--force` |
-| outputs | `--out`, `--no-viz`, `--no-cluster` |
+| outputs | `--out`, `--no-viz`, `--no-cluster`, `--no-program` |
 | analysis | `--resolution`, `--exclude-hubs` |
 | code metadata | `--cargo`, `--postgres`, `--google-workspace` |
 | semantics | `--code-only`, `--backend`, `--model`, `--mode` |

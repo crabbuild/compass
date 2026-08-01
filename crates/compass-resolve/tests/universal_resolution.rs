@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::Path;
 
 use compass_languages::{Engine, RawCall};
@@ -120,6 +121,18 @@ fn universal_overloads_receive_stable_publication_discriminators() {
             .collect::<std::collections::BTreeSet<_>>(),
         std::collections::BTreeSet::from(["overload:0".to_owned(), "overload:1".to_owned()])
     );
+    let widget = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.widget.Widget")
+        .expect("Widget declaration");
+    assert!(methods.iter().all(|method| {
+        resolved.edges.iter().any(|edge| {
+            edge.source == widget.id
+                && edge.target == method.id
+                && edge.string("relation") == "contains"
+        })
+    }));
 }
 
 #[test]
@@ -293,6 +306,106 @@ enum Event { Local(Local), Remote { value: Remote } }
                 && edge.string("relation") == "references"
         }));
     }
+}
+
+#[test]
+fn rust_nonstandard_crate_root_preserves_nested_module_identity() {
+    let flags = extract(
+        "crates/core/flags/mod.rs",
+        b"trait Flag {}\nenum Category { Output }\nmod defs;\n",
+    );
+    let definitions_source = br#"use crate::flags::{Category, Flag};
+struct AfterContext;
+impl Flag for AfterContext {
+    fn category(&self) -> Category { Category::Output }
+}
+"#;
+    let definitions = extract("crates/core/flags/defs.rs", definitions_source);
+    let resolved = compass_resolve::resolve(
+        &[flags, definitions],
+        &HashMap::from([(
+            "crates/core/flags/defs.rs".to_owned(),
+            String::from_utf8(definitions_source.to_vec()).expect("source"),
+        )]),
+    );
+    let after_context = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "core::flags::defs::AfterContext")
+        .expect("AfterContext declaration");
+    let flag = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "core::flags::Flag")
+        .expect("Flag declaration");
+    let category = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "core::flags::Category")
+        .expect("Category declaration");
+    let category_method = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name")
+                == "<core::flags::defs::AfterContext as core::flags::Flag>::category"
+        })
+        .expect("Category method");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == after_context.id
+            && edge.target == flag.id
+            && edge.string("relation") == "implements"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == category_method.id
+            && edge.target == category.id
+            && edge.string("relation") == "returns"
+    }));
+}
+
+#[test]
+fn rust_generic_impl_preserves_exact_type_ownership() {
+    let source = br#"trait Render {}
+struct Container<T>(T);
+impl<T> Render for Container<T> {
+    fn render(&self) {}
+}
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let container = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Container")
+        .expect("Container declaration");
+    let render_trait = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Render")
+        .expect("Render trait");
+    let render_method = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "<crate::Container as crate::Render>::render")
+        .expect("Container.render method");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == container.id
+            && edge.target == render_trait.id
+            && edge.string("relation") == "implements"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == container.id
+            && edge.target == render_method.id
+            && edge.string("relation") == "contains"
+    }));
 }
 
 #[test]
@@ -606,7 +719,7 @@ fn universal_declarations_project_without_prebuilt_graph_nodes() {
 }
 
 #[test]
-fn repeated_external_type_uses_share_one_canonical_symbol_and_exact_edges() {
+fn repeated_external_base_uses_share_one_canonical_class_and_exact_edges() {
     let source = b"from ctypes import Structure\nclass First(Structure):\n    pass\nclass Second(Structure):\n    pass\n";
     let extracted = extract("models.py", source);
     let sources = HashMap::from([(
@@ -619,7 +732,7 @@ fn repeated_external_type_uses_share_one_canonical_symbol_and_exact_edges() {
         .iter()
         .filter(|node| {
             node.string("qualified_name") == "ctypes.Structure"
-                && node.string("symbol_kind") == "type_alias"
+                && node.string("symbol_kind") == "class"
         })
         .collect::<Vec<_>>();
 
@@ -872,7 +985,7 @@ type Summary = api.Summary
 
     assert_ne!(provider.id, alias.id);
     assert!(resolved.edges.iter().any(|edge| {
-        edge.string("relation") == "references"
+        edge.string("relation") == "returns"
             && edge.target == alias.id
             && edge.string("source_file") == "cmd/entire/cli/checkpoint/reader.go"
             && edge.string("source_location") == "L2"
@@ -1173,4 +1286,209 @@ fn rust_wildcard_bindings_resolve_local_exports_and_preserve_external_candidates
             && edge.string("relation") == "calls"
             && edge.string("resolution_rule") == "qualified-external"
     }));
+}
+
+#[test]
+fn typescript_workspace_package_exports_follow_nodenext_reexports()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let package = directory.path().join("packages/timezone/package.json");
+    let barrel = directory.path().join("packages/timezone/src/index.ts");
+    let implementation = directory.path().join("packages/timezone/src/date/index.ts");
+    let consumer = directory.path().join("packages/app/src/consumer.ts");
+    for path in [&package, &barrel, &implementation, &consumer] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+    }
+    let package_source = br#"{"name":"@example/timezone","exports":{".":"./src/index.ts"}}"#;
+    let barrel_source = br#"export * from "./date/index.js";"#;
+    let implementation_source = br#"export class ZonedDate {}"#;
+    let consumer_source = br#"import { ZonedDate } from "@example/timezone";
+export function makeDate() { return new ZonedDate(); }
+function consume(value: unknown) { return value; }
+export const wrappedDate = consume(ZonedDate);
+"#;
+    for (path, source) in [
+        (&package, package_source.as_slice()),
+        (&barrel, barrel_source.as_slice()),
+        (&implementation, implementation_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            package.to_str().ok_or("non-UTF-8 fixture path")?,
+            package_source,
+        ),
+        extract(
+            barrel.to_str().ok_or("non-UTF-8 fixture path")?,
+            barrel_source,
+        ),
+        extract(
+            implementation.to_str().ok_or("non-UTF-8 fixture path")?,
+            implementation_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    assert!(extractions[0].nodes.iter().any(|node| {
+        node.string("symbol_kind") == "file"
+            && node.string("source_file") == package.to_string_lossy()
+    }));
+    assert!(extractions[3].edges.iter().any(|edge| {
+        edge.string("relation") == "imports_from" && edge.string("module") == "@example/timezone"
+    }));
+    let sources = [
+        (&package, package_source.as_slice()),
+        (&barrel, barrel_source.as_slice()),
+        (&implementation, implementation_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, directory.path());
+    assert_eq!(resolved.error, None);
+    let declaration = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.label() == "ZonedDate"
+                && node.string("source_file") == implementation.to_string_lossy()
+        })
+        .ok_or("missing ZonedDate declaration")?;
+    let barrel_node = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "file"
+                && node.string("source_file") == barrel.to_string_lossy()
+        })
+        .ok_or("missing barrel file")?;
+    let implementation_node = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "file"
+                && node.string("source_file") == implementation.to_string_lossy()
+        })
+        .ok_or("missing implementation file")?;
+    let consumer_modules = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "imports_from"
+                && edge.string("source_file") == consumer.to_string_lossy()
+        })
+        .map(|edge| {
+            (
+                edge.target.clone(),
+                edge.string("module"),
+                edge.string("target_file"),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        consumer_modules
+            .iter()
+            .any(|(target, _, _)| { target == &barrel_node.id }),
+        "consumer modules: {consumer_modules:#?}"
+    );
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "re_exports"
+            && edge.source == barrel_node.id
+            && edge.target == implementation_node.id
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "imports"
+            && edge.target == declaration.id
+            && edge.string("source_file") == consumer.to_string_lossy()
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == declaration.id
+            && edge.string("source_file") == consumer.to_string_lossy()
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "references"
+            && edge.target == declaration.id
+            && edge.string("source_file") == consumer.to_string_lossy()
+            && edge.string("context") == "argument"
+    }));
+    Ok(())
+}
+
+#[test]
+fn duplicate_typescript_workspace_package_names_remain_unresolved()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let consumer = directory.path().join("app/consumer.ts");
+    let consumer_source = br#"import { Widget } from "@example/duplicate";
+new Widget();
+"#;
+    let package_source = br#"{"name":"@example/duplicate","exports":"./index.ts"}"#;
+    let implementation_source = br#"export class Widget {}"#;
+    let mut fixtures = vec![(consumer.clone(), consumer_source.as_slice())];
+    for package in ["first", "second"] {
+        fixtures.extend([
+            (
+                directory.path().join(format!("{package}/package.json")),
+                package_source.as_slice(),
+            ),
+            (
+                directory.path().join(format!("{package}/index.ts")),
+                implementation_source.as_slice(),
+            ),
+        ]);
+    }
+    for (path, source) in &fixtures {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let extractions = fixtures
+        .iter()
+        .map(|(path, source)| {
+            Ok(extract(
+                path.to_str().ok_or("non-UTF-8 fixture path")?,
+                source,
+            ))
+        })
+        .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
+    let sources = fixtures
+        .iter()
+        .map(|(path, source)| {
+            Ok((
+                path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+                String::from_utf8(source.to_vec())?,
+            ))
+        })
+        .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, directory.path());
+    let widgets = resolved
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.label() == "Widget"
+                && ["first/index.ts", "second/index.ts"]
+                    .iter()
+                    .any(|suffix| node.string("source_file").ends_with(suffix))
+        })
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    assert!(widgets.len() >= 2);
+    assert!(resolved.edges.iter().all(|edge| {
+        !(widgets.contains(edge.target.as_str())
+            && matches!(edge.string("relation").as_str(), "imports" | "calls")
+            && edge.string("source_file") == consumer.to_string_lossy())
+    }));
+    Ok(())
 }

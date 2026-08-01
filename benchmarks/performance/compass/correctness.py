@@ -15,6 +15,19 @@ from .jsonstream import iter_top_level_array, iter_top_level_object_array
 from .model import CorrectnessResult
 from .occurrences import SourceOccurrenceOracle
 
+CODE_TYPE_KINDS = {
+    "class",
+    "struct",
+    "interface",
+    "trait",
+    "protocol",
+    "enum",
+    "type_alias",
+}
+
+MAX_CONTAINMENT_PATH_DEPTH = 8
+MAX_CONTAINMENT_PATH_STATES = 4096
+
 
 @dataclass(frozen=True)
 class GraphSummary:
@@ -54,6 +67,8 @@ class EdgeFact:
     source: str
     target: str
     relation: str
+    original_relation: str
+    context: str
     source_fact_key: str
     target_fact_key: str
     occurrence_file: str
@@ -175,6 +190,7 @@ def _shared_relation(tool: str, relation: str) -> str:
     if tool == "compass":
         return {"documents": "rationale_for", "instantiates": "calls"}.get(relation, relation)
     return {
+        "case_of": "contains",
         "defines": "contains",
         "indirect_call": "calls",
         "inherits": "extends",
@@ -225,6 +241,8 @@ def _create_schema(database: sqlite3.Connection) -> None:
             source TEXT NOT NULL,
             target TEXT NOT NULL,
             relation TEXT NOT NULL,
+            original_relation TEXT NOT NULL,
+            context TEXT NOT NULL,
             source_fact_key TEXT NOT NULL,
             target_fact_key TEXT NOT NULL,
             occurrence_file TEXT NOT NULL,
@@ -395,7 +413,9 @@ def index_graph(
             raise ValueError(f"{tool} edge has an invalid target")
         if not isinstance(relation, str) or not relation:
             raise ValueError(f"{tool} edge has an invalid relation")
-        relation = _shared_relation(tool, relation.lower())
+        original_relation = relation.lower()
+        relation = _shared_relation(tool, original_relation)
+        context = _text(record.get("context"))
         source_fact_key = node_facts.get(source, "")
         target_fact_key = node_facts.get(target, "")
         occurrence_file, occurrence_location = _edge_occurrence(record)
@@ -407,6 +427,8 @@ def index_graph(
                 source,
                 target,
                 relation,
+                original_relation,
+                context,
                 _text(confidence),
                 occurrence_file,
                 occurrence_location,
@@ -414,12 +436,14 @@ def index_graph(
         )
         before = database.total_changes
         database.execute(
-            "INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 tool,
                 source,
                 target,
                 relation,
+                original_relation,
+                context,
                 source_fact_key,
                 target_fact_key,
                 occurrence_file,
@@ -524,16 +548,19 @@ def _edge_facts(database: sqlite3.Connection, tool: str) -> list[EdgeFact]:
             source=str(row[0]),
             target=str(row[1]),
             relation=str(row[2]),
-            source_fact_key=str(row[3]),
-            target_fact_key=str(row[4]),
-            occurrence_file=str(row[5]),
-            occurrence_location=str(row[6]),
-            payload_sha256=str(row[7]),
+            original_relation=str(row[3]),
+            context=str(row[4]),
+            source_fact_key=str(row[5]),
+            target_fact_key=str(row[6]),
+            occurrence_file=str(row[7]),
+            occurrence_location=str(row[8]),
+            payload_sha256=str(row[9]),
         )
         for row in database.execute(
             """
-            SELECT source,target,relation,source_fact_key,target_fact_key,
-                   occurrence_file,occurrence_location,payload_sha256
+            SELECT source,target,relation,original_relation,context,
+                   source_fact_key,target_fact_key,occurrence_file,
+                   occurrence_location,payload_sha256
             FROM edges WHERE tool = ?
             ORDER BY source,target,relation,occurrence_file,occurrence_location,payload_sha256
             """,
@@ -569,6 +596,16 @@ def _identifier_carries_module(identifier: str, module: str) -> bool:
 
 def _terminal_symbol(normalized_label: str) -> str:
     return re.split(r"::|\.", normalized_label)[-1]
+
+
+def _rust_generic_owner_name(node: NodeFact) -> str | None:
+    if node.language != "rust" or "<" not in node.label:
+        return None
+    owner = node.label.split("<", 1)[0].strip()
+    if not owner or owner.startswith(("&", "[", "(")):
+        return None
+    normalized = re.sub(r"\(\)$", "", owner.casefold()).lstrip(".")
+    return _terminal_symbol(normalized) or None
 
 
 def _qualified_name_has_owner(qualified_name: str) -> bool:
@@ -686,6 +723,30 @@ def _classify_nodes(
             )
             mapping[identifier] = exact_compatible[0].identifier
             continue
+        if (
+            graphify.source_file
+            and (generic_owner := _rust_generic_owner_name(graphify)) is not None
+        ):
+            generic_owner_candidates = [
+                candidate
+                for candidate in compass_definitions_by_file_name.get(
+                    (graphify.source_file, generic_owner), []
+                )
+                if candidate.kind in CODE_TYPE_KINDS
+                and (
+                    not graphify.language
+                    or not candidate.language
+                    or graphify.language == candidate.language
+                )
+            ]
+            if len(generic_owner_candidates) == 1:
+                coverage[identifier] = Coverage(
+                    "dominated",
+                    "canonical_rust_generic_owner",
+                    generic_owner_candidates[0].identifier,
+                )
+                mapping[identifier] = generic_owner_candidates[0].identifier
+                continue
         if graphify.callable and graphify.source_file and graphify.source_location:
             callable_candidates = [
                 candidate
@@ -995,6 +1056,43 @@ def _precise_inheritance_occurrence(
     )
 
 
+def _bounded_unique_containment_path(
+    containment: dict[str, set[str]],
+    compass_nodes: dict[str, NodeFact],
+    source: str,
+    target: str,
+) -> tuple[tuple[str, ...] | None, str | None]:
+    """Return one unique bounded path, or report ambiguity/search exhaustion."""
+    target_node = compass_nodes.get(target)
+    target_file = target_node.source_file if target_node is not None else ""
+    stack = [(source, (source,))]
+    witness: tuple[str, ...] | None = None
+    explored = 0
+    while stack:
+        current, path = stack.pop()
+        explored += 1
+        if explored > MAX_CONTAINMENT_PATH_STATES:
+            return None, "bounded_containment_search_limit"
+        if len(path) - 1 >= MAX_CONTAINMENT_PATH_DEPTH:
+            continue
+        for candidate in sorted(containment.get(current, set()), reverse=True):
+            if candidate in path:
+                continue
+            candidate_path = (*path, candidate)
+            if candidate == target:
+                if witness is not None:
+                    return None, "multiple_containment_paths"
+                witness = candidate_path
+                continue
+            candidate_node = compass_nodes.get(candidate)
+            if candidate_node is None:
+                continue
+            if target_file and candidate_node.source_file != target_file:
+                continue
+            stack.append((candidate, candidate_path))
+    return witness, None
+
+
 def _classify_edges(
     graphify_edges: list[EdgeFact],
     compass_edges: list[EdgeFact],
@@ -1022,7 +1120,11 @@ def _classify_edges(
         tuple[str, str, str, str], set[str]
     ] = {}
     typed_reference_index: dict[tuple[str, str], list[EdgeFact]] = {}
+    typed_references_by_source: dict[str, list[tuple[str, EdgeFact]]] = {}
+    field_type_references: dict[tuple[str, str], list[EdgeFact]] = {}
+    value_references: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
     containment: dict[str, set[str]] = {}
+    containment_parents: dict[str, set[str]] = {}
     import_occurrences: set[tuple[str, str, str]] = set()
     for edges in (graphify_edges, compass_edges):
         for edge in edges:
@@ -1049,6 +1151,18 @@ def _classify_edges(
         direct_index.setdefault((edge.relation, source, target), []).append(edge)
         if edge.relation in {"returns", "type_of"}:
             typed_reference_index.setdefault((source, target), []).append(edge)
+        if edge.relation == "type_of":
+            typed_references_by_source.setdefault(source, []).append((target, edge))
+        if (
+            edge.relation == "references"
+            and edge.context in {"argument", "collection"}
+            and edge.occurrence_file
+            and edge.occurrence_location
+        ):
+            value_references.setdefault(
+                (source, edge.context, edge.occurrence_file, edge.occurrence_location),
+                [],
+            ).append(edge)
         source_node = compass_nodes.get(edge.source)
         if (
             edge.relation in {"extends", "implements"}
@@ -1135,6 +1249,7 @@ def _classify_edges(
                 ).add(edge.target)
         if edge.relation == "contains":
             containment.setdefault(source, set()).add(target)
+            containment_parents.setdefault(target, set()).add(source)
         if (
             edge.relation == "exports"
             and edge.occurrence_file
@@ -1170,6 +1285,11 @@ def _classify_edges(
                     [],
                 ).append(edge)
 
+    for owner, children in containment.items():
+        for child in children:
+            for target, edge in typed_references_by_source.get(child, []):
+                field_type_references.setdefault((owner, target), []).append(edge)
+
     output: list[Coverage] = []
     for graphify in graphify_edges:
         if (
@@ -1195,7 +1315,7 @@ def _classify_edges(
             for fact in (source_coverage, target_coverage)
         )
         exact = [
-            edge
+            (edge, occurrence)
             for edge in exact_index.get(
                 (
                     graphify.relation,
@@ -1208,7 +1328,16 @@ def _classify_edges(
             is not None
         ]
         if exact and not unverifiable_endpoint:
-            output.append(Coverage("exact", "relationship_fact", exact[0].payload_sha256))
+            edge, occurrence = exact[0]
+            output.append(
+                Coverage(
+                    "exact" if occurrence == "exact" else "dominated",
+                    "relationship_fact"
+                    if occurrence == "exact"
+                    else "source_statement_occurrence",
+                    edge.payload_sha256,
+                )
+            )
             continue
 
         graphify_target = graphify_nodes.get(graphify.target)
@@ -1280,6 +1409,89 @@ def _classify_edges(
         source = node_mapping.get(graphify.source)
         target = node_mapping.get(graphify.target)
         graphify_source = graphify_nodes.get(graphify.source)
+        compass_source = compass_nodes.get(source) if source is not None else None
+        compass_target = compass_nodes.get(target) if target is not None else None
+        if (
+            graphify.relation == "references"
+            and graphify.context == "field"
+            and source is not None
+            and target is not None
+        ):
+            precise_field_types = [
+                edge
+                for edge in field_type_references.get((source, target), [])
+                if _occurrence_match(graphify, edge, occurrence_oracle) is not None
+            ]
+            if len(precise_field_types) == 1:
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "precise_field_type",
+                        precise_field_types[0].payload_sha256,
+                    )
+                )
+                continue
+            if len(precise_field_types) > 1:
+                output.append(Coverage("ambiguous", "multiple_field_types", None))
+                continue
+        if (
+            graphify.relation
+            in {"calls", "references", "extends", "implements"}
+            and compass_source is not None
+            and compass_target is not None
+            and compass_source.anchored_definition
+            and compass_target.anchored_definition
+            and compass_source.language
+            and compass_target.language
+            and compass_source.language != compass_target.language
+            and graphify.occurrence_file == compass_source.source_file
+        ):
+            output.append(Coverage("rejected", "cross_language_target", None))
+            continue
+        if (
+            graphify.original_relation == "indirect_call"
+            and source is not None
+            and target is not None
+        ):
+            references = [
+                edge
+                for edge in value_references.get(
+                    (
+                        source,
+                        graphify.context,
+                        graphify.occurrence_file,
+                        graphify.occurrence_location,
+                    ),
+                    [],
+                )
+                if _occurrence_match(graphify, edge, occurrence_oracle) is not None
+            ]
+            corrected_targets = {
+                canonical_endpoints.get(edge.target, edge.target) for edge in references
+            }
+            if len(corrected_targets) == 1 and target not in corrected_targets:
+                output.append(
+                    Coverage(
+                        "rejected",
+                        "argument_reference_target_conflict",
+                        references[0].payload_sha256,
+                    )
+                )
+                continue
+            if len(corrected_targets) == 1:
+                output.append(
+                    Coverage(
+                        "rejected",
+                        "value_reference_not_indirect_call",
+                        references[0].payload_sha256,
+                    )
+                )
+                continue
+            if len(corrected_targets) > 1:
+                output.append(
+                    Coverage("ambiguous", "multiple_argument_reference_targets", None)
+                )
+                continue
         if graphify.relation == "imports" and source is not None:
             exact_reexports = reexport_occurrence_targets.get(
                 (
@@ -1439,6 +1651,32 @@ def _classify_edges(
             output.append(Coverage(status, "uncovered_endpoint", None))
             continue
 
+        if (
+            graphify.relation == "calls"
+            and compass_target is not None
+            and compass_target.language == "go"
+            and compass_target.kind in CODE_TYPE_KINDS
+        ):
+            conversions = [
+                edge
+                for edge in direct_index.get(("references", source, target), [])
+                if _occurrence_match(graphify, edge, occurrence_oracle) is not None
+            ]
+            if len(conversions) == 1:
+                output.append(
+                    Coverage(
+                        "rejected",
+                        "go_type_conversion_not_call",
+                        conversions[0].payload_sha256,
+                    )
+                )
+                continue
+            if len(conversions) > 1:
+                output.append(
+                    Coverage("ambiguous", "multiple_go_type_conversions", None)
+                )
+                continue
+
         if graphify.relation == "references":
             typed_references = [
                 edge
@@ -1503,28 +1741,57 @@ def _classify_edges(
                 )
                 continue
         if graphify.relation == "contains":
-            direct_paths = int(bool(direct))
-            middle_nodes = {
-                middle
-                for middle in containment.get(source, set())
-                if target in containment.get(middle, set())
-                and compass_nodes.get(middle) is not None
-                and compass_nodes[middle].source_file
-                == compass_nodes.get(target, compass_nodes[middle]).source_file
-            }
-            path_count = direct_paths + len(middle_nodes)
-            if path_count == 1:
+            containment_path, containment_failure = _bounded_unique_containment_path(
+                containment, compass_nodes, source, target
+            )
+            if containment_path is not None:
                 output.append(
                     Coverage(
                         "dominated",
                         "containment_path",
-                        target if not middle_nodes else sorted(middle_nodes)[0],
+                        containment_path[1],
                     )
                 )
-            elif path_count > 1:
-                output.append(Coverage("ambiguous", "multiple_containment_paths", None))
+            elif containment_failure is not None:
+                output.append(Coverage("ambiguous", containment_failure, None))
             else:
-                output.append(Coverage("missing", "no_bounded_containment_path", None))
+                exact_parents = containment_parents.get(target, set())
+                specific_parents = {
+                    parent
+                    for parent in exact_parents
+                    if not any(
+                        other != parent and other in containment.get(parent, set())
+                        for other in exact_parents
+                    )
+                }
+                specific_parent = (
+                    next(iter(specific_parents))
+                    if len(specific_parents) == 1
+                    else None
+                )
+                if (
+                    specific_parent is not None
+                    and source != specific_parent
+                    and compass_nodes.get(source) is not None
+                    and compass_nodes[source].kind in CODE_TYPE_KINDS
+                    and compass_nodes.get(specific_parent) is not None
+                    and compass_nodes[specific_parent].kind in CODE_TYPE_KINDS
+                    and graphify_source is not None
+                    and graphify_source.source_file
+                    and graphify_target is not None
+                    and graphify_target.source_file
+                ):
+                    output.append(
+                        Coverage(
+                            "rejected",
+                            "exact_containment_owner_conflict",
+                            specific_parent,
+                        )
+                    )
+                else:
+                    output.append(
+                        Coverage("missing", "no_bounded_containment_path", None)
+                    )
             continue
 
         if not (graphify.occurrence_file or graphify.occurrence_location):
@@ -1540,12 +1807,18 @@ def _classify_edges(
             edge, occurrence = matching[0]
             reason = "source_statement_occurrence"
             if occurrence != "source_statement":
-                reason = (
-                    "canonical_owner"
-                    if target_coverage is not None
+                if (
+                    source_coverage is not None
+                    and source_coverage.reason == "canonical_rust_generic_owner"
+                ):
+                    reason = "exact_rust_impl_owner"
+                elif (
+                    target_coverage is not None
                     and target_coverage.reason == "canonical_owner"
-                    else "resolved_endpoint"
-                )
+                ):
+                    reason = "canonical_owner"
+                else:
+                    reason = "resolved_endpoint"
             output.append(Coverage("dominated", reason, edge.payload_sha256))
         elif len(matching) > 1:
             output.append(Coverage("ambiguous", "multiple_relationship_facts", None))

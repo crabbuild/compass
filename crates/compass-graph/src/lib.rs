@@ -265,56 +265,69 @@ fn build_from_owned_extraction(
                 .insert("_drop".to_owned(), Value::Bool(true));
         }
     }
-    source_edges
-        .par_sort_by(|left, right| edge_occurrence_key(left).cmp(&edge_occurrence_key(right)));
+    if source_edges.len() < 100_000 {
+        source_edges
+            .sort_by(|left, right| edge_occurrence_key(left).cmp(&edge_occurrence_key(right)));
+    } else {
+        source_edges
+            .par_sort_by(|left, right| edge_occurrence_key(left).cmp(&edge_occurrence_key(right)));
+    }
     profile_internal("graph edge cloning and sort", &mut profile_started);
-    let normalized_results = source_edges
-        .into_par_iter()
-        .map(|mut edge| {
-            let mut diagnostics = Vec::new();
-            if edge.attributes.remove("_drop") == Some(Value::Bool(true)) {
-                return (None, diagnostics);
-            }
-            let source_value = edge.source.clone();
-            let target_value = edge.target.clone();
-            let Some(source) = resolve_edge_endpoint(
-                &source_value,
-                "source",
-                &mut edge,
-                &positions,
-                &normalized,
-                &mut diagnostics,
-            ) else {
-                return (None, diagnostics);
-            };
-            let Some(target) = resolve_edge_endpoint(
-                &target_value,
-                "target",
-                &mut edge,
-                &positions,
-                &normalized,
-                &mut diagnostics,
-            ) else {
-                return (None, diagnostics);
-            };
-            edge.source = source;
-            edge.target = target;
-            edge.attributes.remove("target_file");
-            sanitize_numeric(&mut edge.attributes, "weight");
-            sanitize_numeric(&mut edge.attributes, "confidence_score");
-            backfill_source_file(&mut edge, &nodes, &positions);
-            normalize_attribute_path(&mut edge.attributes, "source_file", root);
-            normalize_source_anchor_path(&mut edge.attributes, root);
-            if is_cross_language_phantom(&edge, &nodes, &positions) {
-                return (None, diagnostics);
-            }
-            edge.attributes
-                .insert("_src".to_owned(), Value::String(edge.source.clone()));
-            edge.attributes
-                .insert("_tgt".to_owned(), Value::String(edge.target.clone()));
-            (Some(edge), diagnostics)
-        })
-        .collect::<Vec<_>>();
+    let normalize_edge = |mut edge: EdgeRecord| {
+        let mut diagnostics = Vec::new();
+        if edge.attributes.remove("_drop") == Some(Value::Bool(true)) {
+            return (None, diagnostics);
+        }
+        let source_value = edge.source.clone();
+        let target_value = edge.target.clone();
+        let Some(source) = resolve_edge_endpoint(
+            &source_value,
+            "source",
+            &mut edge,
+            &positions,
+            &normalized,
+            &mut diagnostics,
+        ) else {
+            return (None, diagnostics);
+        };
+        let Some(target) = resolve_edge_endpoint(
+            &target_value,
+            "target",
+            &mut edge,
+            &positions,
+            &normalized,
+            &mut diagnostics,
+        ) else {
+            return (None, diagnostics);
+        };
+        edge.source = source;
+        edge.target = target;
+        edge.attributes.remove("target_file");
+        sanitize_numeric(&mut edge.attributes, "weight");
+        sanitize_numeric(&mut edge.attributes, "confidence_score");
+        backfill_source_file(&mut edge, &nodes, &positions);
+        normalize_attribute_path(&mut edge.attributes, "source_file", root);
+        normalize_source_anchor_path(&mut edge.attributes, root);
+        if is_cross_language_phantom(&edge, &nodes, &positions) {
+            return (None, diagnostics);
+        }
+        edge.attributes
+            .insert("_src".to_owned(), Value::String(edge.source.clone()));
+        edge.attributes
+            .insert("_tgt".to_owned(), Value::String(edge.target.clone()));
+        (Some(edge), diagnostics)
+    };
+    let normalized_results = if source_edges.len() < 100_000 {
+        source_edges
+            .into_iter()
+            .map(normalize_edge)
+            .collect::<Vec<_>>()
+    } else {
+        source_edges
+            .into_par_iter()
+            .map(normalize_edge)
+            .collect::<Vec<_>>()
+    };
     let mut normalized_edges = Vec::new();
     for (edge, mut diagnostics) in normalized_results {
         graph_diagnostics.append(&mut diagnostics);

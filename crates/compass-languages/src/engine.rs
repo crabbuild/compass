@@ -113,6 +113,31 @@ impl Engine {
         source_file: &str,
         source: &[u8],
     ) -> Result<CombinedExtraction, ExtractError> {
+        self.extract_source_with_program(path, source_file, source, true)
+    }
+
+    /// Extract only structural graph evidence while retaining an explicit,
+    /// repository-relative source identity.
+    ///
+    /// Structural-only callers use this path to avoid constructing the
+    /// independent Program IR evidence batch from the same syntax tree.
+    pub fn extract_source_graph_only(
+        &mut self,
+        path: &Path,
+        source_file: &str,
+        source: &[u8],
+    ) -> Result<Extraction, ExtractError> {
+        self.extract_source_with_program(path, source_file, source, false)
+            .map(|combined| combined.graph)
+    }
+
+    fn extract_source_with_program(
+        &mut self,
+        path: &Path,
+        source_file: &str,
+        source: &[u8],
+        include_program: bool,
+    ) -> Result<CombinedExtraction, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
         if spec.kind == ExtractorKind::Generic && matches!(spec.name, "go" | "java") {
@@ -144,15 +169,14 @@ impl Engine {
         let mut graph = self.extract_generic_from_tree(path, spec, source_file, source, root);
         self.stamp_project_evidence(path, &mut graph);
         stamp_producer_metadata(&mut graph, spec.name);
-        let program = crate::program::extract_from_tree(source_file, spec.name, source, root)
+        let program = include_program
+            .then(|| crate::program::extract_from_tree(source_file, spec.name, source, root))
+            .transpose()
             .map_err(|error| ExtractError::InvalidProgramEvidence {
                 path: path.to_path_buf(),
                 detail: error.to_string(),
             })?;
-        Ok(CombinedExtraction {
-            graph,
-            program: Some(program),
-        })
+        Ok(CombinedExtraction { graph, program })
     }
 
     pub(super) fn extract_embedded_script(
@@ -463,11 +487,104 @@ impl Engine {
                 })?;
             self.parsers.entry(grammar).or_insert(parser)
         };
+        // Keep known pinned-grammar gaps from quarantining otherwise exact
+        // TypeScript files. The parser-only mask preserves every byte and line
+        // offset; extractors still read names, modules, and hashes from the
+        // original source buffer.
+        let masked = matches!(spec.name, "typescript" | "tsx")
+            .then(|| mask_typescript_parser_gaps(source))
+            .flatten();
+        let parser_source = masked.as_deref().unwrap_or(source);
         let tree = parser
-            .parse(source, None)
+            .parse(parser_source, None)
             .ok_or_else(|| ExtractError::ParseCancelled(path.to_path_buf()))?;
         Ok(tree)
     }
+}
+
+fn mask_typescript_parser_gaps(source: &[u8]) -> Option<Vec<u8>> {
+    let mut masked = None::<Vec<u8>>;
+    let mut line_start = 0;
+    while line_start < source.len() {
+        let line_end = source[line_start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(source.len(), |offset| line_start.saturating_add(offset));
+        let line = &source[line_start..line_end];
+        let mut offset = line
+            .iter()
+            .take_while(|byte| byte.is_ascii_whitespace())
+            .count();
+        if line.get(offset..offset.saturating_add(6)) == Some(b"export")
+            && line
+                .get(offset.saturating_add(6))
+                .is_some_and(u8::is_ascii_whitespace)
+        {
+            offset = offset.saturating_add(6);
+            offset = offset.saturating_add(
+                line[offset..]
+                    .iter()
+                    .take_while(|byte| byte.is_ascii_whitespace())
+                    .count(),
+            );
+            let modifier_start = offset;
+            if line.get(offset..offset.saturating_add(4)) == Some(b"type")
+                && line
+                    .get(offset.saturating_add(4))
+                    .is_some_and(u8::is_ascii_whitespace)
+            {
+                offset = offset.saturating_add(4);
+                offset = offset.saturating_add(
+                    line[offset..]
+                        .iter()
+                        .take_while(|byte| byte.is_ascii_whitespace())
+                        .count(),
+                );
+                if line.get(offset) == Some(&b'*') {
+                    let output = masked.get_or_insert_with(|| source.to_vec());
+                    output[line_start.saturating_add(modifier_start)
+                        ..line_start.saturating_add(modifier_start).saturating_add(4)]
+                        .fill(b' ');
+                }
+            }
+        }
+        let declaration = line
+            .get(
+                line.iter()
+                    .take_while(|byte| byte.is_ascii_whitespace())
+                    .count()..,
+            )
+            .unwrap_or_default();
+        let is_type_alias =
+            declaration.starts_with(b"type ") || declaration.starts_with(b"export type ");
+        let unsupported_import_query = line
+            .windows(b"typeof import(".len())
+            .position(|window| window == b"typeof import(")
+            .filter(|query| line[*query..].windows(2).any(|window| window == b")["));
+        if is_type_alias
+            && let Some(query) = unsupported_import_query
+            && let Some(equals) = line[..query].iter().rposition(|byte| *byte == b'=')
+            && let Some(semicolon) = line.iter().rposition(|byte| *byte == b';')
+        {
+            let value_start = equals.saturating_add(1).saturating_add(
+                line[equals.saturating_add(1)..semicolon]
+                    .iter()
+                    .take_while(|byte| byte.is_ascii_whitespace())
+                    .count(),
+            );
+            if value_start.saturating_add(3) <= semicolon {
+                let output = masked.get_or_insert_with(|| source.to_vec());
+                output[line_start.saturating_add(equals).saturating_add(1)
+                    ..line_start.saturating_add(semicolon)]
+                    .fill(b' ');
+                output[line_start.saturating_add(value_start)
+                    ..line_start.saturating_add(value_start).saturating_add(3)]
+                    .copy_from_slice(b"any");
+            }
+        }
+        line_start = line_end.saturating_add(1);
+    }
+    masked
 }
 
 fn project_universal_declaration_sources(extraction: &mut Extraction) {
@@ -516,6 +633,13 @@ struct FunctionBody<'tree> {
     top_level: bool,
 }
 
+#[derive(Clone)]
+struct JsImportTarget {
+    target: String,
+    module: String,
+    imported_name: String,
+}
+
 struct ExtractState<'source, 'tree> {
     source: &'source [u8],
     source_file: String,
@@ -530,6 +654,7 @@ struct ExtractState<'source, 'tree> {
     types: HashMap<String, String>,
     seen_resolved_calls: HashSet<(String, String, usize, usize)>,
     seen_dynamic_imports: HashSet<(String, String)>,
+    js_import_targets: HashMap<String, JsImportTarget>,
     python_import_aliases: HashMap<String, String>,
     python_import_targets: HashMap<String, String>,
 }
@@ -564,6 +689,7 @@ fn extract_tree(
         types: HashMap::new(),
         seen_resolved_calls: HashSet::new(),
         seen_dynamic_imports: HashSet::new(),
+        js_import_targets: HashMap::new(),
         python_import_aliases,
         python_import_targets,
     };
@@ -1157,6 +1283,39 @@ fn source_node_text(node: Node<'_>, source: &[u8]) -> String {
         .unwrap_or_default()
 }
 
+fn collect_js_binding_names(node: Node<'_>, source: &[u8], output: &mut Vec<String>) {
+    match node.kind() {
+        "identifier" | "shorthand_property_identifier_pattern" => {
+            let name = clean_name(source_node_text(node, source));
+            if !name.is_empty() {
+                output.push(name);
+            }
+        }
+        "pair_pattern" => {
+            if let Some(value) = node.child_by_field_name("value") {
+                collect_js_binding_names(value, source, output);
+            }
+        }
+        "assignment_pattern" => {
+            if let Some(left) = node.child_by_field_name("left") {
+                collect_js_binding_names(left, source, output);
+            }
+        }
+        "rest_pattern" => {
+            if let Some(argument) = node.child_by_field_name("argument") {
+                collect_js_binding_names(argument, source, output);
+            }
+        }
+        "object_pattern" | "array_pattern" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+                collect_js_binding_names(child, source, output);
+            }
+        }
+        _ => {}
+    }
+}
+
 impl<'source, 'tree> ExtractState<'source, 'tree> {
     fn walk_declarations(
         &mut self,
@@ -1220,6 +1379,9 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 self.add_kotlin_parent_edges(node, &id);
             } else if self.language == "scala" {
                 self.add_scala_class_references(node, &id);
+            }
+            if matches!(self.language, "javascript" | "typescript" | "tsx") {
+                self.add_js_parent_edges(node, &id);
             }
             if matches!(self.language, "typescript" | "tsx") {
                 self.add_ts_class_decorators(node, &id);
@@ -1540,14 +1702,18 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             let mut identifiers = Vec::new();
             collect_js_collection_values(node, &mut identifiers);
             for identifier in identifiers {
-                self.add_js_indirect(identifier, "collection", bound);
+                if !self.add_js_import_reference(identifier, "collection") {
+                    self.add_js_indirect(identifier, "collection", bound);
+                }
             }
         } else if matches!(node.kind(), "call_expression" | "new_expression")
             && let Some(arguments) = node.child_by_field_name("arguments")
         {
             let mut cursor = arguments.walk();
             for argument in arguments.children(&mut cursor) {
-                if argument.kind() == "identifier" {
+                if argument.kind() == "identifier"
+                    && !self.add_js_import_reference(argument, "argument")
+                {
                     self.add_js_indirect(argument, "argument", bound);
                 }
             }
@@ -1556,6 +1722,33 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         for child in node.children(&mut cursor) {
             self.walk_js_module_indirect(child, false, bound);
         }
+    }
+
+    fn add_js_import_reference(&mut self, node: Node<'tree>, context: &str) -> bool {
+        let Some(name) = self.node_text(node).map(clean_name) else {
+            return false;
+        };
+        let Some(binding) = self.js_import_targets.get(&name).cloned() else {
+            return false;
+        };
+        self.add_edge_at(
+            &self.file_id.clone(),
+            &binding.target,
+            "references",
+            node,
+            Some(context),
+        );
+        if let Some(edge) = self.extraction.edges.last_mut() {
+            edge.attributes
+                .insert("binding_name".to_owned(), Value::String(name));
+            edge.attributes
+                .insert("module".to_owned(), Value::String(binding.module));
+            edge.attributes.insert(
+                "imported_name".to_owned(),
+                Value::String(binding.imported_name),
+            );
+        }
+        true
     }
 
     fn add_js_indirect(&mut self, node: Node<'tree>, context: &str, bound: &HashSet<String>) {
@@ -2079,16 +2272,20 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             line(node),
             Some(if is_reexport { "re-export" } else { "import" }),
         );
-        if let (Some(edge), Some(target_path)) = (self.extraction.edges.last_mut(), &target_path) {
-            edge.attributes.insert(
-                "target_file".to_owned(),
-                Value::String(target_path.to_string_lossy().into_owned()),
-            );
+        if let Some(edge) = self.extraction.edges.last_mut() {
+            edge.attributes
+                .insert("module".to_owned(), Value::String(raw_module.clone()));
+            if let Some(target_path) = &target_path {
+                edge.attributes.insert(
+                    "target_file".to_owned(),
+                    Value::String(target_path.to_string_lossy().into_owned()),
+                );
+            }
         }
-        let Some(target_path) = target_path else {
-            return;
-        };
-        let target_stem = file_stem(&target_path);
+        let target_stem = target_path
+            .as_deref()
+            .map(file_stem)
+            .unwrap_or_else(|| raw_module.clone());
         if is_reexport {
             let Some(clause) = first_descendant(node, "export_clause") else {
                 return;
@@ -2118,23 +2315,52 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             let mut specifiers = Vec::new();
             collect_nodes_of_kind(clause, "import_specifier", &mut specifiers);
             for specifier in specifiers {
-                let Some(name) = specifier
+                let Some(imported_name) = specifier
                     .child_by_field_name("name")
                     .and_then(|name| self.node_text(name))
                     .map(clean_name)
                 else {
                     continue;
                 };
-                if name.is_empty() {
+                if imported_name.is_empty() {
                     continue;
                 }
+                let local_name = specifier
+                    .child_by_field_name("alias")
+                    .and_then(|alias| self.node_text(alias))
+                    .map(clean_name)
+                    .filter(|alias| !alias.is_empty())
+                    .unwrap_or_else(|| imported_name.clone());
+                let target = make_id(&[&target_stem, &imported_name]);
+                self.js_import_targets.insert(
+                    local_name.clone(),
+                    JsImportTarget {
+                        target: target.clone(),
+                        module: raw_module.clone(),
+                        imported_name: imported_name.clone(),
+                    },
+                );
                 self.add_edge(
                     &self.file_id.clone(),
-                    &make_id(&[&target_stem, &name]),
+                    &target,
                     "imports",
                     line(node),
                     Some("import"),
                 );
+                if let Some(edge) = self.extraction.edges.last_mut() {
+                    edge.attributes
+                        .insert("module".to_owned(), Value::String(raw_module.clone()));
+                    edge.attributes
+                        .insert("imported_name".to_owned(), Value::String(imported_name));
+                    edge.attributes
+                        .insert("local_name".to_owned(), Value::String(local_name));
+                    if let Some(target_path) = &target_path {
+                        edge.attributes.insert(
+                            "target_file".to_owned(),
+                            Value::String(target_path.to_string_lossy().into_owned()),
+                        );
+                    }
+                }
             }
         }
     }
@@ -2153,17 +2379,21 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 continue;
             };
             self.add_js_require_import(declaration, name_node, value);
-            let Some(name) = self.node_text(name_node).map(clean_name) else {
-                continue;
-            };
-            if name.is_empty() {
+            let mut names = Vec::new();
+            collect_js_binding_names(name_node, self.source, &mut names);
+            names.sort();
+            names.dedup();
+            if names.is_empty() {
                 continue;
             }
-            let id = make_id(&[&self.stem, &name]);
-            if matches!(
-                value.kind(),
-                "arrow_function" | "function_expression" | "function"
-            ) {
+            if name_node.kind() == "identifier"
+                && matches!(
+                    value.kind(),
+                    "arrow_function" | "function_expression" | "function"
+                )
+            {
+                let name = &names[0];
+                let id = make_id(&[&self.stem, name]);
                 self.add_node(&id, &format!("{name}()"), line(declaration), true, None);
                 self.add_edge(
                     &self.file_id.clone(),
@@ -2172,7 +2402,10 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     line(declaration),
                     None,
                 );
-                self.callables.entry(name).or_default().push(id.clone());
+                self.callables
+                    .entry(name.clone())
+                    .or_default()
+                    .push(id.clone());
                 self.functions.push(FunctionBody {
                     id,
                     node: value,
@@ -2182,26 +2415,28 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 value.kind(),
                 "object" | "array" | "as_expression" | "call_expression" | "new_expression"
             ) {
-                self.add_node(&id, &name, line(declaration), false, None);
-                if name_node.kind() == "identifier"
-                    && let Some(binding) = self
+                for name in names {
+                    let id = make_id(&[&self.stem, &name]);
+                    self.add_node(&id, &name, line(declaration), false, None);
+                    if let Some(binding) = self
                         .extraction
                         .nodes
                         .iter_mut()
                         .find(|binding| binding.id == id)
-                {
-                    binding.attributes.insert(
-                        "symbol_kind".to_owned(),
-                        Value::String("variable".to_owned()),
+                    {
+                        binding.attributes.insert(
+                            "symbol_kind".to_owned(),
+                            Value::String("variable".to_owned()),
+                        );
+                    }
+                    self.add_edge(
+                        &self.file_id.clone(),
+                        &id,
+                        "contains",
+                        line(declaration),
+                        None,
                     );
                 }
-                self.add_edge(
-                    &self.file_id.clone(),
-                    &id,
-                    "contains",
-                    line(declaration),
-                    None,
-                );
             }
         }
     }
@@ -2356,6 +2591,85 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     line(decorator),
                     Some("decorator"),
                 );
+            }
+        }
+    }
+
+    fn add_js_parent_edges(&mut self, node: Node<'tree>, class_id: &str) {
+        let mut clauses = Vec::new();
+        if let Some(heritage) = direct_named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "class_heritage")
+        {
+            let nested = direct_named_children(heritage);
+            if nested
+                .iter()
+                .any(|child| matches!(child.kind(), "extends_clause" | "implements_clause"))
+            {
+                clauses.extend(nested);
+            } else {
+                clauses.push(heritage);
+            }
+        }
+        clauses.extend(
+            direct_named_children(node)
+                .into_iter()
+                .filter(|child| child.kind() == "extends_type_clause"),
+        );
+
+        for clause in clauses {
+            let relation = if clause.kind() == "implements_clause" {
+                "implements"
+            } else {
+                "inherits"
+            };
+            let context = if relation == "implements" {
+                "implements"
+            } else {
+                "extends"
+            };
+            let mut cursor = clause.walk();
+            let targets = match clause.kind() {
+                "extends_clause" => clause
+                    .children_by_field_name("value", &mut cursor)
+                    .collect::<Vec<_>>(),
+                "extends_type_clause" => clause
+                    .children_by_field_name("type", &mut cursor)
+                    .collect::<Vec<_>>(),
+                _ => clause
+                    .children(&mut cursor)
+                    .filter(|child| child.is_named())
+                    .collect::<Vec<_>>(),
+            };
+            for target_node in targets {
+                let Some(qualified_name) = js_heritage_name(target_node, self.source) else {
+                    continue;
+                };
+                let spelling = qualified_name
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or(&qualified_name)
+                    .trim();
+                if spelling.is_empty() {
+                    continue;
+                }
+                let target = self
+                    .js_import_targets
+                    .get(spelling)
+                    .map(|binding| binding.target.clone())
+                    .unwrap_or_else(|| self.ensure_type_node(spelling, true));
+                if target == class_id {
+                    continue;
+                }
+                self.add_edge_at(class_id, &target, relation, target_node, Some(context));
+                if qualified_name != spelling
+                    && let Some(edge) = self.extraction.edges.last_mut()
+                {
+                    edge.attributes.insert(
+                        "target_qualified_name".to_owned(),
+                        Value::String(qualified_name),
+                    );
+                }
             }
         }
     }
@@ -3449,6 +3763,11 @@ fn first_descendant<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>>
     None
 }
 
+fn direct_named_children(node: Node<'_>) -> Vec<Node<'_>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).collect()
+}
+
 fn first_identifier(node: Node<'_>) -> Option<Node<'_>> {
     [
         "identifier",
@@ -3500,6 +3819,26 @@ fn clean_name(value: String) -> String {
         .trim_matches(['\'', '"', '`', '&', '*', '$', '@'])
         .trim_end_matches(['!', '?'])
         .to_owned()
+}
+
+fn js_heritage_name(node: Node<'_>, source: &[u8]) -> Option<String> {
+    let target = if node.kind() == "generic_type" {
+        node.child_by_field_name("name")?
+    } else {
+        node
+    };
+    if !matches!(
+        target.kind(),
+        "identifier" | "type_identifier" | "nested_type_identifier" | "member_expression"
+    ) {
+        return None;
+    }
+    target
+        .utf8_text(source)
+        .ok()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
 }
 
 fn quoted_value(value: &str) -> Option<String> {

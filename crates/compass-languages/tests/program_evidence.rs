@@ -53,7 +53,13 @@ fn combined_extraction_matches_standalone_graph_and_program_outputs() -> Result<
             path.to_str().ok_or("non-UTF-8 fixture path")?,
             source,
         )?;
+        let graph_only = Engine::default().extract_source_graph_only(
+            path,
+            path.to_str().ok_or("non-UTF-8 fixture path")?,
+            source,
+        )?;
         assert_eq!(combined.graph, standalone_graph);
+        assert_eq!(graph_only, combined.graph);
         assert_eq!(combined.program, Some(standalone_program));
     }
     Ok(())

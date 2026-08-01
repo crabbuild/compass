@@ -26,6 +26,7 @@ unicode-casefold.workspace = true
 unicode-normalization.workspace = true
 
 [dev-dependencies]
+compass-resolve = { path = "../compass-resolve", version = "0.1.4" }
 tempfile.workspace = true
 
 [lints]

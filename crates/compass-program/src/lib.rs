@@ -4,6 +4,7 @@ mod evidence;
 mod manifest;
 mod merge;
 mod path;
+mod projection;
 mod provider;
 mod scip;
 mod scip_stream;
@@ -14,6 +15,7 @@ pub use evidence::{
 pub use manifest::{SCIP_MANIFEST_SCHEMA, parse_artifact_manifest};
 pub use merge::{MERGER_VERSION, MergeError, merge_evidence};
 pub use path::normalize_source_path;
+pub use projection::{CompilerCall, CompilerDefinition, CompilerProjection, compiler_projection};
 pub use provider::{
     ArtifactInput, ArtifactLimits, ArtifactManifest, ArtifactProvider, ArtifactReader, FileInput,
     ProjectAnalyzer, ProjectFile, ProjectInput, ProviderError, SyntaxProvider,

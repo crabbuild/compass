@@ -49,6 +49,8 @@ fn valid_batch() -> SemanticEvidenceBatch {
             scope_id: None,
             signature: None,
             parameter_count: None,
+            parameter_types: Vec::new(),
+            direct_bases_complete: false,
             variadic: false,
             signature_hash: None,
             implementation_hash: None,
@@ -71,6 +73,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
             qualified_target: "tools.execute".to_owned(),
             target_declaration_id: None,
             scope_id: Some("scope:caller".to_owned()),
+            output_index: None,
             range: range(7, 13),
         }],
         occurrences: vec![OccurrenceFact {
@@ -99,6 +102,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
                 scope_id: Some("scope:caller".to_owned()),
                 qualified_name: Some("tools.execute".to_owned()),
                 argument_count: None,
+                argument_types: Vec::new(),
                 allowed_target_kinds: vec!["function".to_owned()],
                 hierarchy: None,
                 allow_external: true,
@@ -116,7 +120,11 @@ fn assert_code(batch: &SemanticEvidenceBatch, code: EvidenceErrorCode) {
 
 #[test]
 fn evidence_round_trips_with_closed_camel_case_schema() {
-    let batch = valid_batch();
+    let mut batch = valid_batch();
+    batch.declarations[0].parameter_count = Some(1);
+    batch.declarations[0].parameter_types = vec!["example.Request".to_owned()];
+    batch.candidates[0].constraints.argument_count = Some(1);
+    batch.candidates[0].constraints.argument_types = vec![Some("example.Request".to_owned())];
     validate_evidence(&batch, EvidenceLimits::default()).expect("valid fixture");
 
     let encoded = serde_json::to_value(&batch).expect("serialize evidence");
@@ -126,6 +134,14 @@ fn evidence_round_trips_with_closed_camel_case_schema() {
         "decl:caller"
     );
     assert_eq!(encoded["occurrences"][0]["role"], "call");
+    assert_eq!(
+        encoded["declarations"][0]["parameterTypes"][0],
+        "example.Request"
+    );
+    assert_eq!(
+        encoded["candidates"][0]["constraints"]["argumentTypes"][0],
+        "example.Request"
+    );
     assert_eq!(
         serde_json::from_value::<SemanticEvidenceBatch>(encoded).expect("deserialize evidence"),
         batch
@@ -139,6 +155,13 @@ fn unknown_fields_are_rejected_at_nested_boundaries() {
     let error =
         serde_json::from_value::<SemanticEvidenceBatch>(encoded).expect_err("unknown field");
     assert!(error.to_string().contains("unknown field"));
+}
+
+#[test]
+fn output_positions_are_reserved_for_call_result_bindings() {
+    let mut batch = valid_batch();
+    batch.bindings[0].output_index = Some(0);
+    assert_code(&batch, EvidenceErrorCode::InvalidFact);
 }
 
 #[test]
@@ -267,6 +290,37 @@ fn every_resource_boundary_is_enforced() {
     };
     let error = validate_evidence(&batch, limits).expect_err("target-kind limit");
     assert_eq!(error.code, EvidenceErrorCode::ResourceLimit);
+
+    let mut typed = valid_batch();
+    typed.candidates[0].constraints.argument_count = Some(1);
+    typed.candidates[0].constraints.argument_types = vec![Some("java.lang.String".to_owned())];
+    let limits = EvidenceLimits {
+        callable_types_per_fact: 0,
+        ..EvidenceLimits::default()
+    };
+    let error = validate_evidence(&typed, limits).expect_err("callable-type limit");
+    assert_eq!(error.code, EvidenceErrorCode::ResourceLimit);
+}
+
+#[test]
+fn callable_type_vectors_must_match_their_source_arity() {
+    let mut declaration = valid_batch();
+    declaration.declarations[0].parameter_count = Some(1);
+    declaration.declarations[0].parameter_types =
+        vec!["java.lang.String".to_owned(), "java.lang.Object".to_owned()];
+    assert_code(&declaration, EvidenceErrorCode::InvalidFact);
+
+    let mut candidate = valid_batch();
+    candidate.candidates[0].constraints.argument_count = Some(1);
+    candidate.candidates[0].constraints.argument_types = vec![Some("int".to_owned()), None];
+    assert_code(&candidate, EvidenceErrorCode::InvalidFact);
+}
+
+#[test]
+fn complete_direct_base_sets_are_reserved_for_java_types() {
+    let mut batch = valid_batch();
+    batch.declarations[0].direct_bases_complete = true;
+    assert_code(&batch, EvidenceErrorCode::InvalidFact);
 }
 
 #[test]
@@ -310,9 +364,13 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
     );
     assert!(profiles.iter().all(|profile| {
         !profile.id.is_empty()
-            && profile.version == 1
+            && profile.version > 0
             && profile.evidence_schema == UNIVERSAL_EVIDENCE_SCHEMA
     }));
+    assert_eq!(
+        AdapterRegistry::universal_profile("go").map(|profile| profile.version),
+        Some(3)
+    );
     assert_eq!(
         profiles
             .iter()
@@ -330,11 +388,11 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
     assert_eq!(
         AdapterRegistry::universal_profile("java")
             .map(|profile| (profile.version, profile.profile)),
-        Some((1, UniversalAdapterProfile::UniversalCandidate))
+        Some((3, UniversalAdapterProfile::UniversalCandidate))
     );
     assert_eq!(
         AdapterRegistry::universal_profile("rust").map(|profile| profile.version),
-        Some(1)
+        Some(2)
     );
 }
 
@@ -863,6 +921,100 @@ func caller(callback func()) {
             .all(|occurrence| !matches!(occurrence.spelling.as_str(), "callback" | "invoke")),
         "parameters, captures, and function-valued locals must not resolve as package calls"
     );
+}
+
+#[test]
+fn go_calls_use_lexical_composite_and_method_return_receiver_types() {
+    let source = br#"package sample
+
+type Bucket struct{}
+type Cursor struct{}
+type Stats struct{}
+type Options struct{}
+type Command struct{ Options }
+
+func (b *Bucket) write() {}
+func (b *Bucket) Cursor() *Cursor { return &Cursor{} }
+func (b *Bucket) Open() (*Cursor, error) { return &Cursor{}, nil }
+func (c *Cursor) node() {}
+func (s *Stats) Add() {}
+func (o *Options) AddFlags() {}
+
+func create(b *Bucket) {
+    bucket := Bucket{}
+    bucket.write()
+    c := b.Cursor()
+    c.node()
+    opened, err := b.Open()
+    _ = err
+    opened.node()
+    var stats Stats
+    stats.Add()
+    var command Command
+    command.Options.AddFlags()
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/sample/example.go"),
+            "sample/example.go",
+            source,
+        )
+        .expect("extract go")
+        .graph
+        .semantic_evidence
+        .expect("go universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid go evidence");
+
+    for (spelling, qualified_name) in [
+        ("write", "sample.Bucket::write"),
+        ("node", "sample.Cursor::node"),
+        ("Add", "sample.Stats::Add"),
+        ("AddFlags", "sample.Options::AddFlags"),
+    ] {
+        assert!(
+            evidence.candidates.iter().any(|candidate| {
+                candidate.relation == CandidateRelation::Calls
+                    && candidate.target_spelling == spelling
+                    && candidate.constraints.qualified_name.as_deref() == Some(qualified_name)
+            }),
+            "missing {qualified_name}: {:#?}",
+            evidence.candidates
+        );
+    }
+    let cursor = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "sample.Bucket::Cursor")
+        .expect("Cursor method declaration");
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.source_declaration_id == cursor.id
+            && candidate.relation == CandidateRelation::Returns
+            && candidate.target_spelling == "Cursor"
+            && candidate.constraints.qualified_name.as_deref() == Some("sample.Cursor")
+    }));
+    let call_result = evidence
+        .bindings
+        .iter()
+        .find(|binding| {
+            binding.kind == BindingKind::CallResult
+                && binding.spelling == "c"
+                && binding.qualified_target == "sample.Bucket::Cursor"
+        })
+        .expect("method call-result binding");
+    assert_eq!(call_result.output_index, None);
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "node"
+            && candidate.binding_id.as_deref() == Some(call_result.id.as_str())
+    }));
+    let positional_result = evidence
+        .bindings
+        .iter()
+        .find(|binding| binding.kind == BindingKind::CallResult && binding.spelling == "opened")
+        .expect("positional method call-result binding");
+    assert_eq!(positional_result.output_index, Some(0));
 }
 
 #[test]

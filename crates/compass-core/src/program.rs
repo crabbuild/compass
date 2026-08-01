@@ -10,7 +10,8 @@ use compass_ir::{ProviderDescriptor, canonical_json_bytes, hex_sha256};
 use compass_languages::{Registry, TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
 use compass_program::{
     ArtifactInput, ArtifactProvider, DecodedScipArtifact, DecodedScipDocument, EvidenceBatch,
-    OfficialScipProvider, SyntaxProvider, merge_evidence, parse_artifact_manifest,
+    OfficialScipProvider, SyntaxProvider, compiler_projection, merge_evidence,
+    parse_artifact_manifest,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,7 @@ pub(crate) struct ProgramBuild {
     pub artifact_documents_analyzed: usize,
     pub artifact_documents_reused: usize,
     pub conflicts: usize,
+    pub compiler_projection: compass_program::CompilerProjection,
 }
 
 #[derive(Clone)]
@@ -265,6 +267,7 @@ pub(crate) fn build_program(
     cache.prune_program(&artifact_kind, &live_artifact_keys)?;
     profile_internal("Program artifact processing", &mut internal_started);
 
+    let compiler_projection = compiler_projection(&batches);
     let program = merge_evidence(batches)?;
     profile_internal("Program evidence merge", &mut internal_started);
     let analysis = compass_analysis::analyze_prevalidated(program)?;
@@ -287,6 +290,7 @@ pub(crate) fn build_program(
         artifact_documents_analyzed,
         artifact_documents_reused,
         conflicts,
+        compiler_projection,
     })
 }
 
@@ -391,6 +395,7 @@ pub(crate) fn load_current_program(
         artifact_documents_analyzed: 0,
         artifact_documents_reused: 0,
         conflicts,
+        compiler_projection: compass_program::CompilerProjection::default(),
     }))
 }
 

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -6,6 +6,7 @@ use compass_graph::{BuildEvidence, normalize_v1};
 use compass_languages::{Engine, extract_sql_content};
 use compass_model::code_graph::{EdgeKind, NodeKind};
 use compass_model::provenance::EvidenceOrigin;
+use compass_resolve::resolve_with_root;
 
 #[test]
 fn sql_domain_facts_publish_as_a_valid_closed_v1_graph() -> Result<(), Box<dyn std::error::Error>> {
@@ -213,14 +214,21 @@ fn unresolved_java_inheritance_is_typed_deferred_and_not_exact_topology()
     fs::create_dir_all(root.join("src"))?;
     fs::write(root.join(relative), source)?;
 
-    let extraction = Engine::default().extract_source(relative, source)?;
+    let extracted = Engine::default().extract_source(relative, source)?;
+    let sources = HashMap::from([(
+        relative.to_string_lossy().into_owned(),
+        String::from_utf8(source.to_vec())?,
+    )]);
+    let extraction = resolve_with_root(&[extracted], &sources, root);
+    assert!(extraction.error.is_none(), "{:#?}", extraction.error);
+    assert!(!extraction.nodes.is_empty(), "resolved Java graph is empty");
     let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:test-java")?;
     let graph = normalize_v1(extraction, evidence)?;
     let inheritance = graph
         .links
         .iter()
         .find(|edge| edge.kind == EdgeKind::Extends)
-        .ok_or("missing deferred inheritance edge")?;
+        .ok_or_else(|| format!("missing deferred inheritance edge: {graph:#?}"))?;
     assert!(inheritance.deferred);
     assert!(inheritance.evidence.iter().any(|evidence| {
         evidence.origin == EvidenceOrigin::Heuristic
