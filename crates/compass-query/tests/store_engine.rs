@@ -2,10 +2,30 @@ mod support;
 
 use std::fs;
 
+use compass_graph::GraphSnapshotBuilder;
 use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
-use compass_model::query_contract::{CodeQueryLimits, SearchRequest};
+use compass_model::query_contract::{
+    CallRequest, CodeQueryLimits, ExploreRequest, ImpactRequest, NodeTrailRequest, SearchRequest,
+};
 use compass_query::{EngineSelection, QueryEngineKind, open, open_with_engine};
-use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
+use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
+
+fn publish_phase2_snapshot(
+    directory: &std::path::Path,
+    graph_path: &std::path::Path,
+) -> Result<SqliteStore, Box<dyn std::error::Error>> {
+    let store = SqliteStore::open(directory.join(STORE_FILE_NAME))?;
+    let graph = GraphDocument::load(graph_path)?;
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &graph)?;
+    GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    let reference = store.snapshot_reference()?;
+    fs::write(
+        directory.join(STORE_REF_FILE_NAME),
+        serde_json::to_vec(&reference)?,
+    )?;
+    store.checkpoint()?;
+    Ok(store)
+}
 
 #[test]
 fn default_query_open_prefers_store_and_matches_json_results()
@@ -36,10 +56,197 @@ fn default_query_open_prefers_store_and_matches_json_results()
         serde_json::to_value(store_engine.search(request.clone())?)?,
         serde_json::to_value(json_engine.search(request)?)?,
     );
+    assert_eq!(store_engine.index_path(), json_engine.index_path());
 
     drop(store_engine);
     let reopened = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
     assert_eq!(reopened.engine_kind(), QueryEngineKind::Store);
+    Ok(())
+}
+
+#[test]
+fn store_engine_reads_the_immutable_phase2_snapshot_for_all_code_queries()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
+
+    let cache = directory.path().join("cache");
+    let store = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
+    let json = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
+    assert_eq!(store.engine_kind(), QueryEngineKind::Store);
+    assert_eq!(json.engine_kind(), QueryEngineKind::Json);
+    assert_eq!(store.index_path(), json.index_path());
+
+    let search = SearchRequest {
+        query: "UserService.list".to_owned(),
+        limits: CodeQueryLimits::default(),
+    };
+    assert_eq!(
+        serde_json::to_value(store.search(search.clone())?)?,
+        serde_json::to_value(json.search(search)?)?,
+    );
+    let callers = CallRequest {
+        symbol: "UserService.list".to_owned(),
+        limits: CodeQueryLimits::default(),
+    };
+    assert_eq!(
+        serde_json::to_value(store.callers(callers.clone())?)?,
+        serde_json::to_value(json.callers(callers)?)?,
+    );
+    let callees = CallRequest {
+        symbol: "Api.caller".to_owned(),
+        limits: CodeQueryLimits::default(),
+    };
+    assert_eq!(
+        serde_json::to_value(store.callees(callees.clone())?)?,
+        serde_json::to_value(json.callees(callees)?)?,
+    );
+    let impact = ImpactRequest {
+        symbol: "UserService.list".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits::default(),
+    };
+    assert_eq!(
+        serde_json::to_value(store.impact(impact.clone())?)?,
+        serde_json::to_value(json.impact(impact)?)?,
+    );
+    let explore = ExploreRequest {
+        symbols: vec!["Api.caller".to_owned(), "Store.callee".to_owned()],
+        root: directory.path().to_string_lossy().into_owned(),
+        limits: CodeQueryLimits::default(),
+    };
+    assert_eq!(
+        serde_json::to_value(store.explore(explore.clone())?)?,
+        serde_json::to_value(json.explore(explore)?)?,
+    );
+    let trail = NodeTrailRequest {
+        source: "Api.caller".to_owned(),
+        target: "Store.callee".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits::default(),
+    };
+    assert_eq!(
+        serde_json::to_value(store.node_trail(trail.clone())?)?,
+        serde_json::to_value(json.node_trail(trail)?)?,
+    );
+    Ok(())
+}
+
+#[test]
+fn phase2_snapshot_is_authoritative_over_the_legacy_payload_selector()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let store = SqliteStore::open(directory.path().join(STORE_FILE_NAME))?;
+    store.publish_snapshot(b"not the phase2 graph", CODE_GRAPH_SCHEMA_V1, 0, 0)?;
+    drop(store);
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
+
+    let engine = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("cache"),
+        EngineSelection::Store,
+    )?;
+    let response = engine.search(SearchRequest {
+        query: "UserService.list".to_owned(),
+        limits: CodeQueryLimits::default(),
+    })?;
+    assert!(response.results.iter().any(|hit| hit.node_id == "n:list"));
+    Ok(())
+}
+
+#[test]
+fn active_phase2_snapshot_requires_a_matching_store_reference()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
+    fs::remove_file(directory.path().join(STORE_REF_FILE_NAME))?;
+
+    let error = match open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("cache"),
+        EngineSelection::Store,
+    ) {
+        Ok(_) => return Err("active snapshot opened without store.ref".into()),
+        Err(error) => error,
+    };
+    assert_eq!(error.code(), "store_ref_missing");
+    Ok(())
+}
+
+#[test]
+fn active_phase2_snapshot_rejects_a_stale_store_reference() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
+    let reference_path = directory.path().join(STORE_REF_FILE_NAME);
+    let mut reference: StoreRef = serde_json::from_slice(&fs::read(&reference_path)?)?;
+    reference.graph_digest = "0".repeat(64);
+    fs::write(reference_path, serde_json::to_vec(&reference)?)?;
+
+    let error = match open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("cache"),
+        EngineSelection::Store,
+    ) {
+        Ok(_) => return Err("stale store.ref was accepted".into()),
+        Err(error) => error,
+    };
+    assert_eq!(error.code(), "store_ref_mismatch");
+    Ok(())
+}
+
+#[test]
+fn opened_store_reader_remains_pinned_when_the_active_selector_changes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+    let cache = directory.path().join("cache");
+    let old = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
+
+    let mut updated = GraphDocument::load(&graph_path)?;
+    updated.nodes[0].qualified_name = "UserService.renamed".to_owned();
+    fs::write(&graph_path, serde_json::to_vec(&updated)?)?;
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &updated)?;
+    GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    fs::write(
+        directory.path().join(STORE_REF_FILE_NAME),
+        serde_json::to_vec(&store.snapshot_reference()?)?,
+    )?;
+
+    let current = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
+    let old_response = old.search(SearchRequest {
+        query: "UserService.list".to_owned(),
+        limits: CodeQueryLimits::default(),
+    })?;
+    let current_response = current.search(SearchRequest {
+        query: "UserService.renamed".to_owned(),
+        limits: CodeQueryLimits::default(),
+    })?;
+    assert!(
+        old_response
+            .results
+            .iter()
+            .any(|hit| hit.node_id == "n:list")
+    );
+    assert!(
+        current_response
+            .results
+            .iter()
+            .any(|hit| hit.node_id == "n:list")
+    );
     Ok(())
 }
 

@@ -18,12 +18,16 @@ CompassQL compiler/executor. Both operate over the same indexed graph model.
 
 `compass-query` exposes an immutable `GraphEngine` boundary with two supported
 implementations: `JsonGraphEngine` for the permanent compatible JSON artifact
-and `StoreGraphEngine` for a validated `compass-store` snapshot. The typed
-query algorithms consume the same validated `GraphDocument` projection from
-either engine, so selection cannot change ranking, direction, multiplicity,
-source anchors, or public result schemas. The store implementation is the
-seam for the planned bounded projection/streaming reads; its current local
-slice materializes the validated projection while preserving that contract.
+and `StoreGraphEngine` for a validated `compass-store` snapshot. The store
+engine reads the active Phase 2 graph-index snapshot, validates its manifest
+and typed `store.ref`, and pins the resulting projection to that immutable
+realization. The typed query algorithms consume the same validated
+`GraphDocument` projection from either engine, so selection cannot change
+ranking, direction, multiplicity, source anchors, or public result schemas.
+Both engines canonicalize graph bytes before deriving the disposable query
+index key, so equivalent JSON/store openings share cache identity. The local
+slice still materializes a bounded projection; bounded point-read plans and
+streaming execution remain the next query phase.
 
 ## Load once into the query model
 
@@ -50,14 +54,16 @@ it.
 
 The typed `search`, `callers`, `callees`, `impact`, `explore`, and `node`
 commands open through `compass_query::open`. The default selector looks for a
-validated `compass-store.sqlite3` sidecar and optional `store.ref` beside the
-requested graph and reads its content-addressed snapshot; if no sidecar exists,
-it opens `graph.json`. A present reference is checked against the store
-identity, manifest, and graph digest before query state is created. `--engine
-json` always uses the compatible JSON engine, while `--engine store` requires a
-readable store and reports corruption or absence explicitly. The query index
-remains disposable and keyed by the snapshot bytes, so JSON and store openings
-share the same cache identity and deterministic result path.
+validated `compass-store.sqlite3` sidecar beside the requested graph. A sidecar
+with an active Phase 2 selector must also have a matching `store.ref`; if no
+sidecar exists, the permanent `graph.json` engine is used. A present reference
+is checked against store identity, snapshot ID, manifest digest, and graph
+digest before query state is created. `--engine json` always uses the
+compatible JSON engine without opening the database, while `--engine store`
+requires a readable, referenced store and reports corruption or absence
+explicitly. The query index remains disposable and keyed by canonical snapshot
+bytes, so JSON and store openings share the same cache identity and
+deterministic result path.
 
 ## Focused discovery path
 

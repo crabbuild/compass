@@ -1,10 +1,11 @@
 # Executable Compass store implementation plan
 
-**Status:** In progress. Phases 0–2 and the local Phase 3 SQLite
-shadow-publication slice are implemented. The branch also retains the initial
-Phase 4 typed query-engine selection. Remote adapters, fault-injected crash
-qualification, general garbage collection, and measured performance claims
-remain follow-on work.
+**Status:** In progress. Phases 0–3 and the local Phase 4 snapshot-backed
+query-routing slice are implemented. The typed query path now reads the
+immutable Phase 2 graph snapshot and validates its reference before building
+query state. Bounded projection execution, remote adapters, fault-injected
+crash qualification, general garbage collection, and measured performance
+claims remain follow-on work.
 
 > **Who this page is for:** implementers and reviewers delivering
 > `compass-store`, store-backed graph snapshots, backend adapters, and the
@@ -67,15 +68,16 @@ Acceptance criteria for this slice are deliberately concrete:
    lexicographic scans/cursors, CAS, immutable retry, snapshot validation, and
    reopen tests.
 2. `cargo test -p compass-query --test store_engine --locked` proves default
-   store selection, explicit JSON selection, explicit-store failure, reopen,
-   and JSON-equivalent search results.
+   store selection, immutable Phase 2 snapshot authority, explicit JSON
+   selection, reference failures, pinned readers, cache identity, and
+   JSON-equivalent typed query results.
 3. The core publication regression test proves the sidecar is present,
    reopenable, digest-valid, and byte-identical to `graph.json` after a local
    build.
 4. Deleting or corrupting the sidecar never changes the JSON artifact; default
-   query opening falls back only when the sidecar is absent, while explicit
-   store selection fails with a typed error and a present malformed `store.ref`
-   fails closed.
+   query opening falls back only when the sidecar is absent, while an active
+   Phase 2 snapshot without a matching `store.ref` and explicit store
+   selection fail with typed errors.
 
 The initial local slice above does not claim redb/PostgreSQL/DynamoDB adapters,
 remote retry semantics, general garbage collection, or a measured performance
@@ -551,14 +553,17 @@ Disable shadow writes and remove unpublished databases. Existing
 `graph.json` generations remain valid. Do not attempt to repair a partially
 published store by rewriting its immutable objects; rebuild a new snapshot.
 
-## Phase 4: Route local queries to the store engine
+## Phase 4: Route local queries to the store engine (implemented local slice)
 
 ### Context and objective
 
 After shadow publication proves equivalence and durability, local readers can
-prefer the co-published store snapshot. The goal is faster cold open and
-bounded memory without changing public query results. JSON remains selectable
-and is used whenever the caller explicitly supplies a JSON graph.
+prefer the co-published store snapshot. The local slice now reads the
+immutable Phase 2 snapshot, validates the active selector and `store.ref`, and
+compares every typed code-query operation with the JSON engine. The query
+algorithms still materialize a bounded `GraphDocument`; projection/streaming
+execution and performance qualification remain follow-on work. JSON remains
+selectable and is used whenever the caller explicitly supplies a JSON graph.
 
 ### Prerequisite inputs
 
@@ -599,6 +604,12 @@ and is used whenever the caller explicitly supplies a JSON graph.
    expose `store` only through a separately reviewed CLI/configuration change.
    Store-only generations must support bounded deterministic JSON export.
 
+The shipped local slice implements items 1–2 for the typed code-query path,
+uses canonical graph bytes for shared disposable-index identity, and pins an
+opened reader to the immutable snapshot it selected. Items 3, 6, 8, and 9
+remain the next streaming/performance slice; the broader CompassQL and MCP
+engine plumbing remains explicitly gated on that work.
+
 ### Required tests
 
 - every public query produces the same ordered machine output under JSON and
@@ -620,18 +631,23 @@ and is used whenever the caller explicitly supplies a JSON graph.
 - `store` avoids full JSON materialization but can export byte-identical
   canonical JSON on demand.
 
-### Acceptance criteria
+### Acceptance criteria for the shipped local slice
 
-- Cross-engine differential tests cover typed search, code search, traversal,
-  impact, affected, CompassQL, MCP, and JSON export.
-- CompassQL TCK, OpenCypher TCK, CLI product tests, product-boundary check, and
-  fixture-only code-graph qualification pass.
-- `PERFORMANCE.md` contains reproducible before/after commands and results for
-  cold open, peak RSS, common queries, no-change update, and small-change
-  update, with `json`, `store`, and `dual` measured separately.
-- The default switches to store only if correctness is equal and agreed
-  performance thresholds are met; otherwise shadow mode remains available
-  without blocking later adapter development.
+- `compass-query` differential tests cover typed search, callers, callees,
+  impact, explore, node trails, explicit JSON isolation, stale references,
+  immutable snapshot authority, and reader pinning.
+- The default typed query path selects the immutable store snapshot only when
+  its active selector and `store.ref` validate; malformed or missing references
+  fail closed, while explicit JSON remains independent.
+- The disposable query index uses one canonical graph identity for JSON and
+  store openings, so equivalent engines share cache state and ordered results.
+- Existing CompassQL TCK, OpenCypher TCK, CLI product tests, product-boundary
+  check, and fixture-only code-graph qualification remain green.
+
+Full cross-engine differential coverage for CompassQL/MCP, bounded projection
+plans, and `PERFORMANCE.md` cold-open/RSS/query measurements are explicit
+follow-on gates before claiming a streaming performance improvement or adding
+additional storage profiles.
 - Documentation clearly states that `graph.json` is a compatible permanent
   engine, not a deprecated fallback.
 
