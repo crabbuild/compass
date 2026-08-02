@@ -131,6 +131,90 @@ impl RedbStore {
         self.read_only
     }
 
+    /// Copy a validated redb database to a new backup path.
+    ///
+    /// Callers should stop application writers before invoking this method.
+    /// The copied database is reopened read-only and its schema is validated
+    /// before the method returns.
+    pub fn backup_to(&self, destination: impl AsRef<Path>) -> Result<(), StoreError> {
+        if !self.read_only {
+            return Err(StoreError::Unsupported(
+                "redb backup requires a read-only reopen after writers close".to_owned(),
+            ));
+        }
+        let destination = destination.as_ref();
+        if destination == self.path {
+            return Err(StoreError::InvalidFormat(
+                "redb backup destination must differ from the live store".to_owned(),
+            ));
+        }
+        if destination.exists() {
+            return Err(StoreError::InvalidFormat(format!(
+                "redb backup destination already exists: {}",
+                destination.display()
+            )));
+        }
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|source| StoreError::Io {
+                operation: "create_redb_backup_parent",
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        fs::copy(&self.path, destination).map_err(|source| StoreError::Io {
+            operation: "copy_redb_backup",
+            path: destination.to_path_buf(),
+            source,
+        })?;
+        if let Err(error) =
+            Self::open_read_only(destination).and_then(|store| store.verify_schema())
+        {
+            let _ = fs::remove_file(destination);
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// Restore a validated redb backup into a new path without overwriting it.
+    pub fn restore_from(
+        backup: impl AsRef<Path>,
+        destination: impl AsRef<Path>,
+    ) -> Result<(), StoreError> {
+        let backup = backup.as_ref();
+        let destination = destination.as_ref();
+        if backup == destination {
+            return Err(StoreError::InvalidFormat(
+                "redb restore destination must differ from the backup".to_owned(),
+            ));
+        }
+        if destination.exists() {
+            return Err(StoreError::InvalidFormat(format!(
+                "redb restore destination already exists: {}",
+                destination.display()
+            )));
+        }
+        Self::open_read_only(backup)?.verify_schema()?;
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|source| StoreError::Io {
+                operation: "create_redb_restore_parent",
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        fs::copy(backup, destination).map_err(|source| StoreError::Io {
+            operation: "copy_redb_restore",
+            path: destination.to_path_buf(),
+            source,
+        })?;
+        if let Err(error) =
+            Self::open_read_only(destination).and_then(|store| store.verify_schema())
+        {
+            let _ = fs::remove_file(destination);
+            return Err(error);
+        }
+        Ok(())
+    }
+
     fn initialize_schema(&self) -> Result<(), StoreError> {
         self.with_write(|transaction| {
             let mut metadata = transaction

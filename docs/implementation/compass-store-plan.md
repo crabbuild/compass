@@ -1,11 +1,10 @@
 # Executable Compass store implementation plan
 
-**Status:** In progress. Phases 0–4 and the local Phase 5 redb adapter slice
-are implemented. The typed query path now accepts any common-contract store
-adapter, while the local CLI remains SQLite/JSON-only until packaging policy
-selects another backend. Bounded projection execution, remote adapters,
-fault-injected crash qualification, general garbage collection, and measured
-performance claims remain follow-on work.
+**Status:** Phase 9 local release slice in progress. Phases 0–5 and the local
+Phase 9 operational/qualification work are implemented in this worktree. The
+CLI publishes SQLite plus permanent `graph.json`; redb is a library-only
+adapter. PostgreSQL, DynamoDB, hosted operation, general garbage collection,
+and service quotas remain explicitly deferred until their phases are complete.
 
 > **Who this page is for:** implementers and reviewers delivering
 > `compass-store`, store-backed graph snapshots, backend adapters, and the
@@ -38,6 +37,12 @@ At completion, Compass has:
 - adapter conformance, cross-engine differential tests, fault injection,
   garbage collection, backup, and recovery coverage; and
 - measured performance evidence before any release claim.
+
+The current local release boundary is intentionally smaller than the eventual
+cloud program: logical formats are versioned and validated, while physical
+adapter files and query caches can be rebuilt. See the [operations guide](../guides/compass-store-operations.md)
+for locations, backups, restore, quotas, recovery, and the first `0.3.x`
+upgrade window.
 
 ## Shipped initial slice in this branch
 
@@ -1038,6 +1043,30 @@ performance, packaging, and operational evidence.
 8. Add release-visible changes to `CHANGELOG.md` and user actions to
    `MIGRATION.md`.
 
+### Local `0.3.x` implementation in this phase
+
+The local release work closes the first support window without claiming cloud
+readiness:
+
+- `compass store status|validate|backup|restore` validates the co-published
+  SQLite generation and writes digest-bound backup bundles;
+- `scripts/rebuild_compass_store.sh` provides an explicit, rollback-preserving
+  hard-cut rebuild path;
+- `compass-store-qualification` and
+  `scripts/qualify_compass_store_release.sh` measure SQLite/redb graph sizes,
+  peak RSS, bytes, request counts, database size, write amplification, GC
+  state, and CLI clean/no-change/small-change/cold-query behavior;
+- the harness compares canonical JSON, typed query responses, and CompassQL
+  results and runs the adapter, corruption, concurrency, snapshot, packaging,
+  and product-boundary gates; and
+- the operations, compatibility, migration, security, support, and
+  configuration references declare SQLite as the local CLI backend, redb as a
+  library-only adapter, and PostgreSQL/DynamoDB as deferred service phases.
+
+The generated qualification directory is external evidence and is never
+committed. Run the harness again on the final release commit after all docs and
+release metadata have settled.
+
 ### Release acceptance criteria
 
 - Canonical JSON exported from every released engine is byte-identical for the
@@ -1138,5 +1167,6 @@ without inspecting backend internals:
 - [Compatibility policy](../../COMPATIBILITY.md)
 - [Performance qualification](../../PERFORMANCE.md)
 
-**Next step:** begin Phase 0 with an API/encoding review and land the memory
-reference implementation before adding any database dependency.
+**Next step:** after the local release is accepted, start the separately scoped
+PostgreSQL service adapter only with endpoint, credential, TLS, quota, lease,
+and tenant-isolation evidence. Do not widen the local CLI backend implicitly.

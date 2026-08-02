@@ -159,6 +159,7 @@ fn redb_database_file_can_be_backed_up_after_reopen() -> Result<(), Box<dyn Erro
     let namespace = NamespaceId::new(b"tenant")?;
     let partition = PartitionKey::new(b"records")?;
     let key = Key::new(b"one")?;
+    let restored_path = directory.path().join("restored.redb");
     {
         let store = RedbStore::open(&path)?;
         store.put(
@@ -169,12 +170,24 @@ fn redb_database_file_can_be_backed_up_after_reopen() -> Result<(), Box<dyn Erro
             WriteCondition::Missing,
         )?;
     }
-    fs::copy(&path, &backup)?;
+    RedbStore::open_read_only(&path)?.backup_to(&backup)?;
     let restored = RedbStore::open_read_only(&backup)?;
     let restored_entry = restored
         .get(&namespace, &partition, &key)?
         .ok_or("restored redb value is missing")?;
     assert_eq!(restored_entry.value, b"value");
+    RedbStore::restore_from(&backup, &restored_path)?;
+    assert_eq!(
+        RedbStore::open_read_only(&restored_path)?
+            .get(&namespace, &partition, &key)?
+            .ok_or("restored redb copy is missing")?
+            .value,
+        b"value"
+    );
+    let corrupt = directory.path().join("corrupt.redb");
+    fs::copy(&backup, &corrupt)?;
+    fs::write(&corrupt, b"not a redb database")?;
+    assert!(RedbStore::restore_from(&corrupt, directory.path().join("rejected.redb")).is_err());
     Ok(())
 }
 

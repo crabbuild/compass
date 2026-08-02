@@ -31,3 +31,28 @@ Follow [SECURITY.md](SECURITY.md) and use [GitHub private vulnerability reportin
 ## Support boundaries
 
 The project doesn't offer guaranteed response times, private implementation consulting, or support for modified binaries and unsupported releases. Community members may still help when a question includes enough public information to reproduce the behavior.
+
+## Store troubleshooting
+
+For a local output, collect:
+
+```bash
+compass store status compass-out --format json
+compass store validate compass-out --format json
+```
+
+If the graph is valid and only the sidecar fails, use the JSON engine while
+rebuilding:
+
+```bash
+compass search "symbol" --graph compass-out/graph.json --engine json --format json
+scripts/rebuild_compass_store.sh . --out compass-out --compass compass
+```
+
+Back up before any repair and restore into a new directory. Do not edit SQLite
+tables, copy a redb file while it is open for writing, or report a failed
+validation as an empty graph. Include the Compass version, platform, schema
+identifiers, sanitized status/validation output, and exact command. Remove
+databases, backup bundles, private source, credentials, `.env` files, and
+machine-specific paths from public reports. PostgreSQL, DynamoDB, and cloud
+store endpoints are not supported in this local release.

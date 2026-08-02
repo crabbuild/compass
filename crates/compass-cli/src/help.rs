@@ -82,6 +82,7 @@ const GROUPS: &[Group] = &[
             "cache-check",
             "merge-chunks",
             "merge-semantic",
+            "store",
         ],
     },
     Group {
@@ -164,6 +165,17 @@ const PAGES: &[Page] = &[
         "Incrementally refresh the local knowledge graph",
         ["compass update [PATH] [OPTIONS]"],
         "Arguments:\n  [PATH]                       Project directory to scan [default: saved root or .]\n\nOptions:\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --no-program                Build only the structural graph; omit program.json\n  --out <DIR>                  Write artifacts below this directory\n  --force                      Rebuild even when inputs appear unchanged\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules while scanning\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --resolution <NUMBER>        Community-detection resolution [default: 1.0]\n  --exclude-hubs <NUMBER>      Exclude high-degree hubs from clustering\n  --timing                     Print stage timings\n\nExamples:\n  compass update\n  compass update ./services/api --force --timing\n  compass update ./services/api --no-program --no-cluster\n  compass update --program-artifact index.scip\n\nTips:\n  Use `compass watch` to refresh the graph whenever project files change."
+    ),
+    page!(
+        "store",
+        "Validate, back up, and restore the local graph store",
+        [
+            "compass store status [PATH] [--format text|json]",
+            "compass store validate [PATH] [--format text|json]",
+            "compass store backup [PATH] --output DIR [--format text|json]",
+            "compass store restore --from DIR --into DIR [--format text|json]"
+        ],
+        "Options:\n  [PATH]                   Project or compass-out directory [default: compass-out]\n  --output DIR             New backup directory\n  --from DIR               Backup directory to restore\n  --into DIR               New output directory for a restore\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass store status --format json\n  compass store validate compass-out\n  compass store backup compass-out --output /safe/backups/project\n  compass store restore --from /safe/backups/project --into restored-out\n\nNotes:\n  Backup and restore are SQLite local operations. Stop writers before backup; restore only into a new or empty output directory. A stale or corrupt sidecar remains rebuildable with `compass update --force`. The optional redb adapter is library-only and is not selected by this command."
     ),
     page!(
         "extract",
@@ -1047,7 +1059,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 45);
+        assert_eq!(roots.len(), 46);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");
