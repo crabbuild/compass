@@ -14,7 +14,8 @@ use compass_model::code_graph::{
 use compass_model::identity::edge_id;
 use compass_model::provenance::{
     EndpointRewriteEvidence, EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin,
-    SEMANTIC_LAYER_EXTRACTOR, TRUSTED_EDGE_RECORD_ATTRIBUTE, append_endpoint_rewrite_evidence,
+    NODE_PROVENANCE_ANCHOR_ATTRIBUTE, SEMANTIC_LAYER_EXTRACTOR, TRUSTED_EDGE_RECORD_ATTRIBUTE,
+    append_endpoint_rewrite_evidence,
 };
 use compass_model::validate_code_graph;
 use serde_json::{Map, Value, json};
@@ -109,6 +110,88 @@ fn raw_file_node(root: &Path, id: &str, relative: &str) -> RawNodeRecord {
             ("source_anchor".to_owned(), anchor_in(root, relative, 0)),
         ]),
     }
+}
+
+#[test]
+fn node_navigation_extent_preserves_and_contains_exact_provenance()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let definition = json!({
+        "file": root.join("src/lib.rs"),
+        "startByte": 10,
+        "endByte": 50,
+        "startLine": 2,
+        "startColumn": 0,
+        "endLine": 5,
+        "endColumn": 1
+    });
+    let identifier = json!({
+        "file": root.join("src/lib.rs"),
+        "startByte": 20,
+        "endByte": 23,
+        "startLine": 3,
+        "startColumn": 4,
+        "endLine": 3,
+        "endColumn": 7
+    });
+    let mut method = raw_node(root, "method", "run", 10);
+    method
+        .attributes
+        .insert("source_anchor".to_owned(), definition.clone());
+    method.attributes.insert(
+        NODE_PROVENANCE_ANCHOR_ATTRIBUTE.to_owned(),
+        identifier.clone(),
+    );
+    let graph = normalize_v1(
+        Extraction {
+            nodes: vec![method],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+    let mut published_definition = definition.clone();
+    published_definition["file"] = json!("src/lib.rs");
+    let mut published_identifier = identifier.clone();
+    published_identifier["file"] = json!("src/lib.rs");
+    assert_eq!(
+        serde_json::to_value(graph.nodes[0].source.as_ref())?,
+        published_definition
+    );
+    assert_eq!(
+        serde_json::to_value(graph.nodes[0].evidence[0].anchors.first())?,
+        published_identifier
+    );
+
+    let mut invalid = raw_node(root, "invalid", "invalid", 10);
+    invalid
+        .attributes
+        .insert("source_anchor".to_owned(), definition);
+    invalid.attributes.insert(
+        NODE_PROVENANCE_ANCHOR_ATTRIBUTE.to_owned(),
+        json!({
+            "file": root.join("src/lib.rs"),
+            "startByte": 49,
+            "endByte": 55,
+            "startLine": 5,
+            "startColumn": 0,
+            "endLine": 5,
+            "endColumn": 6
+        }),
+    );
+    let invalid_result = normalize_v1(
+        Extraction {
+            nodes: vec![invalid],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    );
+    let error = match invalid_result {
+        Ok(_) => return Err("out-of-range provenance unexpectedly normalized".into()),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("not contained"));
+    Ok(())
 }
 
 #[test]

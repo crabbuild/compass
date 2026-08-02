@@ -5,6 +5,7 @@ import {
   SourceLocationSchema,
   type SourceLocation
 } from "@compass/viewer/contracts/graph";
+import { fullLineSourceRange } from "../views/sourceRange";
 
 const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
 
@@ -89,20 +90,9 @@ export function revealSource(
   document: vscode.TextDocument,
   source: SourceLocation
 ): void {
-  const start = source.startByte !== undefined
-    ? document.positionAt(source.startByte)
-    : new vscode.Position(Math.max(0, (source.startLine ?? 1) - 1), 0);
-  const recordedEndLine = source.endLine ?? source.startLine;
-  const end = recordedEndLine !== undefined
-    ? document.validatePosition(
-      new vscode.Position(Math.max(start.line, recordedEndLine), 0)
-    )
-    : source.endByte !== undefined
-      ? document.positionAt(source.endByte)
-      : start;
-  const range = new vscode.Range(start, end);
+  const range = fullLineSourceRange(document, source);
   editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-  editor.selection = new vscode.Selection(start, end);
+  editor.selection = new vscode.Selection(range.start, range.end);
 }
 
 function defaultGitSourceReader(

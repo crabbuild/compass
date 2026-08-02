@@ -4,11 +4,11 @@ use std::time::Instant;
 
 use ahash::AHashMap;
 use compass_languages::{
-    BindingFact, CandidateRelation, DeclarationFact, EvidenceLimits, HierarchyConstraint,
-    OccurrenceFact, ReceiverDispatchStrategy, RelationshipCandidate, SemanticEvidenceBatch,
-    make_id, validate_evidence,
+    BindingFact, CandidateRelation, DeclarationFact, EvidenceLimits, EvidenceRange,
+    HierarchyConstraint, OccurrenceFact, ReceiverDispatchStrategy, RelationshipCandidate,
+    SemanticEvidenceBatch, make_id, validate_evidence,
 };
-use compass_model::provenance::OCCURRENCE_RULE_ATTRIBUTE;
+use compass_model::provenance::{NODE_PROVENANCE_ANCHOR_ATTRIBUTE, OCCURRENCE_RULE_ATTRIBUTE};
 use serde_json::{Map, Value};
 
 use compass_languages::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
@@ -101,6 +101,7 @@ pub struct UniversalResolutionIndex {
     bindings: BTreeMap<String, compass_languages::BindingFact>,
     candidates: BTreeMap<String, RelationshipCandidate>,
     scopes: BTreeMap<String, compass_languages::ScopeFact>,
+    definition_ranges: BTreeMap<String, EvidenceRange>,
     by_qualified: AHashMap<(String, String), Vec<String>>,
     by_module_name: AHashMap<(String, String, String), Vec<String>>,
     by_scope_name: AHashMap<(String, String, String), Vec<String>>,
@@ -169,6 +170,7 @@ impl UniversalResolutionIndex {
             "universal validation and fact collection",
             &mut profile_started,
         );
+        let definition_ranges = unique_definition_ranges(&declarations, &scopes);
         for (name, count, limit) in [
             ("declarations", declarations.len(), limits.declarations),
             ("bindings", bindings.len(), limits.bindings),
@@ -465,6 +467,7 @@ impl UniversalResolutionIndex {
             bindings,
             candidates,
             scopes,
+            definition_ranges,
             by_qualified,
             by_module_name,
             by_scope_name,
@@ -943,8 +946,14 @@ impl UniversalResolutionIndex {
             .collect::<BTreeSet<_>>();
         for declaration in self.declarations.values() {
             let graph_node_id = &graph_ids[&declaration.id];
+            let definition_range = self.definition_ranges.get(&declaration.id);
             if let Some(index) = existing_positions.get(graph_node_id) {
-                project_declaration_onto_node(&mut nodes[*index], declaration, graph_node_id);
+                project_declaration_onto_node(
+                    &mut nodes[*index],
+                    declaration,
+                    definition_range,
+                    graph_node_id,
+                );
                 if let Some(discriminator) = overloads.get(&declaration.id) {
                     nodes[*index].attributes.insert(
                         "overload_discriminator".to_owned(),
@@ -952,7 +961,7 @@ impl UniversalResolutionIndex {
                     );
                 }
             } else if existing_nodes.insert(graph_node_id.clone()) {
-                let mut node = declaration_node(declaration, graph_node_id);
+                let mut node = declaration_node(declaration, definition_range, graph_node_id);
                 if let Some(discriminator) = overloads.get(&declaration.id) {
                     node.attributes.insert(
                         "overload_discriminator".to_owned(),
@@ -2302,16 +2311,56 @@ fn insert_unique<T>(map: &mut BTreeMap<String, T>, id: String, value: T) -> Resu
     Ok(())
 }
 
+fn unique_definition_ranges(
+    declarations: &BTreeMap<String, DeclarationFact>,
+    scopes: &BTreeMap<String, compass_languages::ScopeFact>,
+) -> BTreeMap<String, EvidenceRange> {
+    let mut ranges = BTreeMap::new();
+    let mut ambiguous = BTreeSet::new();
+    for scope in scopes.values() {
+        let Some(owner_id) = scope.owner_declaration_id.as_ref() else {
+            continue;
+        };
+        let Some(declaration) = declarations.get(owner_id) else {
+            continue;
+        };
+        if !range_contains(&scope.range, &declaration.range) || ambiguous.contains(owner_id) {
+            continue;
+        }
+        if ranges
+            .insert(owner_id.clone(), scope.range.clone())
+            .is_some()
+        {
+            ranges.remove(owner_id);
+            ambiguous.insert(owner_id.clone());
+        }
+    }
+    ranges
+}
+
+fn range_contains(outer: &EvidenceRange, inner: &EvidenceRange) -> bool {
+    outer.source_file == inner.source_file
+        && outer.start_byte <= inner.start_byte
+        && inner.end_byte <= outer.end_byte
+        && (outer.start_line, outer.start_column) <= (inner.start_line, inner.start_column)
+        && (inner.end_line, inner.end_column) <= (outer.end_line, outer.end_column)
+}
+
 fn project_declaration_onto_node(
     node: &mut NodeRecord,
     declaration: &DeclarationFact,
+    definition_range: Option<&EvidenceRange>,
     graph_node_id: &str,
 ) {
     node.attributes
-        .extend(declaration_node(declaration, graph_node_id).attributes);
+        .extend(declaration_node(declaration, definition_range, graph_node_id).attributes);
 }
 
-fn declaration_node(declaration: &DeclarationFact, graph_node_id: &str) -> NodeRecord {
+fn declaration_node(
+    declaration: &DeclarationFact,
+    definition_range: Option<&EvidenceRange>,
+    graph_node_id: &str,
+) -> NodeRecord {
     let label = match declaration.kind.as_str() {
         "function" => format!("{}()", declaration.name),
         "method" => format!(".{}()", declaration.name),
@@ -2404,10 +2453,32 @@ fn declaration_node(declaration: &DeclarationFact, graph_node_id: &str) -> NodeR
             Value::String(module_or_package.clone()),
         );
     }
+    if let Some(definition_range) = definition_range.filter(|range| *range != &declaration.range) {
+        attributes.insert(
+            "source_anchor".to_owned(),
+            source_anchor_value(definition_range),
+        );
+        attributes.insert(
+            NODE_PROVENANCE_ANCHOR_ATTRIBUTE.to_owned(),
+            source_anchor_value(&declaration.range),
+        );
+    }
     NodeRecord {
         id: graph_node_id.to_owned(),
         attributes,
     }
+}
+
+fn source_anchor_value(range: &EvidenceRange) -> Value {
+    serde_json::json!({
+        "file": range.source_file,
+        "startByte": range.start_byte,
+        "endByte": range.end_byte,
+        "startLine": range.start_line,
+        "startColumn": range.start_column,
+        "endLine": range.end_line,
+        "endColumn": range.end_column,
+    })
 }
 
 fn relation_name(relation: CandidateRelation) -> &'static str {

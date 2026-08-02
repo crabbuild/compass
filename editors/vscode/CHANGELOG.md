@@ -2,6 +2,8 @@
 
 ## 0.2.0
 
+- Highlight complete source lines when opening a code-graph node, including the
+  full final line, instead of selecting only the symbol's byte range.
 - Hard-require current Compass community-detail capabilities for the graph
   workflow instead of entering a partially compatible viewer.
 - Speed large immutable graph snapshots with copy-on-write clones where the
