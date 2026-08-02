@@ -1,5 +1,9 @@
 use std::io::{self, IsTerminal, Write};
-use std::process::ExitCode;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+use std::process::{Command, ExitCode};
+
+const ALLOCATOR_CONFIGURED: &str = "COMPASS_INTERNAL_ALLOCATOR_CONFIGURED";
 
 #[global_allocator]
 static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -10,6 +14,30 @@ fn main() -> ExitCode {
         arguments.first().and_then(|argument| argument.to_str()),
         Some("extract" | "update")
     );
+    if one_shot_build
+        && std::env::var_os("MIMALLOC_PURGE_DELAY").is_none()
+        && std::env::var_os(ALLOCATOR_CONFIGURED).is_none()
+        && let Ok(executable) = std::env::current_exe()
+    {
+        let mut command = Command::new(executable);
+        command
+            .args(&arguments)
+            .env("MIMALLOC_PURGE_DELAY", "100")
+            .env(ALLOCATOR_CONFIGURED, "1");
+        #[cfg(unix)]
+        {
+            let _error = command.exec();
+        }
+        #[cfg(not(unix))]
+        if let Ok(status) = command.status() {
+            return ExitCode::from(
+                status
+                    .code()
+                    .and_then(|code| u8::try_from(code).ok())
+                    .unwrap_or(1),
+            );
+        }
+    }
     let events = match compass_cli::ide_contract::take_jsonl_events(&mut arguments) {
         Ok(enabled) => enabled,
         Err(error) => {

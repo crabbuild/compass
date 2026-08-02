@@ -1,14 +1,16 @@
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::time::Instant;
 
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use compass_languages::{
     BindingFact, CandidateRelation, DeclarationFact, EvidenceLimits, EvidenceRange,
     HierarchyConstraint, OccurrenceFact, ReceiverDispatchStrategy, RelationshipCandidate,
     SemanticEvidenceBatch, make_id, validate_evidence,
 };
 use compass_model::provenance::{NODE_PROVENANCE_ANCHOR_ATTRIBUTE, OCCURRENCE_RULE_ATTRIBUTE};
+use rayon::prelude::*;
 use serde_json::{Map, Value};
 
 use compass_languages::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
@@ -96,11 +98,11 @@ pub enum ResolutionDecision {
 }
 
 pub struct UniversalResolutionIndex {
-    declarations: BTreeMap<String, DeclarationFact>,
-    occurrences: BTreeMap<String, OccurrenceFact>,
-    bindings: BTreeMap<String, compass_languages::BindingFact>,
-    candidates: BTreeMap<String, RelationshipCandidate>,
-    scopes: BTreeMap<String, compass_languages::ScopeFact>,
+    declarations: AHashMap<String, DeclarationFact>,
+    occurrences: AHashMap<String, OccurrenceFact>,
+    bindings: AHashMap<String, compass_languages::BindingFact>,
+    candidates: AHashMap<String, RelationshipCandidate>,
+    scopes: AHashMap<String, compass_languages::ScopeFact>,
     definition_ranges: BTreeMap<String, EvidenceRange>,
     by_qualified: AHashMap<(String, String), Vec<String>>,
     by_module_name: AHashMap<(String, String, String), Vec<String>>,
@@ -140,16 +142,40 @@ impl UniversalResolutionIndex {
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
+        Self::new_with_inventory_owned_impl(batches, inventory_nodes, root, limits, true)
+    }
+
+    pub(crate) fn new_with_prevalidated_inventory_owned(
+        batches: Vec<SemanticEvidenceBatch>,
+        inventory_nodes: &[NodeRecord],
+        root: &Path,
+        limits: UniversalResolutionLimits,
+    ) -> Result<Self, String> {
+        Self::new_with_inventory_owned_impl(batches, inventory_nodes, root, limits, false)
+    }
+
+    fn new_with_inventory_owned_impl(
+        batches: Vec<SemanticEvidenceBatch>,
+        inventory_nodes: &[NodeRecord],
+        root: &Path,
+        limits: UniversalResolutionLimits,
+        validate_batches: bool,
+    ) -> Result<Self, String> {
         let mut profile_started = Instant::now();
         let go_module_path = read_go_module_path(root);
-        let mut declarations = BTreeMap::new();
-        let mut occurrences = BTreeMap::new();
-        let mut bindings = BTreeMap::new();
-        let mut candidates = BTreeMap::new();
-        let mut scopes = BTreeMap::new();
+        let mut declarations = AHashMap::new();
+        let mut occurrences = AHashMap::new();
+        let mut bindings = AHashMap::new();
+        let mut candidates = AHashMap::new();
+        let mut scopes = AHashMap::new();
+        if validate_batches {
+            batches.par_iter().try_for_each(|batch| {
+                validate_evidence(batch, EvidenceLimits::default())
+                    .map_err(|error| format!("invalid universal evidence: {error}"))
+            })?;
+        }
+        profile_internal("universal evidence validation", &mut profile_started);
         for batch in batches {
-            validate_evidence(&batch, EvidenceLimits::default())
-                .map_err(|error| format!("invalid universal evidence: {error}"))?;
             for fact in batch.declarations {
                 insert_unique(&mut declarations, fact.id.clone(), fact)?;
             }
@@ -166,10 +192,7 @@ impl UniversalResolutionIndex {
                 insert_unique(&mut scopes, fact.id.clone(), fact)?;
             }
         }
-        profile_internal(
-            "universal validation and fact collection",
-            &mut profile_started,
-        );
+        profile_internal("universal fact collection", &mut profile_started);
         let definition_ranges = unique_definition_ranges(&declarations, &scopes);
         for (name, count, limit) in [
             ("declarations", declarations.len(), limits.declarations),
@@ -501,7 +524,7 @@ impl UniversalResolutionIndex {
                 (id.as_str(), range)
             })
             .collect::<Vec<_>>();
-        ordered.sort_unstable_by(|(left_id, left_range), (right_id, right_range)| {
+        ordered.par_sort_unstable_by(|(left_id, left_range), (right_id, right_range)| {
             left_range
                 .map(|range| range.source_file.as_str())
                 .unwrap_or_default()
@@ -939,12 +962,14 @@ impl UniversalResolutionIndex {
             .iter()
             .enumerate()
             .map(|(index, node)| (node.id.clone(), index))
-            .collect::<BTreeMap<_, _>>();
+            .collect::<AHashMap<_, _>>();
         let mut existing_nodes = nodes
             .iter()
             .map(|node| node.id.clone())
-            .collect::<BTreeSet<_>>();
-        for declaration in self.declarations.values() {
+            .collect::<AHashSet<_>>();
+        let mut declarations = self.declarations.values().collect::<Vec<_>>();
+        declarations.sort_unstable_by(|left, right| left.id.cmp(&right.id));
+        for declaration in declarations {
             let graph_node_id = &graph_ids[&declaration.id];
             let definition_range = self.definition_ranges.get(&declaration.id);
             if let Some(index) = existing_positions.get(graph_node_id) {
@@ -975,7 +1000,7 @@ impl UniversalResolutionIndex {
         let inventory_kinds = nodes
             .iter()
             .map(|node| (node.id.clone(), node.string("symbol_kind")))
-            .collect::<BTreeMap<_, _>>();
+            .collect::<AHashMap<_, _>>();
         let mut external_positions = nodes
             .iter()
             .enumerate()
@@ -983,22 +1008,18 @@ impl UniversalResolutionIndex {
                 node.attributes.get("external").and_then(Value::as_bool) == Some(true)
             })
             .map(|(index, node)| (node.id.clone(), index))
-            .collect::<BTreeMap<_, _>>();
-        let mut emitted_edges = BTreeSet::new();
+            .collect::<AHashMap<_, _>>();
         let candidate_ids = self.candidate_ids();
         profile_internal("universal candidate ordering", &mut profile_started);
-        for candidate_id in candidate_ids {
+        let decisions = candidate_ids
+            .into_par_iter()
+            .map(|candidate_id| (candidate_id, self.resolve(candidate_id)))
+            .collect::<Vec<_>>();
+        profile_internal("universal candidate decisions", &mut profile_started);
+        let mut resolved_targets = Vec::with_capacity(decisions.len());
+        for (candidate_id, decision) in decisions {
             let candidate = &self.candidates[candidate_id];
-            let Some(source) = self
-                .declarations
-                .get(&candidate.source_declaration_id)
-                .map(|declaration| graph_ids[&declaration.id].clone())
-            else {
-                continue;
-            };
-            let (target, resolution_rule, target_kind, target_site) = match self
-                .resolve(candidate_id)
-            {
+            let (target, resolution_rule, target_kind, target_site) = match decision {
                 ResolutionDecision::Resolved {
                     declaration_id,
                     evidence,
@@ -1068,82 +1089,98 @@ impl UniversalResolutionIndex {
                 }
                 ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved => continue,
             };
-            let (source, target) = if candidate.relation == CandidateRelation::Contains {
-                (source, target)
-            } else if self.occurrence(candidate).is_some_and(|occurrence| {
-                occurrence.role == compass_languages::SemanticRole::Receiver
-            }) {
-                (target, source)
-            } else {
-                (source, target)
-            };
-            let exact_target = candidate
-                .constraints
-                .exact_target_declaration_id
-                .as_deref()
-                .and_then(|id| self.declarations.get(id));
-            let relation = if self.occurrence(candidate).is_some_and(|occurrence| {
-                occurrence.role == compass_languages::SemanticRole::Receiver
-            }) {
-                "method"
-            } else if candidate.language == "go"
-                && candidate.relation == CandidateRelation::Calls
-                && target_kind
-                    .as_deref()
-                    .is_some_and(|kind| matches!(kind, "struct" | "interface" | "type_alias"))
-            {
-                "references"
-            } else {
-                relation_name(candidate.relation)
-            };
-            let site = self
-                .occurrence(candidate)
-                .map(|occurrence| &occurrence.range)
-                .or_else(|| exact_target.map(|target| &target.range))
-                .or_else(|| {
-                    matches!(
-                        candidate.relation,
-                        CandidateRelation::Contains | CandidateRelation::Owns
-                    )
-                    .then_some(target_site)
-                    .flatten()
-                })
-                .or_else(|| {
-                    self.declarations
-                        .get(&candidate.source_declaration_id)
-                        .map(|declaration| &declaration.range)
-                });
-            let Some(site) = site else { continue };
-            let key = (
-                source.clone(),
-                target.clone(),
-                relation.to_owned(),
-                site.source_file.clone(),
-                site.start_byte,
-                site.end_byte,
-                candidate.id.clone(),
-            );
-            if !emitted_edges.insert(key) || source == target {
-                continue;
-            }
-            edges.push(materialized_edge(
-                source,
+            resolved_targets.push((
+                candidate_id,
                 target,
-                relation,
-                candidate,
-                self.occurrence(candidate),
-                candidate
-                    .binding_id
-                    .as_deref()
-                    .and_then(|binding_id| self.bindings.get(binding_id)),
-                target_kind.as_deref(),
-                target_site.map(|range| range.source_file.as_str()),
-                site,
                 resolution_rule,
-                &candidate.language,
+                target_kind,
+                target_site,
             ));
         }
-        profile_internal("universal candidate resolution", &mut profile_started);
+        profile_internal("universal target projection", &mut profile_started);
+        let materialized = resolved_targets
+            .into_par_iter()
+            .filter_map(
+                |(candidate_id, target, resolution_rule, target_kind, target_site)| {
+                    let candidate = &self.candidates[candidate_id];
+                    let source = self
+                        .declarations
+                        .get(&candidate.source_declaration_id)
+                        .map(|declaration| graph_ids[&declaration.id].clone())?;
+                    let (source, target) = if candidate.relation == CandidateRelation::Contains {
+                        (source, target)
+                    } else if self.occurrence(candidate).is_some_and(|occurrence| {
+                        occurrence.role == compass_languages::SemanticRole::Receiver
+                    }) {
+                        (target, source)
+                    } else {
+                        (source, target)
+                    };
+                    let exact_target = candidate
+                        .constraints
+                        .exact_target_declaration_id
+                        .as_deref()
+                        .and_then(|id| self.declarations.get(id));
+                    let relation = if self.occurrence(candidate).is_some_and(|occurrence| {
+                        occurrence.role == compass_languages::SemanticRole::Receiver
+                    }) {
+                        "method"
+                    } else if candidate.language == "go"
+                        && candidate.relation == CandidateRelation::Calls
+                        && target_kind.as_deref().is_some_and(|kind| {
+                            matches!(kind, "struct" | "interface" | "type_alias")
+                        })
+                    {
+                        "references"
+                    } else {
+                        relation_name(candidate.relation)
+                    };
+                    let site = self
+                        .occurrence(candidate)
+                        .map(|occurrence| &occurrence.range)
+                        .or_else(|| exact_target.map(|target| &target.range))
+                        .or_else(|| {
+                            matches!(
+                                candidate.relation,
+                                CandidateRelation::Contains | CandidateRelation::Owns
+                            )
+                            .then_some(target_site)
+                            .flatten()
+                        })
+                        .or_else(|| {
+                            self.declarations
+                                .get(&candidate.source_declaration_id)
+                                .map(|declaration| &declaration.range)
+                        });
+                    let site = site?;
+                    // Candidate IDs are unique by construction and every candidate is
+                    // visited exactly once, so a second full edge-identity set cannot
+                    // remove duplicates here. Downstream graph publication still
+                    // performs its contract-level semantic edge coalescing.
+                    if source == target {
+                        return None;
+                    }
+                    Some(materialized_edge(
+                        source,
+                        target,
+                        relation,
+                        candidate,
+                        self.occurrence(candidate),
+                        candidate
+                            .binding_id
+                            .as_deref()
+                            .and_then(|binding_id| self.bindings.get(binding_id)),
+                        target_kind.as_deref(),
+                        target_site.map(|range| range.source_file.as_str()),
+                        site,
+                        resolution_rule,
+                        &candidate.language,
+                    ))
+                },
+            )
+            .collect::<Vec<_>>();
+        edges.extend(materialized);
+        profile_internal("universal edge materialization", &mut profile_started);
     }
 
     fn resolve_c3_receiver_dispatch(
@@ -2143,8 +2180,8 @@ fn declaration_basic_allowed(target: &DeclarationFact, candidate: &RelationshipC
 
 fn declaration_overloads<'a>(
     declarations: impl Iterator<Item = &'a DeclarationFact>,
-) -> BTreeMap<String, String> {
-    let mut groups = BTreeMap::<(String, String, String, String), Vec<&DeclarationFact>>::new();
+) -> AHashMap<String, String> {
+    let mut groups = AHashMap::<(String, String, String, String), Vec<&DeclarationFact>>::new();
     for declaration in declarations {
         groups
             .entry((
@@ -2156,7 +2193,7 @@ fn declaration_overloads<'a>(
             .or_default()
             .push(declaration);
     }
-    let mut overloads = BTreeMap::new();
+    let mut overloads = AHashMap::new();
     for declarations in groups.values_mut().filter(|group| group.len() > 1) {
         declarations.sort_by_key(|declaration| (declaration.range.start_byte, &declaration.id));
         for (position, declaration) in declarations.iter().enumerate() {
@@ -2192,15 +2229,15 @@ fn qualified_root(qualified: &str) -> &str {
 
 fn materialized_declaration_ids<'a>(
     declarations: impl Iterator<Item = &'a DeclarationFact>,
-) -> BTreeMap<String, String> {
-    let mut groups = BTreeMap::<String, Vec<&DeclarationFact>>::new();
+) -> AHashMap<String, String> {
+    let mut groups = AHashMap::<String, Vec<&DeclarationFact>>::new();
     for declaration in declarations {
         groups
             .entry(declaration.graph_node_id.clone())
             .or_default()
             .push(declaration);
     }
-    let mut ids = BTreeMap::new();
+    let mut ids = AHashMap::new();
     for (graph_node_id, declarations) in groups {
         if declarations.len() == 1 {
             ids.insert(declarations[0].id.clone(), graph_node_id);
@@ -2304,16 +2341,19 @@ fn read_go_module_path(root: &Path) -> Option<String> {
     })
 }
 
-fn insert_unique<T>(map: &mut BTreeMap<String, T>, id: String, value: T) -> Result<(), String> {
-    if map.insert(id.clone(), value).is_some() {
-        return Err(format!("duplicate universal evidence id {id:?}"));
+fn insert_unique<T>(map: &mut AHashMap<String, T>, id: String, value: T) -> Result<(), String> {
+    match map.entry(id) {
+        Entry::Occupied(entry) => Err(format!("duplicate universal evidence id {:?}", entry.key())),
+        Entry::Vacant(entry) => {
+            entry.insert(value);
+            Ok(())
+        }
     }
-    Ok(())
 }
 
 fn unique_definition_ranges(
-    declarations: &BTreeMap<String, DeclarationFact>,
-    scopes: &BTreeMap<String, compass_languages::ScopeFact>,
+    declarations: &AHashMap<String, DeclarationFact>,
+    scopes: &AHashMap<String, compass_languages::ScopeFact>,
 ) -> BTreeMap<String, EvidenceRange> {
     let mut ranges = BTreeMap::new();
     let mut ambiguous = BTreeSet::new();

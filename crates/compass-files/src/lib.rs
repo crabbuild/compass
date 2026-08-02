@@ -52,6 +52,18 @@ pub enum FileError {
         #[source]
         source: rmp_serde::encode::Error,
     },
+    #[error("could not compress deterministic cache entry at {path}: {source}")]
+    CacheCompression {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("deterministic cache entry at {path} is {size} bytes, exceeding limit {limit}")]
+    CacheEntryTooLarge {
+        path: PathBuf,
+        size: usize,
+        limit: usize,
+    },
     #[error("file hash requires a regular file: {0}")]
     NotAFile(PathBuf),
     #[error("path is outside the scan root: {0}")]

@@ -236,7 +236,7 @@ fn resolve_unique_syntax_calls(
 fn canonical_batches(batches: Vec<EvidenceBatch>) -> Result<Vec<EvidenceBatch>, MergeError> {
     let mut by_provider = BTreeMap::<String, EvidenceBatch>::new();
     for batch in batches {
-        let canonical = batch.canonicalized();
+        let canonical = batch.into_canonicalized();
         match by_provider.get(&canonical.descriptor.id) {
             Some(existing) if existing != &canonical => {
                 return Err(MergeError::ConflictingProvider(

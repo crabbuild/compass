@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+ahash.workspace = true
 compass-ir = { path = "../compass-ir", version = "0.2.1" }
 compass-program = { path = "../compass-program", version = "0.2.1" }
 serde.workspace = true

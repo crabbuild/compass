@@ -76,20 +76,23 @@ pub(crate) fn build_program(
     sources: &[PathBuf],
     options: &BuildOptions,
     cache: &Cache,
-    prepared: &[PreparedSyntaxInput],
+    prepared: Vec<PreparedSyntaxInput>,
 ) -> Result<ProgramBuild, CoreError> {
     let mut internal_started = Instant::now();
     let artifacts = discover_artifacts(root, options)?;
+    let mut prepared_by_key = BTreeMap::new();
     let inputs = if artifacts.is_empty() && !prepared.is_empty() {
         let mut inputs = prepared
-            .iter()
+            .into_iter()
             .map(|input| {
                 let digest = hex_sha256(&input.bytes);
+                let cache_key = format!("{}:{digest}", input.source_file);
+                prepared_by_key.insert(cache_key.clone(), input.batch);
                 SourceInput {
-                    source_file: input.source_file.clone(),
-                    language: input.language.clone(),
-                    bytes: input.bytes.clone(),
-                    cache_key: format!("{}:{digest}", input.source_file),
+                    source_file: input.source_file,
+                    language: input.language,
+                    bytes: input.bytes,
+                    cache_key,
                     digest,
                 }
             })
@@ -101,16 +104,28 @@ pub(crate) fn build_program(
         });
         inputs
     } else {
+        for input in prepared {
+            let digest = hex_sha256(&input.bytes);
+            prepared_by_key.insert(format!("{}:{digest}", input.source_file), input.batch);
+        }
         read_sources(root, sources, options.max_source_bytes)?
     };
-    let source_digests = inputs
-        .iter()
-        .map(|input| (input.source_file.clone(), input.digest.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let source_texts = inputs
-        .iter()
-        .map(|input| (input.source_file.clone(), input.bytes.clone()))
-        .collect::<BTreeMap<_, _>>();
+    let source_digests = if artifacts.is_empty() {
+        BTreeMap::new()
+    } else {
+        inputs
+            .iter()
+            .map(|input| (input.source_file.clone(), input.digest.clone()))
+            .collect::<BTreeMap<_, _>>()
+    };
+    let source_texts = if artifacts.is_empty() {
+        BTreeMap::new()
+    } else {
+        inputs
+            .iter()
+            .map(|input| (input.source_file.clone(), input.bytes.clone()))
+            .collect::<BTreeMap<_, _>>()
+    };
     profile_internal("Program input preparation", &mut internal_started);
 
     let syntax_kind = CacheKind::ProgramSyntax {
@@ -121,17 +136,8 @@ pub(crate) fn build_program(
     let mut missing = Vec::new();
     let mut syntax_reused = 0;
     let mut live_syntax_keys = BTreeSet::new();
-    let prepared = prepared
-        .iter()
-        .map(|input| {
-            (
-                format!("{}:{}", input.source_file, hex_sha256(&input.bytes)),
-                input.batch.clone(),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
     let mut prepared_fresh = Vec::new();
-    for input in &inputs {
+    for input in inputs {
         if !supports_program_syntax(&input.source_file) {
             continue;
         }
@@ -145,11 +151,11 @@ pub(crate) fn build_program(
             syntax_reused += 1;
             continue;
         }
-        if let Some(batch) = prepared.get(&input.cache_key) {
-            prepared_fresh.push((input.cache_key.clone(), batch.clone()));
+        if let Some(batch) = prepared_by_key.remove(&input.cache_key) {
+            prepared_fresh.push((input.cache_key, batch));
             continue;
         }
-        missing.push(input.clone());
+        missing.push(input);
     }
     let mut fresh = analyze_syntax(&missing, options.max_workers)?;
     fresh.extend(prepared_fresh);

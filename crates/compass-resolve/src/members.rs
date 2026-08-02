@@ -1,5 +1,6 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
 
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_languages::{Extraction, RawCall, is_language_builtin_global, make_id};
 use compass_languages::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
@@ -46,8 +47,17 @@ pub(crate) fn collect_language_call_facts_owned(
 }
 
 pub(crate) fn resolve_language_call_facts(facts: LanguageCallFacts, merged: &mut Extraction) {
+    if facts.calls.is_empty() {
+        return;
+    }
     let external_nodes = {
-        let indexes = Indexes::new(&merged.nodes, &merged.edges);
+        let (indexed_families, has_unscoped_calls) = indexed_families(&facts.calls, &facts.tables);
+        let indexes = Indexes::new(
+            &merged.nodes,
+            &merged.edges,
+            &indexed_families,
+            has_unscoped_calls,
+        );
         let mut existing = merged
             .edges
             .iter()
@@ -148,18 +158,29 @@ struct Indexes<'a> {
 }
 
 impl<'a> Indexes<'a> {
-    fn new(nodes: &'a [NodeRecord], edges: &[EdgeRecord]) -> Self {
+    fn new(
+        nodes: &'a [NodeRecord],
+        edges: &[EdgeRecord],
+        indexed_families: &HashSet<&'static str>,
+        has_unscoped_calls: bool,
+    ) -> Self {
         let nodes_by_id = nodes
             .iter()
+            .filter(|node| {
+                has_unscoped_calls
+                    || index_family(&node.string("source_file"))
+                        .is_none_or(|family| indexed_families.contains(family))
+            })
             .map(|node| (node.id.as_str(), node))
             .collect::<HashMap<_, _>>();
         let contained = edges
             .iter()
+            .filter(|edge| nodes_by_id.contains_key(edge.target.as_str()))
             .filter(|edge| relation(edge) == "contains")
             .map(|edge| edge.target.as_str())
             .collect::<HashSet<_>>();
         let mut types = HashMap::<String, Vec<String>>::new();
-        for node in nodes {
+        for node in nodes_by_id.values().copied() {
             if contained.contains(node.id.as_str()) && is_type_like(node) {
                 push_unique(&mut types, key(node.label()), &node.id);
             }
@@ -173,6 +194,11 @@ impl<'a> Indexes<'a> {
         let mut imports = HashMap::<String, HashSet<String>>::new();
         let mut bases = HashMap::<String, Vec<String>>::new();
         for edge in edges {
+            if !nodes_by_id.contains_key(edge.source.as_str())
+                && !nodes_by_id.contains_key(edge.target.as_str())
+            {
+                continue;
+            }
             let target_label = nodes_by_id
                 .get(edge.target.as_str())
                 .map(|node| node.label());
@@ -275,6 +301,42 @@ impl TypeTables {
             collect_table(extraction, "objc_type_table", &mut tables.objc);
         }
         tables
+    }
+}
+
+fn indexed_families(calls: &[RawCall], tables: &TypeTables) -> (HashSet<&'static str>, bool) {
+    let mut families = calls
+        .iter()
+        .filter_map(|call| index_family(&call.source_file))
+        .collect::<HashSet<_>>();
+    let has_unscoped = calls
+        .iter()
+        .any(|call| index_family(&call.source_file).is_none());
+    for (present, family) in [
+        (!tables.swift.is_empty(), "swift"),
+        (!tables.typescript.is_empty(), "javascript"),
+        (!tables.cpp.is_empty(), "cpp"),
+        (!tables.csharp.is_empty(), "csharp"),
+        (!tables.objc.is_empty(), "objc"),
+    ] {
+        if present {
+            families.insert(family);
+        }
+    }
+    (families, has_unscoped)
+}
+
+fn index_family(source: &str) -> Option<&'static str> {
+    match extension(source).as_str() {
+        "py" | "pyi" => Some("python"),
+        "rb" | "rake" => Some("ruby"),
+        "pas" | "pp" | "dpr" | "dpk" | "inc" => Some("pascal"),
+        "swift" => Some("swift"),
+        "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs" => Some("javascript"),
+        "c" | "h" | "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "cu" | "cuh" => Some("cpp"),
+        "cs" | "razor" | "cshtml" => Some("csharp"),
+        "m" | "mm" => Some("objc"),
+        _ => None,
     }
 }
 

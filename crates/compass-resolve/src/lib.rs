@@ -225,7 +225,14 @@ pub fn resolve_with_root(
             .framework_facts
             .extend(extraction.framework_facts.iter().cloned());
     }
-    finish_resolution(merged, language_facts, evidence_batches, sources, root)
+    finish_resolution(
+        merged,
+        language_facts,
+        evidence_batches,
+        sources,
+        root,
+        false,
+    )
 }
 
 /// Resolve a collection while transferring its node and edge buffers into the
@@ -237,10 +244,34 @@ pub fn resolve_owned_with_root(
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
-    let language_facts = members::collect_language_call_facts_owned(&mut extractions);
+    resolve_owned_with_root_impl(&mut extractions, sources, root, false)
+}
+
+/// Resolve owned facts whose universal evidence was validated at its trust boundary.
+///
+/// This is the build-pipeline entry point: fresh evidence is validated before
+/// the language engine publishes it, and cached evidence is validated before
+/// cache acceptance. Cross-batch identities, aggregate limits, and all
+/// resolution ambiguity checks are still enforced here.
+#[must_use]
+pub fn resolve_prevalidated_owned_with_root(
+    mut extractions: Vec<Extraction>,
+    sources: &HashMap<String, String>,
+    root: &Path,
+) -> Extraction {
+    resolve_owned_with_root_impl(&mut extractions, sources, root, true)
+}
+
+fn resolve_owned_with_root_impl(
+    extractions: &mut Vec<Extraction>,
+    sources: &HashMap<String, String>,
+    root: &Path,
+    evidence_prevalidated: bool,
+) -> Extraction {
+    let language_facts = members::collect_language_call_facts_owned(extractions);
     let mut evidence_batches = Vec::new();
     let mut merged = Extraction::default();
-    for extraction in &mut extractions {
+    for extraction in extractions.iter_mut() {
         let universal = extraction.semantic_evidence.take();
         if universal.is_some() {
             let mut allowed = universal
@@ -280,8 +311,15 @@ pub fn resolve_owned_with_root(
             evidence_batches.push(batch);
         }
     }
-    drop(extractions);
-    finish_resolution(merged, language_facts, evidence_batches, sources, root)
+    extractions.clear();
+    finish_resolution(
+        merged,
+        language_facts,
+        evidence_batches,
+        sources,
+        root,
+        evidence_prevalidated,
+    )
 }
 
 fn universal_allowed_node_ids(extraction: &Extraction) -> HashSet<String> {
@@ -312,27 +350,51 @@ fn finish_resolution(
     evidence_batches: Vec<SemanticEvidenceBatch>,
     sources: &HashMap<String, String>,
     root: &Path,
+    evidence_prevalidated: bool,
 ) -> Extraction {
     let mut profile_started = Instant::now();
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    if let Err(error) = resolve_javascript_workspace_modules(&mut merged, &canonical_root) {
-        merged
-            .error
-            .get_or_insert_with(|| format!("JavaScript workspace resolution failed: {error}"));
+    let has_javascript = sources.keys().any(|source| {
+        let extension = extension(source);
+        matches!(
+            extension.as_str(),
+            "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts"
+        )
+    });
+    let has_csharp = sources
+        .keys()
+        .any(|source| matches!(extension(source).as_str(), "cs" | "razor" | "cshtml"));
+    let has_php = sources.keys().any(|source| extension(source) == "php");
+    if has_javascript {
+        if let Err(error) = resolve_javascript_workspace_modules(&mut merged, &canonical_root) {
+            merged
+                .error
+                .get_or_insert_with(|| format!("JavaScript workspace resolution failed: {error}"));
+        }
+        resolve_javascript_reexports(&mut merged);
     }
     profile_internal(
         "resolver JavaScript workspace modules",
         &mut profile_started,
     );
-    resolve_javascript_reexports(&mut merged);
     profile_internal("resolver JavaScript re-exports", &mut profile_started);
     if !evidence_batches.is_empty() {
-        match evidence::UniversalResolutionIndex::new_with_inventory_owned(
-            evidence_batches,
-            &merged.nodes,
-            &canonical_root,
-            evidence::UniversalResolutionLimits::default(),
-        ) {
+        let index = if evidence_prevalidated {
+            evidence::UniversalResolutionIndex::new_with_prevalidated_inventory_owned(
+                evidence_batches,
+                &merged.nodes,
+                &canonical_root,
+                evidence::UniversalResolutionLimits::default(),
+            )
+        } else {
+            evidence::UniversalResolutionIndex::new_with_inventory_owned(
+                evidence_batches,
+                &merged.nodes,
+                &canonical_root,
+                evidence::UniversalResolutionLimits::default(),
+            )
+        };
+        match index {
             Ok(index) => index.materialize(&mut merged.nodes, &mut merged.edges),
             Err(error) => {
                 if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
@@ -356,14 +418,20 @@ fn finish_resolution(
         &mut language_facts.calls,
     );
     profile_internal("resolver collision disambiguation", &mut profile_started);
-    resolve_javascript_workspace_symbols(&mut merged);
+    if has_javascript {
+        resolve_javascript_workspace_symbols(&mut merged);
+    }
     profile_internal(
         "resolver JavaScript workspace symbols",
         &mut profile_started,
     );
-    canonicalize_csharp_namespace_nodes(&mut merged);
+    if has_csharp {
+        canonicalize_csharp_namespace_nodes(&mut merged);
+    }
     profile_internal("resolver C# namespace normalization", &mut profile_started);
-    resolve_php_type_references(&mut merged, sources);
+    if has_php {
+        resolve_php_type_references(&mut merged, sources);
+    }
     profile_internal("resolver PHP types", &mut profile_started);
     rewire_unique_family_stubs(&mut merged);
     profile_internal("resolver family stubs", &mut profile_started);
@@ -940,6 +1008,9 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
                 .push((node.id.clone(), source));
         }
     }
+    if stubs.is_empty() {
+        return;
+    }
     let imports_by_source = extraction
         .edges
         .iter()
@@ -1186,7 +1257,7 @@ fn canonicalize_file_targets(extraction: &mut Extraction, root: &Path) {
     let node_ids = extraction
         .nodes
         .iter()
-        .map(|node| node.id.clone())
+        .map(|node| node.id.as_str())
         .collect::<HashSet<_>>();
     for node in &extraction.nodes {
         let source = string_attribute(node, "source_file");
@@ -1237,7 +1308,7 @@ fn canonicalize_file_targets(extraction: &mut Extraction, root: &Path) {
         })
         .collect::<HashMap<_, _>>();
     for edge in &mut extraction.edges {
-        if node_ids.contains(&edge.target) {
+        if node_ids.contains(edge.target.as_str()) {
             continue;
         }
         if let Some(target) = aliases.get(&edge.target) {
@@ -1256,41 +1327,66 @@ fn canonicalize_file_targets(extraction: &mut Extraction, root: &Path) {
 }
 
 fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
+    let normalized_label = |node: &NodeRecord| {
+        node.label()
+            .trim()
+            .trim_matches(['(', ')'])
+            .trim_start_matches('.')
+            .chars()
+            .filter(char::is_ascii_alphanumeric)
+            .collect::<String>()
+    };
+    let stubs = extraction
+        .nodes
+        .iter()
+        .filter(|node| {
+            string_attribute(node, "source_file").is_empty() && !is_canonical_external_symbol(node)
+        })
+        .filter_map(|node| {
+            let label = normalized_label(node);
+            (!label.is_empty()).then(|| (node.id.clone(), label))
+        })
+        .collect::<Vec<_>>();
+    if stubs.is_empty() {
+        return;
+    }
+    let needed_labels = stubs
+        .iter()
+        .map(|(_, label)| label.clone())
+        .collect::<HashSet<_>>();
+    let needed_folded = needed_labels
+        .iter()
+        .map(|label| label.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
     let mut types = HashMap::<String, Vec<String>>::new();
     let mut types_ci = HashMap::<String, Vec<String>>::new();
     let mut callables = HashMap::<String, Vec<String>>::new();
     let mut source_by_id = HashMap::<String, String>::new();
-    let mut stubs = Vec::<(String, String)>::new();
     for node in &extraction.nodes {
-        let normalized_label = node
-            .label()
-            .trim()
-            .trim_matches(['(', ')'])
-            .trim_start_matches('.')
-            .to_owned();
-        let label = normalized_label
-            .chars()
-            .filter(char::is_ascii_alphanumeric)
-            .collect::<String>();
+        let source = string_attribute(node, "source_file");
+        if source.is_empty() {
+            continue;
+        }
+        let label = normalized_label(node);
         if label.is_empty() {
             continue;
         }
-        let source = string_attribute(node, "source_file");
+        let folded = label.to_ascii_lowercase();
+        if !needed_labels.contains(label.as_str()) && !needed_folded.contains(&folded) {
+            continue;
+        }
         source_by_id.insert(node.id.clone(), source.clone());
-        if source.is_empty() && !is_canonical_external_symbol(node) {
-            stubs.push((node.id.clone(), label));
-        } else if is_generic_call_target(node) {
+        if is_generic_call_target(node) && needed_labels.contains(label.as_str()) {
             callables.entry(label).or_default().push(node.id.clone());
         } else if is_type_like_definition(node) {
-            types
-                .entry(label.clone())
-                .or_default()
-                .push(node.id.clone());
-            if case_insensitive(&source) {
-                types_ci
-                    .entry(label.to_ascii_lowercase())
+            if needed_labels.contains(label.as_str()) {
+                types
+                    .entry(label.clone())
                     .or_default()
                     .push(node.id.clone());
+            }
+            if case_insensitive(&source) && needed_folded.contains(&folded) {
+                types_ci.entry(folded).or_default().push(node.id.clone());
             }
         }
     }
@@ -1497,6 +1593,7 @@ fn disambiguate_colliding_node_ids_with_calls(
     root: &Path,
     raw_calls: &mut [RawCall],
 ) {
+    let mut first_positions = HashMap::<String, usize>::new();
     let mut groups = HashMap::<String, Vec<usize>>::new();
     for (index, node) in extraction.nodes.iter().enumerate() {
         if matches!(
@@ -1506,9 +1603,17 @@ fn disambiguate_colliding_node_ids_with_calls(
             continue;
         }
         if !node.id.is_empty() {
-            groups.entry(node.id.clone()).or_default().push(index);
+            if let Some(&first) = first_positions.get(&node.id) {
+                groups
+                    .entry(node.id.clone())
+                    .or_insert_with(|| vec![first])
+                    .push(index);
+            } else {
+                first_positions.insert(node.id.clone(), index);
+            }
         }
     }
+    drop(first_positions);
     let mut remap = HashMap::<(String, String), String>::new();
     let mut ambiguous = HashSet::new();
     for (old_id, indexes) in &groups {
@@ -1669,6 +1774,25 @@ fn resolve_cross_file_calls_with_root(
 }
 
 fn resolve_cross_file_calls_with_root_calls(extraction: &mut Extraction, raw_calls: &[RawCall]) {
+    let eligible_calls = raw_calls.iter().filter(|raw| {
+        !raw.callee.is_empty()
+            && raw.is_member_call != Some(true)
+            && raw.extensions.get("is_mixin").and_then(Value::as_bool) != Some(true)
+    });
+    let mut call_families = AHashSet::new();
+    let mut has_unscoped_call = false;
+    let mut eligible_call_count = 0_usize;
+    for raw in eligible_calls {
+        eligible_call_count = eligible_call_count.saturating_add(1);
+        if let Some(family) = language_family(&raw.source_file) {
+            call_families.insert(family);
+        } else {
+            has_unscoped_call = true;
+        }
+    }
+    if eligible_call_count == 0 {
+        return;
+    }
     let mut profile_started = Instant::now();
     let mut exact = AHashMap::<String, Vec<String>>::new();
     let mut folded = AHashMap::<String, Vec<String>>::new();
@@ -1677,6 +1801,11 @@ fn resolve_cross_file_calls_with_root_calls(extraction: &mut Extraction, raw_cal
     let mut callable = AHashSet::<String>::new();
     for node in &extraction.nodes {
         let source = string_attribute(node, "source_file");
+        if !has_unscoped_call
+            && language_family(&source).is_some_and(|family| !call_families.contains(family))
+        {
+            continue;
+        }
         source_by_id.insert(node.id.clone(), source.clone());
         if node.attributes.get("_callable").and_then(Value::as_bool) == Some(true) {
             callable.insert(node.id.clone());
@@ -1723,6 +1852,9 @@ fn resolve_cross_file_calls_with_root_calls(extraction: &mut Extraction, raw_cal
     let mut existing = AHashSet::new();
     let mut call_like = AHashSet::new();
     for edge in &extraction.edges {
+        if !source_by_id.contains_key(&edge.source) {
+            continue;
+        }
         existing.insert((
             edge.source.clone(),
             edge.target.clone(),

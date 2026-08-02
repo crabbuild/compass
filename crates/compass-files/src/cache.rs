@@ -15,8 +15,12 @@ use crate::{FileError, StatHashIndex, file_hash, io_error, write_bytes_atomic, w
 /// Changes whenever cached extraction semantics change, even if the wire encoding does not.
 pub const AST_CACHE_VERSION: &str = "5";
 /// Portable cache encoding version used in the on-disk namespace.
-pub const CACHE_ENCODING_VERSION: u32 = 7;
+pub const CACHE_ENCODING_VERSION: u32 = 8;
 const MESSAGEPACK_EXTENSION: &str = "msgpack";
+const COMPRESSED_MESSAGEPACK_MAGIC: &[u8; 5] = b"CMPZ1";
+const COMPRESSED_MESSAGEPACK_HEADER_BYTES: usize = COMPRESSED_MESSAGEPACK_MAGIC.len() + 8;
+const MAX_DECOMPRESSED_CACHE_ENTRY_BYTES: usize = 256 * 1024 * 1024;
+const CACHE_COMPRESSION_LEVEL: i32 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CacheLayout {
@@ -124,6 +128,12 @@ struct SessionHash {
     size: u64,
     modified: Option<SystemTime>,
     value: String,
+}
+
+/// Opaque, compressed cache payload ready for atomic publication.
+pub struct EncodedCacheWrite {
+    destination: PathBuf,
+    bytes: Vec<u8>,
 }
 
 impl Cache {
@@ -236,12 +246,7 @@ impl Cache {
         fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
         if deterministic_binary_kind(kind) {
             let destination = directory.join(format!("{key}.{MESSAGEPACK_EXTENSION}"));
-            let bytes = rmp_serde::to_vec_named(&on_disk).map_err(|source| {
-                FileError::MessagePackEncode {
-                    path: destination.clone(),
-                    source,
-                }
-            })?;
+            let bytes = encode_messagepack(&on_disk, &destination)?;
             write_cache_bytes(&destination, &bytes)
         } else {
             write_json_atomic(directory.join(format!("{key}.json")), &on_disk, false)
@@ -277,12 +282,7 @@ impl Cache {
             let mut on_disk = value.clone();
             relativize_source_files(&mut on_disk, root);
             if deterministic_binary_kind(kind) {
-                let bytes = rmp_serde::to_vec_named(&on_disk).map_err(|source| {
-                    FileError::MessagePackEncode {
-                        path: destination.clone(),
-                        source,
-                    }
-                })?;
+                let bytes = encode_messagepack(&on_disk, &destination)?;
                 write_cache_bytes(&destination, &bytes)
             } else {
                 write_json_atomic(destination, &on_disk, false)
@@ -319,11 +319,7 @@ impl Cache {
             ));
         }
         let write_job = |(destination, value): (PathBuf, &T)| {
-            let bytes =
-                rmp_serde::to_vec_named(value).map_err(|source| FileError::MessagePackEncode {
-                    path: destination.clone(),
-                    source,
-                })?;
+            let bytes = encode_messagepack(value, &destination)?;
             write_cache_bytes(&destination, &bytes)
         };
         if jobs.len() < 256 {
@@ -331,6 +327,46 @@ impl Cache {
         } else {
             jobs.into_par_iter().try_for_each(write_job)
         }
+    }
+
+    /// Prepare portable AST entries in parallel without retaining cloned typed
+    /// values after each entry has been compressed.
+    pub fn encode_portable_ast_batch<T, F>(
+        &mut self,
+        entries: &[(&PathBuf, &T)],
+        prepare: F,
+    ) -> Result<Vec<EncodedCacheWrite>, FileError>
+    where
+        T: Serialize + Sync,
+        F: Fn(&Path, &T) -> T + Sync,
+    {
+        let directory = self.directory(&CacheKind::Ast, None);
+        fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
+        let mut jobs = Vec::with_capacity(entries.len());
+        for &(path, value) in entries {
+            let hash = self.content_hash(path)?;
+            let key = self.source_cache_key(path, &hash);
+            jobs.push((
+                directory.join(format!("{key}.{MESSAGEPACK_EXTENSION}")),
+                path,
+                value,
+            ));
+        }
+        jobs.into_par_iter()
+            .map(|(destination, path, value)| {
+                let prepared = prepare(path, value);
+                let bytes = encode_messagepack(&prepared, &destination)?;
+                Ok(EncodedCacheWrite { destination, bytes })
+            })
+            .collect()
+    }
+
+    /// Atomically publish cache payloads prepared by
+    /// [`Self::encode_portable_ast_batch`].
+    pub fn write_encoded_batch(entries: &[EncodedCacheWrite]) -> Result<(), FileError> {
+        entries
+            .par_iter()
+            .try_for_each(|entry| write_cache_bytes(&entry.destination, &entry.bytes))
     }
 
     /// Load a Program IR cache value by a caller-owned logical input key.
@@ -369,11 +405,7 @@ impl Cache {
             "{}.{MESSAGEPACK_EXTENSION}",
             logical_key_hash(logical_key)
         ));
-        let bytes =
-            rmp_serde::to_vec_named(value).map_err(|source| FileError::MessagePackEncode {
-                path: destination.clone(),
-                source,
-            })?;
+        let bytes = encode_messagepack(value, &destination)?;
         write_cache_bytes(&destination, &bytes)
     }
 
@@ -394,11 +426,7 @@ impl Cache {
                 "{}.{MESSAGEPACK_EXTENSION}",
                 logical_key_hash(logical_key)
             ));
-            let bytes =
-                rmp_serde::to_vec_named(value).map_err(|source| FileError::MessagePackEncode {
-                    path: destination.clone(),
-                    source,
-                })?;
+            let bytes = encode_messagepack(value, &destination)?;
             write_cache_bytes(&destination, &bytes)
         })
     }
@@ -579,10 +607,57 @@ fn load_json_value(
     Ok(Some(value))
 }
 
+fn encode_messagepack<T: Serialize>(value: &T, path: &Path) -> Result<Vec<u8>, FileError> {
+    let messagepack =
+        rmp_serde::to_vec_named(value).map_err(|source| FileError::MessagePackEncode {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if messagepack.len() > MAX_DECOMPRESSED_CACHE_ENTRY_BYTES {
+        return Err(FileError::CacheEntryTooLarge {
+            path: path.to_path_buf(),
+            size: messagepack.len(),
+            limit: MAX_DECOMPRESSED_CACHE_ENTRY_BYTES,
+        });
+    }
+    let compressed =
+        zstd::bulk::compress(&messagepack, CACHE_COMPRESSION_LEVEL).map_err(|source| {
+            FileError::CacheCompression {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
+    let mut encoded =
+        Vec::with_capacity(COMPRESSED_MESSAGEPACK_HEADER_BYTES.saturating_add(compressed.len()));
+    encoded.extend_from_slice(COMPRESSED_MESSAGEPACK_MAGIC);
+    encoded.extend_from_slice(&(messagepack.len() as u64).to_le_bytes());
+    encoded.extend_from_slice(&compressed);
+    Ok(encoded)
+}
+
 fn decode_messagepack<T: DeserializeOwned>(bytes: &[u8]) -> Option<T> {
-    let mut deserializer = rmp_serde::Deserializer::new(std::io::Cursor::new(bytes));
+    if bytes.len() < COMPRESSED_MESSAGEPACK_HEADER_BYTES
+        || &bytes[..COMPRESSED_MESSAGEPACK_MAGIC.len()] != COMPRESSED_MESSAGEPACK_MAGIC
+    {
+        return None;
+    }
+    let size_bytes: [u8; 8] = bytes
+        [COMPRESSED_MESSAGEPACK_MAGIC.len()..COMPRESSED_MESSAGEPACK_HEADER_BYTES]
+        .try_into()
+        .ok()?;
+    let size = usize::try_from(u64::from_le_bytes(size_bytes)).ok()?;
+    if size > MAX_DECOMPRESSED_CACHE_ENTRY_BYTES {
+        return None;
+    }
+    let messagepack =
+        zstd::bulk::decompress(&bytes[COMPRESSED_MESSAGEPACK_HEADER_BYTES..], size).ok()?;
+    if messagepack.len() != size {
+        return None;
+    }
+    let mut deserializer = rmp_serde::Deserializer::new(std::io::Cursor::new(&messagepack));
     let value = serde::Deserialize::deserialize(&mut deserializer).ok()?;
-    (deserializer.position() == u64::try_from(bytes.len()).unwrap_or(u64::MAX)).then_some(value)
+    (deserializer.position() == u64::try_from(messagepack.len()).unwrap_or(u64::MAX))
+        .then_some(value)
 }
 
 fn logical_key_hash(value: &str) -> String {
@@ -628,6 +703,44 @@ fn clear_cache_entries(directory: &Path) {
         } else if cache_extension(&path) {
             let _ = fs::remove_file(path);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use serde_json::json;
+
+    use super::{
+        COMPRESSED_MESSAGEPACK_HEADER_BYTES, COMPRESSED_MESSAGEPACK_MAGIC,
+        MAX_DECOMPRESSED_CACHE_ENTRY_BYTES, decode_messagepack, encode_messagepack,
+    };
+
+    #[test]
+    fn compressed_messagepack_round_trips_and_rejects_invalid_envelopes() {
+        let value = json!({
+            "source_file": "src/example.py",
+            "facts": vec!["repeated deterministic evidence"; 128],
+        });
+        let encoded = encode_messagepack(&value, Path::new("cache.msgpack"))
+            .unwrap_or_else(|_| std::process::abort());
+        assert!(encoded.starts_with(COMPRESSED_MESSAGEPACK_MAGIC));
+        assert_eq!(decode_messagepack(&encoded), Some(value));
+        assert_eq!(
+            decode_messagepack::<serde_json::Value>(b"not-a-cache"),
+            None
+        );
+
+        let mut oversized = Vec::with_capacity(COMPRESSED_MESSAGEPACK_HEADER_BYTES);
+        oversized.extend_from_slice(COMPRESSED_MESSAGEPACK_MAGIC);
+        oversized.extend_from_slice(
+            &(u64::try_from(MAX_DECOMPRESSED_CACHE_ENTRY_BYTES)
+                .unwrap_or(u64::MAX)
+                .saturating_add(1))
+            .to_le_bytes(),
+        );
+        assert_eq!(decode_messagepack::<serde_json::Value>(&oversized), None);
     }
 }
 

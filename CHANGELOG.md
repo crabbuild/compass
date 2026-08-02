@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Restore sub-10-second cold builds for the pinned 3,105-file Django
+  qualification corpus by batching and compressing portable AST cache
+  publication, parallelizing independent resolver and graph-normalization
+  work, and avoiding redundant evidence, index, and serialization allocations
+  without changing valid graph facts or Program output. Partial-graph omission
+  diagnostics now use portable content-addressed edge identities instead of
+  transient raw positions.
 - Restore complete definition ranges for source navigation on universally
   extracted functions, methods, and containers while preserving exact
   identifier anchors in provenance. Ambiguous or non-containing scopes fall

@@ -1,6 +1,7 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_languages::{
     Extraction, FrameworkLimitError, FrameworkLimits, RawEdgeRecord, RawFrameworkAnchor,
     RawFrameworkFact, RawFrameworkOrigin, RawNodeRecord, RawRouteFact, make_id,
@@ -113,14 +114,15 @@ pub fn publish_resolved_routes(
     extraction: &mut Extraction,
     routes: &[ResolvedRoute],
 ) -> Result<(), FrameworkResolutionError> {
-    let mut existing_nodes = extraction
+    let existing_nodes = extraction
         .nodes
         .iter()
-        .map(|node| node.id.clone())
+        .map(|node| node.id.as_str())
         .collect::<HashSet<_>>();
     let mut existing_edges = extraction
         .edges
         .iter()
+        .filter(|edge| edge.string("relation") == "routes_to")
         .map(|edge| {
             (
                 edge.source.clone(),
@@ -135,6 +137,10 @@ pub fn publish_resolved_routes(
             )
         })
         .collect::<HashSet<_>>();
+    let mut added_node_ids = HashSet::new();
+    let mut added_nodes = Vec::new();
+    let mut stage_roles = Vec::new();
+    let mut added_edges = Vec::new();
 
     for resolved in routes {
         let route = &resolved.route;
@@ -152,8 +158,8 @@ pub fn publish_resolved_routes(
             &route.anchor.end_line.to_string(),
             &route.anchor.end_column.to_string(),
         ]);
-        if existing_nodes.insert(route_id.clone()) {
-            extraction.nodes.push(RawNodeRecord {
+        if !existing_nodes.contains(route_id.as_str()) && added_node_ids.insert(route_id.clone()) {
+            added_nodes.push(RawNodeRecord {
                 id: route_id.clone(),
                 attributes: route_attributes(resolved),
             });
@@ -178,14 +184,20 @@ pub fn publish_resolved_routes(
             )) {
                 continue;
             }
-            mark_stage_role(&mut extraction.nodes, target, stage.role);
-            extraction.edges.push(RawEdgeRecord {
+            stage_roles.push((target.to_owned(), stage.role));
+            added_edges.push(RawEdgeRecord {
                 source: route_id.clone(),
                 target: target.to_owned(),
                 attributes: route_edge_attributes(resolved, stage),
             });
         }
     }
+    drop(existing_nodes);
+    extraction.nodes.extend(added_nodes);
+    for (target, role) in stage_roles {
+        mark_stage_role(&mut extraction.nodes, &target, role);
+    }
+    extraction.edges.extend(added_edges);
     Ok(())
 }
 
