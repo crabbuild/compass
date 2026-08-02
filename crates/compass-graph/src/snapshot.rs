@@ -9,7 +9,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use compass_model::code_graph::{
-    CODE_GRAPH_SCHEMA_V1, EdgeRecord, GraphDiagnostic, GraphDocument, GraphMetadata, NodeRecord,
+    CODE_GRAPH_SCHEMA_V1, EdgeRecord, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
+    NodeRecord,
 };
 use compass_model::validate_code_graph;
 use compass_store::{
@@ -408,6 +409,14 @@ pub fn prepare_graph_snapshot<S: Store + ?Sized>(
     GraphSnapshotBuilder::new().prepare(store, graph)
 }
 
+/// Encode a graph using the same deterministic normalization used by a store
+/// snapshot.  Publication and shadow verification use this helper instead of
+/// comparing source-order JSON bytes, so equivalent graph records have one
+/// stable identity across adapters.
+pub fn canonical_graph_json(graph: &GraphDocument) -> Result<Vec<u8>, SnapshotError> {
+    encode_json(&canonical_document(graph)?)
+}
+
 pub fn activate_graph_snapshot<S: Store + ?Sized>(
     store: &S,
     prepared: &PreparedGraphSnapshot,
@@ -509,15 +518,48 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
     }
 
     pub fn metadata(&self) -> Result<GraphSnapshotMetadata, SnapshotError> {
-        let key = encode_graph_index_key(IndexKind::Metadata, &[])?;
-        let value = self
-            .lookup(IndexKind::Metadata, &key)?
+        let entries = self.scan_entries(
+            IndexKind::Metadata,
+            None,
+            SnapshotReadLimits {
+                max_items: GRAPH_SNAPSHOT_MAX_OBJECTS,
+                max_bytes: MAX_VALUE_BYTES.saturating_mul(4_096),
+                max_objects: GRAPH_SNAPSHOT_MAX_OBJECTS,
+                ..SnapshotReadLimits::default()
+            },
+        )?;
+        let base_key = encode_graph_index_key(IndexKind::Metadata, &[])?;
+        let base = entries
+            .iter()
+            .find(|entry| entry.key == base_key)
             .ok_or_else(|| SnapshotError::Corrupt("metadata index entry is missing".to_owned()))?;
-        let record = decode_json::<MetadataRecord>(&value)?;
+        let record = decode_json::<MetadataRecord>(&base.value)?;
+        let mut graph = record.graph;
+        for entry in entries {
+            let segments = decode_key_segments(&entry.key).map_err(SnapshotError::from)?;
+            let Some(kind) = segments.get(1).map(Vec::as_slice) else {
+                continue;
+            };
+            match kind {
+                b"file" => graph.files.push(decode_json::<FileRecord>(&entry.value)?),
+                b"coverage" => graph.coverage.push(decode_json::<
+                    compass_model::code_graph::CoverageRecord,
+                >(&entry.value)?),
+                b"diagnostic" => graph
+                    .diagnostics
+                    .push(decode_json::<GraphDiagnostic>(&entry.value)?),
+                _ => {
+                    return Err(SnapshotError::Corrupt(
+                        "metadata index contains an unknown supplement".to_owned(),
+                    ));
+                }
+            }
+        }
+        graph.files.sort_by(|left, right| left.id.cmp(&right.id));
         Ok(GraphSnapshotMetadata {
             directed: record.directed,
             multigraph: record.multigraph,
-            graph: record.graph,
+            graph,
         })
     }
 
@@ -654,10 +696,28 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             limits,
             objects: 0,
             bytes: 0,
-            values: Vec::new(),
+            entries: Vec::new(),
         };
         scan_tree(self.store, index, &root, prefix, &mut state, 0)?;
-        Ok(state.values)
+        Ok(state.entries.into_iter().map(|entry| entry.value).collect())
+    }
+
+    fn scan_entries(
+        &self,
+        index: IndexKind,
+        prefix: Option<&[u8]>,
+        limits: SnapshotReadLimits,
+    ) -> Result<Vec<TreeEntry>, SnapshotError> {
+        let limits = limits.validate()?;
+        let root = self.root(index)?.digest.clone();
+        let mut state = ScanState {
+            limits,
+            objects: 0,
+            bytes: 0,
+            entries: Vec::new(),
+        };
+        scan_tree(self.store, index, &root, prefix, &mut state, 0)?;
+        Ok(state.entries)
     }
 }
 
@@ -703,10 +763,14 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
         .into_iter()
         .map(|index| (index, BTreeMap::new()))
         .collect::<BTreeMap<_, _>>();
+    let mut metadata_graph = graph.graph.clone();
+    metadata_graph.files.clear();
+    metadata_graph.coverage.clear();
+    metadata_graph.diagnostics.clear();
     let metadata = MetadataRecord {
         directed: graph.directed,
         multigraph: graph.multigraph,
-        graph: graph.graph.clone(),
+        graph: metadata_graph,
     };
     insert_json(
         &mut indexes,
@@ -714,6 +778,39 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
         encode_graph_index_key(IndexKind::Metadata, &[])?,
         &metadata,
     )?;
+    for file in &graph.graph.files {
+        insert_json(
+            &mut indexes,
+            IndexKind::Metadata,
+            encode_graph_index_key(IndexKind::Metadata, &[b"file", file.id.as_bytes()])?,
+            file,
+        )?;
+    }
+    for (ordinal, coverage) in graph.graph.coverage.iter().enumerate() {
+        let ordinal = format!("{ordinal:08}");
+        insert_json(
+            &mut indexes,
+            IndexKind::Metadata,
+            encode_graph_index_key(IndexKind::Metadata, &[b"coverage", ordinal.as_bytes()])?,
+            coverage,
+        )?;
+    }
+    for (ordinal, diagnostic) in graph.graph.diagnostics.iter().enumerate() {
+        let ordinal = format!("{ordinal:08}");
+        insert_json(
+            &mut indexes,
+            IndexKind::Metadata,
+            encode_graph_index_key(
+                IndexKind::Metadata,
+                &[
+                    b"diagnostic",
+                    ordinal.as_bytes(),
+                    diagnostic.code.as_bytes(),
+                ],
+            )?,
+            diagnostic,
+        )?;
+    }
 
     for node in &graph.nodes {
         insert_json(
@@ -1118,7 +1215,7 @@ struct ScanState {
     limits: SnapshotReadLimits,
     objects: usize,
     bytes: usize,
-    values: Vec<Vec<u8>>,
+    entries: Vec<TreeEntry>,
 }
 
 fn scan_tree<S: Store + ?Sized>(
@@ -1146,7 +1243,7 @@ fn scan_tree<S: Store + ?Sized>(
                 {
                     continue;
                 }
-                if state.values.len() >= state.limits.max_items {
+                if state.entries.len() >= state.limits.max_items {
                     return Err(SnapshotError::Limit(
                         "snapshot item limit exceeded".to_owned(),
                     ));
@@ -1157,7 +1254,7 @@ fn scan_tree<S: Store + ?Sized>(
                         "snapshot byte limit exceeded".to_owned(),
                     ));
                 }
-                state.values.push(entry.value);
+                state.entries.push(entry);
             }
         }
         TreeObject::Branch { children, .. } => {

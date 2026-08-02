@@ -5,7 +5,10 @@ use std::io::Cursor;
 use std::process::{Command, Stdio};
 
 use compass_files::{BuildGuard, ProjectConfig};
+use compass_graph::{GraphSnapshotReader, canonical_graph_json};
 use compass_model::GraphDocument;
+use compass_model::code_graph::GraphDocument as CodeGraphDocument;
+use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
 use serde_json::Value;
 
 #[test]
@@ -44,6 +47,77 @@ fn init_persists_scope_and_builds_only_matching_files() -> Result<(), Box<dyn Er
     )?)?;
     assert!(graph.nodes.iter().any(|node| node.label() == "included()"));
     assert!(!graph.nodes.iter().any(|node| node.label() == "excluded()"));
+    Ok(())
+}
+
+#[test]
+fn init_and_update_publish_a_durable_graph_snapshot_alongside_json() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    fs::create_dir(root.path().join("src"))?;
+    fs::write(root.path().join("src/lib.rs"), "pub fn initial() {}\n")?;
+    let init = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["init", ".", "--yes"])
+        .current_dir(root.path())
+        .env_remove("COMPASS_OUT")
+        .output()?;
+    assert!(
+        init.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&init.stdout),
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let output_root = root.path().join("compass-out");
+    let active = BuildGuard::resolve_active_directory(&output_root)?;
+    let graph_path = active.join("graph.json");
+    let store = SqliteStore::open_read_only(active.join(STORE_FILE_NAME))?;
+    let graph = CodeGraphDocument::load(&graph_path)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("missing active snapshot")?;
+    assert_eq!(reader.export_json_bytes()?, canonical_graph_json(&graph)?);
+    let reference: StoreRef = serde_json::from_slice(&fs::read(active.join(STORE_REF_FILE_NAME))?)?;
+    assert_eq!(reference, store.snapshot_reference()?);
+
+    fs::write(root.path().join("src/lib.rs"), "pub fn changed() {}\n")?;
+    let update = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["update", ".", "--no-viz"])
+        .current_dir(root.path())
+        .env_remove("COMPASS_OUT")
+        .output()?;
+    assert!(
+        update.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&update.stdout),
+        String::from_utf8_lossy(&update.stderr)
+    );
+    let active = BuildGuard::resolve_active_directory(&output_root)?;
+    assert!(active.join("graph.json").is_file());
+    assert!(active.join(STORE_FILE_NAME).is_file());
+    assert!(active.join(STORE_REF_FILE_NAME).is_file());
+    assert!(!active.join(".compass-build-incomplete").exists());
+    Ok(())
+}
+
+#[test]
+fn shadow_switch_can_disable_store_artifacts_without_disabling_json() -> Result<(), Box<dyn Error>>
+{
+    let root = tempfile::tempdir()?;
+    fs::write(root.path().join("main.rs"), "fn main() {}\n")?;
+    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["update", ".", "--no-viz"])
+        .current_dir(root.path())
+        .env_remove("COMPASS_OUT")
+        .env("COMPASS_STORE_SHADOW", "0")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let active = BuildGuard::resolve_active_directory(&root.path().join("compass-out"))?;
+    assert!(active.join("graph.json").is_file());
+    assert!(!active.join(STORE_FILE_NAME).exists());
+    assert!(!active.join(STORE_REF_FILE_NAME).exists());
     Ok(())
 }
 

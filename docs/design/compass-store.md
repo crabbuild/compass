@@ -1,17 +1,19 @@
 # Compass store and graph-engine design
 
-**Status:** Architecture reference. The initial local slice and the Phase 2
-memory snapshot layout are shipped: the `compass-store` contract, SQLite
-adapter, dual graph publication, typed query-engine selection, deterministic
-immutable graph indexes, and selector-CAS reference protocol are implemented.
-SQLite publication still contains the validated JSON payload; persistent
-streamed store publication remains the next phase.
+**Status:** Architecture reference. The initial local slice, Phase 2 memory
+snapshot layout, and the Phase 3 SQLite shadow-publication slice are shipped:
+the `compass-store` contract, SQLite adapter, dual graph publication, typed
+query-engine selection, deterministic immutable graph indexes, selector-CAS
+reference protocol, WAL durability, reopen validation, and canonical
+graph.json differential checks are implemented. redb, PostgreSQL, DynamoDB,
+remote operation, general garbage collection, and performance claims remain
+follow-on work.
 
-The initial sidecar stores the validated graph payload as immutable,
-content-addressed chunks and keeps the existing query index disposable. The
-Phase 2 graph layer now also provides a backend-neutral memory implementation
-of the final index shape for qualification and future adapters. It is not yet
-the persistent SQLite publication path.
+Each generated sidecar now contains both the validated graph payload used by
+the current store engine and the Phase 2 content-addressed graph indexes. The
+sidecar is prepared and checkpointed in the unpublished BuildGuard generation;
+only the filesystem generation switch publishes it. `graph.json` remains a
+permanent compatible engine and is never removed or made dependent on SQLite.
 
 > **Who this page is for:** maintainers of graph publication and queries,
 > storage-adapter authors, cloud-service implementers, and reviewers of the
@@ -679,11 +681,12 @@ logical identity. A prepared snapshot writes no active selector. Activation is
 one conditional write, allowing readers that already opened an older selector
 to finish against that immutable realization.
 
-This reference is intentionally not the Phase 3 persistent path: the existing
-SQLite sidecar continues to store the validated JSON payload and the CLI still
-keeps `graph.json` as a permanent compatible engine. The next phase maps these
-same objects and selectors to durable SQLite publication and reopen/recovery
-tests without changing the logical contract.
+The Phase 3 local adapter maps these same objects and selectors to durable
+SQLite. It validates the active selector and canonical export after reopen,
+publishes a typed `store.ref`, checkpoints WAL frames before the generation
+switch, and reports bounded unreachable manifest candidates without deleting
+them. A malformed or stale store fails the unpublished build and leaves the
+previous generation and its JSON engine readable.
 
 ### Structural sharing and incremental update
 
@@ -743,6 +746,12 @@ If the filesystem commit fails, the prepared snapshot is an orphan. If the
 database later becomes unavailable, the published `graph.json` remains a
 usable complete engine. No best-effort sequence of “update database, then
 replace JSON” is allowed to expose two different current graphs.
+
+The Phase 3 local implementation uses `compass-store.sqlite3` inside the
+staged generation. SQLite runs in WAL/FULL mode; the writer checkpoints before
+the generation switch, then writes `store.ref` and bounded retention metadata.
+`COMPASS_STORE_SHADOW=0` is an internal diagnosis switch that removes store
+artifacts from the staged generation while retaining the JSON publication.
 
 ### Store-native or cloud publication
 
@@ -888,19 +897,15 @@ binary comparisons. Conditional updates include the observed `version` in the
 transaction and require the observed version to match. Put-if-absent uses the
 primary-key constraint and verifies the existing digest on conflict.
 
-The initial generated sidecar uses the rollback journal, full synchronous
-durability, a bounded busy timeout, bounded values, and explicit transactions.
-Rollback-journal mode is intentional while each build generation is represented
-by one portable SQLite file; a WAL adapter must stage and publish its `-wal`
-and `-shm` state together before it can replace this mode. Whether
-`WITHOUT ROWID` is retained must be benchmarked on Compass workloads; SQLite's
-own documentation recommends measuring this optimization rather than assuming
-it always wins.
-
-For a future WAL adapter, backups must include committed WAL state. The current
-rollback-journal sidecar is self-contained. File creation, permissions,
-symlink handling, corruption recovery, and atomic replacement reuse
-`compass-files` primitives rather than new weaker helpers.
+The generated sidecar uses WAL, full synchronous durability, a bounded busy
+timeout, bounded values, and explicit transactions. The publication path calls
+an explicit WAL checkpoint before `BuildGuard` seals the generation, so the
+main database file is self-contained for copy and recovery. File creation,
+permissions, symlink handling, corruption recovery, and atomic replacement
+reuse `compass-files` primitives rather than new weaker helpers. Whether
+`WITHOUT ROWID` remains the best physical choice is still a benchmark question;
+SQLite's own documentation recommends measuring this optimization rather than
+assuming it always wins.
 
 ### redb
 

@@ -2,7 +2,7 @@ use std::error::Error;
 
 use compass_graph::{
     GraphSnapshotBuilder, GraphSnapshotReader, IndexKind, SnapshotError, SnapshotReadLimits,
-    active_graph_snapshot, encode_graph_index_key,
+    active_graph_snapshot, canonical_graph_json, encode_graph_index_key,
 };
 use compass_model::code_graph::{
     BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord, GraphDocument, NodeKind,
@@ -249,6 +249,11 @@ fn sqlite_adapter_round_trips_the_same_snapshot_contract() -> Result<(), Box<dyn
     );
     assert_eq!(reader.outgoing("a", limits(4))?.len(), 2);
     assert_eq!(reader.manifest().snapshot_id, prepared.manifest.snapshot_id);
+    assert_eq!(reader.export_json_bytes()?, canonical_graph_json(&graph())?);
+    let reference = reopened.snapshot_reference()?;
+    assert_eq!(reference.snapshot_id, prepared.manifest.snapshot_id);
+    assert_eq!(reference.manifest_digest, prepared.manifest_digest);
+    assert_eq!(reference.graph_digest, prepared.manifest.graph_digest);
     Ok(())
 }
 

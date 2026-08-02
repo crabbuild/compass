@@ -11,9 +11,10 @@ use compass_files::{
 };
 use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
-    InventoryEvidence, PublicationOmissions, PublicationOutcome,
-    build_owned_with_tiebreaker as build_document, canonical_edge_kind, canonical_raw_edge_sites,
-    cluster, dedupe_nodes, extraction_from_v1, graph_insights, label_communities_by_hub,
+    GraphSnapshotBuilder, GraphSnapshotReader, InventoryEvidence, PublicationOmissions,
+    PublicationOutcome, build_owned_with_tiebreaker as build_document, canonical_edge_kind,
+    canonical_graph_json, canonical_raw_edge_sites, cluster, dedupe_nodes, extraction_from_v1,
+    graph_insights, label_communities_by_hub,
     normalize_document_v1_with_evidence_best_effort_owned,
     normalize_document_v1_with_inventory_best_effort,
     normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
@@ -320,6 +321,8 @@ pub enum CoreError {
     ProgramIr(#[from] compass_ir::IrError),
     #[error(transparent)]
     Store(#[from] compass_store::StoreError),
+    #[error(transparent)]
+    Snapshot(#[from] compass_graph::SnapshotError),
     #[error("invalid Program IR input: {0}")]
     InvalidProgramInput(String),
     #[error("invalid completed-build state: {0}")]
@@ -1859,10 +1862,15 @@ fn publish_build_state(
     omissions: PublicationOmissions,
     program: Option<&ProgramBuildSummary>,
 ) -> Result<(), CoreError> {
-    ensure_store_snapshot(output_dir)?;
+    let shadow_store = store_shadow_enabled();
+    if shadow_store {
+        ensure_store_snapshot(output_dir)?;
+    }
     let mut required = vec![output_dir.join(OUTPUT_STATS_FILE)];
-    required.push(output_dir.join(STORE_FILE_NAME));
-    required.push(output_dir.join(STORE_REF_FILE_NAME));
+    if shadow_store {
+        required.push(output_dir.join(STORE_FILE_NAME));
+        required.push(output_dir.join(STORE_REF_FILE_NAME));
+    }
     match options.purpose {
         BuildPurpose::Update => {
             required.push(output_dir.join(".compass_root"));
@@ -1909,14 +1917,24 @@ fn publish_build_state(
 }
 
 fn commit_generation(guard: BuildGuard, output_container: &Path) -> Result<PathBuf, CoreError> {
-    ensure_store_snapshot(guard.staging_directory())?;
-    let mut artifacts = vec![
-        "graph.json",
-        "manifest.json",
-        BUILD_STATE_FILE,
-        STORE_FILE_NAME,
-        STORE_REF_FILE_NAME,
-    ];
+    let shadow_store = store_shadow_enabled();
+    if !shadow_store {
+        for suffix in ["", "-wal", "-shm"] {
+            remove_if_exists(
+                &guard
+                    .staging_directory()
+                    .join(format!("{STORE_FILE_NAME}{suffix}")),
+            )?;
+        }
+        remove_if_exists(&guard.staging_directory().join(STORE_REF_FILE_NAME))?;
+    }
+    if shadow_store {
+        ensure_store_snapshot(guard.staging_directory())?;
+    }
+    let mut artifacts = vec!["graph.json", "manifest.json", BUILD_STATE_FILE];
+    if shadow_store {
+        artifacts.extend([STORE_FILE_NAME, STORE_REF_FILE_NAME]);
+    }
     if guard.staging_directory().join("program.json").is_file() {
         artifacts.push("program.json");
     }
@@ -1941,26 +1959,52 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<(), CoreError> {
             graph.graph.schema
         )));
     }
+    let canonical_graph = canonical_graph_json(&graph)?;
     let store_path = output_dir.join(STORE_FILE_NAME);
-    if let Ok(store) = SqliteStore::open_read_only(&store_path)
-        && let Ok((manifest, existing)) = store.read_snapshot()
-        && existing == graph_bytes
-        && manifest.node_count == graph.nodes.len() as u64
-        && manifest.edge_count == graph.links.len() as u64
-    {
-        write_store_ref(output_dir, &store)?;
-        return Ok(());
-    }
     let store = SqliteStore::open(&store_path)?;
-    store.publish_snapshot(
-        &graph_bytes,
-        GRAPH_SCHEMA_V1,
-        graph.nodes.len(),
-        graph.links.len(),
-    )?;
+    if !store.read_snapshot().is_ok_and(|(manifest, existing)| {
+        existing == graph_bytes
+            && manifest.node_count == graph.nodes.len() as u64
+            && manifest.edge_count == graph.links.len() as u64
+    }) {
+        store.publish_snapshot(
+            &graph_bytes,
+            GRAPH_SCHEMA_V1,
+            graph.nodes.len(),
+            graph.links.len(),
+        )?;
+    }
+    let builder = GraphSnapshotBuilder::new();
+    let active = GraphSnapshotReader::open_active(&store)?;
+    let reader = match active {
+        Some(reader) if reader.export_json_bytes()? == canonical_graph => reader,
+        Some(_) | None => {
+            let prepared = builder.prepare(&store, &graph)?;
+            let selector = builder.activate(&store, &prepared)?;
+            GraphSnapshotReader::open_selector(&store, selector)?
+        }
+    };
+    if reader.export_json_bytes()? != canonical_graph {
+        return Err(CoreError::InvalidBuildState(
+            "SQLite graph snapshot does not match graph.json; rebuild the generation".to_owned(),
+        ));
+    }
     store.validate_snapshot()?;
-    write_store_ref(output_dir, &store)?;
+    store.checkpoint()?;
+    let reference = write_store_ref(output_dir, &store)?;
+    store.record_retention_metadata(&reference, compass_store::MAX_SCAN_ITEMS)?;
+    store.checkpoint()?;
     Ok(())
+}
+
+fn store_shadow_enabled() -> bool {
+    let Ok(value) = std::env::var("COMPASS_STORE_SHADOW") else {
+        return true;
+    };
+    !matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "0" | "false" | "off" | "no" | "disabled"
+    )
 }
 
 fn write_store_ref(output_dir: &Path, store: &SqliteStore) -> Result<StoreRef, CoreError> {
@@ -3875,20 +3919,25 @@ fn topology_is_unchanged(existing: &GraphDocument, candidate: &GraphDocument) ->
 }
 
 fn update_artifacts_complete(output_dir: &Path) -> bool {
-    [
+    let mut required = vec![
         "graph.json",
-        STORE_FILE_NAME,
-        STORE_REF_FILE_NAME,
         "GRAPH_REPORT.md",
         ".compass_labels.json",
         ".compass_root",
         GRAPH_OVERVIEW_FILE,
-    ]
-    .into_iter()
-    .all(|name| output_dir.join(name).is_file())
+    ];
+    if store_shadow_enabled() {
+        required.extend([STORE_FILE_NAME, STORE_REF_FILE_NAME]);
+    }
+    required
+        .into_iter()
+        .all(|name| output_dir.join(name).is_file())
 }
 
 fn store_artifact_complete(output_dir: &Path) -> bool {
+    if !store_shadow_enabled() {
+        return true;
+    }
     let path = output_dir.join(STORE_FILE_NAME);
     let reference_path = output_dir.join(STORE_REF_FILE_NAME);
     let Ok(reference_bytes) = fs::read(reference_path) else {

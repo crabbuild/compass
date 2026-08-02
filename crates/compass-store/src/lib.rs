@@ -26,6 +26,7 @@ use sha2::{Digest, Sha256};
 pub const STORE_SCHEMA_V1: &str = "compass.store/1";
 pub const GRAPH_SNAPSHOT_SCHEMA_V1: &str = "compass.store.graph-snapshot/1";
 pub const STORE_REF_SCHEMA_V1: &str = "compass.store.ref/1";
+pub const STORE_RETENTION_SCHEMA_V1: &str = "compass.store.retention/1";
 pub const GRAPH_SCHEMA_V1: &str = "compass.graph/1";
 pub const STORE_FILE_NAME: &str = "compass-store.sqlite3";
 pub const STORE_REF_FILE_NAME: &str = "store.ref";
@@ -42,9 +43,15 @@ const GRAPH_NAMESPACE: &[u8] = b"compass.current.graph.v1";
 const CATALOG_PARTITION: &[u8] = b"catalog";
 const OBJECT_PARTITION: &[u8] = b"object";
 const ACTIVE_KEY: &[u8] = b"active";
+const GRAPH_SNAPSHOT_CATALOG_PARTITION: &[u8] = b"graph-snapshot/catalog";
+const GRAPH_SNAPSHOT_OBJECT_PARTITION: &[u8] = b"graph-snapshot/objects";
 const MANIFEST_PREFIX: &[u8] = b"manifest/";
 const CHUNK_PREFIX: &[u8] = b"chunk/";
 const CHUNK_BYTES: usize = MAX_VALUE_BYTES - 1_024;
+const GRAPH_SNAPSHOT_LAYOUT_V1: &str = "compass.store.graph-index/1";
+const GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1: &str = "compass.store.graph-selector/1";
+const GRAPH_SNAPSHOT_ACTIVE_KEY: &[u8] = b"active";
+const RETENTION_METADATA_KEY: &str = "retention.v1";
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -404,6 +411,35 @@ pub struct StoreRef {
     pub graph_digest: String,
 }
 
+/// Bounded, backend-neutral maintenance state. It records what a future
+/// garbage collector may retain without embedding a path, clock value, or
+/// deletion policy in the graph snapshot contract.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RetentionMetadata {
+    pub schema: String,
+    pub active_snapshot_id: String,
+    pub active_manifest_digest: String,
+    pub orphan_scan_limit: u32,
+}
+
+impl RetentionMetadata {
+    pub fn validate(&self) -> Result<(), StoreError> {
+        if self.schema != STORE_RETENTION_SCHEMA_V1 {
+            return Err(StoreError::InvalidFormat(format!(
+                "expected retention schema {STORE_RETENTION_SCHEMA_V1}"
+            )));
+        }
+        validate_digest("retention snapshot", &self.active_snapshot_id)?;
+        validate_digest("retention manifest", &self.active_manifest_digest)?;
+        if self.orphan_scan_limit == 0 || self.orphan_scan_limit as usize > MAX_SCAN_ITEMS {
+            return Err(StoreError::InvalidFormat(format!(
+                "retention orphan scan limit must be between 1 and {MAX_SCAN_ITEMS}"
+            )));
+        }
+        Ok(())
+    }
+}
+
 impl StoreRef {
     pub fn validate(&self) -> Result<(), StoreError> {
         if self.schema != STORE_REF_SCHEMA_V1 {
@@ -478,6 +514,7 @@ impl SqliteStore {
             &path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
         )?;
+        configure_read_only_connection(&connection)?;
         verify_schema(&connection)?;
         Ok(Self {
             path,
@@ -600,8 +637,149 @@ impl SqliteStore {
         self.read_snapshot().map(|(manifest, _)| manifest)
     }
 
+    /// Flush all acknowledged WAL frames before a filesystem generation is
+    /// committed.  The main database file is the only authoritative artifact
+    /// named by `BuildGuard`; checkpointing makes it self-contained for copy,
+    /// backup, and recovery operations.
+    pub fn checkpoint(&self) -> Result<(), StoreError> {
+        if self.read_only {
+            return Err(StoreError::Unsupported(
+                "cannot checkpoint a read-only store".to_owned(),
+            ));
+        }
+        let connection = self.connection()?;
+        connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        Ok(())
+    }
+
+    /// Return bounded manifest keys that are not selected by either the
+    /// payload snapshot or the immutable graph-index selector.  This is a
+    /// discovery API only; Phase 8 owns retention policy and deletion.
+    pub fn discover_orphan_manifests(&self, limits: ScanLimits) -> Result<Vec<String>, StoreError> {
+        let namespace = NamespaceId::graph();
+        let object = PartitionKey::new(OBJECT_PARTITION)?;
+        let page = self.scan(
+            &namespace,
+            &object,
+            &KeyRange {
+                start_inclusive: Some(MANIFEST_PREFIX.to_vec()),
+                end_exclusive: Some(b"manifest0".to_vec()),
+            },
+            limits,
+            None,
+        )?;
+        if page.next.is_some() {
+            return Err(StoreError::InvalidScanLimit(
+                "orphan manifest discovery exceeds the supplied bounded page".to_owned(),
+            ));
+        }
+        let mut active = BTreeMap::new();
+        if let Some(entry) = self.get(
+            &namespace,
+            &PartitionKey::new(CATALOG_PARTITION)?,
+            &Key::new(ACTIVE_KEY)?,
+        )? {
+            let manifest = serde_json::from_slice::<SnapshotManifest>(&entry.value)
+                .map_err(|error| StoreError::Corrupt(format!("active manifest: {error}")))?;
+            validate_manifest(&manifest)?;
+            active.insert(manifest.snapshot_id, ());
+        }
+        if let Some(entry) = self.get(
+            &namespace,
+            &PartitionKey::new(GRAPH_SNAPSHOT_CATALOG_PARTITION)?,
+            &Key::new(GRAPH_SNAPSHOT_ACTIVE_KEY)?,
+        )? {
+            let selector =
+                serde_json::from_slice::<GraphSnapshotSelector>(&entry.value).map_err(|error| {
+                    StoreError::Corrupt(format!("graph snapshot selector: {error}"))
+                })?;
+            if selector.schema != GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1 {
+                return Err(StoreError::InvalidFormat(
+                    "selected graph snapshot uses an unsupported format; rebuild the store"
+                        .to_owned(),
+                ));
+            }
+            validate_digest("snapshot selector manifest", &selector.manifest_digest)?;
+            active.insert(selector.manifest_digest, ());
+        }
+        let mut orphans = Vec::new();
+        for entry in page.entries {
+            let Some(digest) = entry
+                .key
+                .strip_prefix(MANIFEST_PREFIX)
+                .and_then(|value| std::str::from_utf8(value).ok())
+            else {
+                continue;
+            };
+            if digest.len() == 64
+                && digest.as_bytes().iter().all(u8::is_ascii_hexdigit)
+                && !active.contains_key(digest)
+            {
+                orphans.push(digest.to_owned());
+            }
+        }
+        Ok(orphans)
+    }
+
+    /// Record the active graph snapshot and the bounded maintenance budget
+    /// used by orphan discovery. The value is operational metadata and does
+    /// not participate in graph identity.
+    pub fn record_retention_metadata(
+        &self,
+        reference: &StoreRef,
+        orphan_scan_limit: usize,
+    ) -> Result<RetentionMetadata, StoreError> {
+        if self.read_only {
+            return Err(StoreError::Unsupported(
+                "cannot update retention metadata through a read-only store".to_owned(),
+            ));
+        }
+        reference.validate()?;
+        let orphan_scan_limit = u32::try_from(orphan_scan_limit).map_err(|_| {
+            StoreError::InvalidScanLimit("retention scan limit does not fit u32".to_owned())
+        })?;
+        let metadata = RetentionMetadata {
+            schema: STORE_RETENTION_SCHEMA_V1.to_owned(),
+            active_snapshot_id: reference.snapshot_id.clone(),
+            active_manifest_digest: reference.manifest_digest.clone(),
+            orphan_scan_limit,
+        };
+        metadata.validate()?;
+        let bytes = serde_json::to_vec(&metadata)
+            .map_err(|error| StoreError::Corrupt(format!("retention metadata encode: {error}")))?;
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO metadata(key, value) VALUES(?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![RETENTION_METADATA_KEY, bytes],
+        )?;
+        Ok(metadata)
+    }
+
+    pub fn retention_metadata(&self) -> Result<Option<RetentionMetadata>, StoreError> {
+        let connection = self.connection()?;
+        let bytes = connection
+            .query_row(
+                "SELECT value FROM metadata WHERE key = ?1",
+                params![RETENTION_METADATA_KEY],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .optional()?;
+        bytes
+            .map(|bytes| {
+                let metadata = serde_json::from_slice::<RetentionMetadata>(&bytes)
+                    .map_err(|error| StoreError::Corrupt(format!("retention metadata: {error}")))?;
+                metadata.validate()?;
+                Ok(metadata)
+            })
+            .transpose()
+    }
+
     /// Return the typed reference for the currently selected snapshot.
     pub fn snapshot_reference(&self) -> Result<StoreRef, StoreError> {
+        if let Some(reference) = self.graph_snapshot_reference()? {
+            return Ok(reference);
+        }
         let (manifest, _) = self.read_snapshot()?;
         let manifest_bytes = serde_json::to_vec(&manifest)
             .map_err(|error| StoreError::Corrupt(format!("manifest encode: {error}")))?;
@@ -617,6 +795,61 @@ impl SqliteStore {
         };
         reference.validate()?;
         Ok(reference)
+    }
+
+    fn graph_snapshot_reference(&self) -> Result<Option<StoreRef>, StoreError> {
+        let namespace = NamespaceId::graph();
+        let catalog = PartitionKey::new(GRAPH_SNAPSHOT_CATALOG_PARTITION)?;
+        let active = Key::new(GRAPH_SNAPSHOT_ACTIVE_KEY)?;
+        let Some(entry) = self.get(&namespace, &catalog, &active)? else {
+            return Ok(None);
+        };
+        let selector: GraphSnapshotSelector = serde_json::from_slice(&entry.value)
+            .map_err(|error| StoreError::Corrupt(format!("graph snapshot selector: {error}")))?;
+        if selector.schema != GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1 {
+            return Err(StoreError::InvalidFormat(
+                "selected graph snapshot uses an unsupported format; rebuild the store".to_owned(),
+            ));
+        }
+        validate_digest("snapshot selector", &selector.snapshot_id)?;
+        validate_digest("snapshot selector manifest", &selector.manifest_digest)?;
+        let object = PartitionKey::new(GRAPH_SNAPSHOT_OBJECT_PARTITION)?;
+        let manifest_key = Key::new(format!("manifest/{}", selector.manifest_digest))?;
+        let Some(manifest_entry) = self.get(&namespace, &object, &manifest_key)? else {
+            return Err(StoreError::Corrupt(
+                "selected graph snapshot manifest is missing".to_owned(),
+            ));
+        };
+        if digest(&manifest_entry.value) != selector_digest(&selector.manifest_digest)? {
+            return Err(StoreError::Corrupt(
+                "selected graph snapshot manifest digest does not match".to_owned(),
+            ));
+        }
+        let manifest: GraphSnapshotManifest = serde_json::from_slice(&manifest_entry.value)
+            .map_err(|error| StoreError::Corrupt(format!("graph snapshot manifest: {error}")))?;
+        if manifest.schema != GRAPH_SNAPSHOT_LAYOUT_V1
+            || manifest.graph_schema != GRAPH_SCHEMA_V1
+            || manifest.snapshot_id != selector.snapshot_id
+        {
+            return Err(StoreError::InvalidFormat(
+                "selected graph snapshot uses an unsupported or mismatched format; rebuild the store"
+                    .to_owned(),
+            ));
+        }
+        validate_digest("graph snapshot graph", &manifest.graph_digest)?;
+        let manifest_digest = hex_digest(&manifest_entry.value);
+        let reference = StoreRef {
+            schema: STORE_REF_SCHEMA_V1.to_owned(),
+            store_schema: STORE_SCHEMA_V1.to_owned(),
+            adapter: "sqlite".to_owned(),
+            store_id: "sqlite-local-v1".to_owned(),
+            namespace: String::from_utf8_lossy(GRAPH_NAMESPACE).into_owned(),
+            snapshot_id: selector.snapshot_id,
+            manifest_digest,
+            graph_digest: manifest.graph_digest,
+        };
+        reference.validate()?;
+        Ok(Some(reference))
     }
 
     fn connection(&self) -> Result<MutexGuard<'_, Connection>, StoreError> {
@@ -1232,9 +1465,17 @@ fn hex_digest(value: &[u8]) -> String {
 
 fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
     connection.execute_batch(
-        "PRAGMA journal_mode=DELETE;
+        "PRAGMA journal_mode=WAL;
          PRAGMA synchronous=FULL;
          PRAGMA foreign_keys=ON;
+         PRAGMA busy_timeout=5000;",
+    )?;
+    Ok(())
+}
+
+fn configure_read_only_connection(connection: &Connection) -> Result<(), StoreError> {
+    connection.execute_batch(
+        "PRAGMA foreign_keys=ON;
          PRAGMA busy_timeout=5000;",
     )?;
     Ok(())
@@ -1270,10 +1511,58 @@ fn verify_schema(connection: &Connection) -> Result<(), StoreError> {
         .optional()?;
     if schema.as_deref() != Some(STORE_SCHEMA_V1) {
         return Err(StoreError::InvalidFormat(format!(
-            "expected metadata schema {STORE_SCHEMA_V1}"
+            "expected metadata schema {STORE_SCHEMA_V1}; remove the store and rebuild it"
         )));
     }
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphSnapshotSelector {
+    schema: String,
+    snapshot_id: String,
+    manifest_digest: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphSnapshotManifest {
+    schema: String,
+    snapshot_id: String,
+    graph_schema: String,
+    graph_digest: String,
+}
+
+fn validate_digest(component: &'static str, value: &str) -> Result<(), StoreError> {
+    if value.len() != 64 || !value.as_bytes().iter().all(u8::is_ascii_hexdigit) {
+        return Err(StoreError::Corrupt(format!(
+            "{component} is not a SHA-256 hex digest"
+        )));
+    }
+    Ok(())
+}
+
+fn selector_digest(value: &str) -> Result<[u8; 32], StoreError> {
+    validate_digest("manifest digest", value)?;
+    let mut output = [0_u8; 32];
+    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+        let high = hex_digit(pair[0]).ok_or_else(|| {
+            StoreError::Corrupt("manifest digest contains a non-hex character".to_owned())
+        })?;
+        let low = hex_digit(pair[1]).ok_or_else(|| {
+            StoreError::Corrupt("manifest digest contains a non-hex character".to_owned())
+        })?;
+        output[index] = (high << 4) | low;
+    }
+    Ok(output)
+}
+
+fn hex_digit(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn manifest_key(snapshot_id: &str) -> Vec<u8> {
@@ -1325,6 +1614,9 @@ fn validate_manifest(manifest: &SnapshotManifest) -> Result<(), StoreError> {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+
+    use rusqlite::Connection;
+    use sha2::{Digest, Sha256};
 
     use super::{
         Key, KeyRange, MemoryStore, NamespaceId, PartitionKey, ScanLimits, SqliteStore, Store,
@@ -1424,10 +1716,60 @@ mod tests {
             let store = SqliteStore::open(&path)?;
             let manifest = store.publish_snapshot(bytes, "compass.graph/1", 1, 0)?;
             assert_eq!(manifest.payload_bytes, bytes.len() as u64);
+            store.checkpoint()?;
         }
         let store = SqliteStore::open_read_only(&path)?;
         let (_, loaded) = store.read_snapshot()?;
         assert_eq!(loaded, bytes);
+        let copied_path = directory.path().join("copied.sqlite3");
+        std::fs::copy(&path, &copied_path)?;
+        let copied = SqliteStore::open_read_only(&copied_path)?;
+        assert_eq!(copied.read_snapshot()?.1, bytes);
+        let connection = Connection::open(&path)?;
+        let journal_mode =
+            connection.query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))?;
+        assert_eq!(journal_mode, "wal");
+        let synchronous =
+            connection.query_row("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))?;
+        assert_eq!(synchronous, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn orphan_manifest_discovery_is_bounded_and_does_not_delete_data() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("store.sqlite3");
+        let first = br#"{"graph":{"schema":"compass.graph/1"},"nodes":[1],"links":[]}"#;
+        let second = br#"{"graph":{"schema":"compass.graph/1"},"nodes":[2],"links":[]}"#;
+        let store = SqliteStore::open(&path)?;
+        store.publish_snapshot(first, "compass.graph/1", 1, 0)?;
+        store.publish_snapshot(second, "compass.graph/1", 1, 0)?;
+        let reference = store.snapshot_reference()?;
+        let retention = store.record_retention_metadata(&reference, 16)?;
+        assert_eq!(store.retention_metadata()?, Some(retention));
+        let orphans = store.discover_orphan_manifests(ScanLimits::default())?;
+        let first_digest = format!("{:x}", Sha256::digest(first));
+        assert_eq!(orphans, vec![first_digest]);
+        assert_eq!(store.read_snapshot()?.1, second);
+        Ok(())
+    }
+
+    #[test]
+    fn stale_schema_reports_rebuild_instruction() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("store.sqlite3");
+        let connection = Connection::open(&path)?;
+        connection.execute_batch(
+            "CREATE TABLE metadata(key TEXT PRIMARY KEY NOT NULL, value BLOB NOT NULL);
+             INSERT INTO metadata(key, value) VALUES('schema', 'compass.store/0');",
+        )?;
+        drop(connection);
+        let error = match SqliteStore::open(&path) {
+            Ok(_) => return Err("stale schema unexpectedly opened".into()),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("rebuild"));
         Ok(())
     }
 
