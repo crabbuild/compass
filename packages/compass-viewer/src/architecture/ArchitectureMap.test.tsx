@@ -185,6 +185,44 @@ describe("ArchitectureMap", () => {
       .not.toBeInTheDocument();
   });
 
+  it("collapses reciprocal neighbor routes into one bidirectional connection", () => {
+    const reciprocalOverview: ArchitectureOverview = {
+      ...overview,
+      sections: overview.sections.map((section) => ({
+        ...section,
+        incomingCalls: 30,
+        outgoingCalls: 30
+      })),
+      routes: [
+        overview.routes[0]!,
+        {
+          ...overview.routes[0]!,
+          id: "storage→api",
+          sourceSection: "storage",
+          targetSection: "api",
+          calls: 20
+        }
+      ]
+    };
+    render(
+      <ArchitectureMap
+        overview={reciprocalOverview}
+        selection={{ kind: "section", id: "api" }}
+        onSelect={vi.fn()}
+      />
+    );
+
+    const connection = screen.getByRole("button", {
+      name: /api to storage, 30 calls; bidirectional, 20 reverse calls/i
+    });
+    expect(document.querySelectorAll(".architecture-routes > g")).toHaveLength(1);
+    expect(connection.querySelector(".architecture-route-line"))
+      .toHaveAttribute("marker-start", "url(#architecture-arrow-incoming)");
+
+    fireEvent.click(screen.getByRole("button", { name: "All routes · 2" }));
+    expect(document.querySelectorAll(".architecture-routes > g")).toHaveLength(2);
+  });
+
   it("explains an empty filtered architecture instead of leaving a blank canvas", () => {
     render(
       <ArchitectureMap

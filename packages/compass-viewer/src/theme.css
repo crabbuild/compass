@@ -5741,6 +5741,16 @@ body.vscode-high-contrast-light .architecture-call-table {
   background: var(--vscode-charts-blue, #49a6ff);
 }
 
+.architecture-map-legend i[data-direction="bidirectional"] {
+  display: grid;
+  width: 18px;
+  height: 12px;
+  place-items: center;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  font: normal 10px/1 var(--compass-font-mono);
+}
+
 .architecture-map-legend i[data-direction="feedback"] {
   background: repeating-linear-gradient(
     90deg,

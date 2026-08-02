@@ -40,6 +40,7 @@ type DragState = {
 type RouteMode = "key" | "complete";
 type ScrollPosition = "start" | "middle" | "end" | "none";
 type ViewportSize = { width: number; height: number };
+type ArchitectureRoute = ArchitectureOverview["routes"][number];
 
 const KEY_ROUTE_LIMIT = 16;
 const DEFAULT_VIEWPORT_SIZE: ViewportSize = { width: 1280, height: 620 };
@@ -93,12 +94,16 @@ export function ArchitectureMap({
     () => selectKeyRoutes(overview.routes, selection),
     [overview.routes, selection]
   );
-  const routeSummaries = useMemo(
+  const routeDisplay = useMemo(
     () => routeMode === "complete"
-      ? overview.routes
-      : overview.routes.filter((route) => keyRouteIds.has(route.id)),
-    [keyRouteIds, overview.routes, routeMode]
+      ? { routes: overview.routes, reciprocals: new Map<string, ArchitectureRoute>() }
+      : collapseReciprocalRoutes(
+        overview.routes.filter((route) => keyRouteIds.has(route.id)),
+        selection?.kind === "route" ? selection.id : undefined
+      ),
+    [keyRouteIds, overview.routes, routeMode, selection]
   );
+  const routeSummaries = routeDisplay.routes;
   const displayedSections = useMemo(() => {
     if (routeMode === "complete" || selection === undefined) return overview.sections;
     const ids = new Set<string>();
@@ -408,7 +413,7 @@ export function ArchitectureMap({
               markerHeight="8"
               refX="7"
               refY="4"
-              orient="auto"
+              orient="auto-start-reverse"
               markerUnits="userSpaceOnUse"
             >
               <path d="M 0 0 L 8 4 L 0 8 z" />
@@ -420,7 +425,7 @@ export function ArchitectureMap({
               markerHeight="8"
               refX="7"
               refY="4"
-              orient="auto"
+              orient="auto-start-reverse"
               markerUnits="userSpaceOnUse"
             >
               <path d="M 0 0 L 8 4 L 0 8 z" />
@@ -432,7 +437,7 @@ export function ArchitectureMap({
               markerHeight="8"
               refX="7"
               refY="4"
-              orient="auto"
+              orient="auto-start-reverse"
               markerUnits="userSpaceOnUse"
             >
               <path d="M 0 0 L 8 4 L 0 8 z" />
@@ -463,6 +468,7 @@ export function ArchitectureMap({
 
           <g className="architecture-routes">
             {displayedRoutes.map((route) => {
+              const reciprocal = routeDisplay.reciprocals.get(route.id);
               const selected = selection?.kind === "route" && selection.id === route.id;
               const related = selected
                 || selection === undefined
@@ -484,10 +490,11 @@ export function ArchitectureMap({
                   role="button"
                   tabIndex={0}
                   aria-label={`${route.sourceSection} to ${route.targetSection}, ${route.calls} calls${
-                    route.direction === "backward" ? ", feedback route" : ""
-                  }`}
+                    reciprocal ? `; bidirectional, ${reciprocal.calls} reverse calls` : ""
+                  }${route.direction === "backward" ? ", feedback route" : ""}`}
                   data-direction={route.direction}
                   data-evidence={evidence}
+                  data-reciprocal={reciprocal ? "true" : undefined}
                   data-focus-direction={focusDirection}
                   data-selected={selected || undefined}
                   data-dimmed={!related || undefined}
@@ -504,6 +511,7 @@ export function ArchitectureMap({
                       strokeWidth: route.width,
                       "--architecture-route-opacity": opacity
                     } as CSSProperties}
+                    markerStart={reciprocal ? reverseMarker(focusDirection) : undefined}
                     markerEnd={
                       focusDirection === "incoming"
                         ? "url(#architecture-arrow-incoming)"
@@ -514,6 +522,11 @@ export function ArchitectureMap({
                   />
                   <title>
                     {route.sourceSection} → {route.targetSection}: {route.calls} calls
+                    {reciprocal && (
+                      ` · ${reciprocal.sourceSection} → ${reciprocal.targetSection}: ${
+                        reciprocal.calls
+                      } calls`
+                    )}
                   </title>
                 </g>
               );
@@ -605,6 +618,7 @@ export function ArchitectureMap({
           <span><i data-evidence="inferred" /> Inferred</span>
           <span><i data-direction="incoming" /> Incoming</span>
           <span><i data-direction="outgoing" /> Outgoing</span>
+          <span><i data-direction="bidirectional" aria-hidden="true">↔</i> Bidirectional</span>
           <span><i data-direction="feedback" /> Feedback</span>
           <span><MoveIcon aria-hidden="true" /> Drag cards to arrange</span>
           {hiddenRouteCount > 0 && (
@@ -694,7 +708,15 @@ function selectKeyRoutes(
     );
   const selected = new Set<string>();
   if (selection?.kind === "route") {
-    if (routes.some((route) => route.id === selection.id)) selected.add(selection.id);
+    const selectedRoute = routes.find((route) => route.id === selection.id);
+    if (selectedRoute) {
+      selected.add(selectedRoute.id);
+      const reverse = routes.find((route) =>
+        route.sourceSection === selectedRoute.targetSection
+        && route.targetSection === selectedRoute.sourceSection
+      );
+      if (reverse) selected.add(reverse.id);
+    }
     return selected;
   } else if (selection?.kind === "section") {
     const incoming = strongest(
@@ -713,6 +735,55 @@ function selectKeyRoutes(
     selected.add(route.id);
   }
   return selected;
+}
+
+function collapseReciprocalRoutes(
+  routes: readonly ArchitectureRoute[],
+  preferredRouteId?: string
+): { routes: ArchitectureRoute[]; reciprocals: Map<string, ArchitectureRoute> } {
+  const byDirection = new Map(
+    routes.map((route) => [routePairKey(route.sourceSection, route.targetSection), route])
+  );
+  const consumed = new Set<string>();
+  const collapsed: ArchitectureRoute[] = [];
+  const reciprocals = new Map<string, ArchitectureRoute>();
+
+  for (const route of routes) {
+    if (consumed.has(route.id)) continue;
+    const reverse = byDirection.get(
+      routePairKey(route.targetSection, route.sourceSection)
+    );
+    if (!reverse || reverse.id === route.id || consumed.has(reverse.id)) {
+      collapsed.push(route);
+      consumed.add(route.id);
+      continue;
+    }
+    const primary = route.id === preferredRouteId
+      ? route
+      : reverse.id === preferredRouteId
+        ? reverse
+        : route.calls > reverse.calls
+          || (route.calls === reverse.calls && route.id.localeCompare(reverse.id) <= 0)
+          ? route
+          : reverse;
+    const reciprocal = primary.id === route.id ? reverse : route;
+    collapsed.push(primary);
+    reciprocals.set(primary.id, reciprocal);
+    consumed.add(route.id);
+    consumed.add(reverse.id);
+  }
+  collapsed.sort((left, right) => right.calls - left.calls || left.id.localeCompare(right.id));
+  return { routes: collapsed, reciprocals };
+}
+
+function routePairKey(source: string, target: string): string {
+  return `${source}\u0000${target}`;
+}
+
+function reverseMarker(direction: "incoming" | "outgoing" | undefined): string {
+  if (direction === "incoming") return "url(#architecture-arrow-outgoing)";
+  if (direction === "outgoing") return "url(#architecture-arrow-incoming)";
+  return "url(#architecture-arrow)";
 }
 
 function mapLabel(nodes: number, displayedRoutes: number, totalRoutes: number): string {
