@@ -4,6 +4,7 @@ mod analyze;
 mod cluster;
 mod dedup;
 mod quarantine;
+mod snapshot;
 mod v1;
 
 pub use analyze::{
@@ -22,6 +23,12 @@ pub use dedup::{
     deduplicate_entities_with_tiebreaker,
 };
 pub use quarantine::{MAX_QUARANTINE_EXAMPLES, PublicationOmissions, PublicationOutcome};
+pub use snapshot::{
+    GRAPH_SNAPSHOT_LAYOUT_V1, GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder,
+    GraphSnapshotManifest, GraphSnapshotMetadata, GraphSnapshotReader, IndexKind,
+    PreparedGraphSnapshot, SnapshotError, SnapshotReadLimits, SnapshotRoot, SnapshotSelector,
+    activate_graph_snapshot, active_graph_snapshot, encode_graph_index_key, prepare_graph_snapshot,
+};
 pub use v1::{
     BuildEvidence, InventoryEvidence, V1_PUBLICATION_SEMANTICS_VERSION, canonical_edge_kind,
     canonical_raw_edge_sites, extraction_from_v1, normalize_document_v1,

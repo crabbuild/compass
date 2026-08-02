@@ -1,0 +1,278 @@
+use std::error::Error;
+
+use compass_graph::{
+    GraphSnapshotBuilder, GraphSnapshotReader, IndexKind, SnapshotError, SnapshotReadLimits,
+    active_graph_snapshot, encode_graph_index_key,
+};
+use compass_model::code_graph::{
+    BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord, GraphDocument, NodeKind,
+    NodeRecord,
+};
+use compass_model::identity::{edge_id, file_id};
+use compass_model::provenance::{
+    EvidenceConfidence, EvidenceOrigin, OccurrenceRule, Provenance, SourceAnchor,
+};
+use compass_store::SqliteStore;
+use compass_store::{Key, MemoryStore, NamespaceId, PartitionKey, Store, WriteCondition};
+use tempfile::tempdir;
+
+fn graph() -> GraphDocument {
+    let mut document = GraphDocument::empty_v1(BuildMetadata {
+        builder_version: "test".to_owned(),
+        schema_fingerprint: "schema".to_owned(),
+        source_tree_digest: "tree".to_owned(),
+        configuration_digest: "config".to_owned(),
+        generation_id: "generation".to_owned(),
+        source_commit: None,
+    });
+    document.graph.files.push(FileRecord {
+        id: file_id("src/lib.rs"),
+        path: "src/lib.rs".to_owned(),
+        language: Some("rust".to_owned()),
+        content_digest: "sha256:test".to_owned(),
+        byte_size: 1,
+        generated: false,
+        extraction_status: ExtractionStatus::Extracted,
+        extractor_versions: vec!["test".to_owned()],
+        coverage: Vec::new(),
+        diagnostics: Vec::new(),
+    });
+    document.nodes = vec![node("b"), node("a")];
+    let first_id = edge_id("a", EdgeKind::Calls, "b", None, None);
+    let second_id = edge_id("a", EdgeKind::Calls, "b", None, Some("second"));
+    document.links = vec![
+        EdgeRecord {
+            id: first_id.clone(),
+            key: first_id,
+            source: "a".to_owned(),
+            target: "b".to_owned(),
+            kind: EdgeKind::Calls,
+            occurrence_rule: None,
+            relationship_site: None,
+            details: None,
+            evidence: vec![evidence()],
+            weight: Some(1.0),
+            context: Some("a calls b".to_owned()),
+            deferred: false,
+            diagnostics: Vec::new(),
+        },
+        EdgeRecord {
+            id: second_id.clone(),
+            key: second_id,
+            source: "a".to_owned(),
+            target: "b".to_owned(),
+            kind: EdgeKind::Calls,
+            occurrence_rule: OccurrenceRule::new("second"),
+            relationship_site: None,
+            details: None,
+            evidence: vec![evidence()],
+            weight: Some(2.0),
+            context: Some("a calls b again".to_owned()),
+            deferred: false,
+            diagnostics: Vec::new(),
+        },
+    ];
+    document
+}
+
+fn node(id: &str) -> NodeRecord {
+    NodeRecord {
+        id: id.to_owned(),
+        kind: NodeKind::Function,
+        roles: Vec::new(),
+        name: id.to_owned(),
+        qualified_name: format!("crate::{id}"),
+        language: Some("rust".to_owned()),
+        framework: None,
+        source: Some(anchor()),
+        details: None,
+        evidence: vec![evidence()],
+        coverage: Vec::new(),
+        diagnostics: Vec::new(),
+        community: None,
+    }
+}
+
+fn evidence() -> Provenance {
+    Provenance {
+        origin: EvidenceOrigin::Ast,
+        extractor: "test".to_owned(),
+        confidence: EvidenceConfidence::Exact,
+        rule: None,
+        anchors: vec![anchor()],
+        wiring_site: None,
+        score: None,
+        candidates: Vec::new(),
+    }
+}
+
+fn anchor() -> SourceAnchor {
+    SourceAnchor {
+        file: "src/lib.rs".to_owned(),
+        start_byte: 0,
+        end_byte: 1,
+        start_line: 1,
+        start_column: 0,
+        end_line: 1,
+        end_column: 1,
+    }
+}
+
+fn limits(max_items: usize) -> SnapshotReadLimits {
+    SnapshotReadLimits {
+        max_items,
+        max_bytes: 256 * 1024,
+        max_objects: 4_096,
+        max_depth: 64,
+    }
+}
+
+#[test]
+fn snapshot_is_deterministic_and_reuses_immutable_objects() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let first = builder.prepare(&store, &graph())?;
+    let second = builder.prepare(&store, &graph())?;
+    let mut operational_variant = graph();
+    operational_variant.nodes.reverse();
+    operational_variant.links.reverse();
+    operational_variant.graph.build.generation_id = "different-run".to_owned();
+    let variant = builder.prepare(&store, &operational_variant)?;
+
+    assert_eq!(first.manifest, second.manifest);
+    assert_eq!(first.manifest.snapshot_id, variant.manifest.snapshot_id);
+    assert_ne!(first.manifest.graph_digest, variant.manifest.graph_digest);
+    let mut unknown = first.manifest.clone();
+    unknown.schema = "compass.store.graph-index/99".to_owned();
+    assert!(matches!(
+        unknown.validate(),
+        Err(SnapshotError::Unsupported(_))
+    ));
+    assert_eq!(second.new_objects, 0);
+    assert!(second.reused_objects > 0);
+    let selector = builder.activate(&store, &first)?;
+    let reader = GraphSnapshotReader::open_selector(&store, selector)?;
+    assert_eq!(
+        reader.get_node("a")?.map(|node| node.id),
+        Some("a".to_owned())
+    );
+    assert_eq!(reader.outgoing("a", limits(4))?.len(), 2);
+    assert_eq!(reader.incoming("b", limits(4))?.len(), 2);
+    assert!(reader.outgoing("b", limits(4))?.is_empty());
+    assert_eq!(reader.export_graph()?, graph_sorted());
+    assert_eq!(
+        reader.export_json_bytes()?,
+        serde_json::to_vec(&graph_sorted())?
+    );
+
+    let indexes = reader
+        .manifest()
+        .roots
+        .iter()
+        .map(|root| root.index)
+        .collect::<Vec<_>>();
+    assert_eq!(indexes, IndexKind::ALL);
+    assert!(
+        reader
+            .manifest()
+            .roots
+            .iter()
+            .filter(|root| {
+                root.index != IndexKind::Diagnostics && root.index != IndexKind::Communities
+            })
+            .all(|root| root.entry_count > 0)
+    );
+    Ok(())
+}
+
+#[test]
+fn selector_is_not_active_until_commit_and_reads_are_bounded() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let prepared = builder.prepare(&store, &graph())?;
+    assert!(active_graph_snapshot(&store)?.is_none());
+    assert!(matches!(GraphSnapshotReader::open_active(&store), Ok(None)));
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active reader missing")?;
+    assert!(matches!(
+        reader.nodes(limits(1)),
+        Err(SnapshotError::Limit(message)) if message.contains("item limit")
+    ));
+    Ok(())
+}
+
+#[test]
+fn missing_or_tampered_objects_fail_closed() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let prepared = builder.prepare(&store, &graph())?;
+    let selector = builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_selector(&store, selector)?;
+    let root = reader
+        .manifest()
+        .roots
+        .iter()
+        .find(|root| root.index == IndexKind::Nodes)
+        .ok_or("nodes root missing")?;
+    let namespace = NamespaceId::graph();
+    let partition = PartitionKey::new("graph-snapshot/objects")?;
+    let key = Key::new(format!("object/{}", root.digest))?;
+    store.put(
+        &namespace,
+        &partition,
+        &key,
+        b"corrupt",
+        WriteCondition::Any,
+    )?;
+    assert!(matches!(
+        reader.get_node("a"),
+        Err(SnapshotError::Corrupt(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn sqlite_adapter_round_trips_the_same_snapshot_contract() -> Result<(), Box<dyn Error>> {
+    let directory = tempdir()?;
+    let path = directory.path().join("snapshot.sqlite3");
+    let store = SqliteStore::open(&path)?;
+    let builder = GraphSnapshotBuilder::new();
+    let prepared = builder.prepare(&store, &graph())?;
+    builder.activate(&store, &prepared)?;
+    drop(store);
+
+    let reopened = SqliteStore::open_read_only(&path)?;
+    let reader = GraphSnapshotReader::open_active(&reopened)?.ok_or("active snapshot missing")?;
+    assert_eq!(
+        reader.get_node("a")?.map(|node| node.id),
+        Some("a".to_owned())
+    );
+    assert_eq!(reader.outgoing("a", limits(4))?.len(), 2);
+    assert_eq!(reader.manifest().snapshot_id, prepared.manifest.snapshot_id);
+    Ok(())
+}
+
+#[test]
+fn graph_key_vectors_are_namespace_safe_and_orderable() -> Result<(), Box<dyn Error>> {
+    let left = encode_graph_index_key(IndexKind::Nodes, &[b"a"])?;
+    let right = encode_graph_index_key(IndexKind::Nodes, &[b"b"])?;
+    assert_eq!(
+        left,
+        vec![
+            1, 2, 0, 0, 0, 5, b'n', b'o', b'd', b'e', b's', 0, 0, 0, 1, b'a'
+        ]
+    );
+    assert!(left < right);
+    assert_ne!(
+        encode_graph_index_key(IndexKind::Nodes, &[b"a", b"b"])?,
+        encode_graph_index_key(IndexKind::Nodes, &[b"a|b"])?
+    );
+    Ok(())
+}
+
+fn graph_sorted() -> GraphDocument {
+    let mut document = graph();
+    document.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    document.links.sort_by(|left, right| left.id.cmp(&right.id));
+    document
+}

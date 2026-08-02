@@ -1,14 +1,17 @@
 # Compass store and graph-engine design
 
-**Status:** Architecture reference. The initial local slice is shipped: the
-`compass-store` contract, SQLite adapter, dual graph publication, and typed
-query-engine selection are implemented. Remote adapters and fully streamed
-store graph indexes remain planned phases.
+**Status:** Architecture reference. The initial local slice and the Phase 2
+memory snapshot layout are shipped: the `compass-store` contract, SQLite
+adapter, dual graph publication, typed query-engine selection, deterministic
+immutable graph indexes, and selector-CAS reference protocol are implemented.
+SQLite publication still contains the validated JSON payload; persistent
+streamed store publication remains the next phase.
 
 The initial sidecar stores the validated graph payload as immutable,
-content-addressed chunks and keeps the existing query index disposable. It is
-the publication and adapter boundary, not yet the final streamed node/edge
-index layout described later in this document.
+content-addressed chunks and keeps the existing query index disposable. The
+Phase 2 graph layer now also provides a backend-neutral memory implementation
+of the final index shape for qualification and future adapters. It is not yet
+the persistent SQLite publication path.
 
 > **Who this page is for:** maintainers of graph publication and queries,
 > storage-adapter authors, cloud-service implementers, and reviewers of the
@@ -644,6 +647,43 @@ Snapshot construction follows a canonical stream:
 Parallel extraction and tree building are allowed, but the emitted objects and
 roots must not depend on task completion order, thread count, host, locale, or
 backend.
+
+### Phase 2 memory reference implementation
+
+`compass-graph` implements the layout above against any `compass-store::Store`
+through `GraphSnapshotBuilder` and `GraphSnapshotReader`. The implementation
+is deliberately backend-neutral and is used before persistent adapter work so
+that tree and graph semantics are tested without SQLite transaction behavior
+masking logical errors.
+
+The v1 reference uses these fixed records and keys:
+
+- immutable JSON tree objects in the `graph-snapshot/objects` partition;
+- a manifest at `manifest/<sha256>` and one selector at
+  `graph-snapshot/catalog/active`;
+- nodes, edges, outgoing, incoming, files/source anchors, names, terms,
+  communities, diagnostics, and metadata roots; and
+- portable length-prefixed keys whose first segment is the index kind.
+
+Leaves contain strictly ordered entries and branches contain at most 32
+children. Content-addressed writes use `put_immutable`, so repeated builds
+reuse byte-identical leaves and branches. The reader verifies the object
+digest, schema, index kind, ordering, root selection, and graph validation
+before returning a record. Point reads and scans enforce item, byte, object,
+and depth limits; corruption is never converted into an empty result.
+
+`snapshot_id` is a meaning-oriented identity digest. The build generation ID
+is retained in the exported metadata and graph digest but is excluded from
+the identity projection, so operational rebuilds do not create a different
+logical identity. A prepared snapshot writes no active selector. Activation is
+one conditional write, allowing readers that already opened an older selector
+to finish against that immutable realization.
+
+This reference is intentionally not the Phase 3 persistent path: the existing
+SQLite sidecar continues to store the validated JSON payload and the CLI still
+keeps `graph.json` as a permanent compatible engine. The next phase maps these
+same objects and selectors to durable SQLite publication and reopen/recovery
+tests without changing the logical contract.
 
 ### Structural sharing and incremental update
 
