@@ -1,14 +1,15 @@
 # Compass store and graph-engine design
 
 **Status:** Architecture reference. The initial local slice, Phase 2 memory
-snapshot layout, Phase 3 SQLite shadow-publication slice, and the local Phase 4
-snapshot-backed query-routing slice are shipped: the `compass-store` contract,
-SQLite adapter, dual graph publication, typed query-engine selection,
-deterministic immutable graph indexes, selector-CAS reference protocol, WAL
-durability, reopen validation, canonical graph.json differential checks, and
-cross-engine typed-query checks are implemented. redb, PostgreSQL, DynamoDB,
-remote operation, bounded streaming plans, general garbage collection, and
-performance claims remain follow-on work.
+snapshot layout, Phase 3 SQLite shadow-publication slice, local Phase 4
+snapshot-backed query routing, and the optional Phase 5 redb adapter slice are
+shipped: the `compass-store` contract, SQLite/redb adapters, dual graph
+publication, typed query-engine selection, deterministic immutable graph
+indexes, selector-CAS reference protocol, WAL/redb durability, reopen
+validation, canonical graph.json differential checks, and cross-engine
+typed-query checks are implemented. PostgreSQL, DynamoDB, remote operation,
+bounded streaming plans, general garbage collection, and performance claims
+remain follow-on work.
 
 Each generated sidecar now contains both a validated graph payload retained for
 compatibility and the Phase 2 content-addressed graph indexes used by the
@@ -922,9 +923,18 @@ unbounded number of waiting writers. Large immutable batches are chunked,
 committed, and safe to retry because no chunk becomes active before the final
 selector CAS.
 
+The shipped adapter uses a redb tuple key with component-aware byte ordering
+for `(namespace, partition, key)` and an adapter-private value envelope that
+stores the version, SHA-256 digest, and opaque value. A process-local writer
+gate rejects excess writers immediately with a typed backend error; it never
+builds an unbounded task queue. `RedbStore::open_read_only` uses redb snapshot
+transactions for stable reads, while `compass-query::open_with_store` consumes
+the same immutable graph snapshot through the backend-neutral graph reader.
+
 Table names, database files, and durability configuration are adapter-private.
 The conformance suite, not matching the SQLite schema, establishes
-compatibility.
+compatibility. A redb file may be copied for backup only after all writers
+close; restore reopens it read-only and validates the metadata before use.
 
 ### PostgreSQL
 

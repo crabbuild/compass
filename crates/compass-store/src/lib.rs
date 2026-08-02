@@ -64,6 +64,12 @@ pub enum StoreError {
     },
     #[error("SQLite operation failed: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("{adapter} operation failed during {operation}: {message}")]
+    Backend {
+        adapter: &'static str,
+        operation: &'static str,
+        message: String,
+    },
     #[error("{component} is empty")]
     EmptyComponent { component: &'static str },
     #[error("{component} is {actual} bytes; maximum is {maximum}")]
@@ -170,6 +176,22 @@ impl VersionToken {
     pub const fn is_zero(self) -> bool {
         self.0 == 0
     }
+
+    /// Construct a token from an adapter-owned monotonically increasing value.
+    ///
+    /// Storage adapters must reject zero and overflow before publishing a
+    /// token. The value remains opaque to callers; this bridge only lets
+    /// adapter crates preserve the common token type.
+    #[must_use]
+    pub const fn from_raw(value: u64) -> Self {
+        Self(value)
+    }
+
+    /// Return the adapter-owned token representation.
+    #[must_use]
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -230,6 +252,11 @@ pub struct ScanCursor {
 }
 
 impl ScanCursor {
+    pub fn from_last_key(last_key: Vec<u8>) -> Result<Self, StoreError> {
+        validate_component("cursor", &last_key, MAX_KEY_BYTES)?;
+        Ok(Self { last_key })
+    }
+
     #[must_use]
     pub fn last_key(&self) -> &[u8] {
         &self.last_key
@@ -1609,6 +1636,140 @@ fn validate_manifest(manifest: &SnapshotManifest) -> Result<(), StoreError> {
         ));
     }
     Ok(())
+}
+
+/// Reusable adapter conformance checks for backend crates.
+///
+/// The helper is feature-gated so production binaries do not carry test-only
+/// assertions. Every adapter test invokes the same contract checks rather than
+/// maintaining a backend-shaped copy of the semantics.
+#[cfg(feature = "test-support")]
+pub mod test_support {
+    use super::{
+        Key, KeyRange, NamespaceId, PartitionKey, ScanLimits, Store, StoreError, WriteCondition,
+    };
+
+    pub fn assert_store_contract<S: Store + ?Sized>(store: &S) -> Result<(), StoreError> {
+        let first_namespace = NamespaceId::new(b"conformance/first")?;
+        let second_namespace = NamespaceId::new(b"conformance/second")?;
+        let partition = PartitionKey::new(b"records")?;
+        let other_partition = PartitionKey::new(b"other")?;
+        let first = Key::new([0_u8, 1_u8])?;
+        let second = Key::new([0_u8, 2_u8])?;
+
+        store.put(
+            &first_namespace,
+            &partition,
+            &second,
+            b"two",
+            WriteCondition::Missing,
+        )?;
+        store.put(
+            &first_namespace,
+            &partition,
+            &first,
+            b"one",
+            WriteCondition::Missing,
+        )?;
+        if store.get(&second_namespace, &partition, &first)?.is_some()
+            || store
+                .get(&first_namespace, &other_partition, &first)?
+                .is_some()
+        {
+            return Err(StoreError::Corrupt(
+                "adapter leaked a value across namespace or partition boundaries".to_owned(),
+            ));
+        }
+
+        let first_page = store.scan(
+            &first_namespace,
+            &partition,
+            &KeyRange::default(),
+            ScanLimits {
+                max_items: 1,
+                max_bytes: 32,
+            },
+            None,
+        )?;
+        if first_page.entries.len() != 1 || first_page.entries[0].key != first.as_bytes() {
+            return Err(StoreError::Corrupt(
+                "adapter did not preserve unsigned key ordering".to_owned(),
+            ));
+        }
+        let cursor = first_page.next.as_ref().ok_or_else(|| {
+            StoreError::Corrupt("adapter omitted a continuation cursor".to_owned())
+        })?;
+        let second_page = store.scan(
+            &first_namespace,
+            &partition,
+            &KeyRange::default(),
+            ScanLimits::default(),
+            Some(cursor),
+        )?;
+        if second_page.entries.len() != 1 || second_page.entries[0].key != second.as_bytes() {
+            return Err(StoreError::Corrupt(
+                "adapter cursor did not continue after the last key".to_owned(),
+            ));
+        }
+
+        let version = store
+            .get(&first_namespace, &partition, &first)?
+            .ok_or_else(|| StoreError::Corrupt("inserted value is missing".to_owned()))?
+            .version;
+        store.put(
+            &first_namespace,
+            &partition,
+            &first,
+            b"updated",
+            WriteCondition::Version(version),
+        )?;
+        if !matches!(
+            store.put(
+                &first_namespace,
+                &partition,
+                &first,
+                b"stale",
+                WriteCondition::Version(version),
+            ),
+            Err(StoreError::Conflict)
+        ) {
+            return Err(StoreError::Corrupt(
+                "adapter accepted a stale compare-and-swap write".to_owned(),
+            ));
+        }
+
+        let immutable = Key::new(b"immutable")?;
+        let first_immutable =
+            store.put_immutable(&first_namespace, &partition, &immutable, b"payload")?;
+        let second_immutable =
+            store.put_immutable(&first_namespace, &partition, &immutable, b"payload")?;
+        if first_immutable != second_immutable
+            || !matches!(
+                store.put_immutable(&first_namespace, &partition, &immutable, b"different",),
+                Err(StoreError::Conflict)
+            )
+        {
+            return Err(StoreError::Corrupt(
+                "adapter violated immutable-write semantics".to_owned(),
+            ));
+        }
+
+        let deleted_version = store
+            .get(&first_namespace, &partition, &first)?
+            .ok_or_else(|| StoreError::Corrupt("updated value is missing".to_owned()))?
+            .version;
+        if !store.delete(
+            &first_namespace,
+            &partition,
+            &first,
+            WriteCondition::Version(deleted_version),
+        )? {
+            return Err(StoreError::Corrupt(
+                "adapter did not delete an existing value".to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

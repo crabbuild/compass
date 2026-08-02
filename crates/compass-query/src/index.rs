@@ -8,6 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use compass_ir::{PROGRAM_SCHEMA, ProgramBundle};
 use compass_model::code_graph::GraphDocument;
 use compass_model::query_contract::CODE_QUERY_SCHEMA_V1;
+use compass_store::Store;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
@@ -55,6 +56,29 @@ pub fn open_with_engine(
     selection: EngineSelection,
 ) -> Result<CodeQueryEngine, QueryError> {
     let graph_engine = open_graph_engine(graph_path, selection)?;
+    open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
+}
+
+/// Hydrate the typed query engine from any common-contract store adapter.
+///
+/// This is the backend-neutral hook used by adapter conformance and future
+/// service integrations. It does not add a backend to the CLI binary.
+pub fn open_with_store<S: Store + ?Sized>(
+    store: &S,
+    graph_path: &Path,
+    program_path: Option<&Path>,
+    cache_root: &Path,
+) -> Result<CodeQueryEngine, QueryError> {
+    let graph_engine = Box::new(crate::graph_engine::StoreGraphEngine::from_store(store)?);
+    open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
+}
+
+fn open_from_graph_engine(
+    graph_path: &Path,
+    program_path: Option<&Path>,
+    cache_root: &Path,
+    graph_engine: Box<dyn crate::graph_engine::GraphEngine>,
+) -> Result<CodeQueryEngine, QueryError> {
     let graph = graph_engine.graph().clone();
     let graph_bytes = graph_engine.graph_bytes().to_vec();
     let engine_kind = graph_engine.kind();

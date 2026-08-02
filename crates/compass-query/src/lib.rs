@@ -20,7 +20,7 @@ pub use cql::{
     QueryErrorKind, QueryLimits, QueryProfile, QueryRequest, QueryResult, execute,
 };
 pub use graph_engine::{GraphEngine, JsonGraphEngine, StoreGraphEngine, open_graph_engine};
-pub use index::{EngineSelection, QueryEngineKind, open, open_with_engine};
+pub use index::{EngineSelection, QueryEngineKind, open, open_with_engine, open_with_store};
 pub use program_join::join_program_evidence;
 pub use score::{QueryScores, ScoredNode, find_node, pick_scored_endpoint, score_nodes};
 pub use text::{normalize_context_filters, query_terms, sanitize_label, search_tokens};
