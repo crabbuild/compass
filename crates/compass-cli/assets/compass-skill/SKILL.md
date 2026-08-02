@@ -49,6 +49,16 @@ or global graph must preserve repository origin. If a command fails to load the
 selected graph, stop and diagnose that selection instead of answering from a
 different graph.
 
+When the current project graph is absent and the request needs repository-wide
+architecture, dependency, history, or impact evidence, run `compass update .`
+once and continue with the query workflow. Do not interrupt the user for routine
+confirmation: this is a local deterministic build into `compass-out/`. Skip the
+build for a narrow task that already identifies the files to edit, when the user
+asked not to create generated files, or when repository guidance requires a
+different build command. After a successful first build, run the focused query;
+the new graph does not need a freshness check. Read `GRAPH_REPORT.md` as well
+when the request needs repository-wide architecture context.
+
 ## Fast path: use an existing graph
 
 When `compass-out/graph.json` exists and the user asks a natural-language
@@ -100,11 +110,11 @@ access. Semantic providers, URL ingestion, repository cloning, database pushes,
 and HTTP serving may use the network; do not start them unless the request
 requires them.
 
-After modifying project code, run `compass update .` unless the repository gives
-a more specific Compass instruction. If the refresh fails, report the failure
-and do not describe the graph as current. Confirm the expected graph and report
-exist after a successful build; an old file surviving a failed command is not a
-successful refresh.
+After modifying project code, run `compass update .` unless the user asked not
+to create generated files or the repository gives a more specific Compass
+instruction. If the refresh fails, report the failure and do not describe the
+graph as current. Confirm the expected graph and report exist after a successful
+build; an old file surviving a failed command is not a successful refresh.
 
 Community naming is a separate semantic operation. Use `compass label` only when
 the user wants human-readable community labels and accepts provider use. Use

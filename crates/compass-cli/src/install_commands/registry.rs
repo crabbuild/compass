@@ -216,7 +216,7 @@ fn descriptors() -> Vec<AgentDescriptor> {
         AgentDescriptor::shared(
             "copilot",
             &["vscode"],
-            &["copilot", "code"],
+            &["copilot"],
             &[".github/copilot-instructions.md"],
             "https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/add-skills",
         ),

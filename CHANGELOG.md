@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Make `compass install` setup more seamless: recognize host directories and
+  instruction files during agent detection, show and preflight every dry-run
+  destination, provide host-specific activation actions, reject ineffective
+  strict-mode or unsupported scope combinations, bootstrap missing graphs on
+  first broad use, and replace the Codex no-op hook with a bounded graph-first
+  search guard.
 - Make Markdown extraction source-driven and structurally parsed with pinned
   block and inline grammars. Publish bounded frontmatter metadata, headings,
   nested blocks, tables, code fences, reference definitions, exact link sites,

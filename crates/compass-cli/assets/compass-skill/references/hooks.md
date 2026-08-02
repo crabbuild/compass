@@ -60,8 +60,11 @@ changes.
 `--strict` is a Claude Code project PreToolUse behavior. It blocks the first raw
 read in a session until a Compass query has oriented the agent; it is not a
 global security sandbox and does not apply uniformly across platforms.
-`hook-check` and `hook-guard` are installed adapter commands. Do not run or
-script them directly unless diagnosing generated configuration.
+Codex project setup installs a bounded `hook-guard search` PreToolUse command;
+review and trust its exact definition through Codex `/hooks` before relying on
+it. `hook-check` remains a compatibility probe for older Compass-generated
+configuration. Do not run or script either command directly unless diagnosing
+generated configuration.
 
 After project installation, report which files were created or modified and
 which should be added to version control. Uninstall must leave unrelated files,

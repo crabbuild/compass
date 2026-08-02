@@ -307,6 +307,11 @@ COMPASS_HOOK_STRICT
 Reinstall hooks after moving/upgrading the binary so embedded invocation paths
 remain correct.
 
+Codex project hooks are not active until their exact definition is reviewed and
+trusted in Codex. After `compass install --project --platform codex`, use
+`/hooks` to review the bounded `hook-guard search` command. New or changed hook
+content requires review again.
+
 ## Assistant configuration
 
 ```bash
