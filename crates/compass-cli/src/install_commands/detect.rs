@@ -21,7 +21,7 @@ pub(super) fn detect_agents(
             }
         }
         for relative in agent.config_paths {
-            if valid_config_file(&scope.root().join(relative)) {
+            if valid_detection_path(&scope.root().join(relative)) {
                 evidence.push(format!("config:{relative}"));
             }
         }
@@ -42,14 +42,19 @@ pub(super) fn detect_agents(
     detected
 }
 
-fn valid_config_file(path: &std::path::Path) -> bool {
-    let Ok(content) = std::fs::read_to_string(path) else {
+fn valid_detection_path(path: &std::path::Path) -> bool {
+    if path.is_dir() {
+        return true;
+    }
+    if !path.is_file() {
         return false;
-    };
+    }
     match path.extension().and_then(|extension| extension.to_str()) {
-        Some("json") => serde_json::from_str::<serde_json::Value>(&content).is_ok(),
-        Some("toml") => toml::from_str::<toml::Value>(&content).is_ok(),
-        _ => false,
+        Some("json") => std::fs::read_to_string(path)
+            .is_ok_and(|content| serde_json::from_str::<serde_json::Value>(&content).is_ok()),
+        Some("toml") => std::fs::read_to_string(path)
+            .is_ok_and(|content| toml::from_str::<toml::Value>(&content).is_ok()),
+        _ => true,
     }
 }
 
@@ -71,4 +76,35 @@ fn executable_on_path(name: &str) -> bool {
             .iter()
             .any(|extension| directory.join(format!("{name}{extension}")).is_file())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_detection_path;
+
+    #[test]
+    fn detection_accepts_host_directories_and_valid_configuration_files()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let host = directory.path().join(".kiro");
+        std::fs::create_dir(&host)?;
+        assert!(valid_detection_path(&host));
+
+        let markdown = directory.path().join("copilot-instructions.md");
+        std::fs::write(&markdown, "# Copilot\n")?;
+        assert!(valid_detection_path(&markdown));
+
+        let json = directory.path().join("settings.json");
+        std::fs::write(&json, "{}")?;
+        assert!(valid_detection_path(&json));
+        std::fs::write(&json, "{invalid")?;
+        assert!(!valid_detection_path(&json));
+
+        let toml = directory.path().join("config.toml");
+        std::fs::write(&toml, "model = \"test\"\n")?;
+        assert!(valid_detection_path(&toml));
+        std::fs::write(&toml, "model = [")?;
+        assert!(!valid_detection_path(&toml));
+        Ok(())
+    }
 }
