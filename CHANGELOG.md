@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.1 - 2026-08-01
+
 - Improve native Python, Rust, Go, Java, TypeScript, and JavaScript graph
   extraction and resolution, with three-run deterministic qualification on six
   pinned real repositories and explicit reporting of comparator defects and

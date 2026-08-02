@@ -19,7 +19,7 @@ sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 time.workspace = true
-compass-files = { path = "../compass-files", version = "0.2.0" }
+compass-files = { path = "../compass-files", version = "0.2.1" }
 ureq.workspace = true
 url.workspace = true
 wait-timeout.workspace = true
