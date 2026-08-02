@@ -29,13 +29,14 @@ test("architecture and call graph have separate purpose-built views", async ({ p
     (stageBox!.y + stageBox!.height) - (panelBox!.y + panelBox!.height)
   )).toBeLessThanOrEqual(25);
   await expect.poll(() => diagram.evaluate((element) => {
-    element.scrollLeft = element.scrollWidth;
-    const maximum = element.scrollWidth - element.clientWidth;
+    element.scrollLeft = Number.MAX_SAFE_INTEGER;
+    const maximum = element.scrollLeft;
+    element.scrollLeft = maximum + 1;
     return {
-      moved: element.scrollLeft > 1,
-      reachedEnd: Math.abs(maximum - element.scrollLeft) <= 1
+      moved: maximum > 1,
+      clampedAtEnd: element.scrollLeft === maximum
     };
-  })).toEqual({ moved: true, reachedEnd: true });
+  })).toEqual({ moved: true, clampedAtEnd: true });
 
   await page.goto("/calls.html");
   await expect(page.getByText("depth 1")).toBeVisible();

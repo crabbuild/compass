@@ -5381,7 +5381,7 @@ body.vscode-high-contrast-light .architecture-call-table {
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-color: var(--vscode-scrollbarSlider-background, var(--muted)) transparent;
-  scrollbar-gutter: stable both-edges;
+  scrollbar-gutter: stable;
   box-shadow: inset -26px 0 22px -24px color-mix(in srgb, var(--foreground) 30%, transparent);
   background:
     linear-gradient(
