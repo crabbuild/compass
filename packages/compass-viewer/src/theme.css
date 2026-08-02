@@ -5096,7 +5096,7 @@ body.vscode-high-contrast-light .architecture-call-table {
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -5313,9 +5313,76 @@ body.vscode-high-contrast-light .architecture-call-table {
 
 .architecture-map-panel {
   position: relative;
+  display: grid;
   min-width: 0;
   min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  margin: clamp(14px, 2vw, 24px);
   overflow: hidden;
+  border: 1px solid var(--architecture-border);
+  border-radius: 10px;
+  background: var(--architecture-raised);
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 10%, transparent);
+}
+
+.architecture-map-header {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--architecture-border);
+  background: var(--architecture-raised);
+}
+
+.architecture-map-intro {
+  display: grid;
+  min-width: min(100%, 260px);
+  gap: 3px;
+}
+
+.architecture-map-intro > span {
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 700 8px/1.2 var(--compass-font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.architecture-map-intro > strong {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.architecture-map-intro > small {
+  max-width: 560px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+.architecture-map-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.architecture-map-viewport {
+  position: relative;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--vscode-scrollbarSlider-background, var(--muted)) transparent;
+  scrollbar-gutter: stable;
+  box-shadow: inset -26px 0 22px -24px color-mix(in srgb, var(--foreground) 30%, transparent);
   background:
     linear-gradient(
       color-mix(in srgb, var(--vscode-editorRuler-foreground, var(--border)) 9%, transparent) 1px,
@@ -5330,17 +5397,22 @@ body.vscode-high-contrast-light .architecture-call-table {
   background-size: 32px 32px;
 }
 
+.architecture-map-viewport[data-scroll-position="end"],
+.architecture-map-viewport[data-scroll-position="none"] {
+  box-shadow: none;
+}
+
+.architecture-map-canvas {
+  min-width: 100%;
+  min-height: 100%;
+}
+
 .architecture-route-mode {
-  position: absolute;
-  z-index: 5;
-  top: 10px;
-  left: 10px;
   display: flex;
   overflow: hidden;
   border: 1px solid var(--architecture-border);
   border-radius: 5px;
-  background: color-mix(in srgb, var(--architecture-raised) 94%, transparent);
-  box-shadow: 0 3px 12px color-mix(in srgb, #000 10%, transparent);
+  background: var(--architecture-surface);
 }
 
 .architecture-route-mode button {
@@ -5372,17 +5444,12 @@ body.vscode-high-contrast-light .architecture-call-table {
 }
 
 .architecture-map-toolbar {
-  position: absolute;
-  z-index: 5;
-  top: 10px;
-  right: 10px;
   display: flex;
   align-items: center;
   overflow: hidden;
   border: 1px solid var(--architecture-border);
   border-radius: 5px;
-  background: color-mix(in srgb, var(--architecture-raised) 94%, transparent);
-  box-shadow: 0 3px 12px color-mix(in srgb, #000 10%, transparent);
+  background: var(--architecture-surface);
 }
 
 .architecture-map-toolbar button {
@@ -5426,7 +5493,6 @@ body.vscode-high-contrast-light .architecture-call-table {
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 440px;
   cursor: grab;
   touch-action: none;
 }
@@ -5452,8 +5518,8 @@ body.vscode-high-contrast-light .architecture-call-table {
 }
 
 .architecture-map-lanes rect {
-  fill: color-mix(in srgb, var(--architecture-raised) 18%, transparent);
-  stroke: color-mix(in srgb, var(--architecture-border) 38%, transparent);
+  fill: color-mix(in srgb, var(--architecture-raised) 8%, transparent);
+  stroke: color-mix(in srgb, var(--architecture-border) 20%, transparent);
   stroke-width: 1px;
 }
 
@@ -5477,6 +5543,7 @@ body.vscode-high-contrast-light .architecture-call-table {
   );
   font-size: 7px;
   letter-spacing: 0.16em;
+  text-anchor: start;
 }
 
 .architecture-route-line {
@@ -5491,6 +5558,10 @@ body.vscode-high-contrast-light .architecture-call-table {
 .architecture-routes g[data-evidence="inferred"] .architecture-route-line {
   stroke: var(--vscode-editorWarning-foreground, var(--warning));
   stroke-dasharray: 6 5;
+}
+
+.architecture-routes g[data-direction="backward"] .architecture-route-line {
+  stroke-dasharray: 3 5;
 }
 
 .architecture-route-hit {
@@ -5614,17 +5685,10 @@ body.vscode-high-contrast-light .architecture-call-table {
 }
 
 .architecture-map-legend {
-  position: absolute;
-  bottom: 7px;
-  left: 10px;
   display: flex;
-  max-width: calc(100% - 150px);
+  min-width: 0;
   flex-wrap: wrap;
   gap: 7px 12px;
-  padding: 6px 8px;
-  border: 1px solid var(--architecture-border);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--architecture-raised) 92%, transparent);
   color: var(--muted-foreground);
   font: 8px/1.2 var(--compass-font-mono);
 }
@@ -5677,49 +5741,95 @@ body.vscode-high-contrast-light .architecture-call-table {
   background: var(--vscode-charts-blue, #49a6ff);
 }
 
+.architecture-map-legend i[data-direction="bidirectional"] {
+  display: grid;
+  width: 18px;
+  height: 12px;
+  place-items: center;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  font: normal 10px/1 var(--compass-font-mono);
+}
+
+.architecture-map-legend i[data-direction="feedback"] {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--vscode-textLink-foreground, var(--compass-focus)) 0 3px,
+    transparent 3px 6px
+  );
+}
+
 .architecture-map-table {
-  position: absolute;
-  z-index: 4;
-  right: 10px;
-  bottom: 7px;
-  max-width: min(620px, calc(100% - 20px));
-  border: 1px solid var(--architecture-border);
-  border-radius: 4px;
-  background: var(--architecture-raised);
+  min-width: 0;
+  flex: none;
   font-size: 9px;
 }
 
 .architecture-map-table summary {
-  padding: 5px 8px;
+  padding: 3px 0;
   cursor: pointer;
   color: var(--muted-foreground);
+  white-space: nowrap;
 }
 
-.architecture-map-table[open] {
+.architecture-map-table[open] > div {
+  position: absolute;
+  z-index: 8;
+  right: 12px;
+  bottom: 42px;
+  width: min(620px, calc(100% - 24px));
   max-height: 280px;
   overflow: auto;
+  border: 1px solid var(--architecture-border);
+  border-radius: 6px;
+  background: var(--architecture-raised);
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 22%, transparent);
 }
 
 .architecture-map-table table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .architecture-map-table th,
 .architecture-map-table td {
   padding: 5px 7px;
   border-top: 1px solid var(--architecture-border);
+  overflow-wrap: anywhere;
   text-align: left;
 }
 
 .architecture-map-empty {
   display: grid;
-  min-height: 440px;
+  min-width: min(100%, 760px);
+  min-height: 100%;
   place-items: center;
+  align-content: center;
+  gap: 5px;
   padding: 30px;
   color: var(--muted-foreground);
   font-size: 11px;
   text-align: center;
+}
+
+.architecture-map-empty strong {
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.architecture-map-footer {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--architecture-border);
+  background: var(--architecture-raised);
 }
 
 .architecture-inspector {
@@ -5947,6 +6057,8 @@ body.vscode-high-contrast-light .architecture-call-table {
 
 body.vscode-high-contrast .architecture-map-node-card,
 body.vscode-high-contrast-light .architecture-map-node-card,
+body.vscode-high-contrast .architecture-map-panel,
+body.vscode-high-contrast-light .architecture-map-panel,
 body.vscode-high-contrast .architecture-symbol-list article,
 body.vscode-high-contrast-light .architecture-symbol-list article,
 body.vscode-high-contrast .architecture-call-list article,
@@ -5954,6 +6066,12 @@ body.vscode-high-contrast-light .architecture-call-list article {
   stroke: var(--vscode-contrastBorder, var(--ring));
   border-color: var(--vscode-contrastBorder, var(--ring));
   stroke-width: 2px;
+}
+
+body.vscode-high-contrast .architecture-map-panel,
+body.vscode-high-contrast-light .architecture-map-panel {
+  border-width: 2px;
+  box-shadow: none;
 }
 
 @media (max-width: 1100px) {
@@ -6052,6 +6170,10 @@ body.vscode-high-contrast-light .architecture-call-list article {
   .architecture-route-line,
   .architecture-map-nodes g {
     transition: none;
+  }
+
+  .architecture-loading-rows i {
+    animation: none;
   }
 }
 

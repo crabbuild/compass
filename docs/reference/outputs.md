@@ -428,7 +428,10 @@ Use its command help and retain the source graph.
 
 First-party editor and offline-viewer contracts are versioned independently:
 
-- `compass.viewer.graph/1` — shared interactive graph model;
+- `compass.viewer.graph/1` — shared interactive graph model; located edges may
+  include an optional `relationshipSite` source anchor;
+- `compass.graph-overview/2` — rebuildable prepared graph projection used by
+  editor integrations;
 - `compass.program.call_graph/1` — bounded symbol-centered caller/callee graph;
 - `compass.viewer.callflow/1` — broader subsystem architecture flow;
 - `compass.history.timeline/1` — commit and materialization states;

@@ -65,4 +65,12 @@ describe("graphNodeColor", () => {
       hoveredEdgeId: null
     })).toBe(false);
   });
+
+  it("includes a recorded relationship line in the hover label", () => {
+    expect(formatGraphEdgeLabel({
+      relation: "calls",
+      confidence: "inferred",
+      relationshipSite: { file: "src/main.rs", startLine: 27 }
+    })).toBe("calls [INFERRED] · src/main.rs:27");
+  });
 });

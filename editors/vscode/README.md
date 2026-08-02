@@ -29,11 +29,15 @@ is found first on `PATH`, Compass stops before running a workflow and offers
   language adapted to the current VS Code theme. Single-click a node to inspect
   it; double-click an overview community to load its detailed graph, use
   **Overview** to go back, and double-click a detail node with an exact file and
-  line/byte location to open source.
+  line/byte location to open source. Hover a relationship to see its extraction
+  confidence and recorded source line; double-click a located relationship to
+  open the call or wiring site.
 - Start a caller/callee graph from the function under the cursor in any
   call-capable language already represented in the Compass graph. Expand it by
   depth while retaining resolved, inferred, ambiguous, and unresolved calls.
-- Read the broader architecture flow document in a separate editor tab.
+- Read the broader architecture flow document in a separate editor tab, with a
+  horizontally scrollable map, draggable subsystem cards, and a route-table
+  alternative for large systems.
 - Run natural-language queries or deterministic CompassQL.
 - Browse every reachable Git commit with graph states: graph available, not
   materialized, building, or failed.

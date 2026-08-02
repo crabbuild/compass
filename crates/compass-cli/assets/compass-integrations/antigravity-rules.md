@@ -1,8 +1,10 @@
 ## compass
 
 When `compass-out/graph.json` exists, use the Compass knowledge graph as the
-first navigation layer. If it is absent, ask before running `compass update .`
-unless the current task already requires building the graph.
+first navigation layer. If it is absent and the task needs repository-wide
+architecture, dependency, history, or impact evidence, run `compass update .`
+once and continue. Skip the build for a narrow task that already identifies the
+files to edit or when the user asked not to create generated files.
 
 Rules:
 
@@ -12,7 +14,7 @@ Rules:
 - Use `compass affected "<symbol>"` for change-review scope
 - Read `compass-out/GRAPH_REPORT.md` for broad architecture
 - Navigate `compass-out/wiki/index.md` when the wiki exists
-- Run `compass update .` after code changes
+- Run `compass update .` after code changes unless the user prohibited generated files
 - Verify important graph conclusions in the cited source
 - Treat missing paths and inferred edges as uncertain evidence, not proof
 - Keep explicit `--graph`, `--at`, provider, and output selections unchanged

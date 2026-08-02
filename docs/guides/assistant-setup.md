@@ -12,7 +12,7 @@ verification, and safe removal.
 >
 > **Prerequisites:** the `compass` executable installed.
 >
-> **Completion time:** 5–10 minutes.
+> **Completion time:** about 2 minutes, plus the first graph build.
 
 ## What the integration does
 
@@ -35,7 +35,10 @@ open only the source files needed to verify the answer
 It does not give Compass permission to run arbitrary external actions. It
 provides task instructions and, where the platform supports them, helper
 integration files. Installation does not build `compass-out/`; the report
-recommends `compass update .` when a project graph is absent.
+offers the exact build and activation actions when a project graph is absent.
+For a repository-wide architecture, dependency, history, or impact question,
+the installed guidance lets the assistant run the local deterministic first
+build and continue without another setup exchange.
 
 ## Recommended setup
 
@@ -47,6 +50,17 @@ Inside Git, Compass resolves the repository root, detects supported agents, and
 always includes the portable Agent Skills target. Outside Git, it uses user
 scope. The report lists detection evidence, every destination, and reload or
 graph-build actions.
+
+That is the normal setup path. You do not need to identify an agent, copy a
+skill directory, edit an instruction file, or build a graph before running it.
+Inside a repository this command creates project-scoped, reviewable files; use
+`compass install --user` instead when you want personal configuration only.
+
+Confirm that your intended host, such as `codex` or `gemini`, appears under
+`Selected` in the report. If the report selects only `agents`, the portable
+skill was installed but no host-specific adapter was detected. Rerun with an
+explicit target, for example `compass install --platform codex` or
+`compass install --platform gemini`.
 
 ## Global or project scope
 
@@ -61,6 +75,10 @@ Use user scope when:
 - this is your personal tool configuration;
 - many repositories should use the same skill;
 - you do not want generated assistant files committed per repository.
+
+Some rule-only adapters, including Cursor, are project-scoped because Compass
+does not invent an undocumented user-level destination. The installer fails
+explicitly when a selected platform has no target for the requested scope.
 
 ### Project installation
 
@@ -111,6 +129,11 @@ compass install --all --dry-run
 destinations differ by platform and scope; use installer output as the source
 of truth instead of copying paths from another tool.
 
+Detection accepts valid host configuration files, existing host directories,
+and platform-specific executables. A generic editor executable alone is not
+treated as proof that its AI assistant is installed. Use `--platform` when you
+want a target that is not detected automatically.
+
 Explicit platform selection bypasses detection. `--all` selects every registry
 entry and conflicts with `--platform`. For CI, add `--require-all` and
 `--format json` when skipped or failed targets must fail the job.
@@ -120,12 +143,12 @@ entry and conflicts with `--platform`. For CI, add `--require-all` and
 Representative project-scoped destinations include:
 
 ```text
-Codex       .agents/skills/compass/SKILL.md
-Gemini      .agents/skills/compass/SKILL.md
+Codex       .agents/skills/compass/SKILL.md + AGENTS.md + .codex/hooks.json
+Gemini      .agents/skills/compass/SKILL.md + GEMINI.md + .gemini/settings.json
 OpenCode    .agents/skills/compass/SKILL.md
 Copilot     .agents/skills/compass/SKILL.md
 Agents      .agents/skills/compass/SKILL.md
-Claude      .claude/skills/compass/SKILL.md
+Claude      .claude/skills/compass/SKILL.md + CLAUDE.md + .claude/settings.json
 Kiro        .kiro/skills/compass/SKILL.md
 Cline       .cline/skills/compass/SKILL.md
 Cursor      Cursor-specific project integration
@@ -157,7 +180,7 @@ COMPASS_HOOK_STRICT=0 your-assistant-command
 Strict mode:
 
 - requires project scope;
-- applies only where the platform's hook mechanism supports it;
+- currently requires the Claude platform;
 - is not a security sandbox;
 - should be explained to repository contributors before adoption.
 
@@ -178,16 +201,31 @@ Check:
 - no machine-specific path or credential was written;
 - platform-specific syntax matches the selected assistant.
 
-### Exercise the workflow
+For Codex project installs, open `/hooks` in Codex and review the exact Compass
+hook before trusting it. Codex skips new or changed project command hooks until
+they are trusted. The Compass hook reads bounded tool metadata and adds a short
+graph-first reminder before matching raw searches; it does not execute a graph
+build or change the proposed command. Hook trust activates the hook only; start
+a new Codex session to ensure the newly installed skill and `AGENTS.md` guidance
+are discovered.
 
-In a project with a graph:
+For Gemini CLI, run `/skills reload` to activate a new skill in the current
+session. For other hosts, start a new session or use the host's skill reload
+operation when it provides one. The install report prints these actions.
+
+### Exercise first use
+
+In a project without a graph:
 
 1. ask the assistant a broad architecture question;
-2. confirm it reads `compass-out/GRAPH_REPORT.md` or runs a focused query;
-3. ask a narrow implementation question;
-4. confirm it verifies graph results in source;
-5. check that it does not treat inferred/ambiguous edges as unquestionable
-   runtime truth.
+2. confirm the assistant—not the installer—runs one local `compass update .`;
+3. confirm it runs a focused query and uses `compass-out/GRAPH_REPORT.md` for
+   repository-wide context;
+4. confirm it verifies graph results in source.
+
+When a graph already exists, the assistant should query it directly, open only
+the source needed to verify the result, and avoid treating inferred or ambiguous
+edges as unquestionable runtime truth.
 
 ### Verify idempotence
 
@@ -259,7 +297,8 @@ Before answering architecture questions:
 2. run compass query for the focused question;
 3. verify graph claims in source.
 
-After modifying source files, run compass update .
+After modifying source files, run compass update . unless the user prohibited
+generated files.
 ```
 
 Avoid:
@@ -279,6 +318,8 @@ Avoid:
 | Existing instructions changed | Inspect the diff; uninstall managed content and reapply after resolving ownership |
 | Strict mode blocks unexpectedly | Set `COMPASS_HOOK_STRICT=0` for the session, then review the project hook |
 | Assistant ignores the graph | Confirm it discovers the installed skill and that `compass-out/` exists |
+| Codex hook is skipped | Open `/hooks`, review the project hook source, and trust its current definition |
+| Gemini does not see a new skill | Run `/skills reload` or start a new Gemini CLI session |
 | Assistant over-trusts the graph | Strengthen instructions to verify source and qualify provenance |
 | Upgrade leaves stale content | Rerun install with the same scope/platform and review managed files |
 

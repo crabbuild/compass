@@ -7,6 +7,19 @@
   identifier anchors in provenance. Ambiguous or non-containing scopes fall
   back to the exact declaration, and graph publication semantics advance to
   version 3 so existing outputs rebuild under the corrected range policy.
+- Give the VS Code Architecture Flow a bounded, horizontally scrollable system
+  canvas with roomier lanes, non-overlapping controls, drag-to-pan navigation,
+  resilient empty states, and a route-table alternative.
+- Make `compass install` setup more seamless: recognize host directories and
+  instruction files during agent detection, show and preflight every dry-run
+  destination, provide host-specific activation actions, reject ineffective
+  strict-mode or unsupported scope combinations, bootstrap missing graphs on
+  first broad use, and replace the Codex no-op hook with a bounded graph-first
+  search guard.
+- Preserve relationship source anchors in the shared graph viewer, show their
+  file and line on edge hover, and let VS Code open the exact call or wiring
+  site when a located edge is double-clicked. Prepared graph overviews advance
+  to `compass.graph-overview/2` so older cached projections refresh safely.
 - Make Markdown extraction source-driven and structurally parsed with pinned
   block and inline grammars. Publish bounded frontmatter metadata, headings,
   nested blocks, tables, code fences, reference definitions, exact link sites,

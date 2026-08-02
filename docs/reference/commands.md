@@ -473,13 +473,19 @@ workflows.
 
 ```text
 compass install
-  [--project]
+  [--project | --user]
   [--strict]
-  [--platform P | P]
+  [--platform P ... | --all]
+  [--dry-run]
+  [--require-all]
+  [--format text|json]
 ```
 
 Run `compass install --help` for the version's platform list. `--strict`
-requires a supported project-scoped hook target.
+requires a project-scoped Claude target. With no explicit platform, Compass
+detects agents and also installs the portable Agent Skills package. Dry-run
+output includes the complete skill and adapter path plan and performs read-only
+preflight checks.
 
 ### `uninstall`
 
@@ -515,8 +521,9 @@ compass hook [install|uninstall|status]
 compass hook-check
 ```
 
-Managed integration probe installed for supported assistants. It is normally
-invoked by generated integration configuration rather than by a person.
+Managed integration probe invoked by older Compass-generated integration
+configuration. Current contextual integrations use `hook-guard`; people do not
+normally invoke this command directly.
 
 ### `hook-guard`
 

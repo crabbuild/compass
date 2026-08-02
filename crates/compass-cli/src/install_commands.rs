@@ -179,14 +179,6 @@ fn command_install_compass(args: &[String]) -> Outcome {
         Ok(scope) => scope,
         Err(error) => return Outcome::failure(error),
     };
-    let _scope_lock = if request.dry_run {
-        None
-    } else {
-        match InstallLock::acquire(scope.root()) {
-            Ok(lock) => Some(lock),
-            Err(error) => return Outcome::failure(error),
-        }
-    };
     let detected = if request.platforms.is_empty() && !request.all {
         detect_agents(&registry, &scope)
     } else {
@@ -207,6 +199,25 @@ fn command_install_compass(args: &[String]) -> Outcome {
     } else {
         match registry.canonicalize(&request.platforms) {
             Ok(values) => values,
+            Err(error) => return Outcome::failure(error),
+        }
+    };
+    if request.strict && !scope.is_project() {
+        return Outcome::failure(
+            "error: --strict requires project scope because it installs a project hook".to_owned(),
+        );
+    }
+    if request.strict && !selected.iter().any(|platform| platform == "claude") {
+        return Outcome::failure(
+            "error: --strict currently requires the Claude platform; add `--platform claude`"
+                .to_owned(),
+        );
+    }
+    let _scope_lock = if request.dry_run {
+        None
+    } else {
+        match InstallLock::acquire(scope.root()) {
+            Ok(lock) => Some(lock),
             Err(error) => return Outcome::failure(error),
         }
     };
@@ -259,13 +270,34 @@ fn command_install_compass(args: &[String]) -> Outcome {
     let output = scope.root().join("compass-out");
     let graph_exists = compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
         .is_ok_and(|path| path.is_file());
-    let mut next_actions = Vec::new();
-    if !graph_exists && scope.is_project() {
-        next_actions
-            .push("Run `compass update .` to build the project knowledge graph.".to_owned());
-    }
-    next_actions
-        .push("Restart or reload active coding-agent sessions to discover the skill.".to_owned());
+    let ready_consumers = results
+        .iter()
+        .filter(|result| {
+            matches!(
+                result.status,
+                InstallStatus::Installed | InstallStatus::Updated | InstallStatus::Current
+            )
+        })
+        .flat_map(|result| result.consumers.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    let successful = !ready_consumers.is_empty();
+    let incomplete = results.iter().any(|result| {
+        matches!(
+            result.status,
+            InstallStatus::Skipped | InstallStatus::Failed
+        )
+    });
+    let has_failures = results
+        .iter()
+        .any(|result| result.status == InstallStatus::Failed);
+    let next_actions = install_next_actions(
+        &scope,
+        &ready_consumers,
+        graph_exists,
+        request.dry_run,
+        incomplete,
+        has_failures,
+    );
     let report = InstallReport {
         schema: 1,
         scope: scope.kind(),
@@ -280,18 +312,6 @@ fn command_install_compass(args: &[String]) -> Outcome {
         Ok(output) => output,
         Err(error) => return Outcome::failure(error),
     };
-    let successful = report.results.iter().any(|result| {
-        matches!(
-            result.status,
-            InstallStatus::Installed | InstallStatus::Updated | InstallStatus::Current
-        )
-    });
-    let incomplete = report.results.iter().any(|result| {
-        matches!(
-            result.status,
-            InstallStatus::Skipped | InstallStatus::Failed
-        )
-    });
     let failed = (!request.dry_run && !successful) || (request.require_all && incomplete);
     Outcome {
         code: u8::from(failed),
@@ -301,6 +321,59 @@ fn command_install_compass(args: &[String]) -> Outcome {
         stderr_trailing_newline: true,
         html_output: None,
     }
+}
+
+fn install_next_actions(
+    scope: &InstallScope,
+    ready_consumers: &BTreeSet<String>,
+    graph_exists: bool,
+    dry_run: bool,
+    incomplete: bool,
+    has_failures: bool,
+) -> Vec<String> {
+    if dry_run {
+        if has_failures {
+            return vec![
+                "Resolve the reported preflight failures, then rerun `compass install --dry-run`."
+                    .to_owned(),
+            ];
+        }
+        return vec![
+            "Review the plan, then rerun without `--dry-run` to install these targets.".to_owned(),
+        ];
+    }
+    if ready_consumers.is_empty() {
+        return vec![
+            "Resolve the reported installation failures, then rerun `compass install`.".to_owned(),
+        ];
+    }
+    let mut actions = Vec::new();
+    if incomplete {
+        actions.push(
+            "Review skipped or failed targets above; configured targets are ready to activate."
+                .to_owned(),
+        );
+    }
+    if !graph_exists && scope.is_project() {
+        actions.push(
+            "Run `compass update .` now, or ask the configured assistant an architecture question to build the project graph on first use."
+                .to_owned(),
+        );
+    }
+    if scope.is_project() && ready_consumers.contains("codex") {
+        actions.push(
+            "In Codex, open `/hooks` and trust the Compass project hook before relying on graph-first search guidance."
+                .to_owned(),
+        );
+    }
+    if ready_consumers.contains("gemini") {
+        actions.push("In Gemini CLI, run `/skills reload` to activate Compass now.".to_owned());
+    }
+    actions.push(
+        "Start a new coding-agent session, or use its skill reload command, then ask a codebase question."
+            .to_owned(),
+    );
+    actions
 }
 
 fn migrate_legacy_codex_skill(scope: &InstallScope, dry_run: bool) -> Option<TargetResult> {
@@ -372,12 +445,28 @@ fn execute_skill_target(
         consumers.iter().next().cloned().unwrap_or_default()
     };
     if request.dry_run {
+        let paths = planned_target_paths(scope, Some(&destination), &consumers);
+        let preflight = validate_skill_destination(&destination, scope.root())
+            .and_then(|()| require_owned_or_absent(&destination))
+            .and_then(|()| {
+                consumers
+                    .iter()
+                    .try_for_each(|consumer| preflight_agent_adapter(scope, consumer))
+            });
         return TargetResult {
             id,
             consumers,
-            status: InstallStatus::Skipped,
-            paths: vec![destination],
-            reason: Some("dry run: no files were changed".to_owned()),
+            status: if preflight.is_ok() {
+                InstallStatus::Skipped
+            } else {
+                InstallStatus::Failed
+            },
+            paths,
+            reason: Some(
+                preflight.err().unwrap_or_else(|| {
+                    "dry run: target is ready; no files were changed".to_owned()
+                }),
+            ),
             rollback: None,
         };
     }
@@ -715,6 +804,20 @@ fn adapter_paths_for(scope: &InstallScope, consumers: &BTreeSet<String>) -> Vec<
     paths
 }
 
+fn planned_target_paths(
+    scope: &InstallScope,
+    skill_destination: Option<&Path>,
+    consumers: &BTreeSet<String>,
+) -> Vec<PathBuf> {
+    skill_destination
+        .into_iter()
+        .map(Path::to_path_buf)
+        .chain(adapter_paths_for(scope, consumers))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 fn uninstall_paths_for(scope: &InstallScope, consumers: &BTreeSet<String>) -> Vec<PathBuf> {
     let mut paths = adapter_paths_for(scope, consumers);
     if scope.is_project() {
@@ -879,13 +982,40 @@ fn execute_adapter_target(
     consumer: &str,
 ) -> TargetResult {
     let consumers = BTreeSet::from([consumer.to_owned()]);
-    if request.dry_run {
+    let planned_paths = planned_target_paths(scope, None, &consumers);
+    if planned_paths.is_empty() {
         return TargetResult {
             id: consumer.to_owned(),
             consumers,
-            status: InstallStatus::Skipped,
+            status: InstallStatus::Failed,
             paths: Vec::new(),
-            reason: Some("dry run: no files were changed".to_owned()),
+            reason: Some(format!(
+                "error: {consumer} has no {}-scoped Compass installation target",
+                if scope.is_project() {
+                    "project"
+                } else {
+                    "user"
+                }
+            )),
+            rollback: None,
+        };
+    }
+    if request.dry_run {
+        let preflight = preflight_agent_adapter(scope, consumer);
+        return TargetResult {
+            id: consumer.to_owned(),
+            consumers,
+            status: if preflight.is_ok() {
+                InstallStatus::Skipped
+            } else {
+                InstallStatus::Failed
+            },
+            paths: planned_paths,
+            reason: Some(
+                preflight.err().unwrap_or_else(|| {
+                    "dry run: target is ready; no files were changed".to_owned()
+                }),
+            ),
             rollback: None,
         };
     }
@@ -2508,11 +2638,11 @@ fn install_codex_hook(root: &Path, lines: &mut Vec<String>) -> Result<(), String
         .filter(|value| !is_compass_hook(value))
         .collect::<Vec<_>>();
     let executable = compass_executable();
-    values.push(json!({"matcher":"Bash","hooks":[{"type":"command","command":format!("{executable} hook-check")}]}));
+    values.push(json!({"matcher":"Bash","hooks":[{"type":"command","command":format!("{executable} hook-guard search")}]}));
     hooks.insert("PreToolUse".to_owned(), Value::Array(values));
     write_json_object(path, &document)?;
     lines.push(format!(
-        "  .codex/hooks.json  ->  PreToolUse hook registered ({executable} hook-check)"
+        "  .codex/hooks.json  ->  PreToolUse graph-first search guard registered ({executable} hook-guard search)"
     ));
     Ok(())
 }
@@ -3797,6 +3927,7 @@ fn is_compass_hook(value: &Value) -> bool {
     matches!(
         (matcher, managed_command_suffix(command).as_deref()),
         ("Bash", Some("hook-check"))
+            | ("Bash", Some("hook-guard search"))
             | ("Bash|Grep", Some("hook-guard search"))
             | ("Read|Glob", Some("hook-guard read"))
             | ("Read|Glob", Some("hook-guard read --strict"))

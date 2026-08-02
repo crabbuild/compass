@@ -1,14 +1,42 @@
 import { expect, test } from "@playwright/test";
 
 test("architecture and call graph have separate purpose-built views", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto("/architecture.html");
   await expect(page.getByRole("heading", { name: "Fixture" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Architecture subsystems" })).toBeVisible();
   await expect(page.getByText("25 subsystem routes")).toBeVisible();
-  await expect(page.getByText("16 of 25 routes · Show all")).toBeVisible();
-  await expect(page.locator(".architecture-routes > g")).toHaveCount(16);
-  await page.getByRole("button", { name: "All routes" }).click();
+  await expect(page.getByText("1 of 25 routes · Show all")).toBeVisible();
+  await expect(page.locator(".architecture-routes > g")).toHaveCount(1);
+
+  const diagram = page.getByRole("region", {
+    name: "Scrollable architecture flow diagram"
+  });
+  await page.getByRole("button", { name: /All routes/ }).click();
   await expect(page.locator(".architecture-routes > g")).toHaveCount(25);
+  const dimensions = await diagram.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth
+  }));
+  expect(dimensions.clientHeight).toBeGreaterThan(700);
+  expect(dimensions.scrollWidth).toBeGreaterThan(dimensions.clientWidth);
+  const stageBox = await page.locator(".architecture-stage").boundingBox();
+  const panelBox = await page.locator(".architecture-map-panel").boundingBox();
+  expect(stageBox).not.toBeNull();
+  expect(panelBox).not.toBeNull();
+  expect(Math.abs(
+    (stageBox!.y + stageBox!.height) - (panelBox!.y + panelBox!.height)
+  )).toBeLessThanOrEqual(25);
+  await expect.poll(() => diagram.evaluate((element) => {
+    element.scrollLeft = Number.MAX_SAFE_INTEGER;
+    const maximum = element.scrollLeft;
+    element.scrollLeft = maximum + 1;
+    return {
+      moved: maximum > 1,
+      clampedAtEnd: element.scrollLeft === maximum
+    };
+  })).toEqual({ moved: true, clampedAtEnd: true });
 
   await page.goto("/calls.html");
   await expect(page.getByText("depth 1")).toBeVisible();

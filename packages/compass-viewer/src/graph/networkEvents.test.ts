@@ -15,6 +15,7 @@ function fixture() {
   const handlers = {
     onFocus: vi.fn(),
     onOpenSource: vi.fn(),
+    onOpenRelationshipSource: vi.fn(),
     onHover: vi.fn(),
     onHoverEdge: vi.fn(),
     onBlurEdge: vi.fn(),
@@ -44,6 +45,16 @@ describe("bindGraphNetworkEvents", () => {
   it("ignores a double-click without a node", () => {
     const { listeners, handlers } = fixture();
     listeners.get("doubleClick")?.(event([]));
+    expect(handlers.onOpenSource).not.toHaveBeenCalled();
+  });
+
+  it("opens an edge relationship source on double-click", () => {
+    const { listeners, handlers } = fixture();
+    listeners.get("doubleClick")?.({
+      ...event([]),
+      edges: ["caller-callee"]
+    });
+    expect(handlers.onOpenRelationshipSource).toHaveBeenCalledWith("caller-callee");
     expect(handlers.onOpenSource).not.toHaveBeenCalled();
   });
 

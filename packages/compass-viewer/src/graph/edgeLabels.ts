@@ -21,7 +21,7 @@ export type EdgeLabelVisibility = {
 };
 
 export function formatGraphEdgeLabel(
-  edge: Pick<GraphEdge, "relation" | "confidence" | "details">
+  edge: Pick<GraphEdge, "relation" | "confidence" | "details" | "relationshipSite">
 ): string {
   const relation = edge.relation.trim();
   const relationLabel = RELATION_LABELS[relation] ?? relation;
@@ -35,9 +35,25 @@ export function formatGraphEdgeLabel(
     .filter((part) => part !== undefined && part !== "")
     .join(" · ");
   const confidence = edge.confidence?.trim().toLocaleUpperCase();
-  if (semanticLabel && confidence) return `${semanticLabel} [${confidence}]`;
-  if (semanticLabel) return semanticLabel;
-  return confidence ? `[${confidence}]` : "";
+  const relationship = semanticLabel && confidence
+    ? `${semanticLabel} [${confidence}]`
+    : semanticLabel || (confidence ? `[${confidence}]` : "");
+  const source = formatRelationshipSite(edge.relationshipSite);
+  return [relationship, source].filter(Boolean).join(" · ");
+}
+
+function formatRelationshipSite(site: GraphEdge["relationshipSite"]): string {
+  if (!site?.file.trim()) return "";
+  const startLine = site.startLine;
+  const endLine = site.endLine;
+  if (startLine !== undefined) {
+    const lines = endLine !== undefined && endLine !== startLine
+      ? `${startLine}–${endLine}`
+      : String(startLine);
+    return `${site.file}:${lines}`;
+  }
+  if (site.startByte !== undefined) return `${site.file}:byte ${site.startByte}`;
+  return site.file;
 }
 
 export function shouldShowGraphEdgeLabel(
