@@ -39,8 +39,10 @@ type DragState = {
 
 type RouteMode = "key" | "complete";
 type ScrollPosition = "start" | "middle" | "end" | "none";
+type ViewportSize = { width: number; height: number };
 
 const KEY_ROUTE_LIMIT = 16;
+const DEFAULT_VIEWPORT_SIZE: ViewportSize = { width: 1280, height: 620 };
 
 export function ArchitectureMap({
   overview,
@@ -63,6 +65,7 @@ export function ArchitectureMap({
   const positionsRef = useRef(positions);
   const [zoom, setZoom] = useState(1);
   const [scrollPosition, setScrollPosition] = useState<ScrollPosition>("none");
+  const [viewportSize, setViewportSize] = useState(DEFAULT_VIEWPORT_SIZE);
   const [routeMode, setRouteMode] = useState<RouteMode>("key");
   const [draggingId, setDraggingId] = useState<string>();
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -110,11 +113,11 @@ export function ArchitectureMap({
     () => layoutArchitecture(
       displayedSections,
       routeSummaries,
-      undefined,
+      viewportSize,
       positions,
       routeMode === "key" && selection?.kind === "section" ? selection.id : undefined
     ),
-    [displayedSections, positions, routeMode, routeSummaries, selection]
+    [displayedSections, positions, routeMode, routeSummaries, selection, viewportSize]
   );
   const displayedRoutes = layout.routes;
   const connected = useMemo(() => {
@@ -279,7 +282,19 @@ export function ArchitectureMap({
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const update = () => updateScrollPosition(viewport);
+    const update = () => {
+      updateScrollPosition(viewport);
+      if (viewport.clientWidth <= 0 || viewport.clientHeight <= 0) return;
+      const measured = {
+        width: Math.round(viewport.clientWidth),
+        height: Math.round(viewport.clientHeight)
+      };
+      setViewportSize((current) =>
+        current.width === measured.width && current.height === measured.height
+          ? current
+          : measured
+      );
+    };
     update();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(update);

@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("architecture and call graph have separate purpose-built views", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto("/architecture.html");
   await expect(page.getByRole("heading", { name: "Fixture" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Architecture subsystems" })).toBeVisible();
@@ -18,8 +19,15 @@ test("architecture and call graph have separate purpose-built views", async ({ p
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth
   }));
-  expect(dimensions.clientHeight).toBeLessThanOrEqual(620);
+  expect(dimensions.clientHeight).toBeGreaterThan(700);
   expect(dimensions.scrollWidth).toBeGreaterThan(dimensions.clientWidth);
+  const stageBox = await page.locator(".architecture-stage").boundingBox();
+  const panelBox = await page.locator(".architecture-map-panel").boundingBox();
+  expect(stageBox).not.toBeNull();
+  expect(panelBox).not.toBeNull();
+  expect(Math.abs(
+    (stageBox!.y + stageBox!.height) - (panelBox!.y + panelBox!.height)
+  )).toBeLessThanOrEqual(25);
   await diagram.evaluate((element) => {
     element.scrollLeft = element.scrollWidth;
   });
