@@ -102,6 +102,7 @@ workspace:
 | [Managed JDT integration](design/java-jdt-integration.md) | Planned Java semantic tooling, trust boundaries, phases, and acceptance criteria |
 | [Storage and history](design/storage-and-history.md) | Incremental artifacts and immutable historical realizations |
 | [Security and privacy](design/security-and-privacy.md) | Trust boundaries, credentials, and offline behavior |
+| [Document processing](design/document-processing.md) | Source-driven Markdown structure, metadata, links, and bounds |
 
 ### Work on the implementation
 
@@ -131,6 +132,7 @@ The [cookbook index](cookbook/README.md) routes to:
 | [Commands](reference/commands.md) | Command families, common inputs, output modes, and diagnostics |
 | [Configuration](reference/configuration.md) | Providers, environment, paths, and precedence |
 | [Outputs](reference/outputs.md) | `compass-out/`, graph JSON, query results, and history exports |
+| [Document formats](reference/document-formats.md) | Markdown fields, limits, and discovery versus extraction |
 | [Compatibility](reference/compatibility.md) | Compass contracts, hard cutovers, and portability |
 | [CompassQL 1](COMPASSQL.md) | Canonical language and runtime contract |
 | [CompassQL support](COMPASSQL_SUPPORT.md) | Checked syntax and feature matrix |

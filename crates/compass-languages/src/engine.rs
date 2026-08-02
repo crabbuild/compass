@@ -41,7 +41,14 @@ impl Engine {
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
         let mut extraction = match spec.kind {
             ExtractorKind::Generic => self.extract_generic(path, spec),
-            ExtractorKind::Markdown => crate::markdown::extract(path),
+            ExtractorKind::Markdown => {
+                let source = fs::read(path).map_err(|source| compass_files::FileError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+                let source_file = path.to_string_lossy().into_owned();
+                crate::markdown::extract_source(path, &source_file, &source)
+            }
             ExtractorKind::JsonConfig => self.extract_json(path, spec),
             ExtractorKind::McpConfig => crate::mcp::extract(path),
             ExtractorKind::PackageManifest => crate::package_manifest::extract(path),
@@ -93,6 +100,10 @@ impl Engine {
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
         let mut extraction = match spec.kind {
             ExtractorKind::Generic => self.extract_generic_source(path, spec, source),
+            ExtractorKind::Markdown => {
+                let source_file = path.to_string_lossy().into_owned();
+                crate::markdown::extract_source(path, &source_file, source)
+            }
             ExtractorKind::JsonConfig => self.extract_json_source(path, spec, source),
             ExtractorKind::Terraform => self.extract_terraform_source(path, spec, source),
             ExtractorKind::FrameworkConfig => Ok(crate::frameworks::detect_config_file(
@@ -140,6 +151,15 @@ impl Engine {
     ) -> Result<CombinedExtraction, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
+        if spec.kind == ExtractorKind::Markdown {
+            let mut graph = crate::markdown::extract_source(path, source_file, source)?;
+            self.stamp_project_evidence(path, &mut graph);
+            stamp_producer_metadata(&mut graph, spec.name);
+            return Ok(CombinedExtraction {
+                graph,
+                program: None,
+            });
+        }
         if spec.kind == ExtractorKind::Generic && matches!(spec.name, "go" | "java") {
             let tree = self.parse(path, spec, source)?;
             let mut graph =

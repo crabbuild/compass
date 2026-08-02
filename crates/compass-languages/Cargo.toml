@@ -27,6 +27,7 @@ toml.workspace = true
 compass-files = { path = "../compass-files", version = "0.2.1" }
 tree-sitter.workspace = true
 tree-sitter-dm.workspace = true
+tree-sitter-md.workspace = true
 tree-sitter-language-pack.workspace = true
 unicode-normalization.workspace = true
 unicode-casefold.workspace = true

@@ -466,7 +466,7 @@ const REGISTRY_CASES: &[RegistryCase] = &[
     ),
     registry_case!(
         "markdown",
-        RegistryMatcher::Extensions(&["md", "mdx", "qmd", "skill"]),
+        RegistryMatcher::Extensions(&["md", "markdown", "mdx", "qmd", "skill"]),
         LanguageSpec {
             name: "markdown",
             grammar: None,

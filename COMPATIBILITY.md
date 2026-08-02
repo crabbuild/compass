@@ -49,6 +49,13 @@ A user-visible incompatible change requires:
 Versioned formats use Compass-owned identifiers. Consumers should reject
 unknown major versions instead of attempting legacy fallback behavior.
 
+Markdown graph extraction is a structural, extensible projection. New
+document/block attributes and bounded diagnostic extensions may appear without
+changing node identity; consumers must preserve unknown attributes, edge
+direction, multiplicity, and source ranges. Markdown frontmatter is part of
+the file hash, so metadata-only edits invalidate compatible extraction/cache
+entries and are rebuilt under the current extraction semantics version.
+
 ## Attribution
 
 Compass was inspired by
