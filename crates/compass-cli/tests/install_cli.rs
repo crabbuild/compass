@@ -56,7 +56,6 @@ const GLOBAL_PLATFORMS: &[&str] = &[
     "agents",
     "devin",
     "gemini",
-    "cursor",
 ];
 
 #[test]
@@ -76,6 +75,7 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     assert!(body.contains("references/command-reference.md"));
     assert!(body.contains("references/labeling.md"));
     assert!(body.contains("references/security-and-boundaries.md"));
+    assert!(body.contains("run `compass update .`\nonce and continue"));
     assert_native(&body);
     assert!(skill.with_file_name(".compass_version").is_file());
     assert!(
@@ -91,6 +91,20 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
             .len(),
         15
     );
+    let hooks: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.project.join(".codex/hooks.json"))?)?;
+    let hooks = hooks["hooks"]["PreToolUse"]
+        .as_array()
+        .ok_or("Codex PreToolUse hooks")?;
+    assert!(hooks.iter().any(|hook| {
+        hook["matcher"] == "Bash"
+            && hook["hooks"][0]["command"]
+                .as_str()
+                .is_some_and(|command| command.ends_with(" hook-guard search"))
+    }));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("hook-check"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("/hooks"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("new coding-agent session"));
     Ok(())
 }
 
@@ -379,6 +393,12 @@ fn plain_install_detects_agents_and_deduplicates_the_shared_skill() -> Result<()
     )?;
     fs::create_dir(fixture.project.join(".gemini"))?;
     fs::write(fixture.project.join(".gemini/settings.json"), "{}")?;
+    fs::create_dir(fixture.project.join(".kiro"))?;
+    fs::create_dir_all(fixture.project.join(".github"))?;
+    fs::write(
+        fixture.project.join(".github/copilot-instructions.md"),
+        "# Existing Copilot instructions\n",
+    )?;
 
     let output = fixture.run(&["install", "--format", "json"])?;
     assert_success("automatic multi-agent install", &output);
@@ -386,6 +406,8 @@ fn plain_install_detects_agents_and_deduplicates_the_shared_skill() -> Result<()
     assert_eq!(report["scope"], "project");
     assert!(report["detected"]["codex"].is_array());
     assert!(report["detected"]["gemini"].is_array());
+    assert!(report["detected"]["kiro"].is_array());
+    assert!(report["detected"]["copilot"].is_array());
 
     let skill = fixture.project.join(".agents/skills/compass/SKILL.md");
     assert!(skill.is_file());
@@ -394,12 +416,18 @@ fn plain_install_detects_agents_and_deduplicates_the_shared_skill() -> Result<()
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(skill.with_file_name(".compass-install.json"))?)?;
     let consumers = manifest["consumers"].as_array().ok_or("consumers")?;
-    for expected in ["agents", "codex", "gemini"] {
+    for expected in ["agents", "codex", "copilot", "gemini"] {
         assert!(
             consumers.iter().any(|value| value == expected),
             "missing consumer {expected}"
         );
     }
+    assert!(
+        fixture
+            .project
+            .join(".kiro/skills/compass/SKILL.md")
+            .is_file()
+    );
     Ok(())
 }
 
@@ -418,6 +446,34 @@ fn repeated_platforms_share_one_package_and_dry_run_is_read_only() -> Result<(),
     ])?;
     assert_success("dry run", &dry_run);
     assert!(!tree_contains_compass_skill(&fixture.project)?);
+    let report: serde_json::Value = serde_json::from_slice(&dry_run.stdout)?;
+    assert_eq!(
+        report["next_actions"],
+        serde_json::json!([
+            "Review the plan, then rerun without `--dry-run` to install these targets."
+        ])
+    );
+    let planned = report["results"]
+        .as_array()
+        .ok_or("dry-run results")?
+        .iter()
+        .flat_map(|result| result["paths"].as_array().into_iter().flatten())
+        .filter_map(serde_json::Value::as_str)
+        .collect::<Vec<_>>();
+    for expected in [
+        ".agents/skills/compass/SKILL.md",
+        ".codex/hooks.json",
+        "AGENTS.md",
+        ".claude/skills/compass/SKILL.md",
+        ".claude/CLAUDE.md",
+        ".claude/settings.json",
+        "CLAUDE.md",
+    ] {
+        assert!(
+            planned.iter().any(|path| path.ends_with(expected)),
+            "dry run omitted {expected}: {planned:?}"
+        );
+    }
 
     let output = fixture.run(&[
         "install",
@@ -440,6 +496,39 @@ fn repeated_platforms_share_one_package_and_dry_run_is_read_only() -> Result<(),
             .count(),
         1
     );
+    let next_actions = report["next_actions"].as_array().ok_or("next actions")?;
+    assert!(next_actions.iter().any(|action| {
+        action
+            .as_str()
+            .is_some_and(|action| action.contains("/hooks"))
+    }));
+    assert!(next_actions.iter().any(|action| {
+        action
+            .as_str()
+            .is_some_and(|action| action.contains("/skills reload"))
+    }));
+    assert!(next_actions.iter().any(|action| {
+        action
+            .as_str()
+            .is_some_and(|action| action.contains("new coding-agent session"))
+    }));
+    Ok(())
+}
+
+#[test]
+fn install_rejects_unsupported_scope_and_platform_combinations() -> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    let unsupported = fixture.run(&["install", "--project", "--platform", "codex", "--strict"])?;
+    assert!(!unsupported.status.success());
+    assert!(String::from_utf8_lossy(&unsupported.stderr).contains("requires the Claude platform"));
+
+    let user_scope = fixture.run(&["install", "--user", "--platform", "claude", "--strict"])?;
+    assert!(!user_scope.status.success());
+    assert!(String::from_utf8_lossy(&user_scope.stderr).contains("requires project scope"));
+
+    let cursor_user = fixture.run(&["install", "--user", "--platform", "cursor"])?;
+    assert!(!cursor_user.status.success());
+    assert!(String::from_utf8_lossy(&cursor_user.stdout).contains("no user-scoped"));
     Ok(())
 }
 

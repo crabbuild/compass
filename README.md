@@ -273,7 +273,9 @@ compass install --user --format json
 
 The skill teaches assistants to use an existing Compass graph as the first
 navigation layer, request a focused subgraph, and open only the source files
-needed to verify an answer. Installation does not build a graph.
+needed to verify an answer. Installation does not build a graph; on the first
+repository-wide architecture, dependency, history, or impact question, the
+assistant can run the local deterministic build and continue automatically.
 
 ```text
 architecture question

@@ -43,5 +43,8 @@ Compass parses untrusted project content and graph files. Its default structural
 - Neo4j and FalkorDB pushes connect to external databases
 - URL acquisition and Google Workspace extraction access configured external services
 - PostgreSQL extraction connects to the supplied database server
+- Assistant setup can register local command hooks. Review generated hook files
+  before trusting them in the host, and reinstall after moving the Compass
+  executable so the managed command path remains accurate.
 
 Include the selected options and endpoint type in reports about these features. Never include live credentials.
