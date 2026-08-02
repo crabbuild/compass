@@ -2,6 +2,8 @@
 
 ## 0.2.0
 
+- Show recorded relationship source lines on graph edges and open the exact
+  call or wiring site when a located edge is double-clicked.
 - Hard-require current Compass community-detail capabilities for the graph
   workflow instead of entering a partially compatible viewer.
 - Speed large immutable graph snapshots with copy-on-write clones where the

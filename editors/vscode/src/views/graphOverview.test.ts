@@ -24,10 +24,12 @@ describe("loadPreparedGraphOverview", () => {
 
   async function fixture({
     sourceGraphBytes = 12,
-    nodeLimit = 5000
+    nodeLimit = 5000,
+    schema = "compass.graph-overview/2"
   }: {
     sourceGraphBytes?: number;
     nodeLimit?: number;
+    schema?: string;
   } = {}) {
     directory = await mkdtemp(path.join(tmpdir(), "compass-graph-overview-"));
     const output = path.join(directory, "compass-out");
@@ -36,7 +38,7 @@ describe("loadPreparedGraphOverview", () => {
     await writeFile(graphPath, "x".repeat(12));
     const overviewPath = path.join(output, "graph-overview.json");
     await writeFile(overviewPath, JSON.stringify({
-      schema: "compass.graph-overview/1",
+      schema,
       sourceGraphBytes,
       nodeLimit,
       model
@@ -60,6 +62,12 @@ describe("loadPreparedGraphOverview", () => {
 
   it("rejects an overview generated with a different node limit", async () => {
     const graphPath = await fixture({ nodeLimit: 2500 });
+
+    await expect(loadPreparedGraphOverview(graphPath, 5000)).resolves.toBeUndefined();
+  });
+
+  it("rejects an overview from the renderer without relationship anchors", async () => {
+    const graphPath = await fixture({ schema: "compass.graph-overview/1" });
 
     await expect(loadPreparedGraphOverview(graphPath, 5000)).resolves.toBeUndefined();
   });

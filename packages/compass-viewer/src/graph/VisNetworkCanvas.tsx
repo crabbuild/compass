@@ -31,6 +31,7 @@ type Props = {
   hiddenChanges: ReadonlySet<GraphChangeType>;
   onFocus(nodeId: string): void;
   onOpenSource(nodeId: string): void;
+  onOpenRelationshipSource(edgeId: string): void;
   onHover(change: GraphHover | null): void;
   onClear(): void;
   onStabilized(): void;
@@ -303,6 +304,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     hiddenChanges,
     onFocus,
     onOpenSource,
+    onOpenRelationshipSource,
     onHover,
     onClear,
     onStabilized
@@ -508,6 +510,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       bindGraphNetworkEvents(network, {
         onFocus,
         onOpenSource,
+        onOpenRelationshipSource,
         onHover,
         onHoverEdge: handleHoverEdge,
         onBlurEdge: handleBlurEdge,
@@ -534,6 +537,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       onFocus,
       onHover,
       onOpenSource,
+      onOpenRelationshipSource,
       onStabilized
     ]);
 

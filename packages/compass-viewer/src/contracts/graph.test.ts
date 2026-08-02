@@ -74,4 +74,31 @@ describe("GraphViewModelSchema", () => {
 
     expect(parsed.edges[0]?.confidence).toBe("aggregated");
   });
+
+  it("preserves an optional relationship source anchor", () => {
+    const parsed = GraphViewModelSchema.parse({
+      schema: "compass.viewer.graph/1",
+      title: "Relationships",
+      stats: { nodes: 2, edges: 1, communities: 1, aggregated: false },
+      nodes: [
+        { id: "caller", label: "caller", community: 0 },
+        { id: "callee", label: "callee", community: 0 }
+      ],
+      edges: [{
+        id: "caller-callee",
+        source: "caller",
+        target: "callee",
+        relation: "calls",
+        confidence: "inferred",
+        relationshipSite: { file: "src/main.rs", startLine: 42, endLine: 42 }
+      }],
+      communities: [{ id: 0, label: "Core", color: "#4E79A7" }]
+    });
+
+    expect(parsed.edges[0]?.relationshipSite).toEqual({
+      file: "src/main.rs",
+      startLine: 42,
+      endLine: 42
+    });
+  });
 });

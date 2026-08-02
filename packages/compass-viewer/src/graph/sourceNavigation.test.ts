@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GraphNode } from "../contracts/graph";
-import { navigableSource } from "./sourceNavigation";
+import { navigableRelationshipSource, navigableSource } from "./sourceNavigation";
 
 function node(source?: GraphNode["source"]): GraphNode {
   return { id: "n1", label: "run", community: 0, source };
@@ -24,5 +24,24 @@ describe("navigableSource", () => {
     { file: "src/main.rs" }
   ])("rejects incomplete source metadata %#", (source) => {
     expect(navigableSource(node(source))).toBeUndefined();
+  });
+});
+
+describe("navigableRelationshipSource", () => {
+  it("returns only a relationship's own located source anchor", () => {
+    const relationshipSite = { file: "src/main.rs", startLine: 19, endLine: 19 };
+    expect(navigableRelationshipSource({
+      id: "edge",
+      source: "caller",
+      target: "callee",
+      relation: "calls",
+      relationshipSite
+    })).toEqual(relationshipSite);
+    expect(navigableRelationshipSource({
+      id: "edge",
+      source: "caller",
+      target: "callee",
+      relation: "calls"
+    })).toBeUndefined();
   });
 });

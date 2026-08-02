@@ -7,7 +7,7 @@ import {
 } from "@compass/viewer/contracts/graph";
 import { z } from "zod";
 
-export const GRAPH_OVERVIEW_SCHEMA = "compass.graph-overview/1" as const;
+export const GRAPH_OVERVIEW_SCHEMA = "compass.graph-overview/2" as const;
 
 const GraphOverviewArtifactSchema = z.object({
   schema: z.literal(GRAPH_OVERVIEW_SCHEMA),
