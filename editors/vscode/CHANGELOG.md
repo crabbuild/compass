@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Hard-require current Compass community-detail capabilities for the graph
   workflow instead of entering a partially compatible viewer.
