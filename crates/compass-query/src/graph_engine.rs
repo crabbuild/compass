@@ -8,6 +8,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use compass_graph::{GraphSnapshotManifest, GraphSnapshotReader, canonical_graph_json};
 use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
 
@@ -38,8 +39,14 @@ impl JsonGraphEngine {
                 error.to_string(),
             )
         })?;
-        let graph_bytes = fs::read(path).map_err(|error| io_error("read_graph", error))?;
         validate_graph_schema(&graph)?;
+        let graph_bytes = canonical_graph_json(&graph).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "graph_canonicalization_failed",
+                error.to_string(),
+            )
+        })?;
         Ok(Self { graph, graph_bytes })
     }
 }
@@ -74,22 +81,50 @@ impl StoreGraphEngine {
                 error.to_string(),
             )
         })?;
-        validate_store_ref(graph_path, &store)?;
-        let (manifest, graph_bytes) = store.read_snapshot().map_err(|error| {
+        let active = GraphSnapshotReader::open_active(&store).map_err(|error| {
             QueryError::new(
                 QueryErrorKind::CorruptArtifact,
-                "store_snapshot_failed",
+                "store_graph_snapshot_failed",
                 error.to_string(),
             )
         })?;
-        if manifest.graph_schema != CODE_GRAPH_SCHEMA_V1 {
+        let (graph_schema, node_count, edge_count, graph_bytes) = if let Some(reader) = active {
+            let manifest = reader.manifest();
+            let graph_bytes = reader.export_json_bytes().map_err(|error| {
+                QueryError::new(
+                    QueryErrorKind::CorruptArtifact,
+                    "store_graph_export_failed",
+                    error.to_string(),
+                )
+            })?;
+            validate_store_ref(graph_path, &store, Some(manifest))?;
+            (
+                manifest.graph_schema.clone(),
+                manifest.node_count,
+                manifest.edge_count,
+                graph_bytes,
+            )
+        } else {
+            let (manifest, graph_bytes) = store.read_snapshot().map_err(|error| {
+                QueryError::new(
+                    QueryErrorKind::CorruptArtifact,
+                    "store_snapshot_failed",
+                    error.to_string(),
+                )
+            })?;
+            validate_store_ref(graph_path, &store, None)?;
+            (
+                manifest.graph_schema,
+                manifest.node_count,
+                manifest.edge_count,
+                graph_bytes,
+            )
+        };
+        if graph_schema != CODE_GRAPH_SCHEMA_V1 {
             return Err(QueryError::new(
                 QueryErrorKind::UnsupportedSchema,
                 "unsupported_graph_schema",
-                format!(
-                    "expected {CODE_GRAPH_SCHEMA_V1}, found {}",
-                    manifest.graph_schema
-                ),
+                format!("expected {CODE_GRAPH_SCHEMA_V1}, found {}", graph_schema),
             ));
         }
         let graph = serde_json::from_slice::<GraphDocument>(&graph_bytes).map_err(|error| {
@@ -106,15 +141,20 @@ impl StoreGraphEngine {
                 error.to_string(),
             )
         })?;
-        if manifest.node_count != graph.nodes.len() as u64
-            || manifest.edge_count != graph.links.len() as u64
-        {
+        if node_count != graph.nodes.len() as u64 || edge_count != graph.links.len() as u64 {
             return Err(QueryError::new(
                 QueryErrorKind::CorruptArtifact,
                 "store_manifest_counts_mismatch",
                 "store manifest counts do not match the decoded graph",
             ));
         }
+        let graph_bytes = canonical_graph_json(&graph).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_canonicalization_failed",
+                error.to_string(),
+            )
+        })?;
         Ok(Self { graph, graph_bytes })
     }
 }
@@ -172,12 +212,23 @@ fn validate_graph_schema(graph: &GraphDocument) -> Result<(), QueryError> {
     Ok(())
 }
 
-fn validate_store_ref(graph_path: &Path, store: &SqliteStore) -> Result<(), QueryError> {
+fn validate_store_ref(
+    graph_path: &Path,
+    store: &SqliteStore,
+    graph_snapshot: Option<&GraphSnapshotManifest>,
+) -> Result<(), QueryError> {
     let reference_path = graph_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(STORE_REF_FILE_NAME);
     if !reference_path.is_file() {
+        if graph_snapshot.is_some() {
+            return Err(QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_ref_missing",
+                "store.ref is required for an immutable graph snapshot",
+            ));
+        }
         return Ok(());
     }
     let size = fs::metadata(&reference_path)
@@ -217,6 +268,16 @@ fn validate_store_ref(graph_path: &Path, store: &SqliteStore) -> Result<(), Quer
             QueryErrorKind::CorruptArtifact,
             "store_ref_mismatch",
             "store.ref does not describe the selected store snapshot",
+        ));
+    }
+    if let Some(manifest) = graph_snapshot
+        && (reference.snapshot_id != manifest.snapshot_id
+            || reference.graph_digest != manifest.graph_digest)
+    {
+        return Err(QueryError::new(
+            QueryErrorKind::CorruptArtifact,
+            "store_ref_snapshot_mismatch",
+            "store.ref does not describe the active immutable graph snapshot",
         ));
     }
     Ok(())

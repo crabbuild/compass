@@ -1,19 +1,21 @@
 # Compass store and graph-engine design
 
 **Status:** Architecture reference. The initial local slice, Phase 2 memory
-snapshot layout, and the Phase 3 SQLite shadow-publication slice are shipped:
-the `compass-store` contract, SQLite adapter, dual graph publication, typed
-query-engine selection, deterministic immutable graph indexes, selector-CAS
-reference protocol, WAL durability, reopen validation, and canonical
-graph.json differential checks are implemented. redb, PostgreSQL, DynamoDB,
-remote operation, general garbage collection, and performance claims remain
-follow-on work.
+snapshot layout, Phase 3 SQLite shadow-publication slice, and the local Phase 4
+snapshot-backed query-routing slice are shipped: the `compass-store` contract,
+SQLite adapter, dual graph publication, typed query-engine selection,
+deterministic immutable graph indexes, selector-CAS reference protocol, WAL
+durability, reopen validation, canonical graph.json differential checks, and
+cross-engine typed-query checks are implemented. redb, PostgreSQL, DynamoDB,
+remote operation, bounded streaming plans, general garbage collection, and
+performance claims remain follow-on work.
 
-Each generated sidecar now contains both the validated graph payload used by
-the current store engine and the Phase 2 content-addressed graph indexes. The
-sidecar is prepared and checkpointed in the unpublished BuildGuard generation;
-only the filesystem generation switch publishes it. `graph.json` remains a
-permanent compatible engine and is never removed or made dependent on SQLite.
+Each generated sidecar now contains both a validated graph payload retained for
+compatibility and the Phase 2 content-addressed graph indexes used by the
+current store engine. The sidecar is prepared and checkpointed in the
+unpublished BuildGuard generation; only the filesystem generation switch
+publishes it. `graph.json` remains a permanent compatible engine and is never
+removed or made dependent on SQLite.
 
 > **Who this page is for:** maintainers of graph publication and queries,
 > storage-adapter authors, cloud-service implementers, and reviewers of the
