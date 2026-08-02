@@ -182,6 +182,12 @@ compass query "<question>"
   [--graph PATH | --at REV]
 ```
 
+Query seeds prefer source-backed declarations over unresolved external-symbol
+placeholders with the same callable label. Source-less placeholder nodes retain
+an explicit `wiring=FILE:LOCATION` site, and traversed relationships render
+their occurrence as `at=FILE:LOCATION`; neither is presented as a declaration
+location.
+
 CompassQL:
 
 ```text
@@ -224,7 +230,10 @@ Renders a shortest known graph path while preserving relationship direction.
 compass explain "<node>" [--graph PATH | --at REV]
 ```
 
-Shows one node and incoming/outgoing connections.
+Shows one node and incoming/outgoing connections. An exact node ID resolves
+directly. When a label names multiple source-backed declarations, Compass lists
+the candidates and their source ranges and asks for the full node ID instead of
+silently selecting one. Connection lines include the stored relationship site.
 
 ### `affected`
 

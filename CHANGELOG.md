@@ -104,6 +104,9 @@
   repeated linear node lookups from graph interactions.
 - Restore source ranges and named communities in natural-language query output
   when reading typed `compass.graph/1` nodes and relationships.
+- Prefer source-backed declarations over unresolved call placeholders in
+  natural-language queries, show placeholder wiring and relationship sites,
+  and make `explain` report ambiguous labels before accepting an exact node ID.
 
 ## 0.2.0 - 2026-08-01
 
