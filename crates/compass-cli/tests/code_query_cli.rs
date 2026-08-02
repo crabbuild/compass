@@ -5,6 +5,8 @@ use std::ffi::OsString;
 
 use compass_cli::{Frontend, run};
 use compass_files::BuildGuard;
+use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
+use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 use serde_json::Value;
 
 #[test]
@@ -41,6 +43,53 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
         assert_eq!(response["schema"], "compass.query/1");
         assert_eq!(response["operation"], operation);
     }
+    Ok(())
+}
+
+#[test]
+fn typed_query_defaults_to_the_store_when_a_published_sidecar_is_present()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = support::write_typed_graph(directory.path())?;
+    let graph_bytes = std::fs::read(&graph_path)?;
+    let graph = GraphDocument::load(&graph_path)?;
+    let store = SqliteStore::open(directory.path().join(STORE_FILE_NAME))?;
+    store.publish_snapshot(
+        &graph_bytes,
+        CODE_GRAPH_SCHEMA_V1,
+        graph.nodes.len(),
+        graph.links.len(),
+    )?;
+    std::fs::write(
+        directory.path().join(STORE_REF_FILE_NAME),
+        serde_json::to_vec(&store.snapshot_reference()?)?,
+    )?;
+    std::fs::write(&graph_path, b"not the selected JSON engine")?;
+
+    let default = run(
+        Frontend::Compass,
+        [
+            OsString::from("search"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph_path.clone().into_os_string(),
+        ],
+    );
+    assert_eq!(default.code, 0, "{}", default.stderr);
+    assert!(default.stdout.contains("Fixture.Target"));
+
+    let json = run(
+        Frontend::Compass,
+        [
+            OsString::from("search"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph_path.into_os_string(),
+            OsString::from("--engine"),
+            OsString::from("json"),
+        ],
+    );
+    assert_ne!(json.code, 0);
     Ok(())
 }
 

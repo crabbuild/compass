@@ -21,6 +21,8 @@ Default:
 ```text
 compass-out/
 ├── graph.json
+├── compass-store.sqlite3
+├── store.ref
 ├── program.json
 ├── GRAPH_REPORT.md
 ├── graph.html
@@ -36,6 +38,8 @@ compass-out/
 | Artifact | Authority | Consumer use |
 | --- | --- | --- |
 | `graph.json` | machine-readable graph snapshot | queries, integrations, export |
+| `compass-store.sqlite3` | validated namespace/partition/key store snapshot | default typed code-query engine and future store adapters |
+| `store.ref` | typed selector for the co-published store identity and snapshot | store-engine validation before query execution |
 | `program.json` | provenance-aware Program IR | program inspection, semantic analysis |
 | `GRAPH_REPORT.md` | derived human orientation | architecture survey |
 | `graph.html` | derived optional visualization | interactive exploration |
@@ -44,6 +48,15 @@ compass-out/
 | semantic sidecars | depends on artifact class | completeness/evidence/export |
 
 Do not reconstruct graph truth from HTML when JSON is available.
+
+`compass-store.sqlite3` is a local SQLite realization of the same published
+snapshot. It is addressed through the `compass-store` namespace/partition/key
+contract and is not a public SQL schema. The file is immutable as a published
+generation; a new build writes immutable content and advances one active
+selector. `graph.json` remains a complete compatible graph engine and can be
+selected explicitly with `--engine json`. Omitting `--engine` selects the store
+for a generation with a valid sidecar/reference; use `--engine store` to
+require the store and fail explicitly when it is missing or corrupt.
 
 ## `graph.json`
 

@@ -1,6 +1,8 @@
 # Executable Compass store implementation plan
 
-**Status:** Planned. No phase is shipped merely because it appears here.
+**Status:** In progress. Phase 0 and the initial local portion of Phases 3–4
+are implemented in the current branch; the remaining phases are executable
+follow-on work and are not implied to be shipped.
 
 > **Who this page is for:** implementers and reviewers delivering
 > `compass-store`, store-backed graph snapshots, backend adapters, and the
@@ -33,6 +35,49 @@ At completion, Compass has:
 - adapter conformance, cross-engine differential tests, fault injection,
   garbage collection, backup, and recovery coverage; and
 - measured performance evidence before any release claim.
+
+## Shipped initial slice in this branch
+
+The first implementation is intentionally smaller than the full program above
+and is independently mergeable:
+
+- `compass-store` exposes the namespace-first `(namespace, partition, key)`
+  contract, bounded ordered scans, conditional writes, immutable writes, and a
+  versioned SQLite realization in one package. The contract does not expose
+  SQL or require a particular backend, so redb, PostgreSQL, DynamoDB, or a
+  service adapter can implement the same trait later.
+- Every committed local generation contains `graph.json`,
+  `compass-store.sqlite3`, and a typed `store.ref`. The store contains
+  immutable, digest-addressed graph chunks and manifests plus one
+  CAS-protected active selector. The payload is byte-identical to the
+  published JSON and is validated before the build state is sealed; the
+  reference is checked against the selected manifest before a store query
+  runs.
+- Typed code-query opening chooses the store by default when the sidecar is
+  present, keeps `graph.json` as a complete engine, and supports explicit
+  `--engine default|json|store`. Omitting `--engine` selects the store for a
+  published generation; `--engine json` is the explicit JSON choice. A raw
+  graph without a sidecar remains readable through the compatibility path.
+
+Acceptance criteria for this slice are deliberately concrete:
+
+1. `cargo test -p compass-store --locked` passes namespace isolation,
+   lexicographic scans/cursors, CAS, immutable retry, snapshot validation, and
+   reopen tests.
+2. `cargo test -p compass-query --test store_engine --locked` proves default
+   store selection, explicit JSON selection, explicit-store failure, reopen,
+   and JSON-equivalent search results.
+3. The core publication regression test proves the sidecar is present,
+   reopenable, digest-valid, and byte-identical to `graph.json` after a local
+   build.
+4. Deleting or corrupting the sidecar never changes the JSON artifact; default
+   query opening falls back only when the sidecar is absent, while explicit
+   store selection fails with a typed error and a present malformed `store.ref`
+   fails closed.
+
+This slice does not claim streamed graph indexes, redb/PostgreSQL/DynamoDB
+adapters, remote retry semantics, general garbage collection, or a measured
+performance improvement. Those remain the follow-on phases below.
 
 ## Program rules
 
@@ -399,7 +444,8 @@ write/publication risk from query-routing risk.
 
 ### Owned surfaces
 
-- new `compass-store-sqlite` crate;
+- the SQLite adapter in `compass-store` for the initial local slice (a future
+  split into `compass-store-sqlite` remains an internal packaging choice);
 - local store path and file lifecycle in `compass-files`;
 - snapshot preparation and `store.ref` staging in `compass-core`; and
 - CLI contract tests for `init` and `update` side effects.
@@ -447,15 +493,18 @@ write/publication risk from query-routing risk.
 
 ### Acceptance criteria
 
-- `cargo test -p compass-store-sqlite --locked` passes the shared conformance
-  suite after reopen and under injected busy/interrupt failures.
+- the initial adapter's `cargo test -p compass-store --locked` passes the
+  shared conformance suite after reopen and under injected busy/interrupt
+  failures; a split adapter must retain the same command-level evidence.
 - `compass init` and `compass update` CLI integration tests assert successful
   exit, `graph.json`, `store.ref`, complete manifest, and no visible partial
   generation.
 - Shadow comparison covers all fixture graphs and rejects publication on any
   mismatch.
-- No default query reads SQLite yet, so a user can delete the new database and
-  continue using the published JSON engine.
+- In a shadow-only deployment before Phase 4, no default query reads SQLite, so
+  deleting the new database cannot affect the published JSON engine. The
+  current branch's initial slice has intentionally advanced the typed
+  code-query path to the Phase 4 default-selection behavior described above.
 - The old disposable query SQLite cache may be hard-cut or rebuilt, but the
   new durable snapshot store uses a different format identity and location.
 

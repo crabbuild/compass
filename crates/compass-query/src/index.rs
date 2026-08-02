@@ -6,39 +6,58 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use compass_ir::{PROGRAM_SCHEMA, ProgramBundle};
-use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
+use compass_model::code_graph::GraphDocument;
 use compass_model::query_contract::CODE_QUERY_SCHEMA_V1;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 use crate::CodeQueryEngine;
 use crate::cql::{QueryError, QueryErrorKind};
+use crate::graph_engine::open_graph_engine;
 
 const INDEX_FORMAT_VERSION: &str = "compass-code-index/1";
+
+/// Selects the source used to hydrate the typed query engine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EngineSelection {
+    /// Prefer the store sidecar and fall back to graph JSON when it is absent.
+    Default,
+    /// Read and validate the compatible `graph.json` artifact directly.
+    Json,
+    /// Require the store sidecar and fail if it is unavailable or corrupt.
+    Store,
+}
+
+/// Identifies the engine that supplied a query engine's graph snapshot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum QueryEngineKind {
+    Json,
+    Store,
+}
 
 pub fn open(
     graph_path: &Path,
     program_path: Option<&Path>,
     cache_root: &Path,
 ) -> Result<CodeQueryEngine, QueryError> {
-    let graph = GraphDocument::load(graph_path).map_err(|error| {
-        QueryError::new(
-            QueryErrorKind::CorruptArtifact,
-            "graph_load_failed",
-            error.to_string(),
-        )
-    })?;
-    if graph.graph.schema != CODE_GRAPH_SCHEMA_V1 {
-        return Err(QueryError::new(
-            QueryErrorKind::UnsupportedSchema,
-            "unsupported_graph_schema",
-            format!(
-                "expected {CODE_GRAPH_SCHEMA_V1}, found {}",
-                graph.graph.schema
-            ),
-        ));
-    }
-    let graph_bytes = fs::read(graph_path).map_err(|error| io_error("read_graph", error))?;
+    open_with_engine(
+        graph_path,
+        program_path,
+        cache_root,
+        EngineSelection::Default,
+    )
+}
+
+pub fn open_with_engine(
+    graph_path: &Path,
+    program_path: Option<&Path>,
+    cache_root: &Path,
+    selection: EngineSelection,
+) -> Result<CodeQueryEngine, QueryError> {
+    let graph_engine = open_graph_engine(graph_path, selection)?;
+    let graph = graph_engine.graph().clone();
+    let graph_bytes = graph_engine.graph_bytes().to_vec();
+    let engine_kind = graph_engine.kind();
     let (program, program_digest) = load_program(program_path)?;
     let key = index_key(
         &graph_bytes,
@@ -88,6 +107,7 @@ pub fn open(
         adjacency,
         lookup,
         partial_graph_message,
+        engine_kind,
     })
 }
 
