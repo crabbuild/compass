@@ -61,10 +61,6 @@ export function ArchitectureMap({
     () => loadPositions(storageKey)
   );
   const positionsRef = useRef(positions);
-  const layout = useMemo(
-    () => layoutArchitecture(overview.sections, overview.routes, undefined, positions),
-    [overview.routes, overview.sections, positions]
-  );
   const [zoom, setZoom] = useState(1);
   const [scrollPosition, setScrollPosition] = useState<ScrollPosition>("none");
   const [routeMode, setRouteMode] = useState<RouteMode>("key");
@@ -94,12 +90,33 @@ export function ArchitectureMap({
     () => selectKeyRoutes(overview.routes, selection),
     [overview.routes, selection]
   );
-  const displayedRoutes = useMemo(
+  const routeSummaries = useMemo(
     () => routeMode === "complete"
-      ? layout.routes
-      : layout.routes.filter((route) => keyRouteIds.has(route.id)),
-    [keyRouteIds, layout.routes, routeMode]
+      ? overview.routes
+      : overview.routes.filter((route) => keyRouteIds.has(route.id)),
+    [keyRouteIds, overview.routes, routeMode]
   );
+  const displayedSections = useMemo(() => {
+    if (routeMode === "complete" || selection === undefined) return overview.sections;
+    const ids = new Set<string>();
+    if (selection.kind === "section") ids.add(selection.id);
+    for (const route of routeSummaries) {
+      ids.add(route.sourceSection);
+      ids.add(route.targetSection);
+    }
+    return overview.sections.filter((section) => ids.has(section.id));
+  }, [overview.sections, routeMode, routeSummaries, selection]);
+  const layout = useMemo(
+    () => layoutArchitecture(
+      displayedSections,
+      routeSummaries,
+      undefined,
+      positions,
+      routeMode === "key" && selection?.kind === "section" ? selection.id : undefined
+    ),
+    [displayedSections, positions, routeMode, routeSummaries, selection]
+  );
+  const displayedRoutes = layout.routes;
   const connected = useMemo(() => {
     if (selection?.kind !== "section") return new Set<string>();
     return new Set(
@@ -111,7 +128,7 @@ export function ArchitectureMap({
     );
   }, [displayedRoutes, selection]);
   const maximumCalls = Math.max(1, ...displayedRoutes.map((route) => route.calls));
-  const hiddenRouteCount = layout.routes.length - displayedRoutes.length;
+  const hiddenRouteCount = overview.routes.length - displayedRoutes.length;
   const canvasSize = {
     width: Math.round(layout.width * zoom),
     height: Math.round(layout.height * zoom)
@@ -291,14 +308,14 @@ export function ArchitectureMap({
               aria-pressed={routeMode === "key"}
               onClick={() => setRouteMode("key")}
             >
-              Key routes
+              {selection?.kind === "section" ? "Neighbors" : "Key routes"}
             </button>
             <button
               type="button"
               aria-pressed={routeMode === "complete"}
               onClick={() => setRouteMode("complete")}
             >
-              All routes
+              All routes · {overview.routes.length}
             </button>
           </div>
           <div className="architecture-map-toolbar" aria-label="Map controls">
@@ -359,7 +376,7 @@ export function ArchitectureMap({
             aria-label={mapLabel(
               layout.nodes.length,
               displayedRoutes.length,
-              layout.routes.length
+              overview.routes.length
             )}
             onPointerDown={startCanvasDrag}
             onPointerMove={moveCanvas}
@@ -422,10 +439,10 @@ export function ArchitectureMap({
             ))}
             <text
               className="architecture-map-direction"
-              x={layout.width / 2}
+              x={96}
               y={24}
             >
-              CALL DIRECTION  →
+              PRIMARY CALL DIRECTION  →
             </text>
           </g>
 
@@ -451,7 +468,9 @@ export function ArchitectureMap({
                   key={route.id}
                   role="button"
                   tabIndex={0}
-                  aria-label={`${route.sourceSection} to ${route.targetSection}, ${route.calls} calls`}
+                  aria-label={`${route.sourceSection} to ${route.targetSection}, ${route.calls} calls${
+                    route.direction === "backward" ? ", feedback route" : ""
+                  }`}
                   data-direction={route.direction}
                   data-evidence={evidence}
                   data-focus-direction={focusDirection}
@@ -571,10 +590,11 @@ export function ArchitectureMap({
           <span><i data-evidence="inferred" /> Inferred</span>
           <span><i data-direction="incoming" /> Incoming</span>
           <span><i data-direction="outgoing" /> Outgoing</span>
+          <span><i data-direction="feedback" /> Feedback</span>
           <span><MoveIcon aria-hidden="true" /> Drag cards to arrange</span>
           {hiddenRouteCount > 0 && (
             <button type="button" onClick={() => setRouteMode("complete")}>
-              {displayedRoutes.length} of {layout.routes.length} routes · Show all
+              {displayedRoutes.length} of {overview.routes.length} routes · Show all
             </button>
           )}
         </div>
@@ -659,17 +679,19 @@ function selectKeyRoutes(
     );
   const selected = new Set<string>();
   if (selection?.kind === "route") {
-    selected.add(selection.id);
+    if (routes.some((route) => route.id === selection.id)) selected.add(selection.id);
+    return selected;
   } else if (selection?.kind === "section") {
     const incoming = strongest(
       routes.filter((route) => route.targetSection === selection.id)
-    ).slice(0, 4);
+    ).slice(0, 6);
     const outgoing = strongest(
       routes.filter((route) => route.sourceSection === selection.id)
-    ).slice(0, 4);
+    ).slice(0, 6);
     for (const route of strongest([...incoming, ...outgoing])) {
       selected.add(route.id);
     }
+    return selected;
   }
   for (const route of strongest(routes)) {
     if (selected.size >= KEY_ROUTE_LIMIT) break;

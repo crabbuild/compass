@@ -5376,7 +5376,7 @@ body.vscode-high-contrast-light .architecture-call-table {
 
 .architecture-map-viewport {
   position: relative;
-  height: clamp(480px, 64vh, 720px);
+  height: clamp(420px, 56vh, 620px);
   min-width: 0;
   min-height: 0;
   overflow: auto;
@@ -5519,8 +5519,8 @@ body.vscode-high-contrast-light .architecture-call-table {
 }
 
 .architecture-map-lanes rect {
-  fill: color-mix(in srgb, var(--architecture-raised) 18%, transparent);
-  stroke: color-mix(in srgb, var(--architecture-border) 38%, transparent);
+  fill: color-mix(in srgb, var(--architecture-raised) 8%, transparent);
+  stroke: color-mix(in srgb, var(--architecture-border) 20%, transparent);
   stroke-width: 1px;
 }
 
@@ -5544,6 +5544,7 @@ body.vscode-high-contrast-light .architecture-call-table {
   );
   font-size: 7px;
   letter-spacing: 0.16em;
+  text-anchor: start;
 }
 
 .architecture-route-line {
@@ -5558,6 +5559,10 @@ body.vscode-high-contrast-light .architecture-call-table {
 .architecture-routes g[data-evidence="inferred"] .architecture-route-line {
   stroke: var(--vscode-editorWarning-foreground, var(--warning));
   stroke-dasharray: 6 5;
+}
+
+.architecture-routes g[data-direction="backward"] .architecture-route-line {
+  stroke-dasharray: 3 5;
 }
 
 .architecture-route-hit {
@@ -5735,6 +5740,14 @@ body.vscode-high-contrast-light .architecture-call-table {
 
 .architecture-map-legend i[data-direction="outgoing"] {
   background: var(--vscode-charts-blue, #49a6ff);
+}
+
+.architecture-map-legend i[data-direction="feedback"] {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--vscode-textLink-foreground, var(--compass-focus)) 0 3px,
+    transparent 3px 6px
+  );
 }
 
 .architecture-map-table {

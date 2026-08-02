@@ -136,10 +136,53 @@ describe("ArchitectureMap", () => {
     expect(screen.getByRole("group", {
       name: /19 subsystems and 16 of 18 directed routes visible/i
     })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "All routes" }));
+    fireEvent.click(screen.getByRole("button", { name: "All routes · 18" }));
     expect(screen.getByRole("group", {
       name: /19 subsystems and 18 directed routes/i
     })).toBeInTheDocument();
+  });
+
+  it("shows only the selected subsystem neighborhood in focused mode", () => {
+    const extraSections = Array.from({ length: 8 }, (_, index) => ({
+      ...overview.sections[1]!,
+      id: `service-${index}`,
+      name: `Service ${index}`
+    }));
+    const selectedRoutes = extraSections.slice(0, 2).map((target, index) => ({
+      ...overview.routes[0]!,
+      id: `api-service-${index}`,
+      targetSection: target.id,
+      calls: 2 + index
+    }));
+    const unrelatedRoutes = extraSections.slice(2).map((target, index) => ({
+      ...overview.routes[0]!,
+      id: `unrelated-${index}`,
+      sourceSection: extraSections[0]!.id,
+      targetSection: target.id,
+      calls: 100 + index
+    }));
+    render(
+      <ArchitectureMap
+        overview={{
+          ...overview,
+          sections: [overview.sections[0]!, ...extraSections],
+          routes: [...selectedRoutes, ...unrelatedRoutes]
+        }}
+        selection={{ kind: "section", id: "api" }}
+        onSelect={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Neighbors" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    expect(screen.getByRole("group", {
+      name: /3 subsystems and 2 of 8 directed routes visible/i
+    })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Service 2,/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /service-0 to service-2/i }))
+      .not.toBeInTheDocument();
   });
 
   it("explains an empty filtered architecture instead of leaving a blank canvas", () => {
