@@ -1095,6 +1095,7 @@ dependencies = [
  "ahash",
  "compass-languages",
  "compass-model",
+ "compass-store",
  "rayon",
  "serde",
  "serde_json",

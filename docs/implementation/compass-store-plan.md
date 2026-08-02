@@ -1,8 +1,10 @@
 # Executable Compass store implementation plan
 
-**Status:** In progress. Phase 0 and the initial local portion of Phases 3–4
-are implemented in the current branch; the remaining phases are executable
-follow-on work and are not implied to be shipped.
+**Status:** In progress. Phase 0, Phase 1, and the initial local portion of
+Phases 3–4 are implemented. This branch adds the Phase 2 backend-neutral
+memory snapshot/index slice; persistent SQLite streamed publication and the
+remaining cross-engine qualification work are executable follow-on phases and
+are not implied to be shipped.
 
 > **Who this page is for:** implementers and reviewers delivering
 > `compass-store`, store-backed graph snapshots, backend adapters, and the
@@ -75,9 +77,36 @@ Acceptance criteria for this slice are deliberately concrete:
    store selection fails with a typed error and a present malformed `store.ref`
    fails closed.
 
-This slice does not claim streamed graph indexes, redb/PostgreSQL/DynamoDB
-adapters, remote retry semantics, general garbage collection, or a measured
-performance improvement. Those remain the follow-on phases below.
+The initial local slice above does not claim streamed graph indexes,
+redb/PostgreSQL/DynamoDB adapters, remote retry semantics, general garbage
+collection, or a measured performance improvement. Those remain the follow-on
+phases below.
+
+## Phase 2 memory-layout slice shipped in this branch
+
+The first executable Phase 2 slice is intentionally independent of a durable
+adapter. `compass-graph` now exposes a deterministic immutable snapshot builder
+and reader over the namespace-first `compass-store::Store` contract. It writes
+content-addressed JSON tree objects, a typed manifest, and a CAS-protected
+active selector using the memory reference store. The layout includes metadata,
+nodes, edges, directional adjacency, files/source anchors, names, terms,
+communities, and diagnostics roots.
+
+The reader validates schema majors, object digests, tree ordering, root/index
+identity, graph counts, and the complete typed graph before returning data. It
+provides bounded point reads, ordered node/edge scans, directional adjacency,
+and canonical JSON export. Repeated builds are idempotent and report immutable
+object reuse; prepared content never becomes active until the selector CAS.
+The permanent `graph.json` engine and the existing SQLite payload sidecar are
+unchanged.
+
+The slice's acceptance evidence is in
+`crates/compass-graph/tests/store_snapshot.rs`: deterministic identity across
+record insertion order and operational generation IDs, immutable object reuse,
+selector-before-commit behavior, bounded reads, directional multiplicity, key
+vectors, and fail-closed tamper detection. Full `JsonGraphEngine` versus
+streaming store-engine differential tests, persistent SQLite publication, and
+measured performance claims remain the explicit Phase 3/4 gates below.
 
 ## Program rules
 
