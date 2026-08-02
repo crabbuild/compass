@@ -152,6 +152,23 @@ The items below have committed design or implementation-plan evidence. They are
 not listed in the current public command surface unless explicitly moved to
 Available now.
 
+### Backend-neutral graph storage
+
+Goal: add a `compass-store` contract that improves incremental build and
+bounded query performance locally while supporting a future cloud deployment.
+The planned boundary is namespace first, then partition and ordered key-value
+operations, with SQLite, redb, PostgreSQL, and DynamoDB adapters required to
+pass the same conformance suite.
+
+Store-backed immutable graph snapshots will coexist with a permanent,
+compatible `graph.json` engine. The plan does not deprecate JSON or make a
+remote database necessary for native local extraction and queries.
+
+Evidence:
+
+- [Compass store and graph-engine design](design/compass-store.md)
+- [Executable Compass store implementation plan](implementation/compass-store-plan.md)
+
 ### Compass Guard: architecture governance
 
 Goal: build a production CI architecture-governance product on CompassQL and

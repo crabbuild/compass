@@ -65,9 +65,11 @@ workspace:
 5. [Extraction pipeline](implementation/extraction-pipeline.md)
 6. [Universal evidence implementation](implementation/universal-evidence.md)
 7. [Query engine](implementation/query-engine.md)
-8. [Semantic pipeline](implementation/semantic-pipeline.md)
-9. [Extending Compass](implementation/extending-compass.md)
-10. [Contributing](../CONTRIBUTING.md)
+8. [Planned Compass store design](design/compass-store.md)
+9. [Compass store implementation plan](implementation/compass-store-plan.md)
+10. [Semantic pipeline](implementation/semantic-pipeline.md)
+11. [Extending Compass](implementation/extending-compass.md)
+12. [Contributing](../CONTRIBUTING.md)
 
 ## Documentation map
 
@@ -101,6 +103,7 @@ workspace:
 | [Managed language analyzers](design/managed-language-analyzers.md) | Planned compiler, indexer, and language-server enrichment across languages |
 | [Managed JDT integration](design/java-jdt-integration.md) | Planned Java semantic tooling, trust boundaries, phases, and acceptance criteria |
 | [Storage and history](design/storage-and-history.md) | Incremental artifacts and immutable historical realizations |
+| [Compass store](design/compass-store.md) | Planned namespace/partition/key contract, graph engines, snapshot schema, and database mappings |
 | [Security and privacy](design/security-and-privacy.md) | Trust boundaries, credentials, and offline behavior |
 
 ### Work on the implementation
@@ -112,6 +115,7 @@ workspace:
 | [Universal evidence](implementation/universal-evidence.md) | Language contracts, crate boundaries, resolution, and qualification |
 | [Code-graph parity qualification](implementation/code-graph-parity-qualification.md) | Pinned real-repository Graphify comparison and open quality gaps |
 | [Query engine](implementation/query-engine.md) | Discovery queries, traversal, and CompassQL |
+| [Compass store plan](implementation/compass-store-plan.md) | Executable phases and acceptance criteria for local and cloud database engines |
 | [Semantic pipeline](implementation/semantic-pipeline.md) | Optional provider-backed extraction |
 | [Extending Compass](implementation/extending-compass.md) | Adding languages, relations, integrations, and commands |
 
