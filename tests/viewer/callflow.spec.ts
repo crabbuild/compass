@@ -30,6 +30,7 @@ test("architecture and call graph have separate purpose-built views", async ({ p
   )).toBeLessThanOrEqual(25);
   await diagram.evaluate((element) => {
     element.scrollLeft = element.scrollWidth;
+    element.dispatchEvent(new Event("scroll"));
   });
   await expect(diagram).toHaveAttribute("data-scroll-position", "end");
 
