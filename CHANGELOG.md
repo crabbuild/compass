@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-08-02
+
 - Restore sub-10-second cold builds for the pinned 3,105-file Django
   qualification corpus by batching and compressing portable AST cache
   publication, parallelizing independent resolver and graph-normalization
