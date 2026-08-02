@@ -166,3 +166,27 @@ fn natural_query_reads_legacy_only_when_the_generation_pointer_is_absent()
     );
     Ok(())
 }
+
+#[test]
+fn natural_query_renders_typed_source_locations() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+
+    let outcome = run(
+        Frontend::Compass,
+        [
+            OsString::from("query"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph.into_os_string(),
+        ],
+    );
+
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+    assert!(
+        outcome
+            .stdout
+            .contains("NODE Target [src=src/lib.rs loc=L1:0-L1:4")
+    );
+    Ok(())
+}

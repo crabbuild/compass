@@ -37,6 +37,18 @@ impl NodeRecord {
                     .and_then(|source| source.get("file"))
                     .and_then(Value::as_str)
                     .map(str::to_owned),
+                "source_location" => self
+                    .attributes
+                    .get("source")
+                    .and_then(Value::as_object)
+                    .and_then(source_anchor_location),
+                "community_name" => self
+                    .attributes
+                    .get("community")
+                    .and_then(Value::as_object)
+                    .and_then(|community| community.get("label"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
                 "symbol_kind" | "type" | "node_type" => self
                     .attributes
                     .get("kind")
@@ -151,6 +163,11 @@ impl EdgeRecord {
                     .and_then(|site| site.get("file"))
                     .and_then(Value::as_str)
                     .map(str::to_owned),
+                "source_location" => self
+                    .attributes
+                    .get("relationshipSite")
+                    .and_then(Value::as_object)
+                    .and_then(source_anchor_location),
                 "_origin" => evidence_field(&self.attributes, "origin").map(str::to_owned),
                 "confidence" => evidence_field(&self.attributes, "confidence").map(|confidence| {
                     match confidence {
@@ -237,6 +254,21 @@ impl EdgeRecord {
                 .map(|(key, value)| (key.as_str(), value.clone())),
         )
     }
+}
+
+fn source_anchor_location(anchor: &Map<String, Value>) -> Option<String> {
+    let start_line = anchor.get("startLine")?.as_u64()?;
+    let exact_range = anchor
+        .get("startColumn")
+        .and_then(Value::as_u64)
+        .zip(anchor.get("endLine").and_then(Value::as_u64))
+        .zip(anchor.get("endColumn").and_then(Value::as_u64));
+    Some(exact_range.map_or_else(
+        || format!("L{start_line}"),
+        |((start_column, end_line), end_column)| {
+            format!("L{start_line}:{start_column}-L{end_line}:{end_column}")
+        },
+    ))
 }
 
 fn evidence_field<'a>(attributes: &'a Map<String, Value>, field: &str) -> Option<&'a str> {
@@ -663,6 +695,45 @@ mod tests {
             serde_json::from_str(r#"{"multigraph":false,"nodes":[{"id":"a"}],"links":[]}"#)
                 .unwrap_or_else(|_| std::process::abort());
         assert!(!document.multigraph);
+    }
+
+    #[test]
+    fn typed_records_project_compatibility_source_locations()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let document: GraphDocument = serde_json::from_str(
+            r#"{
+                "nodes": [{
+                    "id": "a",
+                    "name": "source",
+                    "source": {
+                        "file": "src/lib.rs",
+                        "startLine": 2,
+                        "startColumn": 3,
+                        "endLine": 4,
+                        "endColumn": 5
+                    },
+                    "community": {"id": 7, "label": "Core"}
+                }, {"id": "b", "name": "target"}],
+                "links": [{
+                    "id": "edge",
+                    "source": "a",
+                    "target": "b",
+                    "kind": "calls",
+                    "relationshipSite": {
+                        "file": "src/lib.rs",
+                        "startLine": 8,
+                        "startColumn": 9,
+                        "endLine": 8,
+                        "endColumn": 15
+                    }
+                }]
+            }"#,
+        )?;
+
+        assert_eq!(document.nodes[0].string("source_location"), "L2:3-L4:5");
+        assert_eq!(document.nodes[0].string("community_name"), "Core");
+        assert_eq!(document.links[0].string("source_location"), "L8:9-L8:15");
+        Ok(())
     }
 
     #[test]
