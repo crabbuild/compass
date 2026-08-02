@@ -67,6 +67,7 @@ export function ArchitectureMap({
   const [zoom, setZoom] = useState(1);
   const [scrollPosition, setScrollPosition] = useState<ScrollPosition>("none");
   const scrollPositionRef = useRef<ScrollPosition>("none");
+  const maximumScrollRef = useRef(0);
   const [viewportSize, setViewportSize] = useState(DEFAULT_VIEWPORT_SIZE);
   const [routeMode, setRouteMode] = useState<RouteMode>("key");
   const [draggingId, setDraggingId] = useState<string>();
@@ -88,6 +89,7 @@ export function ArchitectureMap({
     setPositions(next);
     setZoom(1);
     scrollPositionRef.current = "start";
+    maximumScrollRef.current = 0;
     setScrollPosition("start");
     viewportRef.current?.scrollTo?.({ left: 0, top: 0 });
     setRouteMode("key");
@@ -181,6 +183,7 @@ export function ArchitectureMap({
   const resetView = () => {
     setZoom(1);
     scrollPositionRef.current = "start";
+    maximumScrollRef.current = 0;
     setScrollPosition("start");
     const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     viewportRef.current?.scrollTo?.({
@@ -198,6 +201,7 @@ export function ArchitectureMap({
         : target.scrollLeft >= maximum - 1
           ? "end"
           : "middle";
+    maximumScrollRef.current = maximum;
     scrollPositionRef.current = next;
     setScrollPosition((current) => current === next ? current : next);
   };
@@ -294,8 +298,15 @@ export function ArchitectureMap({
     const viewport = viewportRef.current;
     if (!viewport) return;
     const update = () => {
-      if (scrollPositionRef.current === "end") {
-        viewport.scrollLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+      const previousMaximum = maximumScrollRef.current;
+      const maximum = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+      const reachedPreviousEnd = previousMaximum > 1
+        && viewport.scrollLeft >= previousMaximum - 1;
+      if (
+        maximum > previousMaximum
+        && (scrollPositionRef.current === "end" || reachedPreviousEnd)
+      ) {
+        viewport.scrollLeft = maximum;
       }
       updateScrollPosition(viewport);
       if (viewport.clientWidth <= 0 || viewport.clientHeight <= 0) return;

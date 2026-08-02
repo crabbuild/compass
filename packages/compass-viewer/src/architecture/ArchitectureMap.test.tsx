@@ -69,7 +69,7 @@ describe("ArchitectureMap", () => {
       name: "Scrollable architecture flow diagram"
     });
     let scrollWidth = 1_000;
-    let scrollLeft = 500;
+    let scrollLeft = 0;
     Object.defineProperties(viewport, {
       clientHeight: { configurable: true, value: 620 },
       clientWidth: { configurable: true, value: 500 },
@@ -84,8 +84,9 @@ describe("ArchitectureMap", () => {
     });
 
     fireEvent.scroll(viewport);
-    expect(viewport).toHaveAttribute("data-scroll-position", "end");
+    expect(viewport).toHaveAttribute("data-scroll-position", "start");
 
+    scrollLeft = 500;
     scrollWidth = 1_400;
     fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
 
