@@ -107,6 +107,7 @@ pub enum BindingKind {
     ImportAlias,
     Reexport,
     LocalAlias,
+    CallResult,
     Package,
     Member,
 }
@@ -117,6 +118,7 @@ impl BindingKind {
         match self {
             Self::Import | Self::Package => LanguageCapability::Imports,
             Self::ImportAlias | Self::LocalAlias => LanguageCapability::Aliases,
+            Self::CallResult => LanguageCapability::TypeReferences,
             Self::Reexport => LanguageCapability::Reexports,
             Self::Member => LanguageCapability::Members,
         }
@@ -135,6 +137,8 @@ pub enum CandidateRelation {
     Extends,
     Implements,
     References,
+    TypeOf,
+    Returns,
     AccessesMember,
     Contains,
     Owns,
@@ -152,9 +156,11 @@ impl CandidateRelation {
             Self::Calls | Self::IndirectCalls => LanguageCapability::Calls,
             Self::Constructs => LanguageCapability::Construction,
             Self::Decorates => LanguageCapability::Decorators,
-            Self::Annotates | Self::References | Self::Implements => {
-                LanguageCapability::TypeReferences
-            }
+            Self::Annotates
+            | Self::References
+            | Self::TypeOf
+            | Self::Returns
+            | Self::Implements => LanguageCapability::TypeReferences,
             Self::Extends => LanguageCapability::BaseTypes,
             Self::AccessesMember => LanguageCapability::Members,
             Self::Contains | Self::Owns => LanguageCapability::Ownership,
@@ -192,6 +198,12 @@ pub struct DeclarationFact {
     /// Number of source-level parameters when this declaration is callable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parameter_count: Option<u32>,
+    /// Canonical source-level parameter types, in declaration order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameter_types: Vec<String>,
+    /// Whether all direct base types for this declaration were parsed and emitted.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub direct_bases_complete: bool,
     /// Whether the final source-level parameter accepts a variable arity.
     #[serde(default)]
     pub variadic: bool,
@@ -218,6 +230,10 @@ pub struct ScopeFact {
     pub range: EvidenceRange,
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// One explicit name binding.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -231,6 +247,9 @@ pub struct BindingFact {
     pub target_declaration_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope_id: Option<String>,
+    /// Zero-based result selected by a source-level destructuring assignment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_index: Option<u32>,
     pub range: EvidenceRange,
 }
 
@@ -270,6 +289,9 @@ pub struct ResolutionConstraint {
     /// Number of source-level arguments at a callable occurrence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub argument_count: Option<u32>,
+    /// Canonical argument types when statically proven at the call site.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub argument_types: Vec<Option<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_target_kinds: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

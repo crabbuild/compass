@@ -1,9 +1,9 @@
 # Universal semantic evidence
 
 Compass resolves source relationships through a language-neutral evidence
-contract. Python and Go use this contract in production. Other languages keep
-their existing extractors until a dedicated change removes the old algorithm
-and adds the universal adapter atomically.
+contract. Python, Go, Rust, and Java use this contract in production. Other
+languages keep their existing extractors until a dedicated change removes the
+old algorithm and adds the universal adapter atomically.
 
 This is a hard-cutover interface. It has no raw-fact translation layer, shadow
 mode, terminal-name fallback, or runtime dependency on Graphify.
@@ -16,18 +16,33 @@ the adapter actually emits. The batch contains six bounded collections:
 
 - `DeclarationFact` identifies a source-backed declaration and its existing
   graph node, kind, name, qualified name, optional module/package, lexical
-  scope, and exact range.
+  scope, signature, optional bounded canonical parameter-type vector, optional
+  complete-direct-base marker for Java types, and exact range.
 - `ScopeFact` identifies a lexical scope, optional owning declaration, parent
   scope, and exact range.
-- `BindingFact` records an import, import alias, re-export, local alias, or
-  package binding. Its target is qualified; a proven local declaration may
-  also be named directly.
+- `BindingFact` records an import, import alias, re-export, local alias,
+  call-result, or package binding. Its target is qualified; a proven local
+  declaration may also be named directly. A call-result binding names the
+  exact callable that initialized a receiver and may record the zero-based
+  output selected by a destructuring assignment. Resolution requires a unique
+  callable and either one published return type or an in-range exact output
+  position; unpositioned multi-result calls remain unresolved.
 - `OccurrenceFact` records one exact use site and its role, owner, spelling,
   optional qualifier, lexical scope, and range. Repeated uses are separate
   occurrences.
 - `RelationshipCandidate` connects a source declaration and occurrence to a
   typed relationship plus target constraints. It is evidence awaiting
-  resolution, not permission to choose a convenient node.
+  resolution, not permission to choose a convenient node. When the parser has
+  already identified the target declaration, `exact_target_declaration_id`
+  preserves that identity; downstream resolution must not replace it with a
+  same-named overload. A callable candidate may carry a bounded positional
+  vector of optional canonical argument types. The shared resolver selects an
+  overload first through a uniquely identical parameter vector. If every
+  argument type is known, Java may then use proven primitive widening,
+  boxing/unboxing, array, complete source-hierarchy, and stable core-Java
+  conversions, but only when one applicable vector is more specific than all
+  other applicable vectors. Unknown hierarchy or a competing conversion
+  remains unresolved.
 - `EvidenceDiagnostic` records a bounded extraction problem without creating
   a graph fact.
 
@@ -53,6 +68,15 @@ and deduplicate typed facts before validation.
 - declarations, scopes, bindings, occurrences, candidates, diagnostics, and
   diagnostic messages remain within `EvidenceLimits`.
 
+Callable type vectors are limited to 256 positions and 1,024 bytes per known
+type identity. Their length must equal the source-level parameter or argument
+count. Unknown argument positions are explicit rather than guessed.
+
+`directBasesComplete` is valid only on Java class, interface, enum, record, or
+annotation-type declarations. It is false when parser recovery overlaps the
+declaration. The resolver may traverse source inheritance only while every
+visited declaration proves that its complete direct-base set was emitted.
+
 Validation traverses each collection by stable fact ID, so equivalent input
 orders return the same first error.
 
@@ -60,8 +84,8 @@ orders return the same first error.
 
 `AdapterRegistry::universal_profile(language)` is the authority for universal
 cutover. A returned `AdapterProfile` means universal evidence is mandatory.
-Python and Go are currently registered. An unregistered language does not
-silently claim universal behavior.
+Python, Go, Rust, and Java are currently registered. An unregistered language
+does not silently claim universal behavior.
 
 An adapter profile must:
 
@@ -269,12 +293,13 @@ changes for this extension.
 
 Offline SCIP batches are Program evidence, not `SemanticEvidenceBatch`
 records. For Java calls, Compass can join their symbol identities to this
-contract without weakening its invariants: the compiler reference must match
-an adapter-emitted call occurrence by normalized source path and exact
-half-open byte range, and the compiler definition must match an adapter-emitted
-declaration the same way. Only fresh, unanimous, locally defined targets are
-projected. Non-call references, stale or unverified documents, ambiguous
-definition anchors, and provider conflicts do not create or retarget an edge.
+contract without weakening its invariants: the compiler
+reference must match an adapter-emitted call occurrence by normalized source
+path and exact half-open byte range, and the compiler definition must match an
+adapter-emitted declaration the same way. Only fresh, unanimous, locally
+defined targets are projected. Non-call references, stale or unverified
+documents, ambiguous definition anchors, and provider conflicts do not create
+or retarget an edge.
 
 The resulting graph provenance has artifact origin and the
 `compiler-exact-anchor` rule while retaining the adapter's exact occurrence as

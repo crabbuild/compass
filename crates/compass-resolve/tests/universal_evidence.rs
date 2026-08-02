@@ -3,7 +3,69 @@ use std::error::Error;
 use std::path::Path;
 
 use compass_languages::{CandidateRelation, Engine, EvidenceLimits, validate_evidence};
-use compass_resolve::resolve;
+use compass_resolve::{resolve, resolve_with_root};
+
+#[test]
+fn markdown_documents_edges_resolve_to_universal_file_inventory() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let markdown_path = directory.path().join("guide.md");
+    let rust_path = directory.path().join("documented.rs");
+    std::fs::write(&markdown_path, "# Guide\n[Implementation](documented.rs)\n")?;
+    std::fs::write(&rust_path, "pub fn documented() {}\n")?;
+
+    let mut engine = Engine::default();
+    let markdown = engine.extract(&markdown_path)?;
+    let rust = engine.extract(&rust_path)?;
+    let merged = resolve_with_root(&[markdown, rust], &HashMap::new(), directory.path());
+
+    let edge = merged
+        .edges
+        .iter()
+        .find(|edge| edge.string("relation") == "documents")
+        .ok_or("missing documents edge")?;
+    let target = merged
+        .nodes
+        .iter()
+        .find(|node| node.id == edge.target)
+        .ok_or("missing documents target")?;
+    assert_eq!(target.string("symbol_kind"), "file");
+    assert_eq!(target.string("source_file"), "documented.rs");
+
+    let graph = compass_graph::build(&[merged], true, true, Some(directory.path()))?;
+    assert!(graph.links.iter().any(|edge| {
+        edge.attributes
+            .get("relation")
+            .and_then(serde_json::Value::as_str)
+            == Some("documents")
+    }));
+    let inventory = [(&markdown_path, "markdown"), (&rust_path, "rust")]
+        .into_iter()
+        .map(|(path, language)| compass_graph::InventoryEvidence {
+            path: path.clone(),
+            language: Some(language.to_owned()),
+            producer: format!("compass.languages.{language}"),
+            status: compass_model::code_graph::ExtractionStatus::Extracted,
+            reason: None,
+        })
+        .collect();
+    let published = compass_graph::normalize_document_v1_with_inventory_best_effort(
+        &graph,
+        directory.path(),
+        "test",
+        None,
+        inventory,
+    )?;
+    assert!(
+        published
+            .document
+            .links
+            .iter()
+            .any(|edge| edge.kind.as_str() == "documents"),
+        "published={:#?}",
+        published.document
+    );
+    Ok(())
+}
 
 #[test]
 fn collection_resolution_consumes_each_rust_evidence_batch_once() -> Result<(), Box<dyn Error>> {
@@ -53,6 +115,66 @@ fn collection_resolution_consumes_each_rust_evidence_batch_once() -> Result<(), 
 }
 
 #[test]
+fn rust_call_resolution_distinguishes_same_named_fields_and_methods() -> Result<(), Box<dyn Error>>
+{
+    let source = br#"
+struct Entry { path: String }
+impl Entry { fn path(&self) -> &str { &self.path } }
+fn read(entry: &Entry) { entry.path(); }
+"#;
+    let source_file = "src/lib.rs";
+    let extracted = Engine::default().extract_source(Path::new(source_file), source)?;
+    let call = extracted
+        .semantic_evidence
+        .as_ref()
+        .and_then(|evidence| {
+            evidence.candidates.iter().find(|candidate| {
+                candidate.relation == CandidateRelation::Calls
+                    && candidate.target_spelling == "path"
+            })
+        })
+        .ok_or("missing path call evidence")?;
+    assert_eq!(
+        call.constraints.allowed_target_kinds,
+        ["enum_member", "function", "method", "struct"]
+    );
+    let merged = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    let read = merged
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::read")
+        .ok_or("missing read")?;
+    let named = merged
+        .nodes
+        .iter()
+        .filter(|node| node.string("qualified_name") == "crate::Entry::path")
+        .collect::<Vec<_>>();
+    assert_eq!(named.len(), 2, "nodes={named:#?}");
+    assert_ne!(named[0].id, named[1].id, "nodes={named:#?}");
+    let call_edges = merged
+        .edges
+        .iter()
+        .filter(|edge| edge.source == read.id && edge.string("relation") == "calls")
+        .collect::<Vec<_>>();
+    let targets = call_edges
+        .iter()
+        .filter_map(|edge| merged.nodes.iter().find(|node| node.id == edge.target))
+        .collect::<Vec<_>>();
+    assert_eq!(targets.len(), 1, "edges={:#?}", merged.edges);
+    assert_eq!(
+        targets[0].string("symbol_kind"),
+        "method",
+        "target={:#?} edges={call_edges:#?}",
+        targets[0],
+    );
+    assert_eq!(targets[0].string("qualified_name"), "crate::Entry::path");
+    Ok(())
+}
+
+#[test]
 fn rust_import_aliases_resolve_cross_file_types_functions_and_methods() -> Result<(), Box<dyn Error>>
 {
     let mut engine = Engine::default();
@@ -86,7 +208,10 @@ fn run() { build_widget(); Widget::new(); }
         .iter()
         .find(|node| node.string("qualified_name") == "crate::run")
         .ok_or("missing run")?;
-    for target_name in ["crate::api::make", "crate::api::Widget::new"] {
+    for (target_name, resolution_rule) in [
+        ("crate::api::make", "explicit-binding"),
+        ("crate::api::Widget::new", "member-binding"),
+    ] {
         let target = merged
             .nodes
             .iter()
@@ -96,7 +221,7 @@ fn run() { build_widget(); Widget::new(); }
             edge.source == run.id
                 && edge.target == target.id
                 && edge.string("relation") == "calls"
-                && edge.string("resolution_rule") == "explicit-binding"
+                && edge.string("resolution_rule") == resolution_rule
         }));
     }
     let widget = merged
@@ -237,7 +362,7 @@ class Service {
         .ok_or("missing Java universal evidence")?;
     validate_evidence(evidence, EvidenceLimits::default())?;
     assert_eq!(evidence.adapter.id, "compass.java");
-    assert_eq!(evidence.adapter.version, 1);
+    assert_eq!(evidence.adapter.version, 3);
 
     let declaration_id = |qualified_name: &str| {
         evidence
@@ -259,7 +384,7 @@ class Service {
         candidate.relation == CandidateRelation::Contains
             && candidate.source_declaration_id == service_id
             && candidate.target_spelling == "<init>"
-            && candidate.constraints.exact_target_declaration_id.is_none()
+            && candidate.constraints.exact_target_declaration_id.is_some()
             && candidate.constraints.argument_count == Some(1)
     }));
     assert!(evidence.candidates.iter().any(|candidate| {
@@ -322,6 +447,180 @@ class Service {
             "missing {relation} edge {source_id} -> {target_id}"
         );
     }
+    Ok(())
+}
+
+#[test]
+fn java_same_arity_overloads_keep_exact_ownership() -> Result<(), Box<dyn Error>> {
+    let source = br#"package demo;
+class Parser {
+    String parse(String value) { return value; }
+    String parse(Object value) { return value.toString(); }
+}
+"#;
+    let source_file = "src/main/java/demo/Parser.java";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let evidence = extracted
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Java universal evidence")?;
+    let overloads = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.qualified_name == "demo.Parser::parse")
+        .collect::<Vec<_>>();
+    assert_eq!(overloads.len(), 2);
+    assert!(overloads.iter().all(|overload| {
+        evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::Contains
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(overload.id.as_str())
+        })
+    }));
+
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let parser = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "demo.Parser")
+        .ok_or("missing Parser declaration")?;
+    let published_overloads = resolved
+        .nodes
+        .iter()
+        .filter(|node| node.string("qualified_name") == "demo.Parser::parse")
+        .collect::<Vec<_>>();
+    assert_eq!(published_overloads.len(), 2);
+    assert!(published_overloads.iter().all(|overload| {
+        resolved.edges.iter().any(|edge| {
+            edge.source == parser.id
+                && edge.target == overload.id
+                && edge.string("relation") == "contains"
+        })
+    }));
+    Ok(())
+}
+
+#[test]
+fn java_exact_argument_types_select_one_overload_and_unknown_arguments_fail_closed()
+-> Result<(), Box<dyn Error>> {
+    let source = br#"package demo;
+class Selector {
+    String choose(String value) { return value; }
+    String choose(Object value) { return value.toString(); }
+    Object factory() { return new Object(); }
+    void run() {
+        choose("exact");
+        choose(factory());
+    }
+}
+"#;
+    let source_file = "src/main/java/demo/Selector.java";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let evidence = extracted
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Java universal evidence")?;
+    let choose_candidates = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "choose"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(choose_candidates.len(), 2);
+    assert!(choose_candidates.iter().any(|candidate| {
+        candidate.constraints.argument_types == [Some("java.lang.String".to_owned())]
+    }));
+    assert!(
+        choose_candidates
+            .iter()
+            .any(|candidate| candidate.constraints.argument_types == [None])
+    );
+
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "demo.Selector::run")
+        .ok_or("missing run declaration")?;
+    let selected = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.source == run.id && edge.string("relation") == "calls")
+        .filter_map(|edge| resolved.nodes.iter().find(|node| node.id == edge.target))
+        .filter(|target| target.string("qualified_name") == "demo.Selector::choose")
+        .collect::<Vec<_>>();
+    assert_eq!(selected.len(), 1, "selected={selected:#?}");
+    assert_eq!(selected[0].string("signature"), "choose(String)");
+    Ok(())
+}
+
+#[test]
+fn java_proven_conversions_select_the_unique_most_specific_overload() -> Result<(), Box<dyn Error>>
+{
+    let source = br#"package demo;
+import vendor.External;
+class Base {}
+class Child extends Base {}
+class Other {}
+class Selector {
+    String select(Object value) { return "object"; }
+    String select(Base value) { return "base"; }
+    Object factory() { return new Object(); }
+    void run(Other other, Child child, External external) {
+        select(other);
+        select(child);
+        select(1);
+        select(new int[1]);
+        select(factory());
+        select(external);
+    }
+}
+"#;
+    let source_file = "src/main/java/demo/Selector.java";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "demo.Selector::run")
+        .ok_or("missing run declaration")?;
+    let selected = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.source == run.id && edge.string("relation") == "calls")
+        .filter_map(|edge| resolved.nodes.iter().find(|node| node.id == edge.target))
+        .filter(|target| target.string("qualified_name") == "demo.Selector::select")
+        .map(|target| target.string("signature"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        selected,
+        [
+            "select(Object)",
+            "select(Base)",
+            "select(Object)",
+            "select(Object)"
+        ],
+        "selected={selected:#?}"
+    );
     Ok(())
 }
 

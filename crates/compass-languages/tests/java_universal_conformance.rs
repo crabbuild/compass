@@ -20,6 +20,9 @@ import org.example.model.*;
 public class Service extends BaseService implements Runnable<String, Result>, AutoCloseable {
     private final Repository repository;
     private List<String> names;
+    private final Runnable worker = new Runnable() {
+        @Override public void run() {}
+    };
 
     public Service(Repository repository) { this.repository = repository; }
     public Service(Repository repository, List<String> names) { this.repository = repository; }
@@ -33,6 +36,10 @@ public class Service extends BaseService implements Runnable<String, Result>, Au
     }
 
     public Result find(String key, int limit) { return repository.load(key); }
+    public void write(Number number, Appendable appendable) {
+        number.toString();
+        appendable.append("value");
+    }
     public void run() {}
     public void close() {}
 
@@ -40,7 +47,13 @@ public class Service extends BaseService implements Runnable<String, Result>, Au
 }
 
 @interface Audited {}
-enum Status { READY, DONE }
+interface Specialized extends AutoCloseable {}
+enum Status {
+    READY {
+        @Override public String toString() { return "ready"; }
+    },
+    DONE
+}
 "#;
     let extraction = Engine::default()
         .extract_source_combined(
@@ -55,7 +68,7 @@ enum Status { READY, DONE }
 
     let evidence = extraction.graph.semantic_evidence.expect("Java evidence");
     validate_evidence(&evidence, EvidenceLimits::default()).expect("valid Java evidence");
-    assert_eq!(evidence.adapter.version, 1);
+    assert_eq!(evidence.adapter.version, 3);
     assert_eq!(
         evidence.adapter.profile,
         UniversalAdapterProfile::UniversalCandidate
@@ -66,10 +79,21 @@ enum Status { READY, DONE }
             .capabilities
             .contains(&LanguageCapability::Namespaces)
     );
+    assert!(evidence.declarations.iter().any(|fact| {
+        fact.kind == "class"
+            && fact.qualified_name == "org.example.app.Service"
+            && fact.direct_bases_complete
+    }));
+    let encoded = serde_json::to_value(&evidence).expect("serialize Java evidence");
     assert!(
-        evidence.declarations.iter().any(|fact| {
-            fact.kind == "class" && fact.qualified_name == "org.example.app.Service"
-        })
+        encoded["declarations"]
+            .as_array()
+            .is_some_and(|declarations| {
+                declarations.iter().any(|declaration| {
+                    declaration["qualifiedName"] == "org.example.app.Service"
+                        && declaration["directBasesComplete"] == true
+                })
+            })
     );
     assert!(evidence.declarations.iter().any(|fact| {
         fact.kind == "record" && fact.qualified_name == "org.example.app.Service::Nested"
@@ -77,12 +101,33 @@ enum Status { READY, DONE }
     assert!(evidence.declarations.iter().any(|fact| {
         fact.kind == "annotation_type" && fact.qualified_name == "org.example.app.Audited"
     }));
+    assert!(evidence.declarations.iter().any(|fact| {
+        fact.kind == "method" && fact.qualified_name == "org.example.app.Service::worker::run"
+    }));
     assert!(
         evidence
             .declarations
             .iter()
             .any(|fact| fact.kind == "enum_member")
     );
+    let ready = evidence
+        .declarations
+        .iter()
+        .find(|fact| fact.qualified_name == "org.example.app.Status::READY")
+        .expect("READY enum member");
+    let ready_to_string = evidence
+        .declarations
+        .iter()
+        .find(|fact| fact.qualified_name == "org.example.app.Status::READY::toString")
+        .expect("constant-specific toString method");
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Contains
+            && candidate.source_declaration_id == ready.id
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(ready_to_string.id.as_str())
+            && candidate.constraints.qualified_name.as_deref()
+                == Some(ready_to_string.qualified_name.as_str())
+    }));
 
     let overloads = evidence
         .declarations
@@ -99,6 +144,23 @@ enum Status { READY, DONE }
         std::collections::BTreeSet::from([Some(1), Some(2)])
     );
     assert!(overloads.iter().all(|fact| fact.signature.is_some()));
+    assert_eq!(
+        overloads
+            .iter()
+            .map(|fact| fact.parameter_types.clone())
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from([
+            vec!["java.lang.String".to_owned()],
+            vec!["java.lang.String".to_owned(), "int".to_owned()],
+        ])
+    );
+    assert!(overloads.iter().all(|fact| {
+        evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::Contains
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(fact.id.as_str())
+        })
+    }));
 
     assert!(evidence.bindings.iter().any(|binding| {
         binding.spelling == "Repository"
@@ -115,6 +177,14 @@ enum Status { READY, DONE }
     assert!(evidence.candidates.iter().any(|candidate| {
         candidate.relation == CandidateRelation::Extends
             && candidate.target_spelling == "BaseService"
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Extends
+            && candidate.target_spelling == "AutoCloseable"
+            && evidence.declarations.iter().any(|declaration| {
+                declaration.id == candidate.source_declaration_id
+                    && declaration.qualified_name == "org.example.app.Specialized"
+            })
     }));
     assert_eq!(
         evidence
@@ -134,7 +204,14 @@ enum Status { READY, DONE }
             && candidate.constraints.qualified_name.as_deref()
                 == Some("org.example.data.Repository::load")
             && candidate.constraints.argument_count == Some(1)
+            && candidate.constraints.argument_types == [Some("java.lang.String".to_owned())]
     }));
+    for qualified_name in ["java.lang.Number::toString", "java.lang.Appendable::append"] {
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.constraints.qualified_name.as_deref() == Some(qualified_name)
+        }));
+    }
     assert!(evidence.candidates.iter().any(|candidate| {
         candidate.relation == CandidateRelation::Constructs
             && candidate.target_spelling == "Result"
@@ -165,4 +242,11 @@ fn java_evidence_is_deterministic_and_source_bounded_under_parser_recovery() {
     assert!(first.occurrences.iter().all(|occurrence| {
         usize::try_from(occurrence.range.end_byte).expect("bounded offset") <= source.len()
     }));
+    assert!(
+        first
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.kind == "class")
+            .all(|declaration| !declaration.direct_bases_complete)
+    );
 }

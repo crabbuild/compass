@@ -31,11 +31,16 @@ def compare_documents(
         graphify = root / "graphify.json"
         compass.write_text(compass_document, encoding="utf-8")
         graphify.write_text(graphify_document, encoding="utf-8")
+        if source_documents is not None:
+            for relative_path, source in source_documents.items():
+                source_path = root / relative_path
+                source_path.parent.mkdir(parents=True, exist_ok=True)
+                source_path.write_text(source, encoding="utf-8")
         database = sqlite3.connect(":memory:")
         try:
             index_graph("compass", compass, database)
             index_graph("graphify", graphify, database)
-            return compare_graphs(database)
+            return compare_graphs(database, root if source_documents is not None else None)
         finally:
             database.close()
 
@@ -164,6 +169,28 @@ class CorrectnessTests(unittest.TestCase):
             index_graph("graphify", graphify, database)
         result = compare_graphs(database)
         self.assertTrue(result.passed, result.failures)
+
+    def test_graphify_case_of_matches_canonical_compass_containment(self) -> None:
+        nodes = (
+            '{"id":"enum","label":"Policy","kind":"enum",'
+            '"source_file":"Policy.java","source_location":"L1"},'
+            '{"id":"member","label":"ALLOW","kind":"enum_member",'
+            '"source_file":"Policy.java","source_location":"L2"}'
+        )
+        result = compare_documents(
+            '{"graph":{"diagnostics":[]},"nodes":['
+            + nodes
+            + '],"links":[{"source":"enum","target":"member",'
+            '"relation":"contains","source_file":"Policy.java",'
+            '"source_location":"L2"}]}',
+            '{"nodes":['
+            + nodes
+            + '],"links":[{"source":"enum","target":"member",'
+            '"relation":"case_of","source_file":"Policy.java",'
+            '"source_location":"L2"}]}',
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["exact_graphify_edges"], 1)
 
     def test_multiline_python_imports_match_only_with_same_statement_evidence(self) -> None:
         nodes = """
@@ -506,7 +533,255 @@ class CorrectnessTests(unittest.TestCase):
             result.metrics["graphify_edges_coverage_reasons"],
         )
 
-    def test_three_hop_containment_and_different_call_sites_fail_closed(self) -> None:
+    def test_exact_containment_owner_rejects_cross_type_graphify_ownership(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"file","label":"flakey.go","kind":"file",
+               "source_file":"pkg/flakey.go","source_location":"L1","language":"go"},
+              {"id":"interface","label":"Flakey","kind":"interface",
+               "qualified_name":"pkg.Flakey",
+               "source_file":"pkg/flakey.go","source_location":"L2","language":"go"},
+              {"id":"implementation","label":"flakey","kind":"struct",
+               "qualified_name":"pkg.flakey",
+               "source_file":"pkg/flakey.go","source_location":"L8","language":"go"},
+              {"id":"interface_method","label":".Close()","kind":"method",
+               "qualified_name":"pkg.Flakey::Close",
+               "source_file":"pkg/flakey.go","source_location":"L3","language":"go"},
+              {"id":"implementation_method","label":".Close()","kind":"method",
+               "qualified_name":"pkg.flakey::Close",
+               "source_file":"pkg/flakey.go","source_location":"L9","language":"go"}
+            ],"links":[
+              {"source":"file","target":"interface","relation":"contains"},
+              {"source":"file","target":"implementation","relation":"contains"},
+              {"source":"file","target":"implementation_method","relation":"contains"},
+              {"source":"interface","target":"interface_method","relation":"contains"},
+              {"source":"implementation","target":"implementation_method","relation":"contains"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_interface","label":"Flakey","kind":"interface",
+               "qualified_name":"pkg.Flakey",
+               "source_file":"pkg/flakey.go","source_location":"L2","language":"go"},
+              {"id":"legacy_method","label":".Close()","kind":"method",
+               "qualified_name":"pkg.flakey::Close",
+               "source_file":"pkg/flakey.go","source_location":"L9","language":"go"}
+            ],"links":[
+              {"source":"legacy_interface","target":"legacy_method","relation":"contains"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "rejected:exact_containment_owner_conflict",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_go_type_conversion_rejects_graphify_call_classification(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"convert","label":"convert()","kind":"function",
+               "source_file":"pkg/convert.go","source_location":"L3","language":"go"},
+              {"id":"pgid","label":"Pgid","kind":"type_alias",
+               "qualified_name":"common.Pgid",
+               "source_file":"common/types.go","source_location":"L2","language":"go"}
+            ],"links":[
+              {"source":"convert","target":"pgid","relation":"references",
+               "source_file":"pkg/convert.go","source_location":"L4"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_convert","label":"convert()","kind":"function",
+               "source_file":"pkg/convert.go","source_location":"L3","language":"go"},
+              {"id":"legacy_pgid","label":"Pgid","kind":"type_alias",
+               "qualified_name":"common.Pgid",
+               "source_file":"common/types.go","source_location":"L2","language":"go"}
+            ],"links":[
+              {"source":"legacy_convert","target":"legacy_pgid","relation":"calls",
+               "source_file":"pkg/convert.go","source_location":"L4"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "rejected:go_type_conversion_not_call",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_argument_reference_rejects_wrong_indirect_call_target(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"fp/add/index.ts","kind":"file",
+               "source_file":"fp/add/index.ts","source_location":"L1","language":"typescript"},
+              {"id":"correct","label":"add","kind":"function",
+               "source_file":"add/index.ts","source_location":"L73","language":"typescript"},
+              {"id":"wrong","label":"fn","kind":"function",
+               "source_file":"convert/test.ts","source_location":"L11","language":"typescript"}
+            ],"links":[
+              {"source":"owner","target":"correct","relation":"references",
+               "context":"argument","source_file":"fp/add/index.ts","source_location":"L6"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"owner","label":"fp/add/index.ts",
+               "source_file":"fp/add/index.ts","source_location":"L1"},
+              {"id":"wrong","label":"fn()",
+               "source_file":"convert/test.ts","source_location":"L11"}
+            ],"links":[
+              {"source":"owner","target":"wrong","relation":"indirect_call",
+               "context":"argument","source_file":"fp/add/index.ts","source_location":"L6"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:argument_reference_target_conflict",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_collection_reference_is_not_an_indirect_call(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"locale/index.ts","kind":"file",
+               "source_file":"locale/index.ts","source_location":"L1","language":"typescript"},
+              {"id":"format","label":"formatDistance","kind":"function",
+               "source_file":"locale/format.ts","source_location":"L12","language":"typescript"}
+            ],"links":[
+              {"source":"owner","target":"format","relation":"references",
+               "context":"collection","source_file":"locale/index.ts","source_location":"L17"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"owner","label":"locale/index.ts",
+               "source_file":"locale/index.ts","source_location":"L1"},
+              {"id":"format","label":"formatDistance()",
+               "source_file":"locale/format.ts","source_location":"L12"}
+            ],"links":[
+              {"source":"owner","target":"format","relation":"indirect_call",
+               "context":"collection","source_file":"locale/index.ts","source_location":"L17"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:value_reference_not_indirect_call",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_anchored_cross_language_type_reference_is_rejected(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"rust_owner","label":"build()","kind":"function",
+               "source_file":"src/build.rs","source_location":"L2","language":"rust"},
+              {"id":"python_result","label":"Result","kind":"class",
+               "source_file":"tools/bench","source_location":"L10","language":"python"}
+            ],"links":[]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_owner","label":"build()",
+               "source_file":"src/build.rs","source_location":"L2"},
+              {"id":"legacy_result","label":"Result",
+               "source_file":"tools/bench","source_location":"L10"}
+            ],"links":[
+              {"source":"legacy_owner","target":"legacy_result","relation":"references",
+               "context":"return_type","source_file":"src/build.rs","source_location":"L2"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "rejected:cross_language_target",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_rust_generic_impl_owner_is_dominated_by_exact_type_ownership(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"StandardImpl","kind":"struct",
+               "source_file":"src/printer.rs","source_location":"L1","language":"rust"},
+              {"id":"method","label":".write()","kind":"method",
+               "source_file":"src/printer.rs","source_location":"L4","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"method","relation":"contains",
+               "source_file":"src/printer.rs","source_location":"L4"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_impl","label":"StandardImpl<'a, M, W>",
+               "source_file":"src/printer.rs","source_location":"L3"},
+              {"id":"legacy_method","label":".write()",
+               "source_file":"src/printer.rs","source_location":"L4"}
+            ],"links":[
+              {"source":"legacy_impl","target":"legacy_method","relation":"method",
+               "source_file":"src/printer.rs","source_location":"L4"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "dominated:canonical_rust_generic_owner",
+            result.metrics["graphify_nodes_coverage_reasons"],
+        )
+
+    def test_exact_field_type_dominates_flat_owner_reference(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"Config","kind":"struct",
+               "source_file":"src/config.rs","source_location":"L1","language":"rust"},
+              {"id":"field","label":"matcher","kind":"field",
+               "source_file":"src/config.rs","source_location":"L2","language":"rust"},
+              {"id":"target","label":"Matcher","kind":"struct",
+               "source_file":"src/matcher.rs","source_location":"L1","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"field","relation":"contains",
+               "source_file":"src/config.rs","source_location":"L2"},
+              {"source":"field","target":"target","relation":"type_of",
+               "source_file":"src/config.rs","source_location":"L2"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_owner","label":"Config",
+               "source_file":"src/config.rs","source_location":"L1"},
+              {"id":"legacy_target","label":"Matcher",
+               "source_file":"src/matcher.rs","source_location":"L1"}
+            ],"links":[
+              {"source":"legacy_owner","target":"legacy_target","relation":"references",
+               "context":"field","source_file":"src/config.rs","source_location":"L2"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "dominated:precise_field_type",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_unique_three_hop_containment_dominates_flat_graphify_ownership(self) -> None:
         containment = compare_documents(
             """
             {"graph":{"diagnostics":[]},"nodes":[
@@ -535,9 +810,51 @@ class CorrectnessTests(unittest.TestCase):
             ]}
             """,
         )
-        self.assertFalse(containment.passed)
-        self.assertEqual(containment.metrics["missing_graphify_edges"], 1)
+        self.assertTrue(containment.passed, containment.failures)
+        self.assertEqual(containment.metrics["dominated_graphify_edges"], 1)
+        self.assertIn(
+            "dominated:containment_path",
+            containment.metrics["graphify_edges_coverage_reasons"],
+        )
 
+    def test_multiple_bounded_containment_paths_fail_closed(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"file","label":"a.go","kind":"file",
+               "source_file":"pkg/a.go","source_location":"L1"},
+              {"id":"left","label":"Left","kind":"class",
+               "source_file":"pkg/a.go","source_location":"L2"},
+              {"id":"right","label":"Right","kind":"class",
+               "source_file":"pkg/a.go","source_location":"L3"},
+              {"id":"method","label":"run()","kind":"method",
+               "source_file":"pkg/a.go","source_location":"L4"}
+            ],"links":[
+              {"source":"file","target":"left","relation":"contains"},
+              {"source":"file","target":"right","relation":"contains"},
+              {"source":"left","target":"method","relation":"contains"},
+              {"source":"right","target":"method","relation":"contains"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_file","label":"pkg/a.go",
+               "source_file":"pkg/a.go","source_location":"L1"},
+              {"id":"legacy_method","label":"run()",
+               "source_file":"pkg/a.go","source_location":"L4"}
+            ],"links":[
+              {"source":"legacy_file","target":"legacy_method","relation":"contains"}
+            ]}
+            """,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.metrics["ambiguous_graphify_edges"], 1)
+        self.assertIn(
+            "ambiguous:multiple_containment_paths",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_different_call_sites_still_fail_closed(self) -> None:
         occurrence = compare_documents(
             """
             {"graph":{"diagnostics":[]},"nodes":[

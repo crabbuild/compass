@@ -35,7 +35,7 @@ pub enum AdapterRegistryError {
     UnsortedLanguages(&'static str),
     #[error("universal adapter {0:?} capabilities must be sorted and unique")]
     InvalidCapabilityOrder(&'static str),
-    #[error("universal adapter {0:?} must remain at adapter version 1")]
+    #[error("universal adapter {0:?} must declare a positive adapter version")]
     InvalidVersion(&'static str),
     #[error("universal adapter {0:?} declares an unsupported evidence schema")]
     InvalidEvidenceSchema(&'static str),
@@ -72,7 +72,7 @@ impl AdapterRegistry {
             if !ids.insert(profile.id) {
                 return Err(AdapterRegistryError::DuplicateId(profile.id));
             }
-            if profile.version != 1 {
+            if profile.version == 0 {
                 return Err(AdapterRegistryError::InvalidVersion(profile.language));
             }
             if profile.evidence_schema != crate::UNIVERSAL_EVIDENCE_SCHEMA {
@@ -177,7 +177,7 @@ const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
     AdapterProfile {
         id: "compass.go",
         language: "go",
-        version: 1,
+        version: 3,
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         profile: UniversalAdapterProfile::UniversalCandidate,
         capabilities: GO_CAPABILITIES,
@@ -185,7 +185,7 @@ const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
     AdapterProfile {
         id: "compass.java",
         language: "java",
-        version: 1,
+        version: 3,
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         profile: UniversalAdapterProfile::UniversalCandidate,
         capabilities: JAVA_CAPABILITIES,
@@ -201,7 +201,7 @@ const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
     AdapterProfile {
         id: "compass.rust",
         language: "rust",
-        version: 1,
+        version: 2,
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         profile: UniversalAdapterProfile::UniversalCandidate,
         capabilities: RUST_CAPABILITIES,

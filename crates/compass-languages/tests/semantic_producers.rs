@@ -406,7 +406,7 @@ fn build(mut graph: Graph) {
         "compass.languages.evidence/1"
     );
     assert_eq!(evidence.adapter.id, "compass.rust");
-    assert_eq!(evidence.adapter.version, 1);
+    assert_eq!(evidence.adapter.version, 2);
 
     let calls = evidence
         .occurrences
@@ -664,6 +664,68 @@ fn config_and_document_artifacts_publish_valid_dependency_schema_and_documentati
             .any(|node| node.string("symbol_kind") == "variable"),
         "nodes={:?}",
         mcp.nodes
+    );
+    Ok(())
+}
+
+#[test]
+fn vscode_mcp_servers_publish_exact_command_package_and_environment_facts()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let vscode = directory.path().join(".vscode");
+    fs::create_dir(&vscode)?;
+    let mcp_path = vscode.join("mcp.json");
+    fs::write(
+        &mcp_path,
+        br#"{
+  "servers": {
+    "date-fns": {
+      "type": "stdio",
+      "command": "pnpm",
+      "args": ["date-fns-mcp"],
+      "env": {"DATE_FNS_TOKEN": "do-not-publish"}
+    }
+  }
+}"#,
+    )?;
+
+    let extraction = Engine::default().extract(&mcp_path)?;
+    assert!(extraction.error.is_none(), "error={:?}", extraction.error);
+    let labels = extraction
+        .nodes
+        .iter()
+        .map(|node| (node.label().to_owned(), node.string("symbol_kind")))
+        .collect::<HashSet<_>>();
+    for expected in [
+        ("date-fns".to_owned(), "component".to_owned()),
+        ("pnpm".to_owned(), "function".to_owned()),
+        ("date-fns-mcp".to_owned(), "package".to_owned()),
+        ("DATE_FNS_TOKEN".to_owned(), "config_key".to_owned()),
+    ] {
+        assert!(labels.contains(&expected), "nodes={:?}", extraction.nodes);
+    }
+    let environment = extraction
+        .nodes
+        .iter()
+        .find(|node| node.label() == "DATE_FNS_TOKEN")
+        .ok_or("missing VS Code MCP environment key")?;
+    assert_eq!(
+        environment.string("key_path"),
+        "servers.date-fns.env.DATE_FNS_TOKEN"
+    );
+    assert!(!format!("{extraction:?}").contains("do-not-publish"));
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| edge.string("relation") == "references")
+            .count(),
+        2
+    );
+    assert!(
+        extraction.edges.iter().any(|edge| {
+            edge.target == environment.id && edge.string("relation") == "depends_on"
+        })
     );
     Ok(())
 }

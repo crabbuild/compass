@@ -1548,12 +1548,23 @@ fn qualified_external_python_calls_are_canonical_internally_and_source_scoped_on
     assert_eq!(
         published_placeholders.len(),
         4,
-        "published source-scoped placeholders: {published_placeholders:#?}"
+        "published wiring-scoped placeholders: {published_placeholders:#?}"
     );
+    for qualified_name in ["unittest.mock.patch", "vendor.mock.patch"] {
+        assert_eq!(
+            published_placeholders
+                .iter()
+                .filter(|node| node.qualified_name == qualified_name)
+                .count(),
+            2,
+            "each external call site must retain a separate unresolved identity"
+        );
+    }
     assert!(published_placeholders.iter().all(|node| {
         node.evidence.iter().any(|evidence| {
             evidence.origin == EvidenceOrigin::Heuristic
                 && evidence.confidence == EvidenceConfidence::Inferred
+                && evidence.rule.as_deref() == Some("external-symbol-placeholder")
                 && evidence.anchors.is_empty()
                 && evidence.wiring_site.is_some()
         })

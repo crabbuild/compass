@@ -41,6 +41,7 @@ const TRUSTED_NODE_RECORD: &str = TRUSTED_NODE_RECORD_ATTRIBUTE;
 const TRUSTED_EDGE_RECORD: &str = TRUSTED_EDGE_RECORD_ATTRIBUTE;
 const TRUSTED_GRAPH_COVERAGE: &str = "_compass_v1_graph_coverage";
 const TRUSTED_GRAPH_DIAGNOSTICS: &str = "_compass_v1_graph_diagnostics";
+const CANONICAL_EXTERNAL_SYMBOL: &str = "_canonical_external_symbol";
 const CANONICAL_RAW_ORDER: &str = "_compass_v1_canonical_raw_order";
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
 const MAX_EXTERNAL_REFERENCE_DIAGNOSTICS: usize = 100;
@@ -125,39 +126,46 @@ impl BuildEvidence {
         let mut source_tree = Sha256::new();
         let mut files = Vec::with_capacity(paths.len());
         let mut omitted_external_references = 0_usize;
-        let inspected = paths
-            .into_iter()
-            .collect::<Vec<_>>()
-            .into_par_iter()
-            .map(|path| {
-                let absolute = repository_root.join(&path);
-                if !absolute.is_file() {
-                    return Ok((path, None));
-                }
-                let language = Registry::resolve(&absolute).map(|spec| spec.name.to_owned());
-                let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
-                    path: absolute,
-                    source,
-                })?;
-                let content_digest = sha256_prefixed(&bytes);
-                let record = FileRecord {
-                    id: file_id(&path),
-                    path: path.clone(),
-                    language,
-                    content_digest,
-                    byte_size: bytes.len() as u64,
-                    generated: false,
-                    extraction_status: ExtractionStatus::Extracted,
-                    extractor_versions: vec![format!(
-                        "compass-languages/{}",
-                        env!("CARGO_PKG_VERSION")
-                    )],
-                    coverage: Vec::new(),
-                    diagnostics: Vec::new(),
-                };
-                Ok((path, Some(record)))
-            })
-            .collect::<Vec<Result<_, GraphError>>>();
+        let paths = paths.into_iter().collect::<Vec<_>>();
+        let inspect = |path: String| {
+            let absolute = repository_root.join(&path);
+            if !absolute.is_file() {
+                return Ok((path, None));
+            }
+            let language = Registry::resolve(&absolute).map(|spec| spec.name.to_owned());
+            let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
+                path: absolute,
+                source,
+            })?;
+            let content_digest = sha256_prefixed(&bytes);
+            let record = FileRecord {
+                id: file_id(&path),
+                path: path.clone(),
+                language,
+                content_digest,
+                byte_size: bytes.len() as u64,
+                generated: false,
+                extraction_status: ExtractionStatus::Extracted,
+                extractor_versions: vec![format!(
+                    "compass-languages/{}",
+                    env!("CARGO_PKG_VERSION")
+                )],
+                coverage: Vec::new(),
+                diagnostics: Vec::new(),
+            };
+            Ok((path, Some(record)))
+        };
+        let inspected = if paths.len() < 512 {
+            paths
+                .into_iter()
+                .map(inspect)
+                .collect::<Vec<Result<_, GraphError>>>()
+        } else {
+            paths
+                .into_par_iter()
+                .map(inspect)
+                .collect::<Vec<Result<_, GraphError>>>()
+        };
         for inspected in inspected {
             let (path, record) = inspected?;
             let Some(record) = record else {
@@ -612,7 +620,6 @@ fn normalize_v1_with_mode(
 
     if mode == PublicationMode::BestEffort && !canonical_raw_order {
         extraction.nodes.sort_by_cached_key(raw_node_sort_key);
-        extraction.edges.sort_by_cached_key(raw_edge_sort_key);
     }
     let mut id_remap = HashMap::with_capacity(extraction.nodes.len());
     let mut nodes = HashMap::<String, NodeRecord>::with_capacity(extraction.nodes.len());
@@ -636,8 +643,7 @@ fn normalize_v1_with_mode(
         }
         let trusted = raw.attributes.get(TRUSTED_NODE_RECORD).cloned();
         let normalized = match trusted {
-            Some(value) => serde_json::from_value::<NodeRecord>(value)
-                .map_err(|error| raw_error(&raw_id, &error.to_string())),
+            Some(value) => normalize_trusted_node(value, &raw_id),
             None => normalize_node(
                 &mut raw,
                 &evidence.repository_root,
@@ -699,22 +705,20 @@ fn normalize_v1_with_mode(
     }
     profile_v1("v1 node normalization", &mut profile_started);
 
-    let prepared_edges = extraction
-        .edges
-        .into_par_iter()
-        .enumerate()
-        .map(|(index, raw)| {
-            prepare_edge(
-                raw,
-                index,
-                &id_remap,
-                &evidence.repository_root,
-                &file_facts,
-            )
-        })
-        .collect::<Vec<_>>();
-    let mut links = HashMap::<String, EdgeRecord>::with_capacity(prepared_edges.len());
-    for prepared in prepared_edges {
+    if mode == PublicationMode::BestEffort && !canonical_raw_order {
+        extraction
+            .edges
+            .sort_by_cached_key(|raw| raw_edge_sort_key(raw, &id_remap, &evidence.repository_root));
+    }
+    let mut links = HashMap::<String, EdgeRecord>::with_capacity(extraction.edges.len());
+    for (index, raw) in extraction.edges.into_iter().enumerate() {
+        let prepared = prepare_edge(
+            raw,
+            index,
+            &id_remap,
+            &evidence.repository_root,
+            &file_facts,
+        );
         let PreparedEdge {
             index,
             raw,
@@ -1063,6 +1067,21 @@ fn normalize_v1_with_mode(
     })
 }
 
+fn normalize_trusted_node(value: Value, raw_id: &str) -> Result<NodeRecord, GraphError> {
+    let mut node = serde_json::from_value::<NodeRecord>(value)
+        .map_err(|error| raw_error(raw_id, &error.to_string()))?;
+    if node.source.is_none() {
+        for evidence in &mut node.evidence {
+            if evidence.rule.as_deref() == Some("external-symbol-placeholder") {
+                evidence.origin = EvidenceOrigin::Heuristic;
+                evidence.confidence = EvidenceConfidence::Inferred;
+            }
+        }
+        sort_dedup_serialized(&mut node.evidence);
+    }
+    Ok(node)
+}
+
 fn sanitize_document(
     document: &mut GraphDocument,
     quarantine: &mut QuarantineCollector,
@@ -1255,14 +1274,47 @@ fn raw_node_sort_key(raw: &RawNodeRecord) -> String {
     )
 }
 
-fn raw_edge_sort_key(raw: &RawEdgeRecord) -> String {
+fn raw_edge_sort_key(
+    raw: &RawEdgeRecord,
+    id_remap: &HashMap<String, String>,
+    repository_root: &Path,
+) -> String {
+    let mut attributes = Value::Object(raw.attributes.clone());
+    normalize_raw_sort_paths(&mut attributes, repository_root);
     format!(
         "{}\u{1f}{}\u{1f}{}\u{1f}{}",
-        raw.source,
+        id_remap.get(&raw.source).unwrap_or(&raw.source),
         optional_string(&raw.attributes, "relation").unwrap_or_default(),
-        raw.target,
-        serialized(&raw.attributes)
+        id_remap.get(&raw.target).unwrap_or(&raw.target),
+        serialized(&attributes)
     )
+}
+
+fn normalize_raw_sort_paths(value: &mut Value, repository_root: &Path) {
+    let Value::Object(object) = value else {
+        if let Value::Array(values) = value {
+            for value in values {
+                normalize_raw_sort_paths(value, repository_root);
+            }
+        }
+        return;
+    };
+    let values = std::mem::take(object);
+    let mut sorted = BTreeMap::new();
+    for (key, mut value) in values {
+        if matches!(
+            key.as_str(),
+            "file" | "sourceFile" | "source_file" | "originFile" | "origin_file"
+        ) && let Some(path) = value.as_str()
+            && let Ok(portable) = portable_path(path, repository_root)
+        {
+            value = Value::String(portable);
+        } else {
+            normalize_raw_sort_paths(&mut value, repository_root);
+        }
+        sorted.insert(key, value);
+    }
+    object.extend(sorted);
 }
 
 fn raw_edge_identity(raw: &RawEdgeRecord, index: usize) -> String {
@@ -1841,6 +1893,16 @@ fn mark_external_placeholder(
     stable_scope: Option<&str>,
     inferred_kind: Option<&str>,
 ) {
+    attributes.remove(CANONICAL_EXTERNAL_SYMBOL);
+    attributes.insert("_origin".to_owned(), Value::String("heuristic".to_owned()));
+    attributes.insert(
+        "confidence".to_owned(),
+        Value::String("inferred".to_owned()),
+    );
+    attributes.insert(
+        "rule".to_owned(),
+        Value::String("external-symbol-placeholder".to_owned()),
+    );
     attributes.insert(
         "extractor".to_owned(),
         Value::String("compass.graph.external-placeholder".to_owned()),
@@ -2168,7 +2230,9 @@ pub fn normalize_document_v1_with_inventory_best_effort(
 ///
 /// Callers that already hold a deterministic publication-only document can
 /// transfer its buffers across the v1 boundary and avoid retaining a second
-/// full raw graph or re-sorting its canonical raw order.
+/// full raw graph. Best-effort publication still sorts the transferred facts
+/// before assigning diagnostic positions because upstream parallel assembly
+/// does not guarantee a canonical raw order.
 pub fn normalize_document_v1_with_inventory_best_effort_owned(
     document: compass_model::GraphDocument,
     repository_root: &Path,
@@ -2310,10 +2374,15 @@ fn raw_node_from_v1(node: &NodeRecord) -> RawNodeRecord {
     if let Some(details) = &node.details {
         insert_raw_node_details(&mut attributes, details);
     }
-    attributes.insert(
-        TRUSTED_NODE_RECORD.to_owned(),
-        serde_json::to_value(node).unwrap_or(Value::Null),
-    );
+    if !node.evidence.iter().any(|evidence| {
+        evidence.rule.as_deref() == Some("external-symbol-placeholder")
+            && evidence.wiring_site.is_some()
+    }) {
+        attributes.insert(
+            TRUSTED_NODE_RECORD.to_owned(),
+            serde_json::to_value(node).unwrap_or(Value::Null),
+        );
+    }
     RawNodeRecord {
         id: node.id.clone(),
         attributes,
@@ -3164,7 +3233,7 @@ fn normalize_provenance(
 ) -> Result<Provenance, GraphError> {
     let raw_origin = optional_any_string(attributes, &["_origin", "origin"]);
     let confidence = match optional_string(attributes, "confidence").as_deref() {
-        None if heuristic_default => EvidenceConfidence::Inferred,
+        _ if heuristic_default => EvidenceConfidence::Inferred,
         None | Some("EXTRACTED" | "exact") => EvidenceConfidence::Exact,
         Some("INFERRED" | "inferred") => EvidenceConfidence::Inferred,
         Some("AMBIGUOUS" | "ambiguous") => EvidenceConfidence::Ambiguous,
@@ -3197,8 +3266,7 @@ fn normalize_provenance(
         ));
     }
     let origin = match raw_origin.as_deref() {
-        None if heuristic_default => EvidenceOrigin::Heuristic,
-        Some("ast") if heuristic_default => EvidenceOrigin::Heuristic,
+        _ if heuristic_default => EvidenceOrigin::Heuristic,
         None if optional_string(attributes, "context").as_deref() == Some("scip") => {
             EvidenceOrigin::Artifact
         }
@@ -4086,31 +4154,29 @@ impl PublishedFileFacts {
 fn published_file_facts(
     evidence: &BuildEvidence,
 ) -> Result<HashMap<String, PublishedFileFacts>, GraphError> {
-    evidence
-        .files
-        .par_iter()
-        .map(|file| {
-            let absolute = evidence.repository_root.join(&file.path);
-            let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
-                path: absolute,
-                source,
-            })?;
-            if bytes.len() as u64 != file.byte_size
-                || sha256_prefixed(&bytes) != file.content_digest
-            {
-                return Err(raw_error(
-                    &file.path,
-                    "file inventory digest or byte size does not match the source tree",
-                ));
-            }
-            Ok((
-                file.path.clone(),
-                PublishedFileFacts::from_bytes(&bytes, file.generated),
-            ))
-        })
-        .collect::<Vec<_>>()
-        .into_iter()
-        .collect()
+    let inspect = |file: &FileRecord| {
+        let absolute = evidence.repository_root.join(&file.path);
+        let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
+            path: absolute,
+            source,
+        })?;
+        if bytes.len() as u64 != file.byte_size || sha256_prefixed(&bytes) != file.content_digest {
+            return Err(raw_error(
+                &file.path,
+                "file inventory digest or byte size does not match the source tree",
+            ));
+        }
+        Ok((
+            file.path.clone(),
+            PublishedFileFacts::from_bytes(&bytes, file.generated),
+        ))
+    };
+    let inspected = if evidence.files.len() < 512 {
+        evidence.files.iter().map(inspect).collect::<Vec<_>>()
+    } else {
+        evidence.files.par_iter().map(inspect).collect::<Vec<_>>()
+    };
+    inspected.into_iter().collect()
 }
 
 fn sha256_prefixed(bytes: &[u8]) -> String {

@@ -306,7 +306,7 @@
       "path": "/api/users",
       "routeSource": "fixtures/code-graph/routes/go/gin.go",
       "handler": {
-        "qualifiedName": "fixtures/code-graph/routes/go.listUsers"
+        "qualifiedName": "fixtures/code-graph/routes/routes.listUsers"
       },
       "handlerSource": "fixtures/code-graph/routes/go/gin.go",
       "relationship": "routes_to",
@@ -333,7 +333,7 @@
       "path": "/users/{id}",
       "routeSource": "fixtures/code-graph/routes/go/chi.go",
       "handler": {
-        "qualifiedName": "fixtures/code-graph/routes/go.showUser"
+        "qualifiedName": "fixtures/code-graph/routes/routes.showUser"
       },
       "handlerSource": "fixtures/code-graph/routes/go/chi.go",
       "relationship": "routes_to",
@@ -360,7 +360,7 @@
       "path": "/users/{id}",
       "routeSource": "fixtures/code-graph/routes/go/gorilla.go",
       "handler": {
-        "qualifiedName": "fixtures/code-graph/routes/go.updateUser"
+        "qualifiedName": "fixtures/code-graph/routes/routes.updateUser"
       },
       "handlerSource": "fixtures/code-graph/routes/go/gorilla.go",
       "relationship": "routes_to",

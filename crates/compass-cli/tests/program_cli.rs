@@ -45,6 +45,53 @@ fn native_update_emits_and_reports_program_analysis() -> Result<(), Box<dyn Erro
 }
 
 #[test]
+fn native_update_can_publish_only_the_structural_graph() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    fs::write(directory.path().join("lib.rs"), "pub fn run() {}\n")?;
+    let root = directory.path().to_string_lossy();
+    let outcome = run(
+        Frontend::Compass,
+        arguments([
+            "update",
+            root.as_ref(),
+            "--no-program",
+            "--no-cluster",
+            "--no-viz",
+        ]),
+    );
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+    assert!(outcome.stdout.contains(
+        "Program analysis: 0 syntax analyzed, 0 syntax reused, 0 artifacts loaded, 0 artifacts reused, 0 artifact documents analyzed, 0 artifact documents reused, 0 modules, 0 summaries, 0 conflicts"
+    ));
+    let output = directory.path().join("compass-out");
+    assert!(BuildGuard::resolve_artifact(&output, "graph.json")?.is_file());
+    assert!(
+        !BuildGuard::resolve_artifact(&output, "program.json").is_ok_and(|path| path.is_file())
+    );
+    Ok(())
+}
+
+#[test]
+fn no_program_rejects_program_artifacts() {
+    let outcome = run(
+        Frontend::Compass,
+        arguments([
+            "update",
+            ".",
+            "--no-program",
+            "--program-artifact",
+            "index.scip",
+        ]),
+    );
+    assert_ne!(outcome.code, 0);
+    assert!(
+        outcome
+            .stderr
+            .contains("--no-program conflicts with --program-artifact")
+    );
+}
+
+#[test]
 fn native_program_artifact_requires_a_nonempty_path() {
     for arguments in [
         vec!["update", "--program-artifact"],

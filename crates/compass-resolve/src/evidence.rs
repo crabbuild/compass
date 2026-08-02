@@ -111,6 +111,8 @@ pub struct UniversalResolutionIndex {
     aliases: AHashMap<(String, String), Vec<String>>,
     wildcard_reexports_by_module: AHashMap<(String, String), Vec<String>>,
     members: AHashMap<(String, String, String), Vec<String>>,
+    returns_by_callable: AHashMap<(String, String), Vec<String>>,
+    go_module_path: Option<String>,
     limits: UniversalResolutionLimits,
 }
 
@@ -128,29 +130,39 @@ impl UniversalResolutionIndex {
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
+        Self::new_with_inventory_owned(batches.to_vec(), inventory_nodes, root, limits)
+    }
+
+    pub(crate) fn new_with_inventory_owned(
+        batches: Vec<SemanticEvidenceBatch>,
+        inventory_nodes: &[NodeRecord],
+        root: &Path,
+        limits: UniversalResolutionLimits,
+    ) -> Result<Self, String> {
         let mut profile_started = Instant::now();
+        let go_module_path = read_go_module_path(root);
         let mut declarations = BTreeMap::new();
         let mut occurrences = BTreeMap::new();
         let mut bindings = BTreeMap::new();
         let mut candidates = BTreeMap::new();
         let mut scopes = BTreeMap::new();
         for batch in batches {
-            validate_evidence(batch, EvidenceLimits::default())
+            validate_evidence(&batch, EvidenceLimits::default())
                 .map_err(|error| format!("invalid universal evidence: {error}"))?;
-            for fact in &batch.declarations {
-                insert_unique(&mut declarations, fact.id.clone(), fact.clone())?;
+            for fact in batch.declarations {
+                insert_unique(&mut declarations, fact.id.clone(), fact)?;
             }
-            for fact in &batch.occurrences {
-                insert_unique(&mut occurrences, fact.id.clone(), fact.clone())?;
+            for fact in batch.occurrences {
+                insert_unique(&mut occurrences, fact.id.clone(), fact)?;
             }
-            for fact in &batch.bindings {
-                insert_unique(&mut bindings, fact.id.clone(), fact.clone())?;
+            for fact in batch.bindings {
+                insert_unique(&mut bindings, fact.id.clone(), fact)?;
             }
-            for fact in &batch.candidates {
-                insert_unique(&mut candidates, fact.id.clone(), fact.clone())?;
+            for fact in batch.candidates {
+                insert_unique(&mut candidates, fact.id.clone(), fact)?;
             }
-            for fact in &batch.scopes {
-                insert_unique(&mut scopes, fact.id.clone(), fact.clone())?;
+            for fact in batch.scopes {
+                insert_unique(&mut scopes, fact.id.clone(), fact)?;
             }
         }
         profile_internal(
@@ -282,13 +294,20 @@ impl UniversalResolutionIndex {
         profile_internal("universal alias index", &mut profile_started);
         let mut direct_bases = AHashMap::<(String, String), DirectBaseSet>::new();
         for candidate in candidates.values() {
-            let Some(HierarchyConstraint::DirectBase { base_set_complete }) =
-                candidate.constraints.hierarchy.as_ref()
-            else {
-                continue;
-            };
             let Some(owner) = declarations.get(&candidate.source_declaration_id) else {
                 continue;
+            };
+            let base_set_complete = match candidate.constraints.hierarchy.as_ref() {
+                Some(HierarchyConstraint::DirectBase { base_set_complete }) => *base_set_complete,
+                None if candidate.language == "java"
+                    && matches!(
+                        candidate.relation,
+                        CandidateRelation::Extends | CandidateRelation::Implements
+                    ) =>
+                {
+                    owner.direct_bases_complete
+                }
+                _ => continue,
             };
             let range = candidate
                 .occurrence_id
@@ -301,7 +320,7 @@ impl UniversalResolutionIndex {
                     links: Vec::new(),
                     complete: true,
                 });
-            entry.complete &= *base_set_complete;
+            entry.complete &= base_set_complete;
             if entry.links.len() <= limits.candidates_per_lookup {
                 entry.links.push(DirectBaseLink {
                     qualified_name: candidate.constraints.qualified_name.clone(),
@@ -407,6 +426,38 @@ impl UniversalResolutionIndex {
             targets.sort_unstable();
             targets.dedup();
         }
+        let mut return_entries = AHashMap::<_, Vec<_>>::new();
+        for candidate in candidates
+            .values()
+            .filter(|candidate| candidate.relation == CandidateRelation::Returns)
+        {
+            let Some(callable) = declarations.get(&candidate.source_declaration_id) else {
+                continue;
+            };
+            let Some(return_type) = candidate.constraints.qualified_name.as_ref() else {
+                continue;
+            };
+            let start_byte = candidate
+                .occurrence_id
+                .as_deref()
+                .and_then(|id| occurrences.get(id))
+                .map_or(u64::MAX, |occurrence| occurrence.range.start_byte);
+            return_entries
+                .entry((candidate.language.clone(), callable.qualified_name.clone()))
+                .or_default()
+                .push((start_byte, candidate.id.clone(), return_type.clone()));
+        }
+        let returns_by_callable = return_entries
+            .into_iter()
+            .map(|(key, mut entries)| {
+                entries.sort_unstable();
+                entries.truncate(limits.candidates_per_lookup);
+                (
+                    key,
+                    entries.into_iter().map(|(_, _, target)| target).collect(),
+                )
+            })
+            .collect();
         profile_internal("universal member index", &mut profile_started);
         Ok(Self {
             declarations,
@@ -424,6 +475,8 @@ impl UniversalResolutionIndex {
             aliases,
             wildcard_reexports_by_module,
             members,
+            returns_by_callable,
+            go_module_path,
             limits,
         })
     }
@@ -584,6 +637,9 @@ impl UniversalResolutionIndex {
                 return decision;
             }
             if let Some(decision) = self.member_decision(language, &qualified, candidate) {
+                return decision;
+            }
+            if let Some(decision) = self.imported_member_decision(language, &qualified, candidate) {
                 return decision;
             }
             if let Some(decision) = self.inventory_decision(language, &qualified, candidate) {
@@ -795,6 +851,11 @@ impl UniversalResolutionIndex {
                 ) {
                     return Some(decision);
                 }
+                if let Some(decision) =
+                    self.imported_member_decision(language, &qualified, candidate)
+                {
+                    return Some(decision);
+                }
                 return Some(ResolutionDecision::QualifiedExternal {
                     qualified_name: qualified,
                     evidence: ResolutionEvidence {
@@ -802,6 +863,9 @@ impl UniversalResolutionIndex {
                         candidate_count: 0,
                     },
                 });
+            }
+            Ok(None) if binding.kind == compass_languages::BindingKind::CallResult => {
+                return Some(ResolutionDecision::Unresolved);
             }
             Ok(None) => {}
             Err(candidate_count) => {
@@ -1011,10 +1075,15 @@ impl UniversalResolutionIndex {
                 .and_then(|id| self.declarations.get(id));
             let relation = if self.occurrence(candidate).is_some_and(|occurrence| {
                 occurrence.role == compass_languages::SemanticRole::Receiver
-            }) || (candidate.relation == CandidateRelation::Contains
-                && exact_target.is_some_and(|target| target.kind == "method"))
-            {
+            }) {
                 "method"
+            } else if candidate.language == "go"
+                && candidate.relation == CandidateRelation::Calls
+                && target_kind
+                    .as_deref()
+                    .is_some_and(|kind| matches!(kind, "struct" | "interface" | "type_alias"))
+            {
+                "references"
             } else {
                 relation_name(candidate.relation)
             };
@@ -1463,21 +1532,85 @@ impl UniversalResolutionIndex {
             .split('/')
             .filter(|component| !component.is_empty() && *component != ".")
             .collect::<Vec<_>>();
-        let mut imported = BTreeSet::new();
         for start in 0..components.len().min(64) {
             let directory = components[start..].join("/");
             let key = (language.to_owned(), directory, spelling.to_owned());
             if let Some(candidates) = self.by_source_directory_name.get(&key) {
-                imported.extend(candidates.iter().cloned());
-                if imported.len() > self.limits.candidates_per_lookup {
-                    break;
+                let imported = candidates
+                    .iter()
+                    .filter_map(|id| {
+                        self.declarations
+                            .get(id)
+                            .filter(|declaration| !declaration.qualified_name.contains("::"))
+                            .map(|_| id.clone())
+                    })
+                    .take(self.limits.candidates_per_lookup.saturating_add(1))
+                    .collect::<BTreeSet<_>>();
+                if !imported.is_empty() {
+                    return imported.into_iter().collect();
                 }
             }
         }
-        imported
+        if self.go_module_path.as_deref() != Some(import_path) {
+            return Vec::new();
+        }
+        let Some(package) = components.last() else {
+            return Vec::new();
+        };
+        self.by_module_name
+            .get(&(
+                language.to_owned(),
+                (*package).to_owned(),
+                spelling.to_owned(),
+            ))
             .into_iter()
+            .flatten()
+            .filter_map(|id| {
+                self.declarations
+                    .get(id)
+                    .filter(|declaration| !declaration.qualified_name.contains("::"))
+                    .map(|_| id.clone())
+            })
             .take(self.limits.candidates_per_lookup.saturating_add(1))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
             .collect()
+    }
+
+    fn imported_member_decision(
+        &self,
+        language: &str,
+        qualified: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        if language != "go" {
+            return None;
+        }
+        let (owner, member) = qualified.rsplit_once("::")?;
+        let (import_path, owner_spelling) = owner.rsplit_once('.')?;
+        let owner_ids = self.imported_declarations(language, import_path, owner_spelling);
+        let mut declarations = BTreeSet::new();
+        for owner_id in owner_ids
+            .into_iter()
+            .take(self.limits.candidates_per_lookup)
+        {
+            let owner = &self.declarations.get(&owner_id)?.qualified_name;
+            if let Some(ids) = self
+                .by_qualified
+                .get(&(language.to_owned(), format!("{owner}::{member}")))
+            {
+                declarations.extend(
+                    ids.iter()
+                        .filter(|id| self.declaration_allowed(id, candidate))
+                        .cloned(),
+                );
+            }
+        }
+        self.unique_decision(
+            Some(&declarations.into_iter().collect::<Vec<_>>()),
+            candidate,
+            ResolutionRule::MemberBinding,
+        )
     }
 
     fn bound_member_target(
@@ -1486,6 +1619,43 @@ impl UniversalResolutionIndex {
         binding: &BindingFact,
         candidate: &RelationshipCandidate,
     ) -> Result<Option<String>, usize> {
+        if binding.kind == compass_languages::BindingKind::CallResult {
+            let callable_ids = self.callable_declarations(language, &binding.qualified_target);
+            let [callable_id] = callable_ids.as_slice() else {
+                return if callable_ids.is_empty() {
+                    Ok(None)
+                } else {
+                    Err(callable_ids.len())
+                };
+            };
+            let Some(callable) = self.declarations.get(callable_id) else {
+                return Ok(None);
+            };
+            let Some(return_types) = self
+                .returns_by_callable
+                .get(&(language.to_owned(), callable.qualified_name.clone()))
+            else {
+                return Ok(None);
+            };
+            let return_type = if let Some(output_index) = binding.output_index {
+                let Ok(output_index) = usize::try_from(output_index) else {
+                    return Ok(None);
+                };
+                let Some(return_type) = return_types.get(output_index) else {
+                    return Ok(None);
+                };
+                return_type
+            } else {
+                let [return_type] = return_types.as_slice() else {
+                    return Err(return_types.len());
+                };
+                return_type
+            };
+            return Ok(Some(format!(
+                "{return_type}::{}",
+                candidate.target_spelling
+            )));
+        }
         if binding.kind != compass_languages::BindingKind::LocalAlias {
             return Ok(None);
         }
@@ -1515,6 +1685,44 @@ impl UniversalResolutionIndex {
             target.clone_from(next);
         }
         Ok(Some(format!("{target}::{}", candidate.target_spelling)))
+    }
+
+    fn callable_declarations(&self, language: &str, qualified: &str) -> Vec<String> {
+        if let Some(declarations) = self
+            .by_qualified
+            .get(&(language.to_owned(), qualified.to_owned()))
+        {
+            return declarations.clone();
+        }
+        if language != "go" {
+            return Vec::new();
+        }
+        let mut declarations = BTreeSet::new();
+        if let Some((owner, member)) = qualified.rsplit_once("::")
+            && let Some((import_path, owner_spelling)) = owner.rsplit_once('.')
+        {
+            for owner_id in self
+                .imported_declarations(language, import_path, owner_spelling)
+                .into_iter()
+                .take(self.limits.candidates_per_lookup)
+            {
+                let Some(owner) = self.declarations.get(&owner_id) else {
+                    continue;
+                };
+                if let Some(ids) = self.by_qualified.get(&(
+                    language.to_owned(),
+                    format!("{}::{member}", owner.qualified_name),
+                )) {
+                    declarations.extend(ids.iter().cloned());
+                }
+            }
+        } else if let Some((import_path, spelling)) = qualified.rsplit_once('.') {
+            declarations.extend(self.imported_declarations(language, import_path, spelling));
+        }
+        declarations
+            .into_iter()
+            .take(self.limits.candidates_per_lookup)
+            .collect()
     }
 
     fn member_decision(
@@ -1558,23 +1766,251 @@ impl UniversalResolutionIndex {
     }
 
     fn declaration_allowed(&self, declaration_id: &str, candidate: &RelationshipCandidate) -> bool {
-        self.declarations.get(declaration_id).is_some_and(|target| {
-            target.language == candidate.language
-                && candidate
-                    .constraints
-                    .argument_count
-                    .is_none_or(|arguments| {
-                        target.parameter_count.is_none_or(|parameters| {
-                            arguments == parameters
-                                || (target.variadic && arguments >= parameters.saturating_sub(1))
-                        })
-                    })
-                && (candidate.constraints.allowed_target_kinds.is_empty()
-                    || candidate
-                        .constraints
-                        .allowed_target_kinds
-                        .contains(&target.kind))
-        })
+        let Some(target) = self.declarations.get(declaration_id) else {
+            return false;
+        };
+        if !declaration_basic_allowed(target, candidate) {
+            return false;
+        }
+        let argument_types = &candidate.constraints.argument_types;
+        if target.language != "java"
+            || argument_types.is_empty()
+            || argument_types.iter().any(Option::is_none)
+        {
+            return true;
+        }
+        let Some(overloads) = self
+            .by_qualified
+            .get(&(target.language.clone(), target.qualified_name.clone()))
+        else {
+            return true;
+        };
+        let eligible = overloads
+            .iter()
+            .filter_map(|id| self.declarations.get(id))
+            .filter(|declaration| declaration_basic_allowed(declaration, candidate))
+            .collect::<Vec<_>>();
+        let exact = eligible
+            .iter()
+            .copied()
+            .filter(|declaration| {
+                declaration.parameter_types.len() == argument_types.len()
+                    && declaration
+                        .parameter_types
+                        .iter()
+                        .zip(argument_types)
+                        .all(|(parameter, argument)| argument.as_deref() == Some(parameter))
+            })
+            .take(2)
+            .collect::<Vec<_>>();
+        match exact.as_slice() {
+            [only] => only.id == target.id,
+            [] => self
+                .unique_java_applicable_overload(&eligible, argument_types)
+                .is_none_or(|only| only == target.id),
+            _ => true,
+        }
+    }
+
+    fn unique_java_applicable_overload<'a>(
+        &self,
+        overloads: &[&'a DeclarationFact],
+        argument_types: &[Option<String>],
+    ) -> Option<&'a str> {
+        let mut proven = Vec::new();
+        for declaration in overloads {
+            if declaration.parameter_types.len() != argument_types.len() {
+                return None;
+            }
+            let mut applicability = JavaApplicability::Proven;
+            for (parameter, argument) in declaration.parameter_types.iter().zip(argument_types) {
+                let argument = argument.as_deref()?;
+                match self.java_conversion(argument, parameter) {
+                    JavaConversion::Proven => {}
+                    JavaConversion::Disproven => {
+                        applicability = JavaApplicability::Disproven;
+                        break;
+                    }
+                    JavaConversion::Unknown => applicability = JavaApplicability::Unknown,
+                }
+            }
+            match applicability {
+                JavaApplicability::Proven => proven.push(*declaration),
+                JavaApplicability::Unknown => return None,
+                JavaApplicability::Disproven => {}
+            }
+        }
+        if let [only] = proven.as_slice() {
+            return Some(only.id.as_str());
+        }
+        let mut most_specific = proven.iter().copied().filter(|candidate| {
+            proven.iter().copied().all(|other| {
+                candidate.id == other.id
+                    || self.java_parameter_vector_more_specific(candidate, other)
+            })
+        });
+        let only = most_specific.next()?;
+        most_specific.next().is_none().then_some(only.id.as_str())
+    }
+
+    fn java_parameter_vector_more_specific(
+        &self,
+        candidate: &DeclarationFact,
+        other: &DeclarationFact,
+    ) -> bool {
+        candidate.parameter_types.len() == other.parameter_types.len()
+            && candidate
+                .parameter_types
+                .iter()
+                .zip(&other.parameter_types)
+                .all(|(candidate, other)| {
+                    self.java_conversion(candidate, other) == JavaConversion::Proven
+                })
+            && candidate.parameter_types != other.parameter_types
+    }
+
+    fn java_conversion(&self, argument: &str, parameter: &str) -> JavaConversion {
+        if argument == parameter {
+            return JavaConversion::Proven;
+        }
+        if argument == "null" {
+            return if java_primitive_type(parameter) {
+                JavaConversion::Disproven
+            } else {
+                JavaConversion::Proven
+            };
+        }
+        if java_primitive_type(argument) {
+            if java_primitive_type(parameter) {
+                return if java_primitive_widens_to(argument, parameter) {
+                    JavaConversion::Proven
+                } else {
+                    JavaConversion::Disproven
+                };
+            }
+            let Some(boxed) = java_boxed_type(argument) else {
+                return JavaConversion::Disproven;
+            };
+            return self.java_reference_conversion(boxed, parameter);
+        }
+        if java_primitive_type(parameter) {
+            let Some(unboxed) = java_unboxed_type(argument) else {
+                return JavaConversion::Disproven;
+            };
+            return if java_primitive_widens_to(unboxed, parameter) {
+                JavaConversion::Proven
+            } else {
+                JavaConversion::Disproven
+            };
+        }
+        self.java_reference_conversion(argument, parameter)
+    }
+
+    fn java_reference_conversion(&self, argument: &str, parameter: &str) -> JavaConversion {
+        if argument == parameter || parameter == "java.lang.Object" {
+            return JavaConversion::Proven;
+        }
+        if let Some(argument_component) = argument.strip_suffix("[]") {
+            if let Some(parameter_component) = parameter.strip_suffix("[]") {
+                return if java_primitive_type(argument_component)
+                    || java_primitive_type(parameter_component)
+                {
+                    if argument_component == parameter_component {
+                        JavaConversion::Proven
+                    } else {
+                        JavaConversion::Disproven
+                    }
+                } else {
+                    self.java_reference_conversion(argument_component, parameter_component)
+                };
+            }
+            return if matches!(parameter, "java.lang.Cloneable" | "java.io.Serializable") {
+                JavaConversion::Proven
+            } else {
+                JavaConversion::Disproven
+            };
+        }
+        if parameter.ends_with("[]") {
+            return JavaConversion::Disproven;
+        }
+
+        let mut pending = vec![argument.to_owned()];
+        let mut visited = BTreeSet::new();
+        let mut complete = true;
+        while let Some(current) = pending.pop() {
+            if !visited.insert(current.clone()) {
+                continue;
+            }
+            if visited.len() > self.limits.candidates_per_lookup {
+                return JavaConversion::Unknown;
+            }
+            for base in java_known_direct_bases(&current) {
+                if *base == parameter {
+                    return JavaConversion::Proven;
+                }
+                pending.push((*base).to_owned());
+            }
+            if java_known_direct_bases(&current).is_empty() && current != "java.lang.Object" {
+                let Some(declaration) = self.exact_java_type_declaration(&current) else {
+                    complete = false;
+                    continue;
+                };
+                if !declaration.direct_bases_complete {
+                    complete = false;
+                    continue;
+                }
+                if let Some(bases) = self.direct_bases.get(&("java".to_owned(), current.clone())) {
+                    if !bases.complete {
+                        complete = false;
+                        continue;
+                    }
+                    for link in &bases.links {
+                        let Some(base) = link.qualified_name.as_ref() else {
+                            complete = false;
+                            continue;
+                        };
+                        if base == parameter {
+                            return JavaConversion::Proven;
+                        }
+                        pending.push(base.clone());
+                    }
+                }
+                let implicit = match declaration.kind.as_str() {
+                    "enum" => "java.lang.Enum",
+                    "record" => "java.lang.Record",
+                    "class" | "interface" | "annotation_type" => "java.lang.Object",
+                    _ => {
+                        complete = false;
+                        continue;
+                    }
+                };
+                if implicit == parameter {
+                    return JavaConversion::Proven;
+                }
+                pending.push(implicit.to_owned());
+            }
+        }
+        if complete {
+            JavaConversion::Disproven
+        } else {
+            JavaConversion::Unknown
+        }
+    }
+
+    fn exact_java_type_declaration(&self, qualified_name: &str) -> Option<&DeclarationFact> {
+        let declarations = self
+            .by_qualified
+            .get(&("java".to_owned(), qualified_name.to_owned()))?;
+        let mut eligible = declarations.iter().filter_map(|id| {
+            self.declarations.get(id).filter(|declaration| {
+                matches!(
+                    declaration.kind.as_str(),
+                    "class" | "interface" | "enum" | "record" | "annotation_type"
+                )
+            })
+        });
+        let only = eligible.next()?;
+        eligible.next().is_none().then_some(only)
     }
 
     fn follow_alias(&self, language: &str, qualified: &str) -> Result<String, usize> {
@@ -1597,6 +2033,103 @@ impl UniversalResolutionIndex {
         }
         Err(64)
     }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum JavaApplicability {
+    Proven,
+    Disproven,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum JavaConversion {
+    Proven,
+    Disproven,
+    Unknown,
+}
+
+fn java_primitive_type(kind: &str) -> bool {
+    matches!(
+        kind,
+        "byte" | "short" | "int" | "long" | "float" | "double" | "boolean" | "char"
+    )
+}
+
+fn java_primitive_widens_to(argument: &str, parameter: &str) -> bool {
+    argument == parameter
+        || matches!(
+            (argument, parameter),
+            ("byte", "short" | "int" | "long" | "float" | "double")
+                | ("short" | "char", "int" | "long" | "float" | "double")
+                | ("int", "long" | "float" | "double")
+                | ("long", "float" | "double")
+                | ("float", "double")
+        )
+}
+
+fn java_boxed_type(primitive: &str) -> Option<&'static str> {
+    match primitive {
+        "byte" => Some("java.lang.Byte"),
+        "short" => Some("java.lang.Short"),
+        "int" => Some("java.lang.Integer"),
+        "long" => Some("java.lang.Long"),
+        "float" => Some("java.lang.Float"),
+        "double" => Some("java.lang.Double"),
+        "boolean" => Some("java.lang.Boolean"),
+        "char" => Some("java.lang.Character"),
+        _ => None,
+    }
+}
+
+fn java_unboxed_type(reference: &str) -> Option<&'static str> {
+    match reference {
+        "java.lang.Byte" => Some("byte"),
+        "java.lang.Short" => Some("short"),
+        "java.lang.Integer" => Some("int"),
+        "java.lang.Long" => Some("long"),
+        "java.lang.Float" => Some("float"),
+        "java.lang.Double" => Some("double"),
+        "java.lang.Boolean" => Some("boolean"),
+        "java.lang.Character" => Some("char"),
+        _ => None,
+    }
+}
+
+fn java_known_direct_bases(reference: &str) -> &'static [&'static str] {
+    match reference {
+        "java.lang.Byte" | "java.lang.Short" | "java.lang.Integer" | "java.lang.Long"
+        | "java.lang.Float" | "java.lang.Double" => &["java.lang.Number"],
+        "java.lang.Number" => &["java.lang.Object"],
+        "java.lang.Boolean" | "java.lang.Character" | "java.lang.String" => &["java.lang.Object"],
+        "java.lang.Class" => &["java.lang.Object", "java.lang.reflect.Type"],
+        "java.lang.Enum" | "java.lang.Record" => &["java.lang.Object"],
+        "java.lang.StringBuilder" | "java.lang.StringBuffer" => &[
+            "java.lang.Object",
+            "java.lang.Appendable",
+            "java.lang.CharSequence",
+        ],
+        "java.lang.Object" => &[],
+        _ => &[],
+    }
+}
+
+fn declaration_basic_allowed(target: &DeclarationFact, candidate: &RelationshipCandidate) -> bool {
+    target.language == candidate.language
+        && candidate
+            .constraints
+            .argument_count
+            .is_none_or(|arguments| {
+                target.parameter_count.is_none_or(|parameters| {
+                    arguments == parameters
+                        || (target.variadic && arguments >= parameters.saturating_sub(1))
+                })
+            })
+        && (candidate.constraints.allowed_target_kinds.is_empty()
+            || candidate
+                .constraints
+                .allowed_target_kinds
+                .contains(&target.kind))
 }
 
 fn declaration_overloads<'a>(
@@ -1739,6 +2272,29 @@ fn source_directory(source_file: &str, root: &Path) -> Option<String> {
     (!directory.is_empty()).then_some(directory)
 }
 
+fn read_go_module_path(root: &Path) -> Option<String> {
+    const MAX_GO_MOD_BYTES: u64 = 1024 * 1024;
+    let source = compass_files::read_source_lossy(&root.join("go.mod"), MAX_GO_MOD_BYTES).ok()?;
+    source.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        if fields.next()? != "module" {
+            return None;
+        }
+        let module = fields.next()?;
+        if fields.next().is_some()
+            || module.len() > 4096
+            || module.starts_with('.')
+            || module.contains(['\\', '\0'])
+            || module
+                .split('/')
+                .any(|component| component.is_empty() || component == "." || component == "..")
+        {
+            return None;
+        }
+        Some(module.to_owned())
+    })
+}
+
 fn insert_unique<T>(map: &mut BTreeMap<String, T>, id: String, value: T) -> Result<(), String> {
     if map.insert(id.clone(), value).is_some() {
         return Err(format!("duplicate universal evidence id {id:?}"));
@@ -1860,6 +2416,8 @@ fn relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::IndirectCalls => "indirect_call",
         CandidateRelation::Decorates => "references",
         CandidateRelation::Annotates | CandidateRelation::References => "references",
+        CandidateRelation::TypeOf => "type_of",
+        CandidateRelation::Returns => "returns",
         CandidateRelation::Extends => "inherits",
         CandidateRelation::Implements => "implements",
         CandidateRelation::AccessesMember => "accesses",
@@ -2017,9 +2575,11 @@ fn external_kind(candidate: &RelationshipCandidate) -> &'static str {
     match candidate.relation {
         CandidateRelation::Imports => "import",
         CandidateRelation::Reexports => "export",
-        CandidateRelation::Extends | CandidateRelation::Annotates | CandidateRelation::Embeds => {
-            "type_alias"
-        }
+        CandidateRelation::Extends => "class",
+        CandidateRelation::Annotates
+        | CandidateRelation::Embeds
+        | CandidateRelation::TypeOf
+        | CandidateRelation::Returns => "type_alias",
         CandidateRelation::Implements => "interface",
         CandidateRelation::AccessesMember => "variable",
         CandidateRelation::Calls | CandidateRelation::IndirectCalls => "function",
@@ -2218,6 +2778,7 @@ fn binding_kind_name(kind: compass_languages::BindingKind) -> &'static str {
         compass_languages::BindingKind::ImportAlias => "import_alias",
         compass_languages::BindingKind::Reexport => "reexport",
         compass_languages::BindingKind::LocalAlias => "local_alias",
+        compass_languages::BindingKind::CallResult => "call_result",
         compass_languages::BindingKind::Package => "package",
         compass_languages::BindingKind::Member => "member",
     }
@@ -2264,6 +2825,8 @@ const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::Extends => "extends",
         CandidateRelation::Implements => "implements",
         CandidateRelation::References => "reference",
+        CandidateRelation::TypeOf => "type-of",
+        CandidateRelation::Returns => "return-type",
         CandidateRelation::AccessesMember => "member-access",
         CandidateRelation::Contains => "contains",
         CandidateRelation::Owns => "owns",

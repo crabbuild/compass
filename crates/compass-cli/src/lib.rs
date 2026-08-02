@@ -1569,6 +1569,7 @@ fn command_build_with_validation_inner(
     let mut reuse_cache_on_force = false;
     let mut no_cluster = false;
     let mut no_viz = false;
+    let mut no_program = false;
     let mut gitignore = true;
     let mut code_only = false;
     let mut cargo = false;
@@ -1598,6 +1599,7 @@ fn command_build_with_validation_inner(
             "--reuse-cache-on-force" => reuse_cache_on_force = true,
             "--no-cluster" => no_cluster = true,
             "--no-viz" => no_viz = true,
+            "--no-program" => no_program = true,
             "--no-gitignore" => gitignore = false,
             "--code-only" => code_only = true,
             "--cargo" if extract => cargo = true,
@@ -1791,7 +1793,7 @@ fn command_build_with_validation_inner(
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
-                    "Usage: compass update [path] [--program-artifact PATH] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
+                    "Usage: compass update [path] [--program-artifact PATH] [--no-program] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
                 });
             }
             value if value.starts_with('-') => {
@@ -1809,6 +1811,11 @@ fn command_build_with_validation_inner(
         index += 1;
     }
     let has_explicit_root = root.is_some();
+    if no_program && !program_artifacts.is_empty() {
+        return Outcome::failure(
+            "error: --no-program conflicts with --program-artifact".to_owned(),
+        );
+    }
     if extract && !has_explicit_root && postgres_dsn.is_none() {
         return Outcome::failure(
             "error: must specify a path to scan or a --postgres DSN".to_owned(),
@@ -1849,7 +1856,7 @@ fn command_build_with_validation_inner(
     };
     options.google_workspace =
         google_workspace || compass_google_workspace::google_workspace_enabled(None);
-    options.program_analysis = true;
+    options.program_analysis = !no_program;
     options.program_artifacts = program_artifacts;
     options.precomputed_detection = precomputed_detection;
     apply_max_workers_override(&mut options, max_workers);
@@ -2641,7 +2648,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: compass extract [PATH] [--program-artifact PATH] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: compass extract [PATH] [--program-artifact PATH] [--no-program] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {

@@ -39,6 +39,35 @@ fn build(root: &Path) -> Result<(Vec<u8>, bool), Box<dyn Error>> {
     Ok((bytes, result.outputs_changed))
 }
 
+fn build_with_empty_semantic(root: &Path) -> Result<(Vec<u8>, bool), Box<dyn Error>> {
+    let mut options = BuildOptions::new(root);
+    options.no_cluster = true;
+    options.no_viz = true;
+    options.max_workers = Some(2);
+    options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
+    options.purpose = BuildPurpose::Extract;
+    let result = build_graph_with_semantic(
+        &options,
+        &SemanticLayer {
+            fragment: serde_json::json!({
+                "nodes": [],
+                "edges": [],
+                "hyperedges": [],
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "failed_chunks": 0,
+            }),
+            refreshed_files: Vec::new(),
+            partial_files: Vec::new(),
+            allow_partial: false,
+        },
+    )?;
+    let path = result.output_dir.join("graph.json");
+    let bytes = fs::read(&path)?;
+    GraphDocument::load(&path)?;
+    Ok((bytes, result.outputs_changed))
+}
+
 fn build_clustered(root: &Path) -> Result<(Vec<u8>, bool), Box<dyn Error>> {
     let mut options = BuildOptions::new(root);
     options.no_viz = true;
@@ -126,6 +155,33 @@ fn clean_warm_restored_and_checkout_root_builds_are_byte_identical() -> Result<(
 }
 
 #[test]
+fn empty_semantic_layer_does_not_reuse_output_after_cached_content_reversion()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/lib.rs"), SOURCE)?;
+    fs::write(
+        root.join("model.php"),
+        "<?php\nuse Illuminate\\Database\\Eloquent\\Model;\nclass Account extends Model {}\n",
+    )?;
+
+    let (clean, _) = build_with_empty_semantic(root)?;
+    fs::write(
+        root.join("src/lib.rs"),
+        format!("{SOURCE}\npub fn temporary_edit() {{}}\n"),
+    )?;
+    let (edited, _) = build_with_empty_semantic(root)?;
+    assert_ne!(edited, clean);
+
+    fs::write(root.join("src/lib.rs"), SOURCE)?;
+    let (restored, restored_output) = build_with_empty_semantic(root)?;
+    assert!(restored_output);
+    assert_eq!(restored, clean);
+    Ok(())
+}
+
+#[test]
 fn unrelated_incremental_edit_preserves_cached_framework_routes() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -172,7 +228,6 @@ export const router = createBrowserRouter([
             .count(),
         2
     );
-
     fs::write(
         root.join("src/lib.rs"),
         format!("{SOURCE}\npub fn temporary_edit() {{}}\n"),
@@ -180,7 +235,6 @@ export const router = createBrowserRouter([
     let _ = build(root)?;
     fs::write(root.join("src/lib.rs"), SOURCE)?;
     let (restored, _) = build(root)?;
-
     assert_eq!(restored, clean);
     Ok(())
 }

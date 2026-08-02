@@ -1092,6 +1092,7 @@ dependencies = [
  "ahash",
  "compass-languages",
  "compass-model",
+ "compass-resolve",
  "rayon",
  "serde",
  "serde_json",
@@ -1341,6 +1342,7 @@ name = "compass-resolve"
 version = "0.2.0"
 dependencies = [
  "ahash",
+ "compass-files",
  "compass-graph",
  "compass-ir",
  "compass-languages",

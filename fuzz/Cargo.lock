@@ -27,6 +27,7 @@ checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
 dependencies = [
  "cfg-if",
  "const-random",
+ "getrandom 0.3.4",
  "once_cell",
  "version_check",
  "zerocopy",
@@ -90,6 +91,17 @@ name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
+
+[[package]]
+name = "atomicwrites"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ef1bb8d1b645fe38d51dfc331d720fb5fc2c94b440c76cc79c80ff265ca33e3"
+dependencies = [
+ "rustix 0.38.44",
+ "tempfile",
+ "windows-sys 0.52.0",
+]
 
 [[package]]
 name = "autocfg"
@@ -792,6 +804,499 @@ dependencies = [
 ]
 
 [[package]]
+name = "compass-analysis"
+version = "0.2.0"
+dependencies = [
+ "compass-ir",
+ "compass-model",
+ "rayon",
+ "serde",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "compass-cargo"
+version = "0.2.0"
+dependencies = [
+ "compass-model",
+ "glob",
+ "serde_json",
+ "thiserror 2.0.19",
+ "toml 1.1.3+spec-1.1.0",
+]
+
+[[package]]
+name = "compass-cli"
+version = "0.2.0"
+dependencies = [
+ "compass-analysis",
+ "compass-cargo",
+ "compass-core",
+ "compass-cypher",
+ "compass-files",
+ "compass-global",
+ "compass-google-workspace",
+ "compass-graph",
+ "compass-graphdb",
+ "compass-history",
+ "compass-ingest",
+ "compass-ir",
+ "compass-mcp",
+ "compass-model",
+ "compass-output",
+ "compass-postgres",
+ "compass-program",
+ "compass-prs",
+ "compass-query",
+ "compass-reflect",
+ "compass-semantic",
+ "compass-semantic-diff",
+ "ctrlc",
+ "flate2",
+ "glob",
+ "mimalloc",
+ "regex",
+ "self-replace",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tar",
+ "tempfile",
+ "time",
+ "tokio",
+ "toml 1.1.3+spec-1.1.0",
+ "ureq",
+ "url",
+]
+
+[[package]]
+name = "compass-core"
+version = "0.2.0"
+dependencies = [
+ "ahash",
+ "compass-analysis",
+ "compass-files",
+ "compass-google-workspace",
+ "compass-graph",
+ "compass-history",
+ "compass-ir",
+ "compass-languages",
+ "compass-model",
+ "compass-output",
+ "compass-program",
+ "compass-reflect",
+ "compass-resolve",
+ "notify",
+ "num_cpus",
+ "rayon",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+ "time",
+]
+
+[[package]]
+name = "compass-cypher"
+version = "0.2.0"
+dependencies = [
+ "compass-model",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "compass-files"
+version = "0.2.0"
+dependencies = [
+ "atomicwrites",
+ "glob",
+ "md-5 0.10.6",
+ "rayon",
+ "regex",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+ "toml 1.1.3+spec-1.1.0",
+]
+
+[[package]]
+name = "compass-fuzz"
+version = "0.0.0"
+dependencies = [
+ "compass-cli",
+ "compass-cypher",
+ "compass-files",
+ "compass-graph",
+ "compass-languages",
+ "compass-model",
+ "compass-output",
+ "compass-query",
+ "compass-semantic",
+ "compass-transcribe",
+ "libfuzzer-sys",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "compass-global"
+version = "0.2.0"
+dependencies = [
+ "compass-files",
+ "compass-model",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+ "time",
+]
+
+[[package]]
+name = "compass-google-workspace"
+version = "0.2.0"
+dependencies = [
+ "compass-media",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+ "url",
+ "wait-timeout",
+]
+
+[[package]]
+name = "compass-graph"
+version = "0.2.0"
+dependencies = [
+ "ahash",
+ "compass-languages",
+ "compass-model",
+ "rayon",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.9",
+ "strsim",
+ "thiserror 2.0.19",
+ "unicode-casefold",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "compass-graphdb"
+version = "0.2.0"
+dependencies = [
+ "compass-model",
+ "rustls",
+ "rustls-platform-verifier",
+ "serde_json",
+ "thiserror 2.0.19",
+ "url",
+]
+
+[[package]]
+name = "compass-history"
+version = "0.2.0"
+dependencies = [
+ "atomicwrites",
+ "compass-analysis",
+ "compass-files",
+ "compass-ir",
+ "compass-model",
+ "prolly-map",
+ "prolly-store-sqlite",
+ "rand 0.8.7",
+ "rayon",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "compass-ingest"
+version = "0.2.0"
+dependencies = [
+ "compass-files",
+ "regex",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+ "time",
+ "ureq",
+ "url",
+ "wait-timeout",
+]
+
+[[package]]
+name = "compass-ir"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "compass-languages"
+version = "0.2.0"
+dependencies = [
+ "compass-files",
+ "compass-ir",
+ "compass-program",
+ "compass-tree-sitter-language-pack",
+ "flate2",
+ "regex",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha1",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+ "toml 1.1.3+spec-1.1.0",
+ "tree-sitter",
+ "tree-sitter-dm",
+ "unicode-casefold",
+ "unicode-normalization",
+ "unicode-properties",
+]
+
+[[package]]
+name = "compass-mcp"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "compass-core",
+ "compass-files",
+ "compass-graph",
+ "compass-model",
+ "compass-prs",
+ "compass-query",
+ "rmcp",
+ "serde_json",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tower-http",
+]
+
+[[package]]
+name = "compass-media"
+version = "0.2.0"
+dependencies = [
+ "oxidize-pdf",
+ "roxmltree",
+ "thiserror 2.0.19",
+ "zip",
+]
+
+[[package]]
+name = "compass-model"
+version = "0.2.0"
+dependencies = [
+ "rayon",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "compass-output"
+version = "0.2.0"
+dependencies = [
+ "ahash",
+ "compass-cypher",
+ "compass-files",
+ "compass-graph",
+ "compass-history",
+ "compass-model",
+ "compass-query",
+ "rayon",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+ "time",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "compass-postgres"
+version = "0.2.0"
+dependencies = [
+ "compass-languages",
+ "rustls",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-postgres",
+ "tokio-postgres-rustls",
+]
+
+[[package]]
+name = "compass-program"
+version = "0.2.0"
+dependencies = [
+ "base64",
+ "compass-ir",
+ "protobuf",
+ "scip",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "compass-prs"
+version = "0.2.0"
+dependencies = [
+ "compass-files",
+ "compass-model",
+ "regex",
+ "serde_json",
+ "thiserror 2.0.19",
+ "time",
+ "wait-timeout",
+]
+
+[[package]]
+name = "compass-query"
+version = "0.2.0"
+dependencies = [
+ "compass-analysis",
+ "compass-cypher",
+ "compass-ir",
+ "compass-model",
+ "libc",
+ "regex",
+ "rusqlite",
+ "rustix 1.1.4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "compass-reflect"
+version = "0.2.0"
+dependencies = [
+ "compass-files",
+ "compass-model",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+ "time",
+]
+
+[[package]]
+name = "compass-resolve"
+version = "0.2.0"
+dependencies = [
+ "ahash",
+ "compass-files",
+ "compass-languages",
+ "compass-model",
+ "compass-program",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha1",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "compass-semantic"
+version = "0.2.0"
+dependencies = [
+ "aws-config",
+ "aws-sdk-bedrockruntime",
+ "aws-smithy-http-client",
+ "base64",
+ "compass-files",
+ "compass-media",
+ "regex",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+ "time",
+ "tokio",
+ "ureq",
+ "url",
+ "wait-timeout",
+]
+
+[[package]]
+name = "compass-semantic-diff"
+version = "0.2.0"
+dependencies = [
+ "compass-analysis",
+ "compass-history",
+ "compass-ir",
+ "compass-model",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "compass-transcribe"
+version = "0.2.0"
+dependencies = [
+ "compass-ingest",
+ "rubato",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.9",
+ "symphonia",
+ "tempfile",
+ "thiserror 2.0.19",
+ "ureq",
+ "url",
+ "wait-timeout",
+]
+
+[[package]]
+name = "compass-tree-sitter-language-pack"
+version = "1.13.1"
+dependencies = [
+ "ahash",
+ "cc",
+ "memchr",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tar",
+ "thiserror 2.0.19",
+ "tree-sitter",
+ "ureq",
+ "zstd",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1149,6 +1654,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4443176a9f2c162692bd3d352d745ef9413eec5782a80d8fd6f8a1ac692a07f7"
 
 [[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1333,13 +1850,25 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "r-efi 5.3.0",
+ "wasip2",
+]
+
+[[package]]
+name = "getrandom"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if",
  "libc",
- "r-efi",
+ "r-efi 6.0.0",
  "rand_core 0.10.1",
 ]
 
@@ -1380,10 +1909,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "half"
+version = "1.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b43ede17f21864e81be2fa654110bf1e793774238d86ef8555c37e6519c0403"
+
+[[package]]
+name = "hashbrown"
+version = "0.14.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
+dependencies = [
+ "ahash",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
+name = "hashlink"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ba4ff7128dee98c7dc9794b6a411377e1404dba1c97deb8d1a55297bd25d8af"
+dependencies = [
+ "hashbrown 0.14.5",
+]
 
 [[package]]
 name = "hermit-abi"
@@ -1686,7 +2239,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
- "hashbrown",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -1855,6 +2408,23 @@ checksum = "c943259e342f1e06ff2da7a83eabdfe7f92ce10262688dbf1895ff0b3e6e4652"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "libsqlite3-sys"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c10584274047cb335c23d3e61bcef8e323adae7c5c8c760540f73610177fc3f"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.4.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
 
 [[package]]
 name = "linux-raw-sys"
@@ -2249,7 +2819,7 @@ dependencies = [
  "base64",
  "byteorder",
  "bytes",
- "fallible-iterator",
+ "fallible-iterator 0.2.0",
  "hmac 0.13.0",
  "md-5 0.11.0",
  "memchr",
@@ -2266,7 +2836,7 @@ checksum = "851ca9db4932932d69f3ea811b1abe63087a0f740a47692619dd40d4899b68be"
 dependencies = [
  "array-init",
  "bytes",
- "fallible-iterator",
+ "fallible-iterator 0.2.0",
  "postgres-protocol",
 ]
 
@@ -2322,6 +2892,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "prolly-map"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d1aa764c1a405825a6c0ab591462dbde1bd92aee887f2afb90f49df682abfb2"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "mimalloc",
+ "rayon",
+ "serde",
+ "serde_cbor",
+ "serde_json",
+ "sha2 0.10.9",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "prolly-store-sqlite"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "205ef07cb82756bfb37b9a2eb088fcc57c2ff3bd3f16689f04bec05823d4c847"
+dependencies = [
+ "prolly-map",
+ "rusqlite",
+]
+
+[[package]]
+name = "protobuf"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d65a1d4ddae7d8b5de68153b48f6aa3bba8cb002b243dbdbc55a5afbc98f99f4"
+dependencies = [
+ "once_cell",
+ "protobuf-support",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "protobuf-support"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e36c2f31e0a47f9280fb347ef5e461ffcd2c52dd520d8e216b52f93b0b0d7d6"
+dependencies = [
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2338,6 +2955,12 @@ checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "r-efi"
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "r-efi"
@@ -2579,6 +3202,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusqlite"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b838eba278d213a8beaf485bd313fd580ca4505a00d5871caeb1457c55322cae"
+dependencies = [
+ "bitflags",
+ "fallible-iterator 0.3.0",
+ "fallible-streaming-iterator",
+ "hashlink",
+ "libsqlite3-sys",
+ "smallvec",
+]
+
+[[package]]
 name = "rustc_version"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2603,6 +3240,19 @@ dependencies = [
 
 [[package]]
 name = "rustix"
+version = "0.38.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154"
+dependencies = [
+ "bitflags",
+ "errno",
+ "libc",
+ "linux-raw-sys 0.4.15",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rustix"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
@@ -2610,7 +3260,7 @@ dependencies = [
  "bitflags",
  "errno",
  "libc",
- "linux-raw-sys",
+ "linux-raw-sys 0.12.1",
  "windows-sys 0.61.2",
 ]
 
@@ -2745,6 +3395,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scip"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26a72133c2d6fd45c9a3a343bcb3db2faa30f68f0919bfa3370ca85add5460c3"
+dependencies = [
+ "protobuf",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2788,6 +3447,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "self-replace"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03ec815b5eab420ab893f63393878d89c90fdd94c0bcc44c07abb8ad95552fb7"
+dependencies = [
+ "fastrand",
+ "tempfile",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2801,6 +3471,16 @@ checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
  "serde_derive",
+]
+
+[[package]]
+name = "serde_cbor"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bef2ebfde456fb76bbcf9f59315333decc4fda0b2b44b420243c11e0f5ec1f5"
+dependencies = [
+ "half",
+ "serde",
 ]
 
 [[package]]
@@ -2913,6 +3593,7 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "digest 0.10.7",
+ "sha2-asm",
 ]
 
 [[package]]
@@ -2924,6 +3605,15 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
  "digest 0.11.3",
+]
+
+[[package]]
+name = "sha2-asm"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b845214d6175804686b2bd482bcffe96651bb2d1200742b712003504a2dac1ab"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -3317,7 +4007,7 @@ dependencies = [
  "fastrand",
  "getrandom 0.4.3",
  "once_cell",
- "rustix",
+ "rustix 1.1.4",
  "windows-sys 0.61.2",
 ]
 
@@ -3484,7 +4174,7 @@ dependencies = [
  "async-trait",
  "byteorder",
  "bytes",
- "fallible-iterator",
+ "fallible-iterator 0.2.0",
  "futures-channel",
  "futures-util",
  "log",
@@ -3691,379 +4381,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "compass-cargo"
-version = "0.1.0"
-dependencies = [
- "glob",
- "serde_json",
- "thiserror 2.0.19",
- "toml 1.1.3+spec-1.1.0",
- "compass-model",
-]
-
-[[package]]
-name = "compass-cli"
-version = "0.1.0"
-dependencies = [
- "ctrlc",
- "glob",
- "mimalloc",
- "regex",
- "serde_json",
- "time",
- "tokio",
- "compass-cargo",
- "compass-core",
- "compass-cypher",
- "compass-files",
- "compass-global",
- "compass-google-workspace",
- "compass-graph",
- "compass-graphdb",
- "compass-ingest",
- "compass-mcp",
- "compass-model",
- "compass-output",
- "compass-postgres",
- "compass-prs",
- "compass-query",
- "compass-reflect",
- "compass-semantic",
- "url",
-]
-
-[[package]]
-name = "compass-core"
-version = "0.1.0"
-dependencies = [
- "notify",
- "rayon",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.19",
- "time",
- "compass-files",
- "compass-google-workspace",
- "compass-graph",
- "compass-languages",
- "compass-model",
- "compass-output",
- "compass-reflect",
- "compass-resolve",
-]
-
-[[package]]
-name = "compass-cypher"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.19",
- "compass-model",
-]
-
-[[package]]
-name = "compass-files"
-version = "0.1.0"
-dependencies = [
- "md-5 0.10.6",
- "rayon",
- "regex",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "compass-fuzz"
-version = "0.0.0"
-dependencies = [
- "libfuzzer-sys",
- "serde_json",
- "tempfile",
- "compass-cli",
- "compass-cypher",
- "compass-files",
- "compass-graph",
- "compass-languages",
- "compass-model",
- "compass-output",
- "compass-query",
- "compass-semantic",
- "compass-transcribe",
-]
-
-[[package]]
-name = "compass-global"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.19",
- "time",
- "compass-files",
- "compass-model",
-]
-
-[[package]]
-name = "compass-google-workspace"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.19",
- "compass-media",
- "url",
- "wait-timeout",
-]
-
-[[package]]
-name = "compass-graph"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sha1",
- "sha2 0.10.9",
- "strsim",
- "thiserror 2.0.19",
- "compass-languages",
- "compass-model",
- "unicode-casefold",
- "unicode-normalization",
-]
-
-[[package]]
-name = "compass-graphdb"
-version = "0.1.0"
-dependencies = [
- "rustls",
- "rustls-platform-verifier",
- "serde_json",
- "thiserror 2.0.19",
- "compass-model",
- "url",
-]
-
-[[package]]
-name = "compass-ingest"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde_json",
- "thiserror 2.0.19",
- "time",
- "compass-files",
- "compass-transcribe",
- "ureq",
- "url",
-]
-
-[[package]]
-name = "compass-languages"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "regex",
- "roxmltree",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sha1",
- "thiserror 2.0.19",
- "toml 1.1.3+spec-1.1.0",
- "compass-files",
- "compass-model",
- "compass-tree-sitter-language-pack",
- "tree-sitter",
- "tree-sitter-dm",
- "unicode-casefold",
- "unicode-normalization",
- "unicode-properties",
-]
-
-[[package]]
-name = "compass-mcp"
-version = "0.1.0"
-dependencies = [
- "axum",
- "rmcp",
- "serde_json",
- "time",
- "tokio",
- "tokio-util",
- "tower-http",
- "compass-core",
- "compass-graph",
- "compass-model",
- "compass-prs",
- "compass-query",
-]
-
-[[package]]
-name = "compass-media"
-version = "0.1.0"
-dependencies = [
- "oxidize-pdf",
- "roxmltree",
- "thiserror 2.0.19",
- "zip",
-]
-
-[[package]]
-name = "compass-model"
-version = "0.1.0"
-dependencies = [
- "rmp-serde",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "compass-output"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sha1",
- "sha2 0.10.9",
- "thiserror 2.0.19",
- "time",
- "compass-cypher",
- "compass-files",
- "compass-graph",
- "compass-model",
- "compass-query",
- "unicode-normalization",
-]
-
-[[package]]
-name = "compass-postgres"
-version = "0.1.0"
-dependencies = [
- "rustls",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "tokio-postgres",
- "tokio-postgres-rustls",
- "compass-languages",
-]
-
-[[package]]
-name = "compass-prs"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde_json",
- "thiserror 2.0.19",
- "time",
- "compass-model",
- "wait-timeout",
-]
-
-[[package]]
-name = "compass-query"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "compass-cypher",
- "compass-model",
- "unicode-normalization",
-]
-
-[[package]]
-name = "compass-reflect"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.19",
- "time",
- "compass-files",
- "compass-model",
-]
-
-[[package]]
-name = "compass-resolve"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde_json",
- "sha1",
- "compass-languages",
- "compass-model",
-]
-
-[[package]]
-name = "compass-semantic"
-version = "0.1.0"
-dependencies = [
- "aws-config",
- "aws-sdk-bedrockruntime",
- "aws-smithy-http-client",
- "base64",
- "regex",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.19",
- "time",
- "tokio",
- "compass-files",
- "compass-media",
- "ureq",
- "url",
- "wait-timeout",
-]
-
-[[package]]
-name = "compass-transcribe"
-version = "0.1.0"
-dependencies = [
- "rubato",
- "serde",
- "serde_json",
- "sha1",
- "sha2 0.10.9",
- "symphonia",
- "tempfile",
- "thiserror 2.0.19",
- "ureq",
- "url",
- "wait-timeout",
-]
-
-[[package]]
-name = "compass-tree-sitter-language-pack"
-version = "1.13.1"
-dependencies = [
- "ahash",
- "cc",
- "memchr",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tar",
- "thiserror 2.0.19",
- "tree-sitter",
- "ureq",
- "zstd",
-]
-
-[[package]]
 name = "transpose"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4234,6 +4551,12 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "vcpkg"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "version_check"
@@ -4749,7 +5072,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
 dependencies = [
  "libc",
- "rustix",
+ "rustix 1.1.4",
 ]
 
 [[package]]
@@ -4757,6 +5080,12 @@ name = "xmlparser"
 version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aee1b19627c7c60102ab80d3a9cbe18de90bfe03bfa6c3715447681f0e8c8af6"
 
 [[package]]
 name = "yoke"

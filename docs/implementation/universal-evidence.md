@@ -38,7 +38,7 @@ future work.
 | Status | Implementation |
 | --- | --- |
 | Available now | `compass-languages` owns the source registry, parsers, established adapters, and semantic evidence version 1 |
-| Available now | Python, Go, Rust, and Java are entries in the hard-cut `AdapterRegistry`, all at adapter version 1 |
+| Available now | Python, Go, Rust, and Java are entries in the hard-cut `AdapterRegistry`; Go and Java are at adapter version 3, Rust is at version 2, and Python is at version 1 |
 | Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all four hard-cut languages |
 | Available now | `UniversalResolutionIndex` resolves and projects hard-cut evidence without a language-name branch |
 | Available now | Rust has passed Phase 2 qualification; Java remains `UniversalCandidate` after completing post-cutover pinned-corpus qualification |
@@ -153,21 +153,25 @@ The architectural profile names are `Direct`, `UniversalCandidate`, and
 an internal `legacy` variant. Treat it as an old wire identifier, not the name
 or quality status of an established adapter.
 
-Rust and Java remain adapter version 1 through their candidate transitions. Grammar provenance and extraction semantics invalidate caches without changing the adapter version.
+Python remains at adapter version 1, while Rust is at version 2 and Go and Java
+are at version 3. Adapter versions advance when a semantic evidence change
+requires language-local cache invalidation; grammar provenance and the
+extraction-semantics identity remain independent cache inputs.
 
 ## Evidence contract
 
 Each successfully prepared hard-cut source produces one
-`SemanticEvidenceBatch`. The adapter version remains 1; hard cutover does not
-increment it.
+`SemanticEvidenceBatch`. Hard cutover alone does not increment an adapter
+version, but later evidence-contract changes may do so to invalidate only that
+language's cached facts.
 
 | Collection | Required information |
 | --- | --- |
-| Declaration | Symbol, name, qualified name, kind, owner, signature, scope, anchor, and line |
+| Declaration | Symbol, name, qualified name, kind, owner, signature, canonical parameter types, direct-base completeness, scope, anchor, and line |
 | Scope | Stable ID, owner, parent, anchor, and depth |
 | Binding | Scope, spelling, identity, binding kind, anchor, and line |
 | Occurrence | Owner, scope, role, spelling, qualifier, anchor, and line |
-| Relationship candidate | Relationship kind, role, target kinds, qualifier, signature or argument evidence, anchor, scope, and external identity |
+| Relationship candidate | Relationship kind, role, target kinds, qualifier, signature, canonical argument types, anchor, scope, and external identity |
 | Diagnostic | Stable category, affected collection or structure, source anchor when valid, and completeness impact |
 
 The builder must:
@@ -376,8 +380,8 @@ This table describes the current branch.
 | --- | --- | --- |
 | Python | Hard-cut universal | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced collection resolver |
 | Go | Hard-cut universal | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced Go collection resolver |
-| Rust | Hard-cut `UniversalCandidate` | Version-1 evidence plus shared resolution and projection; Phase 2 qualified and replaced Rust paths removed |
-| Java | Hard-cut `UniversalCandidate` | Version-1 evidence plus shared resolution and projection; replaced Java paths removed and post-cutover corpus qualification complete |
+| Rust | Hard-cut `UniversalCandidate` | Version-2 adapter evidence plus shared resolution and projection; Phase 2 qualified and replaced Rust paths removed |
+| Java | Hard-cut `UniversalCandidate` | Version-3 evidence plus shared resolution and projection; exact callable ownership, proven conversions, replaced Java paths removed, and post-cutover corpus qualification complete |
 | Remaining registered languages | Established direct adapters | Current language-specific or generic extraction paths |
 
 Python, Go, Rust, and Java are hard-cut on this branch. Each later language

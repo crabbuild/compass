@@ -37,9 +37,9 @@ This architecture is transitioning one language at a time. The status labels bel
 | Status | Behavior |
 | --- | --- |
 | Available now | The vendored package supplies 37 pinned static Tree-sitter grammars |
-| Available now | Python and Go are registered hard-cut version-1 adapters: they emit semantic evidence and use shared resolution and projection |
-| Available now | Rust Phase 2 is a quality-gated, hard-cut version-1 `UniversalCandidate`; its replaced publisher and collection resolution branches are removed |
-| Available now | Java is a hard-cut version-1 `UniversalCandidate`; its replaced publisher and Java member resolver are removed, and post-cutover pinned-corpus qualification is complete |
+| Available now | Python and Go are registered hard-cut adapters: they emit semantic evidence and use shared resolution and projection |
+| Available now | Rust Phase 2 is a quality-gated, hard-cut version-2 `UniversalCandidate`; its replaced publisher and collection resolution branches are removed |
+| Available now | Java is a hard-cut version-3 `UniversalCandidate`; its replaced publisher and Java member resolver are removed, and post-cutover pinned-corpus qualification is complete |
 | Available now | The remaining production languages keep their established extraction and resolution paths |
 | Planned | Later languages transition independently after language-specific qualification |
 
@@ -84,6 +84,11 @@ files + project manifests
               |                      |                              |
               +----------+-----------+------------------------------+
                          |
+              verified compiler artifacts
+                    (SCIP / project analyzers)
+                         |
+              exact-anchor semantic join
+                         |
                          v
              framework facts and resolution
                          |
@@ -98,9 +103,13 @@ Framework packs consume normalized declarations and exact occurrences after lang
 
 The hard-cut route is selected by `AdapterRegistry`. Presence in the source
 registry or availability of a grammar does not select it. On the current
-branch, the registry contains `go`, `java`, `python`, and `rust`, all at
-adapter version 1. Candidate status describes qualification maturity; it does
-not re-enable the removed direct route.
+branch, the registry contains `go`, `java`, `python`, and `rust`. Go is at
+adapter version 3, Java is at version 3, Rust is at version 2, and Python
+remains at version 1. Candidate status
+describes qualification maturity; it does not re-enable the removed direct
+route. Adapter-version changes invalidate cached evidence for only the changed
+language. Go identities retain the repository-relative directory prefix and
+use the parsed package clause to distinguish external test packages.
 
 ## Grammar substrate
 
@@ -197,11 +206,11 @@ The version-1 contract contains:
 
 | Evidence | Purpose |
 | --- | --- |
-| Declarations | Stable symbol identity, kind, owner, signature, and source anchor |
+| Declarations | Stable symbol identity, kind, owner, signature, bounded canonical parameter types, and source anchor |
 | Scopes | Lexical parentage and ownership |
 | Bindings | Imports, aliases, packages, modules, and wildcard or static bindings |
 | Occurrences | Exact call, type, annotation, import, bound, and macro sites |
-| Candidates | Allowed target kinds, qualifiers, signatures, and external identity |
+| Candidates | Allowed target kinds, qualifiers, bounded canonical argument types, signatures, and external identity |
 | Diagnostics | Limit, syntax, and structural failures |
 
 The evidence builder sorts and deduplicates facts deterministically. Per-file limits bound declarations, scopes, bindings, occurrences, candidates, and scope depth.
@@ -221,7 +230,47 @@ Resolution considers:
 
 Multiple valid targets remain unresolved. Wildcard and terminal-name matches never outrank exact evidence.
 
-The projector converts resolved evidence into the normalized Compass graph contract. It preserves exact occurrence anchors and derives containment from declaration ownership and scope parentage.
+The projector converts resolved evidence into the normalized Compass graph
+contract. It preserves exact occurrence anchors and derives containment from
+declaration ownership and scope parentage. When a parser has already emitted
+the owned declaration, the containment candidate carries that exact
+declaration identity; it never re-selects an overload from name and arity.
+
+### Compiler artifact enrichment
+
+Tree-sitter remains the native structural baseline, but an enabled Program
+analysis may also consume offline SCIP evidence. Compiler facts do not replace
+the Java AST and do not independently invent graph
+relationships. Compass projects a compiler-selected Java call target only
+when all of these conditions hold:
+
+- the artifact revision is verified against the current source manifest;
+- Tree-sitter emitted a Java `Calls` or `Constructs` candidate at the exact
+  same repository-relative byte range;
+- the compiler target symbol has exactly one local definition whose identifier
+  range exactly matches one Java declaration;
+- the target declaration kind satisfies the AST candidate; and
+- all compiler providers at the call site agree on the target symbol.
+
+When those conditions hold, the compiler identity may disambiguate overloads
+and replace the structural call edge at that occurrence. The published edge
+keeps the AST wiring site, records artifact origin, and uses the
+`compiler-exact-anchor` rule; `program.json` retains the provider descriptors.
+A stale or unverified artifact, a compiler reference outside an AST-proven
+call, an external-only symbol, or provider disagreement leaves the structural
+result unchanged.
+
+This boundary is intentionally narrower than Program IR merging. SCIP encodes
+symbol references, and Compass's current decoder retains a call-resolution
+fact for each non-definition reference. The exact AST call join is therefore
+the semantic guard that prevents a field read or type reference from becoming
+a call edge.
+
+The projection contract also accepts `Project` provider batches so a future
+bounded `javac`, JDT, or language-server analyzer can reuse the same join and
+failure policy. No such analyzer is invoked by the current build pipeline; it
+requires its own process isolation, limits, freshness contract, and
+qualification before it can become a shipped provider.
 
 ### Compiler artifact enrichment
 

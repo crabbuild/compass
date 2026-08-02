@@ -608,7 +608,7 @@ fn build_graph_inner(
             ));
         }
     }
-    let unchanged_program = if options.program_analysis
+    let unchanged_program_build = if options.program_analysis
         && reusable_semantic_layer
         && supplemental.is_empty()
         && manifest_unchanged
@@ -618,11 +618,14 @@ fn build_graph_inner(
     } else {
         None
     };
+    let unchanged_program_available = unchanged_program_build.is_some();
+    let unchanged_program = unchanged_program_build
+        .map(|program| ProgramBuildSummary::from_program(program, retain_artifacts));
     if reusable_semantic_layer
         && supplemental.is_empty()
         && manifest_unchanged
         && verified_output
-        && (!options.program_analysis || unchanged_program.is_some())
+        && (!options.program_analysis || unchanged_program_available)
         && let Some(stats) = unchanged_output_stats(options, &output_dir)
     {
         if options.no_viz {
@@ -707,11 +710,12 @@ fn build_graph_inner(
             }
             let cached = cache.load(path, &CacheKind::Ast, None, false)?;
             if let Some(value) = cached {
-                let extraction =
+                let mut extraction =
                     serde_json::from_value(value).map_err(|source| CoreError::InvalidCache {
                         path: path.clone(),
                         source,
                     })?;
+                absolutize_cached_framework_fact_sources(&mut extraction, &root);
                 if cached_framework_evidence_matches(&extraction, path, &project_evidence)
                     && cached_universal_evidence_matches(&extraction, path)
                 {
@@ -757,15 +761,67 @@ fn build_graph_inner(
     // cannot silently serialize cold extraction.
     let completed_files = Mutex::new(0_usize);
     let total_files = missing.len();
-    let extract_source = |engine: &mut Engine,
-                          path: &PathBuf|
-     -> Result<_, compass_languages::ExtractError> {
-        let metadata = fs::metadata(path).map_err(|source| compass_files::FileError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        if metadata.len() > options.max_source_bytes {
-            let graph = oversized_source_extraction(path, options.max_source_bytes)?;
+    let extract_source =
+        |engine: &mut Engine, path: &PathBuf| -> Result<_, compass_languages::ExtractError> {
+            let metadata = fs::metadata(path).map_err(|source| compass_files::FileError::Io {
+                path: path.clone(),
+                source,
+            })?;
+            if metadata.len() > options.max_source_bytes {
+                let graph = oversized_source_extraction(path, options.max_source_bytes)?;
+                if let Some(progress) = progress {
+                    let mut completed = completed_files
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    *completed += 1;
+                    progress(BuildFileProgress {
+                        current: *completed,
+                        total: total_files,
+                        path: path.clone(),
+                    });
+                }
+                return Ok((
+                    path.clone(),
+                    graph,
+                    (path.to_string_lossy().into_owned(), String::new()),
+                    None,
+                ));
+            }
+            let bytes = fs::read(path).map_err(|source| compass_files::FileError::Io {
+                path: path.clone(),
+                source,
+            })?;
+            let source_file = path
+                .strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let language = Registry::resolve(path).map_or("", |spec| spec.name);
+            let (mut graph, program) = if options.program_analysis {
+                let combined = engine.extract_source_combined(path, &source_file, &bytes)?;
+                (combined.graph, combined.program)
+            } else {
+                (
+                    engine.extract_source_graph_only(path, &source_file, &bytes)?,
+                    None,
+                )
+            };
+            let empty_structured_document = bytes.is_empty()
+                && Registry::resolve(path).is_some_and(|spec| {
+                    matches!(
+                        spec.kind,
+                        ExtractorKind::JsonConfig | ExtractorKind::ProjectXml | ExtractorKind::Xaml
+                    )
+                });
+            if empty_structured_document && graph.error.is_none() {
+                graph.error = Some(format!("{language} extraction failed: empty document"));
+            }
+            let prepared = program.map(|batch| PreparedSyntaxInput {
+                source_file,
+                language: language.to_owned(),
+                bytes: bytes.clone(),
+                batch,
+            });
             if let Some(progress) = progress {
                 let mut completed = completed_files
                     .lock()
@@ -777,57 +833,12 @@ fn build_graph_inner(
                     path: path.clone(),
                 });
             }
-            return Ok((
-                path.clone(),
-                graph,
-                (path.to_string_lossy().into_owned(), String::new()),
-                None,
-            ));
-        }
-        let bytes = fs::read(path).map_err(|source| compass_files::FileError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        let source_file = path
-            .strip_prefix(&root)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        let language = Registry::resolve(path).map_or("", |spec| spec.name);
-        let mut combined = engine.extract_source_combined(path, &source_file, &bytes)?;
-        let empty_structured_document = bytes.is_empty()
-            && Registry::resolve(path).is_some_and(|spec| {
-                matches!(
-                    spec.kind,
-                    ExtractorKind::JsonConfig | ExtractorKind::ProjectXml | ExtractorKind::Xaml
-                )
-            });
-        if empty_structured_document && combined.graph.error.is_none() {
-            combined.graph.error = Some(format!("{language} extraction failed: empty document"));
-        }
-        let prepared = combined.program.map(|batch| PreparedSyntaxInput {
-            source_file,
-            language: language.to_owned(),
-            bytes: bytes.clone(),
-            batch,
-        });
-        if let Some(progress) = progress {
-            let mut completed = completed_files
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            *completed += 1;
-            progress(BuildFileProgress {
-                current: *completed,
-                total: total_files,
-                path: path.clone(),
-            });
-        }
-        let source = (
-            path.to_string_lossy().into_owned(),
-            String::from_utf8_lossy(&bytes).into_owned(),
-        );
-        Ok((path.clone(), combined.graph, source, prepared))
-    };
+            let source = (
+                path.to_string_lossy().into_owned(),
+                String::from_utf8_lossy(&bytes).into_owned(),
+            );
+            Ok((path.clone(), graph, source, prepared))
+        };
     let fresh_outcomes = if missing.len() < 256 {
         let mut engine = Engine::with_project_evidence(Arc::clone(&project_evidence));
         missing
@@ -886,11 +897,11 @@ fn build_graph_inner(
             &mut extraction_partials,
         );
     }
-    profile_internal("tree-sitter combined extraction", &mut internal_started);
+    profile_internal("tree-sitter extraction", &mut internal_started);
     let prepared = if !reuse_cached_analysis {
         fresh
-            .iter()
-            .filter_map(|(_, _, _, prepared)| prepared.clone())
+            .iter_mut()
+            .filter_map(|(_, _, _, prepared)| prepared.take())
             .collect::<Vec<_>>()
     } else {
         Vec::new()
@@ -922,18 +933,14 @@ fn build_graph_inner(
                         &prepared,
                     )?;
                     write_program(&program_output_dir, &program.canonical_bytes)?;
-                    Ok::<_, CoreError>((program, started.elapsed()))
+                    let summary = ProgramBuildSummary::from_program(program, retain_artifacts);
+                    Ok::<_, CoreError>((summary, started.elapsed()))
                 })
                 .map_err(|error| CoreError::WorkerPool(error.to_string()))?,
         )
     } else {
         None
     };
-    let mut ast_cache_entries = fresh
-        .par_iter()
-        .filter(|(_, extraction, _, _)| extraction_has_cacheable_ast_facts(extraction))
-        .map(|(path, extraction, _, _)| (path.clone(), extraction.clone()))
-        .collect::<Vec<_>>();
     let mut empty_files = Vec::new();
     let fresh_paths = fresh
         .iter()
@@ -947,8 +954,13 @@ fn build_graph_inner(
         fresh_source_text.insert(source_path, source);
         extractions.insert(path, extraction);
     }
-    profile_internal("AST cache snapshot and dispatch", &mut internal_started);
+    profile_internal("AST extraction collation", &mut internal_started);
 
+    let ordered_paths = sources
+        .iter()
+        .filter(|path| extractions.contains_key(*path))
+        .cloned()
+        .collect::<Vec<_>>();
     let mut ordered = sources
         .iter()
         .filter_map(|path| extractions.remove(path))
@@ -978,32 +990,32 @@ fn build_graph_inner(
     };
     if !ast_id_remap.is_empty() {
         let remap_application_started = Instant::now();
-        ordered.par_iter_mut().for_each(|extraction| {
-            apply_ast_id_remap(extraction, &ast_id_remap, &ast_root_marker);
-        });
-        ast_cache_entries
-            .par_iter_mut()
-            .for_each(|(_, extraction)| {
+        if ordered.len() < 256 {
+            ordered.iter_mut().for_each(|extraction| {
                 apply_ast_id_remap(extraction, &ast_id_remap, &ast_root_marker);
             });
+        } else {
+            ordered.par_iter_mut().for_each(|extraction| {
+                apply_ast_id_remap(extraction, &ast_id_remap, &ast_root_marker);
+            });
+        }
         profile_internal_duration(
             "portable AST remap application",
             remap_application_started.elapsed(),
         );
     }
-    ast_cache_entries
-        .par_iter_mut()
-        .for_each(|(path, extraction)| prepare_portable_ast_cache_entry(extraction, path, &root));
-    let ast_cache_handle = std::thread::Builder::new()
-        .name("compass-ast-cache".to_owned())
-        .spawn(move || {
-            let started = Instant::now();
-            cache.save_portable_ast_batch(&ast_cache_entries)?;
-            cache.flush()?;
-            Ok::<_, CoreError>(started.elapsed())
-        })
-        .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
     profile_internal("portable AST ID remapping", &mut internal_started);
+    let ast_cache_started = Instant::now();
+    for (path, extraction) in ordered_paths.iter().zip(&mut ordered) {
+        if fresh_paths.contains(path) && extraction_has_cacheable_ast_facts(extraction) {
+            let mut cache_entry = extraction.clone();
+            prepare_portable_ast_cache_entry(&mut cache_entry, path, &root);
+            cache.save_portable_ast_batch(&[(path.clone(), cache_entry)])?;
+        }
+    }
+    cache.flush()?;
+    profile_internal_duration("AST cache publication", ast_cache_started.elapsed());
+    internal_started = Instant::now();
     let read_source = |path: &PathBuf| read_source_text_with_limit(path, options.max_source_bytes);
     let read_cached_source = |path: &PathBuf| {
         (!fresh_paths.contains(path))
@@ -1040,11 +1052,6 @@ fn build_graph_inner(
     profile_internal("Program graph projection", &mut internal_started);
     finalize_ast_extraction(&mut resolved, &root);
     profile_internal("AST finalization", &mut internal_started);
-    let ast_cache_elapsed = ast_cache_handle
-        .join()
-        .map_err(|_| CoreError::WorkerPanic("AST cache publication".to_owned()))??;
-    profile_internal_duration("AST cache publication worker", ast_cache_elapsed);
-    internal_started = Instant::now();
     timings.deterministic_extract = stage_started.elapsed();
     stage_started = Instant::now();
     if preserve_prior_semantic {
@@ -1095,6 +1102,7 @@ fn build_graph_inner(
     if options.no_cluster
         && options.purpose == BuildPurpose::Extract
         && !options.force
+        && manifest_unchanged
         && missing.is_empty()
         && !source_removed
         && supplemental.is_empty()
@@ -1173,8 +1181,8 @@ fn build_graph_inner(
             .built_at_commit
             .clone()
             .or_else(|| git_commit(&root));
-        let published = normalize_document_v1_with_inventory_best_effort(
-            &document,
+        let published = normalize_document_v1_with_inventory_best_effort_owned(
+            document,
             &root,
             configuration_digest,
             source_commit.as_deref(),
@@ -1690,7 +1698,7 @@ fn build_graph_inner(
     };
     let retained = retained_document.map(|document| RetainedBuildArtifacts {
         document,
-        program: program.map(|program| program.analysis),
+        program: program.and_then(|program| program.analysis),
         analysis: retained_analysis,
     });
     Ok((result, retained))
@@ -1720,16 +1728,56 @@ fn oversized_source_extraction(
     Ok(extraction)
 }
 
-fn program_modules(program: Option<&ProgramBuild>) -> usize {
-    program.map_or(0, |program| program.analysis.program.modules.len())
+struct ProgramBuildSummary {
+    seal: ArtifactSeal,
+    modules: usize,
+    summaries: usize,
+    providers: usize,
+    syntax_analyzed: usize,
+    syntax_reused: usize,
+    artifacts_loaded: usize,
+    artifacts_reused: usize,
+    artifact_documents_analyzed: usize,
+    artifact_documents_reused: usize,
+    conflicts: usize,
+    compiler_projection: compass_program::CompilerProjection,
+    analysis: Option<compass_analysis::AnalysisBundle>,
 }
 
-fn program_summaries(program: Option<&ProgramBuild>) -> usize {
-    program.map_or(0, |program| program.analysis.summaries.len())
+impl ProgramBuildSummary {
+    fn from_program(program: ProgramBuild, retain_analysis: bool) -> Self {
+        let modules = program.analysis.program.modules.len();
+        let summaries = program.analysis.summaries.len();
+        let providers = program.analysis.program.providers.len();
+        let analysis = retain_analysis.then_some(program.analysis);
+        Self {
+            seal: ArtifactSeal::from_bytes(&program.canonical_bytes),
+            modules,
+            summaries,
+            providers,
+            syntax_analyzed: program.syntax_analyzed,
+            syntax_reused: program.syntax_reused,
+            artifacts_loaded: program.artifacts_loaded,
+            artifacts_reused: program.artifacts_reused,
+            artifact_documents_analyzed: program.artifact_documents_analyzed,
+            artifact_documents_reused: program.artifact_documents_reused,
+            conflicts: program.conflicts,
+            compiler_projection: program.compiler_projection,
+            analysis,
+        }
+    }
 }
 
-fn program_providers(program: Option<&ProgramBuild>) -> usize {
-    program.map_or(0, |program| program.analysis.program.providers.len())
+fn program_modules(program: Option<&ProgramBuildSummary>) -> usize {
+    program.map_or(0, |program| program.modules)
+}
+
+fn program_summaries(program: Option<&ProgramBuildSummary>) -> usize {
+    program.map_or(0, |program| program.summaries)
+}
+
+fn program_providers(program: Option<&ProgramBuildSummary>) -> usize {
+    program.map_or(0, |program| program.providers)
 }
 
 fn build_profile(options: &BuildOptions) -> BuildProfile {
@@ -1758,7 +1806,7 @@ fn publish_build_state(
     edges: usize,
     communities: usize,
     omissions: PublicationOmissions,
-    program: Option<&ProgramBuild>,
+    program: Option<&ProgramBuildSummary>,
 ) -> Result<(), CoreError> {
     let mut required = vec![output_dir.join(OUTPUT_STATS_FILE)];
     match options.purpose {
@@ -1787,7 +1835,7 @@ fn publish_build_state(
         output_dir,
         build_profile(options),
         manifest_path,
-        program.map(|program| ArtifactSeal::from_bytes(&program.canonical_bytes)),
+        program.map(|program| program.seal.clone()),
         &required,
         SavedStats {
             files,
@@ -1898,25 +1946,54 @@ fn finalize_ast_extraction(extraction: &mut Extraction, root: &Path) {
             }
         }
     }
-    rayon::join(
-        || {
-            extraction.nodes.par_iter_mut().for_each(|node| {
-                normalize_source_attribute_cached(&mut node.attributes, root, &canonical_sources);
-                node.attributes.remove("_callable");
-                node.attributes
-                    .entry("_origin".to_owned())
-                    .or_insert_with(|| serde_json::Value::String("ast".to_owned()));
-            });
-        },
-        || {
-            extraction.edges.par_iter_mut().for_each(|edge| {
-                normalize_source_attribute_cached(&mut edge.attributes, root, &canonical_sources);
-                edge.attributes
-                    .entry("_origin".to_owned())
-                    .or_insert_with(|| serde_json::Value::String("ast".to_owned()));
-            });
-        },
-    );
+    if extraction
+        .nodes
+        .len()
+        .saturating_add(extraction.edges.len())
+        < 100_000
+    {
+        extraction.nodes.iter_mut().for_each(|node| {
+            normalize_source_attribute_cached(&mut node.attributes, root, &canonical_sources);
+            node.attributes.remove("_callable");
+            node.attributes
+                .entry("_origin".to_owned())
+                .or_insert_with(|| serde_json::Value::String("ast".to_owned()));
+        });
+        extraction.edges.iter_mut().for_each(|edge| {
+            normalize_source_attribute_cached(&mut edge.attributes, root, &canonical_sources);
+            edge.attributes
+                .entry("_origin".to_owned())
+                .or_insert_with(|| serde_json::Value::String("ast".to_owned()));
+        });
+    } else {
+        rayon::join(
+            || {
+                extraction.nodes.par_iter_mut().for_each(|node| {
+                    normalize_source_attribute_cached(
+                        &mut node.attributes,
+                        root,
+                        &canonical_sources,
+                    );
+                    node.attributes.remove("_callable");
+                    node.attributes
+                        .entry("_origin".to_owned())
+                        .or_insert_with(|| serde_json::Value::String("ast".to_owned()));
+                });
+            },
+            || {
+                extraction.edges.par_iter_mut().for_each(|edge| {
+                    normalize_source_attribute_cached(
+                        &mut edge.attributes,
+                        root,
+                        &canonical_sources,
+                    );
+                    edge.attributes
+                        .entry("_origin".to_owned())
+                        .or_insert_with(|| serde_json::Value::String("ast".to_owned()));
+                });
+            },
+        );
+    }
 }
 
 fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, root: &Path) {
@@ -2206,7 +2283,7 @@ fn ast_source_identity_map(sources: &[PathBuf], root: &Path) -> AHashMap<String,
 
 fn ast_extractions_are_portable(extractions: &[Extraction], root: &Path) -> bool {
     let rooted_prefix = format!("{}_", make_id(&[&root.to_string_lossy()]));
-    extractions.par_iter().all(|extraction| {
+    let is_portable = |extraction: &Extraction| {
         extraction.nodes.iter().all(|node| {
             !node.id.starts_with(&rooted_prefix)
                 && node
@@ -2241,7 +2318,12 @@ fn ast_extractions_are_portable(extractions: &[Extraction], root: &Path) -> bool
                             .iter()
                             .all(|fact| !Path::new(&fact.range.source_file).is_absolute())
                 })
-    })
+    };
+    if extractions.len() < 256 {
+        extractions.iter().all(is_portable)
+    } else {
+        extractions.par_iter().all(is_portable)
+    }
 }
 
 fn collect_ast_id_remap(
@@ -3610,6 +3692,19 @@ fn make_framework_fact_sources_portable(extraction: &mut Extraction, root: &Path
     }
 }
 
+fn absolutize_cached_framework_fact_sources(extraction: &mut Extraction, root: &Path) {
+    for fact in &mut extraction.framework_facts {
+        let source_file = match fact {
+            RawFrameworkFact::Route(route) => &mut route.anchor.source_file,
+            RawFrameworkFact::Domain(domain) => &mut domain.anchor.source_file,
+            RawFrameworkFact::Annotation(annotation) => &mut annotation.anchor.source_file,
+        };
+        if !source_file.is_empty() && !Path::new(source_file).is_absolute() {
+            *source_file = root.join(&*source_file).to_string_lossy().into_owned();
+        }
+    }
+}
+
 fn portable_diagnostic_reason(reason: &str, path: &Path, root: &Path) -> String {
     let root_text = root.to_string_lossy();
     let path_text = path.to_string_lossy();
@@ -3958,9 +4053,9 @@ fn profile_internal_duration(label: &str, elapsed: Duration) {
 }
 
 fn join_program_worker(
-    handle: Option<std::thread::JoinHandle<Result<(ProgramBuild, Duration), CoreError>>>,
+    handle: Option<std::thread::JoinHandle<Result<(ProgramBuildSummary, Duration), CoreError>>>,
     timings: &mut BuildTimings,
-) -> Result<Option<ProgramBuild>, CoreError> {
+) -> Result<Option<ProgramBuildSummary>, CoreError> {
     let Some(handle) = handle else {
         return Ok(None);
     };
@@ -4514,15 +4609,40 @@ mod tests {
             "generic punctuation symbols must not be guessed into the typed graph"
         );
         assert!(
-            first_graph.graph.diagnostics.iter().any(|diagnostic| {
-                diagnostic.code == "unresolved_node_kind"
-                    && diagnostic
-                        .anchor
-                        .as_ref()
-                        .is_some_and(|anchor| anchor.file == "src/Page.astro")
-            }),
-            "omitted generic symbols must remain visible as anchored diagnostics: {:#?}",
+            first_graph
+                .graph
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "unresolved_node_kind"),
+            "generic punctuation must be rejected during extraction instead of reaching publication: {:#?}",
             first_graph.graph.diagnostics
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn markdown_documents_edges_survive_portable_ast_remapping() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        fs::write(
+            directory.path().join("guide.md"),
+            "# Guide\n[Implementation](documented.rs)\n",
+        )?;
+        fs::write(
+            directory.path().join("documented.rs"),
+            "pub fn documented() {}\n",
+        )?;
+        let mut options = BuildOptions::new(directory.path());
+        options.no_cluster = true;
+        options.no_viz = true;
+        options.force = true;
+        let result = build_local_graph(&options)?;
+        let graph = V1GraphDocument::load(&result.output_dir.join("graph.json"))?;
+        assert!(
+            graph
+                .links
+                .iter()
+                .any(|edge| edge.kind.as_str() == "documents"),
+            "graph={graph:#?}"
         );
         Ok(())
     }

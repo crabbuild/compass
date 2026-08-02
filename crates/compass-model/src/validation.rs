@@ -707,6 +707,11 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
     ) {
         return true;
     }
+    if matches!(source, NodeKind::EnumMember | NodeKind::Field)
+        && matches!(target, NodeKind::Method | NodeKind::Field)
+    {
+        return true;
+    }
     matches!(
         (source, target),
         (
@@ -905,6 +910,7 @@ const fn is_test_target(kind: NodeKind) -> bool {
                 | NodeKind::Job
                 | NodeKind::Query
                 | NodeKind::Migration
+                | NodeKind::EnumMember
                 | NodeKind::DatabaseProcedure
                 | NodeKind::DatabaseTrigger
         )
@@ -934,7 +940,15 @@ const fn is_documentable_target(kind: NodeKind) -> bool {
 const fn is_call_source(kind: NodeKind) -> bool {
     kind.is_callable()
         || kind.is_type()
-        || matches!(kind, NodeKind::File | NodeKind::Module | NodeKind::Variable)
+        || matches!(
+            kind,
+            NodeKind::File
+                | NodeKind::Module
+                | NodeKind::Variable
+                | NodeKind::Field
+                | NodeKind::Constant
+                | NodeKind::EnumMember
+        )
 }
 
 const fn is_import_target(kind: NodeKind) -> bool {
@@ -947,11 +961,11 @@ const fn is_import_target(kind: NodeKind) -> bool {
                 | NodeKind::Export
                 | NodeKind::TypeAlias
                 | NodeKind::Variable
-                | NodeKind::Constant
                 | NodeKind::Field
+                | NodeKind::Constant
                 | NodeKind::EnumMember
-                | NodeKind::Resource
                 | NodeKind::Annotation
+                | NodeKind::Resource
                 | NodeKind::ConfigKey
         )
 }
@@ -1022,11 +1036,12 @@ const fn is_reference_source(kind: NodeKind) -> bool {
                 | NodeKind::Field
                 | NodeKind::Variable
                 | NodeKind::Constant
-                | NodeKind::Import
                 | NodeKind::EnumMember
+                | NodeKind::Import
                 | NodeKind::Export
-                | NodeKind::TypeAlias
                 | NodeKind::Annotation
+                | NodeKind::Macro
+                | NodeKind::TypeAlias
                 | NodeKind::Resource
                 | NodeKind::Schema
                 | NodeKind::Query
@@ -1054,8 +1069,9 @@ const fn is_reference_target(kind: NodeKind) -> bool {
                 | NodeKind::Parameter
                 | NodeKind::Import
                 | NodeKind::Export
-                | NodeKind::TypeAlias
                 | NodeKind::Annotation
+                | NodeKind::Macro
+                | NodeKind::TypeAlias
                 | NodeKind::Resource
                 | NodeKind::Schema
                 | NodeKind::Query

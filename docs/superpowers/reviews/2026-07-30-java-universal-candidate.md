@@ -177,4 +177,3 @@ the production `spring-java` universal framework pack at Compass commit
 `1946012aa67bba474f4016aa2d9f79010a3c1476`; its independent evidence is
 recorded in the 2026-08-01 Spring universal-pack review. Java Spring no longer
 runs through the legacy source detector. Kotlin Spring remains on the
-established framework path and is not covered by the Java hard cut.

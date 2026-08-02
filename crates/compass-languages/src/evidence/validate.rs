@@ -18,6 +18,8 @@ pub struct EvidenceLimits {
     pub occurrences: usize,
     pub candidates: usize,
     pub diagnostics: usize,
+    pub callable_types_per_fact: usize,
+    pub callable_type_bytes: usize,
     pub allowed_target_kinds_per_candidate: usize,
     pub diagnostic_message_bytes: usize,
 }
@@ -31,6 +33,8 @@ impl Default for EvidenceLimits {
             occurrences: 500_000,
             candidates: 500_000,
             diagnostics: 10_000,
+            callable_types_per_fact: 256,
+            callable_type_bytes: 1_024,
             allowed_target_kinds_per_candidate: 64,
             diagnostic_message_bytes: 4_096,
         }
@@ -306,6 +310,24 @@ fn validate_fact(
                 return Err(invalid_fact(&fact.id, "declaration identity is empty"));
             }
             require_optional_reference(&fact.id, "scope", fact.scope_id.as_deref(), scopes)?;
+            validate_callable_types(
+                &fact.id,
+                &fact.parameter_types,
+                fact.parameter_count,
+                limits,
+            )?;
+            if fact.direct_bases_complete
+                && (fact.language != "java"
+                    || !matches!(
+                        fact.kind.as_str(),
+                        "class" | "interface" | "enum" | "record" | "annotation_type"
+                    ))
+            {
+                return Err(invalid_fact(
+                    &fact.id,
+                    "complete direct-base evidence requires a Java type declaration",
+                ));
+            }
         }
         Fact::Scope(fact) => {
             validate_language(&fact.id, &fact.language, adapter_language)?;
@@ -339,6 +361,12 @@ fn validate_fact(
             require_capability(&fact.id, fact.kind.required_capability(), capabilities)?;
             if fact.spelling.is_empty() || fact.qualified_target.is_empty() {
                 return Err(invalid_fact(&fact.id, "binding identity is empty"));
+            }
+            if fact.output_index.is_some() && fact.kind != crate::BindingKind::CallResult {
+                return Err(invalid_fact(
+                    &fact.id,
+                    "only call-result bindings may select an output index",
+                ));
             }
             require_optional_reference(
                 &fact.id,
@@ -416,6 +444,12 @@ fn validate_fact(
                 "exact target declaration",
                 fact.constraints.exact_target_declaration_id.as_deref(),
                 declarations,
+            )?;
+            validate_callable_types(
+                &fact.id,
+                &fact.constraints.argument_types,
+                fact.constraints.argument_count,
+                limits,
             )?;
             if let Some(language) = fact.constraints.exact_language.as_deref()
                 && language != fact.language
@@ -503,6 +537,55 @@ fn validate_fact(
                 ));
             }
         }
+    }
+    Ok(())
+}
+
+trait CallableTypeValue {
+    fn value(&self) -> Option<&str>;
+}
+
+impl CallableTypeValue for String {
+    fn value(&self) -> Option<&str> {
+        Some(self)
+    }
+}
+
+impl CallableTypeValue for Option<String> {
+    fn value(&self) -> Option<&str> {
+        self.as_deref()
+    }
+}
+
+fn validate_callable_types<T: CallableTypeValue>(
+    id: &str,
+    types: &[T],
+    count: Option<u32>,
+    limits: EvidenceLimits,
+) -> Result<(), EvidenceError> {
+    if types.len() > limits.callable_types_per_fact {
+        return Err(EvidenceError::new(
+            EvidenceErrorCode::ResourceLimit,
+            format!(
+                "fact {id:?} exceeds callable type limit {}",
+                limits.callable_types_per_fact
+            ),
+        ));
+    }
+    if !types.is_empty() && count != u32::try_from(types.len()).ok() {
+        return Err(invalid_fact(
+            id,
+            "callable type count differs from the source-level arity",
+        ));
+    }
+    if types.iter().any(|kind| {
+        kind.value()
+            .is_some_and(|kind| kind.is_empty() || kind.len() > limits.callable_type_bytes)
+    }) {
+        return Err(invalid_fact(
+            id,
+            "callable type identity is empty or too large",
+        ));
     }
     Ok(())
 }

@@ -3,7 +3,8 @@ use std::path::Path;
 
 use compass_graph::{
     BuildEvidence, InventoryEvidence, build_from_extraction, extraction_from_v1,
-    normalize_document_v1, normalize_v1, normalize_v1_best_effort,
+    normalize_document_v1, normalize_document_v1_with_inventory_best_effort_owned, normalize_v1,
+    normalize_v1_best_effort,
 };
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::code_graph::{
@@ -1150,6 +1151,102 @@ fn best_effort_stable_identity_collision_is_order_independent()
 }
 
 #[test]
+fn owned_best_effort_publication_sorts_before_assigning_diagnostic_positions()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut source = extraction(root);
+    source.edges.extend([
+        RawEdgeRecord {
+            source: "raw:a".to_owned(),
+            target: "missing:z".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("calls")),
+                ("confidence".to_owned(), json!("EXTRACTED")),
+                ("extractor".to_owned(), json!("test.rust")),
+                ("source_anchor".to_owned(), anchor(root, 70)),
+            ]),
+        },
+        RawEdgeRecord {
+            source: "raw:a".to_owned(),
+            target: "missing:y".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("calls")),
+                ("confidence".to_owned(), json!("EXTRACTED")),
+                ("extractor".to_owned(), json!("test.rust")),
+                ("source_anchor".to_owned(), anchor(root, 90)),
+            ]),
+        },
+    ]);
+    let document = build_from_extraction(&source, true, Some(root));
+    let mut reversed = document.clone();
+    reversed.links.reverse();
+
+    let left = normalize_document_v1_with_inventory_best_effort_owned(
+        document,
+        root,
+        "sha256:test",
+        None,
+        Vec::new(),
+    )?;
+    let right = normalize_document_v1_with_inventory_best_effort_owned(
+        reversed,
+        root,
+        "sha256:test",
+        None,
+        Vec::new(),
+    )?;
+
+    assert_eq!(left.document, right.document);
+    assert_eq!(left.omissions, right.omissions);
+    assert_eq!(left.omissions.edges, 1);
+    Ok(())
+}
+
+#[test]
+fn best_effort_diagnostic_positions_sort_by_published_endpoint_identity()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let build = |root: &Path, root_dependent_id: &str| -> Result<_, Box<dyn std::error::Error>> {
+        let edge = |source: &str, target: &str, start| RawEdgeRecord {
+            source: source.to_owned(),
+            target: target.to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("calls")),
+                ("confidence".to_owned(), json!("EXTRACTED")),
+                ("extractor".to_owned(), json!("test.rust")),
+                ("source_anchor".to_owned(), anchor(root, start)),
+            ]),
+        };
+        normalize_v1_best_effort(
+            Extraction {
+                nodes: vec![
+                    raw_node(root, root_dependent_id, "alpha", 10),
+                    raw_node(root, "middle", "middle", 30),
+                    raw_node(root, "target", "target", 50),
+                ],
+                edges: vec![
+                    edge(root_dependent_id, "target", 70),
+                    edge("middle", "missing", 90),
+                ],
+                ..Extraction::default()
+            },
+            build_evidence(root)?,
+        )
+        .map_err(Into::into)
+    };
+    let left_root = directory.path().join("left");
+    let right_root = directory.path().join("right");
+    let left = build(&left_root, "alpha-root-dependent")?;
+    let right = build(&right_root, "zulu-root-dependent")?;
+
+    assert_eq!(left.document, right.document);
+    assert_eq!(left.omissions, right.omissions);
+    assert_eq!(left.omissions.edges, 1);
+    Ok(())
+}
+
+#[test]
 fn best_effort_typed_validation_omits_invalid_endpoint_edges()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
@@ -1400,13 +1497,6 @@ fn sourceless_placeholder_identity_unifies_same_file_occurrences_with_typed_defe
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let external_name = "Illuminate\\Database\\Eloquent\\Model";
-    let mut external = raw_external_node("raw:model", external_name);
-    external
-        .attributes
-        .insert("_origin".to_owned(), json!("ast"));
-    external
-        .attributes
-        .insert("confidence".to_owned(), json!("EXTRACTED"));
     let mut inheritance = raw_php_edge(root, "src/lib.rs", "raw:user", "raw:model", "inherits", 70);
     append_endpoint_rewrite_evidence(
         &mut inheritance.attributes,
@@ -1415,11 +1505,20 @@ fn sourceless_placeholder_identity_unifies_same_file_occurrences_with_typed_defe
             score: 1.0,
         },
     );
+    let mut model = raw_external_node("raw:model", external_name);
+    model.attributes.insert("_origin".to_owned(), json!("ast"));
+    model
+        .attributes
+        .insert("confidence".to_owned(), json!("EXTRACTED"));
+    model.attributes.insert(
+        "extractor".to_owned(),
+        json!("compass.resolve.php.universal"),
+    );
     let graph = Extraction {
         nodes: vec![
             raw_file_node(root, "raw:file", "src/lib.rs"),
             raw_class_node(root, "raw:user", "src/lib.rs", "App\\User", 10),
-            external,
+            model,
         ],
         edges: vec![
             raw_php_edge(root, "src/lib.rs", "raw:file", "raw:model", "imports", 50),
