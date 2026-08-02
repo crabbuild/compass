@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use compass_graph::Communities;
 use compass_model::GraphDocument;
@@ -231,10 +231,34 @@ pub fn graph_view_model(
 }
 
 pub fn shared_viewer_html(model: &GraphViewModel) -> Result<String, serde_json::Error> {
+    shared_viewer_html_with_communities(model, &BTreeMap::new())
+}
+
+/// Render the shared offline graph workbench with optional community details.
+///
+/// Each detail remains inert JSON text until selected in the browser, keeping
+/// initial model validation and React rendering bounded to the overview.
+pub fn shared_viewer_html_with_communities(
+    model: &GraphViewModel,
+    community_details: &BTreeMap<usize, GraphViewModel>,
+) -> Result<String, serde_json::Error> {
     let model_json = serde_json::to_string(model)?
         .replace('<', "\\u003c")
         .replace('>', "\\u003e")
         .replace('&', "\\u0026");
+    let community_json = community_details
+        .iter()
+        .map(|(community, detail)| {
+            serde_json::to_string(detail).map(|json| {
+                format!(
+                    r#"<script type="application/json" data-compass-community="{community}">{}</script>"#,
+                    json.replace('<', "\\u003c")
+                        .replace('>', "\\u003e")
+                        .replace('&', "\\u0026")
+                )
+            })
+        })
+        .collect::<Result<String, _>>()?;
     Ok(format!(
         r#"<!doctype html>
 <html lang="en">
@@ -242,12 +266,14 @@ pub fn shared_viewer_html(model: &GraphViewModel) -> Result<String, serde_json::
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 <title>Compass — {title}</title>
 <style>{css}</style>
 </head>
 <body>
 <div id="compass-viewer-root"></div>
 <script id="compass-viewer-model" type="application/json">{model_json}</script>
+{community_json}
 <script>{javascript}</script>
 </body>
 </html>
@@ -406,6 +432,34 @@ mod tests {
 
         assert_eq!(model.edges[0].relation, "2 cross-community edges");
         assert_eq!(model.edges[0].confidence.as_deref(), Some("aggregated"));
+        Ok(())
+    }
+
+    #[test]
+    fn shared_html_embeds_community_models_as_inert_safe_json()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let model = GraphViewModel {
+            schema: GRAPH_VIEWER_SCHEMA,
+            title: "Overview".to_owned(),
+            stats: GraphViewStats {
+                nodes: 0,
+                edges: 0,
+                communities: 0,
+                aggregated: true,
+            },
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            communities: Vec::new(),
+            hyperedges: Vec::new(),
+        };
+        let mut detail = model.clone();
+        detail.title = "</script><script>alert(1)</script>".to_owned();
+        detail.stats.aggregated = false;
+        let html = shared_viewer_html_with_communities(&model, &BTreeMap::from([(7, detail)]))?;
+
+        assert!(html.contains("data-compass-community=\"7\""));
+        assert!(html.contains("\\u003c/script\\u003e"));
+        assert!(!html.contains("<script>alert(1)</script>"));
         Ok(())
     }
 }

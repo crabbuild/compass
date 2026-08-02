@@ -1,3 +1,3 @@
 # Semantic documentation
 
-[Documented runtime](semantic-documented.rs)
+[Documented runtime](../routes/typescript/express.ts)

@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path};
+use std::time::Instant;
 
 use compass_analysis::{AnalysisBundle, FunctionSummary};
 use compass_files::{write_bytes_atomic, write_json_atomic};
@@ -8,6 +9,7 @@ use compass_ir::{EvidenceRecord, FunctionIr, ModuleIr, ProgramBundle, ProviderDe
 use compass_model::code_graph::GraphDocument as TrustedGraphDocument;
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use prolly::{KeyBuilder, VersionedValue, decode_segments};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -23,7 +25,33 @@ const ANALYSIS_KIND: &[u8] = &[4];
 const METADATA_SCHEMA: &[u8] = &[1];
 const METADATA_KIND: &[u8] = &[5];
 const MOVED_NODE_FIELDS: [&str; 3] = ["community", "community_name", "norm_label"];
+const NODE_COMPATIBILITY_FIELDS: [&str; 14] = [
+    "label",
+    "qualified_name",
+    "file_type",
+    "source_file",
+    "source_location",
+    "line_start",
+    "line_end",
+    "signature",
+    "signature_hash",
+    "implementation_hash",
+    "source_hash",
+    "_origin",
+    "confidence",
+    "community_name",
+];
+const EDGE_COMPATIBILITY_FIELDS: [&str; 6] = [
+    "relation",
+    "source_file",
+    "source_location",
+    "confidence",
+    "confidence_score",
+    "_origin",
+];
 const TRUSTED_GRAPH_CONTENT: &str = ".compass-history/graph.v1.json";
+const PROGRAM_SOURCE_DIGEST_CONTENT: &str = ".compass-history/program.source-digest";
+const SOURCE_INVENTORY_CONTENT: &str = ".compass_source_inventory.json";
 
 /// All authoritative inputs needed to reconstruct a complete Compass output.
 #[derive(Clone, Debug, PartialEq)]
@@ -62,6 +90,22 @@ struct ProgramHeader {
     analyzer_version: u32,
 }
 
+struct LoadedProgram {
+    bundle: Option<AnalysisBundle>,
+    source_digest: Option<[u8; 32]>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub(crate) struct IndexedProgramModule {
+    pub(crate) module: ModuleIr,
+    pub(crate) function_ids: Vec<String>,
+}
+
+pub(crate) enum DecodedProgramModule {
+    Embedded(ModuleIr),
+    Indexed(IndexedProgramModule),
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct DocumentHeader {
     directed: bool,
@@ -70,6 +114,11 @@ struct DocumentHeader {
     extras: BTreeMap<String, Value>,
     graph_hyperedges_present: bool,
     top_hyperedges_present: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct TrustedGraphMarker {
+    schema: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -91,6 +140,25 @@ impl CompletedGraphArtifacts {
     pub fn load(output_dir: &Path, completion: CompletionEvidence) -> Result<Self, HistoryError> {
         completion.validate()?;
         let artifacts = GraphArtifacts::load(output_dir)?;
+        Ok(Self {
+            artifacts,
+            completion,
+        })
+    }
+
+    /// Load completed output for immediate publication validation.
+    ///
+    /// Program canonical and semantic validation is deferred to partitioning,
+    /// where the source digest is checked against the one canonical encoding.
+    /// Callers must not inspect or publish the returned artifacts without first
+    /// passing through the normal history publication path.
+    #[doc(hidden)]
+    pub fn load_for_publication(
+        output_dir: &Path,
+        completion: CompletionEvidence,
+    ) -> Result<Self, HistoryError> {
+        completion.validate()?;
+        let artifacts = GraphArtifacts::load_with_registry_mode(output_dir, &[], false)?;
         Ok(Self {
             artifacts,
             completion,
@@ -124,6 +192,53 @@ impl CompletedGraphArtifacts {
 }
 
 impl GraphArtifacts {
+    /// Construct history artifacts from an already validated typed graph.
+    ///
+    /// This is the in-process counterpart of loading `graph.json`; it retains
+    /// the same compatibility projection and canonical authoritative bytes
+    /// without serializing and deserializing through the filesystem boundary.
+    #[doc(hidden)]
+    pub fn from_trusted(
+        trusted: TrustedGraphDocument,
+        program: Option<AnalysisBundle>,
+        analysis: Option<Value>,
+        manifest: Option<Value>,
+    ) -> Result<Self, HistoryError> {
+        let trusted_bytes = canonical_json_bytes(&serde_json::to_value(&trusted)?)?;
+        let graph = serde_json::to_value(&trusted.graph)?
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        let nodes = trusted
+            .nodes
+            .iter()
+            .map(compat_node)
+            .collect::<Result<Vec<_>, _>>()?;
+        let links = trusted
+            .links
+            .iter()
+            .map(compat_edge)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self {
+            document: GraphDocument {
+                directed: trusted.directed,
+                multigraph: trusted.multigraph,
+                graph,
+                nodes,
+                links,
+                extras: BTreeMap::new(),
+            },
+            program,
+            analysis,
+            labels: None,
+            manifest,
+            authoritative_sidecars: BTreeMap::from([(
+                TRUSTED_GRAPH_CONTENT.to_owned(),
+                trusted_bytes,
+            )]),
+        })
+    }
+
     /// Return the complete deterministic registry for this realization content.
     pub fn artifact_registry(&self) -> Result<Vec<ArtifactRegistryEntry>, HistoryError> {
         artifact_registry(self)
@@ -139,7 +254,7 @@ impl GraphArtifacts {
     pub fn export_sidecars(&self) -> BTreeMap<String, ArtifactContent> {
         self.authoritative_sidecars
             .iter()
-            .filter(|(path, _)| path.as_str() != TRUSTED_GRAPH_CONTENT)
+            .filter(|(path, _)| !is_internal_artifact(path))
             .map(|(path, content)| (path.clone(), content.clone()))
             .collect()
     }
@@ -154,8 +269,18 @@ impl GraphArtifacts {
         output_dir: &Path,
         registry: &[ArtifactRegistryEntry],
     ) -> Result<Self, HistoryError> {
+        Self::load_with_registry_mode(output_dir, registry, true)
+    }
+
+    fn load_with_registry_mode(
+        output_dir: &Path,
+        registry: &[ArtifactRegistryEntry],
+        validate_program: bool,
+    ) -> Result<Self, HistoryError> {
+        let total_started = Instant::now();
         validate_registry_declarations(registry)?;
         let mut authoritative_sidecars = BTreeMap::new();
+        let sidecars_started = Instant::now();
         for entry in registry {
             if entry.class != ArtifactClass::Authoritative
                 || is_builtin_artifact(&entry.relative_path)
@@ -168,17 +293,47 @@ impl GraphArtifacts {
             verify_registry_content(entry, &bytes)?;
             authoritative_sidecars.insert(entry.relative_path.clone(), bytes);
         }
-        let (document, trusted_graph) = load_trusted_graph(&output_dir.join("graph.json"))?;
+        profile_artifact_load("authoritative sidecars", sidecars_started);
+        let graph_path = output_dir.join("graph.json");
+        let program_path = output_dir.join("program.json");
+        let ((document, trusted_graph), program) = {
+            let (graph, program) = rayon::join(
+                || {
+                    let started = Instant::now();
+                    let result = load_trusted_graph(&graph_path);
+                    profile_artifact_load("trusted graph", started);
+                    result
+                },
+                || {
+                    let started = Instant::now();
+                    let result = read_optional_program(&program_path, validate_program);
+                    profile_artifact_load("Program", started);
+                    result
+                },
+            );
+            // Preserve stable error precedence even though both operations run
+            // to completion concurrently.
+            (graph?, program?)
+        };
         authoritative_sidecars.insert(TRUSTED_GRAPH_CONTENT.to_owned(), trusted_graph);
+        if !validate_program && let Some(digest) = program.source_digest {
+            authoritative_sidecars
+                .insert(PROGRAM_SOURCE_DIGEST_CONTENT.to_owned(), digest.to_vec());
+        }
+        let json_sidecars_started = Instant::now();
         let artifacts = Self {
             document,
-            program: read_optional_program(&output_dir.join("program.json"))?,
+            program: program.bundle,
             analysis: read_optional_json(&output_dir.join(".compass_analysis.json"))?,
             labels: read_optional_json(&output_dir.join(".compass_labels.json"))?,
             manifest: read_optional_json(&output_dir.join("manifest.json"))?,
             authoritative_sidecars,
         };
+        profile_artifact_load("JSON sidecars", json_sidecars_started);
+        let registry_started = Instant::now();
         verify_builtin_registry_content(&artifacts, registry)?;
+        profile_artifact_load("artifact registry", registry_started);
+        profile_artifact_load("total", total_started);
         Ok(artifacts)
     }
 
@@ -199,15 +354,31 @@ impl GraphArtifacts {
         validate_sidecar_paths(&self.authoritative_sidecars)?;
         let trusted_graph = self
             .authoritative_sidecars
-            .get(TRUSTED_GRAPH_CONTENT)
-            .map(|bytes| serde_json::from_slice::<TrustedGraphDocument>(bytes))
+            .contains_key(TRUSTED_GRAPH_CONTENT);
+        if !trusted_graph {
+            canonicalize_graph_document(&mut self.document)?;
+        }
+        let program_bytes = self
+            .program
+            .as_ref()
+            .map(AnalysisBundle::canonical_bytes)
             .transpose()?;
-        canonicalize_graph_document(&mut self.document)?;
-        let registry = artifact_registry_from_canonical(&self)?;
+        if let (Some(bytes), Some(source_digest)) = (
+            program_bytes.as_deref(),
+            self.authoritative_sidecars
+                .get(PROGRAM_SOURCE_DIGEST_CONTENT),
+        ) {
+            let canonical_digest: [u8; 32] = Sha256::digest(bytes).into();
+            if source_digest.as_slice() != canonical_digest {
+                return Err(HistoryError::InvalidArtifacts(
+                    "program.json is not canonical".to_owned(),
+                ));
+            }
+        }
+        let registry = artifact_registry_from_canonical(&self, program_bytes.as_deref())?;
         let mut partitioned = PartitionedGraph::default();
 
         if let Some(program) = self.program.take() {
-            program.validate()?;
             let AnalysisBundle {
                 analysis_schema_version,
                 analyzer_version,
@@ -232,76 +403,118 @@ impl GraphArtifacts {
                     })?,
                 )?,
             ));
-            for provider in providers {
-                let key = program_key("provider", &provider.id);
-                partitioned.program_facts.push((
-                    key,
-                    encode_record("compass.program.provider", &serde_json::to_value(provider)?)?,
-                ));
-            }
-            for evidence in evidence {
-                let key = program_key("evidence", &evidence.id);
-                partitioned.program_facts.push((
-                    key,
-                    encode_record("compass.program.evidence", &serde_json::to_value(evidence)?)?,
-                ));
-            }
-            for module in modules {
-                let key = program_key("module", &module.source_file);
-                partitioned.program_facts.push((
-                    key,
-                    encode_record("compass.program.module", &serde_json::to_value(&module)?)?,
-                ));
-                for function in module.functions {
-                    let key = program_key("function", &function.symbol_id);
-                    partitioned.program_facts.push((
+            partitioned.program_facts.extend(
+                providers
+                    .into_par_iter()
+                    .map(|provider| {
+                        Ok((
+                            program_key("provider", &provider.id),
+                            encode_record(
+                                "compass.program.provider",
+                                &serde_json::to_value(provider)?,
+                            )?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, HistoryError>>()?,
+            );
+            partitioned.program_facts.extend(
+                evidence
+                    .into_par_iter()
+                    .map(|evidence| {
+                        Ok((
+                            program_key("evidence", &evidence.id),
+                            encode_record(
+                                "compass.program.evidence",
+                                &serde_json::to_value(evidence)?,
+                            )?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, HistoryError>>()?,
+            );
+            let module_records = modules
+                .into_par_iter()
+                .map(|mut module| {
+                    let key = program_key("module", &module.source_file);
+                    let function_ids = module
+                        .functions
+                        .iter()
+                        .map(|function| function.symbol_id.clone())
+                        .collect();
+                    let functions = std::mem::take(&mut module.functions);
+                    let module_record = (
                         key,
                         encode_record(
-                            "compass.program.function",
-                            &serde_json::to_value(function)?,
+                            "compass.program.module-index",
+                            &serde_json::to_value(IndexedProgramModule {
+                                module,
+                                function_ids,
+                            })?,
                         )?,
-                    ));
-                }
+                    );
+                    let functions = functions
+                        .into_iter()
+                        .map(|function| {
+                            Ok((
+                                program_key("function", &function.symbol_id),
+                                encode_record(
+                                    "compass.program.function",
+                                    &serde_json::to_value(function)?,
+                                )?,
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, HistoryError>>()?;
+                    Ok((module_record, functions))
+                })
+                .collect::<Result<Vec<_>, HistoryError>>()?;
+            for (module, functions) in module_records {
+                partitioned.program_facts.push(module);
+                partitioned.program_facts.extend(functions);
             }
-            for summary in summaries {
-                let key = program_key("summary", &summary.symbol_id);
-                partitioned.program_summaries.push((
-                    key,
-                    encode_record("compass.program.summary", &serde_json::to_value(summary)?)?,
-                ));
-            }
-            for (target, callers) in reverse_calls {
-                partitioned.program_summaries.push((
-                    program_key("reverse-call", &target),
-                    encode_record(
-                        "compass.program.reverse-call",
-                        &serde_json::to_value(callers)?,
-                    )?,
-                ));
-            }
+            partitioned.program_summaries.extend(
+                summaries
+                    .into_par_iter()
+                    .map(|summary| {
+                        Ok((
+                            program_key("summary", &summary.symbol_id),
+                            encode_record(
+                                "compass.program.summary",
+                                &serde_json::to_value(summary)?,
+                            )?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, HistoryError>>()?,
+            );
+            partitioned.program_summaries.extend(
+                reverse_calls
+                    .into_par_iter()
+                    .map(|(target, callers)| {
+                        Ok((
+                            program_key("reverse-call", &target),
+                            encode_record(
+                                "compass.program.reverse-call",
+                                &serde_json::to_value(callers)?,
+                            )?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, HistoryError>>()?,
+            );
         }
 
-        // The owned document was canonicalized before its registry digest was
-        // computed, so records can consume that exact order without retaining
-        // a second graph-sized allocation.
-        if let Some(trusted) = &trusted_graph {
-            for (rank, node) in trusted.nodes.iter().enumerate() {
-                let key = node_key(&node.id);
-                partitioned.nodes.push((
-                    key.clone(),
-                    encode_record("compass.graph.node.v1", &serde_json::to_value(node)?)?,
-                ));
-                partitioned.metadata.push((
-                    metadata_rank_key("node-order", rank)?,
-                    encode_record(
-                        "compass.metadata.order",
-                        &serde_json::to_value(OrderedRecord {
-                            key,
-                            location: None,
-                        })?,
-                    )?,
-                ));
-            }
+        // Strict v1 input was validated in canonical contract order when it
+        // was loaded, so records can consume that order without retaining a
+        // second graph-sized ordering index.
+        if trusted_graph {
+            partitioned.nodes = self
+                .document
+                .nodes
+                .par_iter()
+                .map(|node| {
+                    Ok((
+                        node_key(&node.id),
+                        encode_record("compass.graph.node.v1", &trusted_node_value(node))?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, HistoryError>>()?;
         } else {
             for (rank, mut node) in std::mem::take(&mut self.document.nodes)
                 .into_iter()
@@ -334,30 +547,36 @@ impl GraphArtifacts {
         }
 
         let mut edge_occurrences = BTreeMap::<Vec<u8>, u64>::new();
-        if let Some(trusted) = &trusted_graph {
-            for (rank, edge) in trusted.links.iter().enumerate() {
-                let key = edge_key(
-                    &edge.source,
-                    &edge.target,
-                    edge.kind.as_str(),
-                    true,
-                    Some(edge.id.as_bytes()),
-                );
-                partitioned.edges.push((
-                    key.clone(),
-                    encode_record("compass.graph.edge.v1", &serde_json::to_value(edge)?)?,
-                ));
-                partitioned.metadata.push((
-                    metadata_rank_key("edge-order", rank)?,
-                    encode_record(
-                        "compass.metadata.order",
-                        &serde_json::to_value(OrderedRecord {
-                            key,
-                            location: None,
-                        })?,
-                    )?,
-                ));
-            }
+        if trusted_graph {
+            partitioned.edges = self
+                .document
+                .links
+                .par_iter()
+                .map(|edge| {
+                    let id = edge
+                        .attributes
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            HistoryError::InvalidArtifacts(
+                                "trusted edge has no string id".to_owned(),
+                            )
+                        })?;
+                    let kind = edge
+                        .attributes
+                        .get("kind")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            HistoryError::InvalidArtifacts(
+                                "trusted edge has no string kind".to_owned(),
+                            )
+                        })?;
+                    Ok((
+                        edge_key(&edge.source, &edge.target, kind, true, Some(id.as_bytes())),
+                        encode_record("compass.graph.edge.v1", &trusted_edge_value(edge))?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, HistoryError>>()?;
         } else {
             for (rank, edge) in std::mem::take(&mut self.document.links)
                 .into_iter()
@@ -468,6 +687,17 @@ impl GraphArtifacts {
                 &serde_json::to_value(completion)?,
             )?,
         ));
+        if trusted_graph {
+            partitioned.metadata.push((
+                metadata_key(&[b"trusted-graph"]),
+                encode_record(
+                    "compass.metadata.trusted-graph",
+                    &serde_json::to_value(TrustedGraphMarker {
+                        schema: compass_model::code_graph::CODE_GRAPH_SCHEMA_V1.to_owned(),
+                    })?,
+                )?,
+            ));
+        }
 
         add_optional_analysis(
             &mut partitioned,
@@ -483,6 +713,22 @@ impl GraphArtifacts {
             ));
         }
         for (path, bytes) in std::mem::take(&mut self.authoritative_sidecars) {
+            if is_internal_artifact(&path) {
+                continue;
+            }
+            if path == SOURCE_INVENTORY_CONTENT {
+                let inventory = serde_json::from_slice::<Value>(&bytes)?;
+                if canonical_json_bytes(&inventory)? != bytes {
+                    return Err(HistoryError::InvalidArtifacts(
+                        "source inventory is not canonical JSON".to_owned(),
+                    ));
+                }
+                partitioned.metadata.push((
+                    metadata_key(&[b"source-inventory"]),
+                    encode_record("compass.metadata.source-inventory", &inventory)?,
+                ));
+                continue;
+            }
             let key = metadata_key(&[b"sidecar", path.as_bytes()]);
             partitioned.metadata.push((
                 key,
@@ -511,8 +757,6 @@ impl GraphArtifacts {
     pub fn reconstruct(partitioned: &PartitionedGraph) -> Result<Self, HistoryError> {
         let program =
             reconstruct_program(&partitioned.program_facts, &partitioned.program_summaries)?;
-        let mut nodes = decode_node_map(&partitioned.nodes)?;
-        let mut edges = decode_edge_map(&partitioned.edges)?;
         let mut hyperedges = decode_value_map(&partitioned.hyperedges, "compass.hyperedge")?;
         let mut node_analysis = BTreeMap::<String, Map<String, Value>>::new();
         let mut analysis = None;
@@ -552,22 +796,12 @@ impl GraphArtifacts {
                 }
             }
         }
-        for node in nodes.values_mut() {
-            if let Some(fields) = node_analysis.remove(&node.id) {
-                node.attributes.extend(fields);
-            }
-        }
-        if !node_analysis.is_empty() {
-            return Err(HistoryError::InvalidArtifacts(
-                "analysis references a missing node".to_owned(),
-            ));
-        }
-
         let mut header = None;
         let mut completion = None;
         let mut registry = None;
         let mut manifest = None;
         let mut sidecars = BTreeMap::new();
+        let mut trusted_graph_marker = None;
         let mut node_order = BTreeMap::new();
         let mut edge_order = BTreeMap::new();
         let mut hyperedge_order = BTreeMap::new();
@@ -586,6 +820,31 @@ impl GraphArtifacts {
                         decode_typed(bytes, "compass.metadata.completion")?;
                     evidence.validate()?;
                     completion = Some(evidence);
+                }
+                [_, _, name] if name == b"trusted-graph" => {
+                    let marker: TrustedGraphMarker =
+                        decode_typed(bytes, "compass.metadata.trusted-graph")?;
+                    if marker.schema != compass_model::code_graph::CODE_GRAPH_SCHEMA_V1
+                        || trusted_graph_marker.replace(marker).is_some()
+                    {
+                        return Err(HistoryError::InvalidArtifacts(
+                            "invalid trusted graph marker".to_owned(),
+                        ));
+                    }
+                }
+                [_, _, name] if name == b"source-inventory" => {
+                    let inventory = decode_record(bytes, "compass.metadata.source-inventory")?;
+                    if sidecars
+                        .insert(
+                            SOURCE_INVENTORY_CONTENT.to_owned(),
+                            canonical_json_bytes(&inventory)?,
+                        )
+                        .is_some()
+                    {
+                        return Err(HistoryError::InvalidArtifacts(
+                            "duplicate source inventory".to_owned(),
+                        ));
+                    }
                 }
                 [_, _, name] if name == b"artifact-registry" => {
                     registry = Some(decode_typed::<Vec<ArtifactRegistryEntry>>(
@@ -629,8 +888,63 @@ impl GraphArtifacts {
         let mut header: DocumentHeader = header.ok_or_else(|| {
             HistoryError::InvalidArtifacts("missing document metadata".to_owned())
         })?;
-        let ordered_nodes = restore_order(&mut nodes, node_order, "node")?;
-        let ordered_edges = restore_order(&mut edges, edge_order, "edge")?;
+        let (mut ordered_nodes, trusted_nodes) = if trusted_graph_marker.is_some() {
+            let mut nodes = decode_trusted_node_map(&partitioned.nodes)?;
+            let mut trusted = if node_order.is_empty() {
+                nodes.into_values().collect::<Vec<_>>()
+            } else {
+                restore_order(&mut nodes, node_order, "node")?
+            };
+            trusted.sort_by(|left, right| left.id.cmp(&right.id));
+            let compatible = trusted
+                .iter()
+                .map(compat_node)
+                .collect::<Result<Vec<_>, _>>()?;
+            (compatible, Some(trusted))
+        } else {
+            let mut nodes = decode_node_map(&partitioned.nodes)?;
+            (restore_order(&mut nodes, node_order, "node")?, None)
+        };
+        let (ordered_edges, trusted_edges) = if trusted_graph_marker.is_some() {
+            let mut edges = decode_trusted_edge_map(&partitioned.edges)?;
+            let mut trusted = if edge_order.is_empty() {
+                edges.into_values().collect::<Vec<_>>()
+            } else {
+                restore_order(&mut edges, edge_order, "edge")?
+            };
+            trusted.sort_by(|left, right| {
+                (
+                    left.source.as_str(),
+                    left.kind.as_str(),
+                    left.target.as_str(),
+                    left.key.as_str(),
+                )
+                    .cmp(&(
+                        right.source.as_str(),
+                        right.kind.as_str(),
+                        right.target.as_str(),
+                        right.key.as_str(),
+                    ))
+            });
+            let compatible = trusted
+                .iter()
+                .map(compat_edge)
+                .collect::<Result<Vec<_>, _>>()?;
+            (compatible, Some(trusted))
+        } else {
+            let mut edges = decode_edge_map(&partitioned.edges)?;
+            (restore_order(&mut edges, edge_order, "edge")?, None)
+        };
+        for node in &mut ordered_nodes {
+            if let Some(fields) = node_analysis.remove(&node.id) {
+                node.attributes.extend(fields);
+            }
+        }
+        if !node_analysis.is_empty() {
+            return Err(HistoryError::InvalidArtifacts(
+                "analysis references a missing node".to_owned(),
+            ));
+        }
         let ordered_hyperedges = restore_hyperedge_order(&mut hyperedges, hyperedge_order)?;
         let mut graph_values = Vec::new();
         let mut top_values = Vec::new();
@@ -649,6 +963,28 @@ impl GraphArtifacts {
             header
                 .extras
                 .insert("hyperedges".to_owned(), Value::Array(top_values));
+        }
+        if let (Some(nodes), Some(links)) = (trusted_nodes, trusted_edges) {
+            if header.graph_hyperedges_present
+                || header.top_hyperedges_present
+                || !header.extras.is_empty()
+            {
+                return Err(HistoryError::InvalidArtifacts(
+                    "trusted graph metadata contains unsupported extension fields".to_owned(),
+                ));
+            }
+            let graph = serde_json::from_value(Value::Object(header.graph.clone()))?;
+            let trusted = TrustedGraphDocument {
+                directed: header.directed,
+                multigraph: header.multigraph,
+                graph,
+                nodes,
+                links,
+            };
+            sidecars.insert(
+                TRUSTED_GRAPH_CONTENT.to_owned(),
+                canonical_json_bytes(&serde_json::to_value(trusted)?)?,
+            );
         }
         let restored = Self {
             document: GraphDocument {
@@ -712,7 +1048,7 @@ impl GraphArtifacts {
             write_json_atomic(output_dir.join("manifest.json"), value, false)?;
         }
         for (path, bytes) in &self.authoritative_sidecars {
-            if path == TRUSTED_GRAPH_CONTENT {
+            if is_internal_artifact(path) {
                 continue;
             }
             let destination = output_dir.join(path);
@@ -738,8 +1074,16 @@ fn load_trusted_graph(path: &Path) -> Result<(GraphDocument, Vec<u8>), HistoryEr
         .as_object()
         .cloned()
         .unwrap_or_default();
-    let nodes = trusted.nodes.iter().map(compat_node).collect();
-    let links = trusted.links.iter().map(compat_edge).collect();
+    let nodes = trusted
+        .nodes
+        .iter()
+        .map(compat_node)
+        .collect::<Result<Vec<_>, _>>()?;
+    let links = trusted
+        .links
+        .iter()
+        .map(compat_edge)
+        .collect::<Result<Vec<_>, _>>()?;
     Ok((
         GraphDocument {
             directed: trusted.directed,
@@ -753,27 +1097,77 @@ fn load_trusted_graph(path: &Path) -> Result<(GraphDocument, Vec<u8>), HistoryEr
     ))
 }
 
-fn compat_node(node: &compass_model::code_graph::NodeRecord) -> NodeRecord {
-    NodeRecord {
-        id: node.id.clone(),
-        attributes: node
-            .properties()
-            .filter(|(key, _)| *key != "id")
-            .map(|(key, value)| (key.to_owned(), value))
-            .collect(),
+fn compat_node(node: &compass_model::code_graph::NodeRecord) -> Result<NodeRecord, HistoryError> {
+    let mut object = serde_json::to_value(node)?
+        .as_object()
+        .cloned()
+        .ok_or_else(|| {
+            HistoryError::InvalidArtifacts("trusted node is not an object".to_owned())
+        })?;
+    let id = object
+        .remove("id")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or_else(|| {
+            HistoryError::InvalidArtifacts("trusted node has no string id".to_owned())
+        })?;
+    for (key, value) in node.properties().filter(|(key, _)| *key != "id") {
+        object.entry(key.to_owned()).or_insert(value);
     }
+    Ok(NodeRecord {
+        id,
+        attributes: object,
+    })
 }
 
-fn compat_edge(edge: &compass_model::code_graph::EdgeRecord) -> EdgeRecord {
-    EdgeRecord {
-        source: edge.source.clone(),
-        target: edge.target.clone(),
-        attributes: edge
-            .properties()
-            .filter(|(key, _)| !matches!(*key, "source" | "target"))
-            .map(|(key, value)| (key.to_owned(), value))
-            .collect(),
+fn compat_edge(edge: &compass_model::code_graph::EdgeRecord) -> Result<EdgeRecord, HistoryError> {
+    let mut object = serde_json::to_value(edge)?
+        .as_object()
+        .cloned()
+        .ok_or_else(|| {
+            HistoryError::InvalidArtifacts("trusted edge is not an object".to_owned())
+        })?;
+    let source = object
+        .remove("source")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or_else(|| {
+            HistoryError::InvalidArtifacts("trusted edge has no string source".to_owned())
+        })?;
+    let target = object
+        .remove("target")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or_else(|| {
+            HistoryError::InvalidArtifacts("trusted edge has no string target".to_owned())
+        })?;
+    for (key, value) in edge
+        .properties()
+        .filter(|(key, _)| !matches!(*key, "source" | "target"))
+    {
+        object.entry(key.to_owned()).or_insert(value);
     }
+    Ok(EdgeRecord {
+        source,
+        target,
+        attributes: object,
+    })
+}
+
+fn trusted_node_value(node: &NodeRecord) -> Value {
+    let mut object = node.attributes.clone();
+    for field in NODE_COMPATIBILITY_FIELDS {
+        object.remove(field);
+    }
+    object.insert("id".to_owned(), Value::String(node.id.clone()));
+    Value::Object(object)
+}
+
+fn trusted_edge_value(edge: &EdgeRecord) -> Value {
+    let mut object = edge.attributes.clone();
+    for field in EDGE_COMPATIBILITY_FIELDS {
+        object.remove(field);
+    }
+    object.insert("source".to_owned(), Value::String(edge.source.clone()));
+    object.insert("target".to_owned(), Value::String(edge.target.clone()));
+    Value::Object(object)
 }
 
 #[derive(Serialize)]
@@ -854,19 +1248,19 @@ fn artifact_registry(
     artifacts: &GraphArtifacts,
 ) -> Result<Vec<ArtifactRegistryEntry>, HistoryError> {
     let graph_bytes = authoritative_graph_bytes(artifacts)?;
-    artifact_registry_with_graph_bytes(artifacts, &graph_bytes)
+    artifact_registry_with_graph_bytes(artifacts, &graph_bytes, None)
 }
 
 fn artifact_registry_from_canonical(
     artifacts: &GraphArtifacts,
+    program_bytes: Option<&[u8]>,
 ) -> Result<Vec<ArtifactRegistryEntry>, HistoryError> {
-    let graph_bytes = artifacts
-        .authoritative_sidecars
-        .get(TRUSTED_GRAPH_CONTENT)
-        .cloned()
-        .map(Ok)
-        .unwrap_or_else(|| canonical_json_bytes(&serde_json::to_value(&artifacts.document)?))?;
-    artifact_registry_with_graph_bytes(artifacts, &graph_bytes)
+    if let Some(graph_bytes) = artifacts.authoritative_sidecars.get(TRUSTED_GRAPH_CONTENT) {
+        artifact_registry_with_graph_bytes(artifacts, graph_bytes, program_bytes)
+    } else {
+        let graph_bytes = canonical_json_bytes(&serde_json::to_value(&artifacts.document)?)?;
+        artifact_registry_with_graph_bytes(artifacts, &graph_bytes, program_bytes)
+    }
 }
 
 fn authoritative_graph_bytes(artifacts: &GraphArtifacts) -> Result<Vec<u8>, HistoryError> {
@@ -881,6 +1275,7 @@ fn authoritative_graph_bytes(artifacts: &GraphArtifacts) -> Result<Vec<u8>, Hist
 fn artifact_registry_with_graph_bytes(
     artifacts: &GraphArtifacts,
     graph_bytes: &[u8],
+    program_bytes: Option<&[u8]>,
 ) -> Result<Vec<ArtifactRegistryEntry>, HistoryError> {
     let mut registry = vec![authoritative_entry(
         "graph.json",
@@ -888,10 +1283,17 @@ fn artifact_registry_with_graph_bytes(
         graph_bytes,
     )];
     if let Some(program) = &artifacts.program {
+        let canonical;
+        let bytes = if let Some(program_bytes) = program_bytes {
+            program_bytes
+        } else {
+            canonical = program.canonical_bytes()?;
+            &canonical
+        };
         registry.push(authoritative_entry(
             "program.json",
             "application/json",
-            &program.canonical_bytes()?,
+            bytes,
         ));
     }
     for (path, value) in [
@@ -915,11 +1317,13 @@ fn artifact_registry_with_graph_bytes(
         }
     }
     for (path, bytes) in &artifacts.authoritative_sidecars {
-        if path == TRUSTED_GRAPH_CONTENT {
+        if is_internal_artifact(path) {
             continue;
         }
         let mut entry = authoritative_entry(path, "application/octet-stream", bytes);
-        entry.storage = Some(bytes.clone());
+        if path != SOURCE_INVENTORY_CONTENT {
+            entry.storage = Some(bytes.clone());
+        }
         registry.push(entry);
     }
     for path in [
@@ -1003,6 +1407,10 @@ fn is_builtin_artifact(path: &str) -> bool {
             | ".compass_labels.json"
             | "manifest.json"
     )
+}
+
+fn is_internal_artifact(path: &str) -> bool {
+    matches!(path, TRUSTED_GRAPH_CONTENT | PROGRAM_SOURCE_DIGEST_CONTENT)
 }
 
 fn validate_registry_declarations(registry: &[ArtifactRegistryEntry]) -> Result<(), HistoryError> {
@@ -1244,7 +1652,7 @@ fn reconstruct_program(
     let mut header = None;
     let mut providers = Vec::<ProviderDescriptor>::new();
     let mut evidence = Vec::<EvidenceRecord>::new();
-    let mut modules = Vec::<ModuleIr>::new();
+    let mut modules = Vec::<DecodedProgramModule>::new();
     let mut indexed_functions = BTreeMap::<String, FunctionIr>::new();
     for (key, bytes) in facts {
         let segments = decode_segments(key)
@@ -1286,8 +1694,12 @@ fn reconstruct_program(
                 evidence.push(value);
             }
             b"module" => {
-                let value: ModuleIr = decode_typed(bytes, "compass.program.module")?;
-                if value.source_file != identity {
+                let value = decode_program_module(bytes)?;
+                let source_file = match &value {
+                    DecodedProgramModule::Embedded(module) => &module.source_file,
+                    DecodedProgramModule::Indexed(indexed) => &indexed.module.source_file,
+                };
+                if source_file != identity {
                     return Err(HistoryError::InvalidArtifacts(
                         "program module key does not match its source".to_owned(),
                     ));
@@ -1319,14 +1731,51 @@ fn reconstruct_program(
     }
     let header: ProgramHeader = header
         .ok_or_else(|| HistoryError::InvalidArtifacts("missing program header".to_owned()))?;
-    let module_functions = modules
-        .iter()
-        .flat_map(|module| &module.functions)
-        .map(|function| (function.symbol_id.clone(), function.clone()))
-        .collect::<BTreeMap<_, _>>();
-    if indexed_functions != module_functions {
+    let mut referenced_functions = BTreeSet::new();
+    let modules = modules
+        .into_iter()
+        .map(|stored| match stored {
+            DecodedProgramModule::Embedded(module) => {
+                for function in &module.functions {
+                    let indexed = indexed_functions.get(&function.symbol_id).ok_or_else(|| {
+                        HistoryError::InvalidArtifacts(
+                            "program module references a missing indexed function".to_owned(),
+                        )
+                    })?;
+                    if indexed != function
+                        || !referenced_functions.insert(function.symbol_id.clone())
+                    {
+                        return Err(HistoryError::InvalidArtifacts(
+                            "indexed program functions do not match module contents".to_owned(),
+                        ));
+                    }
+                }
+                Ok(module)
+            }
+            DecodedProgramModule::Indexed(mut indexed) => {
+                indexed.module.functions = indexed
+                    .function_ids
+                    .into_iter()
+                    .map(|symbol_id| {
+                        if !referenced_functions.insert(symbol_id.clone()) {
+                            return Err(HistoryError::InvalidArtifacts(
+                                "program function is indexed by multiple modules".to_owned(),
+                            ));
+                        }
+                        indexed_functions.get(&symbol_id).cloned().ok_or_else(|| {
+                            HistoryError::InvalidArtifacts(
+                                "program module references a missing indexed function".to_owned(),
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(indexed.module)
+            }
+        })
+        .collect::<Result<Vec<_>, HistoryError>>()?;
+    if referenced_functions.len() != indexed_functions.len() {
         return Err(HistoryError::InvalidArtifacts(
-            "indexed program functions do not match module contents".to_owned(),
+            "unreferenced indexed program function".to_owned(),
         ));
     }
     let mut function_summaries = Vec::<FunctionSummary>::new();
@@ -1410,12 +1859,41 @@ pub(crate) fn decode_typed<T: for<'de> Deserialize<'de>>(
     serde_json::from_value(decode_record(bytes, schema)?).map_err(HistoryError::from)
 }
 
+pub(crate) fn decode_program_module(bytes: &[u8]) -> Result<DecodedProgramModule, HistoryError> {
+    let envelope = VersionedValue::from_bytes(bytes)?;
+    envelope.require_schema(&envelope.schema, RECORD_VERSION)?;
+    match envelope.schema.as_str() {
+        "compass.program.module" => Ok(DecodedProgramModule::Embedded(serde_json::from_slice(
+            &envelope.payload,
+        )?)),
+        "compass.program.module-index" => Ok(DecodedProgramModule::Indexed(
+            serde_json::from_slice(&envelope.payload)?,
+        )),
+        schema => Err(HistoryError::InvalidArtifacts(format!(
+            "unsupported program module record schema {schema}"
+        ))),
+    }
+}
+
 fn decode_node_map(
     entries: &[(Vec<u8>, Vec<u8>)],
 ) -> Result<BTreeMap<Vec<u8>, NodeRecord>, HistoryError> {
     entries
         .iter()
         .map(|(key, bytes)| Ok((key.clone(), decode_compatible_node(bytes)?)))
+        .collect()
+}
+
+fn decode_trusted_node_map(
+    entries: &[(Vec<u8>, Vec<u8>)],
+) -> Result<BTreeMap<Vec<u8>, compass_model::code_graph::NodeRecord>, HistoryError> {
+    entries
+        .iter()
+        .map(|(key, bytes)| {
+            let envelope = VersionedValue::from_bytes(bytes)?;
+            envelope.require_schema("compass.graph.node.v1", RECORD_VERSION)?;
+            Ok((key.clone(), serde_json::from_slice(&envelope.payload)?))
+        })
         .collect()
 }
 
@@ -1430,7 +1908,7 @@ pub(crate) fn decode_compatible_node(bytes: &[u8]) -> Result<NodeRecord, History
             envelope.require_schema("compass.graph.node.v1", RECORD_VERSION)?;
             let typed =
                 serde_json::from_slice::<compass_model::code_graph::NodeRecord>(&envelope.payload)?;
-            Ok(compat_node(&typed))
+            Ok(compat_node(&typed)?)
         }
         schema => Err(HistoryError::InvalidArtifacts(format!(
             "unexpected node record schema {schema}"
@@ -1447,6 +1925,19 @@ fn decode_edge_map(
         .collect()
 }
 
+fn decode_trusted_edge_map(
+    entries: &[(Vec<u8>, Vec<u8>)],
+) -> Result<BTreeMap<Vec<u8>, compass_model::code_graph::EdgeRecord>, HistoryError> {
+    entries
+        .iter()
+        .map(|(key, bytes)| {
+            let envelope = VersionedValue::from_bytes(bytes)?;
+            envelope.require_schema("compass.graph.edge.v1", RECORD_VERSION)?;
+            Ok((key.clone(), serde_json::from_slice(&envelope.payload)?))
+        })
+        .collect()
+}
+
 pub(crate) fn decode_compatible_edge(bytes: &[u8]) -> Result<EdgeRecord, HistoryError> {
     let envelope = VersionedValue::from_bytes(bytes)?;
     match envelope.schema.as_str() {
@@ -1458,7 +1949,7 @@ pub(crate) fn decode_compatible_edge(bytes: &[u8]) -> Result<EdgeRecord, History
             envelope.require_schema("compass.graph.edge.v1", RECORD_VERSION)?;
             let typed =
                 serde_json::from_slice::<compass_model::code_graph::EdgeRecord>(&envelope.payload)?;
-            Ok(compat_edge(&typed))
+            Ok(compat_edge(&typed)?)
         }
         schema => Err(HistoryError::InvalidArtifacts(format!(
             "unexpected edge record schema {schema}"
@@ -1580,20 +2071,48 @@ fn read_optional_json(path: &Path) -> Result<Option<Value>, HistoryError> {
     }
 }
 
-fn read_optional_program(path: &Path) -> Result<Option<AnalysisBundle>, HistoryError> {
+fn read_optional_program(
+    path: &Path,
+    validate_canonical: bool,
+) -> Result<LoadedProgram, HistoryError> {
+    let read_started = Instant::now();
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(LoadedProgram {
+                bundle: None,
+                source_digest: None,
+            });
+        }
         Err(source) => return Err(crate::error::io_error(path, source)),
     };
+    profile_artifact_load("Program read", read_started);
+    let decode_started = Instant::now();
     let program: AnalysisBundle = serde_json::from_slice(&bytes)?;
-    let canonical = program.canonical_bytes()?;
-    if canonical != bytes {
-        return Err(HistoryError::InvalidArtifacts(
-            "program.json is not canonical".to_owned(),
-        ));
+    profile_artifact_load("Program deserialize", decode_started);
+    if validate_canonical {
+        let canonical_started = Instant::now();
+        let canonical = program.canonical_bytes()?;
+        profile_artifact_load("Program canonical validation", canonical_started);
+        if canonical != bytes {
+            return Err(HistoryError::InvalidArtifacts(
+                "program.json is not canonical".to_owned(),
+            ));
+        }
     }
-    Ok(Some(program))
+    Ok(LoadedProgram {
+        bundle: Some(program),
+        source_digest: Some(Sha256::digest(&bytes).into()),
+    })
+}
+
+fn profile_artifact_load(name: &str, started: Instant) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!(
+            "[compass history artifact load] {name}: {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
+    }
 }
 
 #[cfg(test)]

@@ -165,6 +165,32 @@ test("community double-click enters lazy detail, source opens, and Back restores
   await expect(page.getByText("Data", { exact: true })).toBeVisible();
 });
 
+test("self-contained HTML export double-clicks from community overview into exact detail", async ({
+  page
+}) => {
+  await page.goto("/exportCommunity.html");
+  await page.evaluate(() => {
+    window.addEventListener("compass:open-community", ((event: CustomEvent) => {
+      (window as typeof window & { openedCommunity?: unknown }).openedCommunity = event.detail;
+    }) as EventListener);
+  });
+  const search = page.getByRole("combobox", { name: "Search graph nodes" });
+  await search.fill("Core");
+  await page.getByRole("option", { name: /Core/i }).click();
+  await page.waitForTimeout(300);
+  await page.locator("canvas").dblclick();
+
+  await expect.poll(() => page.evaluate(
+    () => (window as typeof window & { openedCommunity?: unknown }).openedCommunity
+  )).toEqual({ communityId: 0 });
+  await expect(page.getByRole("button", { name: "Back to community overview" })).toBeVisible();
+  await expect(page.locator(".compass-graph-stats")).toContainText("2 nodes");
+
+  await page.getByRole("button", { name: "Back to community overview" }).click();
+  await expect(page.getByRole("heading", { name: "Communities" })).toBeVisible();
+  await expect(page.getByText("Data", { exact: true })).toBeVisible();
+});
+
 test("community failure preserves the overview and permits retry", async ({
   page
 }) => {

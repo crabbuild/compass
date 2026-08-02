@@ -219,3 +219,56 @@ fn small_change_reuses_content_addressed_nodes() -> Result<(), Box<dyn std::erro
     );
     Ok(())
 }
+
+#[test]
+#[ignore = "performance evidence; requires COMPASS_HISTORY_PERF_ARTIFACTS"]
+fn real_artifact_publication_is_bounded() -> Result<(), Box<dyn std::error::Error>> {
+    let artifacts_path = PathBuf::from(
+        std::env::var_os("COMPASS_HISTORY_PERF_ARTIFACTS")
+            .ok_or("COMPASS_HISTORY_PERF_ARTIFACTS is required")?,
+    );
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("fixture.rs"), "pub struct Fixture;\n")?;
+    commit(directory.path(), "fixture")?;
+
+    let repository = Repository::discover(directory.path())?;
+    let history = HistoryStore::create(&repository)?;
+    let commit = repository.resolve("HEAD")?;
+    let mut profile = compass_history::BuildProfile::default();
+    profile.insert("graph_schema", compass_history::HISTORY_GRAPH_SCHEMA)?;
+    let load_started = Instant::now();
+    let artifacts = GraphArtifacts::load(&artifacts_path)?;
+    let load_elapsed = load_started.elapsed();
+    let publish_started = Instant::now();
+    let published = history.publish(PublishRequest {
+        parents: repository.parents(&commit)?,
+        profile,
+        artifacts,
+        completion: CompletionEvidence {
+            extraction_succeeded: true,
+            allow_partial: false,
+            semantic_files_expected: 0,
+            semantic_files_completed: 0,
+            failed_chunks: 0,
+        },
+        fingerprint: "c".repeat(64).parse()?,
+        commit,
+        make_preferred: true,
+    })?;
+    println!(
+        "real_artifact_load={load_elapsed:?} real_artifact_publish={:?} nodes={} edges={} metadata={} program_facts={} program_summaries={}",
+        publish_started.elapsed(),
+        published.version.node_count,
+        published.version.edge_count,
+        published.version.metadata_count,
+        published.version.program_fact_count,
+        published.version.program_summary_count
+    );
+    Ok(())
+}

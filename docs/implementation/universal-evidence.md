@@ -392,14 +392,16 @@ transition does not alter the publication route of any other language.
 ## Framework-pack status
 
 `FrameworkPackDescriptor` and `FrameworkPackRegistry` define the universal pack
-contract and validate language capabilities, activation evidence, accepted
-roles, relationship families, occurrence policy, and limits. The production
-universal descriptor list is currently empty. Established source, config, and
-template pack registries remain active until their individual hard cutovers.
+contract and validate language capabilities, framework capabilities, activation
+evidence, accepted roles, typed relationship families, occurrence policy, and
+limits. The production registry contains `spring-java`. It derives framework
+meaning only from universal Java evidence and publishes through the shared
+framework resolver. Established source, config, and template packs remain
+active until their individual hard cutovers.
 
-This separation prevents a language hard cutover from implicitly changing
-Rails, Spring, Rust web, ASP.NET, Vapor, TypeScript web, filesystem-route,
-enterprise-domain, config, or template semantics.
+The Java hard cut is limited to Spring's Java-facing behavior. Kotlin Spring,
+Rails, Rust web, ASP.NET, Vapor, TypeScript web, filesystem-route, config, and
+template semantics are unchanged.
 
 ## Verification gates
 

@@ -1097,16 +1097,29 @@ impl GraphDocument {
             return Ok(document);
         }
 
-        let value: Value = serde_json::from_slice(&bytes).map_err(GraphError::Corrupt)?;
-        let found = value
-            .get("graph")
-            .and_then(|graph| graph.get("schema"))
-            .and_then(Value::as_str)
-            .map(str::to_owned);
+        #[derive(Deserialize)]
+        struct SchemaEnvelope {
+            #[serde(default)]
+            graph: Option<SchemaHeader>,
+        }
+
+        #[derive(Deserialize)]
+        struct SchemaHeader {
+            #[serde(default)]
+            schema: Option<String>,
+        }
+
+        // Inspect the version without first allocating a complete generic JSON
+        // tree. Serde skips the large node and edge arrays while retaining the
+        // explicit unsupported-schema diagnostic.
+        let found = serde_json::from_slice::<SchemaEnvelope>(&bytes)
+            .map_err(GraphError::Corrupt)?
+            .graph
+            .and_then(|graph| graph.schema);
         if found.as_deref() != Some(CODE_GRAPH_SCHEMA_V1) {
             return Err(GraphError::UnsupportedGraphSchema { found });
         }
-        let document = serde_json::from_value(value).map_err(GraphError::Corrupt)?;
+        let document = serde_json::from_slice(&bytes).map_err(GraphError::Corrupt)?;
         validate_code_graph(&document)?;
         let _ = write_content_cache(path, &digest, &document);
         Ok(document)

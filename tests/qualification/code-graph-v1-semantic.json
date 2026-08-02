@@ -1368,9 +1368,9 @@
     {
       "id": "edge-type_of",
       "kind": "type_of",
-      "source": "fixtures/code-graph/qualification/rich.rs",
+      "source": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "qualifiedName": "*",
-      "producer": "compass.resolve.rust.universal",
+      "producer": "compass.languages.csharp",
       "origins": [
         "ast"
       ],
@@ -1379,9 +1379,9 @@
     {
       "id": "edge-returns",
       "kind": "returns",
-      "source": "fixtures/code-graph/qualification/rich.rs",
+      "source": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "qualifiedName": "*",
-      "producer": "compass.resolve.rust.universal",
+      "producer": "compass.languages.csharp",
       "origins": [
         "ast"
       ],
@@ -1599,7 +1599,7 @@
   ],
   "languages": {
     "source": "corpus",
-    "producerVersion": "compass-languages/0.1.10"
+    "producerVersion": "compass-languages/0.2.0"
   },
   "occurrences": [
     {

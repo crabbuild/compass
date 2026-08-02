@@ -272,6 +272,42 @@ failure policy. No such analyzer is invoked by the current build pipeline; it
 requires its own process isolation, limits, freshness contract, and
 qualification before it can become a shipped provider.
 
+### Compiler artifact enrichment
+
+Tree-sitter remains the native structural baseline, but an enabled Program
+analysis may also consume offline SCIP evidence. Compiler facts do not replace
+the Java AST and do not independently invent graph relationships. Compass
+projects a compiler-selected Java call target only when all of these
+conditions hold:
+
+- the artifact revision is verified against the current source manifest;
+- Tree-sitter emitted a Java `Calls` or `Constructs` candidate at the exact
+  same repository-relative byte range;
+- the compiler target symbol has exactly one local definition whose identifier
+  range exactly matches one Java declaration;
+- the target declaration kind satisfies the AST candidate; and
+- all compiler providers at the call site agree on the target symbol.
+
+When those conditions hold, the compiler identity may disambiguate overloads
+and replace the structural call edge at that occurrence. The published edge
+keeps the AST wiring site, records artifact origin, and uses the
+`compiler-exact-anchor` rule; `program.json` retains the provider descriptors.
+A stale or unverified artifact, a compiler reference outside an AST-proven
+call, an external-only symbol, or provider disagreement leaves the structural
+result unchanged.
+
+This boundary is intentionally narrower than Program IR merging. SCIP encodes
+symbol references, and Compass's current decoder retains a call-resolution
+fact for each non-definition reference. The exact AST call join is therefore
+the semantic guard that prevents a field read or type reference from becoming
+a call edge.
+
+The projection contract also accepts `Project` provider batches so a future
+bounded `javac`, JDT, or language-server analyzer can reuse the same join and
+failure policy. No such analyzer is invoked by the current build pipeline; it
+requires its own process isolation, limits, freshness contract, and
+qualification before it can become a shipped provider.
+
 ## Established and universal profiles
 
 Profiles describe publication architecture, not implementation quality.
@@ -317,14 +353,13 @@ Framework detection is downstream of language parsing but upstream of final
 Code Graph v1 publication. Packs emit anchored route or domain facts; the
 framework resolver validates targets and materializes typed relationships.
 
-The universal pack descriptor and validator exist, but its production registry
-is currently empty. Python web, Rails, Spring, Go web, Rust web, ASP.NET,
-Vapor, TypeScript web, filesystem-route, enterprise-domain, config, and
-template packs therefore retain their established pack registries today. Each
-pack transitions atomically to the universal interface only after its declared
-activation evidence, accepted roles, target constraints, occurrence policy,
-limits, and language capabilities validate. No established detector is
-silently translated into a universal pack.
+The Java Spring source pack is the first production universal framework pack.
+It consumes exact Java annotation, call, import, type, ownership, and hierarchy
+evidence and derives HTTP, bean, injection, messaging, scheduling, persistence,
+transaction, and security meaning before framework resolution. Its Java legacy
+detectors are removed atomically; Kotlin Spring routing remains on its explicit
+established pack until Kotlin has a universal language adapter. Other packs
+retain their established registries until their own qualification and hard cut.
 
 ## Quality and failure boundaries
 

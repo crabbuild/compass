@@ -175,6 +175,18 @@ test("graph chrome stays flat and token-driven", async ({ page }) => {
     .toHaveCSS("box-shadow", "none");
 });
 
+test("standalone HTML export follows the operating-system light theme", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/exportCommunity.html");
+
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(247, 249, 252)");
+  await expect.poll(() => page.locator(".compass-graph-stage").evaluate((element) =>
+    getComputedStyle(element).getPropertyValue("--compass-canvas").trim()
+  )).toBe("#f4f7fb");
+  await expect(page.getByRole("complementary", { name: "Graph inspector" }))
+    .toHaveCSS("background-color", "rgb(255, 255, 255)");
+});
+
 test("narrow Architecture, Ask Codebase, and Evolution views preserve core actions", async ({
   page
 }) => {

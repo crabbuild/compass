@@ -1945,6 +1945,25 @@ impl<'source> DirectAdapterState<'source> {
             self.add_java_annotations(node, &active)?;
             self.add_java_type_relationships(node, &active)?;
         }
+        if matches!(node.kind(), "field_declaration" | "constant_declaration") {
+            let mut declarators = Vec::new();
+            collect_direct_or_nested_nodes(node, "variable_declarator", &mut declarators);
+            for declarator in declarators {
+                if let Some(field) = self.declarations.get(&declarator.id()).cloned() {
+                    self.add_java_annotations(node, &field)?;
+                    self.add_java_type_relationships(node, &field)?;
+                }
+            }
+        }
+        if matches!(
+            node.kind(),
+            "method_declaration" | "constructor_declaration"
+        ) {
+            self.add_java_parameter_annotations(node, &active)?;
+        }
+        if node.kind() == "annotation_type_element_declaration" {
+            self.add_java_annotations(node, &active)?;
+        }
         match node.kind() {
             "import_declaration" => return Ok(()),
             "method_invocation" => self.add_java_method_call(node, &active)?,
@@ -1990,6 +2009,25 @@ impl<'source> DirectAdapterState<'source> {
                 Some("annotation"),
                 vec!["annotation_type", "interface", "class"],
             )?;
+        }
+        Ok(())
+    }
+
+    fn add_java_parameter_annotations(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(parameters) = node.child_by_field_name("parameters") else {
+            return Ok(());
+        };
+        let mut parameter_nodes = Vec::new();
+        collect_nodes(parameters, "formal_parameter", &mut parameter_nodes);
+        collect_nodes(parameters, "spread_parameter", &mut parameter_nodes);
+        parameter_nodes.sort_by_key(Node::start_byte);
+        parameter_nodes.dedup_by_key(|parameter| parameter.id());
+        for parameter in parameter_nodes {
+            self.add_java_annotations(parameter, owner)?;
         }
         Ok(())
     }
@@ -2042,6 +2080,24 @@ impl<'source> DirectAdapterState<'source> {
                         } else {
                             "interface"
                         }),
+                        vec!["interface", "annotation_type"],
+                    )?;
+                }
+            }
+            if let Some(interfaces) = node.child_by_field_name("extends_interfaces").or_else(|| {
+                let mut cursor = node.walk();
+                node.children(&mut cursor)
+                    .find(|child| child.kind() == "extends_interfaces")
+            }) {
+                let mut names = Vec::new();
+                collect_java_direct_supertype_nodes(interfaces, &mut names);
+                for target in names {
+                    self.add_java_named_relationship(
+                        SemanticRole::BaseType,
+                        CandidateRelation::Extends,
+                        owner,
+                        target,
+                        Some("superinterface"),
                         vec!["interface", "annotation_type"],
                     )?;
                 }

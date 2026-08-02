@@ -1204,6 +1204,49 @@ fn owned_best_effort_publication_sorts_before_assigning_diagnostic_positions()
 }
 
 #[test]
+fn best_effort_diagnostic_positions_sort_by_published_endpoint_identity()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let build = |root: &Path, root_dependent_id: &str| -> Result<_, Box<dyn std::error::Error>> {
+        let edge = |source: &str, target: &str, start| RawEdgeRecord {
+            source: source.to_owned(),
+            target: target.to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("calls")),
+                ("confidence".to_owned(), json!("EXTRACTED")),
+                ("extractor".to_owned(), json!("test.rust")),
+                ("source_anchor".to_owned(), anchor(root, start)),
+            ]),
+        };
+        normalize_v1_best_effort(
+            Extraction {
+                nodes: vec![
+                    raw_node(root, root_dependent_id, "alpha", 10),
+                    raw_node(root, "middle", "middle", 30),
+                    raw_node(root, "target", "target", 50),
+                ],
+                edges: vec![
+                    edge(root_dependent_id, "target", 70),
+                    edge("middle", "missing", 90),
+                ],
+                ..Extraction::default()
+            },
+            build_evidence(root)?,
+        )
+        .map_err(Into::into)
+    };
+    let left_root = directory.path().join("left");
+    let right_root = directory.path().join("right");
+    let left = build(&left_root, "alpha-root-dependent")?;
+    let right = build(&right_root, "zulu-root-dependent")?;
+
+    assert_eq!(left.document, right.document);
+    assert_eq!(left.omissions, right.omissions);
+    assert_eq!(left.omissions.edges, 1);
+    Ok(())
+}
+
+#[test]
 fn best_effort_typed_validation_omits_invalid_endpoint_edges()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
@@ -1463,6 +1506,7 @@ fn sourceless_placeholder_identity_unifies_same_file_occurrences_with_typed_defe
         },
     );
     let mut model = raw_external_node("raw:model", external_name);
+    model.attributes.insert("_origin".to_owned(), json!("ast"));
     model
         .attributes
         .insert("confidence".to_owned(), json!("EXTRACTED"));
@@ -1711,6 +1755,53 @@ fn semantic_external_marker_defers_project_placeholder_edges_for_any_known_produ
             && evidence.rule.as_deref() == Some("external-symbol-placeholder")
             && evidence.wiring_site.is_some()
     }));
+    Ok(())
+}
+
+#[test]
+fn canonical_external_exact_binding_is_published_as_inferred_placeholder()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut external = raw_external_node("raw:blueprint", "flask.Blueprint");
+    external.attributes.extend(Map::from_iter([
+        ("symbol_kind".to_owned(), json!("class")),
+        ("language".to_owned(), json!("python")),
+        (
+            "extractor".to_owned(),
+            json!("compass.resolve.python.universal"),
+        ),
+        ("_origin".to_owned(), json!("ast")),
+        ("confidence".to_owned(), json!("EXTRACTED")),
+        ("_canonical_external_symbol".to_owned(), json!(true)),
+    ]));
+    let graph = Extraction {
+        nodes: vec![raw_file_node(root, "raw:file", "src/lib.rs"), external],
+        edges: vec![raw_php_edge(
+            root,
+            "src/lib.rs",
+            "raw:file",
+            "raw:blueprint",
+            "imports",
+            50,
+        )],
+        ..Extraction::default()
+    };
+
+    let document = normalize_v1(graph, build_evidence(root)?)?;
+    let external = document
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "flask.Blueprint")
+        .ok_or("missing canonical external placeholder")?;
+    assert!(external.evidence.iter().any(|evidence| {
+        evidence.extractor == "compass.graph.external-placeholder"
+            && evidence.origin == EvidenceOrigin::Heuristic
+            && evidence.confidence == EvidenceConfidence::Inferred
+            && evidence.rule.as_deref() == Some("external-symbol-placeholder")
+            && evidence.wiring_site.is_some()
+    }));
+    assert!(document.links.first().is_some_and(|edge| edge.deferred));
     Ok(())
 }
 

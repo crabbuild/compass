@@ -392,6 +392,14 @@ fn declaration_initializers_accept_calls_and_instantiations() {
 fn language_specific_declarations_use_supported_endpoint_shapes() {
     for (kind, source_kind, target_kind) in [
         (EdgeKind::Imports, NodeKind::File, NodeKind::EnumMember),
+        (EdgeKind::Imports, NodeKind::File, NodeKind::Annotation),
+        (EdgeKind::Imports, NodeKind::File, NodeKind::Field),
+        (EdgeKind::References, NodeKind::Method, NodeKind::Annotation),
+        (
+            EdgeKind::References,
+            NodeKind::Annotation,
+            NodeKind::Annotation,
+        ),
         (EdgeKind::References, NodeKind::Method, NodeKind::EnumMember),
         (
             EdgeKind::References,

@@ -13,7 +13,7 @@ pub(super) fn expand_django_includes(
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route.clone()),
-            RawFrameworkFact::Domain(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     let mut by_scope = HashMap::<String, Vec<usize>>::new();

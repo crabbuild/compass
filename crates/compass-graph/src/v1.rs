@@ -42,6 +42,7 @@ const TRUSTED_EDGE_RECORD: &str = TRUSTED_EDGE_RECORD_ATTRIBUTE;
 const TRUSTED_GRAPH_COVERAGE: &str = "_compass_v1_graph_coverage";
 const TRUSTED_GRAPH_DIAGNOSTICS: &str = "_compass_v1_graph_diagnostics";
 const CANONICAL_EXTERNAL_SYMBOL: &str = "_canonical_external_symbol";
+const CANONICAL_RAW_ORDER: &str = "_compass_v1_canonical_raw_order";
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
 const MAX_EXTERNAL_REFERENCE_DIAGNOSTICS: usize = 100;
 
@@ -580,6 +581,11 @@ fn normalize_v1_with_mode(
 ) -> Result<PublicationOutcome, GraphError> {
     let mut profile_started = Instant::now();
     let mut quarantine = QuarantineCollector::default();
+    let canonical_raw_order = extraction
+        .extensions
+        .remove(CANONICAL_RAW_ORDER)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     if let Some(value) = extraction.extensions.remove(TRUSTED_GRAPH_COVERAGE) {
         let mut coverage = serde_json::from_value::<Vec<CoverageRecord>>(value)
             .map_err(|error| raw_error("graph.coverage", &error.to_string()))?;
@@ -612,9 +618,8 @@ fn normalize_v1_with_mode(
     )?;
     profile_v1("v1 preparation", &mut profile_started);
 
-    if mode == PublicationMode::BestEffort {
+    if mode == PublicationMode::BestEffort && !canonical_raw_order {
         extraction.nodes.sort_by_cached_key(raw_node_sort_key);
-        extraction.edges.sort_by_cached_key(raw_edge_sort_key);
     }
     let mut id_remap = HashMap::with_capacity(extraction.nodes.len());
     let mut nodes = HashMap::<String, NodeRecord>::with_capacity(extraction.nodes.len());
@@ -700,6 +705,11 @@ fn normalize_v1_with_mode(
     }
     profile_v1("v1 node normalization", &mut profile_started);
 
+    if mode == PublicationMode::BestEffort && !canonical_raw_order {
+        extraction
+            .edges
+            .sort_by_cached_key(|raw| raw_edge_sort_key(raw, &id_remap, &evidence.repository_root));
+    }
     let mut links = HashMap::<String, EdgeRecord>::with_capacity(extraction.edges.len());
     for (index, raw) in extraction.edges.into_iter().enumerate() {
         let prepared = prepare_edge(
@@ -1264,14 +1274,47 @@ fn raw_node_sort_key(raw: &RawNodeRecord) -> String {
     )
 }
 
-fn raw_edge_sort_key(raw: &RawEdgeRecord) -> String {
+fn raw_edge_sort_key(
+    raw: &RawEdgeRecord,
+    id_remap: &HashMap<String, String>,
+    repository_root: &Path,
+) -> String {
+    let mut attributes = Value::Object(raw.attributes.clone());
+    normalize_raw_sort_paths(&mut attributes, repository_root);
     format!(
         "{}\u{1f}{}\u{1f}{}\u{1f}{}",
-        raw.source,
+        id_remap.get(&raw.source).unwrap_or(&raw.source),
         optional_string(&raw.attributes, "relation").unwrap_or_default(),
-        raw.target,
-        serialized(&raw.attributes)
+        id_remap.get(&raw.target).unwrap_or(&raw.target),
+        serialized(&attributes)
     )
+}
+
+fn normalize_raw_sort_paths(value: &mut Value, repository_root: &Path) {
+    let Value::Object(object) = value else {
+        if let Value::Array(values) = value {
+            for value in values {
+                normalize_raw_sort_paths(value, repository_root);
+            }
+        }
+        return;
+    };
+    let values = std::mem::take(object);
+    let mut sorted = BTreeMap::new();
+    for (key, mut value) in values {
+        if matches!(
+            key.as_str(),
+            "file" | "sourceFile" | "source_file" | "originFile" | "origin_file"
+        ) && let Some(path) = value.as_str()
+            && let Ok(portable) = portable_path(path, repository_root)
+        {
+            value = Value::String(portable);
+        } else {
+            normalize_raw_sort_paths(&mut value, repository_root);
+        }
+        sorted.insert(key, value);
+    }
+    object.extend(sorted);
 }
 
 fn raw_edge_identity(raw: &RawEdgeRecord, index: usize) -> String {
@@ -1864,6 +1907,11 @@ fn mark_external_placeholder(
         "extractor".to_owned(),
         Value::String("compass.graph.external-placeholder".to_owned()),
     );
+    attributes.insert("_origin".to_owned(), Value::String("heuristic".to_owned()));
+    attributes.insert(
+        "confidence".to_owned(),
+        Value::String("INFERRED".to_owned()),
+    );
     if let Some(scope) = stable_scope {
         attributes.insert(
             "external_identity_scope".to_owned(),
@@ -2250,6 +2298,7 @@ fn document_publication_input_owned(
 ) -> Result<(Extraction, BuildEvidence), GraphError> {
     let mut profile_started = Instant::now();
     let mut extensions = Map::new();
+    extensions.insert(CANONICAL_RAW_ORDER.to_owned(), Value::Bool(true));
     if let Some(diagnostics) = document.graph.get(TRUSTED_GRAPH_DIAGNOSTICS) {
         extensions.insert(TRUSTED_GRAPH_DIAGNOSTICS.to_owned(), diagnostics.clone());
     }
@@ -2760,11 +2809,6 @@ fn normalize_node(
     } else {
         None
     };
-    let canonical_external = raw
-        .attributes
-        .get(CANONICAL_EXTERNAL_SYMBOL)
-        .and_then(Value::as_bool)
-        == Some(true);
     if source.is_none()
         && external_wiring_site.is_none()
         && optional_string(&raw.attributes, "extractor").as_deref()
@@ -2867,11 +2911,7 @@ fn normalize_node(
         &qualified_name,
         &raw.id,
         details.as_ref(),
-        if canonical_external {
-            source.as_ref()
-        } else {
-            source.as_ref().or(external_wiring_site.as_ref())
-        },
+        source.as_ref().or(external_wiring_site.as_ref()),
     )?;
     let diagnostics = external_wiring_site
         .as_ref()
@@ -3204,6 +3244,11 @@ fn normalize_provenance(
             ));
         }
     };
+    let confidence = if heuristic_default {
+        EvidenceConfidence::Inferred
+    } else {
+        confidence
+    };
     let rule = optional_string(attributes, "rule")
         .or_else(|| normalization_rule.map(str::to_owned))
         .or_else(|| {
@@ -3238,6 +3283,11 @@ fn normalize_provenance(
                 &format!("unknown provenance origin {value:?}"),
             ));
         }
+    };
+    let origin = if heuristic_default {
+        EvidenceOrigin::Heuristic
+    } else {
+        origin
     };
     let extractor = if raw_origin.as_deref() == Some("semantic") {
         SEMANTIC_LAYER_EXTRACTOR.to_owned()

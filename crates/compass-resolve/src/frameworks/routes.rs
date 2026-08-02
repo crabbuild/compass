@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
 
 use compass_languages::{
     Extraction, FrameworkLimitError, FrameworkLimits, RawEdgeRecord, RawFrameworkAnchor,
@@ -13,7 +14,9 @@ use compass_model::provenance::{
 };
 use serde_json::{Map, Value};
 
-use super::target_index::{FrameworkTargetIndex, TargetFamily, normalize_reference, terminal_name};
+use super::target_index::{
+    FrameworkTargetIndex, TargetFamily, normalize_reference, source_key, terminal_name,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RouteStageRole {
@@ -55,16 +58,17 @@ pub fn resolve_routes(
     limits: FrameworkLimits,
 ) -> Result<Vec<ResolvedRoute>, FrameworkResolutionError> {
     let targets = FrameworkTargetIndex::new(extraction);
-    resolve_routes_with_targets(extraction, limits, &targets)
+    resolve_routes_with_targets(extraction, limits, &targets, None)
 }
 
 pub(super) fn resolve_routes_with_targets(
     extraction: &Extraction,
     limits: FrameworkLimits,
     targets: &FrameworkTargetIndex<'_>,
+    root: Option<&Path>,
 ) -> Result<Vec<ResolvedRoute>, FrameworkResolutionError> {
     validate_fact_limits(extraction, limits)?;
-    let aliases = alias_map(extraction, limits)?;
+    let aliases = alias_map(extraction, limits, root)?;
     let expanded = super::python::expand_django_includes(&extraction.framework_facts, limits)?;
     let mut unique = BTreeMap::new();
     for route in expanded {
@@ -92,7 +96,7 @@ pub(super) fn resolve_routes_with_targets(
 
     unique
         .into_values()
-        .map(|route| resolve_one_route(route, targets, &aliases, limits))
+        .map(|route| resolve_one_route(route, targets, &aliases, limits, root))
         .collect()
 }
 
@@ -190,14 +194,16 @@ fn resolve_one_route(
     targets: &FrameworkTargetIndex<'_>,
     aliases: &super::typescript::ImportAliases,
     limits: FrameworkLimits,
+    root: Option<&Path>,
 ) -> Result<ResolvedRoute, FrameworkResolutionError> {
     let mut stages = Vec::new();
+    let normalized_source = source_key(&route.anchor.source_file, root);
     for (position, reference) in route.middleware_references.iter().enumerate() {
         let candidates = resolve_reference(
             reference,
             &route.framework,
             &route.declaring_scope,
-            &route.anchor.source_file,
+            &normalized_source,
             targets,
             aliases,
             limits,
@@ -228,7 +234,7 @@ fn resolve_one_route(
             signature_reference,
             &route.framework,
             &route.declaring_scope,
-            &route.anchor.source_file,
+            &normalized_source,
             targets,
             aliases,
             limits,
@@ -239,7 +245,7 @@ fn resolve_one_route(
             qualified_reference,
             &route.framework,
             &route.declaring_scope,
-            &route.anchor.source_file,
+            &normalized_source,
             targets,
             aliases,
             limits,
@@ -407,6 +413,7 @@ fn validate_fact_limits(
         let file = match fact {
             RawFrameworkFact::Route(route) => route.anchor.source_file.as_str(),
             RawFrameworkFact::Domain(domain) => domain.anchor.source_file.as_str(),
+            RawFrameworkFact::Annotation(annotation) => annotation.anchor.source_file.as_str(),
         };
         *counts.entry(file).or_default() += 1;
     }
@@ -419,8 +426,9 @@ fn validate_fact_limits(
 fn alias_map(
     extraction: &Extraction,
     limits: FrameworkLimits,
+    root: Option<&Path>,
 ) -> Result<super::typescript::ImportAliases, FrameworkResolutionError> {
-    super::typescript::import_alias_map(extraction, limits)
+    super::typescript::import_alias_map(extraction, limits, root)
 }
 
 fn import_alias<'a>(
@@ -431,7 +439,7 @@ fn import_alias<'a>(
     let split = reference.find(['.', ':']).unwrap_or(reference.len());
     let head = &reference[..split];
     aliases
-        .get(&(portable_path(source_file), head.to_owned()))
+        .get(&(source_file.replace('\\', "/"), head.to_owned()))
         .map(|alias| (&reference[split..], alias))
 }
 
@@ -448,10 +456,6 @@ fn expand_alias(reference: &str, alias: Option<&super::typescript::ImportAlias>)
             format!("{}{}{}", alias.module, imported, &reference[split..])
         },
     )
-}
-
-fn portable_path(path: &str) -> String {
-    path.replace('\\', "/")
 }
 
 fn resolved_stage(
@@ -738,6 +742,85 @@ fn source_anchor(anchor: &RawFrameworkAnchor) -> SourceAnchor {
         start_column: anchor.start_column,
         end_line: anchor.end_line,
         end_column: anchor.end_column,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn portable_route_sources_match_absolute_import_aliases()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let route_source = directory.path().join("src/routes.tsx");
+        let target_source = directory.path().join("src/AccountPage.tsx");
+        let target_id = "account-page".to_owned();
+        let mut extraction = Extraction::default();
+        extraction.nodes.push(RawNodeRecord {
+            id: "account-import".to_owned(),
+            attributes: Map::from_iter([
+                ("local_name".into(), Value::String("AccountAlias".into())),
+                ("imported_name".into(), Value::String("AccountPage".into())),
+                ("module".into(), Value::String("./AccountPage".into())),
+                (
+                    "source_file".into(),
+                    Value::String(route_source.to_string_lossy().into_owned()),
+                ),
+            ]),
+        });
+        extraction.nodes.push(RawNodeRecord {
+            id: target_id.clone(),
+            attributes: Map::from_iter([
+                ("label".into(), Value::String("AccountPage".into())),
+                ("name".into(), Value::String("AccountPage".into())),
+                ("qualified_name".into(), Value::String("AccountPage".into())),
+                ("symbol_kind".into(), Value::String("component".into())),
+                (
+                    "source_file".into(),
+                    Value::String(target_source.to_string_lossy().into_owned()),
+                ),
+            ]),
+        });
+        extraction
+            .framework_facts
+            .push(RawFrameworkFact::Route(RawRouteFact {
+                framework: "react-router".to_owned(),
+                operation: "PAGE".to_owned(),
+                raw_path: "/accounts/:id".to_owned(),
+                normalized_path: "/accounts/{id}".to_owned(),
+                declaring_scope: "src.routes".to_owned(),
+                anchor: RawFrameworkAnchor {
+                    source_file: "src/routes.tsx".to_owned(),
+                    start_byte: 1,
+                    end_byte: 2,
+                    start_line: 1,
+                    start_column: 0,
+                    end_line: 1,
+                    end_column: 1,
+                },
+                handler_reference: "AccountAlias".to_owned(),
+                middleware_references: Vec::new(),
+                origin: RawFrameworkOrigin::Ast,
+                rule: None,
+                detail: Map::new(),
+            }));
+
+        let targets = FrameworkTargetIndex::new_with_root(&extraction, Some(directory.path()));
+        let resolved = resolve_routes_with_targets(
+            &extraction,
+            FrameworkLimits::default(),
+            &targets,
+            Some(directory.path()),
+        )?;
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].state, ResolutionState::Exact);
+        assert_eq!(
+            resolved[0].stages[0].target.as_deref(),
+            Some(target_id.as_str())
+        );
+        Ok(())
     }
 }
 

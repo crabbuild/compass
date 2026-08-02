@@ -1414,7 +1414,7 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
 }
 
 #[test]
-fn qualified_external_python_calls_are_canonical_and_follow_rebindings()
+fn qualified_external_python_calls_are_canonical_internally_and_source_scoped_on_publication()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();

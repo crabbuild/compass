@@ -373,6 +373,15 @@ fn finish_resolution(
     profile_internal("resolver cross-file calls", &mut profile_started);
     members::resolve_language_call_facts(language_facts, &mut merged);
     profile_internal("resolver language calls", &mut profile_started);
+    if let Err(error) = frameworks::expand_universal_framework_facts(&mut merged) {
+        merged
+            .error
+            .get_or_insert_with(|| format!("universal framework expansion failed: {error}"));
+    }
+    profile_internal(
+        "resolver universal framework expansion",
+        &mut profile_started,
+    );
     let (routes, domains) = frameworks::resolve_framework_facts(
         &merged,
         compass_languages::FrameworkLimits::default(),

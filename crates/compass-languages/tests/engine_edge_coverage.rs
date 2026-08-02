@@ -3,9 +3,10 @@ use std::fs;
 
 use compass_languages::{
     CandidateRelation, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL, Engine,
-    ExtractError, FrameworkLimits, FrameworkManifestPolicy, FrameworkOccurrencePolicy,
-    FrameworkPackDescriptor, FrameworkPackKind, FrameworkPackRegistry, FrameworkPackRegistryError,
-    LanguageCapability, Registry, SemanticRole, make_id,
+    ExtractError, FrameworkCapability, FrameworkLimits, FrameworkManifestPolicy,
+    FrameworkOccurrencePolicy, FrameworkPackDescriptor, FrameworkPackKind, FrameworkPackRegistry,
+    FrameworkPackRegistryError, FrameworkRelation, LanguageCapability, Registry, SemanticRole,
+    make_id,
 };
 
 fn valid_universal_framework_pack(id: &'static str) -> FrameworkPackDescriptor {
@@ -14,11 +15,12 @@ fn valid_universal_framework_pack(id: &'static str) -> FrameworkPackDescriptor {
         kind: FrameworkPackKind::Source,
         languages: &["go", "python"],
         required_capabilities: &[LanguageCapability::Calls],
+        framework_capabilities: &[FrameworkCapability::Messaging],
         dependency_markers: &["example/framework"],
         manifest_policy: FrameworkManifestPolicy::Required,
         activation_rules: &["decorated-handler"],
         accepted_roles: &[SemanticRole::Call],
-        emitted_relation_families: &[CandidateRelation::Calls],
+        emitted_relation_families: &[FrameworkRelation::Handles],
         occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
         limits: FrameworkLimits::default(),
     }
@@ -31,7 +33,8 @@ fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
         FrameworkPackRegistry::validate_descriptors(&[descriptor]),
         Ok(())
     );
-    assert!(FrameworkPackRegistry::descriptors().is_empty());
+    assert_eq!(FrameworkPackRegistry::descriptors().len(), 1);
+    assert_eq!(FrameworkPackRegistry::descriptors()[0].id, "spring-java");
     assert_eq!(FrameworkPackRegistry::validate(), Ok(()));
 
     let rust = FrameworkPackDescriptor {
@@ -91,15 +94,26 @@ fn universal_framework_pack_registry_enforces_evidence_activation_and_limits() {
     );
 
     let missing_relation_capability = FrameworkPackDescriptor {
-        emitted_relation_families: &[CandidateRelation::Imports],
+        emitted_relation_families: &[FrameworkRelation::RoutesTo],
         ..descriptor
     };
     assert_eq!(
         FrameworkPackRegistry::validate_descriptors(&[missing_relation_capability]),
         Err(FrameworkPackRegistryError::RelationCapabilityNotDeclared {
             pack: descriptor.id,
-            relation: CandidateRelation::Imports,
+            relation: FrameworkRelation::RoutesTo,
         })
+    );
+
+    let missing_framework_capability = FrameworkPackDescriptor {
+        framework_capabilities: &[],
+        ..descriptor
+    };
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[missing_framework_capability]),
+        Err(FrameworkPackRegistryError::EmptyFrameworkCapabilities(
+            descriptor.id
+        ))
     );
 
     let missing_manifest_evidence = FrameworkPackDescriptor {
@@ -583,12 +597,12 @@ class Consumer:
         })
         .collect::<Vec<_>>();
     assert_eq!(uses.len(), 2, "occurrences={:#?}", evidence.occurrences);
-    assert_eq!(
-        uses.iter()
-            .map(|occurrence| occurrence.range.start_line)
-            .collect::<Vec<_>>(),
-        [3, 5]
-    );
+    let mut use_lines = uses
+        .iter()
+        .map(|occurrence| occurrence.range.start_line)
+        .collect::<Vec<_>>();
+    use_lines.sort_unstable();
+    assert_eq!(use_lines, [3, 5]);
     assert!(uses.iter().all(|occurrence| {
         occurrence.range.start_byte < occurrence.range.end_byte
             && evidence.candidates.iter().any(|candidate| {

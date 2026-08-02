@@ -266,8 +266,7 @@ fn build_from_owned_extraction(
         }
     }
     if source_edges.len() < 100_000 {
-        source_edges
-            .sort_by(|left, right| edge_occurrence_key(left).cmp(&edge_occurrence_key(right)));
+        source_edges.sort_by_key(edge_occurrence_key);
     } else {
         source_edges
             .par_sort_by(|left, right| edge_occurrence_key(left).cmp(&edge_occurrence_key(right)));

@@ -68,7 +68,9 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
         std::fs::read_to_string(destination.join("GRAPH_REPORT.md"))?
             .contains("# Graph Report - fixture")
     );
-    assert!(std::fs::read_to_string(destination.join("graph.html"))?.contains("data-nid"));
+    let graph_html = std::fs::read_to_string(destination.join("graph.html"))?;
+    assert!(graph_html.contains("id=\"compass-viewer-root\""));
+    assert!(!graph_html.contains("<script src="));
     assert!(
         std::fs::read_to_string(destination.join("GRAPH_TREE.html"))?
             .contains("compass tree viewer")

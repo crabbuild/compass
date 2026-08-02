@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::{AdapterRegistry, CandidateRelation, LanguageCapability, SemanticRole};
+use crate::{AdapterRegistry, LanguageCapability, SemanticRole};
 
 use super::FrameworkLimits;
 
@@ -29,6 +29,88 @@ pub enum FrameworkOccurrencePolicy {
     ExactAnchoredHeuristic,
 }
 
+/// Framework meaning a pack is qualified to derive from language evidence.
+///
+/// These capabilities are deliberately separate from `LanguageCapability`:
+/// Java may truthfully emit annotations and ownership without every
+/// annotation consumer being qualified to infer Spring HTTP or bean meaning.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum FrameworkCapability {
+    HttpRoutes,
+    Beans,
+    DependencyInjection,
+    Messaging,
+    Scheduling,
+    Persistence,
+    Transactions,
+    Security,
+}
+
+/// Closed framework relationship vocabulary advertised by a universal pack.
+///
+/// The persisted spelling intentionally matches the Code Graph v1 edge
+/// vocabulary. Pack registration therefore cannot hide a framework relation
+/// behind a language-level `CandidateRelation` such as `Calls`.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum FrameworkRelation {
+    Decorates,
+    RoutesTo,
+    Registers,
+    Handles,
+    Publishes,
+    Subscribes,
+    Produces,
+    Consumes,
+    Schedules,
+    Triggers,
+    DependsOn,
+    MapsTo,
+}
+
+impl FrameworkRelation {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Decorates => "decorates",
+            Self::RoutesTo => "routes_to",
+            Self::Registers => "registers",
+            Self::Handles => "handles",
+            Self::Publishes => "publishes",
+            Self::Subscribes => "subscribes",
+            Self::Produces => "produces",
+            Self::Consumes => "consumes",
+            Self::Schedules => "schedules",
+            Self::Triggers => "triggers",
+            Self::DependsOn => "depends_on",
+            Self::MapsTo => "maps_to",
+        }
+    }
+
+    #[must_use]
+    pub fn is_supported_by(self, capabilities: &[FrameworkCapability]) -> bool {
+        let required = match self {
+            Self::RoutesTo => Some(FrameworkCapability::HttpRoutes),
+            Self::Registers => Some(FrameworkCapability::Beans),
+            Self::DependsOn => Some(FrameworkCapability::DependencyInjection),
+            Self::Handles
+            | Self::Publishes
+            | Self::Subscribes
+            | Self::Produces
+            | Self::Consumes => Some(FrameworkCapability::Messaging),
+            Self::Schedules | Self::Triggers => Some(FrameworkCapability::Scheduling),
+            Self::MapsTo => Some(FrameworkCapability::Persistence),
+            Self::Decorates => None,
+        };
+        required.map_or_else(
+            || {
+                capabilities.contains(&FrameworkCapability::Transactions)
+                    || capabilities.contains(&FrameworkCapability::Security)
+            },
+            |required| capabilities.contains(&required),
+        )
+    }
+}
+
 /// Static contract a framework pack must satisfy before registration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FrameworkPackDescriptor {
@@ -36,11 +118,12 @@ pub struct FrameworkPackDescriptor {
     pub kind: FrameworkPackKind,
     pub languages: &'static [&'static str],
     pub required_capabilities: &'static [LanguageCapability],
+    pub framework_capabilities: &'static [FrameworkCapability],
     pub dependency_markers: &'static [&'static str],
     pub manifest_policy: FrameworkManifestPolicy,
     pub activation_rules: &'static [&'static str],
     pub accepted_roles: &'static [SemanticRole],
-    pub emitted_relation_families: &'static [CandidateRelation],
+    pub emitted_relation_families: &'static [FrameworkRelation],
     pub occurrence_policy: FrameworkOccurrencePolicy,
     pub limits: FrameworkLimits,
 }
@@ -83,14 +166,18 @@ pub enum FrameworkPackRegistryError {
     },
     #[error("framework pack {0:?} must emit at least one relationship family")]
     EmptyRelationFamilies(&'static str),
+    #[error("framework pack {0:?} must declare at least one framework capability")]
+    EmptyFrameworkCapabilities(&'static str),
+    #[error("framework pack {0:?} framework capabilities must be sorted and unique")]
+    InvalidFrameworkCapabilityOrder(&'static str),
     #[error("framework pack {0:?} relationship families must be sorted and unique")]
     InvalidRelationOrder(&'static str),
     #[error(
-        "framework pack {pack:?} emits relationship {relation:?} without its required capability"
+        "framework pack {pack:?} emits relationship {relation:?} without its required framework capability"
     )]
     RelationCapabilityNotDeclared {
         pack: &'static str,
-        relation: CandidateRelation,
+        relation: FrameworkRelation,
     },
     #[error("framework pack {0:?} dependency markers must be non-empty, sorted, and unique")]
     InvalidDependencyMarkers(&'static str),
@@ -181,6 +268,20 @@ fn validate_descriptor(
             descriptor.id,
         ));
     }
+    if descriptor.framework_capabilities.is_empty() {
+        return Err(FrameworkPackRegistryError::EmptyFrameworkCapabilities(
+            descriptor.id,
+        ));
+    }
+    if descriptor
+        .framework_capabilities
+        .windows(2)
+        .any(|pair| pair[0] >= pair[1])
+    {
+        return Err(FrameworkPackRegistryError::InvalidFrameworkCapabilityOrder(
+            descriptor.id,
+        ));
+    }
     if descriptor
         .accepted_roles
         .windows(2)
@@ -214,10 +315,7 @@ fn validate_descriptor(
         }
     }
     for &relation in descriptor.emitted_relation_families {
-        if !descriptor
-            .required_capabilities
-            .contains(&relation.required_capability())
-        {
+        if !relation.is_supported_by(descriptor.framework_capabilities) {
             return Err(FrameworkPackRegistryError::RelationCapabilityNotDeclared {
                 pack: descriptor.id,
                 relation,
@@ -269,4 +367,72 @@ fn validate_strings(values: &[&str]) -> Result<(), ()> {
     Ok(())
 }
 
-const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[];
+pub(super) const SPRING_JAVA_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "spring-java",
+    kind: FrameworkPackKind::Source,
+    languages: &["java"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::LexicalScopes,
+        LanguageCapability::Namespaces,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Construction,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::HttpRoutes,
+        FrameworkCapability::Beans,
+        FrameworkCapability::DependencyInjection,
+        FrameworkCapability::Messaging,
+        FrameworkCapability::Scheduling,
+        FrameworkCapability::Persistence,
+        FrameworkCapability::Transactions,
+        FrameworkCapability::Security,
+    ],
+    dependency_markers: &[
+        "org.springframework.boot:spring-boot",
+        "org.springframework:spring-web",
+    ],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &[
+        "spring-annotation-import",
+        "spring-direct-annotation",
+        "spring-project-dependency",
+    ],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Construction,
+        SemanticRole::Annotation,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[
+        FrameworkRelation::Decorates,
+        FrameworkRelation::RoutesTo,
+        FrameworkRelation::Registers,
+        FrameworkRelation::Handles,
+        FrameworkRelation::Publishes,
+        FrameworkRelation::Subscribes,
+        FrameworkRelation::Produces,
+        FrameworkRelation::Consumes,
+        FrameworkRelation::Schedules,
+        FrameworkRelation::Triggers,
+        FrameworkRelation::DependsOn,
+        FrameworkRelation::MapsTo,
+    ],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits {
+        max_candidates: 20,
+        max_include_depth: 32,
+        max_alias_expansions: 1_000,
+        max_facts_per_file: 100_000,
+    },
+};
+
+const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[SPRING_JAVA_DESCRIPTOR];

@@ -154,6 +154,22 @@ Optional interactive visualization. It may be absent when:
 
 It is not required for query commands.
 
+The document is self-contained and uses the same versioned graph workbench as
+the VS Code extension. It performs no runtime network requests, follows the
+operating system's light or dark color scheme, and retains keyboard, reduced
+motion, narrow-screen, and high-contrast behavior from the shared viewer.
+
+When the node limit selects a community overview, each complete community
+detail is embedded as inert JSON and validated only when opened. Double-click a
+community node (or use **Open community** in the inspector) to enter its member
+graph; use **Overview** to return. Community details preserve internal edges,
+source anchors, and hyperedges, while cross-community edges remain represented
+only in the overview.
+
+The HTML DOM and CSS classes are presentation details, not a compatibility
+contract. Automations should consume `graph.json` or `compass export json`
+instead of scraping the viewer.
+
 ## `manifest.json`
 
 The manifest supports incremental detection and cache compatibility. It
