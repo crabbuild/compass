@@ -37,13 +37,13 @@ export type ArchitectureLayout = {
   lanes: ArchitectureLayoutLane[];
 };
 
-const NODE_WIDTH = 208;
-const NODE_HEIGHT = 72;
-const TOP_GUTTER = 112;
-const BOTTOM_GUTTER = 82;
-const SIDE_GUTTER = 76;
-const MINIMUM_LANE_WIDTH = 248;
-const MINIMUM_ROW_STEP = 96;
+const NODE_WIDTH = 224;
+const NODE_HEIGHT = 76;
+const TOP_GUTTER = 124;
+const BOTTOM_GUTTER = 96;
+const SIDE_GUTTER = 96;
+const MINIMUM_LANE_WIDTH = 288;
+const MINIMUM_ROW_STEP = 112;
 
 export function layoutArchitecture(
   sections: readonly ArchitectureSectionSummary[],
@@ -70,7 +70,7 @@ export function layoutArchitecture(
   );
   const columnCount = visible.length === 1
     ? 1
-    : Math.min(5, Math.max(2, Math.round(Math.sqrt(visible.length))));
+    : Math.min(6, Math.max(2, Math.ceil(Math.sqrt(visible.length))));
   const width = Math.max(
     viewport.width,
     SIDE_GUTTER * 2 + MINIMUM_LANE_WIDTH * columnCount

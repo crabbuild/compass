@@ -33,16 +33,34 @@ const overview: ArchitectureOverview = {
 
 describe("ArchitectureMap", () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: memoryStorage()
+    });
   });
 
   it("renders keyboard-accessible directed routes and a table alternative", () => {
     render(<ArchitectureMap overview={overview} selection={undefined} onSelect={vi.fn()} />);
+    expect(screen.getByRole("region", { name: "Scrollable architecture flow diagram" }))
+      .toHaveAttribute("tabindex", "0");
     expect(screen.getByRole("group", { name: /2 subsystems and 1 directed routes/i }))
       .toBeInTheDocument();
     expect(screen.getByRole("button", { name: /api to storage, 30 calls/i }))
       .toBeInTheDocument();
     expect(screen.getByText("View routes as a table")).toBeInTheDocument();
+  });
+
+  it("keeps an intrinsic canvas width and zooms without fitting it to the panel", () => {
+    render(<ArchitectureMap overview={overview} selection={undefined} onSelect={vi.fn()} />);
+    const map = screen.getByRole("group", { name: /2 subsystems and 1 directed routes/i });
+    const canvas = map.parentElement;
+
+    expect(map).toHaveAttribute("viewBox", expect.stringMatching(/^0 0 1280 /));
+    expect(canvas).toHaveStyle({ width: "1280px" });
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(canvas).toHaveStyle({ width: "1600px" });
+    expect(screen.getByRole("button", { name: "Reset zoom and scroll position" }))
+      .toBeInTheDocument();
   });
 
   it("reports route selection from pointer activation", () => {
@@ -123,4 +141,50 @@ describe("ArchitectureMap", () => {
       name: /19 subsystems and 18 directed routes/i
     })).toBeInTheDocument();
   });
+
+  it("explains an empty filtered architecture instead of leaving a blank canvas", () => {
+    render(
+      <ArchitectureMap
+        overview={{
+          ...overview,
+          sections: overview.sections.map((section) => ({
+            ...section,
+            nodeCount: 0,
+            incomingCalls: 0,
+            outgoingCalls: 0
+          })),
+          routes: []
+        }}
+        selection={undefined}
+        onSelect={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("No architecture to draw")).toBeInTheDocument();
+    expect(screen.getByText(/No subsystems match the current scope/i)).toBeInTheDocument();
+  });
 });
+
+function memoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear() {
+      values.clear();
+    },
+    getItem(key) {
+      return values.get(key) ?? null;
+    },
+    key(index) {
+      return [...values.keys()][index] ?? null;
+    },
+    removeItem(key) {
+      values.delete(key);
+    },
+    setItem(key, value) {
+      values.set(key, value);
+    }
+  };
+}

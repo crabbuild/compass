@@ -98,6 +98,19 @@ describe("layoutArchitecture", () => {
     expect(new Set(columns).size).toBeGreaterThan(2);
   });
 
+  it("gives a large architecture enough horizontal room to remain readable", () => {
+    const denseSections = Array.from({ length: 26 }, (_, index) => ({
+      ...sections[0]!,
+      id: `section-${index}`,
+      name: `Section ${index}`
+    }));
+    const layout = layoutArchitecture(denseSections, []);
+
+    expect(layout.lanes).toHaveLength(6);
+    expect(layout.width).toBeGreaterThan(1800);
+    expect(layout.lanes.every((lane) => lane.width >= 288)).toBe(true);
+  });
+
   it("fans routes across separate card ports instead of stacking every line", () => {
     const destinations = Array.from({ length: 4 }, (_, index) => ({
       ...sections[1]!,

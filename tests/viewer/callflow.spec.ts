@@ -7,6 +7,22 @@ test("architecture and call graph have separate purpose-built views", async ({ p
   await expect(page.getByText("25 subsystem routes")).toBeVisible();
   await expect(page.getByText("16 of 25 routes · Show all")).toBeVisible();
   await expect(page.locator(".architecture-routes > g")).toHaveCount(16);
+
+  const diagram = page.getByRole("region", {
+    name: "Scrollable architecture flow diagram"
+  });
+  const dimensions = await diagram.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth
+  }));
+  expect(dimensions.clientHeight).toBeLessThanOrEqual(720);
+  expect(dimensions.scrollWidth).toBeGreaterThan(dimensions.clientWidth);
+  await diagram.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth;
+  });
+  await expect(diagram).toHaveAttribute("data-scroll-position", "end");
+
   await page.getByRole("button", { name: "All routes" }).click();
   await expect(page.locator(".architecture-routes > g")).toHaveCount(25);
 

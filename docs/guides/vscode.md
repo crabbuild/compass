@@ -69,7 +69,10 @@ body and retry. **Show Compass output** opens the local command diagnostics.
 
 Use **Open Architecture Flow** for the broader subsystem call-flow document,
 cross-community relationships, symbol lists, call tables, confidence, and
-source links.
+source links. The system map keeps a readable canvas size instead of shrinking
+large architectures to the editor width. Scroll horizontally or drag open
+canvas space to follow the full call direction; use the zoom controls, draggable
+subsystem cards, or the route-table alternative for another level of detail.
 
 ## Query
 

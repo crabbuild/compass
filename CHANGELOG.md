@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Give the VS Code Architecture Flow a bounded, horizontally scrollable system
+  canvas with roomier lanes, non-overlapping controls, drag-to-pan navigation,
+  resilient empty states, and a route-table alternative.
+
 ## 0.2.1 - 2026-08-01
 
 - Improve native Python, Rust, Go, Java, TypeScript, and JavaScript graph

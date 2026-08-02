@@ -5,7 +5,8 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent,
-  type PointerEvent
+  type PointerEvent,
+  type UIEvent
 } from "react";
 import {
   Maximize2Icon,
@@ -37,6 +38,7 @@ type DragState = {
 };
 
 type RouteMode = "key" | "complete";
+type ScrollPosition = "start" | "middle" | "end" | "none";
 
 const KEY_ROUTE_LIMIT = 16;
 
@@ -64,11 +66,18 @@ export function ArchitectureMap({
     [overview.routes, overview.sections, positions]
   );
   const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [scrollPosition, setScrollPosition] = useState<ScrollPosition>("none");
   const [routeMode, setRouteMode] = useState<RouteMode>("key");
   const [draggingId, setDraggingId] = useState<string>();
-  const panDrag = useRef<
-    { x: number; y: number; panX: number; panY: number; pointerId: number } | undefined
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const canvasDrag = useRef<
+    {
+      x: number;
+      y: number;
+      scrollLeft: number;
+      scrollTop: number;
+      pointerId: number;
+    } | undefined
   >(undefined);
   const nodeDrag = useRef<DragState | undefined>(undefined);
 
@@ -77,7 +86,7 @@ export function ArchitectureMap({
     positionsRef.current = next;
     setPositions(next);
     setZoom(1);
-    setPan({ x: 0, y: 0 });
+    viewportRef.current?.scrollTo?.({ left: 0, top: 0 });
     setRouteMode("key");
   }, [storageKey]);
 
@@ -103,11 +112,10 @@ export function ArchitectureMap({
   }, [displayedRoutes, selection]);
   const maximumCalls = Math.max(1, ...displayedRoutes.map((route) => route.calls));
   const hiddenRouteCount = layout.routes.length - displayedRoutes.length;
-  const viewWidth = layout.width / zoom;
-  const viewHeight = layout.height / zoom;
-  const viewBox = `${(layout.width - viewWidth) / 2 + pan.x} ${
-    (layout.height - viewHeight) / 2 + pan.y
-  } ${viewWidth} ${viewHeight}`;
+  const canvasSize = {
+    width: Math.round(layout.width * zoom),
+    height: Math.round(layout.height * zoom)
+  };
 
   const activate = (next: Exclude<ArchitectureSelection, undefined>) => {
     onSelect(next);
@@ -140,6 +148,54 @@ export function ArchitectureMap({
       window.localStorage.removeItem(storageKey);
     } catch {
       // Resetting in-memory positions is still sufficient for this session.
+    }
+  };
+  const resetView = () => {
+    setZoom(1);
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    viewportRef.current?.scrollTo?.({
+      left: 0,
+      top: 0,
+      behavior: reduceMotion ? "auto" : "smooth"
+    });
+  };
+  const updateScrollPosition = (target: HTMLDivElement) => {
+    const maximum = Math.max(0, target.scrollWidth - target.clientWidth);
+    const next: ScrollPosition = maximum <= 1
+      ? "none"
+      : target.scrollLeft <= 1
+        ? "start"
+        : target.scrollLeft >= maximum - 1
+          ? "end"
+          : "middle";
+    setScrollPosition((current) => current === next ? current : next);
+  };
+  const onViewportScroll = (event: UIEvent<HTMLDivElement>) => {
+    updateScrollPosition(event.currentTarget);
+  };
+  const startCanvasDrag = (event: PointerEvent<SVGSVGElement>) => {
+    if (event.target !== event.currentTarget || !viewportRef.current) return;
+    canvasDrag.current = {
+      x: event.clientX,
+      y: event.clientY,
+      scrollLeft: viewportRef.current.scrollLeft,
+      scrollTop: viewportRef.current.scrollTop,
+      pointerId: event.pointerId
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const moveCanvas = (event: PointerEvent<SVGSVGElement>) => {
+    const current = canvasDrag.current;
+    const viewport = viewportRef.current;
+    if (!current || !viewport || current.pointerId !== event.pointerId) return;
+    viewport.scrollLeft = current.scrollLeft - (event.clientX - current.x);
+    viewport.scrollTop = current.scrollTop - (event.clientY - current.y);
+  };
+  const finishCanvasDrag = (event: PointerEvent<SVGSVGElement>) => {
+    if (canvasDrag.current?.pointerId !== event.pointerId) return;
+    canvasDrag.current = undefined;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
     }
   };
   const startNodeDrag = (
@@ -203,102 +259,115 @@ export function ArchitectureMap({
     savePositions();
   };
 
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const update = () => updateScrollPosition(viewport);
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [canvasSize.height, canvasSize.width]);
+
   return (
     <section
       className="architecture-map-panel"
-      aria-label="Interactive system map"
+      aria-labelledby="architecture-map-title"
       data-route-mode={routeMode}
     >
-      <div className="architecture-route-mode" role="group" aria-label="Route visibility">
-        <button
-          type="button"
-          aria-pressed={routeMode === "key"}
-          onClick={() => setRouteMode("key")}
-        >
-          Key routes
-        </button>
-        <button
-          type="button"
-          aria-pressed={routeMode === "complete"}
-          onClick={() => setRouteMode("complete")}
-        >
-          All routes
-        </button>
-      </div>
-      <div className="architecture-map-toolbar" aria-label="Map controls">
-        <button
-          type="button"
-          aria-label="Zoom out"
-          onClick={() => setZoom((value) => Math.max(0.75, value - 0.25))}
-        >
-          <MinusIcon aria-hidden="true" />
-        </button>
-        <span>{Math.round(zoom * 100)}%</span>
-        <button
-          type="button"
-          aria-label="Zoom in"
-          onClick={() => setZoom((value) => Math.min(2, value + 0.25))}
-        >
-          <PlusIcon aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          aria-label="Fit architecture map"
-          onClick={() => {
-            setZoom(1);
-            setPan({ x: 0, y: 0 });
-          }}
-        >
-          <Maximize2Icon aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          aria-label="Reset subsystem positions"
-          title="Reset subsystem positions"
-          disabled={Object.keys(positions).length === 0}
-          onClick={resetLayout}
-        >
-          <RotateCcwIcon aria-hidden="true" />
-        </button>
-      </div>
-      {layout.nodes.length > 0 ? (
+      <header className="architecture-map-header">
+        <div className="architecture-map-intro">
+          <span>Flow canvas</span>
+          <strong id="architecture-map-title">Subsystem call direction</strong>
+          <small id="architecture-map-help">
+            Scroll sideways or drag open canvas space to follow the complete architecture.
+          </small>
+        </div>
+        <div className="architecture-map-actions">
+          <div className="architecture-route-mode" role="group" aria-label="Route visibility">
+            <button
+              type="button"
+              aria-pressed={routeMode === "key"}
+              onClick={() => setRouteMode("key")}
+            >
+              Key routes
+            </button>
+            <button
+              type="button"
+              aria-pressed={routeMode === "complete"}
+              onClick={() => setRouteMode("complete")}
+            >
+              All routes
+            </button>
+          </div>
+          <div className="architecture-map-toolbar" aria-label="Map controls">
+            <button
+              type="button"
+              aria-label="Zoom out"
+              onClick={() => setZoom((value) => Math.max(0.75, value - 0.25))}
+            >
+              <MinusIcon aria-hidden="true" />
+            </button>
+            <span aria-live="polite">{Math.round(zoom * 100)}%</span>
+            <button
+              type="button"
+              aria-label="Zoom in"
+              onClick={() => setZoom((value) => Math.min(2, value + 0.25))}
+            >
+              <PlusIcon aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              aria-label="Reset zoom and scroll position"
+              title="Reset zoom and scroll position"
+              onClick={resetView}
+            >
+              <Maximize2Icon aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              aria-label="Reset subsystem positions"
+              title="Reset subsystem positions"
+              disabled={Object.keys(positions).length === 0}
+              onClick={resetLayout}
+            >
+              <RotateCcwIcon aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      </header>
+      <div
+        ref={viewportRef}
+        className="architecture-map-viewport"
+        role="region"
+        aria-label="Scrollable architecture flow diagram"
+        aria-describedby="architecture-map-help"
+        tabIndex={0}
+        data-scroll-position={scrollPosition}
+        onScroll={onViewportScroll}
+      >
+        {layout.nodes.length > 0 ? (
+          <div
+            className="architecture-map-canvas"
+            style={{ width: canvasSize.width, height: canvasSize.height }}
+          >
           <svg
             className="architecture-map"
-            viewBox={viewBox}
+            viewBox={`0 0 ${layout.width} ${layout.height}`}
             role="group"
             aria-label={mapLabel(
               layout.nodes.length,
               displayedRoutes.length,
               layout.routes.length
             )}
-          onPointerDown={(event) => {
-            if (event.target !== event.currentTarget) return;
-            panDrag.current = {
-              x: event.clientX,
-              y: event.clientY,
-              panX: pan.x,
-              panY: pan.y,
-              pointerId: event.pointerId
-            };
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-          onPointerMove={(event) => {
-            if (!panDrag.current || panDrag.current.pointerId !== event.pointerId) return;
-            const scale = viewWidth / event.currentTarget.getBoundingClientRect().width;
-            setPan({
-              x: panDrag.current.panX - (event.clientX - panDrag.current.x) * scale,
-              y: panDrag.current.panY - (event.clientY - panDrag.current.y) * scale
-            });
-          }}
-          onPointerUp={(event) => {
-            if (panDrag.current?.pointerId !== event.pointerId) return;
-            panDrag.current = undefined;
-            event.currentTarget.releasePointerCapture(event.pointerId);
-          }}
-          onPointerCancel={() => {
-            panDrag.current = undefined;
-          }}
-        >
+            onPointerDown={startCanvasDrag}
+            onPointerMove={moveCanvas}
+            onPointerUp={finishCanvasDrag}
+            onPointerCancel={() => {
+              canvasDrag.current = undefined;
+            }}
+          >
           <defs>
             <marker
               id="architecture-arrow"
@@ -487,40 +556,47 @@ export function ArchitectureMap({
               );
             })}
           </g>
-        </svg>
-      ) : (
-        <div className="architecture-map-empty">
-          No subsystems match the current scope and evidence filters.
-        </div>
-      )}
-      <div className="architecture-map-legend" aria-label="Map legend">
-        <span><i data-evidence="extracted" /> Extracted</span>
-        <span><i data-evidence="inferred" /> Inferred</span>
-        <span><i data-direction="incoming" /> Incoming</span>
-        <span><i data-direction="outgoing" /> Outgoing</span>
-        <span><MoveIcon aria-hidden="true" /> Drag cards to arrange</span>
-        {hiddenRouteCount > 0 && (
-          <button type="button" onClick={() => setRouteMode("complete")}>
-            {displayedRoutes.length} of {layout.routes.length} routes · Show all
-          </button>
+            </svg>
+          </div>
+        ) : (
+          <div className="architecture-map-empty">
+            <strong>No architecture to draw</strong>
+            <span>No subsystems match the current scope and evidence filters.</span>
+          </div>
         )}
       </div>
-      <details className="architecture-map-table">
-        <summary>View routes as a table</summary>
-        <table>
-          <thead><tr><th>From</th><th>To</th><th>Calls</th><th>Evidence</th></tr></thead>
-          <tbody>
-            {overview.routes.map((route) => (
-              <tr key={route.id}>
-                <td>{sectionName(overview, route.sourceSection)}</td>
-                <td>{sectionName(overview, route.targetSection)}</td>
-                <td>{route.calls.toLocaleString()}</td>
-                <td>{route.extracted} extracted · {route.inferred} inferred</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
+      <footer className="architecture-map-footer">
+        <div className="architecture-map-legend" aria-label="Map legend">
+          <span><i data-evidence="extracted" /> Extracted</span>
+          <span><i data-evidence="inferred" /> Inferred</span>
+          <span><i data-direction="incoming" /> Incoming</span>
+          <span><i data-direction="outgoing" /> Outgoing</span>
+          <span><MoveIcon aria-hidden="true" /> Drag cards to arrange</span>
+          {hiddenRouteCount > 0 && (
+            <button type="button" onClick={() => setRouteMode("complete")}>
+              {displayedRoutes.length} of {layout.routes.length} routes · Show all
+            </button>
+          )}
+        </div>
+        <details className="architecture-map-table">
+          <summary>View routes as a table</summary>
+          <div>
+            <table>
+              <thead><tr><th>From</th><th>To</th><th>Calls</th><th>Evidence</th></tr></thead>
+              <tbody>
+                {overview.routes.map((route) => (
+                  <tr key={route.id}>
+                    <td>{sectionName(overview, route.sourceSection)}</td>
+                    <td>{sectionName(overview, route.targetSection)}</td>
+                    <td>{route.calls.toLocaleString()}</td>
+                    <td>{route.extracted} extracted · {route.inferred} inferred</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </footer>
     </section>
   );
 }
