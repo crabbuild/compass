@@ -92,6 +92,8 @@ pub struct GraphViewEdge {
     pub relation: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<String>,
+    #[serde(rename = "relationshipSite", skip_serializing_if = "Option::is_none")]
+    pub relationship_site: Option<GraphViewSource>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -165,6 +167,7 @@ pub fn graph_view_model(
             let object = value.as_object()?;
             let source = string(object, "from")?;
             let target = string(object, "to")?;
+            let relationship_site = graph_view_edge_source(edge);
             Some(GraphViewEdge {
                 id: format!("edge-{index}-{source}-{target}"),
                 source,
@@ -179,6 +182,7 @@ pub fn graph_view_model(
                     }
                     .to_owned()
                 }),
+                relationship_site,
             })
         })
         .collect::<Vec<_>>();
@@ -228,6 +232,57 @@ pub fn graph_view_model(
         communities: view_communities,
         hyperedges,
     }
+}
+
+fn graph_view_edge_source(edge: &compass_model::EdgeRecord) -> Option<GraphViewSource> {
+    let relationship_site = edge
+        .attributes
+        .get("relationshipSite")
+        .and_then(Value::as_object);
+    let file = relationship_site
+        .and_then(|site| non_empty(site, "file"))
+        .or_else(|| non_empty(&edge.attributes, "source_file"))?;
+    let (location_start, location_end) = source_line_range(&edge.string("source_location"));
+    Some(GraphViewSource {
+        file,
+        start_line: relationship_site
+            .and_then(|site| unsigned(site, "startLine"))
+            .or_else(|| unsigned(&edge.attributes, "line_start"))
+            .or(location_start),
+        end_line: relationship_site
+            .and_then(|site| unsigned(site, "endLine"))
+            .or_else(|| unsigned(&edge.attributes, "line_end"))
+            .or(location_end)
+            .or(location_start),
+        start_byte: relationship_site
+            .and_then(|site| unsigned(site, "startByte"))
+            .or_else(|| unsigned(&edge.attributes, "start_byte")),
+        end_byte: relationship_site
+            .and_then(|site| unsigned(site, "endByte"))
+            .or_else(|| unsigned(&edge.attributes, "end_byte")),
+    })
+}
+
+fn source_line_range(location: &str) -> (Option<u64>, Option<u64>) {
+    let Some(location) = location.strip_prefix('L') else {
+        return (None, None);
+    };
+    let (start, end) = location
+        .split_once('-')
+        .map_or((location, None), |(start, end)| (start, Some(end)));
+    let line = |value: &str| {
+        value
+            .strip_prefix('L')
+            .unwrap_or(value)
+            .split(':')
+            .next()
+            .and_then(|line| line.parse().ok())
+    };
+    (line(start), end.and_then(line))
+}
+
+fn unsigned(object: &Map<String, Value>, key: &str) -> Option<u64> {
+    object.get(key).and_then(Value::as_u64)
 }
 
 pub fn shared_viewer_html(model: &GraphViewModel) -> Result<String, serde_json::Error> {
@@ -432,6 +487,60 @@ mod tests {
 
         assert_eq!(model.edges[0].relation, "2 cross-community edges");
         assert_eq!(model.edges[0].confidence.as_deref(), Some("aggregated"));
+        assert!(model.edges[0].relationship_site.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn graph_model_preserves_edge_relationship_source_anchor()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "nodes": [
+                {"id": "caller", "label": "caller"},
+                {"id": "callee", "label": "callee"}
+            ],
+            "links": [{
+                "id": "caller-callee",
+                "source": "caller",
+                "target": "callee",
+                "kind": "calls",
+                "relationshipSite": {
+                    "file": "src/main.rs",
+                    "startByte": 142,
+                    "endByte": 150,
+                    "startLine": 7,
+                    "startColumn": 12,
+                    "endLine": 7,
+                    "endColumn": 20
+                },
+                "evidence": [{
+                    "origin": "heuristic",
+                    "confidence": "inferred"
+                }]
+            }]
+        }))?;
+        let communities: Communities =
+            BTreeMap::from([(0, vec!["caller".to_owned(), "callee".to_owned()])]);
+        let model = graph_view_model(
+            &document,
+            &communities,
+            "Relationships",
+            &HtmlOptions::default(),
+            false,
+        );
+
+        assert_eq!(model.edges[0].relation, "calls");
+        assert_eq!(model.edges[0].confidence.as_deref(), Some("inferred"));
+        assert_eq!(
+            serde_json::to_value(&model.edges[0])?["relationshipSite"],
+            json!({
+                "file": "src/main.rs",
+                "startLine": 7,
+                "endLine": 7,
+                "startByte": 142,
+                "endByte": 150
+            })
+        );
         Ok(())
     }
 

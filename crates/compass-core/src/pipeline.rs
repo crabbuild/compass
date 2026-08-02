@@ -116,7 +116,7 @@ pub enum BuildPurpose {
 
 const OUTPUT_STATS_FILE: &str = ".compass_output_stats.json";
 const GRAPH_OVERVIEW_FILE: &str = "graph-overview.json";
-const GRAPH_OVERVIEW_SCHEMA: &str = "compass.graph-overview/1";
+const GRAPH_OVERVIEW_SCHEMA: &str = "compass.graph-overview/2";
 const GRAPH_OVERVIEW_NODE_LIMIT: isize = 5_000;
 const MAX_INCREMENTAL_REMAP_DIAGNOSTICS: usize = 100;
 const INCREMENTAL_REMAP_DROP_DIAGNOSTIC: &str = "dropped_incremental_remap_without_wiring_site";
@@ -4679,7 +4679,7 @@ mod tests {
             "clustered updates should prepare the VS Code graph overview even with --no-viz"
         );
         let overview: Value = serde_json::from_slice(&fs::read(&overview_path)?)?;
-        assert_eq!(overview["schema"], "compass.graph-overview/1");
+        assert_eq!(overview["schema"], "compass.graph-overview/2");
         assert_eq!(overview["nodeLimit"], 5_000);
         assert_eq!(
             overview["sourceGraphBytes"],

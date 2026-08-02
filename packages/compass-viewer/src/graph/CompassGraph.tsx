@@ -18,6 +18,7 @@ import {
 } from "./inspectorLayout";
 import { graphNodeActivation } from "./nodeActivation";
 import { NodeHoverCard, type GraphHover } from "./NodeHoverCard";
+import { navigableRelationshipSource } from "./sourceNavigation";
 import type { GraphSourceRevisions } from "./ChangeEvidence";
 import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
 import {
@@ -139,6 +140,10 @@ function CompassGraphView({
     () => new Map(model.nodes.map((node) => [node.id, node])),
     [model.nodes]
   );
+  const edgeById = useMemo(
+    () => new Map(model.edges.map((edge) => [edge.id, edge])),
+    [model.edges]
+  );
   const selected = state.focusedNodeId
     ? nodeById.get(state.focusedNodeId)
     : undefined;
@@ -221,6 +226,16 @@ function CompassGraphView({
     sourceRevisions?.after,
     sourceRevisions?.before
   ]);
+  const activateRelationship = useCallback((edgeId: string) => {
+    const edge = edgeById.get(edgeId);
+    if (!edge) return;
+    const source = navigableRelationshipSource(edge);
+    if (!source) return;
+    hostRef.current.openSource(
+      source,
+      edge.change === "removed" ? sourceRevisions?.before : sourceRevisions?.after
+    );
+  }, [edgeById, sourceRevisions?.after, sourceRevisions?.before]);
   const status = selected
     ? `Inspecting ${selected.label}`
     : state.physicsRunning ? "Layout running" : "Layout paused";
@@ -263,6 +278,7 @@ function CompassGraphView({
             hiddenChanges={state.hiddenChanges}
             onFocus={focus}
             onOpenSource={activateNode}
+            onOpenRelationshipSource={activateRelationship}
             onHover={setHover}
             onClear={clear}
             onStabilized={handleStabilized}

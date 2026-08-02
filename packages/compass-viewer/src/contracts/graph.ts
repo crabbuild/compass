@@ -55,6 +55,7 @@ export const GraphEdgeSchema = z.object({
   evidence: GraphRecordEvidenceSchema.optional(),
   codeEvidence: z.array(CodeEvidenceSchema).optional(),
   details: CodeEdgeDetailsSchema.nullable().optional(),
+  relationshipSite: SourceLocationSchema.optional(),
   confidence: z.enum([
     "extracted",
     "inferred",

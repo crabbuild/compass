@@ -1,7 +1,14 @@
-import type { GraphNode, SourceLocation } from "../contracts/graph";
+import type { GraphEdge, GraphNode, SourceLocation } from "../contracts/graph";
 
 export function navigableSource(node: GraphNode): SourceLocation | undefined {
-  const source = node.source;
+  return navigableLocation(node.source);
+}
+
+export function navigableRelationshipSource(edge: GraphEdge): SourceLocation | undefined {
+  return navigableLocation(edge.relationshipSite);
+}
+
+function navigableLocation(source: SourceLocation | undefined): SourceLocation | undefined {
   if (!source?.file.trim()) return undefined;
   const located = source.startLine !== undefined
     || source.endLine !== undefined

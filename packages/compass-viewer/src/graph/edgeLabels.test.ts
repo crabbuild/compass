@@ -34,6 +34,27 @@ describe("formatGraphEdgeLabel", () => {
     expect(formatGraphEdgeLabel({ relation: "publishes" })).toBe("publishes");
     expect(formatGraphEdgeLabel({ relation: "maps_to" })).toBe("maps to");
   });
+
+  it("adds the relationship source line when Compass recorded one", () => {
+    expect(formatGraphEdgeLabel({
+      relation: "calls",
+      confidence: "inferred",
+      relationshipSite: {
+        file: "src/main.rs",
+        startLine: 42,
+        endLine: 42
+      }
+    })).toBe("calls [INFERRED] · src/main.rs:42");
+    expect(formatGraphEdgeLabel({
+      relation: "calls",
+      confidence: "extracted",
+      relationshipSite: {
+        file: "src/main.rs",
+        startLine: 42,
+        endLine: 45
+      }
+    })).toBe("calls [EXTRACTED] · src/main.rs:42–45");
+  });
 });
 
 describe("shouldShowGraphEdgeLabel", () => {
