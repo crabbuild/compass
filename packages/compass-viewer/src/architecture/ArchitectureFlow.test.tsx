@@ -95,4 +95,19 @@ describe("ArchitectureFlow", () => {
       .toBeInTheDocument();
   });
 
+  it("shows a useful empty state when a subsystem filter has no symbol matches", () => {
+    render(
+      <ArchitectureFlow
+        overview={overview}
+        sectionPage={{ ...page, total: 0, start: 0, end: 0, items: [] }}
+        routePage={undefined}
+        searchPage={undefined}
+        loadingMessage={undefined}
+        host={host()}
+      />
+    );
+
+    expect(screen.getByText("No symbols match this filter.")).toBeInTheDocument();
+  });
+
 });

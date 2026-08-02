@@ -33,7 +33,9 @@ is found first on `PATH`, Compass stops before running a workflow and offers
 - Start a caller/callee graph from the function under the cursor in any
   call-capable language already represented in the Compass graph. Expand it by
   depth while retaining resolved, inferred, ambiguous, and unresolved calls.
-- Read the broader architecture flow document in a separate editor tab.
+- Read the broader architecture flow document in a separate editor tab, with a
+  horizontally scrollable map, draggable subsystem cards, and a route-table
+  alternative for large systems.
 - Run natural-language queries or deterministic CompassQL.
 - Browse every reachable Git commit with graph states: graph available, not
   materialized, building, or failed.

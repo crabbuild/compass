@@ -5,7 +5,8 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent,
-  type PointerEvent
+  type PointerEvent,
+  type UIEvent
 } from "react";
 import {
   Maximize2Icon,
@@ -37,8 +38,12 @@ type DragState = {
 };
 
 type RouteMode = "key" | "complete";
+type ScrollPosition = "start" | "middle" | "end" | "none";
+type ViewportSize = { width: number; height: number };
+type ArchitectureRoute = ArchitectureOverview["routes"][number];
 
 const KEY_ROUTE_LIMIT = 16;
+const DEFAULT_VIEWPORT_SIZE: ViewportSize = { width: 1280, height: 620 };
 
 export function ArchitectureMap({
   overview,
@@ -59,16 +64,22 @@ export function ArchitectureMap({
     () => loadPositions(storageKey)
   );
   const positionsRef = useRef(positions);
-  const layout = useMemo(
-    () => layoutArchitecture(overview.sections, overview.routes, undefined, positions),
-    [overview.routes, overview.sections, positions]
-  );
   const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [scrollPosition, setScrollPosition] = useState<ScrollPosition>("none");
+  const scrollPositionRef = useRef<ScrollPosition>("none");
+  const maximumScrollRef = useRef(0);
+  const [viewportSize, setViewportSize] = useState(DEFAULT_VIEWPORT_SIZE);
   const [routeMode, setRouteMode] = useState<RouteMode>("key");
   const [draggingId, setDraggingId] = useState<string>();
-  const panDrag = useRef<
-    { x: number; y: number; panX: number; panY: number; pointerId: number } | undefined
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const canvasDrag = useRef<
+    {
+      x: number;
+      y: number;
+      scrollLeft: number;
+      scrollTop: number;
+      pointerId: number;
+    } | undefined
   >(undefined);
   const nodeDrag = useRef<DragState | undefined>(undefined);
 
@@ -77,7 +88,10 @@ export function ArchitectureMap({
     positionsRef.current = next;
     setPositions(next);
     setZoom(1);
-    setPan({ x: 0, y: 0 });
+    scrollPositionRef.current = "start";
+    maximumScrollRef.current = 0;
+    setScrollPosition("start");
+    viewportRef.current?.scrollTo?.({ left: 0, top: 0 });
     setRouteMode("key");
   }, [storageKey]);
 
@@ -85,12 +99,37 @@ export function ArchitectureMap({
     () => selectKeyRoutes(overview.routes, selection),
     [overview.routes, selection]
   );
-  const displayedRoutes = useMemo(
+  const routeDisplay = useMemo(
     () => routeMode === "complete"
-      ? layout.routes
-      : layout.routes.filter((route) => keyRouteIds.has(route.id)),
-    [keyRouteIds, layout.routes, routeMode]
+      ? { routes: overview.routes, reciprocals: new Map<string, ArchitectureRoute>() }
+      : collapseReciprocalRoutes(
+        overview.routes.filter((route) => keyRouteIds.has(route.id)),
+        selection?.kind === "route" ? selection.id : undefined
+      ),
+    [keyRouteIds, overview.routes, routeMode, selection]
   );
+  const routeSummaries = routeDisplay.routes;
+  const displayedSections = useMemo(() => {
+    if (routeMode === "complete" || selection === undefined) return overview.sections;
+    const ids = new Set<string>();
+    if (selection.kind === "section") ids.add(selection.id);
+    for (const route of routeSummaries) {
+      ids.add(route.sourceSection);
+      ids.add(route.targetSection);
+    }
+    return overview.sections.filter((section) => ids.has(section.id));
+  }, [overview.sections, routeMode, routeSummaries, selection]);
+  const layout = useMemo(
+    () => layoutArchitecture(
+      displayedSections,
+      routeSummaries,
+      viewportSize,
+      positions,
+      routeMode === "key" && selection?.kind === "section" ? selection.id : undefined
+    ),
+    [displayedSections, positions, routeMode, routeSummaries, selection, viewportSize]
+  );
+  const displayedRoutes = layout.routes;
   const connected = useMemo(() => {
     if (selection?.kind !== "section") return new Set<string>();
     return new Set(
@@ -102,12 +141,11 @@ export function ArchitectureMap({
     );
   }, [displayedRoutes, selection]);
   const maximumCalls = Math.max(1, ...displayedRoutes.map((route) => route.calls));
-  const hiddenRouteCount = layout.routes.length - displayedRoutes.length;
-  const viewWidth = layout.width / zoom;
-  const viewHeight = layout.height / zoom;
-  const viewBox = `${(layout.width - viewWidth) / 2 + pan.x} ${
-    (layout.height - viewHeight) / 2 + pan.y
-  } ${viewWidth} ${viewHeight}`;
+  const hiddenRouteCount = overview.routes.length - displayedRoutes.length;
+  const canvasSize = {
+    width: Math.round(layout.width * zoom),
+    height: Math.round(layout.height * zoom)
+  };
 
   const activate = (next: Exclude<ArchitectureSelection, undefined>) => {
     onSelect(next);
@@ -140,6 +178,59 @@ export function ArchitectureMap({
       window.localStorage.removeItem(storageKey);
     } catch {
       // Resetting in-memory positions is still sufficient for this session.
+    }
+  };
+  const resetView = () => {
+    setZoom(1);
+    scrollPositionRef.current = "start";
+    maximumScrollRef.current = 0;
+    setScrollPosition("start");
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    viewportRef.current?.scrollTo?.({
+      left: 0,
+      top: 0,
+      behavior: reduceMotion ? "auto" : "smooth"
+    });
+  };
+  const updateScrollPosition = (target: HTMLDivElement) => {
+    const maximum = Math.max(0, target.scrollWidth - target.clientWidth);
+    const next: ScrollPosition = maximum <= 1
+      ? "none"
+      : target.scrollLeft <= 1
+        ? "start"
+        : target.scrollLeft >= maximum - 1
+          ? "end"
+          : "middle";
+    maximumScrollRef.current = maximum;
+    scrollPositionRef.current = next;
+    setScrollPosition((current) => current === next ? current : next);
+  };
+  const onViewportScroll = (event: UIEvent<HTMLDivElement>) => {
+    updateScrollPosition(event.currentTarget);
+  };
+  const startCanvasDrag = (event: PointerEvent<SVGSVGElement>) => {
+    if (event.target !== event.currentTarget || !viewportRef.current) return;
+    canvasDrag.current = {
+      x: event.clientX,
+      y: event.clientY,
+      scrollLeft: viewportRef.current.scrollLeft,
+      scrollTop: viewportRef.current.scrollTop,
+      pointerId: event.pointerId
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const moveCanvas = (event: PointerEvent<SVGSVGElement>) => {
+    const current = canvasDrag.current;
+    const viewport = viewportRef.current;
+    if (!current || !viewport || current.pointerId !== event.pointerId) return;
+    viewport.scrollLeft = current.scrollLeft - (event.clientX - current.x);
+    viewport.scrollTop = current.scrollTop - (event.clientY - current.y);
+  };
+  const finishCanvasDrag = (event: PointerEvent<SVGSVGElement>) => {
+    if (canvasDrag.current?.pointerId !== event.pointerId) return;
+    canvasDrag.current = undefined;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
     }
   };
   const startNodeDrag = (
@@ -203,102 +294,137 @@ export function ArchitectureMap({
     savePositions();
   };
 
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const update = () => {
+      const previousMaximum = maximumScrollRef.current;
+      const maximum = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+      const reachedPreviousEnd = previousMaximum > 1
+        && viewport.scrollLeft >= previousMaximum - 1;
+      if (
+        maximum > previousMaximum
+        && (scrollPositionRef.current === "end" || reachedPreviousEnd)
+      ) {
+        viewport.scrollLeft = maximum;
+      }
+      updateScrollPosition(viewport);
+      if (viewport.clientWidth <= 0 || viewport.clientHeight <= 0) return;
+      const measured = {
+        width: Math.round(viewport.clientWidth),
+        height: Math.round(viewport.clientHeight)
+      };
+      setViewportSize((current) =>
+        current.width === measured.width && current.height === measured.height
+          ? current
+          : measured
+      );
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [canvasSize.height, canvasSize.width]);
+
   return (
     <section
       className="architecture-map-panel"
-      aria-label="Interactive system map"
+      aria-labelledby="architecture-map-title"
       data-route-mode={routeMode}
     >
-      <div className="architecture-route-mode" role="group" aria-label="Route visibility">
-        <button
-          type="button"
-          aria-pressed={routeMode === "key"}
-          onClick={() => setRouteMode("key")}
-        >
-          Key routes
-        </button>
-        <button
-          type="button"
-          aria-pressed={routeMode === "complete"}
-          onClick={() => setRouteMode("complete")}
-        >
-          All routes
-        </button>
-      </div>
-      <div className="architecture-map-toolbar" aria-label="Map controls">
-        <button
-          type="button"
-          aria-label="Zoom out"
-          onClick={() => setZoom((value) => Math.max(0.75, value - 0.25))}
-        >
-          <MinusIcon aria-hidden="true" />
-        </button>
-        <span>{Math.round(zoom * 100)}%</span>
-        <button
-          type="button"
-          aria-label="Zoom in"
-          onClick={() => setZoom((value) => Math.min(2, value + 0.25))}
-        >
-          <PlusIcon aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          aria-label="Fit architecture map"
-          onClick={() => {
-            setZoom(1);
-            setPan({ x: 0, y: 0 });
-          }}
-        >
-          <Maximize2Icon aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          aria-label="Reset subsystem positions"
-          title="Reset subsystem positions"
-          disabled={Object.keys(positions).length === 0}
-          onClick={resetLayout}
-        >
-          <RotateCcwIcon aria-hidden="true" />
-        </button>
-      </div>
-      {layout.nodes.length > 0 ? (
+      <header className="architecture-map-header">
+        <div className="architecture-map-intro">
+          <span>Flow canvas</span>
+          <strong id="architecture-map-title">Subsystem call direction</strong>
+          <small id="architecture-map-help">
+            Scroll sideways or drag open canvas space to follow the complete architecture.
+          </small>
+        </div>
+        <div className="architecture-map-actions">
+          <div className="architecture-route-mode" role="group" aria-label="Route visibility">
+            <button
+              type="button"
+              aria-pressed={routeMode === "key"}
+              onClick={() => setRouteMode("key")}
+            >
+              {selection?.kind === "section" ? "Neighbors" : "Key routes"}
+            </button>
+            <button
+              type="button"
+              aria-pressed={routeMode === "complete"}
+              onClick={() => setRouteMode("complete")}
+            >
+              All routes · {overview.routes.length}
+            </button>
+          </div>
+          <div className="architecture-map-toolbar" aria-label="Map controls">
+            <button
+              type="button"
+              aria-label="Zoom out"
+              onClick={() => setZoom((value) => Math.max(0.75, value - 0.25))}
+            >
+              <MinusIcon aria-hidden="true" />
+            </button>
+            <span aria-live="polite">{Math.round(zoom * 100)}%</span>
+            <button
+              type="button"
+              aria-label="Zoom in"
+              onClick={() => setZoom((value) => Math.min(2, value + 0.25))}
+            >
+              <PlusIcon aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              aria-label="Reset zoom and scroll position"
+              title="Reset zoom and scroll position"
+              onClick={resetView}
+            >
+              <Maximize2Icon aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              aria-label="Reset subsystem positions"
+              title="Reset subsystem positions"
+              disabled={Object.keys(positions).length === 0}
+              onClick={resetLayout}
+            >
+              <RotateCcwIcon aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      </header>
+      <div
+        ref={viewportRef}
+        className="architecture-map-viewport"
+        role="region"
+        aria-label="Scrollable architecture flow diagram"
+        aria-describedby="architecture-map-help"
+        tabIndex={0}
+        data-scroll-position={scrollPosition}
+        onScroll={onViewportScroll}
+      >
+        {layout.nodes.length > 0 ? (
+          <div
+            className="architecture-map-canvas"
+            style={{ width: canvasSize.width, height: canvasSize.height }}
+          >
           <svg
             className="architecture-map"
-            viewBox={viewBox}
+            viewBox={`0 0 ${layout.width} ${layout.height}`}
             role="group"
             aria-label={mapLabel(
               layout.nodes.length,
               displayedRoutes.length,
-              layout.routes.length
+              overview.routes.length
             )}
-          onPointerDown={(event) => {
-            if (event.target !== event.currentTarget) return;
-            panDrag.current = {
-              x: event.clientX,
-              y: event.clientY,
-              panX: pan.x,
-              panY: pan.y,
-              pointerId: event.pointerId
-            };
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-          onPointerMove={(event) => {
-            if (!panDrag.current || panDrag.current.pointerId !== event.pointerId) return;
-            const scale = viewWidth / event.currentTarget.getBoundingClientRect().width;
-            setPan({
-              x: panDrag.current.panX - (event.clientX - panDrag.current.x) * scale,
-              y: panDrag.current.panY - (event.clientY - panDrag.current.y) * scale
-            });
-          }}
-          onPointerUp={(event) => {
-            if (panDrag.current?.pointerId !== event.pointerId) return;
-            panDrag.current = undefined;
-            event.currentTarget.releasePointerCapture(event.pointerId);
-          }}
-          onPointerCancel={() => {
-            panDrag.current = undefined;
-          }}
-        >
+            onPointerDown={startCanvasDrag}
+            onPointerMove={moveCanvas}
+            onPointerUp={finishCanvasDrag}
+            onPointerCancel={() => {
+              canvasDrag.current = undefined;
+            }}
+          >
           <defs>
             <marker
               id="architecture-arrow"
@@ -307,7 +433,7 @@ export function ArchitectureMap({
               markerHeight="8"
               refX="7"
               refY="4"
-              orient="auto"
+              orient="auto-start-reverse"
               markerUnits="userSpaceOnUse"
             >
               <path d="M 0 0 L 8 4 L 0 8 z" />
@@ -319,7 +445,7 @@ export function ArchitectureMap({
               markerHeight="8"
               refX="7"
               refY="4"
-              orient="auto"
+              orient="auto-start-reverse"
               markerUnits="userSpaceOnUse"
             >
               <path d="M 0 0 L 8 4 L 0 8 z" />
@@ -331,7 +457,7 @@ export function ArchitectureMap({
               markerHeight="8"
               refX="7"
               refY="4"
-              orient="auto"
+              orient="auto-start-reverse"
               markerUnits="userSpaceOnUse"
             >
               <path d="M 0 0 L 8 4 L 0 8 z" />
@@ -353,15 +479,16 @@ export function ArchitectureMap({
             ))}
             <text
               className="architecture-map-direction"
-              x={layout.width / 2}
+              x={96}
               y={24}
             >
-              CALL DIRECTION  →
+              PRIMARY CALL DIRECTION  →
             </text>
           </g>
 
           <g className="architecture-routes">
             {displayedRoutes.map((route) => {
+              const reciprocal = routeDisplay.reciprocals.get(route.id);
               const selected = selection?.kind === "route" && selection.id === route.id;
               const related = selected
                 || selection === undefined
@@ -382,9 +509,12 @@ export function ArchitectureMap({
                   key={route.id}
                   role="button"
                   tabIndex={0}
-                  aria-label={`${route.sourceSection} to ${route.targetSection}, ${route.calls} calls`}
+                  aria-label={`${route.sourceSection} to ${route.targetSection}, ${route.calls} calls${
+                    reciprocal ? `; bidirectional, ${reciprocal.calls} reverse calls` : ""
+                  }${route.direction === "backward" ? ", feedback route" : ""}`}
                   data-direction={route.direction}
                   data-evidence={evidence}
+                  data-reciprocal={reciprocal ? "true" : undefined}
                   data-focus-direction={focusDirection}
                   data-selected={selected || undefined}
                   data-dimmed={!related || undefined}
@@ -401,6 +531,7 @@ export function ArchitectureMap({
                       strokeWidth: route.width,
                       "--architecture-route-opacity": opacity
                     } as CSSProperties}
+                    markerStart={reciprocal ? reverseMarker(focusDirection) : undefined}
                     markerEnd={
                       focusDirection === "incoming"
                         ? "url(#architecture-arrow-incoming)"
@@ -411,6 +542,11 @@ export function ArchitectureMap({
                   />
                   <title>
                     {route.sourceSection} → {route.targetSection}: {route.calls} calls
+                    {reciprocal && (
+                      ` · ${reciprocal.sourceSection} → ${reciprocal.targetSection}: ${
+                        reciprocal.calls
+                      } calls`
+                    )}
                   </title>
                 </g>
               );
@@ -487,40 +623,49 @@ export function ArchitectureMap({
               );
             })}
           </g>
-        </svg>
-      ) : (
-        <div className="architecture-map-empty">
-          No subsystems match the current scope and evidence filters.
-        </div>
-      )}
-      <div className="architecture-map-legend" aria-label="Map legend">
-        <span><i data-evidence="extracted" /> Extracted</span>
-        <span><i data-evidence="inferred" /> Inferred</span>
-        <span><i data-direction="incoming" /> Incoming</span>
-        <span><i data-direction="outgoing" /> Outgoing</span>
-        <span><MoveIcon aria-hidden="true" /> Drag cards to arrange</span>
-        {hiddenRouteCount > 0 && (
-          <button type="button" onClick={() => setRouteMode("complete")}>
-            {displayedRoutes.length} of {layout.routes.length} routes · Show all
-          </button>
+            </svg>
+          </div>
+        ) : (
+          <div className="architecture-map-empty">
+            <strong>No architecture to draw</strong>
+            <span>No subsystems match the current scope and evidence filters.</span>
+          </div>
         )}
       </div>
-      <details className="architecture-map-table">
-        <summary>View routes as a table</summary>
-        <table>
-          <thead><tr><th>From</th><th>To</th><th>Calls</th><th>Evidence</th></tr></thead>
-          <tbody>
-            {overview.routes.map((route) => (
-              <tr key={route.id}>
-                <td>{sectionName(overview, route.sourceSection)}</td>
-                <td>{sectionName(overview, route.targetSection)}</td>
-                <td>{route.calls.toLocaleString()}</td>
-                <td>{route.extracted} extracted · {route.inferred} inferred</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
+      <footer className="architecture-map-footer">
+        <div className="architecture-map-legend" aria-label="Map legend">
+          <span><i data-evidence="extracted" /> Extracted</span>
+          <span><i data-evidence="inferred" /> Inferred</span>
+          <span><i data-direction="incoming" /> Incoming</span>
+          <span><i data-direction="outgoing" /> Outgoing</span>
+          <span><i data-direction="bidirectional" aria-hidden="true">↔</i> Bidirectional</span>
+          <span><i data-direction="feedback" /> Feedback</span>
+          <span><MoveIcon aria-hidden="true" /> Drag cards to arrange</span>
+          {hiddenRouteCount > 0 && (
+            <button type="button" onClick={() => setRouteMode("complete")}>
+              {displayedRoutes.length} of {overview.routes.length} routes · Show all
+            </button>
+          )}
+        </div>
+        <details className="architecture-map-table">
+          <summary>View routes as a table</summary>
+          <div>
+            <table>
+              <thead><tr><th>From</th><th>To</th><th>Calls</th><th>Evidence</th></tr></thead>
+              <tbody>
+                {overview.routes.map((route) => (
+                  <tr key={route.id}>
+                    <td>{sectionName(overview, route.sourceSection)}</td>
+                    <td>{sectionName(overview, route.targetSection)}</td>
+                    <td>{route.calls.toLocaleString()}</td>
+                    <td>{route.extracted} extracted · {route.inferred} inferred</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </footer>
     </section>
   );
 }
@@ -583,23 +728,82 @@ function selectKeyRoutes(
     );
   const selected = new Set<string>();
   if (selection?.kind === "route") {
-    selected.add(selection.id);
+    const selectedRoute = routes.find((route) => route.id === selection.id);
+    if (selectedRoute) {
+      selected.add(selectedRoute.id);
+      const reverse = routes.find((route) =>
+        route.sourceSection === selectedRoute.targetSection
+        && route.targetSection === selectedRoute.sourceSection
+      );
+      if (reverse) selected.add(reverse.id);
+    }
+    return selected;
   } else if (selection?.kind === "section") {
     const incoming = strongest(
       routes.filter((route) => route.targetSection === selection.id)
-    ).slice(0, 4);
+    ).slice(0, 6);
     const outgoing = strongest(
       routes.filter((route) => route.sourceSection === selection.id)
-    ).slice(0, 4);
+    ).slice(0, 6);
     for (const route of strongest([...incoming, ...outgoing])) {
       selected.add(route.id);
     }
+    return selected;
   }
   for (const route of strongest(routes)) {
     if (selected.size >= KEY_ROUTE_LIMIT) break;
     selected.add(route.id);
   }
   return selected;
+}
+
+function collapseReciprocalRoutes(
+  routes: readonly ArchitectureRoute[],
+  preferredRouteId?: string
+): { routes: ArchitectureRoute[]; reciprocals: Map<string, ArchitectureRoute> } {
+  const byDirection = new Map(
+    routes.map((route) => [routePairKey(route.sourceSection, route.targetSection), route])
+  );
+  const consumed = new Set<string>();
+  const collapsed: ArchitectureRoute[] = [];
+  const reciprocals = new Map<string, ArchitectureRoute>();
+
+  for (const route of routes) {
+    if (consumed.has(route.id)) continue;
+    const reverse = byDirection.get(
+      routePairKey(route.targetSection, route.sourceSection)
+    );
+    if (!reverse || reverse.id === route.id || consumed.has(reverse.id)) {
+      collapsed.push(route);
+      consumed.add(route.id);
+      continue;
+    }
+    const primary = route.id === preferredRouteId
+      ? route
+      : reverse.id === preferredRouteId
+        ? reverse
+        : route.calls > reverse.calls
+          || (route.calls === reverse.calls && route.id.localeCompare(reverse.id) <= 0)
+          ? route
+          : reverse;
+    const reciprocal = primary.id === route.id ? reverse : route;
+    collapsed.push(primary);
+    reciprocals.set(primary.id, reciprocal);
+    consumed.add(route.id);
+    consumed.add(reverse.id);
+  }
+  collapsed.sort((left, right) => right.calls - left.calls || left.id.localeCompare(right.id));
+  return { routes: collapsed, reciprocals };
+}
+
+function routePairKey(source: string, target: string): string {
+  return `${source}\u0000${target}`;
+}
+
+function reverseMarker(direction: "incoming" | "outgoing" | undefined): string {
+  if (direction === "incoming") return "url(#architecture-arrow-outgoing)";
+  if (direction === "outgoing") return "url(#architecture-arrow-incoming)";
+  return "url(#architecture-arrow)";
 }
 
 function mapLabel(nodes: number, displayedRoutes: number, totalRoutes: number): string {

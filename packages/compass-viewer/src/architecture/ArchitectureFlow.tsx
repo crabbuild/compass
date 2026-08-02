@@ -59,6 +59,15 @@ export function ArchitectureFlow({
   const [inspectorOpen, setInspectorOpen] = useState(true);
 
   useEffect(() => {
+    const selectionExists = selection?.kind === "section"
+      ? overview.sections.some((section) => section.id === selection.id)
+      : selection?.kind === "route"
+        ? overview.routes.some((route) => route.id === selection.id)
+        : false;
+    if (selection && !selectionExists) {
+      setSelection(firstSection ? { kind: "section", id: firstSection.id } : undefined);
+      return;
+    }
     if (!selection && firstSection) {
       setSelection({ kind: "section", id: firstSection.id });
       return;
@@ -68,7 +77,7 @@ export function ArchitectureFlow({
     } else if (selection?.kind === "route") {
       host.requestRoute(selection.id, 1, detailQuery);
     }
-  }, [detailQuery, firstSection, host, sectionTab, selection]);
+  }, [detailQuery, firstSection, host, overview.routes, overview.sections, sectionTab, selection]);
 
   const selectedSection = selection?.kind === "section"
     ? overview.sections.find((section) => section.id === selection.id)
@@ -335,7 +344,7 @@ function SectionInspector({
       </div>
       <DetailFilter value={query} onChange={onQuery} />
       <div className="architecture-inspector-scroll">
-        {!page ? <LoadingRows /> : page.kind === "symbols" ? (
+        {!page ? <LoadingRows /> : page.kind === "symbols" && page.items.length > 0 ? (
           <div className="architecture-symbol-list">
             {page.items.map((symbol) => (
               <article key={symbol.id}>
@@ -352,8 +361,12 @@ function SectionInspector({
               </article>
             ))}
           </div>
-        ) : (
+        ) : page.kind === "calls" ? (
           <CallList calls={page.items} onOpenSource={onOpenSource} />
+        ) : (
+          <div className="architecture-inspector-empty">
+            No symbols match this filter.
+          </div>
         )}
       </div>
       {page && (
@@ -473,7 +486,11 @@ function DetailFilter({
 
 function LoadingRows() {
   return (
-    <div className="architecture-loading-rows" aria-label="Loading architecture details">
+    <div
+      className="architecture-loading-rows"
+      role="status"
+      aria-label="Loading architecture details"
+    >
       <i /><i /><i /><i />
     </div>
   );
