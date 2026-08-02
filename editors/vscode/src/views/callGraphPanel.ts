@@ -1,14 +1,10 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import * as vscode from "vscode";
-import { CallGraphResponseSchema } from "@compass/viewer/contracts/callGraph";
 import type { CallDirection } from "@compass/viewer/contracts/callGraph";
 import type { RepositorySession } from "../workspace/repositorySession";
-import {
-  callGraphCommandArguments,
-  callGraphExpansionArguments,
-  callGraphRootArguments
-} from "./callGraphArguments";
+import { callGraphExpansionArguments, callGraphRootArguments } from "./callGraphArguments";
+import { runCallGraph } from "./callGraphClient";
 import { utf8ByteAt } from "./cursorByte";
 import { openGraphSource } from "./sourceNavigation";
 
@@ -20,12 +16,15 @@ export class CallGraphPanel {
     output: vscode.OutputChannel,
     initialDirection: CallDirection = "both"
   ): Promise<void> {
-    const relative = path.relative(session.root, editor.document.uri.fsPath)
-      .split(path.sep)
-      .join("/");
-    if (relative.startsWith("../")) {
+    const relativePath = path.relative(session.root, editor.document.uri.fsPath);
+    if (
+      path.isAbsolute(relativePath)
+      || relativePath === ".."
+      || relativePath.startsWith(`..${path.sep}`)
+    ) {
       throw new Error("The active editor is outside the selected Compass repository.");
     }
+    const relative = relativePath.split(path.sep).join("/");
     const byte = utf8ByteAt(editor.document, editor.selection.active);
     const line = editor.selection.active.line + 1;
     const panel = vscode.window.createWebviewPanel(
@@ -91,13 +90,7 @@ export class CallGraphPanel {
       const abort = () => controller.abort();
       panelController.signal.addEventListener("abort", abort, { once: true });
       try {
-        const graphArgs = callGraphCommandArguments(rootArgs, session.graphPath);
-        const graph = await session.processes.runJson(
-          session.root,
-          graphArgs,
-          CallGraphResponseSchema,
-          controller.signal
-        );
+        const graph = await runCallGraph(session, rootArgs, controller.signal);
         if (generation !== rootGeneration || controller.signal.aborted) return;
         await panel.webview.postMessage({
           type,

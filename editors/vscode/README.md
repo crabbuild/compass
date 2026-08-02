@@ -81,7 +81,7 @@ guide opens and returns to that exact cursor when an action is selected.
 
 1. Open an indexed source file and place the cursor anywhere inside a function
    or method body.
-2. Right-click in the editor and choose **Compass Call Graph**.
+2. Right-click in the editor and choose **Compass**.
 3. Choose **Show Callers**, **Show Callees**, or **Show Callers & Callees**.
 4. In the graph tab, use **Callers**, **Both**, and **Callees** to switch
    direction without returning to the editor. Use an **Expand** action to trace
@@ -95,6 +95,12 @@ identifies structural-only or combined evidence and says when results are
 partial. An empty direction means that Compass found the function but has no
 represented relationship in that direction; it does not prove no runtime call
 exists.
+
+The same **Compass** editor menu includes **Show Change Impact**, **Explore
+Related Symbols**, and **Show Node Trail**. Compass resolves the graph identity
+at the cursor automatically. Impact and related-symbol results open as focused
+graphs containing only the returned nodes and relationships. Node trail uses
+the cursor as its source and asks only for the destination.
 
 Compass discovers the CLI automatically from the configured location, `PATH`,
 and common user-local install directories. When it is missing, **Set up

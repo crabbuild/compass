@@ -1,3 +1,4 @@
+import path from "node:path";
 import * as vscode from "vscode";
 import type { CallDirection } from "@compass/viewer/contracts/callGraph";
 import {
@@ -22,6 +23,9 @@ import {
   type CodeQueryRequest
 } from "./views/codeQueryClient";
 import { CallGraphPanel } from "./views/callGraphPanel";
+import { callGraphRootArguments } from "./views/callGraphArguments";
+import { runCallGraph } from "./views/callGraphClient";
+import { utf8ByteAt } from "./views/cursorByte";
 import { openCallGraphGuidePanel } from "./views/callGraphGuidePanel";
 import { openArchitecturePanel } from "./views/architecturePanel";
 import { openQueryPanel } from "./views/queryPanel";
@@ -323,6 +327,48 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (candidate?.trim()) return candidate.trim();
     }
     const editor = vscode.window.activeTextEditor;
+    const session = registry.forEditor(editor);
+    if (editor && session) {
+      if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.calls)) return undefined;
+      if (session.graphState !== "available") {
+        const action = await vscode.window.showInformationMessage(
+          "Build the Compass code graph before resolving the symbol under the cursor.",
+          "Rebuild with Compass"
+        );
+        if (action === "Rebuild with Compass") {
+          await vscode.commands.executeCommand("compass.update", session.id);
+        }
+        return undefined;
+      }
+      const relativePath = path.relative(session.root, editor.document.uri.fsPath);
+      if (
+        path.isAbsolute(relativePath)
+        || relativePath === ".."
+        || relativePath.startsWith(`..${path.sep}`)
+      ) {
+        void vscode.window.showErrorMessage(
+          "The active editor is outside the selected Compass repository."
+        );
+        return undefined;
+      }
+      const relative = relativePath.split(path.sep).join("/");
+      try {
+        const response = await runCallGraph(
+          session,
+          callGraphRootArguments({
+            file: relative,
+            byte: utf8ByteAt(editor.document, editor.selection.active),
+            line: editor.selection.active.line + 1
+          }, "both", 1)
+        );
+        return response.rootSymbol;
+      } catch (error) {
+        void vscode.window.showErrorMessage(
+          `Compass could not resolve a symbol at the cursor: ${message(error)}`
+        );
+        return undefined;
+      }
+    }
     const range = editor?.document.getWordRangeAtPosition(editor.selection.active);
     const word = editor && range ? editor.document.getText(range) : "";
     return vscode.window.showInputBox({
@@ -342,7 +388,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     const session = await selectRepository(repositoryId);
     if (!session) return;
-    if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.graph)) return;
+    if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.query)) return;
     if (session.graphState !== "available") {
       const action = await vscode.window.showInformationMessage(
         "Build the Compass code graph before running code queries.",
@@ -356,7 +402,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const controller = new AbortController();
     try {
       const result = await runCodeQuery(session, request, controller.signal);
-      await GraphPanel.open(context, session, output, result);
+      await GraphPanel.open(
+        context,
+        session,
+        output,
+        result,
+        codeQueryTitle(request, result.nodes)
+      );
     } catch (error) {
       const detail = message(error);
       if (codeQueryRequiresRebuild(detail)) {
@@ -431,27 +483,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (query) await runAndOpenCodeQuery({ operation: "search", query });
     }),
     vscode.commands.registerCommand("compass.showCodeCallers", async (value?: unknown) => {
-      const symbol = await selectedSymbol(value, "Show Compass callers");
-      if (symbol) await runAndOpenCodeQuery({ operation: "callers", symbol });
+      if (value !== undefined) {
+        const symbol = await selectedSymbol(value, "Show Compass callers");
+        if (symbol) await runAndOpenCodeQuery({ operation: "callers", symbol });
+        return;
+      }
+      await openCallGraph("callers");
     }),
     vscode.commands.registerCommand("compass.showCodeCallees", async (value?: unknown) => {
-      const symbol = await selectedSymbol(value, "Show Compass callees");
-      if (symbol) await runAndOpenCodeQuery({ operation: "callees", symbol });
+      if (value !== undefined) {
+        const symbol = await selectedSymbol(value, "Show Compass callees");
+        if (symbol) await runAndOpenCodeQuery({ operation: "callees", symbol });
+        return;
+      }
+      await openCallGraph("callees");
     }),
     vscode.commands.registerCommand("compass.showCodeImpact", async (value?: unknown) => {
       const symbol = await selectedSymbol(value, "Show Compass impact");
       if (symbol) await runAndOpenCodeQuery({ operation: "impact", symbol });
     }),
-    vscode.commands.registerCommand("compass.exploreCode", async () => {
-      const input = await vscode.window.showInputBox({
-        title: "Explore related Compass symbols",
-        prompt: "Enter symbol IDs or names separated by commas",
-        validateInput: (value) => value.split(",").some((item) => item.trim())
-          ? undefined
-          : "Enter at least one symbol"
-      });
-      const symbols = input?.split(",").map((item) => item.trim()).filter(Boolean);
-      if (symbols?.length) await runAndOpenCodeQuery({ operation: "explore", symbols });
+    vscode.commands.registerCommand("compass.exploreCode", async (value?: unknown) => {
+      const symbol = await selectedSymbol(value, "Explore related Compass symbols");
+      if (symbol) await runAndOpenCodeQuery({ operation: "explore", symbols: [symbol] });
     }),
     vscode.commands.registerCommand("compass.showNodeTrail", async () => {
       const source = await selectedSymbol(undefined, "Compass node trail source");
@@ -506,6 +559,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await vscode.commands.executeCommand("compass.selectCli");
       }
     });
+  }
+}
+
+function codeQueryTitle(
+  request: CodeQueryRequest,
+  nodes: readonly { id: string; name: string }[]
+): string {
+  const label = (symbol: string) =>
+    nodes.find((node) => node.id === symbol)?.name ?? symbol;
+  switch (request.operation) {
+    case "search":
+      return `Compass Search — ${request.query}`;
+    case "callers":
+      return `Compass Callers — ${label(request.symbol)}`;
+    case "callees":
+      return `Compass Callees — ${label(request.symbol)}`;
+    case "impact":
+      return `Compass Change Impact — ${label(request.symbol)}`;
+    case "explore":
+      return `Compass Related Symbols — ${request.symbols.map(label).join(", ")}`;
+    case "node":
+      return `Compass Node Trail — ${label(request.source)} to ${label(request.target)}`;
   }
 }
 

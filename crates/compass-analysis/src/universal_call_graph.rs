@@ -172,8 +172,8 @@ pub fn build_universal_call_graph(
                 call_sites: vec![UniversalCallSite {
                     source_file,
                     line,
-                    start_byte: None,
-                    end_byte: None,
+                    start_byte: edge.unsigned("start_byte"),
+                    end_byte: edge.unsigned("end_byte"),
                     evidence: Vec::new(),
                 }],
                 evidence_layer: "structural_graph",
@@ -411,8 +411,8 @@ fn structural_node(node: &NodeRecord) -> UniversalCallNode {
         file: nonempty(node.string("source_file")),
         start_line: line(node, "line_start"),
         end_line: line(node, "line_end"),
-        start_byte: None,
-        end_byte: None,
+        start_byte: line(node, "start_byte"),
+        end_byte: line(node, "end_byte"),
         graph_node_id: Some(node.id.clone()),
         unresolved: false,
         evidence_layer: "structural_graph",
@@ -449,11 +449,18 @@ fn resolve_structural_root(
                     node.file
                         .as_deref()
                         .is_some_and(|candidate| normalize_path(candidate) == normalized)
-                        && node.start_line.is_some_and(|start| start <= *line)
-                        && node.end_line.is_some_and(|end| *line <= end)
+                        && (node
+                            .start_byte
+                            .zip(node.end_byte)
+                            .is_some_and(|(start, end)| start <= *byte && *byte <= end)
+                            || (node.start_line.is_some_and(|start| start <= *line)
+                                && node.end_line.is_some_and(|end| *line <= end)))
                 })
                 .min_by_key(|node| {
                     (
+                        node.end_byte
+                            .unwrap_or(u64::MAX)
+                            .saturating_sub(node.start_byte.unwrap_or_default()),
                         node.end_line
                             .unwrap_or(u64::MAX)
                             .saturating_sub(node.start_line.unwrap_or_default()),

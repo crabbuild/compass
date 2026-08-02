@@ -118,6 +118,87 @@ fn source_resolution_selects_the_smallest_containing_callable()
 }
 
 #[test]
+fn graph_v1_source_anchors_resolve_the_cursor() -> Result<(), Box<dyn std::error::Error>> {
+    let graph = serde_json::from_value(json!({
+        "directed": true,
+        "multigraph": true,
+        "graph": { "schema": "compass.graph/1" },
+        "nodes": [
+            {
+                "id": "root",
+                "kind": "function",
+                "name": "root",
+                "qualifiedName": "example::root",
+                "source": {
+                    "file": "src/lib.rs",
+                    "startByte": 100,
+                    "endByte": 220,
+                    "startLine": 10,
+                    "startColumn": 0,
+                    "endLine": 18,
+                    "endColumn": 1
+                }
+            },
+            {
+                "id": "callee",
+                "kind": "function",
+                "name": "callee",
+                "qualifiedName": "example::callee",
+                "source": {
+                    "file": "src/lib.rs",
+                    "startByte": 300,
+                    "endByte": 360,
+                    "startLine": 24,
+                    "startColumn": 0,
+                    "endLine": 28,
+                    "endColumn": 1
+                }
+            }
+        ],
+        "links": [{
+            "id": "root-calls-callee",
+            "key": "root-calls-callee",
+            "source": "root",
+            "target": "callee",
+            "kind": "calls",
+            "relationshipSite": {
+                "file": "src/lib.rs",
+                "startByte": 160,
+                "endByte": 168,
+                "startLine": 14,
+                "startColumn": 4,
+                "endLine": 14,
+                "endColumn": 12
+            }
+        }]
+    }))?;
+
+    let response = build_universal_call_graph(
+        &graph,
+        None,
+        &UniversalCallGraphRequest {
+            root: UniversalCallGraphRoot::SourcePosition {
+                file: "src/lib.rs".to_owned(),
+                byte: 165,
+                line: 14,
+            },
+            direction: CallGraphDirection::Callees,
+            depth: 1,
+            max_nodes: 20,
+            max_edges: 20,
+        },
+    )?;
+
+    assert_eq!(response.root_symbol, "root");
+    assert_eq!(response.nodes.len(), 2);
+    assert_eq!(response.edges.len(), 1);
+    assert_eq!(response.nodes[0].start_byte, Some(300));
+    assert_eq!(response.nodes[1].start_byte, Some(100));
+    assert_eq!(response.edges[0].call_sites[0].start_byte, Some(160));
+    Ok(())
+}
+
+#[test]
 fn declaration_only_ranges_keep_source_driven_languages_cursor_capable()
 -> Result<(), Box<dyn std::error::Error>> {
     for language in ["groovy", "zig", "r", "pascal", "dart"] {

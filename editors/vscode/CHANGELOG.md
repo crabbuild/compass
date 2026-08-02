@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Replace the duplicate Call Graph and Code Graph editor submenus with one
+  **Compass** menu whose actions resolve the symbol at the active cursor.
+- Render change-impact, related-symbol, and node-trail queries as focused result
+  graphs instead of loading the complete repository overview behind them.
+- Resolve caller/callee roots from current typed graph source anchors so the
+  editor workflow works with `compass.graph/1` artifacts.
+
 ## 0.2.0
 
 - Highlight complete source lines when opening a code-graph node, including the

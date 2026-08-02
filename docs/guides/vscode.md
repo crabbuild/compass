@@ -45,9 +45,10 @@ use the same interaction against their exact commit.
 ## Calls and architecture
 
 Open an indexed source file and place the cursor anywhere inside a function or
-method. Right-click, choose **Compass Call Graph**, then choose **Show
-Callers**, **Show Callees**, or **Show Callers & Callees**. The same commands
-are available from the Command Palette.
+method. Right-click, choose **Compass**, then choose **Show Callers**, **Show
+Callees**, or **Show Callers & Callees**. The same commands are available from
+the Command Palette. The single Compass submenu also contains **Show Change
+Impact**, **Explore Related Symbols**, and **Show Node Trail**.
 
 Compass sends the relative file, UTF-8 cursor byte, and 1-based line to the
 language-neutral call-graph command. It selects the innermost callable range
@@ -66,6 +67,13 @@ in that direction. It does not prove that no runtime call exists.
 
 If Compass cannot resolve the cursor, move it inside the function or method
 body and retry. **Show Compass output** opens the local command diagnostics.
+
+Editor-context actions resolve the stable graph symbol from the active file,
+UTF-8 byte, and line rather than asking for a symbol name. Change impact and
+related-symbol actions open a focused graph containing only the returned
+neighborhood. Node trail uses the cursor symbol as its source, asks only for
+the destination, and opens the returned path instead of the repository-wide
+overview.
 
 Use **Open Architecture Flow** for the broader subsystem call-flow document,
 cross-community relationships, symbol lists, call tables, confidence, and

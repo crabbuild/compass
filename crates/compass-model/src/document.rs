@@ -117,13 +117,27 @@ impl NodeRecord {
 
     #[must_use]
     pub fn unsigned(&self, key: &str) -> Option<u64> {
-        self.attributes.get(key).and_then(|value| {
-            value.as_u64().or_else(|| {
-                (key == "community")
-                    .then(|| value.as_object()?.get("id")?.as_u64())
-                    .flatten()
+        self.attributes
+            .get(key)
+            .and_then(|value| {
+                value.as_u64().or_else(|| {
+                    (key == "community")
+                        .then(|| value.as_object()?.get("id")?.as_u64())
+                        .flatten()
+                })
             })
-        })
+            .or_else(|| {
+                let source = self.attributes.get("source")?.as_object()?;
+                source
+                    .get(match key {
+                        "start_byte" => "startByte",
+                        "end_byte" => "endByte",
+                        "line_start" => "startLine",
+                        "line_end" => "endLine",
+                        _ => return None,
+                    })?
+                    .as_u64()
+            })
     }
 
     #[must_use]
@@ -238,6 +252,24 @@ impl EdgeRecord {
     #[must_use]
     pub fn boolean(&self, key: &str) -> Option<bool> {
         self.attributes.get(key).and_then(Value::as_bool)
+    }
+
+    #[must_use]
+    pub fn unsigned(&self, key: &str) -> Option<u64> {
+        self.attributes
+            .get(key)
+            .and_then(Value::as_u64)
+            .or_else(|| {
+                let site = self.attributes.get("relationshipSite")?.as_object()?;
+                site.get(match key {
+                    "start_byte" => "startByte",
+                    "end_byte" => "endByte",
+                    "line_start" => "startLine",
+                    "line_end" => "endLine",
+                    _ => return None,
+                })?
+                .as_u64()
+            })
     }
 
     #[must_use]
@@ -729,6 +761,8 @@ mod tests {
                     "name": "source",
                     "source": {
                         "file": "src/lib.rs",
+                        "startByte": 20,
+                        "endByte": 45,
                         "startLine": 2,
                         "startColumn": 3,
                         "endLine": 4,
@@ -759,6 +793,8 @@ mod tests {
                     "kind": "calls",
                     "relationshipSite": {
                         "file": "src/lib.rs",
+                        "startByte": 80,
+                        "endByte": 86,
                         "startLine": 8,
                         "startColumn": 9,
                         "endLine": 8,
@@ -769,10 +805,16 @@ mod tests {
         )?;
 
         assert_eq!(document.nodes[0].string("source_location"), "L2:3-L4:5");
+        assert_eq!(document.nodes[0].unsigned("start_byte"), Some(20));
+        assert_eq!(document.nodes[0].unsigned("end_byte"), Some(45));
+        assert_eq!(document.nodes[0].unsigned("line_start"), Some(2));
+        assert_eq!(document.nodes[0].unsigned("line_end"), Some(4));
         assert_eq!(document.nodes[0].string("community_name"), "Core");
         assert_eq!(document.nodes[1].string("wiring_file"), "src/caller.rs");
         assert_eq!(document.nodes[1].string("wiring_location"), "L11:7-L11:13");
         assert_eq!(document.links[0].string("source_location"), "L8:9-L8:15");
+        assert_eq!(document.links[0].unsigned("start_byte"), Some(80));
+        assert_eq!(document.links[0].unsigned("end_byte"), Some(86));
         Ok(())
     }
 
