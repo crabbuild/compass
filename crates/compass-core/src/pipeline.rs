@@ -537,8 +537,12 @@ fn build_graph_inner(
             .flatten()
             .map(PathBuf::from)
             .filter(|path| {
+                let structural_document = Registry::resolve(path).is_some_and(|spec| {
+                    matches!(spec.kind, ExtractorKind::Markdown | ExtractorKind::Html)
+                });
                 Registry::resolve(path).is_some()
-                    && !semantic_documents.contains(&canonical_identity(path))
+                    && (structural_document
+                        || !semantic_documents.contains(&canonical_identity(path)))
             }),
     );
 
@@ -4838,6 +4842,68 @@ mod tests {
                 .count(),
             1
         );
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_enrichment_preserves_markdown_and_html_structure() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        fs::write(root.join("guide.md"), "# Guide\n\n[Next](next.md)\n")?;
+        fs::write(
+            root.join("page.html"),
+            "<main id=\"top\"><h1>Page</h1><p><a href=\"#top\">Top</a></p></main>\n",
+        )?;
+        let mut options = BuildOptions::new(root);
+        options.no_viz = true;
+        let semantic = SemanticLayer {
+            fragment: json!({
+                "nodes": [{
+                    "id": "semantic_page",
+                    "label": "Page concept",
+                    "file_type": "concept",
+                    "source_file": "page.html",
+                }],
+                "edges": [],
+                "hyperedges": [],
+                "failed_chunks": 0,
+            }),
+            refreshed_files: vec![PathBuf::from("guide.md"), PathBuf::from("page.html")],
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+        let cold = build_local_graph(&options)?;
+        let cold_graph = V1GraphDocument::load(&cold.output_dir.join("graph.json"))?;
+        let structural_ids = cold_graph
+            .nodes
+            .iter()
+            .filter(|node| matches!(node.source_file(), Some("guide.md" | "page.html")))
+            .map(|node| node.id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(!structural_ids.is_empty());
+
+        let enriched = build_graph_with_semantic(&options, &semantic)?;
+        let enriched_graph = V1GraphDocument::load(&enriched.output_dir.join("graph.json"))?;
+        let enriched_ids = enriched_graph
+            .nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            structural_ids.is_subset(&enriched_ids),
+            "missing structural IDs: {:?}; enriched IDs: {:?}",
+            structural_ids.difference(&enriched_ids).collect::<Vec<_>>(),
+            enriched_ids
+        );
+        assert!(
+            enriched_graph
+                .nodes
+                .iter()
+                .any(|node| node.label() == "Page concept")
+        );
+        assert!(enriched_graph.links.iter().any(|edge| {
+            edge.source_file() == Some("page.html") && edge.relation() == "contains"
+        }));
         Ok(())
     }
 

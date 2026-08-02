@@ -4,14 +4,14 @@ meta:
   title: Structural document processing
   navLabel: Document Processing
   category: Design
-  overview: How Compass turns Markdown bytes into bounded, deterministic graph evidence.
+  overview: How Compass turns Markdown and HTML bytes into bounded, deterministic graph evidence.
   goal: Define the ownership, provenance, and cache rules for local text documents.
   audience:
     - Compass contributors
     - technical evaluators
   contentPlan:
     - source-driven extraction
-    - Markdown structure and metadata
+    - Markdown and HTML structure and metadata
     - links and ambiguity
     - cache and security boundaries
   openQuestions: []
@@ -41,9 +41,9 @@ bounded source bytes
         v
 compass-languages::Engine
         |
-        +--> pinned Markdown block grammar
-        +--> pinned Markdown inline grammar
-        +--> bounded frontmatter decoder
+        +--> pinned Markdown block/inline grammars
+        +--> pinned HTML grammar and shared renderer
+        +--> bounded frontmatter/entity/URL decoders
         |
         v
 document root + structural blocks + link evidence
@@ -58,9 +58,12 @@ the caller's source-file identity for cache, repository-relative paths, and
 source ranges. The standalone compatibility path still accepts a `Path` and
 reads it once.
 
-The parser grammars are statically linked through the pinned `tree-sitter-md`
-crate. Markdown extraction does not download grammars, invoke Python, call a
-model, or follow a URL.
+The Markdown grammars are statically linked through the pinned `tree-sitter-md`
+crate and HTML uses the exact pinned `tree-sitter-html` crate. The vendored
+language pack remains the owner for the general language registry; the direct
+HTML binding is deliberately parser-only because this release's pack build
+does not expose an HTML static loader. Neither path downloads a grammar at
+runtime, invokes Python, calls a model, or follows a URL.
 
 ## Markdown projection
 
@@ -112,6 +115,37 @@ autolinks, email links, inline links, and reference links carry a `link_kind`,
 line, byte range, source file, and extracted confidence. Images are not treated
 as document relationships, and links inside fenced code are inert.
 
+Footnote definitions and references are emitted as bounded
+`footnote_definition` nodes and `link_kind: "footnote"` relationships. Duplicate
+or missing footnote labels remain explicit unresolved evidence. MDX imports,
+JSX-like components, expressions, and Quarto directives are represented as
+bounded `other` blocks with an `other_kind` and `source_syntax` instead of being
+executed or silently discarded.
+
+## HTML projection and normalization
+
+HTML files (`.html` and `.htm`) use the same source-driven API as Markdown. The
+root has `document_format: "html"`; semantic nodes cover headings, paragraphs,
+lists/items, block quotes, preformatted/code blocks, tables/rows/cells,
+landmarks (`main`, `article`, `section`, and `nav`), anchors, title, metadata,
+resource links, and base URLs. Every node and relationship keeps an exact byte,
+line, and column range into the original HTML bytes.
+
+The HTML adapter decodes numeric and common named entities, preserves document
+order, and records bounded `html_title`, `html_meta`, `html_canonical`,
+`html_base_href`, and `html_visible_text` metadata. `script`, `style`,
+`template`, and `noscript` subtrees are never published. Anchor and resource
+links carry their `href`/`rel` provenance; same-file fragments resolve only to a
+unique `id`/`name`, while external and unsupported links remain evidence with
+an explicit reason. Relative links are resolved against a validated HTTP(S)
+source/base URL or a lexically normalized local path. Compass never fetches a
+discovered URL.
+
+`compass-ingest` calls `compass_languages::normalize_html` rather than using a
+regular-expression tag stripper. The renderer emits conservative Markdown
+block boundaries and links, so fetched webpages and local HTML files share the
+same visibility, entity, whitespace, and security rules.
+
 ## Cache and trust boundaries
 
 Markdown file hashes include the raw frontmatter bytes. A metadata-only edit
@@ -124,15 +158,22 @@ frontmatter, block, link, metadata, and diagnostic caps. Inputs are never
 executed, fetched, or interpreted as configuration. Unknown graph attributes
 remain extensible, and consumers should preserve them.
 
+## Structural and semantic coexistence
+
+Semantic refreshes are additive for Markdown and HTML. When a provider returns
+an updated concept for one of these files, Compass retains the byte-identical
+document, block, containment, and link subgraph produced by the local adapter;
+provider concepts and edges are published alongside it. A provider failure or
+partial response cannot replace a deterministic structural realization.
+
 ## Other document formats
 
 File discovery recognizes several document extensions, but recognition is not
-the same as structural extraction. HTML, DOCX, PPTX, RTF, and spreadsheet
-normalizers remain separate integration surfaces until they have their own
-bounded parser, exact locator policy, and qualification fixtures. See the
+the same as structural extraction. DOCX and XLSX retain their bounded media
+conversion surfaces; PPTX and RTF remain future format adapters. See the
 [document format reference](../reference/document-formats.md) for the current
-matrix. Markdown links may point at those formats, but Compass does not fetch
-or execute a linked resource during Markdown extraction.
+matrix. Markdown and HTML links may point at those formats, but Compass does
+not fetch or execute a linked resource during extraction.
 
 ## Related pages
 

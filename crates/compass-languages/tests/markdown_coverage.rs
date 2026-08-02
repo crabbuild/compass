@@ -367,5 +367,61 @@ fn markdown_frontmatter_is_bounded_and_diagnosed_without_swallowing_body()
             .is_some_and(|message| message.contains("closing delimiter"))
     }));
     assert!(unclosed.nodes.iter().any(|node| node.label() == "Body"));
+
+    let unsafe_yaml = Engine::default().extract_source(
+        std::path::Path::new("guide.md"),
+        b"---\ntitle: \"R&D\"\nbase: &shared value\ncopy: *shared\n---\n# Body\n",
+    )?;
+    let unsafe_diagnostics = unsafe_yaml
+        .extensions
+        .get("markdown_diagnostics")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing alias diagnostic")?;
+    assert!(unsafe_diagnostics.iter().any(|value| {
+        value
+            .as_str()
+            .is_some_and(|message| message.contains("aliases and tags"))
+    }));
+    assert!(
+        !unsafe_yaml.nodes[0]
+            .attributes
+            .contains_key("document_metadata")
+    );
+    assert!(unsafe_yaml.nodes.iter().any(|node| node.label() == "Body"));
+    Ok(())
+}
+
+#[test]
+fn markdown_footnotes_and_mdx_quarto_constructs_remain_explicit() -> Result<(), Box<dyn Error>> {
+    let mdx = Engine::default().extract_source(
+        std::path::Path::new("guide.mdx"),
+        b"import Callout from './Callout.jsx'\n\n# Guide\n\nText[^note]\n\n<Callout>content</Callout>\n{value}\n\n[^note]: A bounded footnote.\n",
+    )?;
+    assert!(mdx.nodes.iter().any(|node| {
+        node.attributes.get("document_kind") == Some(&serde_json::json!("other"))
+            && node.attributes.get("other_kind") == Some(&serde_json::json!("mdx_construct"))
+    }));
+    assert!(mdx.nodes.iter().any(|node| {
+        node.attributes.get("document_kind") == Some(&serde_json::json!("footnote_definition"))
+            && node.attributes.get("footnote_label") == Some(&serde_json::json!("note"))
+    }));
+    assert!(mdx.edges.iter().any(|edge| {
+        edge.attributes.get("link_kind") == Some(&serde_json::json!("footnote"))
+            && edge.attributes.get("relation") == Some(&serde_json::json!("references"))
+    }));
+
+    let qmd = Engine::default().extract_source(
+        std::path::Path::new("report.qmd"),
+        b"::: {.callout-note}\nQuarto content\n:::\n\n{{< include shared.qmd >}}\n",
+    )?;
+    assert!(qmd.nodes.iter().any(|node| {
+        node.attributes.get("document_kind") == Some(&serde_json::json!("other"))
+            && node.attributes.get("other_kind") == Some(&serde_json::json!("quarto_directive"))
+    }));
+    assert!(
+        qmd.extensions["markdown_other_count"]
+            .as_u64()
+            .is_some_and(|count| count >= 2)
+    );
     Ok(())
 }

@@ -56,6 +56,17 @@ direction, multiplicity, and source ranges. Markdown frontmatter is part of
 the file hash, so metadata-only edits invalidate compatible extraction/cache
 entries and are rebuilt under the current extraction semantics version.
 
+HTML (`.html`/`.htm`) now has the same source-driven structural contract. HTML
+nodes and link evidence preserve exact source ranges and deterministic order;
+`script`, `style`, `template`, and `noscript` subtrees are excluded. The new
+`html_*` metadata and diagnostic extensions are forward-compatible attributes.
+The extraction semantics version is bumped so older realizations are not
+silently reused. URL ingestion uses the same parser-backed HTML normalizer and
+does not fetch discovered links.
+If semantic enrichment is enabled, these structural nodes and relationships
+remain in the published graph; provider concepts are additive and cannot
+replace the local realization.
+
 ## Attribution
 
 Compass was inspired by

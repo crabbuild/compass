@@ -27,11 +27,13 @@ toml.workspace = true
 compass-files = { path = "../compass-files", version = "0.2.1" }
 tree-sitter.workspace = true
 tree-sitter-dm.workspace = true
+tree-sitter-html.workspace = true
 tree-sitter-md.workspace = true
 tree-sitter-language-pack.workspace = true
 unicode-normalization.workspace = true
 unicode-casefold.workspace = true
 unicode-properties.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

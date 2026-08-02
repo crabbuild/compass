@@ -18,9 +18,9 @@ fn registry_covers_every_python_dispatch_extension() -> Result<(), Box<dyn Error
         "kts", "scala", "php", "swift", "lua", "luau", "toc", "zig", "ps1", "psm1", "psd1", "ex",
         "exs", "mm", "jl", "f", "F", "f90", "F90", "f95", "F95", "f03", "F03", "f08", "F08", "vue",
         "svelte", "astro", "dart", "v", "sv", "svh", "sql", "r", "md", "markdown", "mdx", "qmd",
-        "skill", "pas", "pp", "dpr", "dpk", "lpr", "inc", "dfm", "lfm", "lpk", "sh", "bash",
-        "json", "tf", "tfvars", "hcl", "dm", "dme", "dmi", "dmm", "dmf", "sln", "slnx", "csproj",
-        "fsproj", "vbproj", "xaml", "razor", "cshtml", "cls", "trigger", "pl", "pm",
+        "skill", "html", "htm", "pas", "pp", "dpr", "dpk", "lpr", "inc", "dfm", "lfm", "lpk", "sh",
+        "bash", "json", "tf", "tfvars", "hcl", "dm", "dme", "dmi", "dmm", "dmf", "sln", "slnx",
+        "csproj", "fsproj", "vbproj", "xaml", "razor", "cshtml", "cls", "trigger", "pl", "pm",
     ];
     for extension in ordinary {
         let path = directory.path().join(format!("sample.{extension}"));

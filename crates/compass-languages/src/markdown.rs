@@ -65,12 +65,14 @@ pub(crate) fn extract_source(
         heading_occurrences: HashMap::new(),
         heading_targets: HashMap::new(),
         reference_definitions: HashMap::new(),
+        footnote_definitions: HashMap::new(),
         pending_links: Vec::new(),
         unresolved_links: Vec::new(),
         external_links: Vec::new(),
         diagnostics: Vec::new(),
         inline_parser,
         next_block_index: 1,
+        other_count: 0,
     };
 
     state.add_root(file_id, metadata);
@@ -100,6 +102,8 @@ pub(crate) fn extract_source(
         }
     }
     state.scan_reference_definitions();
+    state.scan_footnotes();
+    state.scan_other_constructs();
     state.finalize_links();
 
     state
@@ -118,6 +122,20 @@ pub(crate) fn extract_source(
         "markdown_link_count".to_owned(),
         json!(state.pending_link_count()),
     );
+    state.extraction.extensions.insert(
+        "markdown_footnote_count".to_owned(),
+        json!(
+            state
+                .footnote_definitions
+                .values()
+                .map(Vec::len)
+                .sum::<usize>()
+        ),
+    );
+    state
+        .extraction
+        .extensions
+        .insert("markdown_other_count".to_owned(), json!(state.other_count));
     if !state.diagnostics.is_empty() {
         state.extraction.extensions.insert(
             "markdown_diagnostics".to_owned(),
@@ -151,12 +169,14 @@ struct State<'source, 'path> {
     heading_occurrences: HashMap<String, usize>,
     heading_targets: HashMap<String, Vec<String>>,
     reference_definitions: HashMap<String, String>,
+    footnote_definitions: HashMap<String, Vec<String>>,
     pending_links: Vec<PendingLink>,
     unresolved_links: Vec<Value>,
     external_links: Vec<Value>,
     diagnostics: Vec<String>,
     inline_parser: Parser,
     next_block_index: usize,
+    other_count: usize,
 }
 
 #[derive(Clone)]
@@ -710,6 +730,170 @@ impl State<'_, '_> {
         }
     }
 
+    fn scan_footnotes(&mut self) {
+        let mut offset = 0;
+        let mut fence = None;
+        while let Some((line_end, line)) = next_line(self.source, offset) {
+            if let Some(open) = fence {
+                if closes_fence(line, open) {
+                    fence = None;
+                }
+                offset = line_end;
+                continue;
+            }
+            if let Some(open) = opens_fence(line) {
+                fence = Some(open);
+                offset = line_end;
+                continue;
+            }
+            if let Some((label, relative_start, relative_end)) = parse_footnote_definition(line)
+                && self
+                    .footnote_definitions
+                    .values()
+                    .map(Vec::len)
+                    .sum::<usize>()
+                    < MAX_LINKS
+            {
+                let start = offset.saturating_add(relative_start);
+                let end = offset.saturating_add(relative_end).min(self.source.len());
+                let id = crate::make_id(&[
+                    &self.source_file,
+                    "markdown_footnote",
+                    &label,
+                    &start.to_string(),
+                ]);
+                let parent = self.owner_for_offset(start);
+                let mut extra = Map::new();
+                extra.insert("footnote_label".to_owned(), Value::String(label.clone()));
+                extra.insert(
+                    "footnote_role".to_owned(),
+                    Value::String("definition".to_owned()),
+                );
+                self.add_block_node(
+                    id.clone(),
+                    &format!("Footnote {label}"),
+                    "footnote_definition",
+                    start..end,
+                    Some(&parent),
+                    extra,
+                );
+                self.footnote_definitions.entry(label).or_default().push(id);
+            }
+            self.scan_footnote_references_in_line(offset, line);
+            offset = line_end;
+        }
+    }
+
+    fn scan_footnote_references_in_line(&mut self, offset: usize, line: &[u8]) {
+        let mut cursor = 0;
+        while let Some(relative_start) = line[cursor..].windows(2).position(|pair| pair == b"[^") {
+            let start = cursor.saturating_add(relative_start);
+            let Some(relative_end) = line[start.saturating_add(2)..]
+                .iter()
+                .position(|byte| *byte == b']')
+            else {
+                break;
+            };
+            let end = start
+                .saturating_add(2)
+                .saturating_add(relative_end)
+                .saturating_add(1);
+            if line.get(end) == Some(&b':') {
+                cursor = end.saturating_add(1);
+                continue;
+            }
+            let label =
+                String::from_utf8_lossy(&line[start.saturating_add(2)..end.saturating_sub(1)])
+                    .trim()
+                    .to_owned();
+            if !label.is_empty() && label.len() <= MAX_LABEL_CHARS {
+                let absolute_start = offset.saturating_add(start);
+                let absolute_end = offset.saturating_add(end).min(self.source.len());
+                if self.pending_links.len() < MAX_LINKS {
+                    self.pending_links.push(PendingLink {
+                        raw: label,
+                        reference_label: None,
+                        owner_id: self.owner_for_offset(absolute_start),
+                        site: self.link_site(absolute_start, absolute_end),
+                        kind: "footnote",
+                    });
+                }
+            }
+            cursor = end;
+        }
+    }
+
+    fn scan_other_constructs(&mut self) {
+        let extension = self
+            .path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if extension != "mdx" && extension != "qmd" {
+            return;
+        }
+        let mut offset = 0;
+        let mut fence = None;
+        while let Some((line_end, line)) = next_line(self.source, offset) {
+            if let Some(open) = fence {
+                if closes_fence(line, open) {
+                    fence = None;
+                }
+                offset = line_end;
+                continue;
+            }
+            if let Some(open) = opens_fence(line) {
+                fence = Some(open);
+                offset = line_end;
+                continue;
+            }
+            let trimmed = line.trim_ascii();
+            let (other_kind, should_emit) = if extension == "qmd" {
+                (
+                    "quarto_directive",
+                    trimmed.starts_with(b":::") || trimmed.starts_with(b"{{<"),
+                )
+            } else {
+                (
+                    "mdx_construct",
+                    trimmed.starts_with(b"import ")
+                        || trimmed.starts_with(b"export ")
+                        || trimmed.starts_with(b"{")
+                        || (trimmed.starts_with(b"<")
+                            && trimmed.get(1).is_some_and(u8::is_ascii_uppercase)),
+                )
+            };
+            if should_emit && self.other_count < MAX_DIAGNOSTICS {
+                let start = offset;
+                let end = offset.saturating_add(line.len()).min(self.source.len());
+                let id = crate::make_id(&[
+                    &self.source_file,
+                    "markdown_other",
+                    other_kind,
+                    &start.to_string(),
+                ]);
+                let parent = self.owner_for_offset(start);
+                let mut extra = Map::new();
+                extra.insert(
+                    "other_kind".to_owned(),
+                    Value::String(other_kind.to_owned()),
+                );
+                extra.insert("source_syntax".to_owned(), Value::String(extension.clone()));
+                self.add_block_node(
+                    id,
+                    &compact_label(&String::from_utf8_lossy(line)),
+                    "other",
+                    start..end,
+                    Some(&parent),
+                    extra,
+                );
+                self.other_count = self.other_count.saturating_add(1);
+            }
+            offset = line_end;
+        }
+    }
+
     fn owner_for_offset(&self, offset: usize) -> String {
         let mut owner = self.file_id.clone();
         let mut smallest_span = usize::MAX;
@@ -761,6 +945,24 @@ impl State<'_, '_> {
     fn finalize_links(&mut self) {
         let pending_links = std::mem::take(&mut self.pending_links);
         for pending in pending_links {
+            if pending.kind == "footnote" {
+                match self.footnote_definitions.get(&pending.raw) {
+                    Some(candidates) if candidates.len() == 1 => {
+                        if let Some(target) = candidates.first() {
+                            self.add_link_edge(
+                                &pending,
+                                target.clone(),
+                                Some(("references", Some(&pending.raw))),
+                            );
+                        }
+                    }
+                    Some(_) => self.add_unresolved(&pending, "ambiguous_footnote", &pending.raw),
+                    None => {
+                        self.add_unresolved(&pending, "missing_footnote_definition", &pending.raw)
+                    }
+                }
+                continue;
+            }
             let raw = pending
                 .reference_label
                 .as_ref()
@@ -1022,6 +1224,12 @@ fn parse_frontmatter(source: &[u8]) -> (Option<Map<String, Value>>, Option<Strin
                     Some("Markdown frontmatter exceeds the byte limit".to_owned()),
                 );
             }
+            if yaml_contains_alias_or_tag(yaml) {
+                return (
+                    None,
+                    Some("Markdown frontmatter aliases and tags are not supported".to_owned()),
+                );
+            }
             let yaml = String::from_utf8_lossy(yaml);
             return match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&yaml) {
                 Ok(value) => match yaml_metadata(&value) {
@@ -1040,6 +1248,54 @@ fn parse_frontmatter(source: &[u8]) -> (Option<Map<String, Value>>, Option<Strin
         None,
         Some("Markdown frontmatter has no bounded closing delimiter".to_owned()),
     )
+}
+
+fn yaml_contains_alias_or_tag(source: &[u8]) -> bool {
+    let mut quoted = None;
+    let mut escaped = false;
+    let mut index = 0;
+    while index < source.len() {
+        let byte = source[index];
+        if let Some(quote) = quoted {
+            if quote == b'"' && escaped {
+                escaped = false;
+            } else if quote == b'"' && byte == b'\\' {
+                escaped = true;
+            } else if quote == b'\'' && byte == b'\'' && source.get(index + 1) == Some(&b'\'') {
+                index = index.saturating_add(2);
+                continue;
+            } else if byte == quote {
+                quoted = None;
+            }
+            index = index.saturating_add(1);
+            continue;
+        }
+        if byte == b'\'' || byte == b'"' {
+            quoted = Some(byte);
+            index = index.saturating_add(1);
+            continue;
+        }
+        if byte == b'#' && (index == 0 || source[index - 1].is_ascii_whitespace()) {
+            index = source[index..]
+                .iter()
+                .position(|value| *value == b'\n')
+                .map_or(source.len(), |offset| index.saturating_add(offset));
+            continue;
+        }
+        if matches!(byte, b'&' | b'*' | b'!') {
+            let token_start = index == 0
+                || source[index - 1].is_ascii_whitespace()
+                || matches!(
+                    source[index - 1],
+                    b':' | b'[' | b']' | b',' | b'{' | b'}' | b'-'
+                );
+            if token_start {
+                return true;
+            }
+        }
+        index = index.saturating_add(1);
+    }
+    false
 }
 
 fn yaml_metadata(value: &serde_yaml_ng::Value) -> Result<Map<String, Value>, &'static str> {
@@ -1200,6 +1456,33 @@ fn parse_reference_definition(line: &[u8]) -> Option<(String, String, usize, usi
     Some((label, target, start, target_end))
 }
 
+fn parse_footnote_definition(line: &[u8]) -> Option<(String, usize, usize)> {
+    let line = line.strip_suffix(b"\n").unwrap_or(line);
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    let mut start = 0;
+    while start < line.len() && line[start] == b' ' && start < 3 {
+        start += 1;
+    }
+    if line.get(start..start.saturating_add(2)) != Some(b"[^") {
+        return None;
+    }
+    let label_end = line[start.saturating_add(2)..]
+        .iter()
+        .position(|byte| *byte == b']')?
+        .saturating_add(start)
+        .saturating_add(2);
+    if line.get(label_end.saturating_add(1)) != Some(&b':') {
+        return None;
+    }
+    let label = String::from_utf8_lossy(&line[start.saturating_add(2)..label_end])
+        .trim()
+        .to_owned();
+    if label.is_empty() || label.len() > MAX_LABEL_CHARS {
+        return None;
+    }
+    Some((label, start, line.len()))
+}
+
 fn is_frontmatter_delimiter(line: &[u8], allow_bom: bool) -> bool {
     let line = if allow_bom {
         line.strip_prefix(b"\xef\xbb\xbf").unwrap_or(line)
@@ -1304,6 +1587,8 @@ fn block_label(kind: &str, text: &str) -> String {
         "block_quote" => "blockquote".to_owned(),
         "thematic_break" => "thematic break".to_owned(),
         "link_reference_definition" => "link definition".to_owned(),
+        "footnote_definition" => "footnote".to_owned(),
+        "other" => "other Markdown construct".to_owned(),
         "html_block" => "HTML block".to_owned(),
         _ => compact_label(text),
     }
@@ -1384,6 +1669,7 @@ fn is_structural_block_kind(kind: &str) -> bool {
         "atx_heading"
             | "block_quote"
             | "fenced_code_block"
+            | "footnote_definition"
             | "html_block"
             | "indented_code_block"
             | "link_reference_definition"
@@ -1397,6 +1683,7 @@ fn is_structural_block_kind(kind: &str) -> bool {
             | "section"
             | "setext_heading"
             | "thematic_break"
+            | "other"
     )
 }
 

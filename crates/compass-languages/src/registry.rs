@@ -6,6 +6,7 @@ use crate::{AdapterProfile, AdapterRegistry};
 pub enum ExtractorKind {
     Generic,
     Markdown,
+    Html,
     JsonConfig,
     Terraform,
     PascalForm,
@@ -474,6 +475,17 @@ const REGISTRY_CASES: &[RegistryCase] = &[
         },
         "matrix/sample.md",
         "# Matrix\n"
+    ),
+    registry_case!(
+        "html",
+        RegistryMatcher::Extensions(&["html", "htm"]),
+        LanguageSpec {
+            name: "html",
+            grammar: Some("html"),
+            kind: ExtractorKind::Html
+        },
+        "matrix/sample.html",
+        "<main><h1>Matrix</h1></main>\n"
     ),
     registry_case!(
         "pascal",
