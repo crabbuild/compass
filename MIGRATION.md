@@ -35,6 +35,46 @@ graphify://... MCP resources     -> compass://...
 
 Compass does not fall back to the old names.
 
+## Compass Store sidecar upgrades
+
+The `0.3.x` line supports the logical majors `compass.store/1`,
+`compass.store.graph-snapshot/1`, and `compass.store.ref/1`. A patch release
+can reopen and validate a same-major SQLite sidecar. Unknown majors, a missing
+or corrupt `store.ref`, and redb or prototype files are rebuildable hard cuts;
+they are not migrated in place.
+
+Check an output before upgrading or collecting support evidence:
+
+```bash
+compass store status compass-out --format json
+compass store validate compass-out --format json
+```
+
+Create and verify a rollback bundle before a planned upgrade:
+
+```bash
+compass store backup compass-out --output /safe/compass-store-backup
+compass store restore --from /safe/compass-store-backup --into /safe/compass-out-check
+compass store validate /safe/compass-out-check --format json
+```
+
+If validation fails after an upgrade, retain `graph.json` and rebuild the
+sidecar from source:
+
+```bash
+scripts/rebuild_compass_store.sh . --out compass-out --compass compass
+```
+
+The script preserves existing sidecars in a timestamped rollback directory,
+restores them if `compass update --force` fails, and never replaces the JSON
+artifact. A normal `compass update --force` is also sufficient when the old
+sidecar has already been removed. If only `graph.json` is available, use
+`--engine json`; no database is required to inspect or query that artifact.
+
+Downgrades must validate the output with the target binary. Do not reuse a
+newer physical SQLite/redb file merely because its filename matches. Rebuild
+when the target binary reports an unsupported major or adapter.
+
 ## Regenerate HTML graph exports
 
 Current Compass releases use the shared graph workbench for `graph.html` and

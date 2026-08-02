@@ -36,6 +36,12 @@ whether a Compass capability is covered by the installed skill. Run
   parallel or reciprocal relationships.
 - `compass check-update`: report whether watched semantic changes left a pending
   refresh marker.
+- `compass store status|validate`: inspect and validate the local SQLite graph
+  sidecar without changing graph meaning.
+- `compass store backup`: checkpoint and copy a validated local generation into
+  a new backup directory with a signed-by-digest manifest.
+- `compass store restore`: validate that manifest, graph export, selector, and
+  sidecar before restoring into a new or empty output directory.
 
 These are read-only unless a missing historical realization must be materialized.
 An `--at REV` query can therefore create local history-store artifacts even

@@ -28,6 +28,7 @@ members = [
     "crates/compass-history",
     "crates/compass-store",
     "crates/compass-store-redb",
+    "crates/compass-store-qualification",
     "crates/compass-transcribe",
     "crates/compass-whisper",
     "vendor/compass-tree-sitter-language-pack",

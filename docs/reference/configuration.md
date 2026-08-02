@@ -54,6 +54,35 @@ compass update . --out custom-output
 
 Do not point two concurrent writers at one output directory.
 
+## Compass Store configuration
+
+The local build publishes a co-located store under the selected output root:
+
+```text
+DIR/graph.json
+DIR/compass-store.sqlite3
+DIR/store.ref
+```
+
+`DIR` is `compass-out/` by default and can be set with `--out DIR` or the
+documented `COMPASS_OUT` fallback. The CLI's default store engine is SQLite;
+`--engine json` explicitly uses the permanent JSON engine and `--engine store`
+requires a validated sidecar. The `compass-store-redb` crate is a separate
+library adapter and is not a CLI setting. PostgreSQL and DynamoDB are deferred
+service adapters, so no endpoint, credential, TLS, or cloud SDK configuration
+is read by local store commands.
+
+SQLite uses a local WAL-backed file and checkpoints it before publication and
+backup. Do not run two writers against one output root. Query indexes beneath
+the cache root are disposable and may be deleted; the graph, sidecar, and
+`store.ref` must be kept together. Use `compass store status|validate` for
+health, `compass store backup` for a digest-bound copy, and `compass store
+restore` into a new directory for recovery. The store API enforces bounded
+namespace, partition, key, value, scan, and graph sizes. General object GC and
+hosted quotas are deferred; local disk availability remains an operational
+limit. See the [store operations guide](../guides/compass-store-operations.md)
+for the support window and rebuild procedure.
+
 ## Build configuration
 
 Initialize a reviewable repository scope with:

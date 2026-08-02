@@ -23,6 +23,7 @@ mod result_commands;
 mod semantic_commands;
 mod semantic_diff_commands;
 mod semantic_diff_render;
+mod store_commands;
 mod upgrade_commands;
 
 use std::collections::HashMap;
@@ -367,6 +368,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "merge-chunks" => semantic_commands::command_merge_chunks(frontend, &args),
         "merge-semantic" => semantic_commands::command_merge_semantic(frontend, &args),
         "provider" => provider_commands::command_provider(frontend, &args),
+        "store" => store_commands::command(&args),
         "save-result" => result_commands::command_save_result(frontend, &args),
         "reflect" => result_commands::command_reflect(frontend, &args),
         "check-update" => integration_commands::command_check_update(frontend, &args),

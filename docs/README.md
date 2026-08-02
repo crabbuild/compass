@@ -50,6 +50,7 @@ to yours:
 - [Set up a coding assistant](guides/assistant-setup.md)
 - [Use versioned graph history](guides/versioned-history.md)
 - [Operate watch, serve, hooks, and providers](guides/operations.md)
+- [Operate the Compass Store](guides/compass-store-operations.md)
 - [Solve a concrete problem](cookbook/README.md)
 - [Look up commands and contracts](reference/commands.md)
 
@@ -92,6 +93,7 @@ workspace:
 | [Assistant setup](guides/assistant-setup.md) | A native Compass skill installed at the right scope |
 | [Versioned history](guides/versioned-history.md) | Immutable graphs and diffs for exact Git commits |
 | [Operations](guides/operations.md) | Safe operation of long-running and optional surfaces |
+| [Compass Store operations](guides/compass-store-operations.md) | Store health, backup, restore, rebuild, and release qualification |
 
 ### Understand the design
 

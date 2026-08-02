@@ -68,6 +68,45 @@ selection never requires opening a database. The SQLite file and reference are
 internal realizations of the backend-neutral `compass-store` contract, not a
 stable SQL schema or pointer format that consumers may query directly.
 
+## Compass Store release contract
+
+The first supported local store line is `0.3.x`. Its logical machine formats
+are versioned independently:
+
+| Contract | Major | Support in `0.3.x` |
+| --- | --- | --- |
+| Graph JSON | `compass.graph/1` | Permanent compatible engine; direct input, publication, inspection, interchange, recovery, and deterministic export |
+| Common key-value API | `compass.store/1` | Supported by the local SQLite adapter and the library-only redb adapter |
+| Immutable graph snapshot | `compass.store.graph-snapshot/1` | Same-major reopen and validation |
+| Store reference | `compass.store.ref/1` | Required to bind the selected snapshot to `graph.json` |
+| Backup bundle | `compass.store.backup/1` | Validated by `compass store restore` into a new directory |
+
+Patch releases may reopen a matching major. Unknown majors, pre-release
+physical files, mismatched adapters, and invalid references fail explicitly and
+must be rebuilt; they are never silently treated as empty data. The SQLite
+tables/WAL, redb file, object-key spellings, and query-index caches remain
+rebuildable implementation details. See the [store operations guide](docs/guides/compass-store-operations.md)
+and [migration notes](MIGRATION.md).
+
+The CLI currently selects SQLite for a validated local sidecar.
+`compass-store-redb` is a separate library adapter used by conformance and
+qualification tests; it is not a CLI or packaging dependency. PostgreSQL and
+DynamoDB are future adapters, not supported release backends. No local store
+command accepts cloud credentials, endpoints, or TLS configuration.
+
+Published locations are `DIR/graph.json`, `DIR/compass-store.sqlite3`, and
+`DIR/store.ref` under the selected `--out DIR` (default `compass-out/`).
+`compass store status|validate|backup|restore` are the supported operational
+surface. Backups are digest-bound directories and restores never overwrite an
+existing destination. General object GC and service quotas are deferred; the
+local API still enforces bounded values, scans, graph sizes, and request work.
+
+The hard-cut boundary is the sidecar and all disposable indexes. When a
+physical format is invalid or outside the support window, preserve
+`graph.json`, run `scripts/rebuild_compass_store.sh`, or select `--engine json`.
+The JSON engine does not require a database and is not a migration fallback
+scheduled for removal.
+
 Markdown graph extraction is a structural, extensible projection. New
 document/block attributes and bounded diagnostic extensions may appear without
 changing node identity; consumers must preserve unknown attributes, edge

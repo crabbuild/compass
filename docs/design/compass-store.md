@@ -1,15 +1,15 @@
 # Compass store and graph-engine design
 
-**Status:** Architecture reference. The initial local slice, Phase 2 memory
-snapshot layout, Phase 3 SQLite shadow-publication slice, local Phase 4
-snapshot-backed query routing, and the optional Phase 5 redb adapter slice are
-shipped: the `compass-store` contract, SQLite/redb adapters, dual graph
-publication, typed query-engine selection, deterministic immutable graph
-indexes, selector-CAS reference protocol, WAL/redb durability, reopen
-validation, canonical graph.json differential checks, and cross-engine
-typed-query checks are implemented. PostgreSQL, DynamoDB, remote operation,
-bounded streaming plans, general garbage collection, and performance claims
-remain follow-on work.
+**Status:** Architecture reference plus the local `0.3.x` release contract.
+The initial local slice, Phase 2 memory snapshot layout, Phase 3 SQLite
+shadow-publication slice, local Phase 4 snapshot-backed query routing, the
+optional Phase 5 redb adapter, and the Phase 9 local operational surface are
+implemented. This includes the namespace-first common contract, versioned
+logical envelopes, SQLite backup/restore, explicit rebuild tooling, release
+qualification reports, canonical JSON/typed-query/CompassQL differential
+checks, and packaging boundaries. `graph.json` remains permanent and
+compatible. PostgreSQL, DynamoDB, hosted credentials/TLS, general garbage
+collection, and service quotas remain future work.
 
 Each generated sidecar now contains both a validated graph payload retained for
 compatibility and the Phase 2 content-addressed graph indexes used by the
@@ -17,6 +17,11 @@ current store engine. The sidecar is prepared and checkpointed in the
 unpublished BuildGuard generation; only the filesystem generation switch
 publishes it. `graph.json` remains a permanent compatible engine and is never
 removed or made dependent on SQLite.
+
+The first support window is `0.3.x`: matching logical majors may be reopened
+by patch releases, while physical adapter files and disposable indexes remain
+rebuildable. The exact operator procedures and file-level backup bundle are in
+the [Compass Store operations guide](../guides/compass-store-operations.md).
 
 > **Who this page is for:** maintainers of graph publication and queries,
 > storage-adapter authors, cloud-service implementers, and reviewers of the

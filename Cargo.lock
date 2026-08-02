@@ -1418,6 +1418,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "compass-store-qualification"
+version = "0.3.0"
+dependencies = [
+ "compass-cypher",
+ "compass-graph",
+ "compass-model",
+ "compass-query",
+ "compass-store",
+ "compass-store-redb",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+]
+
+[[package]]
 name = "compass-store-redb"
 version = "0.3.0"
 dependencies = [

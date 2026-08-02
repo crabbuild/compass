@@ -679,6 +679,90 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Copy a validated, checkpointed SQLite store to a new backup path.
+    ///
+    /// The destination must not be the live store. The copy is reopened and
+    /// validated before this method returns so callers never receive a backup
+    /// that only looked complete at the filesystem level.
+    pub fn backup_to(&self, destination: impl AsRef<Path>) -> Result<(), StoreError> {
+        let destination = destination.as_ref();
+        if destination == self.path {
+            return Err(StoreError::InvalidFormat(
+                "store backup destination must differ from the live store".to_owned(),
+            ));
+        }
+        if destination.exists() {
+            return Err(StoreError::InvalidFormat(format!(
+                "store backup destination already exists: {}",
+                destination.display()
+            )));
+        }
+        self.checkpoint()?;
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|source| StoreError::Io {
+                operation: "create_store_backup_parent",
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        fs::copy(&self.path, destination).map_err(|source| StoreError::Io {
+            operation: "copy_store_backup",
+            path: destination.to_path_buf(),
+            source,
+        })?;
+        let validation =
+            Self::open_read_only(destination).and_then(|store| store.validate_snapshot());
+        if let Err(error) = validation {
+            let _ = fs::remove_file(destination);
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// Restore a validated SQLite backup into a new path.
+    ///
+    /// Restores intentionally refuse to overwrite an existing path. A caller
+    /// that needs replacement must move the old generation aside first, which
+    /// preserves a recoverable rollback copy.
+    pub fn restore_from(
+        backup: impl AsRef<Path>,
+        destination: impl AsRef<Path>,
+    ) -> Result<(), StoreError> {
+        let backup = backup.as_ref();
+        let destination = destination.as_ref();
+        if backup == destination {
+            return Err(StoreError::InvalidFormat(
+                "store restore destination must differ from the backup".to_owned(),
+            ));
+        }
+        if destination.exists() {
+            return Err(StoreError::InvalidFormat(format!(
+                "store restore destination already exists: {}",
+                destination.display()
+            )));
+        }
+        Self::open_read_only(backup)?.validate_snapshot()?;
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|source| StoreError::Io {
+                operation: "create_store_restore_parent",
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        fs::copy(backup, destination).map_err(|source| StoreError::Io {
+            operation: "copy_store_restore",
+            path: destination.to_path_buf(),
+            source,
+        })?;
+        let validation =
+            Self::open_read_only(destination).and_then(|store| store.validate_snapshot());
+        if let Err(error) = validation {
+            let _ = fs::remove_file(destination);
+            return Err(error);
+        }
+        Ok(())
+    }
+
     /// Return bounded manifest keys that are not selected by either the
     /// payload snapshot or the immutable graph-index selector.  This is a
     /// discovery API only; Phase 8 owns retention policy and deletion.
@@ -1775,13 +1859,17 @@ pub mod test_support {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::fs;
+    use std::sync::Arc;
+    use std::thread;
 
     use rusqlite::Connection;
     use sha2::{Digest, Sha256};
 
     use super::{
-        Key, KeyRange, MemoryStore, NamespaceId, PartitionKey, ScanLimits, SqliteStore, Store,
-        StoreError, VersionToken, WriteCondition, decode_key_segments, encode_key_segments,
+        GRAPH_SCHEMA_V1, Key, KeyRange, MemoryStore, NamespaceId, PartitionKey, ScanLimits,
+        SqliteStore, Store, StoreError, VersionToken, WriteCondition, decode_key_segments,
+        encode_key_segments,
     };
 
     #[test]
@@ -1864,6 +1952,43 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_serializes_concurrent_conditional_writers() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let store = Arc::new(SqliteStore::open(directory.path().join("store.sqlite3"))?);
+        let namespace = NamespaceId::new("tenant")?;
+        let partition = PartitionKey::new("records")?;
+        let key = Key::new("active")?;
+        let mut writers = Vec::new();
+        for index in 0..8_u8 {
+            let store = Arc::clone(&store);
+            let namespace = namespace.clone();
+            let partition = partition.clone();
+            let key = key.clone();
+            writers.push(thread::spawn(move || {
+                store.put(
+                    &namespace,
+                    &partition,
+                    &key,
+                    &[index],
+                    WriteCondition::Missing,
+                )
+            }));
+        }
+        let mut winners = 0;
+        let mut conflicts = 0;
+        for writer in writers {
+            match writer.join().map_err(|_| "SQLite writer thread panicked")? {
+                Ok(_) => winners += 1,
+                Err(StoreError::Conflict) => conflicts += 1,
+                Err(error) => return Err(error.into()),
+            }
+        }
+        assert_eq!(winners, 1);
+        assert_eq!(conflicts, 7);
+        Ok(())
+    }
+
+    #[test]
     fn snapshots_reopen_and_verify_digest() -> Result<(), Box<dyn Error>> {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("store.sqlite3");
@@ -1893,6 +2018,35 @@ mod tests {
         let synchronous =
             connection.query_row("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))?;
         assert_eq!(synchronous, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn backup_and_restore_validate_the_complete_sqlite_file() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("source.sqlite3");
+        let backup = directory.path().join("backup.sqlite3");
+        let restored = directory.path().join("restored.sqlite3");
+        let bytes = br#"{"graph":{"schema":"compass.graph/1"},"nodes":[],"links":[]}"#;
+        {
+            let store = SqliteStore::open(&source)?;
+            store.publish_snapshot(bytes, GRAPH_SCHEMA_V1, 0, 0)?;
+            store.backup_to(&backup)?;
+        }
+        SqliteStore::restore_from(&backup, &restored)?;
+        assert_eq!(
+            SqliteStore::open_read_only(&restored)?.read_snapshot()?.1,
+            bytes
+        );
+
+        let corrupt = directory.path().join("corrupt.sqlite3");
+        fs::copy(&backup, &corrupt)?;
+        let connection = Connection::open(&corrupt)?;
+        connection.execute("DELETE FROM kv", [])?;
+        drop(connection);
+        assert!(
+            SqliteStore::restore_from(&corrupt, directory.path().join("rejected.sqlite3")).is_err()
+        );
         Ok(())
     }
 
@@ -1984,6 +2138,15 @@ mod tests {
         )?;
         assert_eq!(page.entries[0].key, vec![0, 1]);
         assert!(page.next.is_some());
+        Ok(())
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn sqlite_passes_the_shared_adapter_conformance_contract() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let store = SqliteStore::open(directory.path().join("store.sqlite3"))?;
+        super::test_support::assert_store_contract(&store)?;
         Ok(())
     }
 
