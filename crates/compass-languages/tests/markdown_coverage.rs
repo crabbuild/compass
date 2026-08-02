@@ -351,5 +351,21 @@ fn markdown_frontmatter_is_bounded_and_diagnosed_without_swallowing_body()
             .is_some_and(|message| message.contains("frontmatter"))
     }));
     assert!(malformed.nodes.iter().any(|node| node.label() == "Body"));
+
+    let unclosed = Engine::default().extract_source(
+        std::path::Path::new("guide.md"),
+        b"---\ntitle: still body\n# Body\n",
+    )?;
+    let unclosed_diagnostics = unclosed
+        .extensions
+        .get("markdown_diagnostics")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing unclosed frontmatter diagnostic")?;
+    assert!(unclosed_diagnostics.iter().any(|value| {
+        value
+            .as_str()
+            .is_some_and(|message| message.contains("closing delimiter"))
+    }));
+    assert!(unclosed.nodes.iter().any(|node| node.label() == "Body"));
     Ok(())
 }
