@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Qualify the local `compass-store` release contract: versioned store and
+  graph-snapshot envelopes, namespace-first addressing, SQLite backup/restore,
+  `compass store status|validate|backup|restore`, explicit rebuild tooling, and
+  canonical JSON/typed-query/CompassQL differential evidence. `graph.json`
+  remains permanent; redb is a library-only adapter and PostgreSQL/DynamoDB
+  remain deferred.
 - Publish a validated `compass-store.sqlite3` namespace/partition/key snapshot
   and typed `store.ref` beside every current `graph.json` generation. Typed
   code-query commands now use the store by default when the selector agrees,

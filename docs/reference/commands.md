@@ -652,6 +652,29 @@ Managed integration/update probe.
 - `COMPASS_OUT` can change the default output root for several compatible
   command families; explicit `--out` is clearer in automation.
 
+## Store health and recovery
+
+```text
+compass store status [OUTPUT] [--format text|json]
+compass store validate [OUTPUT] [--format text|json]
+compass store backup [OUTPUT] --output BACKUP_DIR [--format text|json]
+compass store restore --from BACKUP_DIR --into OUTPUT [--format text|json]
+```
+
+`status` is read-only and reports graph, SQLite sidecar, selector, schema, and
+digest state. `validate` requires a matching `compass-store.sqlite3`, active
+snapshot, and `store.ref`; a mismatch is an error, never an empty graph.
+`backup` creates a new digest-bound directory after checkpointing SQLite.
+`restore` validates that bundle and writes only to a new or empty destination.
+The commands currently operate on the local SQLite adapter. The redb adapter is
+library-only, and PostgreSQL/DynamoDB are future backends.
+
+`graph.json` remains a complete engine. If a sidecar is unavailable or being
+rebuilt, use `--engine json` with typed query commands. The explicit rebuild
+runbook is [`scripts/rebuild_compass_store.sh`](../../scripts/rebuild_compass_store.sh);
+the detailed durability, backup, GC, quota, and recovery policy is in the
+[Compass Store operations guide](../guides/compass-store-operations.md).
+
 ## IDE and graph-inspection commands
 
 ```text

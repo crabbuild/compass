@@ -48,3 +48,22 @@ Compass parses untrusted project content and graph files. Its default structural
   executable so the managed command path remains accurate.
 
 Include the selected options and endpoint type in reports about these features. Never include live credentials.
+
+## Store boundary
+
+`graph.json`, `store.ref`, backup manifests, SQLite files, and future adapter
+objects are untrusted input. Compass validates schema majors, bounded sizes,
+content digests, active selectors, canonical JSON export, and reference
+bindings before exposing a store snapshot. `compass store restore` is
+fail-closed, restores only into a new destination, and removes an incomplete
+destination on validation failure. Stop writers before copying a redb file;
+the SQLite backup command checkpoints WAL for this purpose.
+
+The namespace is an isolation and lifecycle key, not an authorization
+mechanism. A future hosted adapter must add authentication, authorization,
+TLS, audit logging, quotas, and tenant-scoped GC outside the common contract.
+The local release has no cloud endpoint, credential, or TLS setting and does
+not link cloud SDKs into the CLI. Never attach a store database or raw backup
+to a public issue: it can disclose repository names, paths, source anchors,
+and graph structure. Share a sanitized `compass store status --format json`
+response instead.

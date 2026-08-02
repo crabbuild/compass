@@ -91,6 +91,12 @@ do
     test "$(tar -tzf "$archive" | grep -Ec "(^|/)$binary_name$")" -eq 1
 done
 
+if tar -tzf "$test_root/dist-aarch64-apple-darwin/compass-aarch64-apple-darwin.tar.gz" \
+    | grep -Eiq '(^|/)(graph\.json|compass-store\.(sqlite3|redb)|store\.ref|\.compass|credentials|\.env)(/|$|\.)'; then
+    echo "release archive contains local store state or credentials" >&2
+    exit 1
+fi
+
 release_dir="$test_root/release"
 mkdir -p "$release_dir" "$test_root/fake-bin"
 cp "$test_root/dist-aarch64-apple-darwin/"* "$release_dir/"
@@ -165,4 +171,5 @@ fi
 test ! -e "$test_root/checksum-must-fail/compass"
 mv "$test_root/good.sha256" "$release_dir/compass-aarch64-apple-darwin.tar.gz.sha256"
 
+"$repo_root/scripts/tests/test_store_release.sh"
 echo "release script tests passed"
