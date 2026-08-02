@@ -609,7 +609,7 @@ fn every_registered_extractor_family_crosses_production_v1_publication()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
-    assert_eq!(Registry::cases().len(), 65, "registry case count changed");
+    assert_eq!(Registry::cases().len(), 66, "registry case count changed");
     for case in Registry::cases() {
         write(root, case.fixture_path, case.fixture_source)?;
         let resolved = Registry::resolve(&root.join(case.fixture_path))
@@ -624,6 +624,7 @@ fn every_registered_extractor_family_crosses_production_v1_publication()
     for expected in [
         "Generic",
         "Markdown",
+        "Html",
         "JsonConfig",
         "Terraform",
         "PascalForm",

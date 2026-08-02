@@ -18,9 +18,10 @@ mod fortran;
 pub mod frameworks;
 
 /// Version of the extraction contract consumed by graph publication.
-pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/4";
+pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/5";
 mod go;
 mod groovy;
+mod html;
 mod ids;
 mod json_config;
 mod julia;
@@ -65,6 +66,7 @@ pub use frameworks::{
     FrameworkPackRegistryError, FrameworkRelation, RawDomainFact, RawFrameworkAnchor,
     RawFrameworkAnnotationFact, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
 };
+pub use html::{HtmlError, HtmlNormalization, normalize_html};
 pub use ids::{file_stem, make_id, normalize_id};
 pub use program::{TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
 pub use project_evidence::{

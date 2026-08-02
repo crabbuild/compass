@@ -5,6 +5,17 @@
 - Give the VS Code Architecture Flow a bounded, horizontally scrollable system
   canvas with roomier lanes, non-overlapping controls, drag-to-pan navigation,
   resilient empty states, and a route-table alternative.
+- Make Markdown extraction source-driven and structurally parsed with pinned
+  block and inline grammars. Publish bounded frontmatter metadata, headings,
+  nested blocks, tables, code fences, reference definitions, exact link sites,
+  and explicit ambiguous-fragment evidence. Include raw frontmatter in Markdown
+  file hashes so metadata-only edits refresh graph and semantic cache entries;
+  recognize `.markdown` files as documents. Extraction semantics advance to
+  version 5 so old structural facts cannot be reused.
+- Add a pinned structural HTML adapter for `.html`/`.htm`, shared entity-aware
+  normalization for URL ingestion, semantic landmarks/tables/links, bounded
+  metadata and malformed-input diagnostics, and explicit MDX/Quarto/footnote
+  evidence.
 
 ## 0.2.1 - 2026-08-01
 

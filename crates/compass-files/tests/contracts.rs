@@ -96,6 +96,18 @@ fn markdown_frontmatter_matches_legacy_bytes() {
 }
 
 #[test]
+fn markdown_file_hash_includes_frontmatter_semantics() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("document.md");
+    fs::write(&path, "---\ntitle: First\n---\n\nShared body\n")?;
+    let first_hash = file_hash(&path, directory.path())?;
+    fs::write(&path, "---\ntitle: Second\n---\n\nShared body\n")?;
+    let second_hash = file_hash(&path, directory.path())?;
+    assert_ne!(first_hash, second_hash);
+    Ok(())
+}
+
+#[test]
 fn watcher_filter_reuses_ignore_and_output_boundaries() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();

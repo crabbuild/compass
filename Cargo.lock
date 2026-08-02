@@ -1141,6 +1141,7 @@ name = "compass-ingest"
 version = "0.2.1"
 dependencies = [
  "compass-files",
+ "compass-languages",
  "regex",
  "serde_json",
  "sha1",
@@ -1184,9 +1185,12 @@ dependencies = [
  "toml 1.1.3+spec-1.1.0",
  "tree-sitter",
  "tree-sitter-dm",
+ "tree-sitter-html",
+ "tree-sitter-md",
  "unicode-casefold",
  "unicode-normalization",
  "unicode-properties",
+ "url",
 ]
 
 [[package]]
@@ -4937,10 +4941,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-html"
+version = "0.23.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "261b708e5d92061ede329babaaa427b819329a9d427a1d710abb0f67bbef63ee"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-language"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
+
+[[package]]
+name = "tree-sitter-md"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2efd398be546456c814598ee56c0f51769a77241511b4a58077815d120afa882"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
 
 [[package]]
 name = "try-lock"

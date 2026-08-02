@@ -20,6 +20,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 time.workspace = true
 compass-files = { path = "../compass-files", version = "0.2.1" }
+compass-languages = { path = "../compass-languages", version = "0.2.1" }
 ureq.workspace = true
 url.workspace = true
 wait-timeout.workspace = true

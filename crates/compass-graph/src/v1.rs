@@ -2296,9 +2296,11 @@ fn document_publication_input_owned(
     source_commit: Option<&str>,
     inventory: Vec<InventoryEvidence>,
 ) -> Result<(Extraction, BuildEvidence), GraphError> {
+    // The owned document may have been assembled from parallel extraction
+    // results. Leave raw-order canonicalization enabled so relocation and
+    // repeated builds receive the same quarantine identities and diagnostics.
     let mut profile_started = Instant::now();
     let mut extensions = Map::new();
-    extensions.insert(CANONICAL_RAW_ORDER.to_owned(), Value::Bool(true));
     if let Some(diagnostics) = document.graph.get(TRUSTED_GRAPH_DIAGNOSTICS) {
         extensions.insert(TRUSTED_GRAPH_DIAGNOSTICS.to_owned(), diagnostics.clone());
     }

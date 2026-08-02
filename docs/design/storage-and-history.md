@@ -288,6 +288,7 @@ Lease appears stuck?
 
 ## Related pages
 
+- [Planned Compass store and graph-engine design](compass-store.md)
 - [Versioned graph history](../guides/versioned-history.md)
 - [History crate tour](../implementation/workspace-tour.md)
 - [Output reference](../reference/outputs.md)

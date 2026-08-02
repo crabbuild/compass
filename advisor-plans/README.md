@@ -32,7 +32,7 @@ conversation context is required beyond the plan file.
 | 006 | Make media ingestion fail explicitly and remain memory-bounded | P1 | M | — | TODO |
 | 007 | Introduce a versioned, provenance-preserving document artifact | P1 | L | 006 | TODO |
 | 008 | Chunk rich documents losslessly and fuse structural with semantic evidence | P1 | L | 007 | TODO |
-| 009 | Make Markdown and HTML first-class structural documents | P1 | L | 007, 008 | TODO |
+| 009 | Make Markdown and HTML first-class structural documents | P1 | L | 007, 008 | DONE |
 | 010 | Preserve OOXML order and add native PPTX document graphs | P2 | L | 006, 007, 008 | TODO |
 | 011 | Add a bounded native RTF decoder with explicit fidelity diagnostics | P2 | L | 007, 008 | TODO |
 | 012 | Qualify document graphs across formats, limits, and determinism | P1 | M | 009, 010, 011 | TODO |
