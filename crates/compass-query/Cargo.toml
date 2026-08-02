@@ -22,6 +22,7 @@ compass-cypher = { path = "../compass-cypher", version = "0.3.0" }
 compass-model = { path = "../compass-model", version = "0.3.0" }
 compass-analysis = { path = "../compass-analysis", version = "0.3.0" }
 compass-ir = { path = "../compass-ir", version = "0.3.0" }
+compass-store = { path = "../compass-store", version = "0.3.0" }
 unicode-normalization.workspace = true
 
 [target.'cfg(unix)'.dependencies]

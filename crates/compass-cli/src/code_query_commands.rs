@@ -4,7 +4,7 @@ use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, CodeQueryResponse, ExploreRequest, ImpactRequest,
     NodeTrailRequest, SearchRequest,
 };
-use compass_query::open;
+use compass_query::{EngineSelection, open_with_engine};
 
 use crate::Outcome;
 
@@ -31,6 +31,21 @@ fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String
     let positional = positional(args);
     let requested_graph =
         PathBuf::from(option(args, "--graph").unwrap_or("compass-out/graph.json"));
+    let explicit_graph = args
+        .iter()
+        .any(|argument| argument == "--graph" || argument.starts_with("--graph="));
+    let engine = match option(args, "--engine") {
+        Some("default") => EngineSelection::Default,
+        Some("json") => EngineSelection::Json,
+        Some("store") => EngineSelection::Store,
+        Some(value) => {
+            return Err(format!(
+                "--engine must be default, json, or store (found {value})"
+            ));
+        }
+        None if explicit_graph => EngineSelection::Json,
+        None => EngineSelection::Default,
+    };
     let cache = option(args, "--cache")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
@@ -44,7 +59,8 @@ fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String
         .map(PathBuf::from)
         .map(resolve_generation_artifact)
         .transpose()?;
-    let engine = open(&graph, program.as_deref(), &cache).map_err(|error| error.to_string())?;
+    let engine = open_with_engine(&graph, program.as_deref(), &cache, engine)
+        .map_err(|error| error.to_string())?;
     let limits = limits(args)?;
     match operation {
         "search" => engine.search(SearchRequest {
@@ -110,10 +126,15 @@ fn number<T: std::str::FromStr + Copy>(
 }
 
 fn option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
-    args.iter()
-        .position(|argument| argument == name)
-        .and_then(|index| args.get(index + 1))
-        .map(String::as_str)
+    args.iter().enumerate().find_map(|(index, argument)| {
+        if argument == name {
+            args.get(index + 1).map(String::as_str)
+        } else {
+            argument
+                .strip_prefix(name)
+                .and_then(|value| value.strip_prefix('='))
+        }
+    })
 }
 
 fn positional(args: &[String]) -> Vec<String> {
@@ -121,6 +142,7 @@ fn positional(args: &[String]) -> Vec<String> {
         "--graph",
         "--program",
         "--cache",
+        "--engine",
         "--format",
         "--root",
         "--max-depth",

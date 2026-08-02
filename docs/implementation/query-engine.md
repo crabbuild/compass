@@ -35,6 +35,17 @@ CompassQL compiler/executor. Both operate over the same indexed graph model.
 Read commands can force stored direction when compatibility documents require
 it.
 
+## Typed code-query storage selection
+
+The typed `search`, `callers`, `callees`, `impact`, `explore`, and `node`
+commands open through `compass_query::open`. The default selector looks for a
+validated `compass-store.sqlite3` sidecar beside the requested graph and reads
+its content-addressed snapshot; if no sidecar exists, it opens `graph.json`.
+`--engine json` always uses the compatible JSON engine, while `--engine store`
+requires a readable store and reports corruption or absence explicitly. The
+query index remains disposable and keyed by the snapshot bytes, so JSON and
+store openings share the same cache identity and deterministic result path.
+
 ## Focused discovery path
 
 ```text

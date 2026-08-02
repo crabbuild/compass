@@ -1015,6 +1015,7 @@ dependencies = [
  "compass-program",
  "compass-reflect",
  "compass-resolve",
+ "compass-store",
  "notify",
  "num_cpus",
  "protobuf",
@@ -1315,6 +1316,7 @@ dependencies = [
  "compass-ir",
  "compass-languages",
  "compass-model",
+ "compass-store",
  "libc",
  "regex",
  "rusqlite",
@@ -1397,6 +1399,18 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "compass-store"
+version = "0.2.1"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.19",
 ]
 
