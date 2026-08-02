@@ -18,6 +18,17 @@ Legacy Graphify names are intentionally unsupported. Existing Graphify state
 must be archived or removed before creating fresh Compass artifacts. See
 [`MIGRATION.md`](MIGRATION.md) for the hard-cutover procedure.
 
+## VS Code extension compatibility
+
+The Compass VS Code extension requires Compass CLI 0.3.0 or newer. Releases
+below 0.3.0 and 0.3.0 prereleases are unsupported even when they advertise an
+individual feature or contract used by the extension. The extension reports
+the minimum-version failure before activating repository workflows; it does
+not maintain command-specific fallbacks for older releases.
+
+Compass 0.3.0 itself remains supported. The extension adapts typed call-query
+results for the known nested-anchor limitation in that stable release.
+
 ## Compatibility evidence
 
 Compass changes are verified with native evidence:

@@ -93,7 +93,7 @@ function CallGraphGuide() {
             <h2 id="call-guide-how">Three moves from code to context</h2>
           </div>
           <span className="call-guide-shortcut">
-            Right-click <ArrowRightIcon aria-hidden="true" /> Compass Call Graph
+            Right-click <ArrowRightIcon aria-hidden="true" /> Compass
           </span>
         </div>
 
@@ -109,7 +109,7 @@ function CallGraphGuide() {
           <li className="call-guide-step-menu">
             <span className="call-guide-step-number">02</span>
             <div>
-              <h3>Open Compass Call Graph</h3>
+              <h3>Open Compass</h3>
               <p>Right-click in the editor and open the Compass submenu.</p>
             </div>
             <ContextMenuPreview />
@@ -238,11 +238,11 @@ function ContextMenuPreview() {
     <div
       className="call-guide-menu-preview"
       role="img"
-      aria-label="Compass Call Graph editor context menu with callers, callees, and both"
+      aria-label="Compass editor context menu with callers, callees, and both"
     >
       <div className="call-guide-menu-parent">
         <NetworkIcon aria-hidden="true" />
-        <span>Compass Call Graph</span>
+        <span>Compass</span>
         <ChevronRightIcon aria-hidden="true" />
       </div>
       <div className="call-guide-submenu">

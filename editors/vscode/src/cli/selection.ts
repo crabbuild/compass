@@ -3,6 +3,10 @@ import type {
   CompassInstallation,
   CompassInstallationSource
 } from "./discovery";
+import {
+  MINIMUM_COMPASS_VERSION,
+  isSupportedCompassVersion
+} from "./compatibility";
 
 export type CompassSelectionItem = {
   label: string;
@@ -23,9 +27,11 @@ export function compassSelectionItems(
     label: installation.version
       ? `$(terminal) Compass ${installation.version}`
       : "$(terminal) Compass (version unavailable)",
-    description: installation.executable === activeExecutable
-      ? "Current selection"
-      : sourceLabel(installation.source),
+    description: installation.version && !isSupportedCompassVersion(installation.version)
+      ? `Unsupported — requires ${MINIMUM_COMPASS_VERSION}+`
+      : installation.executable === activeExecutable
+        ? "Current selection"
+        : sourceLabel(installation.source),
     detail: installation.executable,
     installation
   }));

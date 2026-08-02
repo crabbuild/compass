@@ -7,7 +7,7 @@ import type { RepositorySession } from "../workspace/repositorySession";
 
 const capabilities: CapabilityReport = {
   schema: "compass.ide.capabilities/1",
-  compass_version: "0.1.7",
+  compass_version: "0.3.0",
   contracts: {
     progress: "compass.ide.progress/1",
     graph_viewer: "compass.viewer.graph/1",
@@ -37,7 +37,7 @@ const missing: CompassDiscovery = {
 
 const installation: CompassInstallation = {
   executable: "/home/dev/.local/bin/compass",
-  version: "0.1.7",
+  version: "0.3.0",
   source: "common"
 };
 
@@ -84,7 +84,7 @@ describe("CompassRuntime", () => {
     expect(runtime.discovery).toMatchObject({
       kind: "found",
       executable: installation.executable,
-      version: "0.1.7",
+      version: "0.3.0",
       installations: [installation]
     });
     expect(listener).toHaveBeenCalledOnce();
@@ -109,6 +109,30 @@ describe("CompassRuntime", () => {
     await expect(runtime.activate(installation)).rejects.toThrow(
       "does not advertise the 'history' feature"
     );
+    expect(persistCliPath).not.toHaveBeenCalled();
+    expect(processes.executablePath).toBe("compass");
+    expect(repository.capabilities).toBeUndefined();
+    expect(runtime.discovery).toBe(missing);
+  });
+
+  it("rejects Compass versions below 0.3.0 without mutating runtime state", async () => {
+    const processes = new CompassProcessManager("compass");
+    const repository = session();
+    const persistCliPath = vi.fn(async () => {});
+    const runtime = new CompassRuntime(missing, {
+      processes,
+      sessions: () => [repository],
+      persistCliPath,
+      createCandidateProcesses: () => ({
+        runJson: vi.fn(async () => ({
+          ...capabilities,
+          compass_version: "0.2.9"
+        }))
+      }) as never
+    });
+
+    await expect(runtime.activate({ ...installation, version: "0.2.9" }))
+      .rejects.toThrow("requires Compass CLI 0.3.0 or newer");
     expect(persistCliPath).not.toHaveBeenCalled();
     expect(processes.executablePath).toBe("compass");
     expect(repository.capabilities).toBeUndefined();
@@ -144,12 +168,12 @@ describe("CompassRuntime", () => {
     const previous: CompassDiscovery = {
       kind: "found",
       executable: "/opt/compass",
-      version: "0.1.6",
+      version: "0.3.1",
       installations: [
         { ...installation, version: undefined },
         {
           executable: "/opt/compass",
-          version: "0.1.6",
+          version: "0.3.1",
           source: "path"
         }
       ],
@@ -166,7 +190,7 @@ describe("CompassRuntime", () => {
 
     const activated = await runtime.activate({ ...installation, version: undefined });
 
-    expect(activated.installation.version).toBe("0.1.7");
+    expect(activated.installation.version).toBe("0.3.0");
     expect(runtime.discovery.installations.map((item) => item.executable)).toEqual([
       installation.executable,
       "/opt/compass"

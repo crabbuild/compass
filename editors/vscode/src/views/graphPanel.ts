@@ -19,6 +19,7 @@ import { CurrentGraphSnapshot } from "./graphSnapshot";
 import { openGraphSource } from "./sourceNavigation";
 import { graphStaticLoadingMarkup } from "../webviews/graphLoadingMarkup";
 import { codeQueryRequiresRebuild, runCodeQuery } from "./codeQueryClient";
+import { codeQueryGraphViewModel } from "./codeQueryGraph";
 
 const LARGE_GRAPH_BYTES = 8 * 1024 * 1024;
 
@@ -27,11 +28,14 @@ export class GraphPanel {
     context: vscode.ExtensionContext,
     session: RepositorySession,
     output: vscode.OutputChannel,
-    queryResult?: CodeQueryResponse
+    queryResult?: CodeQueryResponse,
+    queryTitle?: string
   ): Promise<GraphPanel> {
     const panel = vscode.window.createWebviewPanel(
       "compass.graph",
-      `Compass Graph — ${vscode.workspace.asRelativePath(session.root)}`,
+      queryTitle
+        ? `${queryTitle} — ${vscode.workspace.asRelativePath(session.root)}`
+        : `Compass Graph — ${vscode.workspace.asRelativePath(session.root)}`,
       vscode.ViewColumn.Active,
       {
         enableScripts: true,
@@ -39,7 +43,14 @@ export class GraphPanel {
         localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "dist")]
       }
     );
-    const graph = new GraphPanel(context, session, panel, output, queryResult);
+    const graph = new GraphPanel(
+      context,
+      session,
+      panel,
+      output,
+      queryResult,
+      queryTitle
+    );
     await graph.initialize();
     return graph;
   }
@@ -56,7 +67,8 @@ export class GraphPanel {
     private readonly session: RepositorySession,
     private readonly panel: vscode.WebviewPanel,
     private readonly output: vscode.OutputChannel,
-    queryResult?: CodeQueryResponse
+    queryResult?: CodeQueryResponse,
+    private queryTitle?: string
   ) {
     this.queryResult = queryResult;
   }
@@ -106,6 +118,12 @@ export class GraphPanel {
 
   private async hydrate(): Promise<void> {
     try {
+      if (this.queryResult && this.queryTitle) {
+        await this.publishOverview(
+          codeQueryGraphViewModel(this.queryResult, this.queryTitle)
+        );
+        return;
+      }
       const nodeLimit = vscode.workspace
         .getConfiguration("compass")
         .get("graphNodeLimit", 5000);
@@ -222,7 +240,7 @@ export class GraphPanel {
   }
 
   private async publishOverview(model: GraphViewModel): Promise<void> {
-    this.overview = this.withRepositoryTitle(model);
+    this.overview = this.queryTitle ? model : this.withRepositoryTitle(model);
     this.communityCache.clear();
     await this.panel.webview.postMessage({
       type: "hydrateGraph",
@@ -251,7 +269,13 @@ export class GraphPanel {
         this.controller.signal
       );
       this.queryResult = result;
-      await this.publishQueryResult(result);
+      if (this.queryTitle) {
+        this.queryTitle = queryResultTitle(operation, symbol);
+        this.panel.title = `${this.queryTitle} — ${vscode.workspace.asRelativePath(this.session.root)}`;
+        await this.publishOverview(codeQueryGraphViewModel(result, this.queryTitle));
+      } else {
+        await this.publishQueryResult(result);
+      }
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       this.output.appendLine(`[code-query] ${detail}`);
@@ -325,4 +349,14 @@ export class GraphPanel {
 </body>
 </html>`;
   }
+}
+
+function queryResultTitle(
+  operation: "callers" | "callees" | "impact",
+  symbol: string
+): string {
+  const label = operation === "callers"
+    ? "Callers"
+    : operation === "callees" ? "Callees" : "Impact";
+  return `Compass ${label} — ${symbol}`;
 }

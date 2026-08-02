@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Make VS Code editor graph actions reliable and focused: project typed graph
+  source anchors into cursor-based call resolution, consolidate duplicate
+  context submenus, resolve symbols without an initial prompt, and render only
+  the nodes and relationships returned by context queries. The extension also
+  adapts typed caller/callee query results when the selected Compass 0.3.0 CLI
+  cannot consume those source anchors through `call-graph`, and now rejects
+  Compass CLI releases below 0.3.0 instead of accumulating legacy fallbacks.
 - Qualify the local `compass-store` release contract: versioned store and
   graph-snapshot envelopes, namespace-first addressing, SQLite backup/restore,
   `compass store status|validate|backup|restore`, explicit rebuild tooling, and

@@ -88,6 +88,11 @@ The matching VS Code extension requires a CLI that advertises both `graph` and
 `community_detail`. Upgrade Compass and the extension together; the extension
 does not fall back to the older non-drill-down graph workflow.
 
+Current VSIX builds require Compass CLI 0.3.0 or newer. If **Select Compass
+CLI** labels an installation unsupported, upgrade that CLI or select another
+detected installation. Releases below 0.3.0 and 0.3.0 prereleases cannot be
+activated, even if they advertise some current capabilities.
+
 ## Replace commands
 
 Replace Python and legacy executable invocations with `compass`:

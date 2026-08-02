@@ -6,7 +6,8 @@ Dev Container extension hosts. Browser-only `vscode.dev` is not supported.
 
 ## Set up
 
-1. Install Compass and confirm `compass --version` works on the workspace host.
+1. Install Compass CLI 0.3.0 or newer and confirm `compass --version` works on
+   the workspace host. Older releases and 0.3.0 prereleases are unsupported.
 2. Install the Compass VSIX.
 3. Open a trusted repository.
 4. The extension detects Compass on `PATH` and in common install locations.
@@ -45,9 +46,10 @@ use the same interaction against their exact commit.
 ## Calls and architecture
 
 Open an indexed source file and place the cursor anywhere inside a function or
-method. Right-click, choose **Compass Call Graph**, then choose **Show
-Callers**, **Show Callees**, or **Show Callers & Callees**. The same commands
-are available from the Command Palette.
+method. Right-click, choose **Compass**, then choose **Show Callers**, **Show
+Callees**, or **Show Callers & Callees**. The same commands are available from
+the Command Palette. The single Compass submenu also contains **Show Change
+Impact**, **Explore Related Symbols**, and **Show Node Trail**.
 
 Compass sends the relative file, UTF-8 cursor byte, and 1-based line to the
 language-neutral call-graph command. It selects the innermost callable range
@@ -55,6 +57,11 @@ from the structural graph, so Go and every other call-capable language already
 represented by Compass use the same editor workflow. If Program IR exists for
 the selected repository, Compass uses it only as an enrichment layer; it is not
 required to open a structural graph.
+
+With Compass CLI 0.3.0, the extension transparently resolves the same typed
+source anchor through a bounded CompassQL query and adapts the typed
+caller/callee results because that release cannot consume nested graph anchors
+in `call-graph`.
 
 In the graph tab, choose **Callers**, **Both**, or **Callees** to reload the
 root in another direction, or use an **Expand** action to trace a continuation.
@@ -66,6 +73,13 @@ in that direction. It does not prove that no runtime call exists.
 
 If Compass cannot resolve the cursor, move it inside the function or method
 body and retry. **Show Compass output** opens the local command diagnostics.
+
+Editor-context actions resolve the stable graph symbol from the active file,
+UTF-8 byte, and line rather than asking for a symbol name. Change impact and
+related-symbol actions open a focused graph containing only the returned
+neighborhood. Node trail uses the cursor symbol as its source, asks only for
+the destination, and opens the returned path instead of the repository-wide
+overview.
 
 Use **Open Architecture Flow** for the broader subsystem call-flow document,
 cross-community relationships, symbol lists, call tables, confidence, and

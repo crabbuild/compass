@@ -125,16 +125,6 @@
         "icon": "$(symbol-method)"
       },
       {
-        "command": "compass.showCodeCallers",
-        "title": "Compass: Show Typed Callers",
-        "icon": "$(references)"
-      },
-      {
-        "command": "compass.showCodeCallees",
-        "title": "Compass: Show Typed Callees",
-        "icon": "$(references)"
-      },
-      {
         "command": "compass.showCodeImpact",
         "title": "Compass: Show Change Impact",
         "icon": "$(pulse)"
@@ -167,12 +157,8 @@
     ],
     "submenus": [
       {
-        "id": "compass.callGraph",
-        "label": "Compass Call Graph"
-      },
-      {
         "id": "compass.codeGraph",
-        "label": "Compass Code Graph"
+        "label": "Compass"
       }
     ],
     "configuration": {
@@ -265,17 +251,12 @@
       ],
       "editor/context": [
         {
-          "submenu": "compass.callGraph",
-          "when": "resourceScheme == file",
-          "group": "navigation@90"
-        },
-        {
           "submenu": "compass.codeGraph",
           "when": "resourceScheme == file",
-          "group": "navigation@91"
+          "group": "navigation@90"
         }
       ],
-      "compass.callGraph": [
+      "compass.codeGraph": [
         {
           "command": "compass.openCallers",
           "group": "1_direction@1"
@@ -287,16 +268,6 @@
         {
           "command": "compass.openCallersAndCallees",
           "group": "1_direction@3"
-        }
-      ],
-      "compass.codeGraph": [
-        {
-          "command": "compass.showCodeCallers",
-          "group": "1_calls@1"
-        },
-        {
-          "command": "compass.showCodeCallees",
-          "group": "1_calls@2"
         },
         {
           "command": "compass.showCodeImpact",
@@ -340,7 +311,7 @@
           {
             "id": "compass.calls",
             "title": "Trace calls from the editor",
-            "description": "Place the cursor inside a function, right-click, choose **Compass Call Graph**, then select callers, callees, or both.",
+            "description": "Place the cursor inside a function, right-click, choose **Compass**, then select callers, callees, or both.",
             "media": { "markdown": "README.md" },
             "completionEvents": [
               "onCommand:compass.openCallers",

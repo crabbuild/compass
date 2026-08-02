@@ -3,7 +3,7 @@ const command = process.argv[2];
 if (command === "capabilities") {
   process.stdout.write(JSON.stringify({
     schema: "compass.ide.capabilities/1",
-    compass_version: "0.1.4-test",
+    compass_version: "0.3.0",
     contracts: {
       graph_viewer: "compass.viewer.graph/1",
       callflow_viewer: "compass.viewer.callflow/1",
