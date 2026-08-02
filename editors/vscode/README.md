@@ -96,6 +96,11 @@ partial. An empty direction means that Compass found the function but has no
 represented relationship in that direction; it does not prove no runtime call
 exists.
 
+When the selected CLI is Compass 0.3.0, the extension automatically uses the
+typed query contract for this workflow because that release's `call-graph`
+command cannot read nested `compass.graph/1` source anchors. You do not need to
+replace the CLI to use the rebuilt extension.
+
 The same **Compass** editor menu includes **Show Change Impact**, **Explore
 Related Symbols**, and **Show Node Trail**. Compass resolves the graph identity
 at the cursor automatically. Impact and related-symbol results open as focused

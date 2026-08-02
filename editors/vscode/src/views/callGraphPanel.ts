@@ -3,8 +3,7 @@ import path from "node:path";
 import * as vscode from "vscode";
 import type { CallDirection } from "@compass/viewer/contracts/callGraph";
 import type { RepositorySession } from "../workspace/repositorySession";
-import { callGraphExpansionArguments, callGraphRootArguments } from "./callGraphArguments";
-import { runCallGraph } from "./callGraphClient";
+import { runCallGraphAtCursor, runCallGraphForSymbol } from "./callGraphClient";
 import { utf8ByteAt } from "./cursorByte";
 import { openGraphSource } from "./sourceNavigation";
 
@@ -50,7 +49,7 @@ export class CallGraphPanel {
       if (message?.type === "ready" || message?.type === "retry") {
         rootGeneration += 1;
         await send(
-          callGraphRootArguments({ file: relative, byte, line }, direction, 2),
+          { kind: "cursor", direction, depth: 2 },
           "hydrateCallGraph",
           rootGeneration
         );
@@ -59,7 +58,7 @@ export class CallGraphPanel {
         direction = message.direction;
         rootGeneration += 1;
         await send(
-          callGraphRootArguments({ file: relative, byte, line }, direction, 2),
+          { kind: "cursor", direction, depth: 2 },
           "hydrateCallGraph",
           rootGeneration
         );
@@ -67,10 +66,15 @@ export class CallGraphPanel {
         output.show(true);
       } else if (message?.type === "expand"
         && typeof message.symbol === "string"
-        && ["callers", "callees", "both"].includes(message.direction)
+        && isDirection(message.direction)
         && Number.isInteger(message.depth)) {
         await send(
-          callGraphExpansionArguments(message.symbol, message.direction, message.depth),
+          {
+            kind: "symbol",
+            symbol: message.symbol,
+            direction: message.direction,
+            depth: message.depth
+          },
           "mergeCallGraph",
           rootGeneration
         );
@@ -80,7 +84,16 @@ export class CallGraphPanel {
     });
 
     async function send(
-      rootArgs: string[],
+      request: {
+        kind: "cursor";
+        direction: CallDirection;
+        depth: number;
+      } | {
+        kind: "symbol";
+        symbol: string;
+        direction: CallDirection;
+        depth: number;
+      },
       type: "hydrateCallGraph" | "mergeCallGraph",
       generation: number
     ): Promise<void> {
@@ -90,7 +103,21 @@ export class CallGraphPanel {
       const abort = () => controller.abort();
       panelController.signal.addEventListener("abort", abort, { once: true });
       try {
-        const graph = await runCallGraph(session, rootArgs, controller.signal);
+        const graph = request.kind === "cursor"
+          ? await runCallGraphAtCursor(
+            session,
+            { file: relative, byte, line },
+            request.direction,
+            request.depth,
+            controller.signal
+          )
+          : await runCallGraphForSymbol(
+            session,
+            request.symbol,
+            request.direction,
+            request.depth,
+            controller.signal
+          );
         if (generation !== rootGeneration || controller.signal.aborted) return;
         await panel.webview.postMessage({
           type,

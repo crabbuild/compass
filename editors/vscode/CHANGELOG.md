@@ -8,6 +8,9 @@
   graphs instead of loading the complete repository overview behind them.
 - Resolve caller/callee roots from current typed graph source anchors so the
   editor workflow works with `compass.graph/1` artifacts.
+- Keep caller/callee actions compatible with an external Compass 0.3.0 CLI by
+  resolving the cursor through bounded CompassQL and adapting typed call query
+  results when that release's `call-graph` command rejects nested anchors.
 
 ## 0.2.0
 

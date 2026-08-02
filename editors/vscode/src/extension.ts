@@ -23,8 +23,7 @@ import {
   type CodeQueryRequest
 } from "./views/codeQueryClient";
 import { CallGraphPanel } from "./views/callGraphPanel";
-import { callGraphRootArguments } from "./views/callGraphArguments";
-import { runCallGraph } from "./views/callGraphClient";
+import { runCallGraphAtCursor } from "./views/callGraphClient";
 import { utf8ByteAt } from "./views/cursorByte";
 import { openCallGraphGuidePanel } from "./views/callGraphGuidePanel";
 import { openArchitecturePanel } from "./views/architecturePanel";
@@ -353,13 +352,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       const relative = relativePath.split(path.sep).join("/");
       try {
-        const response = await runCallGraph(
+        const response = await runCallGraphAtCursor(
           session,
-          callGraphRootArguments({
+          {
             file: relative,
             byte: utf8ByteAt(editor.document, editor.selection.active),
             line: editor.selection.active.line + 1
-          }, "both", 1)
+          },
+          "both",
+          1
         );
         return response.rootSymbol;
       } catch (error) {

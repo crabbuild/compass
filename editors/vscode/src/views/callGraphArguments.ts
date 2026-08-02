@@ -1,6 +1,6 @@
 import type { CallDirection } from "@compass/viewer/contracts/callGraph";
 
-type CallGraphRoot = {
+export type CallGraphRoot = {
   file: string;
   byte: number;
   line: number;

@@ -57,6 +57,11 @@ represented by Compass use the same editor workflow. If Program IR exists for
 the selected repository, Compass uses it only as an enrichment layer; it is not
 required to open a structural graph.
 
+With Compass CLI 0.3.0, the extension transparently resolves the same typed
+source anchor through a bounded CompassQL query and adapts the typed
+caller/callee results because that release cannot consume nested graph anchors
+in `call-graph`.
+
 In the graph tab, choose **Callers**, **Both**, or **Callees** to reload the
 root in another direction, or use an **Expand** action to trace a continuation.
 Resolved, inferred, ambiguous, and unresolved calls use distinct labels and
