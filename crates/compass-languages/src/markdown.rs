@@ -157,12 +157,20 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
             .entry(qualified_base.clone())
             .or_default();
         *occurrence += 1;
-        let qualified_name = if *occurrence == 1 {
+        let mut qualified_name = if *occurrence == 1 {
             qualified_base
         } else {
             format!("{qualified_base}#{occurrence}")
         };
-        let id = make_id(&[&state.stem, &qualified_name]);
+        if state.heading_stack.is_empty()
+            && path_file_name(state.path).is_some_and(|name| name == qualified_name)
+        {
+            qualified_name.push_str("::heading");
+        }
+        let mut id = make_id(&[&state.stem, &qualified_name]);
+        if id == state.file_id {
+            id = make_id(&[&state.source_file, "heading", &qualified_name]);
+        }
         state.add_node(id.clone(), title, line, Some(&qualified_name));
         let parent = state
             .heading_stack
@@ -182,6 +190,10 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
         .extensions
         .insert("output_tokens".to_owned(), json!(0));
     Ok(state.extraction)
+}
+
+fn path_file_name(path: &Path) -> Option<&str> {
+    path.file_name()?.to_str()
 }
 
 struct State<'path> {

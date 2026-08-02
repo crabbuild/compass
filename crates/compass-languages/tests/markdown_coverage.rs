@@ -117,3 +117,29 @@ fn markdown_missing_file_is_a_structured_io_error() -> Result<(), Box<dyn Error>
     assert!(error.to_string().contains("absent.md"));
     Ok(())
 }
+
+#[test]
+fn markdown_file_and_same_named_heading_have_distinct_identities() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("AGENTS.md");
+    fs::write(&path, "# AGENTS.md\n")?;
+
+    let extraction = Engine::default().extract(&path)?;
+    assert!(extraction.error.is_none());
+    assert_eq!(extraction.nodes.len(), 2);
+    assert_ne!(extraction.nodes[0].id, extraction.nodes[1].id);
+    assert_eq!(
+        extraction.nodes[1].string("qualified_name"),
+        "AGENTS.md::heading"
+    );
+    assert!(extraction.edges.iter().any(|edge| {
+        edge.source == extraction.nodes[0].id
+            && edge.target == extraction.nodes[1].id
+            && edge
+                .attributes
+                .get("relation")
+                .and_then(serde_json::Value::as_str)
+                == Some("contains")
+    }));
+    Ok(())
+}

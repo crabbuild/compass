@@ -56,6 +56,8 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
     let (servers, server_prefix) =
         if let Some(servers) = root.get("mcpServers").and_then(Value::as_object) {
             (servers, vec!["mcpServers".to_owned()])
+        } else if let Some(servers) = root.get("servers").and_then(Value::as_object) {
+            (servers, vec!["servers".to_owned()])
         } else if let Some(servers) = root
             .get("mcp")
             .and_then(Value::as_object)
@@ -64,7 +66,7 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
         {
             (servers, vec!["mcp".to_owned(), "servers".to_owned()])
         } else {
-            return Ok(failure("mcp_ingest: no mcpServers map"));
+            return Ok(failure("mcp_ingest: no supported server map"));
         };
     let key_spans = JsonKeyScanner::new(text).scan();
 
