@@ -66,6 +66,7 @@ export function ArchitectureMap({
   const positionsRef = useRef(positions);
   const [zoom, setZoom] = useState(1);
   const [scrollPosition, setScrollPosition] = useState<ScrollPosition>("none");
+  const scrollPositionRef = useRef<ScrollPosition>("none");
   const [viewportSize, setViewportSize] = useState(DEFAULT_VIEWPORT_SIZE);
   const [routeMode, setRouteMode] = useState<RouteMode>("key");
   const [draggingId, setDraggingId] = useState<string>();
@@ -86,6 +87,8 @@ export function ArchitectureMap({
     positionsRef.current = next;
     setPositions(next);
     setZoom(1);
+    scrollPositionRef.current = "start";
+    setScrollPosition("start");
     viewportRef.current?.scrollTo?.({ left: 0, top: 0 });
     setRouteMode("key");
   }, [storageKey]);
@@ -177,6 +180,8 @@ export function ArchitectureMap({
   };
   const resetView = () => {
     setZoom(1);
+    scrollPositionRef.current = "start";
+    setScrollPosition("start");
     const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     viewportRef.current?.scrollTo?.({
       left: 0,
@@ -193,6 +198,7 @@ export function ArchitectureMap({
         : target.scrollLeft >= maximum - 1
           ? "end"
           : "middle";
+    scrollPositionRef.current = next;
     setScrollPosition((current) => current === next ? current : next);
   };
   const onViewportScroll = (event: UIEvent<HTMLDivElement>) => {
@@ -288,6 +294,9 @@ export function ArchitectureMap({
     const viewport = viewportRef.current;
     if (!viewport) return;
     const update = () => {
+      if (scrollPositionRef.current === "end") {
+        viewport.scrollLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+      }
       updateScrollPosition(viewport);
       if (viewport.clientWidth <= 0 || viewport.clientHeight <= 0) return;
       const measured = {

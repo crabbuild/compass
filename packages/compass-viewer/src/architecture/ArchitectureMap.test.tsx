@@ -63,6 +63,36 @@ describe("ArchitectureMap", () => {
       .toBeInTheDocument();
   });
 
+  it("keeps the viewport pinned to the end when a responsive layout widens", () => {
+    render(<ArchitectureMap overview={overview} selection={undefined} onSelect={vi.fn()} />);
+    const viewport = screen.getByRole("region", {
+      name: "Scrollable architecture flow diagram"
+    });
+    let scrollWidth = 1_000;
+    let scrollLeft = 500;
+    Object.defineProperties(viewport, {
+      clientHeight: { configurable: true, value: 620 },
+      clientWidth: { configurable: true, value: 500 },
+      scrollWidth: { configurable: true, get: () => scrollWidth },
+      scrollLeft: {
+        configurable: true,
+        get: () => scrollLeft,
+        set: (value: number) => {
+          scrollLeft = Math.min(value, scrollWidth - 500);
+        }
+      }
+    });
+
+    fireEvent.scroll(viewport);
+    expect(viewport).toHaveAttribute("data-scroll-position", "end");
+
+    scrollWidth = 1_400;
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+
+    expect(scrollLeft).toBe(900);
+    expect(viewport).toHaveAttribute("data-scroll-position", "end");
+  });
+
   it("reports route selection from pointer activation", () => {
     const onSelect = vi.fn();
     render(<ArchitectureMap overview={overview} selection={undefined} onSelect={onSelect} />);
