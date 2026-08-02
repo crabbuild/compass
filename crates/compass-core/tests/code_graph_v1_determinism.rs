@@ -7,6 +7,7 @@ use compass_core::{
     BuildOptions, BuildPurpose, SemanticLayer, build_graph_with_semantic, build_local_graph,
 };
 use compass_files::{Cache, CacheKind, CacheOptions};
+use compass_graph::{GraphSnapshotReader, canonical_graph_json};
 use compass_languages::Extraction;
 use compass_model::code_graph::{
     EdgeKind, GraphDocument, NodeDetails, NodeKind, NodeRole, RouteStage,
@@ -179,6 +180,20 @@ fn build_publishes_a_reopenable_store_snapshot_matching_graph_json() -> Result<(
     assert_eq!(manifest.edge_count, graph.links.len() as u64);
     assert_eq!(store.validate_snapshot()?.snapshot_id, manifest.snapshot_id);
     assert_eq!(reference, store.snapshot_reference()?);
+    let retention = store
+        .retention_metadata()?
+        .ok_or("missing retention metadata")?;
+    assert_eq!(retention.active_manifest_digest, reference.manifest_digest);
+    let reader =
+        GraphSnapshotReader::open_active(&store)?.ok_or("missing active graph snapshot")?;
+    assert_eq!(reader.export_json_bytes()?, canonical_graph_json(&graph)?);
+    assert_eq!(reference.snapshot_id, reader.selector().snapshot_id);
+    assert_eq!(reference.manifest_digest, reader.selector().manifest_digest);
+    assert!(
+        store
+            .discover_orphan_manifests(Default::default())?
+            .is_empty()
+    );
     Ok(())
 }
 
