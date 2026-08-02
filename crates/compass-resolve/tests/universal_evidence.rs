@@ -2,8 +2,114 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
 
+use compass_graph::{BuildEvidence, normalize_v1};
 use compass_languages::{CandidateRelation, Engine, EvidenceLimits, validate_evidence};
+use compass_model::code_graph::NodeKind;
 use compass_resolve::{resolve, resolve_with_root};
+
+#[test]
+fn rust_method_navigation_uses_definition_extent_without_weakening_exact_evidence()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("src/lib.rs");
+    std::fs::create_dir_all(path.parent().ok_or("missing source parent")?)?;
+    let source = b"struct Service;\nimpl Service {\n    fn run(&self) {\n        let _value = 1;\n    }\n}\n";
+    std::fs::write(&path, source)?;
+
+    let extracted = Engine::default().extract(&path)?;
+    let resolved = resolve_with_root(
+        &[extracted],
+        &HashMap::from([(
+            path.to_string_lossy().into_owned(),
+            String::from_utf8(source.to_vec())?,
+        )]),
+        directory.path(),
+    );
+    let build = BuildEvidence::from_extraction(
+        directory.path(),
+        &resolved,
+        "sha256:rust-navigation-range",
+    )?;
+    let graph = normalize_v1(resolved, build)?;
+    let method = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::Method && node.name == ".run()")
+        .ok_or("missing Rust method")?;
+
+    let navigation = method.source.as_ref().ok_or("missing method source")?;
+    assert_eq!(navigation.start_line, 3);
+    assert_eq!(navigation.start_column, 4);
+    assert_eq!(navigation.end_line, 5);
+    assert_eq!(navigation.end_column, 5);
+
+    let identifier = method
+        .evidence
+        .first()
+        .and_then(|evidence| evidence.anchors.first())
+        .ok_or("missing exact method evidence")?;
+    assert_eq!(identifier.start_line, 3);
+    assert_eq!(identifier.start_column, 7);
+    assert_eq!(identifier.end_line, 3);
+    assert_eq!(identifier.end_column, 10);
+    assert_eq!(
+        &source[usize::try_from(identifier.start_byte)?..usize::try_from(identifier.end_byte)?],
+        b"run"
+    );
+    Ok(())
+}
+
+#[test]
+fn ambiguous_owned_scopes_fall_back_to_the_exact_declaration_anchor() -> Result<(), Box<dyn Error>>
+{
+    let source = b"struct Service;\nimpl Service {\n    fn run(&self) {\n        let _value = 1;\n    }\n}\n";
+    let source_file = "src/lib.rs";
+    let mut extracted = Engine::default().extract_source(Path::new(source_file), source)?;
+    let evidence = extracted
+        .semantic_evidence
+        .as_mut()
+        .ok_or("missing Rust semantic evidence")?;
+    let declaration_id = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "method" && declaration.name == "run")
+        .map(|declaration| declaration.id.clone())
+        .ok_or("missing run declaration")?;
+    let mut duplicate = evidence
+        .scopes
+        .iter()
+        .find(|scope| scope.owner_declaration_id.as_deref() == Some(declaration_id.as_str()))
+        .cloned()
+        .ok_or("missing run scope")?;
+    duplicate.id = "scope:duplicate-run".to_owned();
+    evidence.scopes.push(duplicate);
+
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    let method = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("symbol_kind") == "method" && node.string("label") == ".run()")
+        .ok_or("missing resolved Rust method")?;
+    assert!(!method.attributes.contains_key("source_anchor"));
+    assert_eq!(
+        method
+            .attributes
+            .get("line_start")
+            .and_then(serde_json::Value::as_u64),
+        Some(3)
+    );
+    assert_eq!(
+        method
+            .attributes
+            .get("line_end")
+            .and_then(serde_json::Value::as_u64),
+        Some(3)
+    );
+    Ok(())
+}
 
 #[test]
 fn markdown_documents_edges_resolve_to_universal_file_inventory() -> Result<(), Box<dyn Error>> {

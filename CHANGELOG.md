@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Restore complete definition ranges for source navigation on universally
+  extracted functions, methods, and containers while preserving exact
+  identifier anchors in provenance. Ambiguous or non-containing scopes fall
+  back to the exact declaration, and graph publication semantics advance to
+  version 3 so existing outputs rebuild under the corrected range policy.
 - Give the VS Code Architecture Flow a bounded, horizontally scrollable system
   canvas with roomier lanes, non-overlapping controls, drag-to-pan navigation,
   resilient empty states, and a route-table alternative.

@@ -75,6 +75,13 @@ Top-level node-link shape:
 Only `id` is structurally required by the typed node record. Attributes are
 extensible.
 
+For a source-backed declaration with one containing owning scope, the node's
+`source` anchor spans the complete definition and is the authoritative range
+for editor navigation. Its AST provenance keeps the narrower exact declaration
+anchor, such as the identifier token. When a containing definition extent is
+missing or ambiguous, Compass publishes the exact declaration anchor instead
+of selecting an arbitrary scope.
+
 ### Edge
 
 ```json

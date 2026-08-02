@@ -5,7 +5,22 @@ use std::path::Path;
 
 use compass_graph::{BuildEvidence, normalize_v1};
 use compass_languages::Engine;
-use compass_model::code_graph::{EdgeKind, GraphDocument, NodeKind};
+use compass_model::code_graph::{EdgeKind, GraphDocument, NodeKind, NodeRecord};
+use compass_model::provenance::{EvidenceConfidence, SourceAnchor};
+
+fn has_exact_anchor(node: &NodeRecord, site: &SourceAnchor) -> bool {
+    node.evidence.iter().any(|evidence| {
+        evidence.confidence == EvidenceConfidence::Exact && evidence.anchors.contains(site)
+    })
+}
+
+fn anchor_contains(outer: &SourceAnchor, inner: &SourceAnchor) -> bool {
+    outer.file == inner.file
+        && outer.start_byte <= inner.start_byte
+        && outer.end_byte >= inner.end_byte
+        && (outer.start_line, outer.start_column) <= (inner.start_line, inner.start_column)
+        && (outer.end_line, outer.end_column) >= (inner.end_line, inner.end_column)
+}
 
 fn write(root: &Path, relative: &str, source: &[u8]) -> Result<(), Box<dyn Error>> {
     let path = root.join(relative);
@@ -43,7 +58,12 @@ fn assert_public_containment(
         .links
         .iter()
         .filter(|edge| {
-            edge.kind == EdgeKind::Contains && edge.relationship_site.as_ref() == Some(target_site)
+            edge.kind == EdgeKind::Contains
+                && edge.target == target.id
+                && edge
+                    .relationship_site
+                    .as_ref()
+                    .is_some_and(|site| has_exact_anchor(target, site))
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -104,10 +124,17 @@ fn assert_every_public_containment_site_matches_its_target(
             .iter()
             .find(|node| node.id == edge.target)
             .ok_or("missing managed containment target")?;
-        assert_eq!(
-            target.source.as_ref(),
-            Some(site),
-            "stale public containment endpoint: target={target:#?} edge={edge:#?}"
+        let navigation = target
+            .source
+            .as_ref()
+            .ok_or("missing managed containment target source")?;
+        assert!(
+            has_exact_anchor(target, site),
+            "containment site is not retained as exact target evidence: target={target:#?} edge={edge:#?}"
+        );
+        assert!(
+            anchor_contains(navigation, site),
+            "target navigation does not contain its exact declaration site: target={target:#?} edge={edge:#?}"
         );
     }
     Ok(())

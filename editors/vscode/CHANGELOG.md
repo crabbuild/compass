@@ -2,6 +2,8 @@
 
 ## 0.2.0
 
+- Highlight complete source lines when opening a code-graph node, including the
+  full final line, instead of selecting only the symbol's byte range.
 - Show recorded relationship source lines on graph edges and open the exact
   call or wiring site when a located edge is double-clicked.
 - Hard-require current Compass community-detail capabilities for the graph

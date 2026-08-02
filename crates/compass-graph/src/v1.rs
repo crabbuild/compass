@@ -20,9 +20,9 @@ use compass_model::identity::{
 use compass_model::provenance::{
     COALESCED_NODE_EVIDENCE_ATTRIBUTE, CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE,
     ENDPOINT_REWRITE_RULES_ATTRIBUTE, EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin,
-    OCCURRENCE_RULE_ATTRIBUTE, OccurrenceRule, Provenance, ResolutionCandidate, ResolutionState,
-    SEMANTIC_LAYER_EXTRACTOR, SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE,
-    TRUSTED_NODE_RECORD_ATTRIBUTE,
+    NODE_PROVENANCE_ANCHOR_ATTRIBUTE, OCCURRENCE_RULE_ATTRIBUTE, OccurrenceRule, Provenance,
+    ResolutionCandidate, ResolutionState, SEMANTIC_LAYER_EXTRACTOR, SourceAnchor,
+    TRUSTED_EDGE_RECORD_ATTRIBUTE, TRUSTED_NODE_RECORD_ATTRIBUTE,
 };
 use compass_model::{
     CodeGraphValidationError, GraphError, validate_code_graph, validate_code_graph_records,
@@ -34,7 +34,7 @@ use serde_json::{Map, Value};
 use crate::quarantine::{PublicationOutcome, QuarantineCollector};
 
 /// Version of the normalization and publication contract behind graph schema v1.
-pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/2";
+pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/3";
 use sha2::{Digest, Sha256};
 
 const TRUSTED_NODE_RECORD: &str = TRUSTED_NODE_RECORD_ATTRIBUTE;
@@ -2805,6 +2805,9 @@ fn normalize_node(
     let language = optional_any_string(&raw.attributes, &["language", "lang"]);
     let framework = optional_string(&raw.attributes, "framework");
     let source = raw_anchor(&raw.attributes, root, file_facts)?;
+    let provenance_source =
+        raw_node_provenance_anchor(&raw.attributes, source.as_ref(), root, &raw.id)?
+            .or_else(|| source.clone());
     let external_wiring_site = if source.is_none() {
         raw_origin_anchor(&raw.attributes, root, file_facts)?
             .or_else(|| inferred_wiring_site.cloned())
@@ -2873,7 +2876,9 @@ fn normalize_node(
     } else {
         normalize_provenance(
             &raw.attributes,
-            source.clone().or_else(|| external_wiring_site.clone()),
+            provenance_source
+                .clone()
+                .or_else(|| external_wiring_site.clone()),
             &raw.id,
             root,
             external_wiring_site
@@ -2913,7 +2918,7 @@ fn normalize_node(
         &qualified_name,
         &raw.id,
         details.as_ref(),
-        source.as_ref().or(external_wiring_site.as_ref()),
+        provenance_source.as_ref().or(external_wiring_site.as_ref()),
     )?;
     let diagnostics = external_wiring_site
         .as_ref()
@@ -3881,6 +3886,40 @@ fn raw_anchor(
         end_line,
         end_column,
     }))
+}
+
+fn raw_node_provenance_anchor(
+    attributes: &Map<String, Value>,
+    source: Option<&SourceAnchor>,
+    root: &Path,
+    record: &str,
+) -> Result<Option<SourceAnchor>, GraphError> {
+    let Some(value) = attributes.get(NODE_PROVENANCE_ANCHOR_ATTRIBUTE) else {
+        return Ok(None);
+    };
+    let source = source.ok_or_else(|| {
+        raw_error(
+            record,
+            "an exact node provenance anchor requires a containing source anchor",
+        )
+    })?;
+    let mut anchor = structured_source_anchor(value)?;
+    anchor.file = portable_path(&anchor.file, root)?;
+    if !source_anchor_contains(source, &anchor) {
+        return Err(raw_error(
+            record,
+            "the exact node provenance anchor is not contained by the node source anchor",
+        ));
+    }
+    Ok(Some(anchor))
+}
+
+fn source_anchor_contains(outer: &SourceAnchor, inner: &SourceAnchor) -> bool {
+    outer.file == inner.file
+        && outer.start_byte <= inner.start_byte
+        && inner.end_byte <= outer.end_byte
+        && (outer.start_line, outer.start_column) <= (inner.start_line, inner.start_column)
+        && (inner.end_line, inner.end_column) <= (outer.end_line, outer.end_column)
 }
 
 fn structured_source_anchor(value: &Value) -> Result<SourceAnchor, GraphError> {
