@@ -14,6 +14,17 @@ CompassQL compiler/executor. Both operate over the same indexed graph model.
 >
 > **Reading time:** 15 minutes.
 
+## Graph-engine boundary and query model
+
+`compass-query` exposes an immutable `GraphEngine` boundary with two supported
+implementations: `JsonGraphEngine` for the permanent compatible JSON artifact
+and `StoreGraphEngine` for a validated `compass-store` snapshot. The typed
+query algorithms consume the same validated `GraphDocument` projection from
+either engine, so selection cannot change ranking, direction, multiplicity,
+source anchors, or public result schemas. The store implementation is the
+seam for the planned bounded projection/streaming reads; its current local
+slice materializes the validated projection while preserving that contract.
+
 ## Load once into the query model
 
 `GraphDocument::load`:
@@ -39,12 +50,14 @@ it.
 
 The typed `search`, `callers`, `callees`, `impact`, `explore`, and `node`
 commands open through `compass_query::open`. The default selector looks for a
-validated `compass-store.sqlite3` sidecar beside the requested graph and reads
-its content-addressed snapshot; if no sidecar exists, it opens `graph.json`.
-`--engine json` always uses the compatible JSON engine, while `--engine store`
-requires a readable store and reports corruption or absence explicitly. The
-query index remains disposable and keyed by the snapshot bytes, so JSON and
-store openings share the same cache identity and deterministic result path.
+validated `compass-store.sqlite3` sidecar and optional `store.ref` beside the
+requested graph and reads its content-addressed snapshot; if no sidecar exists,
+it opens `graph.json`. A present reference is checked against the store
+identity, manifest, and graph digest before query state is created. `--engine
+json` always uses the compatible JSON engine, while `--engine store` requires a
+readable store and reports corruption or absence explicitly. The query index
+remains disposable and keyed by the snapshot bytes, so JSON and store openings
+share the same cache identity and deterministic result path.
 
 ## Focused discovery path
 

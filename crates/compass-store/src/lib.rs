@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Backend-neutral, namespace-scoped storage for Compass current graph snapshots.
 //!
 //! The portable address is `(namespace, partition, key)`. The SQLite adapter
@@ -11,6 +13,7 @@
 //! can preserve these same request, ordering, and error semantics without
 //! forcing an executor into this contract crate.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,8 +25,12 @@ use sha2::{Digest, Sha256};
 
 pub const STORE_SCHEMA_V1: &str = "compass.store/1";
 pub const GRAPH_SNAPSHOT_SCHEMA_V1: &str = "compass.store.graph-snapshot/1";
+pub const STORE_REF_SCHEMA_V1: &str = "compass.store.ref/1";
 pub const GRAPH_SCHEMA_V1: &str = "compass.graph/1";
 pub const STORE_FILE_NAME: &str = "compass-store.sqlite3";
+pub const STORE_REF_FILE_NAME: &str = "store.ref";
+pub const KEY_ENCODING_V1: u8 = 1;
+pub const MAX_KEY_SEGMENTS: usize = 32;
 pub const MAX_NAMESPACE_BYTES: usize = 128;
 pub const MAX_PARTITION_BYTES: usize = 256;
 pub const MAX_KEY_BYTES: usize = 1_024;
@@ -380,6 +387,55 @@ pub struct SnapshotManifest {
     pub edge_count: u64,
 }
 
+/// A small, typed pointer to one validated store snapshot.
+///
+/// The reference is an application artifact rather than a SQLite implementation
+/// detail. It lets a reader validate that the selected database and snapshot are
+/// the ones published with the active generation before opening query state.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StoreRef {
+    pub schema: String,
+    pub store_schema: String,
+    pub adapter: String,
+    pub store_id: String,
+    pub namespace: String,
+    pub snapshot_id: String,
+    pub manifest_digest: String,
+    pub graph_digest: String,
+}
+
+impl StoreRef {
+    pub fn validate(&self) -> Result<(), StoreError> {
+        if self.schema != STORE_REF_SCHEMA_V1 {
+            return Err(StoreError::InvalidFormat(format!(
+                "expected store reference schema {STORE_REF_SCHEMA_V1}"
+            )));
+        }
+        if self.store_schema != STORE_SCHEMA_V1 {
+            return Err(StoreError::InvalidFormat(format!(
+                "expected store schema {STORE_SCHEMA_V1}"
+            )));
+        }
+        if self.adapter.is_empty() || self.store_id.is_empty() || self.namespace.is_empty() {
+            return Err(StoreError::InvalidFormat(
+                "store reference identity fields must be non-empty".to_owned(),
+            ));
+        }
+        for (name, value) in [
+            ("snapshot_id", self.snapshot_id.as_str()),
+            ("manifest_digest", self.manifest_digest.as_str()),
+            ("graph_digest", self.graph_digest.as_str()),
+        ] {
+            if value.len() != 64 || !value.as_bytes().iter().all(u8::is_ascii_hexdigit) {
+                return Err(StoreError::InvalidFormat(format!(
+                    "store reference {name} is not a SHA-256 hex digest"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 pub struct SqliteStore {
     path: PathBuf,
     connection: Mutex<Connection>,
@@ -544,10 +600,233 @@ impl SqliteStore {
         self.read_snapshot().map(|(manifest, _)| manifest)
     }
 
+    /// Return the typed reference for the currently selected snapshot.
+    pub fn snapshot_reference(&self) -> Result<StoreRef, StoreError> {
+        let (manifest, _) = self.read_snapshot()?;
+        let manifest_bytes = serde_json::to_vec(&manifest)
+            .map_err(|error| StoreError::Corrupt(format!("manifest encode: {error}")))?;
+        let reference = StoreRef {
+            schema: STORE_REF_SCHEMA_V1.to_owned(),
+            store_schema: STORE_SCHEMA_V1.to_owned(),
+            adapter: "sqlite".to_owned(),
+            store_id: "sqlite-local-v1".to_owned(),
+            namespace: String::from_utf8_lossy(GRAPH_NAMESPACE).into_owned(),
+            snapshot_id: manifest.snapshot_id.clone(),
+            manifest_digest: hex_digest(&manifest_bytes),
+            graph_digest: manifest.graph_digest,
+        };
+        reference.validate()?;
+        Ok(reference)
+    }
+
     fn connection(&self) -> Result<MutexGuard<'_, Connection>, StoreError> {
         self.connection
             .lock()
             .map_err(|_| StoreError::Corrupt("store connection lock is poisoned".to_owned()))
+    }
+}
+
+#[derive(Clone, Debug)]
+struct MemoryRecord {
+    value: Vec<u8>,
+    digest: [u8; 32],
+    version: VersionToken,
+}
+
+type MemoryAddress = (Vec<u8>, Vec<u8>, Vec<u8>);
+type MemoryRecords = BTreeMap<MemoryAddress, MemoryRecord>;
+
+/// Deterministic in-memory reference implementation of [`Store`].
+///
+/// It is intentionally small and synchronous: its purpose is to make address,
+/// ordering, limits, conditional-write, and immutable-write semantics
+/// executable without a database. Adapter conformance tests can run against
+/// it and use it as the logical oracle for later backends.
+#[derive(Debug, Default)]
+pub struct MemoryStore {
+    records: Mutex<MemoryRecords>,
+}
+
+/// Compatibility alias for callers that use the more explicit name.
+pub type InMemoryStore = MemoryStore;
+
+impl MemoryStore {
+    fn lock(&self) -> Result<MutexGuard<'_, MemoryRecords>, StoreError> {
+        self.records
+            .lock()
+            .map_err(|_| StoreError::Corrupt("memory store lock is poisoned".to_owned()))
+    }
+}
+
+impl Store for MemoryStore {
+    fn capabilities(&self) -> StoreCapabilities {
+        StoreCapabilities {
+            strong_point_reads: true,
+            ordered_partition_scans: true,
+            conditional_single_key_writes: true,
+            durable_acknowledgements: false,
+        }
+    }
+
+    fn get(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        key: &Key,
+    ) -> Result<Option<Entry>, StoreError> {
+        let records = self.lock()?;
+        Ok(records
+            .get(&(
+                namespace.as_bytes().to_vec(),
+                partition.as_bytes().to_vec(),
+                key.as_bytes().to_vec(),
+            ))
+            .map(|record| Entry {
+                key: key.as_bytes().to_vec(),
+                value: record.value.clone(),
+                version: record.version,
+                digest: record.digest,
+            }))
+    }
+
+    fn scan(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        range: &KeyRange,
+        limits: ScanLimits,
+        cursor: Option<&ScanCursor>,
+    ) -> Result<ScanPage, StoreError> {
+        let limits = limits.validate()?;
+        if let Some(start) = &range.start_inclusive {
+            validate_component("key", start, MAX_KEY_BYTES)?;
+        }
+        if let Some(end) = &range.end_exclusive {
+            validate_component("key", end, MAX_KEY_BYTES)?;
+        }
+        if let (Some(start), Some(end)) = (&range.start_inclusive, &range.end_exclusive)
+            && start > end
+        {
+            return Err(StoreError::InvalidScanLimit(
+                "range start must be smaller than range end".to_owned(),
+            ));
+        }
+        if let Some(cursor) = cursor {
+            validate_component("cursor", &cursor.last_key, MAX_KEY_BYTES)?;
+        }
+        let records = self.lock()?;
+        let mut entries = Vec::new();
+        let mut bytes_read = 0_usize;
+        let mut has_more = false;
+        for ((found_namespace, found_partition, found_key), record) in records.iter() {
+            if found_namespace.as_slice() != namespace.as_bytes()
+                || found_partition.as_slice() != partition.as_bytes()
+            {
+                continue;
+            }
+            if range
+                .start_inclusive
+                .as_ref()
+                .is_some_and(|start| found_key < start)
+                || range
+                    .end_exclusive
+                    .as_ref()
+                    .is_some_and(|end| found_key >= end)
+                || cursor.is_some_and(|cursor| found_key <= &cursor.last_key)
+            {
+                continue;
+            }
+            let entry_bytes = record.value.len();
+            if entries.is_empty() && entry_bytes > limits.max_bytes {
+                return Err(StoreError::InvalidScanLimit(
+                    "the first matching value exceeds max_bytes".to_owned(),
+                ));
+            }
+            if entries.len() == limits.max_items
+                || bytes_read.saturating_add(entry_bytes) > limits.max_bytes
+            {
+                has_more = true;
+                break;
+            }
+            bytes_read = bytes_read.saturating_add(entry_bytes);
+            entries.push(Entry {
+                key: found_key.clone(),
+                value: record.value.clone(),
+                version: record.version,
+                digest: record.digest,
+            });
+        }
+        Ok(ScanPage {
+            next: has_more.then(|| ScanCursor {
+                last_key: entries
+                    .last()
+                    .map_or_else(Vec::new, |entry| entry.key.clone()),
+            }),
+            entries,
+            bytes_read,
+        })
+    }
+
+    fn put(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        key: &Key,
+        value: &[u8],
+        condition: WriteCondition,
+    ) -> Result<Entry, StoreError> {
+        validate_value(value)?;
+        let mut records = self.lock()?;
+        let address = (
+            namespace.as_bytes().to_vec(),
+            partition.as_bytes().to_vec(),
+            key.as_bytes().to_vec(),
+        );
+        let existing = records.get(&address);
+        if !memory_condition_matches(condition, existing)? {
+            return Err(StoreError::Conflict);
+        }
+        let version = existing.map_or(1, |record| record.version.0.saturating_add(1));
+        if version == 0 {
+            return Err(StoreError::Corrupt(
+                "memory store version overflow".to_owned(),
+            ));
+        }
+        let digest = digest(value);
+        let entry = Entry {
+            key: key.as_bytes().to_vec(),
+            value: value.to_vec(),
+            version: VersionToken(version),
+            digest,
+        };
+        records.insert(
+            address,
+            MemoryRecord {
+                value: entry.value.clone(),
+                digest,
+                version: entry.version,
+            },
+        );
+        Ok(entry)
+    }
+
+    fn delete(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        key: &Key,
+        condition: WriteCondition,
+    ) -> Result<bool, StoreError> {
+        let mut records = self.lock()?;
+        let address = (
+            namespace.as_bytes().to_vec(),
+            partition.as_bytes().to_vec(),
+            key.as_bytes().to_vec(),
+        );
+        if !memory_condition_matches(condition, records.get(&address))? {
+            return Err(StoreError::Conflict);
+        }
+        Ok(records.remove(&address).is_some())
     }
 }
 
@@ -777,6 +1056,83 @@ fn validate_component(
     Ok(())
 }
 
+/// Encode opaque key segments in the portable v1 binary format.
+///
+/// The format is deliberately independent of backend text collations:
+/// `major || segment_count || (u32-be length || bytes)*`.  A caller can use the
+/// resulting bytes as a range key without introducing separator collisions.
+pub fn encode_key_segments(segments: &[&[u8]]) -> Result<Vec<u8>, StoreError> {
+    if segments.is_empty() || segments.len() > MAX_KEY_SEGMENTS {
+        return Err(StoreError::InvalidFormat(format!(
+            "key segment count must be between 1 and {MAX_KEY_SEGMENTS}"
+        )));
+    }
+    let mut encoded = Vec::new();
+    encoded.push(KEY_ENCODING_V1);
+    encoded.push(u8::try_from(segments.len()).map_err(|_| {
+        StoreError::InvalidFormat("key segment count does not fit encoding".to_owned())
+    })?);
+    for segment in segments {
+        validate_component("key segment", segment, MAX_KEY_BYTES)?;
+        let length = u32::try_from(segment.len()).map_err(|_| StoreError::ComponentTooLarge {
+            component: "key segment",
+            actual: segment.len(),
+            maximum: u32::MAX as usize,
+        })?;
+        encoded.extend_from_slice(&length.to_be_bytes());
+        encoded.extend_from_slice(segment);
+    }
+    validate_component("key", &encoded, MAX_KEY_BYTES)?;
+    Ok(encoded)
+}
+
+/// Decode a v1 binary key into its opaque segments.
+pub fn decode_key_segments(encoded: &[u8]) -> Result<Vec<Vec<u8>>, StoreError> {
+    validate_component("key", encoded, MAX_KEY_BYTES)?;
+    if encoded.len() < 2 || encoded[0] != KEY_ENCODING_V1 {
+        return Err(StoreError::InvalidFormat(
+            "unsupported key encoding major".to_owned(),
+        ));
+    }
+    let count = usize::from(encoded[1]);
+    if count == 0 || count > MAX_KEY_SEGMENTS {
+        return Err(StoreError::InvalidFormat(
+            "invalid key segment count".to_owned(),
+        ));
+    }
+    let mut offset = 2_usize;
+    let mut segments = Vec::with_capacity(count);
+    for _ in 0..count {
+        let end_length = offset
+            .checked_add(4)
+            .ok_or_else(|| StoreError::InvalidFormat("key encoding length overflow".to_owned()))?;
+        let length_bytes = encoded
+            .get(offset..end_length)
+            .ok_or_else(|| StoreError::InvalidFormat("truncated key segment length".to_owned()))?;
+        let length =
+            usize::try_from(u32::from_be_bytes(length_bytes.try_into().map_err(
+                |_| StoreError::InvalidFormat("invalid key segment length".to_owned()),
+            )?))
+            .map_err(|_| StoreError::InvalidFormat("key segment length overflow".to_owned()))?;
+        offset = end_length;
+        let end = offset
+            .checked_add(length)
+            .ok_or_else(|| StoreError::InvalidFormat("key segment end overflow".to_owned()))?;
+        let segment = encoded
+            .get(offset..end)
+            .ok_or_else(|| StoreError::InvalidFormat("truncated key segment".to_owned()))?;
+        validate_component("key segment", segment, MAX_KEY_BYTES)?;
+        segments.push(segment.to_vec());
+        offset = end;
+    }
+    if offset != encoded.len() {
+        return Err(StoreError::InvalidFormat(
+            "key encoding has trailing bytes".to_owned(),
+        ));
+    }
+    Ok(segments)
+}
+
 fn validate_value(value: &[u8]) -> Result<(), StoreError> {
     if value.len() > MAX_VALUE_BYTES {
         return Err(StoreError::ValueTooLarge {
@@ -801,6 +1157,19 @@ fn condition_matches(
             let expected = i64::try_from(version.0)
                 .map_err(|_| StoreError::Corrupt("invalid version token".to_owned()))?;
             Ok(*actual == expected)
+        }
+    }
+}
+
+fn memory_condition_matches(
+    condition: WriteCondition,
+    existing: Option<&MemoryRecord>,
+) -> Result<bool, StoreError> {
+    match condition {
+        WriteCondition::Any => Ok(true),
+        WriteCondition::Missing => Ok(existing.is_none()),
+        WriteCondition::Version(version) => {
+            Ok(existing.is_some_and(|record| record.version == version))
         }
     }
 }
@@ -838,6 +1207,13 @@ fn read_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
             Box::new(std::io::Error::other("invalid version")),
         )
     })?;
+    if key.is_empty() || key.len() > MAX_KEY_BYTES || version == 0 {
+        return Err(rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Blob,
+            Box::new(std::io::Error::other("invalid key or version")),
+        ));
+    }
     Ok(Entry {
         key,
         value,
@@ -951,8 +1327,8 @@ mod tests {
     use std::error::Error;
 
     use super::{
-        Key, KeyRange, NamespaceId, PartitionKey, ScanLimits, SqliteStore, Store, StoreError,
-        WriteCondition,
+        Key, KeyRange, MemoryStore, NamespaceId, PartitionKey, ScanLimits, SqliteStore, Store,
+        StoreError, VersionToken, WriteCondition, decode_key_segments, encode_key_segments,
     };
 
     #[test]
@@ -1060,5 +1436,68 @@ mod tests {
         assert!(NamespaceId::new([]).is_err());
         assert!(PartitionKey::new([0_u8; super::MAX_PARTITION_BYTES + 1]).is_err());
         assert!(Key::new([0_u8; super::MAX_KEY_BYTES + 1]).is_err());
+    }
+
+    #[test]
+    fn memory_store_matches_portable_order_and_cas_semantics() -> Result<(), Box<dyn Error>> {
+        let store = MemoryStore::default();
+        let namespace = NamespaceId::new("tenant")?;
+        let partition = PartitionKey::new("nodes")?;
+        let first = Key::new([0_u8, 1_u8])?;
+        let second = Key::new([0_u8, 2_u8])?;
+        let first_entry = store.put(
+            &namespace,
+            &partition,
+            &first,
+            b"one",
+            WriteCondition::Missing,
+        )?;
+        store.put(
+            &namespace,
+            &partition,
+            &second,
+            b"two",
+            WriteCondition::Missing,
+        )?;
+        assert!(matches!(
+            store.put(
+                &namespace,
+                &partition,
+                &first,
+                b"changed",
+                WriteCondition::Version(VersionToken(first_entry.version.0.saturating_add(1))),
+            ),
+            Err(StoreError::Conflict)
+        ));
+        let page = store.scan(
+            &namespace,
+            &partition,
+            &KeyRange::default(),
+            ScanLimits {
+                max_items: 1,
+                max_bytes: 32,
+            },
+            None,
+        )?;
+        assert_eq!(page.entries[0].key, vec![0, 1]);
+        assert!(page.next.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn key_encoding_has_stable_golden_vector_and_round_trip() -> Result<(), Box<dyn Error>> {
+        let encoded = encode_key_segments(&[b"node", &[0, 1, 2]])?;
+        assert_eq!(
+            encoded,
+            vec![
+                1, 2, 0, 0, 0, 4, b'n', b'o', b'd', b'e', 0, 0, 0, 3, 0, 1, 2,
+            ]
+        );
+        assert_eq!(
+            decode_key_segments(&encoded)?,
+            vec![b"node".to_vec(), vec![0, 1, 2]]
+        );
+        assert!(decode_key_segments(&encoded[..encoded.len() - 1]).is_err());
+        Ok(())
     }
 }

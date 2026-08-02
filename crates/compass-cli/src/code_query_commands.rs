@@ -31,9 +31,6 @@ fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String
     let positional = positional(args);
     let requested_graph =
         PathBuf::from(option(args, "--graph").unwrap_or("compass-out/graph.json"));
-    let explicit_graph = args
-        .iter()
-        .any(|argument| argument == "--graph" || argument.starts_with("--graph="));
     let engine = match option(args, "--engine") {
         Some("default") => EngineSelection::Default,
         Some("json") => EngineSelection::Json,
@@ -43,7 +40,6 @@ fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String
                 "--engine must be default, json, or store (found {value})"
             ));
         }
-        None if explicit_graph => EngineSelection::Json,
         None => EngineSelection::Default,
     };
     let cache = option(args, "--cache")

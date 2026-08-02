@@ -3,10 +3,11 @@
 ## Unreleased
 
 - Publish a validated `compass-store.sqlite3` namespace/partition/key snapshot
-  beside every current `graph.json` generation. Typed code-query commands now
-  use the store by default, preserve deterministic JSON-equivalent results, and
-  support explicit `--engine json|store` selection; `graph.json` remains a
-  complete compatible engine.
+  and typed `store.ref` beside every current `graph.json` generation. Typed
+  code-query commands now use the store by default when the selector agrees,
+  preserve deterministic JSON-equivalent results, and support explicit
+  `--engine json|store` selection; `graph.json` remains a complete compatible
+  engine.
 - Restore sub-10-second cold builds for the pinned 3,105-file Django
   qualification corpus by batching and compressing portable AST cache
   publication, parallelizing independent resolver and graph-normalization

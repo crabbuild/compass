@@ -4,6 +4,7 @@ mod affected;
 mod benchmark;
 mod code_query;
 mod cql;
+mod graph_engine;
 mod index;
 mod program_join;
 mod score;
@@ -18,6 +19,7 @@ pub use cql::{
     CacheStats, ExplainPlan, OperatorProfile, PlanCache, PlanCacheConfig, QueryError,
     QueryErrorKind, QueryLimits, QueryProfile, QueryRequest, QueryResult, execute,
 };
+pub use graph_engine::{GraphEngine, JsonGraphEngine, StoreGraphEngine, open_graph_engine};
 pub use index::{EngineSelection, QueryEngineKind, open, open_with_engine};
 pub use program_join::join_program_evidence;
 pub use score::{QueryScores, ScoredNode, find_node, pick_scored_endpoint, score_nodes};

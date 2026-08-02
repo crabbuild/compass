@@ -54,6 +54,7 @@ compass-output = { path = "../compass-output", version = "0.3.0" }
 compass-postgres = { path = "../compass-postgres", version = "0.3.0" }
 compass-prs = { path = "../compass-prs", version = "0.3.0" }
 compass-query = { path = "../compass-query", version = "0.3.0" }
+compass-store = { path = "../compass-store", version = "0.3.0" }
 compass-reflect = { path = "../compass-reflect", version = "0.3.0" }
 compass-semantic = { path = "../compass-semantic", version = "0.3.0" }
 compass-semantic-diff = { path = "../compass-semantic-diff", version = "0.3.0" }

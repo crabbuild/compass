@@ -979,6 +979,7 @@ dependencies = [
  "compass-reflect",
  "compass-semantic",
  "compass-semantic-diff",
+ "compass-store",
  "ctrlc",
  "flate2",
  "glob",
@@ -1404,7 +1405,7 @@ dependencies = [
 
 [[package]]
 name = "compass-store"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "rusqlite",
  "serde",

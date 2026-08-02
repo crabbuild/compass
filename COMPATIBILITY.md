@@ -49,12 +49,13 @@ A user-visible incompatible change requires:
 Versioned formats use Compass-owned identifiers. Consumers should reject
 unknown major versions instead of attempting legacy fallback behavior.
 
-The current local build publishes both `graph.json` (`compass.graph/1`) and a
-validated `compass-store.sqlite3` sidecar. The store is selected by typed code
-queries by default, while `graph.json` remains a complete compatible engine;
-explicit JSON selection never requires opening a database. The SQLite file is
-an internal realization of the backend-neutral `compass-store` contract, not a
-stable SQL schema that consumers may query directly.
+The current local build publishes `graph.json` (`compass.graph/1`), a validated
+`compass-store.sqlite3` sidecar, and a typed `store.ref` selector. The store is
+selected by typed code queries by default when the selector and sidecar agree,
+while `graph.json` remains a complete compatible engine; explicit JSON
+selection never requires opening a database. The SQLite file and reference are
+internal realizations of the backend-neutral `compass-store` contract, not a
+stable SQL schema or pointer format that consumers may query directly.
 
 Markdown graph extraction is a structural, extensible projection. New
 document/block attributes and bounded diagnostic extensions may appear without

@@ -12,7 +12,7 @@ use compass_model::code_graph::{
     EdgeKind, GraphDocument, NodeDetails, NodeKind, NodeRole, RouteStage,
 };
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, ResolutionState};
-use compass_store::{STORE_FILE_NAME, SqliteStore};
+use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
 use sha2::{Digest, Sha256};
 
 const SOURCE: &str = r#"
@@ -171,11 +171,14 @@ fn build_publishes_a_reopenable_store_snapshot_matching_graph_json() -> Result<(
     let graph = GraphDocument::load(&graph_path)?;
     let store = SqliteStore::open_read_only(result.output_dir.join(STORE_FILE_NAME))?;
     let (manifest, store_bytes) = store.read_snapshot()?;
+    let reference: StoreRef =
+        serde_json::from_slice(&fs::read(result.output_dir.join(STORE_REF_FILE_NAME))?)?;
 
     assert_eq!(store_bytes, graph_bytes);
     assert_eq!(manifest.node_count, graph.nodes.len() as u64);
     assert_eq!(manifest.edge_count, graph.links.len() as u64);
     assert_eq!(store.validate_snapshot()?.snapshot_id, manifest.snapshot_id);
+    assert_eq!(reference, store.snapshot_reference()?);
     Ok(())
 }
 

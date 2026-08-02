@@ -43,7 +43,7 @@ use compass_resolve::{
     apply_program_projection, collect_program_projection_sites, merge_decl_def_classes,
     resolve_prevalidated_owned_with_root,
 };
-use compass_store::{GRAPH_SCHEMA_V1, STORE_FILE_NAME, SqliteStore};
+use compass_store::{GRAPH_SCHEMA_V1, STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -1862,6 +1862,7 @@ fn publish_build_state(
     ensure_store_snapshot(output_dir)?;
     let mut required = vec![output_dir.join(OUTPUT_STATS_FILE)];
     required.push(output_dir.join(STORE_FILE_NAME));
+    required.push(output_dir.join(STORE_REF_FILE_NAME));
     match options.purpose {
         BuildPurpose::Update => {
             required.push(output_dir.join(".compass_root"));
@@ -1914,6 +1915,7 @@ fn commit_generation(guard: BuildGuard, output_container: &Path) -> Result<PathB
         "manifest.json",
         BUILD_STATE_FILE,
         STORE_FILE_NAME,
+        STORE_REF_FILE_NAME,
     ];
     if guard.staging_directory().join("program.json").is_file() {
         artifacts.push("program.json");
@@ -1941,9 +1943,12 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<(), CoreError> {
     }
     let store_path = output_dir.join(STORE_FILE_NAME);
     if let Ok(store) = SqliteStore::open_read_only(&store_path)
-        && let Ok((_, existing)) = store.read_snapshot()
+        && let Ok((manifest, existing)) = store.read_snapshot()
         && existing == graph_bytes
+        && manifest.node_count == graph.nodes.len() as u64
+        && manifest.edge_count == graph.links.len() as u64
     {
+        write_store_ref(output_dir, &store)?;
         return Ok(());
     }
     let store = SqliteStore::open(&store_path)?;
@@ -1954,7 +1959,14 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<(), CoreError> {
         graph.links.len(),
     )?;
     store.validate_snapshot()?;
+    write_store_ref(output_dir, &store)?;
     Ok(())
+}
+
+fn write_store_ref(output_dir: &Path, store: &SqliteStore) -> Result<StoreRef, CoreError> {
+    let reference = store.snapshot_reference()?;
+    compass_files::write_json_atomic(output_dir.join(STORE_REF_FILE_NAME), &reference, false)?;
+    Ok(reference)
 }
 
 #[cfg(target_os = "macos")]
@@ -3866,6 +3878,7 @@ fn update_artifacts_complete(output_dir: &Path) -> bool {
     [
         "graph.json",
         STORE_FILE_NAME,
+        STORE_REF_FILE_NAME,
         "GRAPH_REPORT.md",
         ".compass_labels.json",
         ".compass_root",
@@ -3877,8 +3890,20 @@ fn update_artifacts_complete(output_dir: &Path) -> bool {
 
 fn store_artifact_complete(output_dir: &Path) -> bool {
     let path = output_dir.join(STORE_FILE_NAME);
-    path.is_file()
-        && SqliteStore::open_read_only(path).is_ok_and(|store| store.validate_snapshot().is_ok())
+    let reference_path = output_dir.join(STORE_REF_FILE_NAME);
+    let Ok(reference_bytes) = fs::read(reference_path) else {
+        return false;
+    };
+    let Ok(reference) = serde_json::from_slice::<StoreRef>(&reference_bytes) else {
+        return false;
+    };
+    reference.validate().is_ok()
+        && path.is_file()
+        && SqliteStore::open_read_only(path).is_ok_and(|store| {
+            store
+                .snapshot_reference()
+                .is_ok_and(|actual| actual == reference)
+        })
 }
 
 pub(crate) fn write_graph_overview_artifact(

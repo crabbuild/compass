@@ -5,7 +5,7 @@ use std::fs;
 use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
 use compass_model::query_contract::{CodeQueryLimits, SearchRequest};
 use compass_query::{EngineSelection, QueryEngineKind, open, open_with_engine};
-use compass_store::{STORE_FILE_NAME, SqliteStore};
+use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 
 #[test]
 fn default_query_open_prefers_store_and_matches_json_results()
@@ -81,5 +81,27 @@ fn explicit_json_selection_survives_a_corrupt_store_sidecar()
         Err(error) => error,
     };
     assert_eq!(error.code(), "store_open_failed");
+    Ok(())
+}
+
+#[test]
+fn a_present_malformed_store_reference_fails_closed() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let graph_bytes = fs::read(&graph_path)?;
+    let graph = GraphDocument::load(&graph_path)?;
+    SqliteStore::open(directory.path().join(STORE_FILE_NAME))?.publish_snapshot(
+        &graph_bytes,
+        CODE_GRAPH_SCHEMA_V1,
+        graph.nodes.len(),
+        graph.links.len(),
+    )?;
+    fs::write(directory.path().join(STORE_REF_FILE_NAME), b"{}")?;
+    let error = match open(&graph_path, None, &directory.path().join("cache")) {
+        Ok(_) => return Err("malformed store reference was accepted".into()),
+        Err(error) => error,
+    };
+    assert_eq!(error.code(), "store_ref_decode_failed");
     Ok(())
 }

@@ -46,15 +46,18 @@ and is independently mergeable:
   versioned SQLite realization in one package. The contract does not expose
   SQL or require a particular backend, so redb, PostgreSQL, DynamoDB, or a
   service adapter can implement the same trait later.
-- Every committed local generation contains `graph.json` and
-  `compass-store.sqlite3`. The store contains immutable, digest-addressed
-  graph chunks and manifests plus one CAS-protected active selector. The
-  payload is byte-identical to the published JSON and is validated before the
-  build state is sealed.
+- Every committed local generation contains `graph.json`,
+  `compass-store.sqlite3`, and a typed `store.ref`. The store contains
+  immutable, digest-addressed graph chunks and manifests plus one
+  CAS-protected active selector. The payload is byte-identical to the
+  published JSON and is validated before the build state is sealed; the
+  reference is checked against the selected manifest before a store query
+  runs.
 - Typed code-query opening chooses the store by default when the sidecar is
   present, keeps `graph.json` as a complete engine, and supports explicit
-  `--engine default|json|store`. Supplying `--graph` to a typed code-query
-  command selects JSON unless `--engine store` overrides it.
+  `--engine default|json|store`. Omitting `--engine` selects the store for a
+  published generation; `--engine json` is the explicit JSON choice. A raw
+  graph without a sidecar remains readable through the compatibility path.
 
 Acceptance criteria for this slice are deliberately concrete:
 
@@ -69,7 +72,8 @@ Acceptance criteria for this slice are deliberately concrete:
    build.
 4. Deleting or corrupting the sidecar never changes the JSON artifact; default
    query opening falls back only when the sidecar is absent, while explicit
-   store selection fails with a typed error.
+   store selection fails with a typed error and a present malformed `store.ref`
+   fails closed.
 
 This slice does not claim streamed graph indexes, redb/PostgreSQL/DynamoDB
 adapters, remote retry semantics, general garbage collection, or a measured
