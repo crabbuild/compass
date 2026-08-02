@@ -20,14 +20,16 @@ CompassQL compiler/executor. Both operate over the same indexed graph model.
 implementations: `JsonGraphEngine` for the permanent compatible JSON artifact
 and `StoreGraphEngine` for a validated `compass-store` snapshot. The store
 engine reads the active Phase 2 graph-index snapshot, validates its manifest
-and typed `store.ref`, and pins the resulting projection to that immutable
-realization. The typed query algorithms consume the same validated
-`GraphDocument` projection from either engine, so selection cannot change
-ranking, direction, multiplicity, source anchors, or public result schemas.
-Both engines canonicalize graph bytes before deriving the disposable query
-index key, so equivalent JSON/store openings share cache identity. The local
-slice still materializes a bounded projection; bounded point-read plans and
-streaming execution remain the next query phase.
+and typed `store.ref` when opening a published SQLite generation, and pins the
+resulting projection to that immutable realization. Library callers can use
+`open_with_store` with any common-contract adapter, including the optional redb
+adapter, without adding that backend to the CLI. The typed query algorithms
+consume the same validated `GraphDocument` projection from either engine, so
+selection cannot change ranking, direction, multiplicity, source anchors, or
+public result schemas. Both engines canonicalize graph bytes before deriving
+the disposable query index key, so equivalent JSON/store openings share cache
+identity. The local slice still materializes a bounded projection; bounded
+point-read plans and streaming execution remain the next query phase.
 
 ## Load once into the query model
 

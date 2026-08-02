@@ -7,8 +7,9 @@ use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
 use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, ExploreRequest, ImpactRequest, NodeTrailRequest, SearchRequest,
 };
-use compass_query::{EngineSelection, QueryEngineKind, open, open_with_engine};
+use compass_query::{EngineSelection, QueryEngineKind, open, open_with_engine, open_with_store};
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
+use compass_store_redb::RedbStore;
 
 fn publish_phase2_snapshot(
     directory: &std::path::Path,
@@ -78,6 +79,85 @@ fn store_engine_reads_the_immutable_phase2_snapshot_for_all_code_queries()
     assert_eq!(store.engine_kind(), QueryEngineKind::Store);
     assert_eq!(json.engine_kind(), QueryEngineKind::Json);
     assert_eq!(store.index_path(), json.index_path());
+
+    let search = SearchRequest {
+        query: "UserService.list".to_owned(),
+        limits: CodeQueryLimits::default(),
+    };
+    assert_eq!(
+        serde_json::to_value(store.search(search.clone())?)?,
+        serde_json::to_value(json.search(search)?)?,
+    );
+    let callers = CallRequest {
+        symbol: "UserService.list".to_owned(),
+        limits: CodeQueryLimits::default(),
+    };
+    assert_eq!(
+        serde_json::to_value(store.callers(callers.clone())?)?,
+        serde_json::to_value(json.callers(callers)?)?,
+    );
+    let callees = CallRequest {
+        symbol: "Api.caller".to_owned(),
+        limits: CodeQueryLimits::default(),
+    };
+    assert_eq!(
+        serde_json::to_value(store.callees(callees.clone())?)?,
+        serde_json::to_value(json.callees(callees)?)?,
+    );
+    let impact = ImpactRequest {
+        symbol: "UserService.list".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits::default(),
+    };
+    assert_eq!(
+        serde_json::to_value(store.impact(impact.clone())?)?,
+        serde_json::to_value(json.impact(impact)?)?,
+    );
+    let explore = ExploreRequest {
+        symbols: vec!["Api.caller".to_owned(), "Store.callee".to_owned()],
+        root: directory.path().to_string_lossy().into_owned(),
+        limits: CodeQueryLimits::default(),
+    };
+    assert_eq!(
+        serde_json::to_value(store.explore(explore.clone())?)?,
+        serde_json::to_value(json.explore(explore)?)?,
+    );
+    let trail = NodeTrailRequest {
+        source: "Api.caller".to_owned(),
+        target: "Store.callee".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits::default(),
+    };
+    assert_eq!(
+        serde_json::to_value(store.node_trail(trail.clone())?)?,
+        serde_json::to_value(json.node_trail(trail)?)?,
+    );
+    Ok(())
+}
+
+#[test]
+fn redb_store_runs_the_same_typed_queries_as_json() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let redb = RedbStore::open(directory.path().join(compass_store_redb::REDB_FILE_NAME))?;
+    let graph = GraphDocument::load(&graph_path)?;
+    let prepared = GraphSnapshotBuilder::new().prepare(&redb, &graph)?;
+    GraphSnapshotBuilder::new().activate(&redb, &prepared)?;
+
+    let store = open_with_store(
+        &redb,
+        &graph_path,
+        None,
+        &directory.path().join("redb-cache"),
+    )?;
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    assert_eq!(store.engine_kind(), QueryEngineKind::Store);
 
     let search = SearchRequest {
         query: "UserService.list".to_owned(),

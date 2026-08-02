@@ -1319,6 +1319,7 @@ dependencies = [
  "compass-languages",
  "compass-model",
  "compass-store",
+ "compass-store-redb",
  "libc",
  "regex",
  "rusqlite",
@@ -1414,6 +1415,18 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.19",
+]
+
+[[package]]
+name = "compass-store-redb"
+version = "0.3.0"
+dependencies = [
+ "compass-graph",
+ "compass-model",
+ "compass-store",
+ "redb",
+ "sha2 0.10.9",
+ "tempfile",
 ]
 
 [[package]]
@@ -3526,6 +3539,15 @@ name = "reborrow"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03251193000f4bd3b042892be858ee50e8b3719f2b08e5833ac4353724632430"
+
+[[package]]
+name = "redb"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e925444704b5f17d32bf42f5b6e2df050bceebc3dcd6e71cc73dafe8092e839"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "redox_syscall"

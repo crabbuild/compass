@@ -1,11 +1,11 @@
 # Executable Compass store implementation plan
 
-**Status:** In progress. Phases 0–3 and the local Phase 4 snapshot-backed
-query-routing slice are implemented. The typed query path now reads the
-immutable Phase 2 graph snapshot and validates its reference before building
-query state. Bounded projection execution, remote adapters, fault-injected
-crash qualification, general garbage collection, and measured performance
-claims remain follow-on work.
+**Status:** In progress. Phases 0–4 and the local Phase 5 redb adapter slice
+are implemented. The typed query path now accepts any common-contract store
+adapter, while the local CLI remains SQLite/JSON-only until packaging policy
+selects another backend. Bounded projection execution, remote adapters,
+fault-injected crash qualification, general garbage collection, and measured
+performance claims remain follow-on work.
 
 > **Who this page is for:** implementers and reviewers delivering
 > `compass-store`, store-backed graph snapshots, backend adapters, and the
@@ -79,9 +79,10 @@ Acceptance criteria for this slice are deliberately concrete:
    Phase 2 snapshot without a matching `store.ref` and explicit store
    selection fail with typed errors.
 
-The initial local slice above does not claim redb/PostgreSQL/DynamoDB adapters,
+The initial local slice above does not claim PostgreSQL/DynamoDB adapters,
 remote retry semantics, general garbage collection, or a measured performance
-improvement. Those remain the follow-on phases below.
+improvement. The optional redb adapter is delivered in the Phase 5 slice below;
+it is not linked into the released CLI by default.
 
 ## Phase 2 memory-layout slice shipped in this branch
 
@@ -657,23 +658,27 @@ Engine selection can return to JSON without converting data because each local
 generation still contains it. Keep store databases as disposable/unselected or
 rebuild them. A rollback must not remove the graph read abstraction.
 
-## Phase 5: Add the redb embedded adapter
+## Phase 5: Add the redb embedded adapter (implemented local slice)
 
 ### Context and objective
 
 redb provides a second local implementation with different concurrency and
 physical-storage behavior. Its purpose is both a usable embedded option and a
-test that the common contract did not accidentally become SQLite-shaped.
+test that the common contract did not accidentally become SQLite-shaped. The
+implemented slice keeps redb in `compass-store-redb`, uses the same graph
+snapshot builder and a backend-neutral query opening hook, and deliberately
+does not add redb to the default CLI binary.
 
 ### Prerequisite inputs
 
 - Phase 0 conformance and Phase 2 graph differential suites are stable.
-- Phase 4 engine selection can name a backend without changing graph meaning.
+- Phase 4 graph-engine boundary can consume a backend-neutral `Store` without
+  changing graph meaning.
 
 ### Owned surfaces
 
 - new `compass-store-redb` crate;
-- explicit local backend configuration and help; and
+- backend-neutral local selection hook and adapter documentation; and
 - adapter-specific durability, contention, and reopen tests.
 
 ### Work
@@ -690,26 +695,44 @@ test that the common contract did not accidentally become SQLite-shaped.
    JSON contracts.
 7. Document file backup and recovery separately from SQLite.
 
+The shipped local slice implements all seven items for library consumers and
+tests. Explicit CLI/backend configuration remains gated on packaging and
+performance policy; `graph.json` and SQLite remain the supported local command
+engines.
+
 ### Required tests
 
-- conformance under create, reopen, contention, and injected commit failure;
+- `cargo test -p compass-store-redb --locked` runs the shared conformance,
+  reopen/backup, binary-order, writer-gate, and graph-snapshot differential
+  tests.
+- `cargo test -p compass-query --test store_engine --locked` exercises
+  `open_with_store` against redb for search, callers, callees, impact,
+  explore, and node trails.
+- conformance under create, reopen, and contention; injected commit-failure
+  schedules remain a follow-on fault-injection gate;
 - byte ordering across composite namespace/partition/key boundaries;
 - bounded single-writer backpressure and cancellation;
 - reader snapshot stability during selector publication; and
 - full graph/query differential coverage against JSON and SQLite.
 
-### Acceptance criteria
+### Acceptance criteria for the shipped local slice
 
 - redb passes the unmodified shared adapter conformance suite, including
-  deterministic fault schedules and reopen tests.
+  deterministic reopen, ordering, CAS, immutable-write, and bounded writer
+  backpressure tests.
 - Memory, SQLite, and redb produce identical graph snapshot IDs, logical roots,
   JSON exports, and ordered query results for the same graph.
-- A stress test proves writer backpressure remains within configured task and
-  memory bounds.
+- A concurrent writer test proves the adapter rejects a full process-local
+  writer gate rather than accumulating unbounded tasks.
 - No redb type appears in `compass-store`, `compass-model`, public graph
   schemas, or query result contracts.
-- The local binary does not include redb unless packaging/product policy
-  intentionally selects or exposes it.
+- `compass-query::open_with_store` runs all typed code-query families through a
+  redb snapshot and matches JSON output; the local binary does not include redb
+  unless packaging/product policy intentionally selects or exposes it.
+
+Full injected commit-failure schedules, cross-process deadline cancellation,
+CompassQL/MCP differential coverage, and measured redb-versus-SQLite
+performance are explicit follow-on gates.
 
 ### Exit and rollback
 

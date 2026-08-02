@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use compass_graph::{GraphSnapshotManifest, GraphSnapshotReader, canonical_graph_json};
 use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
-use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
+use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, Store, StoreRef};
 
 use crate::cql::{QueryError, QueryErrorKind};
 use crate::index::{EngineSelection, QueryEngineKind};
@@ -72,6 +72,42 @@ pub struct StoreGraphEngine {
 }
 
 impl StoreGraphEngine {
+    /// Open a store-backed engine from any common-contract adapter.
+    ///
+    /// The caller owns backend selection and lifecycle. This constructor only
+    /// consumes the active immutable graph snapshot, so redb and future remote
+    /// adapters can use the same query path without exposing backend types.
+    pub fn from_store<S: Store + ?Sized>(store: &S) -> Result<Self, QueryError> {
+        let reader = GraphSnapshotReader::open_active(store).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_snapshot_failed",
+                error.to_string(),
+            )
+        })?;
+        let Some(reader) = reader else {
+            return Err(QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_snapshot_missing",
+                "store has no active immutable graph snapshot",
+            ));
+        };
+        let manifest = reader.manifest();
+        let graph_bytes = reader.export_json_bytes().map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_export_failed",
+                error.to_string(),
+            )
+        })?;
+        Self::from_parts(
+            manifest.graph_schema.clone(),
+            manifest.node_count,
+            manifest.edge_count,
+            graph_bytes,
+        )
+    }
+
     pub fn open(graph_path: &Path) -> Result<Self, QueryError> {
         let store_path = adjacent_store_path(graph_path);
         let store = SqliteStore::open_read_only(&store_path).map_err(|error| {
@@ -120,6 +156,15 @@ impl StoreGraphEngine {
                 graph_bytes,
             )
         };
+        Self::from_parts(graph_schema, node_count, edge_count, graph_bytes)
+    }
+
+    fn from_parts(
+        graph_schema: String,
+        node_count: u64,
+        edge_count: u64,
+        graph_bytes: Vec<u8>,
+    ) -> Result<Self, QueryError> {
         if graph_schema != CODE_GRAPH_SCHEMA_V1 {
             return Err(QueryError::new(
                 QueryErrorKind::UnsupportedSchema,

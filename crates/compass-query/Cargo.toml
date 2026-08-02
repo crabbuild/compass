@@ -33,6 +33,7 @@ rustix.workspace = true
 [dev-dependencies]
 compass-graphdb = { path = "../compass-graphdb", version = "0.3.0" }
 compass-languages = { path = "../compass-languages", version = "0.3.0" }
+compass-store-redb = { path = "../compass-store-redb", version = "0.3.0" }
 tempfile.workspace = true
 
 [lints]
