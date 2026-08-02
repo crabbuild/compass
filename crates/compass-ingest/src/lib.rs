@@ -24,11 +24,7 @@ const USER_AGENT: &str = "Mozilla/5.0 compass/1.0";
 
 static UNSAFE_FILENAME: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"[^\w\-]"));
 static REPEATED_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"_+"));
-static SCRIPT: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"(?is)<script[^>]*>.*?</script>"));
-static STYLE: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"(?is)<style[^>]*>.*?</style>"));
 static TAG: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"(?s)<[^>]+>"));
-static WHITESPACE: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"\s+"));
-static TITLE: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"(?is)<title[^>]*>(.*?)</title>"));
 static ARXIV_ID: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"(\d{4}\.\d{4,5})"));
 static ARXIV_ABSTRACT: LazyLock<Regex> =
     LazyLock::new(|| compile_regex(r#"(?is)class="abstract[^"]*"[^>]*>(.*?)</blockquote>"#));
@@ -401,14 +397,19 @@ fn fetch_webpage(
     fetcher: &dyn Fetcher,
 ) -> Result<(String, String), IngestError> {
     let html = fetch_text(request.url, fetcher)?;
-    let title = TITLE
-        .captures(&html)
-        .and_then(|captures| captures.get(1))
-        .map_or_else(
-            || request.url.to_owned(),
-            |value| collapse_whitespace(value.as_str()),
-        );
-    let markdown = html_to_markdown(&html);
+    let normalized =
+        compass_languages::normalize_html(request.url, html.as_bytes()).map_err(|error| {
+            IngestError::Fetch {
+                url: request.url.to_owned(),
+                message: format!("HTML normalization failed: {error}"),
+            }
+        })?;
+    let title = if normalized.title.is_empty() {
+        request.url.to_owned()
+    } else {
+        normalized.title
+    };
+    let markdown = normalized.markdown;
     let contributor = request.contributor.or(request.author).unwrap_or("unknown");
     let timestamp = python_timestamp(captured_at);
     let content = format!(
@@ -520,17 +521,6 @@ fn validate_url_syntax(input: &str) -> Result<Url, IngestError> {
         )));
     }
     Ok(url)
-}
-
-fn html_to_markdown(html: &str) -> String {
-    let html = SCRIPT.replace_all(html, "");
-    let html = STYLE.replace_all(&html, "");
-    let text = TAG.replace_all(&html, " ");
-    truncate_chars(&collapse_whitespace(&text), 8_000)
-}
-
-fn collapse_whitespace(value: &str) -> String {
-    WHITESPACE.replace_all(value, " ").trim().to_owned()
 }
 
 fn truncate_chars(value: &str, limit: usize) -> String {
@@ -713,7 +703,7 @@ mod tests {
         assert_eq!(result.message, "Saved webpage: example_com_a-page.md");
         assert_eq!(
             fs::read_to_string(result.path)?,
-            "---\nsource_url: \"https://example.com/a-page?q=1\"\ntype: webpage\ntitle: \"A &amp; B\"\ncaptured_at: 2023-11-14T22:13:20.123456+00:00\ncontributor: \"Alice\"\n---\n\n# A &amp; B\n\nSource: https://example.com/a-page?q=1\n\n---\n\nA &amp; B Hello world\n"
+            "---\nsource_url: \"https://example.com/a-page?q=1\"\ntype: webpage\ntitle: \"A & B\"\ncaptured_at: 2023-11-14T22:13:20.123456+00:00\ncontributor: \"Alice\"\n---\n\n# A & B\n\nSource: https://example.com/a-page?q=1\n\n---\n\n# Hello\n\nworld\n"
         );
         Ok(())
     }

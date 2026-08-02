@@ -135,6 +135,12 @@ It does not own:
 
 Compass disables runtime grammar downloads and dynamic loading. A grammar update changes grammar provenance and invalidates affected extraction caches without changing the universal evidence schema.
 
+Document adapters are a narrow exception to the general registry boundary:
+the pinned Markdown and HTML bindings are linked directly by
+`compass-languages` because the current vendored build subset does not expose
+those document loaders. They still use the same Tree-sitter ABI, source-driven
+Engine API, deterministic range policy, and no-runtime-download guarantee.
+
 ## How the layers differ
 
 The grammar pack, the historical CodeGraph kernel, and universal evidence solve

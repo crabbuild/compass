@@ -24,8 +24,8 @@ const CODE_EXTENSIONS: &[&str] = &[
     "cshtml", "cls", "trigger",
 ];
 const DOCUMENT_EXTENSIONS: &[&str] = &[
-    "md", "mdx", "qmd", "skill", "txt", "rst", "html", "yaml", "yml", "docx", "xlsx", "gdoc",
-    "gsheet", "gslides",
+    "md", "markdown", "mdx", "qmd", "skill", "txt", "rst", "html", "htm", "yaml", "yml", "docx",
+    "xlsx", "gdoc", "gsheet", "gslides",
 ];
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg"];
 const VIDEO_EXTENSIONS: &[&str] = &[

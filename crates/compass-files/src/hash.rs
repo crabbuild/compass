@@ -221,15 +221,10 @@ pub fn body_content(content: &[u8]) -> Vec<u8> {
 }
 
 fn file_hash_bytes(path: &Path, salt: &str) -> Result<String, FileError> {
-    let raw = fs::read(path).map_err(|source| io_error(path, source))?;
-    let content = if path
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-    {
-        body_content(&raw)
-    } else {
-        raw
-    };
+    // Frontmatter is part of Markdown semantics and must invalidate the same
+    // cache entries as body edits. `body_content` remains a compatibility
+    // helper for callers that explicitly need the legacy body-only view.
+    let content = fs::read(path).map_err(|source| io_error(path, source))?;
     let mut hash = Sha256::new();
     hash.update(&content);
     hash.update([0]);
