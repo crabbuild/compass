@@ -10,10 +10,12 @@ use compass_files::{
     Manifest, ManifestKind, detect, write_json_atomic, write_text_atomic,
 };
 use compass_graph::{
-    ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION, InventoryEvidence,
-    PublicationOmissions, PublicationOutcome, build_owned_with_tiebreaker as build_document,
-    canonical_edge_kind, canonical_raw_edge_sites, cluster, dedupe_nodes, extraction_from_v1,
-    graph_insights, label_communities_by_hub, normalize_document_v1_with_inventory_best_effort,
+    BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
+    InventoryEvidence, PublicationOmissions, PublicationOutcome,
+    build_owned_with_tiebreaker as build_document, canonical_edge_kind, canonical_raw_edge_sites,
+    cluster, dedupe_nodes, extraction_from_v1, graph_insights, label_communities_by_hub,
+    normalize_document_v1_with_evidence_best_effort_owned,
+    normalize_document_v1_with_inventory_best_effort,
     normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
     score_communities,
 };
@@ -34,12 +36,12 @@ use compass_model::provenance::{
 };
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
-    DetectionSummary, HtmlOptions, OutputError, ReportOptions, TokenCost, generate_report,
-    graph_view_model_document, write_html,
+    DetectionSummary, GraphViewModel, HtmlOptions, OutputError, ReportOptions, TokenCost,
+    generate_report, graph_view_model_document, write_html,
 };
 use compass_resolve::{
     apply_program_projection, collect_program_projection_sites, merge_decl_def_classes,
-    resolve_owned_with_root,
+    resolve_prevalidated_owned_with_root,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -934,10 +936,14 @@ fn build_graph_inner(
                         &program_sources,
                         &program_options,
                         &program_cache,
-                        &prepared,
+                        prepared,
                     )?;
-                    write_program(&program_output_dir, &program.canonical_bytes)?;
-                    let summary = ProgramBuildSummary::from_program(program, retain_artifacts);
+                    let (summary, canonical_bytes) =
+                        ProgramBuildSummary::from_program_with_canonical_bytes(
+                            program,
+                            retain_artifacts,
+                        );
+                    write_program(&program_output_dir, &canonical_bytes)?;
                     Ok::<_, CoreError>((summary, started.elapsed()))
                 })
                 .map_err(|error| CoreError::WorkerPool(error.to_string()))?,
@@ -1009,17 +1015,30 @@ fn build_graph_inner(
         );
     }
     profile_internal("portable AST ID remapping", &mut internal_started);
-    let ast_cache_started = Instant::now();
-    for (path, extraction) in ordered_paths.iter().zip(&mut ordered) {
-        if fresh_paths.contains(path) && extraction_has_cacheable_ast_facts(extraction) {
+    let ast_cache_sources = ordered_paths
+        .iter()
+        .zip(&ordered)
+        .filter(|(path, extraction)| {
+            fresh_paths.contains(*path) && extraction_has_cacheable_ast_facts(extraction)
+        })
+        .collect::<Vec<_>>();
+    let ast_cache_entries =
+        cache.encode_portable_ast_batch(&ast_cache_sources, |path, extraction| {
             let mut cache_entry = extraction.clone();
             prepare_portable_ast_cache_entry(&mut cache_entry, path, &root);
-            cache.save_portable_ast_batch(&[(path.clone(), cache_entry)])?;
-        }
-    }
-    cache.flush()?;
-    profile_internal_duration("AST cache publication", ast_cache_started.elapsed());
-    internal_started = Instant::now();
+            cache_entry
+        })?;
+    drop(ast_cache_sources);
+    let ast_cache_handle = std::thread::Builder::new()
+        .name("compass-ast-cache".to_owned())
+        .spawn(move || {
+            let started = Instant::now();
+            Cache::write_encoded_batch(&ast_cache_entries)?;
+            cache.flush()?;
+            Ok::<_, CoreError>(started.elapsed())
+        })
+        .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
+    profile_internal("AST cache snapshot and dispatch", &mut internal_started);
     let read_source = |path: &PathBuf| read_source_text_with_limit(path, options.max_source_bytes);
     let read_cached_source = |path: &PathBuf| {
         (!fresh_paths.contains(path))
@@ -1035,10 +1054,21 @@ fn build_graph_inner(
     };
     fresh_source_text.extend(cached_source_text);
     let source_text = fresh_source_text;
+    drop(worker_pool);
+    drop(project_evidence);
+    drop(fresh_paths);
+    drop(ordered_paths);
+    drop(ast_id_remap);
+    drop(ast_root_marker);
     let program_projection_sites = collect_program_projection_sites(&ordered);
-    let mut resolved = resolve_owned_with_root(ordered, &source_text, &root);
+    let mut resolved = resolve_prevalidated_owned_with_root(ordered, &source_text, &root);
     profile_internal("cross-file resolution total", &mut internal_started);
     drop(source_text);
+    let ast_cache_elapsed = ast_cache_handle
+        .join()
+        .map_err(|_| CoreError::WorkerPanic("AST cache publication".to_owned()))??;
+    profile_internal_duration("AST cache publication worker", ast_cache_elapsed);
+    internal_started = Instant::now();
     let defer_program_join = options.force && !options.no_cluster && !has_program_artifacts;
     let mut program = if defer_program_join {
         None
@@ -1046,13 +1076,16 @@ fn build_graph_inner(
         join_program_worker(program_handle.take(), &mut timings)?
     };
     profile_internal("wait for Program analysis", &mut internal_started);
-    if let Some(program) = program.as_ref() {
+    if let Some(program) = program.as_mut()
+        && let Some(compiler_projection) = program.compiler_projection.take()
+    {
         apply_program_projection(
             &mut resolved,
             &program_projection_sites,
-            &program.compiler_projection,
+            &compiler_projection,
         );
     }
+    drop(program_projection_sites);
     profile_internal("Program graph projection", &mut internal_started);
     finalize_ast_extraction(&mut resolved, &root);
     profile_internal("AST finalization", &mut internal_started);
@@ -1407,24 +1440,47 @@ fn build_graph_inner(
         resolution: options.resolution,
         exclude_hubs_percentile: options.exclude_hubs,
     };
-    let ((previous, previous_elapsed), (current, cluster_elapsed)) = rayon::join(
-        || {
-            let started = Instant::now();
-            let previous = if std::env::var_os("COMPASS_HISTORY_BUILD").is_some() {
-                HashMap::new()
-            } else {
-                previous_communities(&output_dir.join("graph.json"))
-            };
-            (previous, started.elapsed())
-        },
-        || {
-            let started = Instant::now();
-            let current = cluster(&document, cluster_options);
-            (current, started.elapsed())
-        },
+    let configuration_digest = graph_configuration_digest(options, &output_dir)?;
+    let publication_inventory = detection_inventory(
+        &detection,
+        semantic,
+        &extraction_failures,
+        &extraction_partials,
+        &root,
     );
+    let publication_evidence = || -> Result<(BuildEvidence, Duration), CoreError> {
+        let started = Instant::now();
+        let mut evidence = BuildEvidence::from_document(&root, &document, configuration_digest)?;
+        evidence.include_inventory(publication_inventory)?;
+        evidence.build.source_commit.clone_from(&commit);
+        Ok((evidence, started.elapsed()))
+    };
+    let (((previous, previous_elapsed), (current, cluster_elapsed)), publication_evidence_result) =
+        rayon::join(
+            || {
+                rayon::join(
+                    || {
+                        let started = Instant::now();
+                        let previous = if std::env::var_os("COMPASS_HISTORY_BUILD").is_some() {
+                            HashMap::new()
+                        } else {
+                            previous_communities(&output_dir.join("graph.json"))
+                        };
+                        (previous, started.elapsed())
+                    },
+                    || {
+                        let started = Instant::now();
+                        let current = cluster(&document, cluster_options);
+                        (current, started.elapsed())
+                    },
+                )
+            },
+            publication_evidence,
+        );
     profile_internal_duration("load previous communities", previous_elapsed);
     profile_internal_duration("Louvain clustering", cluster_elapsed);
+    let (publication_evidence, evidence_elapsed) = publication_evidence_result?;
+    profile_internal_duration("parallel v1 evidence preparation", evidence_elapsed);
     internal_started = Instant::now();
     let communities = if previous.is_empty() {
         current
@@ -1436,70 +1492,6 @@ fn build_graph_inner(
     let labels = label_communities_by_hub(&document, &communities);
     profile_internal("community labeling", &mut internal_started);
 
-    let graph_output = ||
-     -> Result<
-        (
-            Duration,
-            PublicationOmissions,
-            usize,
-            usize,
-            Option<V1GraphDocument>,
-        ),
-        CoreError,
-    > {
-        let started = Instant::now();
-        let mut output_profile_started = Instant::now();
-        let configuration_digest = graph_configuration_digest(options, &output_dir)?;
-        let normalization_started = Instant::now();
-        let published = published_v1_document(
-            &document,
-            &communities,
-            &labels,
-            &root,
-            PublicationEvidence {
-                detection: &detection,
-                semantic,
-                extraction_failures: &extraction_failures,
-                extraction_partials: &extraction_partials,
-            },
-            configuration_digest,
-            commit.as_deref(),
-        )?;
-        profile_internal_duration(
-            "graph.json v1 normalization",
-            normalization_started.elapsed(),
-        );
-        if published.document.nodes.is_empty() {
-            return Err(CoreError::EmptyGraph);
-        }
-        let published_nodes = published.document.nodes.len();
-        let published_edges = published.document.links.len();
-        let serialization_started = Instant::now();
-        write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
-        profile_internal_duration(
-            "graph.json v1 serialization",
-            serialization_started.elapsed(),
-        );
-        profile_internal("graph.json v1 publication", &mut output_profile_started);
-        if options.purpose == BuildPurpose::Update {
-            write_text_atomic(
-                output_dir.join(".compass_root"),
-                &options.root.to_string_lossy(),
-            )?;
-            write_graph_overview_artifact(&document, &communities, &labels, &output_dir)?;
-            profile_internal(
-                "graph root marker and overview publication",
-                &mut output_profile_started,
-            );
-        }
-        Ok((
-            started.elapsed(),
-            published.omissions,
-            published_nodes,
-            published_edges,
-            retain_artifacts.then_some(published.document),
-        ))
-    };
     let graph_analyses = || -> Result<(bool, Duration, Option<Value>), CoreError> {
         let started = Instant::now();
         let analysis_compute_started = Instant::now();
@@ -1607,19 +1599,60 @@ fn build_graph_inner(
             retain_artifacts.then_some(analysis),
         ))
     };
-    let (graph_output_elapsed, analysis_result) = rayon::join(graph_output, graph_analyses);
-    let (graph_output_elapsed, omissions, published_nodes, published_edges, retained_document) =
-        graph_output_elapsed?;
+    let overview_output = || -> Result<(Duration, Option<GraphViewModel>), CoreError> {
+        let started = Instant::now();
+        let model = if options.purpose == BuildPurpose::Update {
+            write_text_atomic(
+                output_dir.join(".compass_root"),
+                &options.root.to_string_lossy(),
+            )?;
+            graph_overview_model(&document, &communities, &labels, &output_dir)?
+        } else {
+            None
+        };
+        Ok((started.elapsed(), model))
+    };
+    let (analysis_result, overview_result) = rayon::join(graph_analyses, overview_output);
     let (html_written, analysis_elapsed, retained_analysis) = analysis_result?;
-    profile_internal_duration("graph and overview publication", graph_output_elapsed);
+    let (overview_elapsed, overview_model) = overview_result?;
     profile_internal_duration(
         "parallel graph analyses and report publication",
         analysis_elapsed,
     );
+    profile_internal_duration(
+        "graph root marker and overview publication",
+        overview_elapsed,
+    );
+
+    let graph_output_started = Instant::now();
+    let mut output_profile_started = Instant::now();
+    let normalization_started = Instant::now();
+    let published = published_v1_document(document, &communities, &labels, publication_evidence)?;
+    profile_internal_duration(
+        "graph.json v1 normalization",
+        normalization_started.elapsed(),
+    );
+    if published.document.nodes.is_empty() {
+        return Err(CoreError::EmptyGraph);
+    }
+    let published_nodes = published.document.nodes.len();
+    let published_edges = published.document.links.len();
+    let omissions = published.omissions;
+    let serialization_started = Instant::now();
+    write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
+    if options.purpose == BuildPurpose::Update {
+        write_prepared_graph_overview(overview_model, &output_dir)?;
+    }
+    let serialization_elapsed = serialization_started.elapsed();
+    profile_internal_duration("graph.json v1 serialization", serialization_elapsed);
+    profile_internal("graph.json v1 publication", &mut output_profile_started);
+    let graph_output_elapsed = graph_output_started.elapsed();
+    let retained_document = retain_artifacts.then_some(published.document);
+    profile_internal_duration("graph publication", graph_output_elapsed);
     internal_started = Instant::now();
     timings.graph_assembly += stage_started.elapsed();
-    stage_started = Instant::now();
 
+    let publish_started = Instant::now();
     let mut manifest = prior_manifest;
     let (manifest_result, seals_result) = rayon::join(
         || {
@@ -1645,7 +1678,7 @@ fn build_graph_inner(
     );
     manifest_result?;
     seals_result?;
-    timings.publish = stage_started.elapsed();
+    timings.publish = publish_started.elapsed();
     if program.is_none() {
         program = join_program_worker(program_handle.take(), &mut timings)?;
     }
@@ -1744,31 +1777,42 @@ struct ProgramBuildSummary {
     artifact_documents_analyzed: usize,
     artifact_documents_reused: usize,
     conflicts: usize,
-    compiler_projection: compass_program::CompilerProjection,
+    compiler_projection: Option<compass_program::CompilerProjection>,
     analysis: Option<compass_analysis::AnalysisBundle>,
 }
 
 impl ProgramBuildSummary {
     fn from_program(program: ProgramBuild, retain_analysis: bool) -> Self {
+        Self::from_program_with_canonical_bytes(program, retain_analysis).0
+    }
+
+    fn from_program_with_canonical_bytes(
+        mut program: ProgramBuild,
+        retain_analysis: bool,
+    ) -> (Self, Vec<u8>) {
+        let canonical_bytes = std::mem::take(&mut program.canonical_bytes);
         let modules = program.analysis.program.modules.len();
         let summaries = program.analysis.summaries.len();
         let providers = program.analysis.program.providers.len();
         let analysis = retain_analysis.then_some(program.analysis);
-        Self {
-            seal: ArtifactSeal::from_bytes(&program.canonical_bytes),
-            modules,
-            summaries,
-            providers,
-            syntax_analyzed: program.syntax_analyzed,
-            syntax_reused: program.syntax_reused,
-            artifacts_loaded: program.artifacts_loaded,
-            artifacts_reused: program.artifacts_reused,
-            artifact_documents_analyzed: program.artifact_documents_analyzed,
-            artifact_documents_reused: program.artifact_documents_reused,
-            conflicts: program.conflicts,
-            compiler_projection: program.compiler_projection,
-            analysis,
-        }
+        (
+            Self {
+                seal: ArtifactSeal::from_bytes(&canonical_bytes),
+                modules,
+                summaries,
+                providers,
+                syntax_analyzed: program.syntax_analyzed,
+                syntax_reused: program.syntax_reused,
+                artifacts_loaded: program.artifacts_loaded,
+                artifacts_reused: program.artifacts_reused,
+                artifact_documents_analyzed: program.artifact_documents_analyzed,
+                artifact_documents_reused: program.artifact_documents_reused,
+                conflicts: program.conflicts,
+                compiler_projection: Some(program.compiler_projection),
+                analysis,
+            },
+            canonical_bytes,
+        )
     }
 }
 
@@ -3494,28 +3538,13 @@ fn graph_configuration_digest(
     Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
 }
 
-struct PublicationEvidence<'a> {
-    detection: &'a Detection,
-    semantic: Option<&'a SemanticLayer>,
-    extraction_failures: &'a BTreeMap<PathBuf, String>,
-    extraction_partials: &'a BTreeMap<PathBuf, String>,
-}
-
 fn published_v1_document(
-    document: &GraphDocument,
+    mut document: GraphDocument,
     communities: &compass_graph::Communities,
     labels: &BTreeMap<usize, String>,
-    root: &Path,
-    evidence: PublicationEvidence<'_>,
-    configuration_digest: String,
-    source_commit: Option<&str>,
+    evidence: BuildEvidence,
 ) -> Result<PublicationOutcome, CoreError> {
     let mut publication_profile_started = Instant::now();
-    let mut publication_source = document.clone();
-    profile_internal(
-        "graph publication source clone",
-        &mut publication_profile_started,
-    );
     let node_communities = communities
         .iter()
         .flat_map(|(community, members)| {
@@ -3524,7 +3553,7 @@ fn published_v1_document(
                 .map(move |member| (member.as_str(), *community))
         })
         .collect::<HashMap<_, _>>();
-    for node in &mut publication_source.nodes {
+    for node in &mut document.nodes {
         let Some(&community_index) = node_communities.get(node.id.as_str()) else {
             continue;
         };
@@ -3543,19 +3572,7 @@ fn published_v1_document(
         "graph publication community projection",
         &mut publication_profile_started,
     );
-    let published = normalize_document_v1_with_inventory_best_effort_owned(
-        publication_source,
-        root,
-        configuration_digest,
-        source_commit,
-        detection_inventory(
-            evidence.detection,
-            evidence.semantic,
-            evidence.extraction_failures,
-            evidence.extraction_partials,
-            root,
-        ),
-    )?;
+    let published = normalize_document_v1_with_evidence_best_effort_owned(document, evidence)?;
     profile_internal(
         "graph publication v1 boundary",
         &mut publication_profile_started,
@@ -3817,8 +3834,17 @@ pub(crate) fn write_graph_overview_artifact(
     labels: &BTreeMap<usize, String>,
     output_dir: &Path,
 ) -> Result<(), CoreError> {
-    let overview_path = output_dir.join(GRAPH_OVERVIEW_FILE);
-    let overview = graph_view_model_document(
+    let overview = graph_overview_model(document, communities, labels, output_dir)?;
+    write_prepared_graph_overview(overview, output_dir)
+}
+
+fn graph_overview_model(
+    document: &GraphDocument,
+    communities: &compass_graph::Communities,
+    labels: &BTreeMap<usize, String>,
+    output_dir: &Path,
+) -> Result<Option<GraphViewModel>, CoreError> {
+    Ok(graph_view_model_document(
         document,
         communities,
         output_dir.join("graph.json"),
@@ -3827,7 +3853,14 @@ pub(crate) fn write_graph_overview_artifact(
             node_limit: Some(GRAPH_OVERVIEW_NODE_LIMIT),
             ..HtmlOptions::default()
         },
-    )?;
+    )?)
+}
+
+fn write_prepared_graph_overview(
+    overview: Option<GraphViewModel>,
+    output_dir: &Path,
+) -> Result<(), CoreError> {
+    let overview_path = output_dir.join(GRAPH_OVERVIEW_FILE);
     if let Some(model) = overview {
         let graph_path = output_dir.join("graph.json");
         let source_graph_bytes = fs::metadata(&graph_path)

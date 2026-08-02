@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use ahash::AHashSet as HashSet;
 
 use compass_languages::{
     Extraction, FrameworkLimitError, FrameworkLimits, RawDomainFact, RawEdgeRecord,

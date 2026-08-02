@@ -25,7 +25,8 @@ pub use quarantine::{MAX_QUARANTINE_EXAMPLES, PublicationOmissions, PublicationO
 pub use v1::{
     BuildEvidence, InventoryEvidence, V1_PUBLICATION_SEMANTICS_VERSION, canonical_edge_kind,
     canonical_raw_edge_sites, extraction_from_v1, normalize_document_v1,
-    normalize_document_v1_with_inventory, normalize_document_v1_with_inventory_best_effort,
+    normalize_document_v1_with_evidence_best_effort_owned, normalize_document_v1_with_inventory,
+    normalize_document_v1_with_inventory_best_effort,
     normalize_document_v1_with_inventory_best_effort_owned, normalize_v1, normalize_v1_best_effort,
 };
 
@@ -266,10 +267,9 @@ fn build_from_owned_extraction(
         }
     }
     if source_edges.len() < 100_000 {
-        source_edges.sort_by_key(edge_occurrence_key);
+        source_edges.sort_by_cached_key(edge_occurrence_key);
     } else {
-        source_edges
-            .par_sort_by(|left, right| edge_occurrence_key(left).cmp(&edge_occurrence_key(right)));
+        source_edges.par_sort_by_cached_key(edge_occurrence_key);
     }
     profile_internal("graph edge cloning and sort", &mut profile_started);
     let normalize_edge = |mut edge: EdgeRecord| {

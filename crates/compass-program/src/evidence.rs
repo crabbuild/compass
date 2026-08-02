@@ -63,22 +63,34 @@ pub struct EvidenceBatch {
 impl EvidenceBatch {
     pub fn canonicalized(&self) -> Self {
         let mut batch = self.clone();
-        batch.evidence.sort();
-        batch.evidence.dedup();
-        batch.modules.sort_by(|left, right| {
+        batch.canonicalize();
+        batch
+    }
+
+    /// Canonicalize an owned batch without cloning its complete Program IR.
+    #[must_use]
+    pub fn into_canonicalized(mut self) -> Self {
+        self.canonicalize();
+        self
+    }
+
+    fn canonicalize(&mut self) {
+        self.evidence.sort();
+        self.evidence.dedup();
+        self.modules.sort_by(|left, right| {
             left.source_file
                 .as_bytes()
                 .cmp(right.source_file.as_bytes())
         });
-        batch.facts.sort_by(|left, right| {
+        self.facts.sort_by(|left, right| {
             left.anchor.cmp(&right.anchor).then_with(|| {
                 left.evidence_id
                     .as_bytes()
                     .cmp(right.evidence_id.as_bytes())
             })
         });
-        batch.facts.dedup();
-        for coverage in batch.coverage.values_mut() {
+        self.facts.dedup();
+        for coverage in self.coverage.values_mut() {
             for state in coverage.values_mut() {
                 match state {
                     CoverageState::Complete => {}
@@ -91,7 +103,6 @@ impl EvidenceBatch {
                 }
             }
         }
-        batch
     }
 
     pub fn digest(&self) -> Result<String, compass_ir::IrError> {

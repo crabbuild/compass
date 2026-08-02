@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_languages::{Extraction, RawNodeRecord};
 use serde_json::Value;
 
@@ -38,12 +38,19 @@ impl<'a> FrameworkTargetIndex<'a> {
             .iter()
             .map(|node| (node.id.as_str(), node))
             .collect::<HashMap<_, _>>();
+        let target_ids = extraction
+            .nodes
+            .iter()
+            .filter(|node| !target_families(node).is_empty())
+            .map(|node| node.id.as_str())
+            .collect::<HashSet<_>>();
         let mut owners = HashMap::<&str, Vec<String>>::new();
         for edge in &extraction.edges {
             if !matches!(
                 edge.attributes.get("relation").and_then(Value::as_str),
                 Some("contains" | "method" | "defines")
-            ) {
+            ) || !target_ids.contains(edge.target.as_str())
+            {
                 continue;
             }
             if let Some(parent) = raw_by_id.get(edge.source.as_str()) {
@@ -75,6 +82,10 @@ impl<'a> FrameworkTargetIndex<'a> {
             by_module_terminal: HashMap::new(),
         };
         for node in &extraction.nodes {
+            let families = target_families(node);
+            if families.is_empty() {
+                continue;
+            }
             let qualified = normalize_reference(&node.string("qualified_name"));
             let signature_qualified = node
                 .attributes
@@ -107,8 +118,7 @@ impl<'a> FrameworkTargetIndex<'a> {
             normalized.dedup();
             let target_owners = owners.remove(node.id.as_str()).unwrap_or_default();
             let position = index.targets.len();
-            let families = target_families(node);
-            for family in families {
+            for &family in families {
                 index
                     .by_id
                     .entry((family, node.id.as_str()))
@@ -336,21 +346,24 @@ fn bounded_union_measured<'a>(
     (retained, truncated, examined)
 }
 
-fn target_families(node: &RawNodeRecord) -> Vec<TargetFamily> {
+fn target_families(node: &RawNodeRecord) -> &'static [TargetFamily] {
+    const ROUTE_CALLABLE: &[TargetFamily] = &[TargetFamily::Route, TargetFamily::Callable];
+    const ROUTE_TYPE: &[TargetFamily] = &[TargetFamily::Route, TargetFamily::Type];
+    const ROUTE: &[TargetFamily] = &[TargetFamily::Route];
+    const TYPE: &[TargetFamily] = &[TargetFamily::Type];
+    const DATABASE_TABLE: &[TargetFamily] = &[TargetFamily::DatabaseTable];
     let kind = node
         .attributes
         .get("symbol_kind")
         .or_else(|| node.attributes.get("type"))
         .and_then(Value::as_str);
     match kind {
-        Some("function" | "method") => vec![TargetFamily::Route, TargetFamily::Callable],
-        Some("class") => vec![TargetFamily::Route, TargetFamily::Type],
-        Some("component") => vec![TargetFamily::Route],
-        Some("struct" | "interface" | "trait" | "protocol" | "enum") => {
-            vec![TargetFamily::Type]
-        }
-        Some("database_table" | "table") => vec![TargetFamily::DatabaseTable],
-        _ => Vec::new(),
+        Some("function" | "method") => ROUTE_CALLABLE,
+        Some("class") => ROUTE_TYPE,
+        Some("component") => ROUTE,
+        Some("struct" | "interface" | "trait" | "protocol" | "enum") => TYPE,
+        Some("database_table" | "table") => DATABASE_TABLE,
+        _ => &[],
     }
 }
 

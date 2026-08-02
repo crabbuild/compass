@@ -1287,6 +1287,39 @@ fn owned_best_effort_publication_sorts_before_assigning_diagnostic_positions()
 }
 
 #[test]
+fn canonical_raw_order_uses_content_addressed_omission_identities()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut source = extraction(root);
+    source.edges = [70_u64, 90]
+        .into_iter()
+        .map(|start| RawEdgeRecord {
+            source: "raw:a".to_owned(),
+            target: "raw:b".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!(format!("unknown_{start}"))),
+                ("source_anchor".to_owned(), anchor(root, start)),
+            ]),
+        })
+        .collect();
+    source.extensions.insert(
+        "_compass_v1_canonical_raw_order".to_owned(),
+        Value::Bool(true),
+    );
+    let mut reversed = source.clone();
+    reversed.edges.reverse();
+
+    let left = normalize_v1_best_effort(source, build_evidence(root)?)?;
+    let right = normalize_v1_best_effort(reversed, build_evidence(root)?)?;
+
+    assert_eq!(left.document, right.document);
+    assert_eq!(left.omissions, right.omissions);
+    assert_eq!(left.omissions.edges, 2);
+    Ok(())
+}
+
+#[test]
 fn best_effort_diagnostic_positions_sort_by_published_endpoint_identity()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

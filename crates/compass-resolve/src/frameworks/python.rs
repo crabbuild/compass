@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
 use compass_languages::{FrameworkLimitError, FrameworkLimits, RawFrameworkFact, RawRouteFact};
 use serde_json::Value;

@@ -1,6 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Component, Path};
 
+use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 
 use super::model::{
@@ -149,22 +150,22 @@ pub fn validate_evidence(
         ));
     }
 
-    let declarations: BTreeMap<_, _> = batch
+    let declarations: AHashMap<_, _> = batch
         .declarations
         .iter()
         .map(|fact| (fact.id.as_str(), fact))
         .collect();
-    let scopes: BTreeMap<_, _> = batch
+    let scopes: AHashMap<_, _> = batch
         .scopes
         .iter()
         .map(|fact| (fact.id.as_str(), fact))
         .collect();
-    let bindings: BTreeMap<_, _> = batch
+    let bindings: AHashMap<_, _> = batch
         .bindings
         .iter()
         .map(|fact| (fact.id.as_str(), fact))
         .collect();
-    let occurrences: BTreeMap<_, _> = batch
+    let occurrences: AHashMap<_, _> = batch
         .occurrences
         .iter()
         .map(|fact| (fact.id.as_str(), fact))
@@ -291,10 +292,10 @@ fn validate_fact(
     fact: Fact<'_>,
     adapter_language: &str,
     capabilities: &BTreeSet<LanguageCapability>,
-    declarations: &BTreeMap<&str, &DeclarationFact>,
-    scopes: &BTreeMap<&str, &ScopeFact>,
-    bindings: &BTreeMap<&str, &BindingFact>,
-    occurrences: &BTreeMap<&str, &OccurrenceFact>,
+    declarations: &AHashMap<&str, &DeclarationFact>,
+    scopes: &AHashMap<&str, &ScopeFact>,
+    bindings: &AHashMap<&str, &BindingFact>,
+    occurrences: &AHashMap<&str, &OccurrenceFact>,
     limits: EvidenceLimits,
 ) -> Result<(), EvidenceError> {
     match fact {
@@ -664,7 +665,7 @@ fn require_reference<T>(
     owner_id: &str,
     kind: &str,
     target_id: &str,
-    index: &BTreeMap<&str, &T>,
+    index: &AHashMap<&str, &T>,
 ) -> Result<(), EvidenceError> {
     if target_id.is_empty() || !index.contains_key(target_id) {
         return Err(EvidenceError::new(
@@ -679,7 +680,7 @@ fn require_optional_reference<T>(
     owner_id: &str,
     kind: &str,
     target_id: Option<&str>,
-    index: &BTreeMap<&str, &T>,
+    index: &AHashMap<&str, &T>,
 ) -> Result<(), EvidenceError> {
     if let Some(target_id) = target_id {
         require_reference(owner_id, kind, target_id, index)?;
