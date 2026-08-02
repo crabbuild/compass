@@ -641,6 +641,10 @@ Managed integration/update probe.
 
 - Current read commands default to `compass-out/graph.json`.
 - `--graph PATH` selects a graph JSON.
+- Typed code-query commands (`search`, `callers`, `callees`, `impact`,
+  `explore`, and `node`) prefer `compass-store.sqlite3` beside the default
+  graph. Their `--engine default|json|store` option selects the store policy;
+  an explicit `--graph PATH` uses JSON unless `--engine store` is supplied.
 - `--at REV` selects an exact historical graph for supported reads.
 - `--graph` and `--at` are mutually exclusive.
 - Build `PATH` defaults are command-specific; run help before scripting.

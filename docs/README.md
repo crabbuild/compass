@@ -65,7 +65,7 @@ workspace:
 5. [Extraction pipeline](implementation/extraction-pipeline.md)
 6. [Universal evidence implementation](implementation/universal-evidence.md)
 7. [Query engine](implementation/query-engine.md)
-8. [Planned Compass store design](design/compass-store.md)
+8. [Compass store design](design/compass-store.md)
 9. [Compass store implementation plan](implementation/compass-store-plan.md)
 10. [Semantic pipeline](implementation/semantic-pipeline.md)
 11. [Extending Compass](implementation/extending-compass.md)
@@ -103,7 +103,7 @@ workspace:
 | [Managed language analyzers](design/managed-language-analyzers.md) | Planned compiler, indexer, and language-server enrichment across languages |
 | [Managed JDT integration](design/java-jdt-integration.md) | Planned Java semantic tooling, trust boundaries, phases, and acceptance criteria |
 | [Storage and history](design/storage-and-history.md) | Incremental artifacts and immutable historical realizations |
-| [Compass store](design/compass-store.md) | Planned namespace/partition/key contract, graph engines, snapshot schema, and database mappings |
+| [Compass store](design/compass-store.md) | Namespace/partition/key contract, current SQLite slice, graph engines, snapshot schema, and database mappings |
 | [Security and privacy](design/security-and-privacy.md) | Trust boundaries, credentials, and offline behavior |
 | [Document processing](design/document-processing.md) | Source-driven Markdown structure, metadata, links, and bounds |
 

@@ -1,7 +1,14 @@
 # Compass store and graph-engine design
 
-**Status:** Planned. This document defines a target architecture and is not
-evidence that a store-backed graph engine has shipped.
+**Status:** Architecture reference. The initial local slice is shipped: the
+`compass-store` contract, SQLite adapter, dual graph publication, and typed
+query-engine selection are implemented. Remote adapters and fully streamed
+store graph indexes remain planned phases.
+
+The initial sidecar stores the validated graph payload as immutable,
+content-addressed chunks and keeps the existing query index disposable. It is
+the publication and adapter boundary, not yet the final streamed node/edge
+index layout described later in this document.
 
 > **Who this page is for:** maintainers of graph publication and queries,
 > storage-adapter authors, cloud-service implementers, and reviewers of the
@@ -175,6 +182,11 @@ The store-backed graph engine maps those graph operations to immutable ordered
 indexes above `compass-store`. The JSON graph engine maps them to a validated
 `GraphDocument` and disposable local indexes. This separation is what lets
 `graph.json` stay a real engine rather than an emulated database.
+
+The shipped `compass-store` v1 trait is synchronous and runtime-neutral so the
+native CLI remains dependency-light. Remote adapters can use a bounded
+blocking client boundary; an async facade is a follow-on API that must preserve
+the same limits, ordering, conditional-write, and error semantics.
 
 ## Engine and materialization profiles
 
@@ -829,22 +841,26 @@ CREATE TABLE kv (
 ) WITHOUT ROWID;
 ```
 
-A separate metadata table records the adapter format, store identity,
-creation state, and migration state. Ordered scans specify all three leading
-primary-key components and use binary comparisons. Conditional updates include
-the observed `version` in the `WHERE` clause and require exactly one affected
-row. Put-if-absent uses the primary-key constraint and verifies the existing
-digest on conflict.
+A separate metadata table records the adapter format; store identity,
+creation-state, and migration metadata are reserved for the adapter lifecycle
+phases. Ordered scans specify all three leading primary-key components and use
+binary comparisons. Conditional updates include the observed `version` in the
+transaction and require the observed version to match. Put-if-absent uses the
+primary-key constraint and verifies the existing digest on conflict.
 
-WAL mode, full synchronous durability, a bounded busy timeout, bounded
-prepared statements, and explicit transactions follow the repository's
-existing local durability posture. Whether `WITHOUT ROWID` is retained must
-be benchmarked on Compass workloads; SQLite's own documentation recommends
-measuring this optimization rather than assuming it always wins.
+The initial generated sidecar uses the rollback journal, full synchronous
+durability, a bounded busy timeout, bounded values, and explicit transactions.
+Rollback-journal mode is intentional while each build generation is represented
+by one portable SQLite file; a WAL adapter must stage and publish its `-wal`
+and `-shm` state together before it can replace this mode. Whether
+`WITHOUT ROWID` is retained must be benchmarked on Compass workloads; SQLite's
+own documentation recommends measuring this optimization rather than assuming
+it always wins.
 
-Backups must include committed WAL state. File creation, permissions, symlink
-handling, corruption recovery, and atomic replacement reuse `compass-files`
-primitives rather than new weaker helpers.
+For a future WAL adapter, backups must include committed WAL state. The current
+rollback-journal sidecar is self-contained. File creation, permissions,
+symlink handling, corruption recovery, and atomic replacement reuse
+`compass-files` primitives rather than new weaker helpers.
 
 ### redb
 

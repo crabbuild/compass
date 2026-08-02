@@ -12,6 +12,7 @@ use compass_model::code_graph::{
     EdgeKind, GraphDocument, NodeDetails, NodeKind, NodeRole, RouteStage,
 };
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, ResolutionState};
+use compass_store::{STORE_FILE_NAME, SqliteStore};
 use sha2::{Digest, Sha256};
 
 const SOURCE: &str = r#"
@@ -151,6 +152,30 @@ fn clean_warm_restored_and_checkout_root_builds_are_byte_identical() -> Result<(
     let (restored, restored_output) = build(first.path())?;
     assert!(restored_output);
     assert_eq!(restored, cold);
+    Ok(())
+}
+
+#[test]
+fn build_publishes_a_reopenable_store_snapshot_matching_graph_json() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    fs::create_dir_all(directory.path().join("src"))?;
+    fs::write(directory.path().join("src/lib.rs"), SOURCE)?;
+
+    let mut options = BuildOptions::new(directory.path());
+    options.no_cluster = true;
+    options.no_viz = true;
+    options.max_workers = Some(2);
+    let result = build_local_graph(&options)?;
+    let graph_path = result.output_dir.join("graph.json");
+    let graph_bytes = fs::read(&graph_path)?;
+    let graph = GraphDocument::load(&graph_path)?;
+    let store = SqliteStore::open_read_only(result.output_dir.join(STORE_FILE_NAME))?;
+    let (manifest, store_bytes) = store.read_snapshot()?;
+
+    assert_eq!(store_bytes, graph_bytes);
+    assert_eq!(manifest.node_count, graph.nodes.len() as u64);
+    assert_eq!(manifest.edge_count, graph.links.len() as u64);
+    assert_eq!(store.validate_snapshot()?.snapshot_id, manifest.snapshot_id);
     Ok(())
 }
 

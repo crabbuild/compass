@@ -8,6 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use compass_ir::{PROGRAM_SCHEMA, ProgramBundle};
 use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
 use compass_model::query_contract::CODE_QUERY_SCHEMA_V1;
+use compass_store::{STORE_FILE_NAME, SqliteStore};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
@@ -16,18 +17,44 @@ use crate::cql::{QueryError, QueryErrorKind};
 
 const INDEX_FORMAT_VERSION: &str = "compass-code-index/1";
 
+/// Selects the source used to hydrate the typed query engine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EngineSelection {
+    /// Prefer the store sidecar and fall back to graph JSON when it is absent.
+    Default,
+    /// Read and validate the compatible `graph.json` artifact directly.
+    Json,
+    /// Require the store sidecar and fail if it is unavailable or corrupt.
+    Store,
+}
+
+/// Identifies the engine that supplied a query engine's graph snapshot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum QueryEngineKind {
+    Json,
+    Store,
+}
+
 pub fn open(
     graph_path: &Path,
     program_path: Option<&Path>,
     cache_root: &Path,
 ) -> Result<CodeQueryEngine, QueryError> {
-    let graph = GraphDocument::load(graph_path).map_err(|error| {
-        QueryError::new(
-            QueryErrorKind::CorruptArtifact,
-            "graph_load_failed",
-            error.to_string(),
-        )
-    })?;
+    open_with_engine(
+        graph_path,
+        program_path,
+        cache_root,
+        EngineSelection::Default,
+    )
+}
+
+pub fn open_with_engine(
+    graph_path: &Path,
+    program_path: Option<&Path>,
+    cache_root: &Path,
+    selection: EngineSelection,
+) -> Result<CodeQueryEngine, QueryError> {
+    let (graph, graph_bytes, engine_kind) = load_graph(graph_path, selection)?;
     if graph.graph.schema != CODE_GRAPH_SCHEMA_V1 {
         return Err(QueryError::new(
             QueryErrorKind::UnsupportedSchema,
@@ -38,7 +65,6 @@ pub fn open(
             ),
         ));
     }
-    let graph_bytes = fs::read(graph_path).map_err(|error| io_error("read_graph", error))?;
     let (program, program_digest) = load_program(program_path)?;
     let key = index_key(
         &graph_bytes,
@@ -88,7 +114,73 @@ pub fn open(
         adjacency,
         lookup,
         partial_graph_message,
+        engine_kind,
     })
+}
+
+fn load_graph(
+    graph_path: &Path,
+    selection: EngineSelection,
+) -> Result<(GraphDocument, Vec<u8>, QueryEngineKind), QueryError> {
+    let store_path = graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(STORE_FILE_NAME);
+    let use_store = match selection {
+        EngineSelection::Store => true,
+        EngineSelection::Json => false,
+        EngineSelection::Default => store_path.is_file(),
+    };
+    if use_store {
+        let store = SqliteStore::open_read_only(&store_path).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_open_failed",
+                error.to_string(),
+            )
+        })?;
+        let (manifest, graph_bytes) = store.read_snapshot().map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_snapshot_failed",
+                error.to_string(),
+            )
+        })?;
+        if manifest.graph_schema != CODE_GRAPH_SCHEMA_V1 {
+            return Err(QueryError::new(
+                QueryErrorKind::UnsupportedSchema,
+                "unsupported_graph_schema",
+                format!(
+                    "expected {CODE_GRAPH_SCHEMA_V1}, found {}",
+                    manifest.graph_schema
+                ),
+            ));
+        }
+        let graph = serde_json::from_slice::<GraphDocument>(&graph_bytes).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_decode_failed",
+                error.to_string(),
+            )
+        })?;
+        compass_model::validate_code_graph(&graph).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_validation_failed",
+                error.to_string(),
+            )
+        })?;
+        return Ok((graph, graph_bytes, QueryEngineKind::Store));
+    }
+    let graph = GraphDocument::load(graph_path).map_err(|error| {
+        QueryError::new(
+            QueryErrorKind::CorruptArtifact,
+            "graph_load_failed",
+            error.to_string(),
+        )
+    })?;
+    let graph_bytes = fs::read(graph_path).map_err(|error| io_error("read_graph", error))?;
+    Ok((graph, graph_bytes, QueryEngineKind::Json))
 }
 
 fn load_program(

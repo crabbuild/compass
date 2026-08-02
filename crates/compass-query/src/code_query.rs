@@ -12,6 +12,7 @@ use compass_model::query_contract::{
 use rusqlite::{Connection, params};
 
 use crate::cql::{QueryError, QueryErrorKind};
+use crate::index::QueryEngineKind;
 use crate::join_program_evidence;
 use crate::source::{VerifiedSource, verified_source};
 
@@ -82,6 +83,7 @@ pub struct CodeQueryEngine {
     pub(crate) adjacency: CodeAdjacencyIndex,
     pub(crate) lookup: CodeLookupIndex,
     pub(crate) partial_graph_message: Option<String>,
+    pub(crate) engine_kind: QueryEngineKind,
 }
 
 pub(crate) struct CodeLookupIndex {
@@ -619,6 +621,11 @@ impl CodeQueryEngine {
     #[must_use]
     pub fn index_path(&self) -> &std::path::Path {
         &self.index_path
+    }
+
+    #[must_use]
+    pub const fn engine_kind(&self) -> QueryEngineKind {
+        self.engine_kind
     }
 
     fn resolve_symbol(&self, query: &str, response: &mut CodeQueryResponse) -> Option<String> {

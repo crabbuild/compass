@@ -43,6 +43,7 @@ use compass_resolve::{
     apply_program_projection, collect_program_projection_sites, merge_decl_def_classes,
     resolve_prevalidated_owned_with_root,
 };
+use compass_store::{GRAPH_SCHEMA_V1, STORE_FILE_NAME, SqliteStore};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -317,6 +318,8 @@ pub enum CoreError {
     ProgramAnalysis(#[from] compass_analysis::AnalysisError),
     #[error(transparent)]
     ProgramIr(#[from] compass_ir::IrError),
+    #[error(transparent)]
+    Store(#[from] compass_store::StoreError),
     #[error("invalid Program IR input: {0}")]
     InvalidProgramInput(String),
     #[error("invalid completed-build state: {0}")]
@@ -567,7 +570,7 @@ fn build_graph_inner(
     } else {
         None
     };
-    let verified_output = verified_state.is_some();
+    let verified_output = verified_state.is_some() && store_artifact_complete(&output_dir);
     if !has_program_artifacts {
         let verified = verified_state;
         if let Some(state) = verified.filter(|state| state.stats.files == sources.len()) {
@@ -1856,7 +1859,9 @@ fn publish_build_state(
     omissions: PublicationOmissions,
     program: Option<&ProgramBuildSummary>,
 ) -> Result<(), CoreError> {
+    ensure_store_snapshot(output_dir)?;
     let mut required = vec![output_dir.join(OUTPUT_STATS_FILE)];
+    required.push(output_dir.join(STORE_FILE_NAME));
     match options.purpose {
         BuildPurpose::Update => {
             required.push(output_dir.join(".compass_root"));
@@ -1903,12 +1908,53 @@ fn publish_build_state(
 }
 
 fn commit_generation(guard: BuildGuard, output_container: &Path) -> Result<PathBuf, CoreError> {
-    let mut artifacts = vec!["graph.json", "manifest.json", BUILD_STATE_FILE];
+    ensure_store_snapshot(guard.staging_directory())?;
+    let mut artifacts = vec![
+        "graph.json",
+        "manifest.json",
+        BUILD_STATE_FILE,
+        STORE_FILE_NAME,
+    ];
     if guard.staging_directory().join("program.json").is_file() {
         artifacts.push("program.json");
     }
     guard.commit_with_artifacts(&artifacts)?;
     Ok(BuildGuard::resolve_active_directory(output_container)?)
+}
+
+/// Ensure every committed generation has a validated, queryable store snapshot
+/// whose payload is byte-identical to the published graph JSON. This is kept at
+/// the publication boundary so fast paths and incremental paths cannot bypass
+/// the store artifact.
+fn ensure_store_snapshot(output_dir: &Path) -> Result<(), CoreError> {
+    let graph_path = output_dir.join("graph.json");
+    let graph_bytes = fs::read(&graph_path).map_err(|source| compass_files::FileError::Io {
+        path: graph_path.clone(),
+        source,
+    })?;
+    let graph = V1GraphDocument::load(&graph_path)?;
+    if graph.graph.schema != GRAPH_SCHEMA_V1 {
+        return Err(CoreError::InvalidBuildState(format!(
+            "graph.json has unsupported schema {}; expected {GRAPH_SCHEMA_V1}",
+            graph.graph.schema
+        )));
+    }
+    let store_path = output_dir.join(STORE_FILE_NAME);
+    if let Ok(store) = SqliteStore::open_read_only(&store_path)
+        && let Ok((_, existing)) = store.read_snapshot()
+        && existing == graph_bytes
+    {
+        return Ok(());
+    }
+    let store = SqliteStore::open(&store_path)?;
+    store.publish_snapshot(
+        &graph_bytes,
+        GRAPH_SCHEMA_V1,
+        graph.nodes.len(),
+        graph.links.len(),
+    )?;
+    store.validate_snapshot()?;
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -3819,6 +3865,7 @@ fn topology_is_unchanged(existing: &GraphDocument, candidate: &GraphDocument) ->
 fn update_artifacts_complete(output_dir: &Path) -> bool {
     [
         "graph.json",
+        STORE_FILE_NAME,
         "GRAPH_REPORT.md",
         ".compass_labels.json",
         ".compass_root",
@@ -3826,6 +3873,12 @@ fn update_artifacts_complete(output_dir: &Path) -> bool {
     ]
     .into_iter()
     .all(|name| output_dir.join(name).is_file())
+}
+
+fn store_artifact_complete(output_dir: &Path) -> bool {
+    let path = output_dir.join(STORE_FILE_NAME);
+    path.is_file()
+        && SqliteStore::open_read_only(path).is_ok_and(|store| store.validate_snapshot().is_ok())
 }
 
 pub(crate) fn write_graph_overview_artifact(

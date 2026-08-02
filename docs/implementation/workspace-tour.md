@@ -129,6 +129,19 @@ raw_guard         raw-input safety boundary
 **Change here when:** multiple domain crates must be sequenced into one
 transactional workflow.
 
+### `compass-store`
+
+**Purpose:** backend-neutral namespace/partition/key storage and the initial
+SQLite realization used for current graph snapshots.
+
+**Modules:** one contract surface containing bounded key/value operations,
+conditional and immutable writes, ordered scans, snapshot manifests/chunks,
+and SQLite schema/validation.
+
+**Change here when:** adding a store capability, backend adapter boundary, or
+snapshot publication invariant. Graph meaning and query planning stay in
+`compass-model`, `compass-graph`, and `compass-query`.
+
 ## Graph model and query crates
 
 ### `compass-model`
