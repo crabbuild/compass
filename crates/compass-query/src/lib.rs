@@ -124,6 +124,115 @@ mod tests {
     }
 
     #[test]
+    fn natural_query_prefers_declarations_and_renders_relationship_sites()
+    -> Result<(), Box<dyn Error>> {
+        let graph = load(
+            r#"{
+                "directed": true, "multigraph": true, "graph": {},
+                "nodes": [{
+                    "id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "kind": "method",
+                    "name": ".process_delayed_slices()",
+                    "source": {
+                        "file": "src/store.rs", "startLine": 20, "startColumn": 4,
+                        "endLine": 20, "endColumn": 28
+                    }
+                }, {
+                    "id": "placeholder",
+                    "kind": "function",
+                    "name": "process_delayed_slices",
+                    "evidence": [{
+                        "origin": "heuristic",
+                        "extractor": "compass.graph.external-placeholder",
+                        "confidence": "inferred",
+                        "wiringSite": {
+                            "file": "tests/workflow.rs", "startLine": 96, "startColumn": 8,
+                            "endLine": 96, "endColumn": 30
+                        }
+                    }]
+                }],
+                "links": [{
+                    "id": "edge", "source": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "target": "placeholder", "kind": "calls",
+                    "relationshipSite": {
+                        "file": "src/store.rs", "startLine": 25, "startColumn": 8,
+                        "endLine": 25, "endColumn": 32
+                    },
+                    "evidence": [{"origin": "ast", "extractor": "test", "confidence": "exact"}]
+                }]
+            }"#,
+        )?;
+
+        let output = query_graph_text(
+            &graph,
+            "process_delayed_slices",
+            TraversalMode::Bfs,
+            2,
+            2000,
+            &[],
+            &HashMap::new(),
+        );
+
+        assert!(output.contains("Start: ['.process_delayed_slices()']"));
+        assert!(!output.contains("Start: ['.process_delayed_slices()', 'process_delayed_slices']"));
+        assert!(output.contains("wiring=src/store.rs:L25:8-L25:32"));
+        assert!(output.contains("at=src/store.rs:L25:8-L25:32"));
+        Ok(())
+    }
+
+    #[test]
+    fn explanation_reports_ambiguity_and_exact_ids_preserve_locations() -> Result<(), Box<dyn Error>>
+    {
+        let first = format!("sha256:{}", "a".repeat(64));
+        let second = format!("sha256:{}", "b".repeat(64));
+        let graph = load(&format!(
+            r#"{{
+                "directed": true, "multigraph": true, "graph": {{}},
+                "nodes": [{{
+                    "id": "{first}", "kind": "method", "name": ".process_delayed_slices()",
+                    "source": {{"file": "src/database.rs", "startLine": 10, "startColumn": 4,
+                        "endLine": 10, "endColumn": 28}}
+                }}, {{
+                    "id": "{second}", "kind": "method", "name": ".process_delayed_slices()",
+                    "source": {{"file": "src/tikv.rs", "startLine": 20, "startColumn": 4,
+                        "endLine": 20, "endColumn": 28}}
+                }}, {{
+                    "id": "placeholder", "kind": "function", "name": "process_delayed_slices",
+                    "evidence": [{{"origin": "heuristic", "extractor": "compass.graph.external-placeholder",
+                        "confidence": "inferred", "wiringSite": {{"file": "tests/workflow.rs",
+                        "startLine": 96, "startColumn": 8, "endLine": 96, "endColumn": 30}}}}]
+                }}],
+                "links": [{{
+                    "id": "edge", "source": "{second}", "target": "placeholder", "kind": "calls",
+                    "relationshipSite": {{"file": "src/tikv.rs", "startLine": 24, "startColumn": 8,
+                        "endLine": 24, "endColumn": 30}},
+                    "evidence": [{{"origin": "ast", "extractor": "test", "confidence": "exact"}}]
+                }}]
+            }}"#
+        ))?;
+
+        let ambiguous = render_explanation(&graph, "process_delayed_slices", &HashMap::new());
+        assert!(
+            ambiguous
+                .contains("Ambiguous: 'process_delayed_slices' matches 2 source-backed nodes.")
+        );
+        assert!(ambiguous.contains("src/database.rs L10:4-L10:28"));
+        assert!(ambiguous.contains("src/tikv.rs L20:4-L20:28"));
+        assert!(!ambiguous.contains("tests/workflow.rs"));
+
+        let exact = render_explanation(&graph, &second, &HashMap::new());
+        assert!(exact.contains(&format!("ID:        {second}")));
+        assert!(exact.contains("Source:    src/tikv.rs L20:4-L20:28"));
+        assert!(exact.contains("Type:      code"));
+        assert!(
+            exact.contains(
+                "--> process_delayed_slices [calls] [EXTRACTED] src/tikv.rs:L24:8-L24:30"
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
     fn omitted_multigraph_preserves_parallel_edge_hub_semantics() -> Result<(), Box<dyn Error>> {
         let links = std::iter::once(serde_json::json!({
             "source": "seed",

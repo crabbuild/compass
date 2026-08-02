@@ -49,6 +49,13 @@ impl NodeRecord {
                     .and_then(|community| community.get("label"))
                     .and_then(Value::as_str)
                     .map(str::to_owned),
+                "wiring_file" => evidence_anchor(&self.attributes, "wiringSite")
+                    .and_then(|site| site.get("file"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                "wiring_location" => {
+                    evidence_anchor(&self.attributes, "wiringSite").and_then(source_anchor_location)
+                }
                 "symbol_kind" | "type" | "node_type" => self
                     .attributes
                     .get("kind")
@@ -269,6 +276,20 @@ fn source_anchor_location(anchor: &Map<String, Value>) -> Option<String> {
             format!("L{start_line}:{start_column}-L{end_line}:{end_column}")
         },
     ))
+}
+
+fn evidence_anchor<'a>(
+    attributes: &'a Map<String, Value>,
+    field: &str,
+) -> Option<&'a Map<String, Value>> {
+    attributes
+        .get("evidence")
+        .and_then(Value::as_array)
+        .and_then(|evidence| {
+            evidence
+                .iter()
+                .find_map(|entry| entry.as_object()?.get(field)?.as_object())
+        })
 }
 
 fn evidence_field<'a>(attributes: &'a Map<String, Value>, field: &str) -> Option<&'a str> {
@@ -704,6 +725,7 @@ mod tests {
             r#"{
                 "nodes": [{
                     "id": "a",
+                    "kind": "method",
                     "name": "source",
                     "source": {
                         "file": "src/lib.rs",
@@ -713,7 +735,23 @@ mod tests {
                         "endColumn": 5
                     },
                     "community": {"id": 7, "label": "Core"}
-                }, {"id": "b", "name": "target"}],
+                }, {
+                    "id": "b",
+                    "kind": "function",
+                    "name": "target",
+                    "evidence": [{
+                        "origin": "heuristic",
+                        "extractor": "compass.graph.external-placeholder",
+                        "confidence": "inferred",
+                        "wiringSite": {
+                            "file": "src/caller.rs",
+                            "startLine": 11,
+                            "startColumn": 7,
+                            "endLine": 11,
+                            "endColumn": 13
+                        }
+                    }]
+                }],
                 "links": [{
                     "id": "edge",
                     "source": "a",
@@ -732,6 +770,8 @@ mod tests {
 
         assert_eq!(document.nodes[0].string("source_location"), "L2:3-L4:5");
         assert_eq!(document.nodes[0].string("community_name"), "Core");
+        assert_eq!(document.nodes[1].string("wiring_file"), "src/caller.rs");
+        assert_eq!(document.nodes[1].string("wiring_location"), "L11:7-L11:13");
         assert_eq!(document.links[0].string("source_location"), "L8:9-L8:15");
         Ok(())
     }

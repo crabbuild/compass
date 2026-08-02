@@ -190,3 +190,53 @@ fn natural_query_renders_typed_source_locations() -> Result<(), Box<dyn Error>> 
     );
     Ok(())
 }
+
+#[test]
+fn explain_requires_an_exact_id_for_ambiguous_typed_nodes() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = directory.path().join("graph.json");
+    let first = format!("sha256:{}", "a".repeat(64));
+    let second = format!("sha256:{}", "b".repeat(64));
+    std::fs::write(
+        &graph,
+        format!(
+            r#"{{
+                "directed": true, "multigraph": true, "nodes": [
+                    {{"id":"{first}","kind":"method","name":".run()","source":{{"file":"src/a.rs","startLine":3,"startColumn":1,"endLine":3,"endColumn":6}}}},
+                    {{"id":"{second}","kind":"method","name":".run()","source":{{"file":"src/b.rs","startLine":7,"startColumn":1,"endLine":7,"endColumn":6}}}}
+                ], "links": []
+            }}"#
+        ),
+    )?;
+
+    let ambiguous = run(
+        Frontend::Compass,
+        [
+            OsString::from("explain"),
+            OsString::from("run"),
+            OsString::from("--graph"),
+            graph.clone().into_os_string(),
+        ],
+    );
+    assert_eq!(ambiguous.code, 0, "{}", ambiguous.stderr);
+    assert!(
+        ambiguous
+            .stdout
+            .contains("Ambiguous: 'run' matches 2 source-backed nodes.")
+    );
+    assert!(ambiguous.stdout.contains("Retry with the full node ID."));
+
+    let exact = run(
+        Frontend::Compass,
+        [
+            OsString::from("explain"),
+            OsString::from(&second),
+            OsString::from("--graph"),
+            graph.into_os_string(),
+        ],
+    );
+    assert_eq!(exact.code, 0, "{}", exact.stderr);
+    assert!(exact.stdout.contains("Source:    src/b.rs L7:1-L7:6"));
+    assert!(exact.stdout.contains("Type:      code"));
+    Ok(())
+}

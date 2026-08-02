@@ -64,7 +64,9 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
 
     let mut ranked = Vec::new();
     let mut best: HashMap<String, BestSeed> = HashMap::new();
+    let mut tie_breakers = HashMap::new();
     for (node_index, node) in graph.nodes() {
+        let tie_breaker = SeedTieBreaker::new(graph, node_index, node);
         let norm_label = normalized_label(node);
         let bare_label = norm_label.trim_end_matches(['(', ')']);
         let label_tokens = search_tokens(&node.string("label")).join(" ");
@@ -118,8 +120,7 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
                 if singleton > 0.0 {
                     let candidate = BestSeed {
                         score: singleton,
-                        degree: graph.degree(node_index),
-                        label_len: node.label().chars().count(),
+                        tie_breaker,
                         id: node.id.clone(),
                         node: node_index,
                     };
@@ -135,6 +136,7 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
         let coverage = matched as f64 / term_count as f64;
         score += tiered * coverage.powi(2);
         if score > 0.0 {
+            tie_breakers.insert(node_index, tie_breaker);
             ranked.push(ScoredNode {
                 score,
                 node: node_index,
@@ -142,26 +144,20 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
         }
     }
     ranked.sort_by(|left, right| {
+        let left_tie = tie_breakers[&left.node];
+        let right_tie = tie_breakers[&right.node];
         right
             .score
             .total_cmp(&left.score)
+            .then_with(|| right_tie.source_backed.cmp(&left_tie.source_backed))
+            .then_with(|| right_tie.semantic_rank.cmp(&left_tie.semantic_rank))
+            .then_with(|| left_tie.test_or_generated.cmp(&right_tie.test_or_generated))
             .then_with(|| {
-                semantic_seed_rank(graph.node(right.node))
-                    .cmp(&semantic_seed_rank(graph.node(left.node)))
+                right_tie
+                    .source_backed_degree
+                    .cmp(&left_tie.source_backed_degree)
             })
-            .then_with(|| {
-                source_is_test_or_generated(graph.node(left.node))
-                    .cmp(&source_is_test_or_generated(graph.node(right.node)))
-            })
-            .then_with(|| graph.degree(right.node).cmp(&graph.degree(left.node)))
-            .then_with(|| {
-                graph
-                    .node(left.node)
-                    .label()
-                    .chars()
-                    .count()
-                    .cmp(&graph.node(right.node).label().chars().count())
-            })
+            .then_with(|| left_tie.label_len.cmp(&right_tie.label_len))
             .then_with(|| graph.node(left.node).id.cmp(&graph.node(right.node).id))
     });
     QueryScores {
@@ -231,7 +227,7 @@ pub fn pick_seeds(
             break;
         }
         let node = graph.node(candidate.node);
-        let key = normalized_label(node);
+        let key = seed_label_key(node);
         let key = if key.is_empty() { node.id.clone() } else { key };
         if labels.insert(key) {
             seeds.push(candidate.node);
@@ -242,7 +238,7 @@ pub fn pick_seeds(
     for term in terms {
         let node = scores.best_seed_by_term[term];
         let record = graph.node(node);
-        let key = normalized_label(record);
+        let key = seed_label_key(record);
         let key = if key.is_empty() {
             record.id.clone()
         } else {
@@ -257,6 +253,9 @@ pub fn pick_seeds(
 
 #[must_use]
 pub fn find_node(graph: &Graph, label: &str) -> Vec<NodeIndex> {
+    if let Some(index) = graph.node_index(label.trim()) {
+        return vec![index];
+    }
     let term = search_tokens(label).join(" ");
     if term.is_empty() {
         return Vec::new();
@@ -323,6 +322,33 @@ pub fn find_node(graph: &Graph, label: &str) -> Vec<NodeIndex> {
     source_exact
 }
 
+pub(crate) fn find_exact_nodes(graph: &Graph, label: &str) -> Vec<NodeIndex> {
+    if let Some(index) = graph.node_index(label.trim()) {
+        return vec![index];
+    }
+    let term = search_tokens(label).join(" ");
+    if term.is_empty() {
+        return Vec::new();
+    }
+    let norm_query = strip_diacritics(label).to_lowercase().trim().to_owned();
+    graph
+        .nodes()
+        .filter_map(|(index, node)| {
+            let norm_label = normalized_label(node);
+            let bare_label = norm_label.trim_end_matches(['(', ')']);
+            let label_tokens = search_tokens(&node.string("label")).join(" ");
+            let node_id = node.id.to_lowercase();
+            (term == norm_label
+                || term == bare_label
+                || term == label_tokens
+                || term == node_id
+                || norm_query == norm_label
+                || norm_query == bare_label)
+                .then_some(index)
+        })
+        .collect()
+}
+
 fn compute_idf(graph: &Graph, terms: &[String]) -> HashMap<String, f64> {
     let mut frequencies = terms
         .iter()
@@ -381,10 +407,61 @@ fn source_is_test_or_generated(node: &NodeRecord) -> bool {
         .is_some_and(|name| name.starts_with("test_") || name.ends_with("_test.go"))
 }
 
+fn seed_label_key(node: &NodeRecord) -> String {
+    let key = normalized_label(node)
+        .trim_end_matches(['(', ')'])
+        .to_owned();
+    if key.is_empty() { node.id.clone() } else { key }
+}
+
+fn source_backed_degree(graph: &Graph, node: NodeIndex) -> usize {
+    graph
+        .outgoing_edges(node)
+        .chain(graph.incoming_edges(node))
+        .filter_map(|edge| graph.edge_endpoints(edge))
+        .filter(|(source, target)| {
+            let neighbor = if *source == node { *target } else { *source };
+            graph
+                .node(neighbor)
+                .source_file()
+                .is_some_and(|source| !source.is_empty())
+        })
+        .count()
+}
+
+#[derive(Clone, Copy)]
+struct SeedTieBreaker {
+    source_backed: bool,
+    semantic_rank: u8,
+    test_or_generated: bool,
+    source_backed_degree: usize,
+    label_len: usize,
+}
+
+impl SeedTieBreaker {
+    fn new(graph: &Graph, node_index: NodeIndex, node: &NodeRecord) -> Self {
+        Self {
+            source_backed: node.source_file().is_some_and(|source| !source.is_empty()),
+            semantic_rank: semantic_seed_rank(node),
+            test_or_generated: source_is_test_or_generated(node),
+            source_backed_degree: source_backed_degree(graph, node_index),
+            label_len: node.label().chars().count(),
+        }
+    }
+
+    fn cmp_preference(&self, other: &Self) -> Ordering {
+        self.source_backed
+            .cmp(&other.source_backed)
+            .then_with(|| self.semantic_rank.cmp(&other.semantic_rank))
+            .then_with(|| other.test_or_generated.cmp(&self.test_or_generated))
+            .then_with(|| self.source_backed_degree.cmp(&other.source_backed_degree))
+            .then_with(|| other.label_len.cmp(&self.label_len))
+    }
+}
+
 struct BestSeed {
     score: f64,
-    degree: usize,
-    label_len: usize,
+    tie_breaker: SeedTieBreaker,
     id: String,
     node: NodeIndex,
 }
@@ -394,12 +471,11 @@ impl BestSeed {
         match self.score.total_cmp(&other.score) {
             Ordering::Greater => true,
             Ordering::Less => false,
-            Ordering::Equal => {
-                self.degree > other.degree
-                    || (self.degree == other.degree
-                        && (self.label_len < other.label_len
-                            || (self.label_len == other.label_len && self.id < other.id)))
-            }
+            Ordering::Equal => match self.tie_breaker.cmp_preference(&other.tie_breaker) {
+                Ordering::Greater => true,
+                Ordering::Less => false,
+                Ordering::Equal => self.id < other.id,
+            },
         }
     }
 }
@@ -420,8 +496,13 @@ mod tests {
     fn seed(score: f64, degree: usize, label_len: usize, id: &str) -> BestSeed {
         BestSeed {
             score,
-            degree,
-            label_len,
+            tie_breaker: super::SeedTieBreaker {
+                source_backed: true,
+                semantic_rank: 4,
+                test_or_generated: false,
+                source_backed_degree: degree,
+                label_len,
+            },
             id: id.to_owned(),
             node: 0,
         }
@@ -439,6 +520,35 @@ mod tests {
         assert!(seed(10.0, 2, 5, "a").better_than(&baseline));
         assert!(!seed(10.0, 2, 5, "c").better_than(&baseline));
         assert!(!seed(10.0, 2, 5, "b").better_than(&baseline));
+    }
+
+    #[test]
+    fn source_backed_seed_beats_a_higher_degree_placeholder() -> Result<(), Box<dyn Error>> {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "directed": true,
+            "multigraph": true,
+            "nodes": [
+                {"id":"declaration","kind":"method","name":".run()","source_file":"src/lib.rs"},
+                {"id":"placeholder","kind":"function","name":"run"},
+                {"id":"caller-a","kind":"method","name":"caller_a()","source_file":"src/a.rs"},
+                {"id":"caller-b","kind":"method","name":"caller_b()","source_file":"src/b.rs"},
+                {"id":"caller-c","kind":"method","name":"caller_c()","source_file":"src/c.rs"}
+            ],
+            "links": [
+                {"source":"caller-a","target":"placeholder","kind":"calls"},
+                {"source":"caller-b","target":"placeholder","kind":"calls"},
+                {"source":"caller-c","target":"placeholder","kind":"calls"}
+            ]
+        }))?;
+        let graph = Graph::from_document(document)?;
+        let scores = score_nodes(&graph, &["run".to_owned()], true);
+        let seeds = pick_seeds(&graph, &scores, 3, 0.2);
+
+        assert_eq!(
+            seeds,
+            [graph.node_index("declaration").ok_or("declaration")?]
+        );
+        Ok(())
     }
 
     #[test]

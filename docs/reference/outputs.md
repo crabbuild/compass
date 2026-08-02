@@ -208,6 +208,11 @@ Reject unknown schema identifiers rather than guessing compatibility.
 human-readable text. It is stable enough for people, not the preferred machine
 contract.
 
+Natural-language `query` output distinguishes declaration locations (`src` and
+`loc`) from unresolved-symbol occurrence sites (`wiring`) and relationship
+occurrences (`at`). `explain` similarly reports `Source` for declarations,
+`Wiring` for source-less placeholders, and source sites on connections.
+
 When exact automation is required, use:
 
 - CompassQL JSON/JSONL;

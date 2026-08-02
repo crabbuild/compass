@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use compass_model::{Graph, NodeIndex};
 use serde_json::{Map, Value};
 
-use crate::score::{find_node, pick_scored_endpoint, pick_seeds, score_nodes};
+use crate::score::{find_exact_nodes, find_node, pick_scored_endpoint, pick_seeds, score_nodes};
 use crate::text::{infer_context_filters, normalize_context_filters, query_terms, sanitize_label};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -70,7 +70,7 @@ pub fn query_graph_text(
     format!(
         "{}\n\n{}",
         header.join(" | "),
-        render_subgraph(&filtered, &nodes, &edges, token_budget, &[], overlay)
+        render_subgraph(&filtered, &nodes, &edges, token_budget, &seeds, overlay)
     )
 }
 
@@ -161,7 +161,23 @@ pub fn render_explanation(
     label: &str,
     overlay: &HashMap<String, Map<String, Value>>,
 ) -> String {
-    let matches = find_node(graph, label);
+    let exact_matches = find_exact_nodes(graph, label);
+    let mut matches = if exact_matches.is_empty() {
+        find_node(graph, label)
+    } else {
+        exact_matches
+    };
+    let source_backed = matches
+        .iter()
+        .copied()
+        .filter(|index| !graph.node(*index).string("source_file").is_empty())
+        .collect::<Vec<_>>();
+    if !source_backed.is_empty() {
+        matches = source_backed;
+    }
+    if matches.len() > 1 {
+        return render_ambiguity(graph, label, &matches);
+    }
     let Some(&node_index) = matches.first() else {
         return format!("No node matching '{label}' found.");
     };
@@ -177,7 +193,16 @@ pub fn render_explanation(
             .trim_end()
             .to_owned(),
     );
-    lines.push(format!("  Type:      {}", node.string("file_type")));
+    let wiring_file = node.string("wiring_file");
+    let wiring_location = node.string("wiring_location");
+    if source.is_empty() && (!wiring_file.is_empty() || !wiring_location.is_empty()) {
+        lines.push(
+            format!("  Wiring:    {wiring_file} {wiring_location}")
+                .trim_end()
+                .to_owned(),
+        );
+    }
+    lines.push(format!("  Type:      {}", rendered_file_type(node)));
     let community_name = node.string("community_name");
     let community = if community_name.is_empty() {
         node.string("community")
@@ -235,21 +260,87 @@ pub fn render_explanation(
     if !connections.is_empty() {
         lines.push(String::new());
         lines.push(format!("Connections ({}):", connections.len()));
-        connections.sort_by_key(|(_, neighbor, _)| std::cmp::Reverse(graph.degree(*neighbor)));
+        connections.sort_by(|left, right| {
+            let left_source_backed = !graph.node(left.1).string("source_file").is_empty();
+            let right_source_backed = !graph.node(right.1).string("source_file").is_empty();
+            right_source_backed
+                .cmp(&left_source_backed)
+                .then_with(|| graph.degree(right.1).cmp(&graph.degree(left.1)))
+                .then_with(|| graph.node(left.1).id.cmp(&graph.node(right.1).id))
+        });
         for (outgoing, neighbor, edge_index) in connections.iter().take(20) {
             let edge = graph.edge(*edge_index);
+            let site = formatted_site(&edge.string("source_file"), &edge.string("source_location"));
             lines.push(format!(
-                "  {} {} [{}] [{}]",
+                "  {} {} [{}] [{}]{}",
                 if *outgoing { "-->" } else { "<--" },
                 graph.node(*neighbor).label(),
                 edge.string("relation"),
-                edge.string("confidence")
+                edge.string("confidence"),
+                if site.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {site}")
+                }
             ));
         }
         if connections.len() > 20 {
             lines.push(format!("  ... and {} more", connections.len() - 20));
         }
     }
+    lines.join("\n")
+}
+
+fn render_ambiguity(graph: &Graph, label: &str, matches: &[NodeIndex]) -> String {
+    let mut matches = matches.to_vec();
+    matches.sort_by(|left, right| {
+        let left_node = graph.node(*left);
+        let right_node = graph.node(*right);
+        left_node
+            .string("source_file")
+            .cmp(&right_node.string("source_file"))
+            .then_with(|| {
+                left_node
+                    .string("source_location")
+                    .cmp(&right_node.string("source_location"))
+            })
+            .then_with(|| left_node.id.cmp(&right_node.id))
+    });
+    let all_source_backed = matches
+        .iter()
+        .all(|index| !graph.node(*index).string("source_file").is_empty());
+    let qualifier = if all_source_backed {
+        " source-backed"
+    } else {
+        ""
+    };
+    let mut lines = vec![format!(
+        "Ambiguous: '{label}' matches {}{qualifier} nodes.",
+        matches.len()
+    )];
+    for index in matches.iter().take(20) {
+        let node = graph.node(*index);
+        let source_file = node.string("source_file");
+        let source_location = node.string("source_location");
+        let source = match (source_file.is_empty(), source_location.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => source_file,
+            (true, false) => source_location,
+            (false, false) => format!("{source_file} {source_location}"),
+        };
+        let wiring = formatted_site(&node.string("wiring_file"), &node.string("wiring_location"));
+        let site = if source.is_empty() { wiring } else { source };
+        if site.is_empty() {
+            lines.push(format!("  {}", node.label()));
+        } else {
+            lines.push(format!("  {site}"));
+        }
+        lines.push(format!("    id: {}", node.id));
+    }
+    if matches.len() > 20 {
+        lines.push(format!("  ... and {} more", matches.len() - 20));
+    }
+    lines.push("Retry with the full node ID.".to_owned());
     lines.join("\n")
 }
 
@@ -347,9 +438,11 @@ fn render_subgraph(
         .filter(|node| !seed_set.contains(node))
         .collect::<Vec<_>>();
     remainder.sort_by(|left, right| {
-        graph
-            .degree(*right)
-            .cmp(&graph.degree(*left))
+        let left_source_backed = !graph.node(*left).string("source_file").is_empty();
+        let right_source_backed = !graph.node(*right).string("source_file").is_empty();
+        right_source_backed
+            .cmp(&left_source_backed)
+            .then_with(|| graph.degree(*right).cmp(&graph.degree(*left)))
             .then_with(|| graph.node(*left).id.cmp(&graph.node(*right).id))
     });
     ordered.extend(remainder);
@@ -369,11 +462,22 @@ fn render_subgraph(
                 format!(" learning={status}{}", if stale { ":stale" } else { "" })
             })
         });
+        let source = node.string("source_file");
+        let location = node.string("source_location");
+        let wiring = contextual_wiring_site(graph, node_index, edges).unwrap_or_else(|| {
+            formatted_site(&node.string("wiring_file"), &node.string("wiring_location"))
+        });
+        let wiring = if source.is_empty() && !wiring.is_empty() {
+            format!(" wiring={}", sanitize_label(&wiring))
+        } else {
+            String::new()
+        };
         lines.push(format!(
-            "NODE {} [src={} loc={} community={}{}]",
+            "NODE {} [src={} loc={}{} community={}{}]",
             sanitize_label(node.label()),
-            sanitize_label(&node.string("source_file")),
-            sanitize_label(&node.string("source_location")),
+            sanitize_label(&source),
+            sanitize_label(&location),
+            wiring,
             sanitize_label(&community),
             learning.unwrap_or_default()
         ));
@@ -392,16 +496,64 @@ fn render_subgraph(
         } else {
             format!(" context={}", sanitize_label(&context))
         };
+        let site = formatted_site(&edge.string("source_file"), &edge.string("source_location"));
+        let site = if site.is_empty() {
+            String::new()
+        } else {
+            format!(" at={}", sanitize_label(&site))
+        };
         lines.push(format!(
-            "EDGE {} --{} [{}{}]--> {}",
+            "EDGE {} --{} [{}{}]--> {}{}",
             sanitize_label(graph.node(source).label()),
             sanitize_label(&edge.string("relation")),
             sanitize_label(&edge.string("confidence")),
             context,
-            sanitize_label(graph.node(target).label())
+            sanitize_label(graph.node(target).label()),
+            site
         ));
     }
     truncate_to_budget(&lines, token_budget)
+}
+
+fn formatted_site(file: &str, location: &str) -> String {
+    match (file.is_empty(), location.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => file.to_owned(),
+        (true, false) => location.to_owned(),
+        (false, false) => format!("{file}:{location}"),
+    }
+}
+
+fn rendered_file_type(node: &compass_model::NodeRecord) -> String {
+    let stored = node.string("file_type");
+    if !stored.is_empty() {
+        return stored;
+    }
+    node.attributes
+        .get("kind")
+        .and_then(Value::as_str)
+        .map_or_else(String::new, |kind| {
+            if kind == "resource" {
+                "document".to_owned()
+            } else {
+                "code".to_owned()
+            }
+        })
+}
+
+fn contextual_wiring_site(
+    graph: &Graph,
+    node: NodeIndex,
+    edges: &[(NodeIndex, NodeIndex)],
+) -> Option<String> {
+    edges
+        .iter()
+        .filter(|(source, target)| *source == node || *target == node)
+        .filter_map(|(source, target)| graph.edge_between(*source, *target))
+        .map(|edge| graph.edge(edge))
+        .map(|edge| formatted_site(&edge.string("source_file"), &edge.string("source_location")))
+        .filter(|site| !site.is_empty())
+        .min()
 }
 
 fn truncate_to_budget(lines: &[String], token_budget: usize) -> String {
