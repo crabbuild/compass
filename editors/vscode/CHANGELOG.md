@@ -11,6 +11,8 @@
 - Keep caller/callee actions compatible with an external Compass 0.3.0 CLI by
   resolving the cursor through bounded CompassQL and adapting typed call query
   results when that release's `call-graph` command rejects nested anchors.
+- Require Compass CLI 0.3.0 or newer. Older releases and 0.3.0 prereleases are
+  labeled unsupported and rejected before the extension activates workflows.
 
 ## 0.2.0
 

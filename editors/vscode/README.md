@@ -6,6 +6,9 @@ exports.
 
 ## Requirements
 
+The extension requires Compass CLI 0.3.0 or newer. Releases below 0.3.0 and
+0.3.0 prereleases are unsupported.
+
 If the `compass` CLI is missing, choose **Set up Compass** in the Compass
 activity bar. The onboarding page shows the exact official install command,
 opens a visible integrated terminal, runs it, and verifies the installed

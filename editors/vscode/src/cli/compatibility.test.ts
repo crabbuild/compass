@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { CapabilityReport } from "./contracts";
-import { COMPASS_REQUIREMENTS, compatibilityIssue } from "./compatibility";
+import {
+  COMPASS_REQUIREMENTS,
+  compatibilityIssue,
+  isSupportedCompassVersion
+} from "./compatibility";
 
 const compatible: CapabilityReport = {
   schema: "compass.ide.capabilities/1",
-  compass_version: "0.1.4",
+  compass_version: "0.3.0",
   contracts: {
     graph_viewer: "compass.viewer.graph/1",
     progress: "compass.ide.progress/1"
@@ -16,6 +20,30 @@ const compatible: CapabilityReport = {
 };
 
 describe("compatibilityIssue", () => {
+  it("rejects Compass releases and prereleases below 0.3.0", () => {
+    for (const version of [
+      "0.1.9",
+      "0.2.99",
+      "0.3.0-beta.1",
+      "00.3.0",
+      "999999999999999999999.0.0",
+      "invalid"
+    ]) {
+      expect(compatibilityIssue(
+        { ...compatible, compass_version: version },
+        undefined,
+        COMPASS_REQUIREMENTS.graph
+      )).toContain("requires Compass CLI 0.3.0 or newer");
+    }
+  });
+
+  it("accepts stable 0.3.0 and later semantic versions", () => {
+    expect(isSupportedCompassVersion("0.3.0")).toBe(true);
+    expect(isSupportedCompassVersion("0.3.0+build.7")).toBe(true);
+    expect(isSupportedCompassVersion("0.3.1-beta.1")).toBe(true);
+    expect(isSupportedCompassVersion("1.0.0")).toBe(true);
+  });
+
   it("explains a failed capability negotiation instead of running an unsupported command", () => {
     expect(compatibilityIssue(
       undefined,

@@ -1,5 +1,7 @@
 import type { CapabilityReport } from "./contracts";
 
+export const MINIMUM_COMPASS_VERSION = "0.3.0";
+
 export type CapabilityRequirement = {
   workflow: string;
   features?: readonly string[];
@@ -61,6 +63,8 @@ export function compatibilityIssue(
     const detail = negotiationError ? ` Capability negotiation failed: ${negotiationError}` : "";
     return `The installed Compass CLI cannot ${requirement.workflow} with this extension.${detail}`;
   }
+  const versionIssue = minimumCompassVersionIssue(report.compass_version);
+  if (versionIssue) return versionIssue;
   for (const feature of requirement.features ?? []) {
     if (report.features[feature] !== true) {
       return `Compass CLI ${report.compass_version} does not advertise the '${feature}' feature required to ${requirement.workflow}.`;
@@ -75,4 +79,28 @@ export function compatibilityIssue(
     }
   }
   return undefined;
+}
+
+export function minimumCompassVersionIssue(version: string): string | undefined {
+  return isSupportedCompassVersion(version)
+    ? undefined
+    : `Compass CLI ${version || "(version unavailable)"} is unsupported. `
+      + `This extension requires Compass CLI ${MINIMUM_COMPASS_VERSION} or newer.`;
+}
+
+export function isSupportedCompassVersion(version: string): boolean {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(
+    version.trim()
+  );
+  if (!match) return false;
+  const current = [Number(match[1]), Number(match[2]), Number(match[3])];
+  if (current.some((value) => !Number.isSafeInteger(value))) return false;
+  const minimum = [0, 3, 0];
+  for (let index = 0; index < minimum.length; index += 1) {
+    const value = current[index] ?? 0;
+    const required = minimum[index] ?? 0;
+    if (value > required) return true;
+    if (value < required) return false;
+  }
+  return match[4] === undefined;
 }

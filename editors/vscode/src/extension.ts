@@ -4,6 +4,7 @@ import type { CallDirection } from "@compass/viewer/contracts/callGraph";
 import {
   COMPASS_REQUIREMENTS,
   compatibilityIssue,
+  minimumCompassVersionIssue,
   type CapabilityRequirement
 } from "./cli/compatibility";
 import { CapabilityReportSchema } from "./cli/contracts";
@@ -59,6 +60,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           ["capabilities", "--format", "json"],
           CapabilityReportSchema
         );
+        session.capabilityError = minimumCompassVersionIssue(
+          session.capabilities.compass_version
+        );
+        if (session.capabilityError) output.warn(session.capabilityError);
       } catch (error) {
         session.capabilityError = message(error);
         output.warn(`Capability negotiation failed for ${executable}: ${session.capabilityError}`);
@@ -147,6 +152,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }
     if (!installation) return;
+    if (installation.version) {
+      const versionIssue = minimumCompassVersionIssue(installation.version);
+      if (versionIssue) {
+        void vscode.window.showErrorMessage(versionIssue);
+        return;
+      }
+    }
 
     if (
       runtime.discovery.kind === "found"

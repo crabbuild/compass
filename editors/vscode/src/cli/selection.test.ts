@@ -7,16 +7,16 @@ describe("compassSelectionItems", () => {
     const discovery: CompassDiscovery = {
       kind: "found",
       executable: "/home/dev/.local/bin/compass",
-      version: "0.1.5",
+      version: "0.2.9",
       installations: [
         {
           executable: "/home/dev/.local/bin/compass",
-          version: "0.1.5",
+          version: "0.2.9",
           source: "common"
         },
         {
           executable: "/home/dev/.cargo/bin/compass",
-          version: "0.2.0-beta.1",
+          version: "0.3.0",
           source: "path"
         }
       ],
@@ -25,12 +25,12 @@ describe("compassSelectionItems", () => {
 
     expect(compassSelectionItems(discovery)).toEqual([
       expect.objectContaining({
-        label: "$(terminal) Compass 0.1.5",
-        description: "Current selection",
+        label: "$(terminal) Compass 0.2.9",
+        description: "Unsupported — requires 0.3.0+",
         detail: "/home/dev/.local/bin/compass"
       }),
       expect.objectContaining({
-        label: "$(terminal) Compass 0.2.0-beta.1",
+        label: "$(terminal) Compass 0.3.0",
         description: "Detected on PATH",
         detail: "/home/dev/.cargo/bin/compass"
       }),

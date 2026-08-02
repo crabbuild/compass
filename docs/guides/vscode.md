@@ -6,7 +6,8 @@ Dev Container extension hosts. Browser-only `vscode.dev` is not supported.
 
 ## Set up
 
-1. Install Compass and confirm `compass --version` works on the workspace host.
+1. Install Compass CLI 0.3.0 or newer and confirm `compass --version` works on
+   the workspace host. Older releases and 0.3.0 prereleases are unsupported.
 2. Install the Compass VSIX.
 3. Open a trusted repository.
 4. The extension detects Compass on `PATH` and in common install locations.
