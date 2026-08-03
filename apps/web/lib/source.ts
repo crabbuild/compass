@@ -21,7 +21,7 @@ const sidebarIcon = (Icon: LucideIcon): ReactNode =>
   });
 
 const START_PAGES = ['README.md', 'getting-started.md', 'roadmap.md'] as const;
-const COMPASSQL_PAGES = ['COMPASSQL.md', 'COMPASSQL_SUPPORT.md', 'concepts/compassql.md'] as const;
+const COMPASSQL_PAGES = ['concepts/compassql.md', 'COMPASSQL.md', 'COMPASSQL_SUPPORT.md'] as const;
 
 const FOLDER_SECTIONS = [
   { path: 'concepts', name: 'Core concepts', icon: BookOpenIcon },
@@ -78,9 +78,10 @@ function removePages(
   return output;
 }
 
-function withPageIcon(page: Item, Icon: LucideIcon): Item {
+function withPageIcon(page: Item, Icon: LucideIcon, name?: string): Item {
   return {
     ...page,
+    name: name ?? page.name,
     icon: page.icon ?? sidebarIcon(Icon),
   };
 }
@@ -136,7 +137,9 @@ function organizeDocsTree(tree: Root): Root {
   });
   const compassqlPages = COMPASSQL_PAGES.flatMap((ref) => {
     const page = getPage(ref);
-    return page ? [withPageIcon(page, BracesIcon)] : [];
+    return page
+      ? [withPageIcon(page, BracesIcon, ref === 'COMPASSQL.md' ? 'Use CompassQL' : undefined)]
+      : [];
   });
 
   const children: Node[] = [
