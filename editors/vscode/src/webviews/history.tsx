@@ -416,21 +416,13 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
       activeCommunityRequest = "";
       activeCommunityContext = undefined;
       const visibleComparison = compareGraphs(parent.data, current.data);
-      const structuralComparison = parent.data.stats.aggregated || current.data.stats.aggregated
-        ? comparisonFromSemanticDiff(message.semanticDiff, current.data) ?? visibleComparison
-        : visibleComparison;
+      const structuralComparison = comparisonFromSemanticDiff(
+        message.semanticDiff,
+        current.data,
+        parent.data
+      ) ?? visibleComparison;
       comparison = {
         ...structuralComparison,
-        ...(structuralCounts
-          ? {
-              addedNodes: structuralCounts.counts.nodes.added,
-              removedNodes: structuralCounts.counts.nodes.removed,
-              changedNodes: structuralCounts.counts.nodes.changed,
-              addedEdges: structuralCounts.counts.edges.added,
-              removedEdges: structuralCounts.counts.edges.removed,
-              changedEdges: structuralCounts.counts.edges.changed
-            }
-          : {}),
         parent: message.parent
       };
       semanticDiff = message.semanticDiff;

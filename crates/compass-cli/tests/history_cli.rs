@@ -1306,6 +1306,42 @@ fn diff_emits_semantic_text_json_html_and_rejects_removed_flags()
     assert!(envelope["findings"].is_array());
     assert!(envelope["source_changes"].is_array());
     assert!(envelope["graph_delta"].is_object());
+    assert_eq!(
+        envelope["graph_delta"]["added_nodes"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        envelope["graph_delta"]["removed_nodes"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(
+        envelope["graph_delta"]["changed_nodes"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(
+        envelope["graph_delta"]["added_edges"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        envelope["graph_delta"]["removed_edges"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        envelope["graph_delta"]["changed_edges"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
     assert!(envelope.get("changes").is_none());
 
     let html_output = run(
@@ -1592,8 +1628,7 @@ fn change_counts_report_structure_instead_of_shifted_source_coordinates()
     let old_commit = repository.resolve("HEAD")?;
     let publish = |commit: compass_history::CommitId,
                    fingerprint: char,
-                   line: u64,
-                   edge_key: &str|
+                   line: u64|
      -> Result<(), Box<dyn std::error::Error>> {
         let document: GraphDocument = serde_json::from_value(json!({
             "directed": true,
@@ -1614,7 +1649,6 @@ fn change_counts_report_structure_instead_of_shifted_source_coordinates()
                 "source": "caller",
                 "target": "callee",
                 "relation": "calls",
-                "key": edge_key,
                 "relationshipSite": {
                     "file": "service.rs",
                     "startLine": line,
@@ -1648,7 +1682,7 @@ fn change_counts_report_structure_instead_of_shifted_source_coordinates()
         })?;
         Ok(())
     };
-    publish(old_commit, 'a', 1, "edge-at-line-1")?;
+    publish(old_commit, 'a', 1)?;
 
     std::fs::write(
         directory.path().join("service.rs"),
@@ -1656,7 +1690,7 @@ fn change_counts_report_structure_instead_of_shifted_source_coordinates()
     )?;
     git(directory.path(), &["add", "service.rs"])?;
     git(directory.path(), &["commit", "--quiet", "-m", "shift"])?;
-    publish(repository.resolve("HEAD")?, 'b', 2, "edge-at-line-2")?;
+    publish(repository.resolve("HEAD")?, 'b', 2)?;
     drop(history);
 
     let output = run(

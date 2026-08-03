@@ -148,6 +148,27 @@ describe("compareGraphs", () => {
     expect(comparison.graph.edges).toEqual([]);
   });
 
+  it("does not turn degree-derived node sizes into structural node changes", () => {
+    const parent = graph(
+      [
+        { id: "a", label: "A", community: 0, degree: 0, size: 10 },
+        { id: "b", label: "B", community: 0, degree: 0, size: 10 }
+      ],
+      []
+    );
+    const current = graph(
+      [
+        { id: "a", label: "A", community: 0, degree: 1, size: 40 },
+        { id: "b", label: "B", community: 0, degree: 1, size: 40 }
+      ],
+      [{ id: "edge-0-a-b", source: "a", target: "b", relation: "calls" }]
+    );
+
+    const comparison = compareGraphs(parent, current);
+
+    expect(comparison).toMatchObject({ changedNodes: 0, addedEdges: 1 });
+  });
+
   it("retains exact before and after fields without presentation metadata", () => {
     const parent = graph(
       [{
@@ -254,7 +275,7 @@ describe("compareGraphs", () => {
     ]);
   });
 
-  it("retains field evidence when a shifted generated edge changes", () => {
+  it("treats a generated edge relation change as topology replacement", () => {
     const nodes = [
       { id: "a", label: "A", community: 0 },
       { id: "b", label: "B", community: 0 },
@@ -283,15 +304,11 @@ describe("compareGraphs", () => {
     const comparison = compareGraphs(parent, current);
 
     expect(comparison).toMatchObject({
-      addedEdges: 1,
-      removedEdges: 0,
-      changedEdges: 1
+      addedEdges: 2,
+      removedEdges: 1,
+      changedEdges: 0
     });
-    expect(comparison.graph.edges.find((edge) => edge.change === "changed")?.evidence?.fields)
-      .toEqual([
-        { field: "confidence", before: "inferred", after: "extracted" },
-        { field: "relation", before: "calls", after: "uses" }
-      ]);
+    expect(comparison.graph.edges.some((edge) => edge.change === "changed")).toBe(false);
   });
 
   it("keeps stable custom edge IDs authoritative when parallel records swap", () => {
@@ -399,5 +416,56 @@ describe("aggregated revision comparison", () => {
       target: "api::serve",
       change: "added"
     }]);
+  });
+
+  it("uses Rust graph deltas for exact views and retains rendered source evidence", () => {
+    const parent = graph(
+      [{
+        id: "api::serve",
+        label: "serve",
+        community: 0,
+        signature: "serve()",
+        source: { file: "src/api.rs", startLine: 10 }
+      }],
+      []
+    );
+    const current = graph(
+      [{
+        id: "api::serve",
+        label: "serve",
+        community: 0,
+        signature: "serve()",
+        source: { file: "src/api.rs", startLine: 11 }
+      }],
+      []
+    );
+    const comparison = comparisonFromSemanticDiff({
+      graph_delta: {
+        added_nodes: [],
+        removed_nodes: [],
+        changed_nodes: [{
+          id: "api::serve",
+          label: "serve",
+          kind: "function",
+          source_file: "src/api.rs",
+          changed_fields: ["implementation_hash"]
+        }],
+        added_edges: [],
+        removed_edges: [],
+        changed_edges: []
+      }
+    }, current, parent);
+
+    expect(comparison).toMatchObject({ changedNodes: 1 });
+    expect(comparison?.graph.nodes[0]).toMatchObject({
+      id: "api::serve",
+      change: "changed",
+      source: { file: "src/api.rs", startLine: 11 },
+      evidence: {
+        before: { source: { file: "src/api.rs", startLine: 10 } },
+        after: { source: { file: "src/api.rs", startLine: 11 } },
+        fields: [{ field: "implementation_hash" }]
+      }
+    });
   });
 });

@@ -152,18 +152,104 @@ impl RealizationReader<'_> {
         &self,
         new: &RealizationReader<'_>,
     ) -> Result<StructuralChangeCounts, HistoryError> {
-        if self.published.version.build_profile != new.published.version.build_profile {
+        let mut sink = StructuralCountSink::default();
+        self.structural_diff(new, &mut sink)?;
+        Ok(sink.counts)
+    }
+
+    /// Stream meaning-oriented graph changes from the Prolly roots.
+    ///
+    /// This is the canonical classification interface for versioned graph views. It preserves
+    /// topology, direction, relation, multiplicity, provenance, and explicit compatibility edge
+    /// keys while collapsing source-coordinate, clustering, presentation, and anchor-derived edge
+    /// identity churn. Exact storage changes remain available through [`Self::diff_records`].
+    pub fn structural_diff(
+        &self,
+        new: &RealizationReader<'_>,
+        sink: &mut dyn ChangeSink,
+    ) -> Result<(), HistoryError> {
+        if !std::ptr::eq(self.store, new.store) {
             return Err(HistoryError::OperationalState(
-                "cannot compare structural counts for different history build profiles".to_owned(),
+                "cannot diff readers from different history stores".to_owned(),
             ));
         }
-        let mut sink = StructuralChangeSink::default();
-        self.diff_records(
-            new,
-            &[RecordKind::Node, RecordKind::Edge, RecordKind::Hyperedge],
-            &mut sink,
-        )?;
-        sink.finish()
+        if self.published.version.build_profile != new.published.version.build_profile {
+            return Err(HistoryError::OperationalState(
+                "cannot compare structural graphs for different history build profiles".to_owned(),
+            ));
+        }
+        let mut projection = StructuralChangeSink::new(sink);
+        for (record, old, new) in [
+            (
+                RecordKind::Node,
+                &self.published.version.nodes_root,
+                &new.published.version.nodes_root,
+            ),
+            (
+                RecordKind::Edge,
+                &self.published.version.edges_root,
+                &new.published.version.edges_root,
+            ),
+            (
+                RecordKind::Hyperedge,
+                &self.published.version.hyperedges_root,
+                &new.published.version.hyperedges_root,
+            ),
+        ] {
+            self.diff_structural_root(record, old, new, &mut projection)?;
+        }
+        projection.finish()
+    }
+
+    fn diff_structural_root(
+        &self,
+        record: RecordKind,
+        old: &StoredTree,
+        new: &StoredTree,
+        sink: &mut StructuralChangeSink<'_>,
+    ) -> Result<(), HistoryError> {
+        if old == new {
+            return Ok(());
+        }
+        for difference in self.prolly.stream_diff(&self.tree(old), &self.tree(new))? {
+            let difference = difference?;
+            let (change, raw_key, old, new, identity) = match difference {
+                Diff::Added { key, val } => {
+                    let value = decode_stored_value(&val)?;
+                    let identity = edge_identity(record, &key, &value.schema)?;
+                    (ChangeKind::Added, key, None, Some(value.payload), identity)
+                }
+                Diff::Removed { key, val } => {
+                    let value = decode_stored_value(&val)?;
+                    let identity = edge_identity(record, &key, &value.schema)?;
+                    (
+                        ChangeKind::Removed,
+                        key,
+                        Some(value.payload),
+                        None,
+                        identity,
+                    )
+                }
+                Diff::Changed { key, old, new } => (
+                    ChangeKind::Changed,
+                    key,
+                    Some(decode_value(&old)?),
+                    Some(decode_value(&new)?),
+                    EdgeIdentity::Derived,
+                ),
+            };
+            sink.change(
+                GraphChange {
+                    record,
+                    change,
+                    key: display_key(record, &raw_key)?,
+                    old,
+                    new,
+                },
+                identity,
+            )?;
+        }
+        Ok(())
     }
 
     fn diff_root(
@@ -206,29 +292,45 @@ impl RealizationReader<'_> {
 
 type EdgeTopology = (String, String, String);
 
-#[derive(Default)]
-struct EdgeIdentityChanges {
-    added: BTreeMap<Vec<u8>, u64>,
-    removed: BTreeMap<Vec<u8>, u64>,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EdgeIdentity {
+    Derived,
+    ExplicitCompatibility,
 }
 
 #[derive(Default)]
-struct StructuralChangeSink {
-    counts: StructuralChangeCounts,
+struct EdgeIdentityChanges {
+    added: BTreeMap<Vec<u8>, Vec<GraphChange>>,
+    removed: BTreeMap<Vec<u8>, Vec<GraphChange>>,
+}
+
+struct ProjectedIdentityChange {
+    projection: Vec<u8>,
+    change: GraphChange,
+}
+
+struct StructuralChangeSink<'a> {
+    sink: &'a mut dyn ChangeSink,
     // Prolly edge keys are ordered by topology then occurrence, so only one topology group needs
     // to be retained while the exact diff streams.
     edge_identity_changes: Option<(EdgeTopology, EdgeIdentityChanges)>,
 }
 
-impl StructuralChangeSink {
-    fn finish(mut self) -> Result<StructuralChangeCounts, HistoryError> {
-        self.flush_edge_identity_changes();
-        Ok(self.counts)
+impl<'a> StructuralChangeSink<'a> {
+    fn new(sink: &'a mut dyn ChangeSink) -> Self {
+        Self {
+            sink,
+            edge_identity_changes: None,
+        }
     }
 
-    fn flush_edge_identity_changes(&mut self) {
+    fn finish(mut self) -> Result<(), HistoryError> {
+        self.flush_edge_identity_changes()
+    }
+
+    fn flush_edge_identity_changes(&mut self) -> Result<(), HistoryError> {
         let Some((_, changes)) = self.edge_identity_changes.take() else {
-            return;
+            return Ok(());
         };
         let projections = changes
             .added
@@ -236,36 +338,59 @@ impl StructuralChangeSink {
             .chain(changes.removed.keys())
             .cloned()
             .collect::<BTreeSet<_>>();
-        let added = changes.added.values().copied().sum::<u64>();
-        let removed = changes.removed.values().copied().sum::<u64>();
-        let unchanged = projections
+        let mut added = changes.added;
+        let mut removed = changes.removed;
+        let mut unmatched_added = Vec::new();
+        let mut unmatched_removed = Vec::new();
+        for projection in projections {
+            let mut added_records = added.remove(&projection).unwrap_or_default();
+            let mut removed_records = removed.remove(&projection).unwrap_or_default();
+            sort_identity_changes(&mut added_records);
+            sort_identity_changes(&mut removed_records);
+            let unchanged = added_records.len().min(removed_records.len());
+            unmatched_added.extend(added_records.into_iter().skip(unchanged).map(|change| {
+                ProjectedIdentityChange {
+                    projection: projection.clone(),
+                    change,
+                }
+            }));
+            unmatched_removed.extend(removed_records.into_iter().skip(unchanged).map(|change| {
+                ProjectedIdentityChange {
+                    projection: projection.clone(),
+                    change,
+                }
+            }));
+        }
+        sort_projected_identity_changes(&mut unmatched_added);
+        sort_projected_identity_changes(&mut unmatched_removed);
+        let changed = unmatched_added.len().min(unmatched_removed.len());
+        for (added, removed) in unmatched_added
             .iter()
-            .map(|projection| {
-                changes
-                    .added
-                    .get(projection)
-                    .copied()
-                    .unwrap_or_default()
-                    .min(changes.removed.get(projection).copied().unwrap_or_default())
-            })
-            .sum::<u64>();
-        let unmatched_added = added.saturating_sub(unchanged);
-        let unmatched_removed = removed.saturating_sub(unchanged);
-        let changed = unmatched_added.min(unmatched_removed);
-        self.counts.edges.changed = self.counts.edges.changed.saturating_add(changed);
-        self.counts.edges.added = self
-            .counts
-            .edges
-            .added
-            .saturating_add(unmatched_added.saturating_sub(changed));
-        self.counts.edges.removed = self
-            .counts
-            .edges
-            .removed
-            .saturating_add(unmatched_removed.saturating_sub(changed));
+            .take(changed)
+            .zip(unmatched_removed.iter().take(changed))
+        {
+            self.sink.change(GraphChange {
+                record: RecordKind::Edge,
+                change: ChangeKind::Changed,
+                key: added.change.key.clone(),
+                old: removed.change.old.clone(),
+                new: added.change.new.clone(),
+            })?;
+        }
+        for change in unmatched_added.into_iter().skip(changed) {
+            self.sink.change(change.change)?;
+        }
+        for change in unmatched_removed.into_iter().skip(changed) {
+            self.sink.change(change.change)?;
+        }
+        Ok(())
     }
 
-    fn edge_identity_change(&mut self, change: &GraphChange) -> Result<(), HistoryError> {
+    fn edge_identity_change(
+        &mut self,
+        change: &GraphChange,
+        identity: EdgeIdentity,
+    ) -> Result<(), HistoryError> {
         let [source, target, relation, ..] = change.key.as_slice() else {
             return Err(HistoryError::InvalidKey(
                 "edge change has no source, target, and relation".to_owned(),
@@ -279,6 +404,9 @@ impl StructuralChangeSink {
         .ok_or_else(|| {
             HistoryError::InvalidArtifacts("edge identity change has no record value".to_owned())
         })?;
+        if identity == EdgeIdentity::ExplicitCompatibility {
+            return self.sink.change(change.clone());
+        }
         let projection = structural_projection(RecordKind::Edge, value)?;
         let topology = (source.clone(), target.clone(), relation.clone());
         if self
@@ -286,7 +414,7 @@ impl StructuralChangeSink {
             .as_ref()
             .is_some_and(|(current, _)| current != &topology)
         {
-            self.flush_edge_identity_changes();
+            self.flush_edge_identity_changes()?;
         }
         let (_, changes) = self
             .edge_identity_changes
@@ -296,45 +424,79 @@ impl StructuralChangeSink {
         } else {
             &mut changes.removed
         };
-        let count = counts.entry(projection).or_default();
-        *count = count.saturating_add(1);
+        counts.entry(projection).or_default().push(change.clone());
+        Ok(())
+    }
+
+    fn change(&mut self, change: GraphChange, identity: EdgeIdentity) -> Result<(), HistoryError> {
+        match (change.record, change.change) {
+            (RecordKind::Node | RecordKind::Hyperedge, ChangeKind::Added | ChangeKind::Removed) => {
+                self.sink.change(change)?;
+            }
+            (RecordKind::Edge, ChangeKind::Added | ChangeKind::Removed) => {
+                self.edge_identity_change(&change, identity)?;
+            }
+            (RecordKind::Node | RecordKind::Edge | RecordKind::Hyperedge, ChangeKind::Changed)
+                if meaningful_record_changed(&change)? =>
+            {
+                self.sink.change(change)?;
+            }
+            _ => {}
+        }
         Ok(())
     }
 }
 
-impl ChangeSink for StructuralChangeSink {
+fn sort_identity_changes(changes: &mut [GraphChange]) {
+    changes.sort_by(|left, right| left.key.cmp(&right.key));
+}
+
+fn sort_projected_identity_changes(changes: &mut [ProjectedIdentityChange]) {
+    changes.sort_by(|left, right| {
+        left.projection
+            .cmp(&right.projection)
+            .then_with(|| left.change.key.cmp(&right.change.key))
+    });
+}
+
+fn edge_identity(
+    record: RecordKind,
+    raw_key: &[u8],
+    schema: &str,
+) -> Result<EdgeIdentity, HistoryError> {
+    if record != RecordKind::Edge || schema != "compass.edge" {
+        return Ok(EdgeIdentity::Derived);
+    }
+    let segments =
+        decode_segments(raw_key).map_err(|error| HistoryError::InvalidKey(error.to_string()))?;
+    Ok(
+        if segments.get(5).and_then(|segment| segment.first()) == Some(&1) {
+            EdgeIdentity::ExplicitCompatibility
+        } else {
+            EdgeIdentity::Derived
+        },
+    )
+}
+
+#[derive(Default)]
+struct StructuralCountSink {
+    counts: StructuralChangeCounts,
+}
+
+impl ChangeSink for StructuralCountSink {
     fn change(&mut self, change: GraphChange) -> Result<(), HistoryError> {
-        match (change.record, change.change) {
-            (RecordKind::Node, ChangeKind::Added) => {
-                self.counts.nodes.added = self.counts.nodes.added.saturating_add(1);
-            }
-            (RecordKind::Node, ChangeKind::Removed) => {
-                self.counts.nodes.removed = self.counts.nodes.removed.saturating_add(1);
-            }
-            (RecordKind::Node, ChangeKind::Changed) => {
-                if meaningful_record_changed(&change)? {
-                    self.counts.nodes.changed = self.counts.nodes.changed.saturating_add(1);
-                }
-            }
-            (RecordKind::Edge, ChangeKind::Added | ChangeKind::Removed) => {
-                self.edge_identity_change(&change)?;
-            }
-            (RecordKind::Edge, ChangeKind::Changed) => {
-                if meaningful_record_changed(&change)? {
-                    self.counts.edges.changed = self.counts.edges.changed.saturating_add(1);
-                }
-            }
-            (RecordKind::Hyperedge, ChangeKind::Added) => {
-                self.counts.hyperedges.added = self.counts.hyperedges.added.saturating_add(1);
-            }
-            (RecordKind::Hyperedge, ChangeKind::Removed) => {
-                self.counts.hyperedges.removed = self.counts.hyperedges.removed.saturating_add(1);
-            }
-            (RecordKind::Hyperedge, ChangeKind::Changed) => {
-                self.counts.hyperedges.changed = self.counts.hyperedges.changed.saturating_add(1);
-            }
-            _ => {}
-        }
+        let counts = match change.record {
+            RecordKind::Node => &mut self.counts.nodes,
+            RecordKind::Edge => &mut self.counts.edges,
+            RecordKind::Hyperedge => &mut self.counts.hyperedges,
+            _ => return Ok(()),
+        };
+        let count = match change.change {
+            ChangeKind::Added => &mut counts.added,
+            ChangeKind::Removed => &mut counts.removed,
+            ChangeKind::Changed => &mut counts.changed,
+        };
+        *count = count.saturating_add(1);
         Ok(())
     }
 }
@@ -421,9 +583,21 @@ fn ignored_structural_field(record: RecordKind, field: &str, root: bool) -> bool
         || (root && record == RecordKind::Edge && matches!(field, "id" | "key"))
 }
 
-fn decode_value(bytes: &[u8]) -> Result<Value, HistoryError> {
+struct StoredValue {
+    schema: String,
+    payload: Value,
+}
+
+fn decode_stored_value(bytes: &[u8]) -> Result<StoredValue, HistoryError> {
     let envelope = VersionedValue::from_bytes(bytes)?;
-    serde_json::from_slice(&envelope.payload).map_err(HistoryError::from)
+    Ok(StoredValue {
+        schema: envelope.schema,
+        payload: serde_json::from_slice(&envelope.payload)?,
+    })
+}
+
+fn decode_value(bytes: &[u8]) -> Result<Value, HistoryError> {
+    Ok(decode_stored_value(bytes)?.payload)
 }
 
 fn display_key(record: RecordKind, key: &[u8]) -> Result<Vec<String>, HistoryError> {
@@ -508,5 +682,19 @@ mod tests {
             .push_str("node-id")
             .finish();
         assert!(display_key(RecordKind::Node, &edge).is_err());
+    }
+
+    #[test]
+    fn edge_identity_uses_the_value_schema_not_discriminator_shape() -> Result<(), HistoryError> {
+        let key = edge_key("source", "target", "calls", true, Some(&[1, b'k']));
+        assert_eq!(
+            edge_identity(RecordKind::Edge, &key, "compass.edge")?,
+            EdgeIdentity::ExplicitCompatibility
+        );
+        assert_eq!(
+            edge_identity(RecordKind::Edge, &key, "compass.graph.edge.v1")?,
+            EdgeIdentity::Derived
+        );
+        Ok(())
     }
 }

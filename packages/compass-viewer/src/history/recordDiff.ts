@@ -22,6 +22,7 @@ const STRUCTURAL_DERIVED_FIELDS = new Set([
   "norm_label",
   "relationshipSite",
   "relationship_site",
+  "size",
   "sourceDigest",
   "sourceFile",
   "sourceHash",
