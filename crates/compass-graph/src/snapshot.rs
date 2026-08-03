@@ -408,17 +408,12 @@ struct MetadataRecord {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct DiagnosticRecord {
-    owner: String,
-    diagnostic: GraphDiagnostic,
+struct TermPostingChunk {
+    term: String,
+    node_ids: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TermPosting {
-    term: String,
-    node_id: String,
-}
+const TERM_POSTING_CHUNK_ITEMS: usize = 128;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -833,6 +828,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 b"diagnostic" => graph
                     .diagnostics
                     .push(decode_json::<GraphDiagnostic>(&entry.value)?),
+                b"diagnostic-code" => {}
                 _ => {
                     return Err(SnapshotError::Corrupt(
                         "metadata index contains an unknown supplement".to_owned(),
@@ -877,6 +873,20 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             .map(|value| decode_json::<GraphDiagnostic>(&value))
             .collect::<Result<Vec<_>, _>>()?;
         Ok((diagnostics, truncated))
+    }
+
+    /// Read the first graph diagnostic for a stable code through a point
+    /// projection. This avoids scanning large omission sets when a query only
+    /// needs the publication summary.
+    pub fn graph_diagnostic_by_code(
+        &self,
+        code: &str,
+    ) -> Result<Option<GraphDiagnostic>, SnapshotError> {
+        let key =
+            encode_graph_index_key(IndexKind::Metadata, &[b"diagnostic-code", code.as_bytes()])?;
+        self.lookup(IndexKind::Metadata, &key)?
+            .map(|value| decode_json::<GraphDiagnostic>(&value))
+            .transpose()
     }
 
     pub fn get_node(&self, id: &str) -> Result<Option<NodeRecord>, SnapshotError> {
@@ -930,12 +940,18 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
     ) -> Result<(Vec<NodeRecord>, bool), SnapshotError> {
         let normalized = normalize_symbol(normalized_name);
         let prefix = encode_name_prefix(&normalized)?;
-        let (values, truncated) =
-            self.scan_values_bounded(IndexKind::Names, Some(&prefix), limits)?;
-        let mut nodes = Vec::with_capacity(values.len());
-        for value in values {
-            let node_id = decode_json::<String>(&value)?;
-            let node = self.get_node(&node_id)?.ok_or_else(|| {
+        let (entries, truncated) =
+            self.scan_entries_bounded(IndexKind::Names, Some(&prefix), limits)?;
+        let mut nodes = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let segments = decode_key_segments(&entry.key).map_err(SnapshotError::from)?;
+            let node_id = segments
+                .last()
+                .and_then(|segment| std::str::from_utf8(segment).ok())
+                .ok_or_else(|| {
+                    SnapshotError::Corrupt("name index node ID is invalid".to_owned())
+                })?;
+            let node = self.get_node(node_id)?.ok_or_else(|| {
                 SnapshotError::Corrupt(format!("name index references missing node {node_id}"))
             })?;
             nodes.push(node);
@@ -963,20 +979,23 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 IndexKind::Terms,
                 &[posting_prefix.as_bytes(), b"node_prefix"],
             )?;
-            let (values, posting_truncated) =
+            let (values, mut posting_truncated) =
                 self.scan_values_bounded(IndexKind::Terms, Some(&prefix), limits)?;
-            truncated |= posting_truncated;
-            let ids = values
-                .into_iter()
-                .map(|value| decode_json::<TermPosting>(&value))
-                .filter_map(|posting| match posting {
-                    Ok(posting) if posting.term.starts_with(&normalized) => {
-                        Some(Ok(posting.node_id))
+            let mut ids = BTreeSet::new();
+            'postings: for value in values {
+                let posting = decode_json::<TermPostingChunk>(&value)?;
+                if !posting.term.starts_with(&normalized) {
+                    continue;
+                }
+                for node_id in posting.node_ids {
+                    if ids.len() == limits.max_items && !ids.contains(&node_id) {
+                        posting_truncated = true;
+                        break 'postings;
                     }
-                    Ok(_) => None,
-                    Err(error) => Some(Err(error)),
-                })
-                .collect::<Result<BTreeSet<_>, _>>()?;
+                    ids.insert(node_id);
+                }
+            }
+            truncated |= posting_truncated;
             intersection = Some(match intersection {
                 Some(previous) => previous.intersection(&ids).cloned().collect(),
                 None => ids,
@@ -996,7 +1015,12 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
 
     pub fn file_by_path(&self, path: &str) -> Result<Option<FileRecord>, SnapshotError> {
         let key = encode_file_path_key(path)?;
-        self.lookup(IndexKind::Files, &key)?
+        let Some(value) = self.lookup(IndexKind::Files, &key)? else {
+            return Ok(None);
+        };
+        let file_id = decode_json::<String>(&value)?;
+        let id_key = encode_graph_index_key(IndexKind::Metadata, &[b"file", file_id.as_bytes()])?;
+        self.lookup(IndexKind::Metadata, &id_key)?
             .map(|value| decode_json::<FileRecord>(&value))
             .transpose()
     }
@@ -1019,11 +1043,11 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         for kind in kinds {
             let prefix =
                 encode_graph_index_key(index, &[node_id.as_bytes(), kind.as_str().as_bytes()])?;
-            let (values, bucket_truncated) =
-                self.scan_values_bounded(index, Some(&prefix), limits)?;
+            let (entries, bucket_truncated) =
+                self.scan_entries_bounded(index, Some(&prefix), limits)?;
             truncated |= bucket_truncated;
-            for value in values {
-                let edge_id = decode_json::<String>(&value)?;
+            for entry in entries {
+                let edge_id = index_entry_id(&entry, "directional adjacency")?;
                 let edge = self.get_edge(&edge_id)?.ok_or_else(|| {
                     SnapshotError::Corrupt(format!(
                         "{index:?} index references missing edge {edge_id}"
@@ -1043,12 +1067,12 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         let incoming_prefix = encode_graph_index_key(IndexKind::Incoming, &[node_id.as_bytes()])?;
         let outgoing_prefix = encode_graph_index_key(IndexKind::Outgoing, &[node_id.as_bytes()])?;
         let (incoming, incoming_truncated) =
-            self.scan_values_bounded(IndexKind::Incoming, Some(&incoming_prefix), limits)?;
+            self.scan_entries_bounded(IndexKind::Incoming, Some(&incoming_prefix), limits)?;
         let (outgoing, outgoing_truncated) =
-            self.scan_values_bounded(IndexKind::Outgoing, Some(&outgoing_prefix), limits)?;
+            self.scan_entries_bounded(IndexKind::Outgoing, Some(&outgoing_prefix), limits)?;
         let mut edges = BTreeMap::new();
-        for value in incoming.into_iter().chain(outgoing) {
-            let edge_id = decode_json::<String>(&value)?;
+        for entry in incoming.into_iter().chain(outgoing) {
+            let edge_id = index_entry_id(&entry, "incident adjacency")?;
             let edge = self.get_edge(&edge_id)?.ok_or_else(|| {
                 SnapshotError::Corrupt(format!("incident index references missing edge {edge_id}"))
             })?;
@@ -1106,10 +1130,10 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         limits: SnapshotReadLimits,
     ) -> Result<Vec<EdgeRecord>, SnapshotError> {
         let prefix = encode_graph_index_key(index, &[node_id.as_bytes()])?;
-        let values = self.scan_values(index, Some(&prefix), limits)?;
-        let mut edges = Vec::with_capacity(values.len());
-        for value in values {
-            let edge_id = decode_json::<String>(&value)?;
+        let entries = self.scan_entries(index, Some(&prefix), limits)?;
+        let mut edges = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let edge_id = index_entry_id(&entry, "adjacency")?;
             let edge = self.get_edge(&edge_id)?.ok_or_else(|| {
                 SnapshotError::Corrupt(format!("{index:?} index references missing edge {edge_id}"))
             })?;
@@ -1180,6 +1204,26 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         ))
     }
 
+    fn scan_entries_bounded(
+        &self,
+        index: IndexKind,
+        prefix: Option<&[u8]>,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<TreeEntry>, bool), SnapshotError> {
+        let limits = limits.validate()?;
+        let root = self.root(index)?.digest.clone();
+        let mut state = ScanState {
+            limits,
+            objects: 0,
+            bytes: 0,
+            entries: Vec::new(),
+            truncate_on_limit: true,
+            truncated: false,
+        };
+        scan_tree(self.store, index, &root, prefix, &mut state, 0)?;
+        Ok((state.entries, state.truncated))
+    }
+
     fn scan_entries(
         &self,
         index: IndexKind,
@@ -1199,6 +1243,15 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         scan_tree(self.store, index, &root, prefix, &mut state, 0)?;
         Ok(state.entries)
     }
+}
+
+fn index_entry_id(entry: &TreeEntry, label: &str) -> Result<String, SnapshotError> {
+    let segments = decode_key_segments(&entry.key).map_err(SnapshotError::from)?;
+    let id = segments
+        .last()
+        .and_then(|segment| std::str::from_utf8(segment).ok())
+        .ok_or_else(|| SnapshotError::Corrupt(format!("{label} ID is invalid")))?;
+    Ok(id.to_owned())
 }
 
 /// Encode an index key using the portable, length-prefixed store encoding.
@@ -1294,6 +1347,18 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
             )?,
             diagnostic,
         )?;
+        if diagnostic.code == "publication_omission_summary" {
+            let key = encode_graph_index_key(
+                IndexKind::Metadata,
+                &[b"diagnostic-code", diagnostic.code.as_bytes()],
+            )?;
+            let value = encode_json(diagnostic)?;
+            indexes
+                .get_mut(&IndexKind::Metadata)
+                .ok_or_else(|| SnapshotError::Corrupt("metadata index is missing".to_owned()))?
+                .entry(key)
+                .or_insert(value);
+        }
     }
 
     let node_by_id = graph
@@ -1313,6 +1378,7 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
         }
     }
 
+    let mut term_postings = BTreeMap::<String, Vec<String>>::new();
     for node in &graph.nodes {
         insert_json(
             &mut indexes,
@@ -1324,20 +1390,14 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
             &mut indexes,
             IndexKind::Names,
             encode_name_index_key(&node.name, &node.id)?,
-            &node.id,
+            &(),
         )?;
-        if let Some(anchor) = &node.source {
-            insert_anchor_entry(&mut indexes, "node", &node.id, anchor)?;
-        }
-        for anchor in node.evidence.iter().flat_map(|item| item.anchors.iter()) {
-            insert_anchor_entry(&mut indexes, "node", &node.id, anchor)?;
-        }
         if node.qualified_name != node.name {
             insert_json(
                 &mut indexes,
                 IndexKind::Names,
                 encode_name_index_key(&node.qualified_name, &node.id)?,
-                &node.id,
+                &(),
             )?;
         }
         let mut terms = BTreeSet::new();
@@ -1376,34 +1436,7 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
             terms.extend(search_terms(alias));
         }
         for term in terms {
-            insert_json(
-                &mut indexes,
-                IndexKind::Terms,
-                encode_graph_index_key(
-                    IndexKind::Terms,
-                    &[term.as_bytes(), b"node", node.id.as_bytes()],
-                )?,
-                &node.id,
-            )?;
-            let prefix_length = term.len().min(3);
-            let prefix = term.get(..prefix_length).unwrap_or(term.as_str());
-            insert_json(
-                &mut indexes,
-                IndexKind::Terms,
-                encode_graph_index_key(
-                    IndexKind::Terms,
-                    &[
-                        prefix.as_bytes(),
-                        b"node_prefix",
-                        term.as_bytes(),
-                        node.id.as_bytes(),
-                    ],
-                )?,
-                &TermPosting {
-                    term: term.clone(),
-                    node_id: node.id.clone(),
-                },
-            )?;
+            term_postings.entry(term).or_default().push(node.id.clone());
         }
         if let Some(community) = &node.community {
             let community_id = community.id.to_string();
@@ -1417,21 +1450,39 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
                 &node.id,
             )?;
         }
-        insert_diagnostics(&mut indexes, &node.id, &node.diagnostics)?;
     }
-    insert_diagnostics(&mut indexes, "graph", &graph.graph.diagnostics)?;
+    for (term, mut node_ids) in term_postings {
+        node_ids.sort();
+        node_ids.dedup();
+        let prefix_length = term.len().min(3);
+        let prefix = term.get(..prefix_length).unwrap_or(term.as_str());
+        for (chunk_index, chunk) in node_ids.chunks(TERM_POSTING_CHUNK_ITEMS).enumerate() {
+            let chunk_index = format!("{chunk_index:08}");
+            insert_json(
+                &mut indexes,
+                IndexKind::Terms,
+                encode_graph_index_key(
+                    IndexKind::Terms,
+                    &[
+                        prefix.as_bytes(),
+                        b"node_prefix",
+                        term.as_bytes(),
+                        chunk_index.as_bytes(),
+                    ],
+                )?,
+                &TermPostingChunk {
+                    term: term.clone(),
+                    node_ids: chunk.to_vec(),
+                },
+            )?;
+        }
+    }
     for file in &graph.graph.files {
         insert_json(
             &mut indexes,
             IndexKind::Files,
-            encode_graph_index_key(IndexKind::Files, &[b"id", file.id.as_bytes()])?,
-            file,
-        )?;
-        insert_json(
-            &mut indexes,
-            IndexKind::Files,
             encode_file_path_key(&file.path)?,
-            file,
+            &file.id,
         )?;
     }
     for edge in &graph.links {
@@ -1454,7 +1505,7 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
                     edge.id.as_bytes(),
                 ],
             )?,
-            &edge.id,
+            &(),
         )?;
         insert_json(
             &mut indexes,
@@ -1468,51 +1519,10 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
                     edge.id.as_bytes(),
                 ],
             )?,
-            &edge.id,
+            &(),
         )?;
-        if let Some(anchor) = &edge.relationship_site {
-            insert_anchor_entry(&mut indexes, "edge", &edge.id, anchor)?;
-        }
-        for anchor in edge.evidence.iter().flat_map(|item| item.anchors.iter()) {
-            insert_anchor_entry(&mut indexes, "edge", &edge.id, anchor)?;
-        }
-        let mut terms = BTreeSet::new();
-        if let Some(context) = &edge.context {
-            terms.extend(search_terms(context));
-        }
-        for term in terms {
-            insert_json(
-                &mut indexes,
-                IndexKind::Terms,
-                encode_graph_index_key(IndexKind::Terms, &[term.as_bytes(), edge.id.as_bytes()])?,
-                &edge.id,
-            )?;
-        }
-        insert_diagnostics(&mut indexes, &edge.id, &edge.diagnostics)?;
     }
     Ok(indexes)
-}
-
-fn insert_anchor_entry(
-    indexes: &mut SnapshotIndexes,
-    record_kind: &str,
-    record_id: &str,
-    anchor: &compass_model::provenance::SourceAnchor,
-) -> Result<(), SnapshotError> {
-    let start_byte = anchor.start_byte.to_be_bytes();
-    let end_byte = anchor.end_byte.to_be_bytes();
-    let key = encode_graph_index_key(
-        IndexKind::Files,
-        &[
-            b"anchor",
-            anchor.file.as_bytes(),
-            &start_byte,
-            &end_byte,
-            record_kind.as_bytes(),
-            record_id.as_bytes(),
-        ],
-    )?;
-    insert_json(indexes, IndexKind::Files, key, &record_id.to_owned())
 }
 
 /// Keep normal names ordered and readable while giving graph-valid, deeply
@@ -1570,30 +1580,6 @@ fn normalize_symbol(value: &str) -> String {
         .trim_end_matches("()")
         .trim_start_matches('.')
         .to_lowercase()
-}
-
-fn insert_diagnostics(
-    indexes: &mut SnapshotIndexes,
-    owner: &str,
-    diagnostics: &[GraphDiagnostic],
-) -> Result<(), SnapshotError> {
-    for (ordinal, diagnostic) in diagnostics.iter().enumerate() {
-        let record = DiagnosticRecord {
-            owner: owner.to_owned(),
-            diagnostic: diagnostic.clone(),
-        };
-        let ordinal = ordinal.to_string();
-        let key = encode_graph_index_key(
-            IndexKind::Diagnostics,
-            &[
-                owner.as_bytes(),
-                diagnostic.code.as_bytes(),
-                ordinal.as_bytes(),
-            ],
-        )?;
-        insert_json(indexes, IndexKind::Diagnostics, key, &record)?;
-    }
-    Ok(())
 }
 
 fn insert_json<T: Serialize>(

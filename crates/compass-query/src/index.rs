@@ -5,7 +5,6 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use compass_graph::SnapshotReadLimits;
 use compass_ir::{PROGRAM_SCHEMA, ProgramBundle};
 use compass_model::code_graph::GraphDocument;
 use compass_model::query_contract::CODE_QUERY_SCHEMA_V1;
@@ -154,9 +153,9 @@ fn open_from_local_store(
             error.to_string(),
         )
     })?;
-    let (diagnostics, diagnostics_truncated) = snapshot
+    let publication_summary = snapshot
         .reader()?
-        .graph_diagnostics(SnapshotReadLimits::default())
+        .graph_diagnostic_by_code("publication_omission_summary")
         .map_err(|error| {
             QueryError::new(
                 QueryErrorKind::CorruptArtifact,
@@ -164,22 +163,12 @@ fn open_from_local_store(
                 error.to_string(),
             )
         })?;
-    if diagnostics_truncated {
-        return Err(QueryError::new(
-            QueryErrorKind::MemoryLimit,
-            "store_graph_diagnostics_limit_exceeded",
-            "graph diagnostics exceed the bounded store projection",
-        ));
-    }
-    let partial_graph_message = diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "publication_omission_summary")
-        .map(|diagnostic| {
-            format!(
-                "Published graph coverage is incomplete: {}",
-                diagnostic.message
-            )
-        });
+    let partial_graph_message = publication_summary.map(|diagnostic| {
+        format!(
+            "Published graph coverage is incomplete: {}",
+            diagnostic.message
+        )
+    });
     let (program, _) = load_program(program_path)?;
     let index_path = snapshot.store_path.clone();
     Ok(CodeQueryEngine {
