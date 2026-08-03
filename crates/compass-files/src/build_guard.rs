@@ -9,6 +9,8 @@ use crate::{FileError, io_error, write_text_atomic};
 const GENERATIONS_DIRECTORY: &str = ".compass-generations";
 const ACTIVE_GENERATION: &str = ".compass-active-generation";
 const INCOMPLETE_MARKER: &str = ".compass-build-incomplete";
+const RETAINED_COMPLETE_GENERATIONS: usize = 2;
+const MAX_GENERATION_DIRECTORY_ENTRIES: usize = 1_024;
 static GENERATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Owns an unpublished output generation until every authoritative artifact is sealed.
@@ -23,6 +25,35 @@ pub struct BuildGuard {
 impl BuildGuard {
     pub fn begin(output_directory: &Path) -> Result<Self, FileError> {
         Self::begin_excluding(output_directory, &[])
+    }
+
+    /// Return complete published generations in deterministic newest-first
+    /// order. In-progress directories are deliberately excluded so callers
+    /// can make retention decisions without treating partial artifacts as
+    /// roots.
+    pub fn complete_generation_directories(
+        output_directory: &Path,
+    ) -> Result<Vec<PathBuf>, FileError> {
+        let generations = output_directory.join(GENERATIONS_DIRECTORY);
+        if !generations.is_dir() {
+            return Ok(Vec::new());
+        }
+        let mut complete = fs::read_dir(&generations)
+            .map_err(|source| io_error(&generations, source))?
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry.file_type().is_ok_and(|kind| kind.is_dir())
+                    && !entry.path().join(INCOMPLETE_MARKER).exists()
+            })
+            .map(|entry| entry.path())
+            .take(MAX_GENERATION_DIRECTORY_ENTRIES.saturating_add(1))
+            .collect::<Vec<_>>();
+        if complete.len() > MAX_GENERATION_DIRECTORY_ENTRIES {
+            return Err(FileError::InvalidGenerationArtifact(generations));
+        }
+        complete.sort();
+        complete.reverse();
+        Ok(complete)
     }
 
     /// Start a generation without copying selected top-level artifacts from
@@ -162,9 +193,44 @@ impl BuildGuard {
             .ok_or_else(|| FileError::InvalidGenerationArtifact(self.generation_directory.clone()))?
             .to_string_lossy();
         write_text_atomic(&pointer, &generation)?;
+        prune_complete_generations(
+            &self.output_directory.join(GENERATIONS_DIRECTORY),
+            generation.as_ref(),
+        )?;
         self.committed = true;
         Ok(())
     }
+}
+
+fn prune_complete_generations(generations: &Path, active: &str) -> Result<(), FileError> {
+    let mut complete = fs::read_dir(generations)
+        .map_err(|source| io_error(generations, source))?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_type().is_ok_and(|kind| kind.is_dir())
+                && !entry.path().join(INCOMPLETE_MARKER).exists()
+        })
+        .take(MAX_GENERATION_DIRECTORY_ENTRIES.saturating_add(1))
+        .collect::<Vec<_>>();
+    if complete.len() > MAX_GENERATION_DIRECTORY_ENTRIES {
+        return Err(FileError::InvalidGenerationArtifact(
+            generations.to_path_buf(),
+        ));
+    }
+    complete.sort_by_key(|entry| entry.file_name());
+    complete.reverse();
+    let retained = complete
+        .iter()
+        .take(RETAINED_COMPLETE_GENERATIONS)
+        .map(|entry| entry.file_name())
+        .chain(std::iter::once(std::ffi::OsString::from(active)))
+        .collect::<std::collections::BTreeSet<_>>();
+    for entry in complete {
+        if !retained.contains(&entry.file_name()) {
+            fs::remove_dir_all(entry.path()).map_err(|source| io_error(entry.path(), source))?;
+        }
+    }
+    sync_directory(generations)
 }
 
 impl Drop for BuildGuard {

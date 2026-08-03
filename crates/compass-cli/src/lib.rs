@@ -2149,6 +2149,20 @@ fn format_build_timings(elapsed: Duration, timings: &BuildTimings) -> String {
             format!("[compass timing] {stage}: {:.1}s", duration.as_secs_f64())
         })
         .collect::<Vec<_>>();
+    if timings.store_new_objects > 0
+        || timings.store_reused_objects > 0
+        || timings.store_write_transactions > 0
+        || timings.store_gc_deleted_entries > 0
+    {
+        lines.push(format!(
+            "[compass timing] store: new_objects={} reused_objects={} write_transactions={} bytes_written={} gc_deleted_entries={}",
+            timings.store_new_objects,
+            timings.store_reused_objects,
+            timings.store_write_transactions,
+            timings.store_bytes_written,
+            timings.store_gc_deleted_entries,
+        ));
+    }
     lines.push(format!(
         "[compass timing] total: {:.1}s",
         elapsed.as_secs_f64()

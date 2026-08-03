@@ -11,10 +11,12 @@ use compass_files::{
 };
 use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
-    GraphSnapshotBuilder, InventoryEvidence, PublicationOmissions, PublicationOutcome,
-    build_owned_with_tiebreaker as build_document, canonical_edge_kind, canonical_raw_edge_sites,
-    cluster, dedupe_nodes, extraction_from_v1, graph_insights, label_communities_by_hub,
-    normalize_document_v1_with_evidence_best_effort_owned,
+    GRAPH_SNAPSHOT_MAX_OBJECTS, GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder,
+    GraphSnapshotGcStats, InventoryEvidence, PublicationOmissions, PublicationOutcome,
+    SnapshotSelector, build_owned_with_tiebreaker as build_document, canonical_edge_kind,
+    canonical_raw_edge_sites, cluster, dedupe_nodes, extraction_from_v1,
+    garbage_collect_graph_snapshots, graph_insights, graph_snapshot_needs_gc,
+    label_communities_by_hub, normalize_document_v1_with_evidence_best_effort_owned,
     normalize_document_v1_with_inventory_best_effort,
     normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
     score_communities,
@@ -275,6 +277,19 @@ pub struct BuildTimings {
     pub graph_assembly: Duration,
     pub program_analysis: Duration,
     pub publish: Duration,
+    pub store_new_objects: u64,
+    pub store_reused_objects: u64,
+    pub store_write_transactions: u64,
+    pub store_bytes_written: u64,
+    pub store_gc_deleted_entries: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct StorePublishMetrics {
+    new_objects: u64,
+    reused_objects: u64,
+    write_transactions: u64,
+    bytes_written: u64,
 }
 
 /// Validated semantic output to merge into one atomic graph build.
@@ -612,8 +627,13 @@ fn build_graph_inner(
             }
             remove_if_exists(&output_dir.join("needs_update"))?;
             let store_ready = storage_artifacts_complete(options.graph_storage, &output_dir);
-            let published_output_dir =
-                commit_generation(guard, &output_container, options.graph_storage, store_ready)?;
+            let published_output_dir = commit_generation(
+                guard,
+                &output_container,
+                options.graph_storage,
+                store_ready,
+                &mut timings,
+            )?;
             return Ok((
                 BuildResult {
                     root,
@@ -686,9 +706,15 @@ fn build_graph_inner(
             stats.communities,
             stats.omissions(),
             unchanged_program.as_ref(),
+            &mut timings,
         )?;
-        let published_output_dir =
-            commit_generation(guard, &output_container, options.graph_storage, true)?;
+        let published_output_dir = commit_generation(
+            guard,
+            &output_container,
+            options.graph_storage,
+            true,
+            &mut timings,
+        )?;
         return Ok((
             BuildResult {
                 root,
@@ -1213,9 +1239,15 @@ fn build_graph_inner(
             0,
             omissions,
             program.as_ref(),
+            &mut timings,
         )?;
-        let published_output_dir =
-            commit_generation(guard, &output_container, options.graph_storage, true)?;
+        let published_output_dir = commit_generation(
+            guard,
+            &output_container,
+            options.graph_storage,
+            true,
+            &mut timings,
+        )?;
         return Ok((
             BuildResult {
                 root,
@@ -1322,9 +1354,15 @@ fn build_graph_inner(
             0,
             omissions,
             program.as_ref(),
+            &mut timings,
         )?;
-        let published_output_dir =
-            commit_generation(guard, &output_container, options.graph_storage, true)?;
+        let published_output_dir = commit_generation(
+            guard,
+            &output_container,
+            options.graph_storage,
+            true,
+            &mut timings,
+        )?;
         timings.publish = stage_started.elapsed();
         return Ok((
             BuildResult {
@@ -1436,9 +1474,15 @@ fn build_graph_inner(
                 communities,
                 PublicationOmissions::default(),
                 program.as_ref(),
+                &mut timings,
             )?;
-            let published_output_dir =
-                commit_generation(guard, &output_container, options.graph_storage, true)?;
+            let published_output_dir = commit_generation(
+                guard,
+                &output_container,
+                options.graph_storage,
+                true,
+                &mut timings,
+            )?;
             return Ok((
                 BuildResult {
                     root,
@@ -1730,7 +1774,6 @@ fn build_graph_inner(
     );
     manifest_result?;
     seals_result?;
-    timings.publish = publish_started.elapsed();
     if program.is_none() {
         program = join_program_worker(program_handle.take(), &mut timings)?;
     }
@@ -1744,10 +1787,17 @@ fn build_graph_inner(
         communities.len(),
         omissions,
         program.as_ref(),
+        &mut timings,
     )?;
     profile_internal("Program output and build seals", &mut internal_started);
-    let published_output_dir =
-        commit_generation(guard, &output_container, options.graph_storage, true)?;
+    let published_output_dir = commit_generation(
+        guard,
+        &output_container,
+        options.graph_storage,
+        true,
+        &mut timings,
+    )?;
+    timings.publish = publish_started.elapsed();
     let result = BuildResult {
         root,
         output_dir: published_output_dir,
@@ -1913,10 +1963,12 @@ fn publish_build_state(
     communities: usize,
     omissions: PublicationOmissions,
     program: Option<&ProgramBuildSummary>,
+    timings: &mut BuildTimings,
 ) -> Result<(), CoreError> {
     let publish_store = options.graph_storage.publishes_store();
     if publish_store {
-        ensure_store_snapshot(output_dir)?;
+        let metrics = ensure_store_snapshot(output_dir)?;
+        record_store_metrics(timings, metrics);
     }
     let mut required = vec![output_dir.join(OUTPUT_STATS_FILE)];
     if publish_store {
@@ -1972,6 +2024,7 @@ fn commit_generation(
     output_container: &Path,
     graph_storage: GraphStorage,
     store_ready: bool,
+    timings: &mut BuildTimings,
 ) -> Result<PathBuf, CoreError> {
     let publish_store = graph_storage.publishes_store();
     if !publish_store {
@@ -1985,7 +2038,8 @@ fn commit_generation(
         remove_if_exists(&guard.staging_directory().join(STORE_REF_FILE_NAME))?;
     }
     if publish_store && !store_ready {
-        ensure_store_snapshot(guard.staging_directory())?;
+        let metrics = ensure_store_snapshot(guard.staging_directory())?;
+        record_store_metrics(timings, metrics);
     }
     let mut artifacts = vec!["graph.json", "manifest.json", BUILD_STATE_FILE];
     if publish_store {
@@ -1994,14 +2048,104 @@ fn commit_generation(
     if guard.staging_directory().join("program.json").is_file() {
         artifacts.push("program.json");
     }
+    if publish_store {
+        let gc = garbage_collect_shared_store(output_container, guard.staging_directory())?;
+        timings.store_gc_deleted_entries = timings
+            .store_gc_deleted_entries
+            .saturating_add(gc.deleted_entries);
+        timings.store_write_transactions = timings
+            .store_write_transactions
+            .saturating_add(gc.delete_transactions);
+    }
     guard.commit_with_artifacts(&artifacts)?;
     Ok(BuildGuard::resolve_active_directory(output_container)?)
+}
+
+fn garbage_collect_shared_store(
+    output_container: &Path,
+    staging_directory: &Path,
+) -> Result<GraphSnapshotGcStats, CoreError> {
+    let parse_reference = |path: &Path, bytes: &[u8]| -> Result<StoreRef, CoreError> {
+        let reference = serde_json::from_slice::<StoreRef>(bytes).map_err(|error| {
+            CoreError::InvalidBuildState(format!(
+                "invalid retained store reference at {}: {error}",
+                path.display()
+            ))
+        })?;
+        reference.validate()?;
+        Ok(reference)
+    };
+    let staging_reference_path = staging_directory.join(STORE_REF_FILE_NAME);
+    let staging_reference_bytes = fs::read(&staging_reference_path).map_err(|error| {
+        CoreError::InvalidBuildState(format!(
+            "could not read staging store reference at {}: {error}",
+            staging_reference_path.display()
+        ))
+    })?;
+    let mut retained_references = vec![parse_reference(
+        &staging_reference_path,
+        &staging_reference_bytes,
+    )?];
+    if let Ok(active_directory) = BuildGuard::resolve_active_directory(output_container) {
+        let path = active_directory.join(STORE_REF_FILE_NAME);
+        if let Ok(bytes) = fs::read(&path) {
+            retained_references.push(parse_reference(&path, &bytes)?);
+        }
+    }
+    retained_references.sort_by(|left, right| {
+        left.snapshot_id
+            .cmp(&right.snapshot_id)
+            .then_with(|| left.manifest_digest.cmp(&right.manifest_digest))
+    });
+    retained_references.dedup_by(|left, right| {
+        left.snapshot_id == right.snapshot_id && left.manifest_digest == right.manifest_digest
+    });
+
+    let mut all_references = retained_references.clone();
+    for directory in BuildGuard::complete_generation_directories(output_container)? {
+        let path = directory.join(STORE_REF_FILE_NAME);
+        let Ok(bytes) = fs::read(&path) else {
+            continue;
+        };
+        all_references.push(parse_reference(&path, &bytes)?);
+    }
+    all_references.sort_by(|left, right| {
+        left.snapshot_id
+            .cmp(&right.snapshot_id)
+            .then_with(|| left.manifest_digest.cmp(&right.manifest_digest))
+    });
+    all_references.dedup_by(|left, right| {
+        left.snapshot_id == right.snapshot_id && left.manifest_digest == right.manifest_digest
+    });
+    let selectors = retained_references
+        .into_iter()
+        .map(|reference| SnapshotSelector {
+            schema: GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1.to_owned(),
+            snapshot_id: reference.snapshot_id,
+            manifest_digest: reference.manifest_digest,
+        })
+        .collect::<Vec<_>>();
+    let graph_path = staging_directory.join("graph.json");
+    let store = SqliteStore::open(local_sqlite_store_path(&graph_path))?;
+    if all_references.len() <= 2 && !graph_snapshot_needs_gc(&store, 2)? {
+        return Ok(GraphSnapshotGcStats::default());
+    }
+    let stats = garbage_collect_graph_snapshots(
+        &store,
+        &selectors,
+        GRAPH_SNAPSHOT_MAX_OBJECTS.saturating_mul(8),
+    )?;
+    if stats.deleted_entries > 0 {
+        store.reclaim_unused_pages(1_024)?;
+    }
+    store.checkpoint()?;
+    Ok(stats)
 }
 
 /// Ensure every committed generation has a validated, queryable immutable
 /// snapshot in the output root's shared store. The generation publishes only a
 /// digest-bound selector beside the permanent `graph.json` artifact.
-fn ensure_store_snapshot(output_dir: &Path) -> Result<(), CoreError> {
+fn ensure_store_snapshot(output_dir: &Path) -> Result<StorePublishMetrics, CoreError> {
     let graph_path = output_dir.join("graph.json");
     let graph = V1GraphDocument::load(&graph_path)?;
     if graph.graph.schema != GRAPH_SCHEMA_V1 {
@@ -2013,15 +2157,7 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<(), CoreError> {
     let store_path = local_sqlite_store_path(&graph_path);
     let store = SqliteStore::open(&store_path)?;
     let builder = GraphSnapshotBuilder::new();
-    let prepared = builder.prepare(&store, &graph)?;
-    if prepared.manifest.node_count != graph.nodes.len() as u64
-        || prepared.manifest.edge_count != graph.links.len() as u64
-    {
-        return Err(CoreError::InvalidBuildState(
-            "SQLite graph snapshot identity does not match graph.json; rebuild the generation"
-                .to_owned(),
-        ));
-    }
+    let prepared = builder.prepare_owned(&store, graph)?;
     let selector = builder.activate(&store, &prepared)?;
     let reference =
         store.graph_snapshot_reference_for(&selector.snapshot_id, &selector.manifest_digest)?;
@@ -2029,7 +2165,27 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<(), CoreError> {
     write_store_ref(output_dir, &reference)?;
     store.record_retention_metadata(&reference, compass_store::MAX_SCAN_ITEMS)?;
     store.checkpoint()?;
-    Ok(())
+    Ok(StorePublishMetrics {
+        new_objects: prepared.new_objects,
+        reused_objects: prepared.reused_objects,
+        write_transactions: prepared.write_transactions.saturating_add(2),
+        bytes_written: prepared.bytes_written,
+    })
+}
+
+fn record_store_metrics(timings: &mut BuildTimings, metrics: StorePublishMetrics) {
+    timings.store_new_objects = timings
+        .store_new_objects
+        .saturating_add(metrics.new_objects);
+    timings.store_reused_objects = timings
+        .store_reused_objects
+        .saturating_add(metrics.reused_objects);
+    timings.store_write_transactions = timings
+        .store_write_transactions
+        .saturating_add(metrics.write_transactions);
+    timings.store_bytes_written = timings
+        .store_bytes_written
+        .saturating_add(metrics.bytes_written);
 }
 
 fn write_store_ref(output_dir: &Path, reference: &StoreRef) -> Result<(), CoreError> {

@@ -58,7 +58,7 @@ fn sqlite_store_option_publishes_a_durable_snapshot_alongside_json() -> Result<(
     fs::create_dir(root.path().join("src"))?;
     fs::write(root.path().join("src/lib.rs"), "pub fn initial() {}\n")?;
     let init = Command::new(env!("CARGO_BIN_EXE_compass"))
-        .args(["init", ".", "--yes", "--store", "sqlite"])
+        .args(["init", ".", "--yes", "--store", "sqlite", "--timing"])
         .current_dir(root.path())
         .env_remove("COMPASS_OUT")
         .output()?;
@@ -68,6 +68,10 @@ fn sqlite_store_option_publishes_a_durable_snapshot_alongside_json() -> Result<(
         String::from_utf8_lossy(&init.stdout),
         String::from_utf8_lossy(&init.stderr)
     );
+    let timing = String::from_utf8_lossy(&init.stderr);
+    assert!(timing.contains("[compass timing] store: new_objects="));
+    assert!(timing.contains("write_transactions="));
+    assert!(timing.contains("bytes_written="));
 
     let output_root = root.path().join("compass-out");
     let active = BuildGuard::resolve_active_directory(&output_root)?;

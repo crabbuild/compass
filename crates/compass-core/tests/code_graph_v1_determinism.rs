@@ -40,6 +40,9 @@ fn build(root: &Path) -> Result<(Vec<u8>, bool), Box<dyn Error>> {
     options.max_workers = Some(2);
     options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
     let result = build_local_graph(&options)?;
+    assert!(result.timings.store_new_objects > 0);
+    assert!(result.timings.store_write_transactions > 0);
+    assert!(result.timings.store_bytes_written > 0);
     let path = result.output_dir.join("graph.json");
     let bytes = fs::read(&path)?;
     GraphDocument::load(&path)?;

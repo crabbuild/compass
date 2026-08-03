@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
+use compass_graph::{GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS, SnapshotReadLimits};
 use compass_ir::ProgramBundle;
-use compass_model::code_graph::{EdgeKind, EdgeRecord, GraphDocument, NodeRecord};
+use compass_model::code_graph::{EdgeKind, EdgeRecord, FileRecord, GraphDocument, NodeRecord};
 use compass_model::provenance::{EvidenceConfidence, ResolutionState};
 use compass_model::query_contract::{
     CallRequest, CodeQueryOperation, CodeQueryResponse, ExploreRequest, ImpactRequest,
@@ -12,6 +13,7 @@ use compass_model::query_contract::{
 use rusqlite::{Connection, params};
 
 use crate::cql::{QueryError, QueryErrorKind};
+use crate::graph_engine::LocalStoreSnapshot;
 use crate::index::QueryEngineKind;
 use crate::join_program_evidence;
 use crate::source::{VerifiedSource, verified_source};
@@ -75,15 +77,22 @@ const IMPACT_KINDS: &[EdgeKind] = &[
 ];
 
 pub struct CodeQueryEngine {
-    pub(crate) graph: GraphDocument,
+    pub(crate) backend: CodeGraphBackend,
     pub(crate) program: Option<ProgramBundle>,
-    pub(crate) connection: Connection,
+    pub(crate) connection: Option<Connection>,
     pub(crate) graph_path: PathBuf,
     pub(crate) index_path: PathBuf,
-    pub(crate) adjacency: CodeAdjacencyIndex,
-    pub(crate) lookup: CodeLookupIndex,
     pub(crate) partial_graph_message: Option<String>,
     pub(crate) engine_kind: QueryEngineKind,
+}
+
+pub(crate) enum CodeGraphBackend {
+    Materialized {
+        graph: Box<GraphDocument>,
+        adjacency: Box<CodeAdjacencyIndex>,
+        lookup: Box<CodeLookupIndex>,
+    },
+    Store(Box<LocalStoreSnapshot>),
 }
 
 pub(crate) struct CodeLookupIndex {
@@ -278,6 +287,206 @@ impl CodeAdjacencyIndex {
     }
 }
 
+impl CodeGraphBackend {
+    fn node_by_id(&self, id: &str) -> Result<Option<NodeRecord>, QueryError> {
+        match self {
+            Self::Materialized { graph, lookup, .. } => Ok(lookup
+                .node_by_id(id)
+                .map(|index| graph.nodes[index].clone())),
+            Self::Store(snapshot) => snapshot.reader()?.get_node(id).map_err(snapshot_error),
+        }
+    }
+
+    fn edge_by_id(&self, id: &str) -> Result<Option<EdgeRecord>, QueryError> {
+        match self {
+            Self::Materialized {
+                graph, adjacency, ..
+            } => Ok(adjacency.by_id(id).map(|index| graph.links[index].clone())),
+            Self::Store(snapshot) => snapshot.reader()?.get_edge(id).map_err(snapshot_error),
+        }
+    }
+
+    fn nodes_by_normalized_name(
+        &self,
+        name: &str,
+        limit: usize,
+    ) -> Result<(Vec<NodeRecord>, bool), QueryError> {
+        match self {
+            Self::Materialized { graph, lookup, .. } => {
+                let retained = limit.saturating_add(1);
+                let mut nodes = lookup
+                    .nodes_by_normalized_name(name)
+                    .iter()
+                    .take(retained)
+                    .map(|index| graph.nodes[*index].clone())
+                    .collect::<Vec<_>>();
+                let truncated = nodes.len() > limit;
+                if truncated {
+                    nodes.truncate(limit);
+                }
+                Ok((nodes, truncated))
+            }
+            Self::Store(snapshot) => {
+                let (mut nodes, truncated) = snapshot
+                    .reader()?
+                    .nodes_by_normalized_name(name, snapshot_limits(limit.saturating_add(1))?)
+                    .map_err(snapshot_error)?;
+                let truncated = truncated || nodes.len() > limit;
+                if nodes.len() > limit {
+                    nodes.truncate(limit);
+                }
+                Ok((nodes, truncated))
+            }
+        }
+    }
+
+    fn matching_bounded(
+        &self,
+        node: &str,
+        inbound: bool,
+        kinds: &[EdgeKind],
+        include_heuristic: bool,
+        limit: usize,
+    ) -> Result<(Vec<EdgeRecord>, bool), QueryError> {
+        match self {
+            Self::Materialized {
+                graph, adjacency, ..
+            } => {
+                let (indices, truncated, _) = adjacency.matching_bounded(
+                    graph,
+                    node,
+                    inbound,
+                    kinds,
+                    include_heuristic,
+                    limit,
+                );
+                Ok((
+                    indices
+                        .into_iter()
+                        .map(|index| graph.links[index].clone())
+                        .collect(),
+                    truncated,
+                ))
+            }
+            Self::Store(snapshot) => {
+                let (mut edges, truncated) = snapshot
+                    .reader()?
+                    .adjacency_by_kinds(
+                        node,
+                        inbound,
+                        kinds,
+                        snapshot_limits(limit.saturating_add(1))?,
+                    )
+                    .map_err(snapshot_error)?;
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                edges.sort_by(|left, right| left.id.cmp(&right.id));
+                let truncated = truncated || edges.len() > limit;
+                if edges.len() > limit {
+                    edges.truncate(limit);
+                }
+                Ok((edges, truncated))
+            }
+        }
+    }
+
+    fn incident_bounded(
+        &self,
+        node: &str,
+        include_heuristic: bool,
+        limit: usize,
+    ) -> Result<(Vec<EdgeRecord>, bool), QueryError> {
+        match self {
+            Self::Materialized {
+                graph, adjacency, ..
+            } => {
+                let retained = limit.saturating_add(1);
+                let mut edges = adjacency
+                    .incident(node, include_heuristic)
+                    .iter()
+                    .take(retained)
+                    .map(|index| graph.links[*index].clone())
+                    .collect::<Vec<_>>();
+                let truncated = edges.len() > limit;
+                if truncated {
+                    edges.truncate(limit);
+                }
+                Ok((edges, truncated))
+            }
+            Self::Store(snapshot) => {
+                let (mut edges, truncated) = snapshot
+                    .reader()?
+                    .incident(node, snapshot_limits(limit.saturating_add(1))?)
+                    .map_err(snapshot_error)?;
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                let truncated = truncated || edges.len() > limit;
+                if edges.len() > limit {
+                    edges.truncate(limit);
+                }
+                Ok((edges, truncated))
+            }
+        }
+    }
+
+    fn file_by_path(&self, path: &str) -> Result<Option<FileRecord>, QueryError> {
+        match self {
+            Self::Materialized { graph, lookup, .. } => Ok(lookup
+                .file_by_path(path)
+                .map(|index| graph.graph.files[index].clone())),
+            Self::Store(snapshot) => snapshot
+                .reader()?
+                .file_by_path(path)
+                .map_err(snapshot_error),
+        }
+    }
+
+    fn store_term_candidates(
+        &self,
+        terms: &[String],
+        limit: usize,
+    ) -> Result<Option<(Vec<NodeRecord>, bool)>, QueryError> {
+        let Self::Store(snapshot) = self else {
+            return Ok(None);
+        };
+        let (mut nodes, truncated) = snapshot
+            .reader()?
+            .nodes_for_terms(terms, snapshot_limits(limit.saturating_add(1))?)
+            .map_err(snapshot_error)?;
+        let truncated = truncated || nodes.len() > limit;
+        if nodes.len() > limit {
+            nodes.truncate(limit);
+        }
+        Ok(Some((nodes, truncated)))
+    }
+}
+
+fn snapshot_limits(max_items: usize) -> Result<SnapshotReadLimits, QueryError> {
+    if max_items == 0 || max_items > GRAPH_SNAPSHOT_MAX_ITEMS {
+        return Err(QueryError::new(
+            QueryErrorKind::InvalidParameter,
+            "code_query_limit_exceeded",
+            format!("snapshot query item limit must be between 1 and {GRAPH_SNAPSHOT_MAX_ITEMS}"),
+        ));
+    }
+    Ok(SnapshotReadLimits {
+        max_items,
+        max_bytes: 1024 * 1024 * 1024,
+        max_objects: GRAPH_SNAPSHOT_MAX_OBJECTS,
+        max_depth: 64,
+    })
+}
+
+fn snapshot_error(error: compass_graph::SnapshotError) -> QueryError {
+    QueryError::new(
+        QueryErrorKind::CorruptArtifact,
+        "store_graph_snapshot_failed",
+        error.to_string(),
+    )
+}
+
 fn index_directional_edge(
     index: &mut HashMap<String, HashMap<EdgeKind, Vec<usize>>>,
     node: &str,
@@ -303,6 +512,7 @@ fn sort_edge_indices(edges: &mut [usize], graph: &GraphDocument) {
 impl CodeQueryEngine {
     pub fn search(&self, request: SearchRequest) -> Result<CodeQueryResponse, QueryError> {
         validate_limits(&request.limits)?;
+        let terms = search_query_terms(&request.query)?;
         let query = fts_query(&request.query)?;
         let mut response =
             CodeQueryResponse::empty(CodeQueryOperation::Search, request.limits.clone());
@@ -315,29 +525,59 @@ impl CodeQueryEngine {
             });
             return self.finish_response(&mut response);
         }
-        let mut statement = self
-            .connection
-            .prepare(
-                "SELECT n.id, n.name, n.qualified_name, bm25(node_fts)
-                 FROM node_fts JOIN nodes n ON n.id = node_fts.node_id
-                 WHERE node_fts MATCH ?1
-                 LIMIT ?2",
-            )
-            .map_err(sql_error)?;
         let candidate_limit =
-            i64::from(request.limits.max_candidates.max(request.limits.max_nodes));
-        let mut rows = statement
-            .query(params![query, candidate_limit])
-            .map_err(sql_error)?;
+            usize::try_from(request.limits.max_candidates.max(request.limits.max_nodes))
+                .unwrap_or(usize::MAX);
+        let (candidates, candidate_truncated) = if let Some(candidates) = self
+            .backend
+            .store_term_candidates(&terms, candidate_limit)?
+        {
+            candidates
+        } else {
+            let connection = self.connection.as_ref().ok_or_else(|| {
+                QueryError::new(
+                    QueryErrorKind::Internal,
+                    "query_index_missing",
+                    "materialized query engine has no search index",
+                )
+            })?;
+            let mut statement = connection
+                .prepare(
+                    "SELECT n.id
+                         FROM node_fts JOIN nodes n ON n.id = node_fts.node_id
+                         WHERE node_fts MATCH ?1
+                         ORDER BY bm25(node_fts), n.id
+                         LIMIT ?2",
+                )
+                .map_err(sql_error)?;
+            let sql_limit = i64::try_from(candidate_limit.saturating_add(1)).unwrap_or(i64::MAX);
+            let mut rows = statement
+                .query(params![query, sql_limit])
+                .map_err(sql_error)?;
+            let mut nodes = Vec::new();
+            while let Some(row) = rows.next().map_err(sql_error)? {
+                let id: String = row.get(0).map_err(sql_error)?;
+                let node = self.backend.node_by_id(&id)?.ok_or_else(|| {
+                    QueryError::new(
+                        QueryErrorKind::GraphInvariant,
+                        "query_graph_invariant",
+                        format!("index references absent graph node {id}"),
+                    )
+                })?;
+                nodes.push(node);
+            }
+            let truncated = nodes.len() > candidate_limit;
+            if truncated {
+                nodes.truncate(candidate_limit);
+            }
+            (nodes, truncated)
+        };
+        response.truncated |= candidate_truncated;
         let normalized_query = request.query.trim().to_lowercase();
         let mut ranked = Vec::new();
-        while let Some(row) = rows.next().map_err(sql_error)? {
-            let id: String = row.get(0).map_err(sql_error)?;
-            let name: String = row.get(1).map_err(sql_error)?;
-            let qualified: String = row.get(2).map_err(sql_error)?;
-            let rank: f64 = row.get(3).map_err(sql_error)?;
-            let normalized_name = name.to_lowercase();
-            let normalized_qualified = qualified.to_lowercase();
+        for node in candidates {
+            let normalized_name = node.name.to_lowercase();
+            let normalized_qualified = node.qualified_name.to_lowercase();
             let tier = if normalized_qualified == normalized_query {
                 4_u8
             } else if normalized_name == normalized_query {
@@ -356,15 +596,9 @@ impl CodeQueryEngine {
             if normalized_qualified.contains(&normalized_query) {
                 matched_fields.push("qualified_name".to_owned());
             }
-            ranked.push((tier, rank, id, matched_fields));
+            ranked.push((tier, node.id.clone(), matched_fields, node));
         }
-        ranked.sort_by(|left, right| {
-            right
-                .0
-                .cmp(&left.0)
-                .then_with(|| left.1.total_cmp(&right.1))
-                .then_with(|| left.2.cmp(&right.2))
-        });
+        ranked.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
         let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);
         if ranked.len() > max_nodes {
             ranked.truncate(max_nodes);
@@ -376,24 +610,13 @@ impl CodeQueryEngine {
                 path: None,
             });
         }
-        for (tier, rank, id, matched_fields) in ranked {
-            let Some(node) = self
-                .lookup
-                .node_by_id(&id)
-                .map(|index| &self.graph.nodes[index])
-            else {
-                return Err(QueryError::new(
-                    QueryErrorKind::GraphInvariant,
-                    "query_graph_invariant",
-                    format!("index references absent graph node {id}"),
-                ));
-            };
+        for (tier, id, matched_fields, node) in ranked {
             response.results.push(SearchHit {
                 node_id: id,
-                score: f64::from(tier) * 1_000_000.0 - rank,
+                score: f64::from(tier) * 1_000_000.0 + matched_fields.len() as f64,
                 matched_fields,
             });
-            response.nodes.push(query_node(node));
+            response.nodes.push(query_node(&node));
         }
         if response.results.is_empty() {
             response.diagnostics.push(QueryDiagnostic {
@@ -426,7 +649,7 @@ impl CodeQueryEngine {
             CodeQueryOperation::Callees
         };
         let mut response = CodeQueryResponse::empty(operation, request.limits.clone());
-        let Some(seed) = self.resolve_symbol(&request.symbol, &mut response) else {
+        let Some(seed) = self.resolve_symbol(&request.symbol, &mut response)? else {
             return self.finish_response(&mut response);
         };
         let kinds: &[EdgeKind] = if inbound {
@@ -435,21 +658,17 @@ impl CodeQueryEngine {
             &[EdgeKind::Calls]
         };
         let max_edges = usize::try_from(request.limits.max_edges).unwrap_or(usize::MAX);
-        let (selected_indices, truncated, _) =
-            self.adjacency
-                .matching_bounded(&self.graph, &seed, inbound, kinds, true, max_edges);
+        let (selected_edges, truncated) = self
+            .backend
+            .matching_bounded(&seed, inbound, kinds, true, max_edges)?;
         response.truncated |= truncated;
-        let selected_edges = selected_indices
-            .into_iter()
-            .map(|index| &self.graph.links[index])
-            .collect::<Vec<_>>();
         let mut ids = HashSet::from([seed.clone()]);
         for edge in &selected_edges {
             ids.insert(edge.source.clone());
             ids.insert(edge.target.clone());
             response.edges.push(query_edge(edge));
         }
-        self.add_nodes(&ids, &mut response);
+        self.add_nodes(&ids, &mut response)?;
         self.finish_response(&mut response)
     }
 
@@ -457,7 +676,7 @@ impl CodeQueryEngine {
         validate_limits(&request.limits)?;
         let mut response =
             CodeQueryResponse::empty(CodeQueryOperation::Impact, request.limits.clone());
-        let Some(seed) = self.resolve_symbol(&request.symbol, &mut response) else {
+        let Some(seed) = self.resolve_symbol(&request.symbol, &mut response)? else {
             return self.finish_response(&mut response);
         };
         let max_depth = usize::try_from(request.limits.max_depth).unwrap_or(usize::MAX);
@@ -472,16 +691,14 @@ impl CodeQueryEngine {
                 continue;
             }
             let remaining_edges = max_edges.saturating_sub(selected_edges.len());
-            let (incoming, incoming_truncated, _) = self.adjacency.matching_bounded(
-                &self.graph,
+            let (incoming, incoming_truncated) = self.backend.matching_bounded(
                 &node,
                 true,
                 IMPACT_KINDS,
                 request.include_heuristic,
                 remaining_edges,
-            );
+            )?;
             response.truncated |= incoming_truncated;
-            let incoming = incoming.into_iter().map(|index| &self.graph.links[index]);
             for edge in incoming {
                 if selected_edges.len() >= max_edges {
                     response.truncated = true;
@@ -501,9 +718,7 @@ impl CodeQueryEngine {
                     nodes.push(edge.source.clone());
                     let mut edges = path_edges.clone();
                     edges.push(edge.id.clone());
-                    response
-                        .paths
-                        .push(path_record(&nodes, &edges, &self.graph, &self.adjacency));
+                    response.paths.push(self.path_record(&nodes, &edges)?);
                     queue.push_back((edge.source.clone(), nodes, edges));
                 } else {
                     selected_edges.insert(edge.id.clone());
@@ -514,8 +729,8 @@ impl CodeQueryEngine {
             }
         }
         let ids = visited;
-        self.add_nodes(&ids, &mut response);
-        self.add_edges(&selected_edges, &mut response);
+        self.add_nodes(&ids, &mut response)?;
+        self.add_edges(&selected_edges, &mut response)?;
         self.apply_path_bound(&mut response);
         self.finish_response(&mut response)
     }
@@ -539,7 +754,7 @@ impl CodeQueryEngine {
             CodeQueryResponse::empty(CodeQueryOperation::Explore, request.limits.clone());
         let mut seeds = Vec::new();
         for symbol in &request.symbols {
-            if let Some(seed) = self.resolve_symbol(symbol, &mut response) {
+            if let Some(seed) = self.resolve_symbol(symbol, &mut response)? {
                 seeds.push(seed);
             }
         }
@@ -555,18 +770,16 @@ impl CodeQueryEngine {
             }
             if let [source, target] = pair
                 && let (Some((nodes, edges)), truncated) =
-                    self.shortest_path(source, target, true, &request.limits, &mut budget)
+                    self.shortest_path(source, target, true, &request.limits, &mut budget)?
             {
                 response.truncated |= truncated;
                 ids.extend(nodes.iter().cloned());
                 edge_ids.extend(edges.iter().cloned());
-                response
-                    .paths
-                    .push(path_record(&nodes, &edges, &self.graph, &self.adjacency));
+                response.paths.push(self.path_record(&nodes, &edges)?);
             }
         }
-        self.add_nodes(&ids, &mut response);
-        self.add_edges(&edge_ids, &mut response);
+        self.add_nodes(&ids, &mut response)?;
+        self.add_edges(&edge_ids, &mut response)?;
         self.add_verified_files(&request.root, &mut response)?;
         self.apply_path_bound(&mut response);
         self.finish_response(&mut response)
@@ -576,10 +789,10 @@ impl CodeQueryEngine {
         validate_limits(&request.limits)?;
         let mut response =
             CodeQueryResponse::empty(CodeQueryOperation::NodeTrail, request.limits.clone());
-        let Some(source) = self.resolve_symbol(&request.source, &mut response) else {
+        let Some(source) = self.resolve_symbol(&request.source, &mut response)? else {
             return self.finish_response(&mut response);
         };
-        let Some(target) = self.resolve_symbol(&request.target, &mut response) else {
+        let Some(target) = self.resolve_symbol(&request.target, &mut response)? else {
             return self.finish_response(&mut response);
         };
         let mut budget = TraversalBudget::new(&request.limits);
@@ -589,7 +802,7 @@ impl CodeQueryEngine {
             request.include_heuristic,
             &request.limits,
             &mut budget,
-        );
+        )?;
         response.truncated |= truncated;
         let Some((nodes, edges)) = path else {
             if truncated {
@@ -604,12 +817,10 @@ impl CodeQueryEngine {
             return self.finish_response(&mut response);
         };
         let ids = nodes.iter().cloned().collect::<HashSet<_>>();
-        self.add_nodes(&ids, &mut response);
+        self.add_nodes(&ids, &mut response)?;
         let edge_ids = edges.iter().cloned().collect::<HashSet<_>>();
-        self.add_edges(&edge_ids, &mut response);
-        response
-            .paths
-            .push(path_record(&nodes, &edges, &self.graph, &self.adjacency));
+        self.add_edges(&edge_ids, &mut response)?;
+        response.paths.push(self.path_record(&nodes, &edges)?);
         self.finish_response(&mut response)
     }
 
@@ -628,25 +839,26 @@ impl CodeQueryEngine {
         self.engine_kind
     }
 
-    fn resolve_symbol(&self, query: &str, response: &mut CodeQueryResponse) -> Option<String> {
-        if let Some(node) = self
-            .lookup
-            .node_by_id(query)
-            .map(|index| &self.graph.nodes[index])
-        {
-            return Some(node.id.clone());
+    fn resolve_symbol(
+        &self,
+        query: &str,
+        response: &mut CodeQueryResponse,
+    ) -> Result<Option<String>, QueryError> {
+        if let Some(node) = self.backend.node_by_id(query)? {
+            return Ok(Some(node.id));
         }
         let normalized = normalize_symbol(query);
         let candidate_limit = usize::try_from(response.limits.max_candidates).unwrap_or(usize::MAX);
-        let exact = self
-            .lookup
-            .nodes_by_normalized_name(&normalized)
-            .iter()
-            .take(candidate_limit.saturating_add(1))
-            .map(|index| self.graph.nodes[*index].id.clone())
+        let (exact_nodes, truncated) = self
+            .backend
+            .nodes_by_normalized_name(&normalized, candidate_limit)?;
+        let exact = exact_nodes
+            .into_iter()
+            .map(|node| node.id)
             .collect::<Vec<_>>();
+        response.truncated |= truncated;
         match exact.as_slice() {
-            [node] => Some(node.clone()),
+            [node] => Ok(Some(node.clone())),
             [] => {
                 response.diagnostics.push(QueryDiagnostic {
                     code: QueryDiagnosticCode::NoMatch,
@@ -654,7 +866,7 @@ impl CodeQueryEngine {
                     node_id: None,
                     path: None,
                 });
-                None
+                Ok(None)
             }
             _ => {
                 response.diagnostics.push(QueryDiagnostic {
@@ -663,34 +875,56 @@ impl CodeQueryEngine {
                     node_id: None,
                     path: None,
                 });
-                None
+                Ok(None)
             }
         }
     }
 
-    fn add_nodes(&self, ids: &HashSet<String>, response: &mut CodeQueryResponse) {
+    fn add_nodes(
+        &self,
+        ids: &HashSet<String>,
+        response: &mut CodeQueryResponse,
+    ) -> Result<(), QueryError> {
         let max = usize::try_from(response.limits.max_nodes).unwrap_or(usize::MAX);
-        let mut nodes = ids
-            .iter()
-            .filter_map(|id| self.lookup.node_by_id(id))
-            .map(|index| &self.graph.nodes[index])
-            .collect::<Vec<_>>();
+        let mut nodes = Vec::with_capacity(ids.len().min(max));
+        for id in ids {
+            if let Some(node) = self.backend.node_by_id(id)? {
+                nodes.push(node);
+            }
+        }
         nodes.sort_by(|left, right| left.id.cmp(&right.id));
         if nodes.len() > max {
             nodes.truncate(max);
             response.truncated = true;
         }
-        response.nodes.extend(nodes.into_iter().map(query_node));
+        response.nodes.extend(nodes.iter().map(query_node));
+        Ok(())
     }
 
-    fn add_edges(&self, ids: &HashSet<String>, response: &mut CodeQueryResponse) {
-        let mut edges = ids
-            .iter()
-            .filter_map(|id| self.adjacency.by_id(id))
-            .map(|index| &self.graph.links[index])
-            .collect::<Vec<_>>();
+    fn add_edges(
+        &self,
+        ids: &HashSet<String>,
+        response: &mut CodeQueryResponse,
+    ) -> Result<(), QueryError> {
+        let mut edges = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(edge) = self.backend.edge_by_id(id)? {
+                edges.push(edge);
+            }
+        }
         edges.sort_by(|left, right| left.id.cmp(&right.id));
-        response.edges.extend(edges.into_iter().map(query_edge));
+        response.edges.extend(edges.iter().map(query_edge));
+        Ok(())
+    }
+
+    fn path_record(&self, nodes: &[String], edges: &[String]) -> Result<QueryPath, QueryError> {
+        let mut selected = Vec::with_capacity(edges.len());
+        for edge in edges {
+            if let Some(record) = self.backend.edge_by_id(edge)? {
+                selected.push(record);
+            }
+        }
+        Ok(path_record(nodes, edges, &selected))
     }
 
     fn shortest_path(
@@ -700,10 +934,10 @@ impl CodeQueryEngine {
         include_heuristic: bool,
         limits: &compass_model::query_contract::CodeQueryLimits,
         budget: &mut TraversalBudget,
-    ) -> BoundedPathResult {
+    ) -> Result<BoundedPathResult, QueryError> {
         let max_depth = usize::try_from(limits.max_depth).unwrap_or(usize::MAX);
         if !budget.consume_node() {
-            return (None, true);
+            return Ok((None, true));
         }
         let mut queue = VecDeque::from([(source.to_owned(), 0_usize)]);
         let mut visited = HashSet::from([source.to_owned()]);
@@ -716,7 +950,7 @@ impl CodeQueryEngine {
                 let mut cursor = target;
                 while cursor != source {
                     let Some((previous, edge)) = predecessor.get(cursor) else {
-                        return (None, truncated);
+                        return Ok((None, truncated));
                     };
                     edges.push(edge.clone());
                     nodes.push(previous.clone());
@@ -724,18 +958,21 @@ impl CodeQueryEngine {
                 }
                 nodes.reverse();
                 edges.reverse();
-                return (Some((nodes, edges)), truncated);
+                return Ok((Some((nodes, edges)), truncated));
             }
             if depth >= max_depth {
                 continue;
             }
             let mut adjacent = Vec::new();
-            for index in self.adjacency.incident(&node, include_heuristic) {
+            let (incident, incident_truncated) =
+                self.backend
+                    .incident_bounded(&node, include_heuristic, budget.remaining_edges)?;
+            truncated |= incident_truncated;
+            for edge in incident {
                 if !budget.consume_edge() {
                     truncated = true;
                     break;
                 }
-                let edge = &self.graph.links[*index];
                 if edge.source == node {
                     adjacent.push((edge.target.clone(), edge));
                 } else if edge.target == node {
@@ -743,8 +980,8 @@ impl CodeQueryEngine {
                 }
             }
             adjacent.sort_by(|left, right| {
-                evidence_quality(right.1)
-                    .cmp(&evidence_quality(left.1))
+                evidence_quality(&right.1)
+                    .cmp(&evidence_quality(&left.1))
                     .then_with(|| left.1.id.cmp(&right.1.id))
             });
             for (next, edge) in adjacent {
@@ -760,7 +997,7 @@ impl CodeQueryEngine {
                 queue.push_back((next, depth + 1));
             }
         }
-        (None, truncated)
+        Ok((None, truncated))
     }
 
     fn add_verified_files(
@@ -781,11 +1018,7 @@ impl CodeQueryEngine {
         let max_total = response.limits.max_source_bytes;
         let per_file = max_total / u64::try_from(files.len().max(1)).unwrap_or(1);
         for path in files {
-            let Some(record) = self
-                .lookup
-                .file_by_path(&path)
-                .map(|index| &self.graph.graph.files[index])
-            else {
+            let Some(record) = self.backend.file_by_path(&path)? else {
                 continue;
             };
             match verified_source(&root, &path, &record.content_digest, per_file)? {
@@ -923,17 +1156,7 @@ fn default_repository_root(graph_path: &Path) -> PathBuf {
         .to_path_buf()
 }
 
-fn path_record(
-    nodes: &[String],
-    edges: &[String],
-    graph: &GraphDocument,
-    adjacency: &CodeAdjacencyIndex,
-) -> QueryPath {
-    let selected = edges
-        .iter()
-        .filter_map(|edge| adjacency.by_id(edge))
-        .map(|index| &graph.links[index])
-        .collect::<Vec<_>>();
+fn path_record(nodes: &[String], edges: &[String], selected: &[EdgeRecord]) -> QueryPath {
     let weakest_confidence = selected
         .iter()
         .flat_map(|edge| &edge.evidence)
@@ -1061,6 +1284,14 @@ pub(crate) fn validate_limits(
 }
 
 fn fts_query(value: &str) -> Result<String, QueryError> {
+    Ok(search_query_terms(value)?
+        .into_iter()
+        .map(|term| format!("\"{}\"*", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" AND "))
+}
+
+fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
     if value.len() > 4_096 {
         return Err(QueryError::new(
             QueryErrorKind::InvalidParameter,
@@ -1077,6 +1308,7 @@ fn fts_query(value: &str) -> Result<String, QueryError> {
                     "AND" | "OR" | "NOT" | "NEAR"
                 )
         })
+        .map(str::to_lowercase)
         .take(33)
         .collect::<Vec<_>>();
     if terms.len() > 32 {
@@ -1086,11 +1318,7 @@ fn fts_query(value: &str) -> Result<String, QueryError> {
             "search query exceeds 32 terms",
         ));
     }
-    Ok(terms
-        .into_iter()
-        .map(|term| format!("\"{}\"*", term.replace('"', "\"\"")))
-        .collect::<Vec<_>>()
-        .join(" AND "))
+    Ok(terms)
 }
 
 pub(crate) fn enforce_response_size(response: &mut CodeQueryResponse) -> Result<(), QueryError> {

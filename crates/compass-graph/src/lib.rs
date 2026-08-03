@@ -24,11 +24,12 @@ pub use dedup::{
 };
 pub use quarantine::{MAX_QUARANTINE_EXAMPLES, PublicationOmissions, PublicationOutcome};
 pub use snapshot::{
-    GRAPH_SNAPSHOT_LAYOUT_V1, GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1,
-    GraphSnapshotBuilder, GraphSnapshotManifest, GraphSnapshotMetadata, GraphSnapshotReader,
-    IndexKind, PreparedGraphSnapshot, SnapshotError, SnapshotReadLimits, SnapshotRoot,
-    SnapshotSelector, activate_graph_snapshot, active_graph_snapshot, canonical_graph_json,
-    encode_graph_index_key, prepare_graph_snapshot,
+    GRAPH_SNAPSHOT_LAYOUT_V2, GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS,
+    GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder, GraphSnapshotGcStats,
+    GraphSnapshotManifest, GraphSnapshotMetadata, GraphSnapshotReader, IndexKind,
+    PreparedGraphSnapshot, SnapshotError, SnapshotReadLimits, SnapshotRoot, SnapshotSelector,
+    activate_graph_snapshot, active_graph_snapshot, canonical_graph_json, encode_graph_index_key,
+    garbage_collect_graph_snapshots, graph_snapshot_needs_gc, prepare_graph_snapshot,
 };
 pub use v1::{
     BuildEvidence, InventoryEvidence, V1_PUBLICATION_SEMANTICS_VERSION, canonical_edge_kind,

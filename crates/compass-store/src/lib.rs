@@ -51,7 +51,7 @@ const GRAPH_SNAPSHOT_OBJECT_PARTITION: &[u8] = b"graph-snapshot/objects";
 const MANIFEST_PREFIX: &[u8] = b"manifest/";
 const CHUNK_PREFIX: &[u8] = b"chunk/";
 const CHUNK_BYTES: usize = MAX_VALUE_BYTES - 1_024;
-const GRAPH_SNAPSHOT_LAYOUT_V1: &str = "compass.store.graph-index/1";
+const GRAPH_SNAPSHOT_LAYOUT_V2: &str = "compass.store.graph-index/2";
 const GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1: &str = "compass.store.graph-selector/1";
 const GRAPH_SNAPSHOT_ACTIVE_KEY: &[u8] = b"active";
 const RETENTION_METADATA_KEY: &str = "retention.v1";
@@ -275,6 +275,18 @@ pub struct ScanPage {
     pub bytes_read: usize,
 }
 
+/// One bounded page of keys without materializing stored values.
+///
+/// Maintenance operations such as reachability-based garbage collection use
+/// this projection so large immutable values do not have to cross the adapter
+/// boundary merely to discover their addresses.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeyPage {
+    pub keys: Vec<Vec<u8>>,
+    pub next: Option<ScanCursor>,
+    pub bytes_read: usize,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StoreCapabilities {
     pub strong_point_reads: bool,
@@ -370,6 +382,61 @@ pub trait Store {
         cursor: Option<&ScanCursor>,
     ) -> Result<ScanPage, StoreError>;
 
+    /// Scan only keys in deterministic byte order. `max_bytes` applies to the
+    /// returned key bytes, not to values hidden by the projection.
+    ///
+    /// The portable implementation is correct but may read values internally;
+    /// database adapters should override it with a native key projection.
+    fn scan_keys(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        range: &KeyRange,
+        limits: ScanLimits,
+        cursor: Option<&ScanCursor>,
+    ) -> Result<KeyPage, StoreError> {
+        let limits = limits.validate()?;
+        let page = self.scan(
+            namespace,
+            partition,
+            range,
+            ScanLimits {
+                max_items: limits.max_items,
+                max_bytes: MAX_SCAN_BYTES,
+            },
+            cursor,
+        )?;
+        let mut keys = Vec::new();
+        let mut bytes_read = 0_usize;
+        let mut has_more = false;
+        for entry in page.entries {
+            let key_bytes = entry.key.len();
+            if keys.is_empty() && key_bytes > limits.max_bytes {
+                return Err(StoreError::InvalidScanLimit(
+                    "the first matching key exceeds max_bytes".to_owned(),
+                ));
+            }
+            if keys.len() == limits.max_items
+                || bytes_read.saturating_add(key_bytes) > limits.max_bytes
+            {
+                has_more = true;
+                break;
+            }
+            bytes_read = bytes_read.saturating_add(key_bytes);
+            keys.push(entry.key);
+        }
+        let next = if has_more {
+            keys.last().cloned().map(|last_key| ScanCursor { last_key })
+        } else {
+            page.next
+        };
+        Ok(KeyPage {
+            keys,
+            next,
+            bytes_read,
+        })
+    }
+
     fn put(
         &self,
         namespace: &NamespaceId,
@@ -386,6 +453,24 @@ pub trait Store {
         key: &Key,
         condition: WriteCondition,
     ) -> Result<bool, StoreError>;
+
+    /// Delete a bounded set of keys from one partition. Adapters with native
+    /// transactions override this to avoid one durable commit per key.
+    fn delete_batch(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        keys: &[Key],
+    ) -> Result<u64, StoreError> {
+        validate_delete_batch(keys)?;
+        let mut deleted = 0_u64;
+        for key in keys {
+            if self.delete(namespace, partition, key, WriteCondition::Any)? {
+                deleted = deleted.saturating_add(1);
+            }
+        }
+        Ok(deleted)
+    }
 
     /// Publish a bounded group of immutable values.
     ///
@@ -487,6 +572,17 @@ impl<'a, S: Store + ?Sized> ScopedStore<'a, S> {
             .scan(&self.namespace, partition, range, limits, cursor)
     }
 
+    pub fn scan_keys(
+        &self,
+        partition: &PartitionKey,
+        range: &KeyRange,
+        limits: ScanLimits,
+        cursor: Option<&ScanCursor>,
+    ) -> Result<KeyPage, StoreError> {
+        self.store
+            .scan_keys(&self.namespace, partition, range, limits, cursor)
+    }
+
     pub fn put(
         &self,
         partition: &PartitionKey,
@@ -523,6 +619,10 @@ impl<'a, S: Store + ?Sized> ScopedStore<'a, S> {
         writes: &[ImmutableWrite],
     ) -> Result<ImmutableBatchOutcome, StoreError> {
         self.store.put_immutable_batch(&self.namespace, writes)
+    }
+
+    pub fn delete_batch(&self, partition: &PartitionKey, keys: &[Key]) -> Result<u64, StoreError> {
+        self.store.delete_batch(&self.namespace, partition, keys)
     }
 }
 
@@ -695,6 +795,20 @@ impl SqliteStore {
         })
     }
 
+    /// Pin subsequent reads on this connection to one SQLite MVCC snapshot.
+    /// The transaction remains open for the lifetime of the read-only store,
+    /// allowing concurrent graph GC to reclaim current rows without breaking
+    /// an already-running query.
+    pub fn begin_read_snapshot(&self) -> Result<(), StoreError> {
+        if !self.read_only {
+            return Err(StoreError::Unsupported(
+                "read snapshots require a read-only store".to_owned(),
+            ));
+        }
+        self.connection()?.execute_batch("BEGIN DEFERRED;")?;
+        Ok(())
+    }
+
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
@@ -820,7 +934,26 @@ impl SqliteStore {
             ));
         }
         let connection = self.connection()?;
-        connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        connection.execute_batch("PRAGMA optimize; PRAGMA wal_checkpoint(TRUNCATE);")?;
+        Ok(())
+    }
+
+    /// Reclaim a bounded number of free pages after immutable-object GC.
+    /// New stores use incremental auto-vacuum so maintenance never triggers an
+    /// unbounded full-database rewrite on the build path.
+    pub fn reclaim_unused_pages(&self, max_pages: u32) -> Result<(), StoreError> {
+        if self.read_only {
+            return Err(StoreError::Unsupported(
+                "cannot reclaim pages through a read-only store".to_owned(),
+            ));
+        }
+        if max_pages == 0 || max_pages > 65_536 {
+            return Err(StoreError::InvalidScanLimit(
+                "incremental vacuum page bound must be between 1 and 65536".to_owned(),
+            ));
+        }
+        self.connection()?
+            .execute_batch(&format!("PRAGMA incremental_vacuum({max_pages});"))?;
         Ok(())
     }
 
@@ -1077,7 +1210,7 @@ impl SqliteStore {
         }
         let manifest: GraphSnapshotManifest = serde_json::from_slice(&manifest_entry.value)
             .map_err(|error| StoreError::Corrupt(format!("graph snapshot manifest: {error}")))?;
-        if manifest.schema != GRAPH_SNAPSHOT_LAYOUT_V1
+        if manifest.schema != GRAPH_SNAPSHOT_LAYOUT_V2
             || manifest.graph_schema != GRAPH_SCHEMA_V1
             || manifest.snapshot_id != snapshot_id
         {
@@ -1398,6 +1531,28 @@ impl Store for MemoryStore {
         }
         Ok(outcome)
     }
+
+    fn delete_batch(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        keys: &[Key],
+    ) -> Result<u64, StoreError> {
+        validate_delete_batch(keys)?;
+        let mut records = self.lock()?;
+        let mut deleted = 0_u64;
+        for key in keys {
+            let address = (
+                namespace.as_bytes().to_vec(),
+                partition.as_bytes().to_vec(),
+                key.as_bytes().to_vec(),
+            );
+            if records.remove(&address).is_some() {
+                deleted = deleted.saturating_add(1);
+            }
+        }
+        Ok(deleted)
+    }
 }
 
 impl Store for SqliteStore {
@@ -1509,6 +1664,84 @@ impl Store for SqliteStore {
         });
         Ok(ScanPage {
             entries,
+            next,
+            bytes_read,
+        })
+    }
+
+    fn scan_keys(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        range: &KeyRange,
+        limits: ScanLimits,
+        cursor: Option<&ScanCursor>,
+    ) -> Result<KeyPage, StoreError> {
+        let limits = limits.validate()?;
+        if let Some(start) = &range.start_inclusive {
+            validate_component("key", start, MAX_KEY_BYTES)?;
+        }
+        if let Some(end) = &range.end_exclusive {
+            validate_component("key", end, MAX_KEY_BYTES)?;
+        }
+        if let (Some(start), Some(end)) = (&range.start_inclusive, &range.end_exclusive)
+            && start > end
+        {
+            return Err(StoreError::InvalidScanLimit(
+                "range start must be smaller than range end".to_owned(),
+            ));
+        }
+        if let Some(cursor) = cursor {
+            validate_component("cursor", cursor.last_key(), MAX_KEY_BYTES)?;
+        }
+        let connection = self.connection()?;
+        let mut query = String::from("SELECT key FROM kv WHERE namespace = ?1 AND partition = ?2");
+        let mut values = vec![
+            rusqlite::types::Value::Blob(namespace.as_bytes().to_vec()),
+            rusqlite::types::Value::Blob(partition.as_bytes().to_vec()),
+        ];
+        if let Some(start) = range.start_inclusive.as_ref() {
+            query.push_str(" AND key >= ?3");
+            values.push(rusqlite::types::Value::Blob(start.clone()));
+        }
+        if let Some(end) = range.end_exclusive.as_ref() {
+            let index = values.len() + 1;
+            query.push_str(&format!(" AND key < ?{index}"));
+            values.push(rusqlite::types::Value::Blob(end.clone()));
+        }
+        if let Some(cursor) = cursor {
+            let index = values.len() + 1;
+            query.push_str(&format!(" AND key > ?{index}"));
+            values.push(rusqlite::types::Value::Blob(cursor.last_key().to_vec()));
+        }
+        query.push_str(" ORDER BY key ASC");
+        let mut statement = connection.prepare(&query)?;
+        let mut rows = statement.query(rusqlite::params_from_iter(values))?;
+        let mut keys = Vec::new();
+        let mut bytes_read = 0_usize;
+        let mut has_more = false;
+        while let Some(row) = rows.next()? {
+            let key = row.get::<_, Vec<u8>>(0)?;
+            let key_bytes = key.len();
+            if keys.is_empty() && key_bytes > limits.max_bytes {
+                return Err(StoreError::InvalidScanLimit(
+                    "the first matching key exceeds max_bytes".to_owned(),
+                ));
+            }
+            if keys.len() == limits.max_items
+                || bytes_read.saturating_add(key_bytes) > limits.max_bytes
+            {
+                has_more = true;
+                break;
+            }
+            bytes_read = bytes_read.saturating_add(key_bytes);
+            keys.push(key);
+        }
+        let next = has_more.then(|| ScanCursor {
+            last_key: keys.last().cloned().unwrap_or_default(),
+        });
+        Ok(KeyPage {
+            keys,
             next,
             bytes_read,
         })
@@ -1674,6 +1907,31 @@ impl Store for SqliteStore {
         transaction.commit()?;
         Ok(outcome)
     }
+
+    fn delete_batch(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        keys: &[Key],
+    ) -> Result<u64, StoreError> {
+        if self.read_only {
+            return Err(StoreError::Unsupported(
+                "cannot delete through a read-only store".to_owned(),
+            ));
+        }
+        validate_delete_batch(keys)?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut deleted = 0_u64;
+        for key in keys {
+            deleted = deleted.saturating_add(transaction.execute(
+                "DELETE FROM kv WHERE namespace = ?1 AND partition = ?2 AND key = ?3",
+                params![namespace.as_bytes(), partition.as_bytes(), key.as_bytes()],
+            )? as u64);
+        }
+        transaction.commit()?;
+        Ok(deleted)
+    }
 }
 
 fn validate_immutable_batch(writes: &[ImmutableWrite]) -> Result<(), StoreError> {
@@ -1699,6 +1957,23 @@ fn validate_immutable_batch(writes: &[ImmutableWrite]) -> Result<(), StoreError>
         )) {
             return Err(StoreError::InvalidBatch(
                 "immutable batch contains a duplicate address".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_delete_batch(keys: &[Key]) -> Result<(), StoreError> {
+    if keys.is_empty() || keys.len() > MAX_IMMUTABLE_BATCH_ITEMS {
+        return Err(StoreError::InvalidBatch(format!(
+            "delete batch item count must be between 1 and {MAX_IMMUTABLE_BATCH_ITEMS}"
+        )));
+    }
+    let mut unique = BTreeSet::new();
+    for key in keys {
+        if !unique.insert(key.as_bytes()) {
+            return Err(StoreError::InvalidBatch(
+                "delete batch contains a duplicate key".to_owned(),
             ));
         }
     }
@@ -1899,10 +2174,16 @@ fn hex_digest(value: &[u8]) -> String {
 
 fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
     connection.execute_batch(
-        "PRAGMA journal_mode=WAL;
+        "PRAGMA page_size=16384;
+         PRAGMA auto_vacuum=INCREMENTAL;
+         PRAGMA journal_mode=WAL;
          PRAGMA synchronous=FULL;
          PRAGMA foreign_keys=ON;
-         PRAGMA busy_timeout=5000;",
+         PRAGMA busy_timeout=5000;
+         PRAGMA cache_size=-131072;
+         PRAGMA mmap_size=536870912;
+         PRAGMA temp_store=MEMORY;
+         PRAGMA wal_autocheckpoint=0;",
     )?;
     Ok(())
 }
@@ -1910,7 +2191,10 @@ fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
 fn configure_read_only_connection(connection: &Connection) -> Result<(), StoreError> {
     connection.execute_batch(
         "PRAGMA foreign_keys=ON;
-         PRAGMA busy_timeout=5000;",
+         PRAGMA busy_timeout=5000;
+         PRAGMA cache_size=-131072;
+         PRAGMA mmap_size=536870912;
+         PRAGMA query_only=ON;",
     )?;
     Ok(())
 }
@@ -2095,6 +2379,21 @@ pub mod test_support {
                 "adapter cursor did not continue after the last key".to_owned(),
             ));
         }
+        let key_page = store.scan_keys(
+            &first_namespace,
+            &partition,
+            &KeyRange::default(),
+            ScanLimits {
+                max_items: 1,
+                max_bytes: 32,
+            },
+            None,
+        )?;
+        if key_page.keys != [first.as_bytes()] || key_page.next.is_none() {
+            return Err(StoreError::Corrupt(
+                "adapter key projection did not preserve scan ordering or continuation".to_owned(),
+            ));
+        }
 
         let version = store
             .get(&first_namespace, &partition, &first)?
@@ -2173,6 +2472,23 @@ pub mod test_support {
                 "adapter did not delete an existing value".to_owned(),
             ));
         }
+        let delete_keys = [Key::new(b"delete/one")?, Key::new(b"delete/two")?];
+        for key in &delete_keys {
+            store.put(
+                &first_namespace,
+                &partition,
+                key,
+                b"delete",
+                WriteCondition::Missing,
+            )?;
+        }
+        if store.delete_batch(&first_namespace, &partition, &delete_keys)? != 2
+            || store.delete_batch(&first_namespace, &partition, &delete_keys)? != 0
+        {
+            return Err(StoreError::Corrupt(
+                "adapter violated bounded delete-batch semantics".to_owned(),
+            ));
+        }
         Ok(())
     }
 }
@@ -2227,6 +2543,39 @@ mod tests {
             Some(cursor),
         )?;
         assert_eq!(next.entries[0].key, b"b");
+        Ok(())
+    }
+
+    #[test]
+    fn sqlite_primary_key_serves_point_and_partition_queries() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("store.sqlite3");
+        let store = SqliteStore::open(&path)?;
+        drop(store);
+        let connection = Connection::open(path)?;
+        for sql in [
+            "EXPLAIN QUERY PLAN SELECT value FROM kv \
+             WHERE namespace = ?1 AND partition = ?2 AND key = ?3",
+            "EXPLAIN QUERY PLAN SELECT key FROM kv \
+             WHERE namespace = ?1 AND partition = ?2 AND key >= ?3 ORDER BY key",
+        ] {
+            let mut statement = connection.prepare(sql)?;
+            let details = statement
+                .query_map(
+                    rusqlite::params![b"namespace", b"partition", b"key"],
+                    |row| row.get::<_, String>(3),
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
+            assert!(
+                details.iter().any(|detail| detail.contains("PRIMARY KEY")),
+                "expected the WITHOUT ROWID primary key in query plan: {details:?}"
+            );
+        }
+        let page_size = connection.query_row("PRAGMA page_size", [], |row| row.get::<_, u32>(0))?;
+        let auto_vacuum =
+            connection.query_row("PRAGMA auto_vacuum", [], |row| row.get::<_, u32>(0))?;
+        assert_eq!(page_size, 16_384);
+        assert_eq!(auto_vacuum, 2);
         Ok(())
     }
 

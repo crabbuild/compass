@@ -724,6 +724,32 @@ fn build_guard_can_exclude_a_large_generation_sidecar() -> Result<(), Box<dyn Er
     Ok(())
 }
 
+#[test]
+fn build_guard_retains_only_two_complete_generations() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    for version in 0..4 {
+        let guard = BuildGuard::begin(directory.path())?;
+        fs::write(
+            guard.staging_directory().join("graph.json"),
+            version.to_string(),
+        )?;
+        guard.commit_with_artifacts(&["graph.json"])?;
+    }
+    let generations = fs::read_dir(directory.path().join(".compass-generations"))?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .collect::<Vec<_>>();
+    assert_eq!(generations.len(), 2);
+    assert_eq!(
+        fs::read_to_string(BuildGuard::resolve_artifact(
+            directory.path(),
+            "graph.json"
+        )?)?,
+        "3"
+    );
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn atomic_write_preserves_destination_symlink() -> Result<(), Box<dyn Error>> {

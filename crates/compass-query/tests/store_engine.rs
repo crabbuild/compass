@@ -50,7 +50,14 @@ fn default_query_open_uses_json_and_explicit_store_matches_results()
         serde_json::to_value(store_engine.search(request.clone())?)?,
         serde_json::to_value(json_engine.search(request)?)?,
     );
-    assert_eq!(store_engine.index_path(), json_engine.index_path());
+    assert_ne!(store_engine.index_path(), json_engine.index_path());
+    assert_eq!(
+        store_engine
+            .index_path()
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some(STORE_FILE_NAME)
+    );
 
     drop(store_engine);
     let reopened = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
@@ -71,7 +78,7 @@ fn store_engine_reads_the_immutable_phase2_snapshot_for_all_code_queries()
     let json = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
     assert_eq!(store.engine_kind(), QueryEngineKind::Store);
     assert_eq!(json.engine_kind(), QueryEngineKind::Json);
-    assert_eq!(store.index_path(), json.index_path());
+    assert_ne!(store.index_path(), json.index_path());
 
     let search = SearchRequest {
         query: "UserService.list".to_owned(),

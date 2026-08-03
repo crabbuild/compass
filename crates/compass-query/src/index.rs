@@ -5,6 +5,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use compass_graph::SnapshotReadLimits;
 use compass_ir::{PROGRAM_SCHEMA, ProgramBundle};
 use compass_model::code_graph::GraphDocument;
 use compass_model::query_contract::CODE_QUERY_SCHEMA_V1;
@@ -13,8 +14,9 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 use crate::CodeQueryEngine;
+use crate::code_query::CodeGraphBackend;
 use crate::cql::{QueryError, QueryErrorKind};
-use crate::graph_engine::open_graph_engine;
+use crate::graph_engine::{open_graph_engine, open_local_store_snapshot};
 
 const INDEX_FORMAT_VERSION: &str = "compass-code-index/1";
 
@@ -55,6 +57,9 @@ pub fn open_with_engine(
     cache_root: &Path,
     selection: EngineSelection,
 ) -> Result<CodeQueryEngine, QueryError> {
+    if selection == EngineSelection::Store {
+        return open_from_local_store(graph_path, program_path);
+    }
     let graph_engine = open_graph_engine(graph_path, selection)?;
     open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
 }
@@ -123,15 +128,68 @@ fn open_from_graph_engine(
             )
         });
     Ok(CodeQueryEngine {
-        graph,
+        backend: CodeGraphBackend::Materialized {
+            graph: Box::new(graph),
+            adjacency: Box::new(adjacency),
+            lookup: Box::new(lookup),
+        },
         program,
-        connection,
+        connection: Some(connection),
         graph_path: graph_path.to_path_buf(),
         index_path,
-        adjacency,
-        lookup,
         partial_graph_message,
         engine_kind,
+    })
+}
+
+fn open_from_local_store(
+    graph_path: &Path,
+    program_path: Option<&Path>,
+) -> Result<CodeQueryEngine, QueryError> {
+    let snapshot = open_local_store_snapshot(graph_path)?;
+    let _metadata = snapshot.reader()?.metadata_summary().map_err(|error| {
+        QueryError::new(
+            QueryErrorKind::CorruptArtifact,
+            "store_graph_snapshot_failed",
+            error.to_string(),
+        )
+    })?;
+    let (diagnostics, diagnostics_truncated) = snapshot
+        .reader()?
+        .graph_diagnostics(SnapshotReadLimits::default())
+        .map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_snapshot_failed",
+                error.to_string(),
+            )
+        })?;
+    if diagnostics_truncated {
+        return Err(QueryError::new(
+            QueryErrorKind::MemoryLimit,
+            "store_graph_diagnostics_limit_exceeded",
+            "graph diagnostics exceed the bounded store projection",
+        ));
+    }
+    let partial_graph_message = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "publication_omission_summary")
+        .map(|diagnostic| {
+            format!(
+                "Published graph coverage is incomplete: {}",
+                diagnostic.message
+            )
+        });
+    let (program, _) = load_program(program_path)?;
+    let index_path = snapshot.store_path.clone();
+    Ok(CodeQueryEngine {
+        backend: CodeGraphBackend::Store(Box::new(snapshot)),
+        program,
+        connection: None,
+        graph_path: graph_path.to_path_buf(),
+        index_path,
+        partial_graph_message,
+        engine_kind: QueryEngineKind::Store,
     })
 }
 
