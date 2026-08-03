@@ -706,6 +706,7 @@ fn build_graph_inner(
             stats.communities,
             stats.omissions(),
             unchanged_program.as_ref(),
+            storage_artifacts_complete(options.graph_storage, &output_dir),
             &mut timings,
         )?;
         let published_output_dir = commit_generation(
@@ -1239,6 +1240,7 @@ fn build_graph_inner(
             0,
             omissions,
             program.as_ref(),
+            storage_artifacts_complete(options.graph_storage, &output_dir),
             &mut timings,
         )?;
         let published_output_dir = commit_generation(
@@ -1318,7 +1320,20 @@ fn build_graph_inner(
         let omissions = published.omissions;
         let published_nodes = published.document.nodes.len();
         let published_edges = published.document.links.len();
-        write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
+        let store_metrics = if options.graph_storage.publishes_store() {
+            let (graph_result, store_result) = rayon::join(
+                || write_json_atomic(output_dir.join("graph.json"), &published.document, false),
+                || ensure_store_snapshot_from_canonical(&output_dir, &published.document),
+            );
+            graph_result?;
+            Some(store_result?)
+        } else {
+            write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
+            None
+        };
+        if let Some(metrics) = store_metrics {
+            record_store_metrics(&mut timings, metrics);
+        }
         remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
         save_output_stats(
             &output_dir,
@@ -1354,6 +1369,7 @@ fn build_graph_inner(
             0,
             omissions,
             program.as_ref(),
+            store_metrics.is_some(),
             &mut timings,
         )?;
         let published_output_dir = commit_generation(
@@ -1474,6 +1490,7 @@ fn build_graph_inner(
                 communities,
                 PublicationOmissions::default(),
                 program.as_ref(),
+                true,
                 &mut timings,
             )?;
             let published_output_dir = commit_generation(
@@ -1720,6 +1737,7 @@ fn build_graph_inner(
         overview_elapsed,
     );
 
+    let publish_started = Instant::now();
     let graph_output_started = Instant::now();
     let mut output_profile_started = Instant::now();
     let normalization_started = Instant::now();
@@ -1735,7 +1753,20 @@ fn build_graph_inner(
     let published_edges = published.document.links.len();
     let omissions = published.omissions;
     let serialization_started = Instant::now();
-    write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
+    let store_metrics = if options.graph_storage.publishes_store() {
+        let (graph_result, store_result) = rayon::join(
+            || write_json_atomic(output_dir.join("graph.json"), &published.document, false),
+            || ensure_store_snapshot_from_canonical(&output_dir, &published.document),
+        );
+        graph_result?;
+        Some(store_result?)
+    } else {
+        write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
+        None
+    };
+    if let Some(metrics) = store_metrics {
+        record_store_metrics(&mut timings, metrics);
+    }
     if options.purpose == BuildPurpose::Update {
         write_prepared_graph_overview(overview_model, &output_dir)?;
     }
@@ -1748,7 +1779,6 @@ fn build_graph_inner(
     internal_started = Instant::now();
     timings.graph_assembly += stage_started.elapsed();
 
-    let publish_started = Instant::now();
     let mut manifest = prior_manifest;
     let (manifest_result, seals_result) = rayon::join(
         || {
@@ -1787,6 +1817,7 @@ fn build_graph_inner(
         communities.len(),
         omissions,
         program.as_ref(),
+        store_metrics.is_some(),
         &mut timings,
     )?;
     profile_internal("Program output and build seals", &mut internal_started);
@@ -1963,10 +1994,11 @@ fn publish_build_state(
     communities: usize,
     omissions: PublicationOmissions,
     program: Option<&ProgramBuildSummary>,
+    store_ready: bool,
     timings: &mut BuildTimings,
 ) -> Result<(), CoreError> {
     let publish_store = options.graph_storage.publishes_store();
-    if publish_store {
+    if publish_store && !store_ready {
         let metrics = ensure_store_snapshot(output_dir)?;
         record_store_metrics(timings, metrics);
     }
@@ -2158,10 +2190,35 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<StorePublishMetrics, CoreE
     let store = SqliteStore::open(&store_path)?;
     let builder = GraphSnapshotBuilder::new();
     let prepared = builder.prepare_owned(&store, graph)?;
-    let selector = builder.activate(&store, &prepared)?;
+    finish_store_snapshot(output_dir, &store, &builder, prepared)
+}
+
+fn ensure_store_snapshot_from_canonical(
+    output_dir: &Path,
+    graph: &V1GraphDocument,
+) -> Result<StorePublishMetrics, CoreError> {
+    if graph.graph.schema != GRAPH_SCHEMA_V1 {
+        return Err(CoreError::InvalidBuildState(format!(
+            "graph has unsupported schema {}; expected {GRAPH_SCHEMA_V1}",
+            graph.graph.schema
+        )));
+    }
+    let graph_path = output_dir.join("graph.json");
+    let store = SqliteStore::open(local_sqlite_store_path(&graph_path))?;
+    let builder = GraphSnapshotBuilder::new();
+    let prepared = builder.prepare_canonical(&store, graph)?;
+    finish_store_snapshot(output_dir, &store, &builder, prepared)
+}
+
+fn finish_store_snapshot(
+    output_dir: &Path,
+    store: &SqliteStore,
+    builder: &GraphSnapshotBuilder,
+    prepared: compass_graph::PreparedGraphSnapshot,
+) -> Result<StorePublishMetrics, CoreError> {
+    let selector = builder.activate(store, &prepared)?;
     let reference =
         store.graph_snapshot_reference_for(&selector.snapshot_id, &selector.manifest_digest)?;
-    store.checkpoint()?;
     write_store_ref(output_dir, &reference)?;
     store.record_retention_metadata(&reference, compass_store::MAX_SCAN_ITEMS)?;
     store.checkpoint()?;

@@ -7,7 +7,7 @@
 //! reconstructed from these records for export and differential testing.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Read;
+use std::io::{Read, Write};
 
 use compass_model::code_graph::{
     CODE_GRAPH_SCHEMA_V1, EdgeRecord, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
@@ -460,7 +460,7 @@ impl GraphSnapshotBuilder {
         store: &S,
         graph: &GraphDocument,
     ) -> Result<PreparedGraphSnapshot, SnapshotError> {
-        self.prepare_owned(store, graph.clone())
+        self.prepare_canonical(store, graph)
     }
 
     /// Prepare a snapshot from an owned document without cloning the complete
@@ -470,18 +470,22 @@ impl GraphSnapshotBuilder {
         store: &S,
         graph: GraphDocument,
     ) -> Result<PreparedGraphSnapshot, SnapshotError> {
-        let mut canonical = canonical_document_owned(graph)?;
-        validate_code_graph(&canonical)
+        self.prepare_canonical(store, &graph)
+    }
+
+    /// Prepare a canonical snapshot without cloning graph records or buffering
+    /// its complete JSON representation. Ordering is imposed through bounded
+    /// reference vectors while `graph.json` can be streamed in parallel.
+    pub fn prepare_canonical<S: Store + ?Sized>(
+        &self,
+        store: &S,
+        canonical: &GraphDocument,
+    ) -> Result<PreparedGraphSnapshot, SnapshotError> {
+        validate_code_graph(canonical)
             .map_err(|error| SnapshotError::Corrupt(format!("graph validation failed: {error}")))?;
-        let graph_bytes = encode_json(&canonical)?;
-        if graph_bytes.is_empty() || graph_bytes.len() > MAX_GRAPH_BYTES {
-            return Err(SnapshotError::Limit(format!(
-                "canonical graph exceeds the {MAX_GRAPH_BYTES}-byte limit"
-            )));
-        }
-        let graph_digest = hex_digest(&graph_bytes);
-        let snapshot_id = snapshot_identity(&mut canonical)?;
-        let indexes = build_indexes(&canonical)?;
+        let (graph_digest, graph_bytes) = digest_canonical_graph(canonical, false)?;
+        let snapshot_id = snapshot_identity(canonical)?;
+        let indexes = build_indexes(canonical)?;
         let mut writer = ObjectWriter::new(store)?;
         let mut roots = Vec::with_capacity(IndexKind::ALL.len());
         for index in IndexKind::ALL {
@@ -501,7 +505,7 @@ impl GraphSnapshotBuilder {
             snapshot_id,
             graph_schema: CODE_GRAPH_SCHEMA_V1.to_owned(),
             graph_digest,
-            graph_bytes: graph_bytes.len() as u64,
+            graph_bytes,
             node_count: canonical.nodes.len() as u64,
             edge_count: canonical.links.len() as u64,
             roots,
@@ -1287,15 +1291,49 @@ fn canonical_document_owned(mut canonical: GraphDocument) -> Result<GraphDocumen
         .graph
         .files
         .sort_by(|left, right| left.id.cmp(&right.id));
-    let _ = encode_json(&canonical)?;
     Ok(canonical)
 }
 
-fn snapshot_identity(graph: &mut GraphDocument) -> Result<String, SnapshotError> {
-    let generation_id = std::mem::take(&mut graph.graph.build.generation_id);
-    let identity = encode_json(graph).map(|bytes| hex_digest(&bytes));
-    graph.graph.build.generation_id = generation_id;
-    identity
+fn snapshot_identity(graph: &GraphDocument) -> Result<String, SnapshotError> {
+    digest_canonical_graph(graph, true).map(|(digest, _)| digest)
+}
+
+fn digest_canonical_graph(
+    graph: &GraphDocument,
+    clear_generation: bool,
+) -> Result<(String, u64), SnapshotError> {
+    #[derive(Serialize)]
+    struct CanonicalDocument<'a> {
+        directed: bool,
+        multigraph: bool,
+        graph: GraphMetadata,
+        nodes: Vec<&'a NodeRecord>,
+        links: Vec<&'a EdgeRecord>,
+    }
+
+    let mut metadata = graph.graph.clone();
+    metadata.files.sort_by(|left, right| left.id.cmp(&right.id));
+    if clear_generation {
+        metadata.build.generation_id.clear();
+    }
+    let mut nodes = graph.nodes.iter().collect::<Vec<_>>();
+    nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut links = graph.links.iter().collect::<Vec<_>>();
+    links.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.target.cmp(&right.target))
+            .then_with(|| left.kind.as_str().cmp(right.kind.as_str()))
+    });
+    let canonical = CanonicalDocument {
+        directed: graph.directed,
+        multigraph: graph.multigraph,
+        graph: metadata,
+        nodes,
+        links,
+    };
+    digest_json(&canonical, MAX_GRAPH_BYTES)
 }
 
 fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError> {
@@ -2021,6 +2059,62 @@ fn bounded_count(count: u64) -> Result<usize, SnapshotError> {
 
 fn encode_json<T: Serialize>(value: &T) -> Result<Vec<u8>, SnapshotError> {
     serde_json::to_vec(value).map_err(|error| SnapshotError::Encode(error.to_string()))
+}
+
+struct DigestWriter {
+    hasher: Sha256,
+    bytes: usize,
+    maximum: usize,
+    exceeded: bool,
+}
+
+impl DigestWriter {
+    fn new(maximum: usize) -> Self {
+        Self {
+            hasher: Sha256::new(),
+            bytes: 0,
+            maximum,
+            exceeded: false,
+        }
+    }
+}
+
+impl Write for DigestWriter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        let next = self.bytes.saturating_add(buffer.len());
+        if next > self.maximum {
+            self.exceeded = true;
+            return Err(std::io::Error::other(
+                "serialized value exceeds its byte limit",
+            ));
+        }
+        self.hasher.update(buffer);
+        self.bytes = next;
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn digest_json<T: Serialize>(value: &T, maximum: usize) -> Result<(String, u64), SnapshotError> {
+    let mut writer = DigestWriter::new(maximum);
+    if let Err(error) = serde_json::to_writer(&mut writer, value) {
+        if writer.exceeded {
+            return Err(SnapshotError::Limit(format!(
+                "canonical graph exceeds the {maximum}-byte limit"
+            )));
+        }
+        return Err(SnapshotError::Encode(error.to_string()));
+    }
+    if writer.bytes == 0 {
+        return Err(SnapshotError::Limit(
+            "canonical graph serialization is empty".to_owned(),
+        ));
+    }
+    let bytes = writer.bytes as u64;
+    Ok((format!("{:x}", writer.hasher.finalize()), bytes))
 }
 
 fn encode_tree_object(value: &TreeObject) -> Result<Vec<u8>, SnapshotError> {
