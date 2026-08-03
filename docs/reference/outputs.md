@@ -451,6 +451,9 @@ First-party editor and offline-viewer contracts are versioned independently:
 - `compass.history.change_counts/1` — lazy structural counts between existing
   realizations;
 - `compass.history.viewer_graph/1` — exact historical graph envelope;
+- `compass.semantic_diff.report/1` — exhaustive semantic findings, source
+  changes, and exact added, removed, and changed node/edge records consumed by
+  the CLI HTML report and editor comparison views;
 - `compass.ide.progress/1` — newline-delimited guided-operation events.
 
 ## Filesystem and concurrency

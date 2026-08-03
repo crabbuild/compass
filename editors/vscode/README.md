@@ -149,6 +149,12 @@ changes**. Compass lazily compares that community at both revisions and shows
 the exact added, removed, and changed symbols and relationships. Selecting a
 changed symbol reveals a Before/After table containing only modified fields,
 including signatures and source ranges, with source actions for both commits.
+The semantic tab renders the report's current finding headlines, verification
+state, reviewer action, and evidence. The changed-graph tab uses the exact Rust
+semantic-diff node and edge records instead of comparing unstable aggregate
+community projections. Large finding details are bounded in the editor; use
+`compass diff OLD NEW --format html --output semantic-diff.html` for the
+exhaustive standalone review report.
 If either community exceeds `compass.graphNodeLimit`, the detail view labels
 its counts as partial and explains how to increase the limit.
 

@@ -32,6 +32,7 @@ pub fn command(frontend: Frontend, args: &[String]) -> Outcome {
             ("history_timeline", compass_history::HISTORY_TIMELINE_SCHEMA),
             ("history_change_counts", "compass.history.change_counts/1"),
             ("history_viewer_graph", "compass.history.viewer_graph/1"),
+            ("semantic_diff_report", compass_semantic_diff::REPORT_SCHEMA),
         ]),
         features: BTreeMap::from([
             ("init", true),

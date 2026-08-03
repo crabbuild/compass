@@ -5,6 +5,7 @@ import type {
   GraphRecordEvidence,
   GraphViewModel
 } from "../contracts/graph";
+import type { SemanticDiffReport } from "../contracts/history";
 import {
   compareRecord,
   compareStructuralRecord,
@@ -189,12 +190,11 @@ export function compareGraphs(
 
 /** Build an exact changed-subgraph when revision exports are community aggregates. */
 export function comparisonFromSemanticDiff(
-  report: unknown,
+  semanticReport: SemanticDiffReport,
   reference: GraphViewModel,
   parent?: GraphViewModel
 ): GraphComparison | undefined {
-  if (!isObject(report) || !isObject(report.graph_delta)) return undefined;
-  const delta = report.graph_delta;
+  const delta = semanticReport.graph_delta;
   const addedNodes = graphNodeDeltas(delta.added_nodes);
   const removedNodes = graphNodeDeltas(delta.removed_nodes);
   const changedNodes = graphNodeDeltas(delta.changed_nodes);
@@ -204,9 +204,7 @@ export function comparisonFromSemanticDiff(
   if ([addedNodes, removedNodes, changedNodes, addedEdges, removedEdges, changedEdges]
     .some((records) => records === undefined)) return undefined;
 
-  const displayNames = isObject(report.entity_display_names)
-    ? report.entity_display_names
-    : {};
+  const displayNames = semanticReport.entity_display_names ?? {};
   const currentNodes = new Map(reference.nodes.map((node) => [node.id, node]));
   const parentNodes = new Map((parent?.nodes ?? []).map((node) => [node.id, node]));
   const nodes = new Map<string, GraphNode>();

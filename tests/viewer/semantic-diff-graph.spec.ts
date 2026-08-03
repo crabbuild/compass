@@ -104,3 +104,29 @@ test("falls back safely when graph data is unavailable", async ({ page }) => {
   await expect(page.locator("#graph-note")).toContainText("exhaustive graph-change lists");
   await expect(page.locator("#exhaustive-list")).toContainText("changed-core");
 });
+
+test("rejects unknown semantic report versions without rendering guessed topology", async ({ page }) => {
+  await page.evaluate(() => {
+    const runtime = globalThis as typeof globalThis & {
+      graphFixture: { destroy(): void };
+      CompassSemanticDiffGraph: {
+        mount(options: Record<string, unknown>): unknown;
+      };
+    };
+    runtime.graphFixture.destroy();
+    const data = document.getElementById("semantic-diff-data")?.textContent || "{}";
+    const report = JSON.parse(data);
+    report.schema = "compass.semantic_diff.report/2";
+    runtime.CompassSemanticDiffGraph.mount({
+      report,
+      host: document.getElementById("graph-canvas"),
+      inspector: document.getElementById("graph-inspector"),
+      liveRegion: document.getElementById("graph-live"),
+      note: document.getElementById("graph-note")
+    });
+  });
+
+  await expect(page.locator("#graph-canvas")).toContainText("Interactive graph unavailable.");
+  await expect(page.locator("#graph-note")).toContainText("embedded report data");
+  await expect(page.locator("#graph-canvas [data-node-id]")).toHaveCount(0);
+});

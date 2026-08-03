@@ -2,6 +2,7 @@ import type {
   GraphViewModel,
   HistoryChangeCounts,
   HistoryTimeline,
+  SemanticDiffReport,
   SourceLocation
 } from "@compass/viewer";
 
@@ -96,7 +97,7 @@ export type HistoryHostMessage =
     parentFingerprint: string;
     currentGraph: GraphViewModel;
     parentGraph: GraphViewModel;
-    semanticDiff: unknown;
+    semanticDiff: SemanticDiffReport;
     counts?: HistoryChangeCounts;
   }
   | {
