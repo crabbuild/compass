@@ -4,16 +4,6 @@ Compass embeds assistant integration assets in its native executable. This
 guide explains automatic detection, explicit multi-agent selection, scope,
 verification, and safe removal.
 
-> **Who this guide is for:** developers using Compass with coding assistants
-> and maintainers deciding what agent instructions belong in a repository.
->
-> **You will learn:** user versus project scope, automatic and explicit platform
-> selection, strict mode, verification, upgrades, and safe uninstall.
->
-> **Prerequisites:** the `compass` executable installed.
->
-> **Completion time:** about 2 minutes, plus the first graph build.
-
 ## What the integration does
 
 When a graph exists, the installed skill teaches an assistant to use it before

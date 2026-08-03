@@ -3,17 +3,6 @@
 Compass has two complementary query paths: focused discovery/traversal and the
 CompassQL compiler/executor. Both operate over the same indexed graph model.
 
-> **Who this page is for:** contributors changing query ranking, traversal,
-> CompassQL syntax/plans/execution, or machine output.
->
-> **You will learn:** loading, indexes, discovery scoring, traversal, affected,
-> CompassQL compilation and execution, caching, limits, profiling, and tests.
->
-> **Prerequisites:** [Graph model](../concepts/graph-model.md) and
-> [Workspace tour](workspace-tour.md).
->
-> **Reading time:** 15 minutes.
-
 ## Graph-engine boundary and query model
 
 `compass-query` exposes an immutable `GraphEngine` boundary with two supported

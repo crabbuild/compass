@@ -24,15 +24,6 @@ extracted strings. The current structural implementation is Markdown-first:
 the same bounded bytes read by the build pipeline are parsed into a document
 root, structural blocks, and provenance-preserving relationships.
 
-> **Who this page is for:** contributors and integrators who need to understand
-> document graph facts.
->
-> **You will learn:** what Markdown emits, how links resolve, and which limits
-> keep extraction local and bounded.
->
-> **Prerequisites:** [Language architecture](language-architecture.md) and
-> [Graph model](../concepts/graph-model.md).
-
 ## Ownership and data flow
 
 ```text

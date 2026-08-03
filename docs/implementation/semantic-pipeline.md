@@ -4,18 +4,6 @@ The semantic pipeline turns untrusted non-code content and provider responses
 into validated graph facts. It is optional and explicitly separate from the
 fully local structural code path.
 
-> **Who this page is for:** contributors adding providers, media formats,
-> semantic relations, validation, or completeness behavior.
->
-> **You will learn:** source classification, extraction/chunking, backend
-> selection, request safety, response validation, evidence binding, partial
-> results, caching, and test requirements.
->
-> **Prerequisites:** [Extraction pipeline](extraction-pipeline.md) and
-> [Security and privacy](../design/security-and-privacy.md).
->
-> **Reading time:** 12–15 minutes.
-
 ## Boundary
 
 ```text

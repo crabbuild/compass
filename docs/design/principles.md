@@ -4,16 +4,6 @@ Compass is designed as a native, inspectable knowledge graph engine rather than
 a hidden retrieval service. These principles explain the trade-offs behind its
 public behavior and provide a test for future changes.
 
-> **Who this page is for:** contributors, maintainers, evaluators comparing
-> architectural approaches, and integrators relying on Compass contracts.
->
-> **You will learn:** the principles governing local execution, determinism,
-> evidence, bounds, publication, compatibility, and independent evolution.
->
-> **Prerequisites:** [How Compass works](../concepts/how-it-works.md).
->
-> **Reading time:** 10–12 minutes.
-
 ## 1. Local-first structural knowledge
 
 Source-code extraction and graph querying should work without:

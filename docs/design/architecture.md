@@ -3,16 +3,6 @@
 Compass is a Rust workspace organized around a deterministic graph pipeline,
 bounded query engines, optional integrations, and immutable history.
 
-> **Who this page is for:** contributors and technical evaluators.
->
-> **You will learn:** architectural layers, dependency direction, primary data
-> flows, public boundaries, and where to look when behavior changes.
->
-> **Prerequisites:** [Design principles](principles.md) and
-> [How Compass works](../concepts/how-it-works.md).
->
-> **Reading time:** 15 minutes.
-
 ![Compass workspace architecture](../assets/diagrams/workspace-architecture.svg)
 
 ## Layered view

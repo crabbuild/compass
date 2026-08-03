@@ -4,19 +4,6 @@ CompassQL is Compass's deterministic, read-only structural query language. It
 uses a documented subset of openCypher to match exact graph patterns without
 copying the graph into another database.
 
-> **Who this page is for:** users deciding between discovery commands and
-> CompassQL, plus integrators preparing stable automated queries.
->
-> **You will learn:** when CompassQL is appropriate, how Compass data maps into
-> the language, how queries flow through the engine, and how limits protect
-> automation.
->
-> **Prerequisites:** familiarity with [the graph model](graph-model.md). This is
-> a concept guide; use [CompassQL](../COMPASSQL.md) as the canonical syntax
-> and runtime reference.
->
-> **Reading time:** 8–10 minutes.
-
 ## Discovery and structural matching solve different problems
 
 Use natural-language discovery when you do not yet know the exact graph shape:

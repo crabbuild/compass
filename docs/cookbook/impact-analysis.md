@@ -2,15 +2,6 @@
 
 Use these recipes to estimate what may depend on a symbol, file, or change.
 
-> **Who this page is for:** implementers and reviewers preparing a change.
->
-> **You will learn:** reverse-impact traversal, direct-caller queries,
-> historical topology diffs, and how to turn results into a review checklist.
->
-> **Prerequisites:** a current graph or versioned history.
->
-> **Completion time:** 5–15 minutes.
-
 ## Recipe 1: impact from one symbol
 
 ### Problem

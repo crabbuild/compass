@@ -4,24 +4,6 @@ This document defines how Compass can add compiler-grade Java evidence through
 Eclipse JDT while preserving the native Tree-sitter code graph as the default
 and fallback.
 
-> **Status:** Planned. Compass does not currently download, install, or invoke
-> JDT Core or JDT LS. The current pipeline can consume verified offline SCIP
-> artifacts and project exact Java call identities onto AST-proven call sites.
->
-> **Who this page is for:** contributors implementing Java semantic analysis,
-> managed tools, Program providers, graph resolution, history, or CLI support.
->
-> **You will learn:** the selected integration architecture, user experience,
-> trust boundaries, machine contracts, crate ownership, implementation phases,
-> and acceptance criteria.
->
-> **Prerequisites:** [Managed language analyzers](managed-language-analyzers.md),
-> [Language architecture](language-architecture.md),
-> [Security and privacy](security-and-privacy.md), and
-> [Universal semantic evidence](../reference/universal-semantic-evidence.md).
->
-> **Reading time:** 20–25 minutes.
-
 ## Decision summary
 
 Compass will not embed a JVM or the full JDT language server into the Rust

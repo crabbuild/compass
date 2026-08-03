@@ -4,16 +4,6 @@ Compass configuration comes from explicit command options, environment
 variables, provider registries, repository history configuration, and generated
 integration files. This page explains ownership and safe use.
 
-> **Who this reference is for:** users, operators, and integrators configuring
-> outputs, providers, history, databases, or assistant integrations.
->
-> **You will learn:** configuration sources, practical precedence, key
-> environment families, secret handling, and reproducibility rules.
->
-> **Prerequisites:** none.
->
-> **Reading time:** 10–12 minutes.
-
 ## Precedence rule
 
 For a specific command, use:
