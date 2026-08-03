@@ -4,10 +4,14 @@ import {
   BoxesIcon,
   BracesIcon,
   CheckCircle2Icon,
+  CpuIcon,
   FileDiffIcon,
+  GaugeIcon,
   GithubIcon,
+  HardDriveIcon,
   LockKeyholeIcon,
   NetworkIcon,
+  RouteIcon,
   SearchIcon,
   TerminalSquareIcon,
 } from 'lucide-react';
@@ -28,10 +32,10 @@ import {
 import { cn } from '@/lib/utils';
 
 const evidence = [
-  ['native Rust', 'one executable, linked parsers'],
-  ['local first', 'no model or database required'],
-  ['traceable', 'source ranges and provenance'],
-  ['bounded', 'explicit limits on graph work'],
+  { icon: CpuIcon, value: 'native Rust', label: 'one executable, linked parsers' },
+  { icon: HardDriveIcon, value: 'local first', label: 'no model or database required' },
+  { icon: RouteIcon, value: 'traceable', label: 'source ranges and provenance' },
+  { icon: GaugeIcon, value: 'bounded', label: 'explicit limits on graph work' },
 ];
 
 const featureCards = [
@@ -66,8 +70,8 @@ export default function HomePage() {
     <>
       <section className="relative isolate overflow-hidden border-b border-border/70">
         <div className="site-grid pointer-events-none absolute inset-0 -z-10 opacity-70" aria-hidden="true" />
-        <div className="mx-auto grid max-w-7xl grid-cols-[minmax(0,1fr)] items-center gap-12 px-5 pb-20 pt-16 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16 lg:px-8 lg:pb-28 lg:pt-24">
-          <div className="flex flex-col items-start">
+        <div className="mx-auto grid max-w-7xl grid-cols-[minmax(0,1fr)] items-center gap-12 px-5 pb-20 pt-16 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-16 lg:px-8 lg:pb-28 lg:pt-24">
+          <div className="flex min-w-0 w-full flex-col items-start">
             <Badge className="gap-2 rounded-full px-3 py-1 font-mono text-[0.68rem] uppercase tracking-[0.14em]" variant="outline">
               <span className="size-1.5 rounded-full bg-compass-amber" />
               Native code intelligence
@@ -101,11 +105,26 @@ export default function HomePage() {
       </section>
 
       <section className="border-b border-border/70 bg-card/45">
-        <div className="mx-auto grid max-w-7xl divide-y divide-border/70 px-5 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4 lg:px-8">
-          {evidence.map(([value, label]) => (
-            <div className="flex flex-col gap-1 px-0 py-5 first:pt-6 sm:px-6 sm:py-6 lg:px-8 lg:first:pl-0" key={value}>
-              <span className="font-heading text-lg font-semibold tracking-[-0.03em]">{value}</span>
-              <span className="text-sm text-muted-foreground">{label}</span>
+        <div className="mx-auto grid max-w-7xl sm:grid-cols-2 lg:grid-cols-4">
+          {evidence.map(({ icon: Icon, value, label }, index) => (
+            <div
+              className={cn(
+                'flex min-h-28 items-center gap-4 px-5 py-5',
+                index > 0 && 'border-t border-border/70',
+                index === 1 && 'sm:border-t-0 sm:border-l',
+                index === 3 && 'sm:border-l',
+                'lg:border-t-0 lg:px-8',
+                index > 0 && 'lg:border-l',
+              )}
+              key={value}
+            >
+              <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-primary/15 bg-primary/[0.07] text-primary">
+                <Icon aria-hidden="true" className="size-5" strokeWidth={1.8} />
+              </span>
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className="font-heading text-lg font-semibold tracking-[-0.03em]">{value}</span>
+                <span className="text-sm leading-5 text-muted-foreground">{label}</span>
+              </span>
             </div>
           ))}
         </div>
