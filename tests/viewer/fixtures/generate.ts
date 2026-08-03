@@ -952,13 +952,36 @@ window.acquireVsCodeApi=()=>({postMessage(message){
         }
       },
       semanticDiff:{
+        schema:"compass.semantic_diff.report/1",
+        comparison:{old_commit:message.parent,new_commit:message.commit,fingerprint:"fixture"},
         source_changes:[{
           old_path:"Cargo.toml",
           new_path:"Cargo.toml",
           status:"modified",
+          hunks:[{old_start:3,old_lines:3,new_start:3,new_lines:3}],
           patch:"@@ -3,3 +3,3 @@ [package]\\n name = \\"compass\\"\\n-version = \\"3.1.6\\"\\n+version = \\"3.1.7\\"\\n edition = \\"2021\\"\\n"
         }],
-        findings:[{summary:"Fixture comparison"}],
+        findings:[{
+          id:"sd1-fixture",
+          finding_type:"behavior_change",
+          subject:"run",
+          origin:"direct",
+          headline:"Fixture comparison",
+          explanation:"The run signature changed.",
+          compatibility:"indeterminate",
+          confidence:"exact",
+          review_priority:2,
+          public_surface:true,
+          routine:false,
+          affected_consumers:[],
+          witness_paths:[],
+          verification:{state:"partial",exact_tests:[],recommended_tests:["run tests"],reason:"Fixture mapping is partial."},
+          reviewer_action:"Review callers of run.",
+          evidence:[{source_file:"src/lib.rs",record_key:"run",capability:"signature"}],
+          completeness:{signature:"complete",test_mapping:"partial"}
+        }],
+        feature_groups:[],
+        collapsed_groups:[],
         graph_delta:{
           added_nodes:[],
           removed_nodes:[],
@@ -971,8 +994,12 @@ window.acquireVsCodeApi=()=>({postMessage(message){
           }],
           added_edges:[],
           removed_edges:[],
-          changed_edges:[]
-        }
+          changed_edges:[],
+          collapsed_attribute_changes:{}
+        },
+        entity_display_names:{run:"run"},
+        completeness:{identity:"complete",source_delta:"complete",call_resolution:"partial",test_mapping:"partial"},
+        limitations:["Fixture call mapping is partial."]
       }
     },"*"),0);
   } else if(message.type==="compareCommunity") {

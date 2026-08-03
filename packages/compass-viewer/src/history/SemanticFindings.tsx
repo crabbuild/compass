@@ -1,26 +1,32 @@
 import { ChevronRightIcon, FileDiffIcon, SparklesIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge } from "../components/ui/badge";
+import type { SemanticDiffReport } from "../contracts/history";
 import { SourceChanges, type SourceChange } from "./SourceChanges";
+
+const MAX_RENDERED_FINDINGS = 500;
+const MAX_RENDERED_VALUES = 100;
+const MAX_STRUCTURED_VALUE_CHARACTERS = 20_000;
 
 export type SemanticEvidence = {
   sourceChanges: SourceChange[];
-  findings: unknown[];
+  findings: SemanticDiffReport["findings"];
 };
 
-export function semanticEvidence(report: unknown): SemanticEvidence {
-  const value = report && typeof report === "object"
-    ? report as Record<string, unknown>
-    : {};
+export function semanticEvidence(report: SemanticDiffReport | undefined): SemanticEvidence {
+  if (report === undefined) return { findings: [], sourceChanges: [] };
   return {
-    findings: Array.isArray(value.findings) ? value.findings : [],
-    sourceChanges: Array.isArray(value.source_changes)
-      ? value.source_changes.filter(isSourceChange)
-      : []
+    findings: report.findings,
+    sourceChanges: report.source_changes.map((change) => ({
+      ...(change.old_path === null ? {} : { old_path: change.old_path }),
+      ...(change.new_path === null ? {} : { new_path: change.new_path }),
+      status: change.status,
+      patch: change.patch
+    }))
   };
 }
 
-export function SourceChangeEvidence({ report }: { report: unknown }) {
+export function SourceChangeEvidence({ report }: { report: SemanticDiffReport | undefined }) {
   const { sourceChanges } = semanticEvidence(report);
   return (
     <section className="history-evidence-panel" aria-labelledby="history-source-title">
@@ -41,19 +47,20 @@ export function SourceChangeEvidence({ report }: { report: unknown }) {
   );
 }
 
-export function SemanticFindings({ report }: { report: unknown }) {
+export function SemanticFindings({ report }: { report: SemanticDiffReport | undefined }) {
   const { findings } = semanticEvidence(report);
+  const visibleFindings = findings.slice(0, MAX_RENDERED_FINDINGS);
   const [openFindings, setOpenFindings] = useState<ReadonlySet<number>>(
-    () => new Set(findings.length ? [0] : [])
+    () => new Set(visibleFindings.length ? [0] : [])
   );
 
   useEffect(() => {
     setOpenFindings((current) => new Set(
-      [...current].filter((index) => index < findings.length)
+      [...current].filter((index) => index < visibleFindings.length)
     ));
-  }, [findings.length]);
+  }, [visibleFindings.length]);
 
-  const allOpen = findings.length > 0 && openFindings.size === findings.length;
+  const allOpen = visibleFindings.length > 0 && openFindings.size === visibleFindings.length;
 
   return (
     <section className="history-evidence-panel" aria-labelledby="history-findings-title">
@@ -71,16 +78,16 @@ export function SemanticFindings({ report }: { report: unknown }) {
             type="button"
             className="history-findings-expand"
             onClick={() => setOpenFindings(
-              allOpen ? new Set() : new Set(findings.map((_, index) => index))
+              allOpen ? new Set() : new Set(visibleFindings.map((_, index) => index))
             )}
           >
             {allOpen ? "Collapse all" : "Expand all"}
           </button>
         )}
       </header>
-      {findings.length > 0 ? (
+      {visibleFindings.length > 0 ? (
         <div className="history-finding-list">
-          {findings.map((finding, index) => {
+          {visibleFindings.map((finding, index) => {
             const details = findingDetails(finding);
             return (
               <details
@@ -127,6 +134,11 @@ export function SemanticFindings({ report }: { report: unknown }) {
               </details>
             );
           })}
+          {findings.length > visibleFindings.length && (
+            <p className="history-diff-empty" role="note">
+              Showing the first {visibleFindings.length.toLocaleString()} of {findings.length.toLocaleString()} findings. Export the HTML or JSON semantic diff for the exhaustive report.
+            </p>
+          )}
         </div>
       ) : (
         <div className="history-findings-empty">
@@ -141,18 +153,10 @@ export function SemanticFindings({ report }: { report: unknown }) {
   );
 }
 
-function isSourceChange(value: unknown): value is SourceChange {
-  if (value === null || typeof value !== "object") return false;
-  const change = value as Record<string, unknown>;
-  return ["old_path", "new_path", "status", "patch"].every(
-    (key) => change[key] === undefined || typeof change[key] === "string"
-  );
-}
-
 function findingSummary(finding: unknown, index: number): string {
   if (finding && typeof finding === "object") {
     const record = finding as Record<string, unknown>;
-    for (const key of ["summary", "title", "message"]) {
+    for (const key of ["headline", "summary", "title", "message"]) {
       if (typeof record[key] === "string") return record[key];
     }
   }
@@ -163,7 +167,7 @@ function findingDetails(finding: unknown): Record<string, unknown> | undefined {
   if (!finding || typeof finding !== "object" || Array.isArray(finding)) return undefined;
   const details = Object.fromEntries(
     Object.entries(finding as Record<string, unknown>)
-      .filter(([key]) => !["summary", "title", "message"].includes(key))
+      .filter(([key]) => !["headline", "summary", "title", "message"].includes(key))
   );
   return Object.keys(details).length > 0 ? details : undefined;
 }
@@ -182,16 +186,26 @@ function renderFindingValue(value: unknown) {
   }
   if (Array.isArray(value)) {
     if (value.length === 0) return <span className="history-finding-muted">None</span>;
+    const visible = value.slice(0, MAX_RENDERED_VALUES);
     return (
       <ul>
-        {value.map((item, index) => (
+        {visible.map((item, index) => (
           <li key={index}>{renderFindingValue(item)}</li>
         ))}
+        {value.length > visible.length && (
+          <li className="history-finding-muted">
+            {value.length - visible.length} additional values omitted from this bounded preview
+          </li>
+        )}
       </ul>
     );
   }
   if (typeof value === "object") {
-    return <pre>{JSON.stringify(value, null, 2)}</pre>;
+    const json = JSON.stringify(value, null, 2);
+    const bounded = json.length > MAX_STRUCTURED_VALUE_CHARACTERS
+      ? `${json.slice(0, MAX_STRUCTURED_VALUE_CHARACTERS)}\n… structured value shortened`
+      : json;
+    return <pre>{bounded}</pre>;
   }
   if (typeof value === "boolean") return <code>{value ? "Yes" : "No"}</code>;
   if (typeof value === "number") return <code>{value.toLocaleString()}</code>;

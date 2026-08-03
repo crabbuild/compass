@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GraphViewModel } from "../contracts/graph";
+import type { SemanticDiffReport } from "../contracts/history";
 import { compareGraphs, comparisonFromSemanticDiff } from "./ComparisonOverlay";
 import { compareRecord, displayFieldValue } from "./recordDiff";
 
@@ -20,6 +21,25 @@ function graph(
     edges,
     communities: [{ id: 0, label: "Core", color: "#6688aa", hidden: false }],
     hyperedges: []
+  };
+}
+
+function semanticReport(
+  graphDelta: SemanticDiffReport["graph_delta"],
+  extra: Partial<SemanticDiffReport> = {}
+): SemanticDiffReport {
+  return {
+    schema: "compass.semantic_diff.report/1",
+    comparison: { old_commit: "parent", new_commit: "current", fingerprint: "fixture" },
+    findings: [],
+    feature_groups: [],
+    collapsed_groups: [],
+    source_changes: [],
+    graph_delta: graphDelta,
+    entity_display_names: {},
+    completeness: {},
+    limitations: [],
+    ...extra
   };
 }
 
@@ -376,8 +396,7 @@ describe("aggregated revision comparison", () => {
       []
     );
     aggregate.stats.aggregated = true;
-    const comparison = comparisonFromSemanticDiff({
-      graph_delta: {
+    const comparison = comparisonFromSemanticDiff(semanticReport({
         added_nodes: [],
         removed_nodes: [],
         changed_nodes: [{
@@ -396,10 +415,11 @@ describe("aggregated revision comparison", () => {
           changed_fields: []
         }],
         removed_edges: [],
-        changed_edges: []
-      },
-      entity_display_names: { "api::route": "route" }
-    }, aggregate);
+        changed_edges: [],
+        collapsed_attribute_changes: {}
+      }, {
+        entity_display_names: { "api::route": "route" }
+      }), aggregate);
 
     expect(comparison).toMatchObject({
       changedNodes: 1,
@@ -439,8 +459,7 @@ describe("aggregated revision comparison", () => {
       }],
       []
     );
-    const comparison = comparisonFromSemanticDiff({
-      graph_delta: {
+    const comparison = comparisonFromSemanticDiff(semanticReport({
         added_nodes: [],
         removed_nodes: [],
         changed_nodes: [{
@@ -452,9 +471,9 @@ describe("aggregated revision comparison", () => {
         }],
         added_edges: [],
         removed_edges: [],
-        changed_edges: []
-      }
-    }, current, parent);
+        changed_edges: [],
+        collapsed_attribute_changes: {}
+      }), current, parent);
 
     expect(comparison).toMatchObject({ changedNodes: 1 });
     expect(comparison?.graph.nodes[0]).toMatchObject({
@@ -468,4 +487,5 @@ describe("aggregated revision comparison", () => {
       }
     });
   });
+
 });

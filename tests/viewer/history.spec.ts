@@ -197,6 +197,47 @@ test("comparison replaces the full graph with a readable focused delta", async (
   });
 });
 
+test("rejects an unknown semantic report before drawing a versioned graph delta", async ({ page }) => {
+  await page.goto("/history.html");
+  await page.getByRole("listbox", { name: "Git commit timeline" })
+    .getByRole("option", { name: /Revision B graph/i }).click();
+  await expect(page.getByText(/Viewing graph for bbbbbbbbb/)).toBeVisible();
+  await page.getByRole("button", { name: /Compare revisions/i }).click();
+  await expect(page.getByText("Comparison mode")).toBeVisible();
+
+  await page.evaluate(() => {
+    const fixture = window as typeof window & {
+      emitHistoryMessage(message: unknown): void;
+      historyGraphs: Record<string, unknown>;
+    };
+    const commit = "b".repeat(40);
+    const parent = "a".repeat(40);
+    fixture.emitHistoryMessage({
+      type: "comparison",
+      commit,
+      parent,
+      realization: "r-b",
+      fingerprint: "f-b",
+      parentRealization: "r-a",
+      parentFingerprint: "f-a",
+      currentGraph: fixture.historyGraphs[commit],
+      parentGraph: fixture.historyGraphs[parent],
+      semanticDiff: {
+        schema: "compass.semantic_diff.report/2",
+        graph_delta: {
+          added_nodes: [{ id: "invented", label: "Invented" }]
+        }
+      }
+    });
+  });
+
+  await expect(page.getByRole("alert")).toContainText(
+    "unsupported or malformed versioned graph comparison"
+  );
+  await expect(page.getByText("Comparison mode")).toHaveCount(0);
+  await expect(page.getByText("Invented", { exact: true })).toHaveCount(0);
+});
+
 test("revision actions share a common control baseline", async ({ page }) => {
   await page.goto("/history.html");
 

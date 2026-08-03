@@ -21,7 +21,8 @@ import type {
   HistoryBuildState,
   HistoryChangeCounts,
   HistoryOperationError,
-  HistoryTimeline
+  HistoryTimeline,
+  SemanticDiffReport
 } from "../contracts/history";
 import { CommitDetails } from "./CommitDetails";
 import { CommitRail } from "./CommitRail";
@@ -71,7 +72,7 @@ export function HistoryWorkspace({
   timeline: HistoryTimeline;
   graph?: GraphViewModel | undefined;
   comparison?: (GraphComparison & { parent: string }) | undefined;
-  semanticDiff?: unknown;
+  semanticDiff?: SemanticDiffReport | undefined;
   changeCounts?: HistoryChangeCounts | undefined;
   graphCommit?: string | undefined;
   communityDetail?: CommunityGraphDetail | undefined;

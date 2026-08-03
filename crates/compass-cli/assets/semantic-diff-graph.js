@@ -4,6 +4,8 @@
   const NS = "http://www.w3.org/2000/svg";
   const MAX_VISUAL_NODES = 42;
   const MAX_VISUAL_EDGES = 100;
+  const MAX_MODEL_NODES = 10000;
+  const MAX_MODEL_EDGES = 200000;
   const STATUS_PRIORITY = Object.freeze({
     context: 0,
     added: 1,
@@ -32,6 +34,65 @@
 
   function richer(current, candidate) {
     return current || candidate || "";
+  }
+
+  function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  function validateGraphReport(report) {
+    if (!isRecord(report) || report.schema !== "compass.semantic_diff.report/1") {
+      throw new Error("Unsupported semantic diff report schema");
+    }
+    if (!Array.isArray(report.findings) || !Array.isArray(report.source_changes)) {
+      throw new Error("Malformed semantic diff evidence");
+    }
+    const delta = report.graph_delta;
+    if (!isRecord(delta)) throw new Error("Missing graph delta");
+    const nodeGroups = ["changed_nodes", "removed_nodes", "added_nodes"];
+    const edgeGroups = ["changed_edges", "removed_edges", "added_edges"];
+    let nodeCount = 0;
+    let edgeCount = 0;
+    for (const key of nodeGroups) {
+      const records = delta[key];
+      if (!Array.isArray(records)) throw new Error(`Malformed ${key}`);
+      nodeCount += records.length;
+      for (const node of records) {
+        if (!isRecord(node)
+          || typeof node.id !== "string"
+          || node.id.length === 0
+          || typeof node.label !== "string"
+          || typeof node.kind !== "string"
+          || typeof node.source_file !== "string"
+          || !Array.isArray(node.changed_fields)
+          || !node.changed_fields.every((field) => typeof field === "string")) {
+          throw new Error(`Malformed ${key} record`);
+        }
+      }
+    }
+    for (const key of edgeGroups) {
+      const records = delta[key];
+      if (!Array.isArray(records)) throw new Error(`Malformed ${key}`);
+      edgeCount += records.length;
+      for (const edge of records) {
+        if (!isRecord(edge)
+          || typeof edge.source !== "string"
+          || edge.source.length === 0
+          || typeof edge.target !== "string"
+          || edge.target.length === 0
+          || typeof edge.relation !== "string"
+          || typeof edge.key !== "string"
+          || typeof edge.source_file !== "string"
+          || !Array.isArray(edge.changed_fields)
+          || !edge.changed_fields.every((field) => typeof field === "string")) {
+          throw new Error(`Malformed ${key} record`);
+        }
+      }
+    }
+    if (nodeCount > MAX_MODEL_NODES || edgeCount > MAX_MODEL_EDGES) {
+      throw new Error("Graph delta exceeds the interactive safety limit");
+    }
+    return delta;
   }
 
   function rememberNode(nodes, raw, status) {
@@ -68,8 +129,8 @@
     }
   }
 
-  function buildGraphModel(delta) {
-    if (!delta) throw new Error("Missing graph delta");
+  function buildGraphModel(report) {
+    const delta = validateGraphReport(report);
     const nodes = new Map();
     for (const node of delta.changed_nodes || []) rememberNode(nodes, node, "changed");
     for (const node of delta.removed_nodes || []) rememberNode(nodes, node, "removed");
@@ -82,6 +143,9 @@
     for (const edge of edges) {
       rememberNode(nodes, edge.source, "context");
       rememberNode(nodes, edge.target, "context");
+      if (nodes.size > MAX_MODEL_NODES) {
+        throw new Error("Graph delta exceeds the interactive node safety limit");
+      }
       nodes.get(edge.source).degree += 1;
       nodes.get(edge.target).degree += 1;
     }
@@ -395,7 +459,7 @@
     }
     const listeners = [];
     try {
-      const model = buildGraphModel(report.graph_delta);
+      const model = buildGraphModel(report);
       const ranked = rankVisualNodes(model);
       const visualNodes = ranked.slice(0, MAX_VISUAL_NODES);
       const selectedIds = new Set(visualNodes.map((node) => node.id));

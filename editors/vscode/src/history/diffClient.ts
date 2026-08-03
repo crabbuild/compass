@@ -1,3 +1,7 @@
+import {
+  SemanticDiffReportSchema,
+  type SemanticDiffReport
+} from "@compass/viewer/contracts/history";
 import type { RepositorySession } from "../workspace/repositorySession";
 
 export async function loadSemanticDiff(
@@ -5,12 +9,11 @@ export async function loadSemanticDiff(
   parent: string,
   commit: string,
   signal?: AbortSignal
-): Promise<unknown> {
-  const result = await session.processes.run(
+): Promise<SemanticDiffReport> {
+  return session.processes.runJson(
     session.root,
     ["diff", parent, commit, "--format", "json"],
+    SemanticDiffReportSchema,
     signal
   );
-  if (result.code !== 0) throw new Error(result.stderr || `Compass exited with ${result.code}`);
-  return JSON.parse(result.stdout);
 }

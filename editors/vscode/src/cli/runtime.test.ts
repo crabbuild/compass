@@ -15,7 +15,8 @@ const capabilities: CapabilityReport = {
     callflow_viewer: "compass.viewer.callflow/1",
     history_timeline: "compass.history.timeline/1",
     history_change_counts: "compass.history.change_counts/1",
-    history_viewer_graph: "compass.history.viewer_graph/1"
+    history_viewer_graph: "compass.history.viewer_graph/1",
+    semantic_diff_report: "compass.semantic_diff.report/1"
   },
   features: {
     init: true,

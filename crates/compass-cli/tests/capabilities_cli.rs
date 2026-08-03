@@ -15,6 +15,10 @@ fn capabilities_reports_versioned_ide_contracts() -> Result<(), Box<dyn Error>> 
     assert_eq!(value["contracts"]["graph_viewer"], "compass.viewer.graph/1");
     assert_eq!(value["contracts"]["call_graph"], "compass.call_graph/1");
     assert_eq!(
+        value["contracts"]["semantic_diff_report"],
+        "compass.semantic_diff.report/1"
+    );
+    assert_eq!(
         value["contracts"]["program_call_graph"],
         "compass.program.call_graph/1"
     );

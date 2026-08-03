@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import {
   HistoryTimelineSchema,
   HistoryChangeCountsSchema,
+  SemanticDiffReportSchema,
   HistoryWorkspace,
   WorkspaceState,
   GraphViewModelSchema,
@@ -13,6 +14,7 @@ import {
   type HistoryBuildState,
   type HistoryChangeCounts,
   type HistoryOperationError,
+  type SemanticDiffReport,
   type HistoryTimeline
 } from "@compass/viewer";
 import type {
@@ -46,7 +48,7 @@ let activeCommunityContext: {
   parentMembers: number;
   currentMembers: number;
 } | undefined;
-let semanticDiff: unknown;
+let semanticDiff: SemanticDiffReport | undefined;
 let comparison: (GraphComparison & { parent: string }) | undefined;
 let repositoryId = "";
 let changeCounts: HistoryChangeCounts | undefined;
@@ -389,7 +391,8 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
     if (!acceptsCommit(message.commit)) return;
     const current = GraphViewModelSchema.safeParse(message.currentGraph);
     const parent = GraphViewModelSchema.safeParse(message.parentGraph);
-    if (current.success && parent.success) {
+    const report = SemanticDiffReportSchema.safeParse(message.semanticDiff);
+    if (current.success && parent.success && report.success) {
       const parsedCounts = message.counts
         ? HistoryChangeCountsSchema.safeParse(message.counts)
         : undefined;
@@ -417,7 +420,7 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
       activeCommunityContext = undefined;
       const visibleComparison = compareGraphs(parent.data, current.data);
       const structuralComparison = comparisonFromSemanticDiff(
-        message.semanticDiff,
+        report.data,
         current.data,
         parent.data
       ) ?? visibleComparison;
@@ -425,10 +428,33 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
         ...structuralComparison,
         parent: message.parent
       };
-      semanticDiff = message.semanticDiff;
+      semanticDiff = report.data;
       if (structuralCounts) changeCounts = structuralCounts;
       operationErrors.delete(message.commit);
       revisionLoadState = "ready";
+    } else {
+      comparison = undefined;
+      comparisonIdentities = undefined;
+      semanticDiff = undefined;
+      changeCounts = undefined;
+      communityDetail = undefined;
+      communityLoading = null;
+      communityError = undefined;
+      activeCommunityRequest = "";
+      activeCommunityContext = undefined;
+      if (current.success) {
+        graph = current.data;
+        graphCommit = message.commit;
+        graphIdentity = {
+          realization: message.realization,
+          fingerprint: message.fingerprint
+        };
+        revisionLoadState = "ready";
+      }
+      operationErrors.set(message.commit, {
+        operation: "Compare revisions",
+        message: "Compass returned an unsupported or malformed versioned graph comparison."
+      });
     }
   } else if (message?.type === "communityComparison") {
     const context = activeCommunityContext;
