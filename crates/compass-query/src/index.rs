@@ -17,7 +17,7 @@ use crate::code_query::CodeGraphBackend;
 use crate::cql::{QueryError, QueryErrorKind};
 use crate::graph_engine::{open_graph_engine, open_local_store_snapshot};
 
-const INDEX_FORMAT_VERSION: &str = "compass-code-index/1";
+const INDEX_FORMAT_VERSION: &str = "compass-code-index/2";
 
 /// Selects the source used to hydrate the typed query engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -276,7 +276,7 @@ fn build_index(
     let mut connection = Connection::open(&temporary).map_err(sql_error)?;
     connection
         .execute_batch(
-            "PRAGMA journal_mode=DELETE;
+            r#"PRAGMA journal_mode=DELETE;
              PRAGMA synchronous=FULL;
              PRAGMA foreign_keys=ON;
              CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -293,8 +293,8 @@ fn build_index(
              CREATE VIRTUAL TABLE node_fts USING fts5(
                node_id UNINDEXED, name, qualified_name, aliases, kind, roles,
                language, framework, normalized_path,
-               tokenize='unicode61 remove_diacritics 2'
-             );",
+               tokenize="unicode61 remove_diacritics 2 tokenchars '_'"
+             );"#,
         )
         .map_err(sql_error)?;
     {
