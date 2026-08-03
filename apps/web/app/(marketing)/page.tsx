@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 
 import { HeroGraph } from '@/components/hero-graph';
+import { ExportGallery } from '@/components/export-gallery';
 import { InstallCommand } from '@/components/install-command';
 import { PipelineDiagram } from '@/components/diagrams';
 import { SectionHeading } from '@/components/section-heading';
@@ -129,6 +130,8 @@ export default function HomePage() {
           ))}
         </div>
       </section>
+
+      <ExportGallery />
 
       <section className="mx-auto max-w-7xl px-5 py-24 lg:px-8 lg:py-32">
         <SectionHeading

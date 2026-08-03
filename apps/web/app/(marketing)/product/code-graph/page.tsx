@@ -3,6 +3,7 @@ import Link from 'next/link';
 
 import { EvidenceDiagram, PipelineDiagram } from '@/components/diagrams';
 import { FeatureGrid, MarketingPage, PageSection } from '@/components/marketing-page';
+import { ProductionGraphExplorer } from '@/components/production-graph-explorer';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -14,6 +15,9 @@ export default function CodeGraphPage() {
   return <MarketingPage eyebrow="Code graph" title="Make the relationships legible." description="Compass extracts structure from source files, resolves cross-file links, and publishes a graph with identity, direction, multiplicity, and provenance intact.">
       <PageSection eyebrow="Graph construction" title="Every stage earns its place in the map." description="The graph is the result of a bounded pipeline—not a decorative layer over a search index.">
         <FeatureGrid items={[{ eyebrow: '01 / discover', title: 'Scope the corpus', description: 'Deterministic discovery, ignore rules, and file classification define what belongs in the build.' }, { eyebrow: '02 / extract', title: 'Emit local facts', description: 'Per-file syntax facts carry source ranges and evidence into the project-level pipeline.' }, { eyebrow: '03 / resolve', title: 'Connect the project', description: 'Cross-file imports, calls, members, aliases, and identities are resolved with ambiguity preserved.' }]} />
+      </PageSection>
+      <PageSection eyebrow="Try a real graph" title="Explore dotenv before you change it." description="This is a compact snapshot of dotenv, the widely adopted Node.js environment loader. Drag the fixed layout, search for a symbol, click a relationship, or open the exact source line on GitHub.">
+        <ProductionGraphExplorer />
       </PageSection>
       <section className="border-y border-border/70 bg-muted/25">
         <div className="mx-auto max-w-7xl px-5 py-20 lg:px-8 lg:py-28">
