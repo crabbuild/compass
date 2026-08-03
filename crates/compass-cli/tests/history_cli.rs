@@ -718,6 +718,26 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
     let exported = GraphDocument::load_for_recluster(&graph_json)?;
     assert_eq!(exported.nodes[0].label(), "First");
 
+    let relative_export = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "export",
+            "HEAD",
+            "--format",
+            "graph-json",
+            "--output",
+            "historical-relative.json",
+        ],
+    )?;
+    assert!(
+        relative_export.status.success(),
+        "{}",
+        String::from_utf8_lossy(&relative_export.stderr)
+    );
+    assert!(directory.path().join("historical-relative.json").is_file());
+
     let viewer_json = directory.path().join("historical-viewer.json");
     let viewer_export = run(
         compass,

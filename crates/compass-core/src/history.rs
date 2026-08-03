@@ -54,7 +54,14 @@ pub fn normalize_current_code_only_snapshot(
         let community = node
             .attributes
             .get("community")
-            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| {
+                value.as_u64().or_else(|| {
+                    value
+                        .as_object()
+                        .and_then(|community| community.get("id"))
+                        .and_then(serde_json::Value::as_u64)
+                })
+            })
             .and_then(|value| usize::try_from(value).ok())
             .ok_or_else(|| {
                 MaterializeError::Incomplete(format!(

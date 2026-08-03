@@ -1004,8 +1004,6 @@ fn build_graph_inner(
         .iter()
         .filter_map(|path| extractions.remove(path))
         .collect::<Vec<_>>();
-    merge_decl_def_classes(&mut ordered);
-    profile_internal("declaration merge", &mut internal_started);
     let ast_root_marker = format!("{}_", make_id(&[&root.to_string_lossy()]));
     let portable_check_started = Instant::now();
     let ast_is_portable = ast_extractions_are_portable(&ordered, &root);
@@ -1044,6 +1042,13 @@ fn build_graph_inner(
         );
     }
     profile_internal("portable AST ID remapping", &mut internal_started);
+    // Continue the cold build from the same portable representation that a
+    // subsequent cache hit will decode. Otherwise absolute origin attributes
+    // can make project-wide declaration merging and edge de-duplication depend
+    // on whether a file was freshly extracted or loaded from the AST cache.
+    for (path, extraction) in ordered_paths.iter().zip(&mut ordered) {
+        prepare_portable_ast_cache_entry(extraction, path, &root);
+    }
     let ast_cache_sources = ordered_paths
         .iter()
         .zip(&ordered)
@@ -1054,10 +1059,17 @@ fn build_graph_inner(
     let ast_cache_entries =
         cache.encode_portable_ast_batch(&ast_cache_sources, |path, extraction| {
             let mut cache_entry = extraction.clone();
+            // Keep this normalization at the cache boundary as a defensive
+            // invariant for callers that construct cache entries directly.
             prepare_portable_ast_cache_entry(&mut cache_entry, path, &root);
             cache_entry
         })?;
     drop(ast_cache_sources);
+    // Declaration/definition merging is project-wide and is not idempotent.
+    // Cache the portable per-file facts before applying it so a warm build
+    // executes the same single merge as a cold build.
+    merge_decl_def_classes(&mut ordered);
+    profile_internal("declaration merge", &mut internal_started);
     let ast_cache_handle = std::thread::Builder::new()
         .name("compass-ast-cache".to_owned())
         .spawn(move || {
@@ -4969,6 +4981,71 @@ mod tests {
                 .iter()
                 .all(|node| node.source_file() != Some("helper.py"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn cached_cpp_declarations_are_not_project_merged_twice() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().join("checkout");
+        fs::create_dir(&root)?;
+        fs::write(
+            root.join("arena.h"),
+            r#"#include <cstddef>
+class Arena {
+ public:
+  Arena();
+  Arena(const Arena&) = delete;
+  Arena& operator=(const Arena&) = delete;
+  ~Arena();
+  char* Allocate(size_t bytes);
+  char* AllocateAligned(size_t bytes);
+ private:
+  char* AllocateFallback(size_t bytes);
+};
+inline char* Arena::Allocate(size_t bytes) {
+  return AllocateFallback(bytes);
+}
+"#,
+        )?;
+        fs::write(
+            root.join("arena.cc"),
+            r#"#include "arena.h"
+Arena::Arena() {}
+Arena::~Arena() {}
+char* Arena::AllocateFallback(size_t bytes) { return nullptr; }
+char* Arena::AllocateAligned(size_t bytes) { return Allocate(bytes); }
+"#,
+        )?;
+        let output = directory.path().join("output");
+        let cache = directory.path().join("history-cache");
+        let semantic = SemanticLayer {
+            fragment: json!({
+                "nodes": [],
+                "edges": [],
+                "hyperedges": [],
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "failed_chunks": 0,
+            }),
+            refreshed_files: Vec::new(),
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+        let mut options = BuildOptions::new(&root);
+        options.output_root = Some(output);
+        options.cache_root = Some(cache);
+        options.no_viz = true;
+        options.program_analysis = true;
+        options.purpose = BuildPurpose::Extract;
+
+        let (cold_result, cold) = build_graph_with_layers_retained(&options, Some(&semantic), &[])?;
+        assert_eq!(cold_result.files_extracted, 2);
+        options.force = true;
+        options.reuse_cache_on_force = true;
+        let (warm_result, warm) = build_graph_with_layers_retained(&options, Some(&semantic), &[])?;
+        assert_eq!(warm_result.files_cached, 2);
+        assert_eq!(warm.document, cold.document);
         Ok(())
     }
 

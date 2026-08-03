@@ -41,6 +41,17 @@ fn canonical_number_boundaries_and_exponents_are_stable() -> Result<(), Box<dyn 
 }
 
 #[test]
+fn canonical_floats_are_idempotent_after_json_round_trip() -> Result<(), Box<dyn std::error::Error>>
+{
+    let value = json!({"cohesion": 0.10384068278805121_f64});
+    let first = canonical_json_bytes(&value)?;
+    let reparsed: Value = serde_json::from_slice(&first)?;
+    let second = canonical_json_bytes(&reparsed)?;
+    assert_eq!(first, second);
+    Ok(())
+}
+
+#[test]
 fn typed_keys_are_segment_safe_and_direction_aware() -> Result<(), Box<dyn std::error::Error>> {
     assert_ne!(node_key("a\0b"), node_key("a"));
     assert_ne!(

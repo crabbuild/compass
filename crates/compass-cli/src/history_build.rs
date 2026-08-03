@@ -1152,16 +1152,15 @@ impl NativeCompleteGraphBuilder {
             retained.analysis,
             Some(manifest),
         )?;
-        Ok(Some(CompletedGraphArtifacts {
-            artifacts,
-            completion: CompletionEvidence {
-                extraction_succeeded: true,
-                allow_partial: false,
-                semantic_files_expected: 0,
-                semantic_files_completed: 0,
-                failed_chunks: 0,
-            },
-        }))
+        let code_files = result
+            .detection
+            .files
+            .get("code")
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        Ok(Some(compass_core::normalize_current_code_only_snapshot(
+            artifacts, checkout, code_files,
+        )?))
     }
 }
 
@@ -1360,6 +1359,7 @@ mod tests {
 
         let completed = builder.build(directory.path(), output_root.path())?;
         assert!(completed.artifacts.program.is_some());
+        assert!(analysis_ids_match_graph(&completed));
         assert!(!completed.partition()?.nodes.is_empty());
         Ok(())
     }

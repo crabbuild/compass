@@ -149,6 +149,32 @@ fn publication_is_atomic_reopenable_and_content_idempotent()
 }
 
 #[test]
+fn publication_with_computed_floats_is_immediately_valid_and_reconstructable()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new()?;
+    let repository = Repository::discover(&fixture.path)?;
+    let history = HistoryStore::create(&repository)?;
+    let mut publish = request('a', false)?;
+    publish.artifacts.analysis = Some(json!({
+        "cohesion": {"14": 0.10384068278805121_f64}
+    }));
+
+    let published = history.publish(publish)?;
+    history.validate(&published.id)?;
+    let reconstructed = history.artifacts(&published.id)?;
+    assert_eq!(
+        reconstructed
+            .artifacts
+            .analysis
+            .as_ref()
+            .and_then(|value| value.pointer("/cohesion/14"))
+            .and_then(serde_json::Value::as_f64),
+        Some(0.10384068278805121_f64)
+    );
+    Ok(())
+}
+
+#[test]
 fn previous_graph_schema_profiles_are_rejected_at_publication()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = Fixture::new()?;

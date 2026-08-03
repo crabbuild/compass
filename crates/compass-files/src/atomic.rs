@@ -41,7 +41,10 @@ where
     F: FnOnce(&mut BufWriter<File>) -> Result<(), FileError>,
 {
     let destination = resolved_destination(path);
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).map_err(|source| io_error(parent, source))?;
     let temporary = temporary_path(&destination);
     let file = OpenOptions::new()

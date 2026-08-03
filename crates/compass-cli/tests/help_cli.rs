@@ -106,8 +106,20 @@ fn every_public_nested_command_has_a_dedicated_page() {
         (
             "history",
             &[
-                "enable", "disable", "status", "build", "rebuild", "list", "show", "prefer",
-                "export", "gc",
+                "enable",
+                "disable",
+                "timeline",
+                "change-counts",
+                "diff",
+                "verify",
+                "status",
+                "build",
+                "rebuild",
+                "list",
+                "show",
+                "prefer",
+                "export",
+                "gc",
             ][..],
         ),
         (
