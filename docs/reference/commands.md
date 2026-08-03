@@ -45,7 +45,9 @@ Includes and excludes are repeatable. Interactive mode previews the effective
 corpus before writing `.compass/config.toml`; scripts must pass `--yes`.
 Replacing an existing configuration requires `--force`.
 The initial build publishes JSON only by default. Pass `--store sqlite` to add
-the SQLite snapshot and `store.ref` to that generation.
+the shared SQLite snapshot and `store.ref` to that generation. The database
+lives below the output root at `.compass-store/compass-store.sqlite3`; the
+generation contains only the small reference beside `graph.json`.
 
 ### `update`
 
@@ -668,9 +670,10 @@ compass store backup [OUTPUT] --output BACKUP_DIR [--format text|json]
 compass store restore --from BACKUP_DIR --into OUTPUT [--format text|json]
 ```
 
-`status` is read-only and reports graph, SQLite sidecar, selector, schema, and
-digest state. `validate` requires a matching `compass-store.sqlite3`, active
-snapshot, and `store.ref`; a mismatch is an error, never an empty graph.
+`status` is read-only and reports graph, shared SQLite store, selector, schema,
+and digest state. `validate` requires a matching
+`.compass-store/compass-store.sqlite3`, active snapshot, and generation
+`store.ref`; a mismatch is an error, never an empty graph.
 `backup` creates a new digest-bound directory after checkpointing SQLite.
 `restore` validates that bundle and writes only to a new or empty destination.
 The commands currently operate on the local SQLite adapter. The redb adapter is

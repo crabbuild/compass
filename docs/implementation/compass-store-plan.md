@@ -1,10 +1,10 @@
 # Executable Compass store implementation plan
 
-**Status:** Phase 9 local release slice in progress. Phases 0–5 and the local
-Phase 9 operational/qualification work are implemented in this worktree. The
-CLI publishes SQLite plus permanent `graph.json`; redb is a library-only
-adapter. PostgreSQL, DynamoDB, hosted operation, general garbage collection,
-and service quotas remain explicitly deferred until their phases are complete.
+**Status:** Phases 0–5, the embedded retention/GC subset of Phase 8, and the
+local Phase 9 operational/qualification slice are implemented. The CLI
+publishes optional SQLite plus permanent `graph.json`; redb is a library-only
+adapter. PostgreSQL, DynamoDB, hosted operation, distributed leases/GC, and
+service quotas remain explicitly deferred until their phases are complete.
 
 > **Who this page is for:** implementers and reviewers delivering
 > `compass-store`, store-backed graph snapshots, backend adapters, and the
@@ -55,16 +55,17 @@ and is independently mergeable:
   SQL or require a particular backend, so redb, PostgreSQL, DynamoDB, or a
   service adapter can implement the same trait later.
 - Every committed local generation contains `graph.json`. Builds using
-  `--store sqlite` additionally contain `compass-store.sqlite3` and a typed
-  `store.ref`. The store contains
-  immutable, digest-addressed graph chunks and manifests plus the Phase 2
-  graph-index trees and CAS-protected selector. WAL is checkpointed before the
-  BuildGuard generation switch; canonical store export is compared with
-  `graph.json` before sealing; the reference is checked against the selected
-  graph snapshot before a store query runs.
+  `--store sqlite` additionally contain a typed `store.ref`; one shared
+  `.compass-store/compass-store.sqlite3` lives outside the generation
+  directories. The store contains immutable digest-addressed projected trees,
+  manifests, and a CAS-protected selector, but no legacy complete-graph
+  payload. WAL is checkpointed before the BuildGuard switch; streamed
+  canonical `graph.json` bytes bind the manifest; and the reference is checked
+  before a store query runs.
 - Typed code-query opening chooses `graph.json` by default and supports
   explicit `--engine default|json|store`. Both `default` and `json` select the
-  permanent JSON engine; `store` requires a published sidecar and reference.
+  permanent JSON engine; `store` requires a published database and reference
+  and executes directly through projected immutable indexes.
 
 Acceptance criteria for this slice are deliberately concrete:
 
@@ -72,21 +73,22 @@ Acceptance criteria for this slice are deliberately concrete:
    lexicographic scans/cursors, CAS, immutable retry, snapshot validation, and
    reopen tests.
 2. `cargo test -p compass-query --test store_engine --locked` proves default
-   store selection, immutable Phase 2 snapshot authority, explicit JSON
+   JSON selection, explicit store selection, immutable snapshot authority,
    selection, reference failures, pinned readers, cache identity, and
    JSON-equivalent typed query results.
-3. The core publication regression test proves the sidecar is present,
-   reopenable, digest-valid, and byte-identical to `graph.json` after a local
-   build.
+3. The core publication regression test proves the shared database and
+   generation reference are present, reopenable, digest-valid, and
+   byte-identical to canonical `graph.json` after a local build.
 4. Deleting or corrupting the sidecar never changes the JSON artifact; default
    query opening falls back only when the sidecar is absent, while an active
    Phase 2 snapshot without a matching `store.ref` and explicit store
    selection fail with typed errors.
 
-The initial local slice above does not claim PostgreSQL/DynamoDB adapters,
-remote retry semantics, general garbage collection, or a measured performance
-improvement. The optional redb adapter is delivered in the Phase 5 slice below;
-it is not linked into the released CLI by default.
+The local slice does not claim PostgreSQL/DynamoDB adapters, remote retry
+semantics, distributed leases, or hosted quotas. Its local performance claims
+are limited to the documented Django qualification. The optional redb adapter
+is delivered in the Phase 5 slice below; it is not linked into the released
+CLI by default.
 
 ## Phase 2 memory-layout slice shipped in this branch
 
@@ -512,8 +514,8 @@ broader remote-adapter work.
    the store snapshot and compares canonical graph identity before commit.
 9. Make SQLite publication an explicit `--store sqlite` choice. Omitting the
    option publishes JSON only; selecting SQLite never removes JSON.
-10. Add bounded orphan discovery and retention metadata, but defer general GC
-    to Phase 8.
+10. Retain two complete local generations and run bounded root-based object GC
+    after coherent publication. Distributed lease-aware GC remains Phase 8.
 
 ### Required tests
 
@@ -560,11 +562,11 @@ published store by rewriting its immutable objects; rebuild a new snapshot.
 
 After optional publication proves equivalence and durability, local readers
 can explicitly select the co-published store snapshot. The local slice reads
-the immutable Phase 2 snapshot, validates the active selector and `store.ref`, and
-compares every typed code-query operation with the JSON engine. The query
-algorithms still materialize a bounded `GraphDocument`; projection/streaming
-execution and performance qualification remain follow-on work. JSON remains
-selectable and is used whenever the caller explicitly supplies a JSON graph.
+the immutable Phase 2 snapshot, validates the active selector and `store.ref`,
+and compares every typed code-query operation with the JSON engine. Typed
+queries use projected point/name/term/adjacency reads without materializing or
+cloning a complete `GraphDocument`. JSON remains selectable and is used by
+default or whenever the caller explicitly selects it.
 
 ### Prerequisite inputs
 
@@ -605,11 +607,11 @@ selectable and is used whenever the caller explicitly supplies a JSON graph.
    expose `store` only through a separately reviewed CLI/configuration change.
    Store-only generations must support bounded deterministic JSON export.
 
-The shipped local slice implements items 1–2 for the typed code-query path,
-uses canonical graph bytes for shared disposable-index identity, and pins an
-opened reader to the immutable snapshot it selected. Items 3, 6, 8, and 9
-remain the next streaming/performance slice; the broader CompassQL and MCP
-engine plumbing remains explicitly gated on that work.
+The shipped local slice implements items 1–8 for typed code queries and the
+dual local profile. It pins opened readers, uses backend-neutral candidate
+ordering and tokenization, and records Django build/query/RSS qualification.
+Store-only publication and broader CompassQL/MCP projection plumbing remain
+separately gated.
 
 ### Required tests
 
@@ -640,15 +642,15 @@ engine plumbing remains explicitly gated on that work.
 - The explicit store query path selects the immutable snapshot only when its
   active selector and `store.ref` validate; malformed or missing references
   fail closed, while default JSON remains independent.
-- The disposable query index uses one canonical graph identity for JSON and
-  store openings, so equivalent engines share cache state and ordered results.
+- The JSON engine's disposable `compass-code-index/2` and the store term index
+  share token and candidate-order semantics; store queries do not construct the
+  disposable index.
 - Existing CompassQL TCK, OpenCypher TCK, CLI product tests, product-boundary
   check, and fixture-only code-graph qualification remain green.
 
-Full cross-engine differential coverage for CompassQL/MCP, bounded projection
-plans, and `PERFORMANCE.md` cold-open/RSS/query measurements are explicit
-follow-on gates before claiming a streaming performance improvement or adding
-additional storage profiles.
+Full cross-engine differential coverage for CompassQL/MCP and any additional
+storage profiles remain follow-on gates. Typed projected-query and
+`PERFORMANCE.md` cold-open/RSS measurements are complete for the local slice.
 - Documentation clearly states that `graph.json` is a compatible permanent
   engine, not a deprecated fallback.
 

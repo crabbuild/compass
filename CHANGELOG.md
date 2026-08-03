@@ -14,6 +14,16 @@
 - Make `graph.json` the default graph build and typed-query engine. SQLite
   snapshot publication is now explicit with `--store sqlite`, and querying it
   is explicit with `--engine store`.
+- Make opt-in Compass Store publication and queries practical on large graphs:
+  batch immutable writes without duplicate reads, remove the legacy full-graph
+  database payload, compress projected trees, keep one shared SQLite database
+  with generation references, retain and collect two bounded generations, and
+  execute typed queries directly through immutable indexes. Canonical
+  `graph.json` hashing is streamed during atomic publication, timing reports
+  transaction/object/byte/GC metrics, and JSON/store search now shares bounded
+  candidate ordering and underscore tokenization. Django qualification reduced
+  a fresh SQLite build from 11.4× JSON to 1.24× internal wall time while store
+  search became 20.7× faster with byte-identical results.
 - Make VS Code editor graph actions reliable and focused: project typed graph
   source anchors into cursor-based call resolution, consolidate duplicate
   context submenus, resolve symbols without an initial prompt, and render only
@@ -27,9 +37,9 @@
   canonical JSON/typed-query/CompassQL differential evidence. `graph.json`
   remains permanent; redb is a library-only adapter and PostgreSQL/DynamoDB
   remain deferred.
-- Optionally publish a validated `compass-store.sqlite3`
-  namespace/partition/key snapshot and typed `store.ref` beside `graph.json`
-  with `--store sqlite`. Typed code-query commands can use the store when
+- Optionally publish a validated shared `.compass-store/compass-store.sqlite3`
+  namespace/partition/key snapshot and a typed generation `store.ref` beside
+  `graph.json` with `--store sqlite`. Typed code-query commands can use the store when
   explicitly selected and the selector agrees, preserve deterministic
   JSON-equivalent results, and support explicit `--engine json|store`
   selection; `graph.json` remains a complete compatible engine.

@@ -24,12 +24,13 @@ and typed `store.ref` when opening a published SQLite generation, and pins the
 resulting projection to that immutable realization. Library callers can use
 `open_with_store` with any common-contract adapter, including the optional redb
 adapter, without adding that backend to the CLI. The typed query algorithms
-consume the same validated `GraphDocument` projection from either engine, so
-selection cannot change ranking, direction, multiplicity, source anchors, or
-public result schemas. Both engines canonicalize graph bytes before deriving
-the disposable query index key, so equivalent JSON/store openings share cache
-identity. The local slice still materializes a bounded projection; bounded
-point-read plans and streaming execution remain the next query phase.
+consume the same backend-neutral projected operations, so selection cannot
+change ranking, direction, multiplicity, source anchors, truncation, or public
+result schemas. `StoreGraphEngine` pins the selected manifest and directly uses
+node, edge, metadata/file, name, term, incoming, and outgoing immutable roots.
+It does not export or clone a complete `GraphDocument`, and it does not build a
+second SQLite query index. Whole-graph consumers outside this typed command
+family may still request a bounded materialized export.
 
 ## Load once into the query model
 
@@ -63,8 +64,16 @@ before query state is created. `--engine json` also uses the compatible JSON
 engine without opening the database, while `--engine store`
 requires a readable, referenced store and reports corruption or absence
 explicitly. The query index remains disposable and keyed by canonical snapshot
-bytes, so JSON and store openings share the same cache identity and
-deterministic result path.
+bytes for the JSON engine. Its current `compass-code-index/2` FTS tokenizer
+preserves underscores, matching the portable store term tokenizer. Store
+queries use immutable snapshot indexes instead of this disposable cache.
+
+Search candidate truncation is observable and therefore backend-neutral. Both
+engines select matching candidates in canonical node-ID order, apply the bound,
+then run common Rust ranking and tie-breaking. Store prefix scans traverse the
+complete bounded posting range before retaining the smallest candidate IDs;
+the posting-chunk count cannot consume a node-candidate limit. Differential
+tests include more matching vocabulary entries than the public candidate bound.
 
 ## Focused discovery path
 
