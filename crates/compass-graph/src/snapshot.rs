@@ -28,6 +28,7 @@ pub const GRAPH_SNAPSHOT_CATALOG_PARTITION: &str = "graph-snapshot/catalog";
 pub const GRAPH_SNAPSHOT_ACTIVE_KEY: &str = "active";
 pub const GRAPH_SNAPSHOT_MAX_DEPTH: usize = 64;
 pub const GRAPH_SNAPSHOT_MAX_OBJECTS: usize = 100_000;
+pub const GRAPH_SNAPSHOT_MAX_ITEMS: usize = 5_000_000;
 pub const GRAPH_SNAPSHOT_MAX_FANOUT: usize = 32;
 pub const GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES: usize = 128;
 
@@ -148,6 +149,13 @@ impl GraphSnapshotManifest {
                 "graph byte count exceeds the {MAX_GRAPH_BYTES}-byte limit"
             )));
         }
+        if self.node_count > GRAPH_SNAPSHOT_MAX_ITEMS as u64
+            || self.edge_count > GRAPH_SNAPSHOT_MAX_ITEMS as u64
+        {
+            return Err(SnapshotError::Limit(format!(
+                "graph record count exceeds the {GRAPH_SNAPSHOT_MAX_ITEMS}-item snapshot limit"
+            )));
+        }
         if self.roots.len() != IndexKind::ALL.len() {
             return Err(SnapshotError::Corrupt(format!(
                 "manifest has {} roots; expected {}",
@@ -234,9 +242,9 @@ impl Default for SnapshotReadLimits {
 
 impl SnapshotReadLimits {
     fn validate(self) -> Result<Self, SnapshotError> {
-        if self.max_items == 0 || self.max_items > GRAPH_SNAPSHOT_MAX_OBJECTS {
+        if self.max_items == 0 || self.max_items > GRAPH_SNAPSHOT_MAX_ITEMS {
             return Err(SnapshotError::Limit(format!(
-                "max_items must be between 1 and {GRAPH_SNAPSHOT_MAX_OBJECTS}"
+                "max_items must be between 1 and {GRAPH_SNAPSHOT_MAX_ITEMS}"
             )));
         }
         if self.max_bytes == 0 || self.max_bytes > MAX_VALUE_BYTES.saturating_mul(4_096) {
@@ -610,7 +618,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
     pub fn export_graph(&self) -> Result<GraphDocument, SnapshotError> {
         let metadata = self.metadata()?;
         let limits = SnapshotReadLimits {
-            max_items: bounded_count(self.manifest.node_count.saturating_add(1))?,
+            max_items: bounded_count(self.manifest.node_count)?,
             max_bytes: MAX_VALUE_BYTES.saturating_mul(4_096),
             ..SnapshotReadLimits::default()
         };
@@ -620,7 +628,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             graph: metadata.graph,
             nodes: self.nodes(limits)?,
             links: self.edges(SnapshotReadLimits {
-                max_items: bounded_count(self.manifest.edge_count.saturating_add(1))?,
+                max_items: bounded_count(self.manifest.edge_count)?,
                 ..limits
             })?,
         };
@@ -822,10 +830,7 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
         insert_json(
             &mut indexes,
             IndexKind::Names,
-            encode_graph_index_key(
-                IndexKind::Names,
-                &[node.name.as_bytes(), node.id.as_bytes()],
-            )?,
+            encode_name_index_key(&node.name, &node.id)?,
             &node.id,
         )?;
         if let Some(anchor) = &node.source {
@@ -838,10 +843,7 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
             insert_json(
                 &mut indexes,
                 IndexKind::Names,
-                encode_graph_index_key(
-                    IndexKind::Names,
-                    &[node.qualified_name.as_bytes(), node.id.as_bytes()],
-                )?,
+                encode_name_index_key(&node.qualified_name, &node.id)?,
                 &node.id,
             )?;
         }
@@ -960,6 +962,23 @@ fn insert_anchor_entry(
     insert_json(indexes, IndexKind::Files, key, &record_id.to_owned())
 }
 
+/// Keep normal names ordered and readable while giving graph-valid, deeply
+/// qualified names a deterministic portable representation. The extra marker
+/// segment prevents a digest key from colliding with the raw two-segment form.
+fn encode_name_index_key(name: &str, node_id: &str) -> Result<Vec<u8>, SnapshotError> {
+    match encode_graph_index_key(IndexKind::Names, &[name.as_bytes(), node_id.as_bytes()]) {
+        Ok(key) => Ok(key),
+        Err(SnapshotError::Store(StoreError::ComponentTooLarge { .. })) => {
+            let digest = hex_digest(name.as_bytes());
+            encode_graph_index_key(
+                IndexKind::Names,
+                &[b"sha256", digest.as_bytes(), node_id.as_bytes()],
+            )
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn insert_diagnostics(
     indexes: &mut SnapshotIndexes,
     owner: &str,
@@ -1028,7 +1047,7 @@ fn build_index_tree<S: Store + ?Sized>(
             entries: candidate.clone(),
         };
         if (candidate.len() > GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES
-            || encode_json(&object)?.len() > MAX_VALUE_BYTES)
+            || encode_tree_object(&object)?.len() > MAX_VALUE_BYTES)
             && !current.is_empty()
         {
             let first_key = current
@@ -1048,7 +1067,7 @@ fn build_index_tree<S: Store + ?Sized>(
             value: value.clone(),
         });
         if current.len() == 1
-            && encode_json(&TreeObject::Leaf {
+            && encode_tree_object(&TreeObject::Leaf {
                 schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
                 index,
                 entries: current.clone(),
@@ -1130,7 +1149,7 @@ fn put_tree_object<S: Store + ?Sized>(
     object: &TreeObject,
     stats: &mut ObjectStats,
 ) -> Result<String, SnapshotError> {
-    let bytes = encode_json(object)?;
+    let bytes = encode_tree_object(object)?;
     if bytes.len() > MAX_VALUE_BYTES {
         return Err(SnapshotError::Limit(
             "immutable tree object exceeds the store value limit".to_owned(),
@@ -1248,7 +1267,10 @@ fn scan_tree<S: Store + ?Sized>(
                         "snapshot item limit exceeded".to_owned(),
                     ));
                 }
-                state.bytes = state.bytes.saturating_add(entry.value.len());
+                state.bytes = state
+                    .bytes
+                    .saturating_add(entry.key.len())
+                    .saturating_add(entry.value.len());
                 if state.bytes > state.limits.max_bytes {
                     return Err(SnapshotError::Limit(
                         "snapshot byte limit exceeded".to_owned(),
@@ -1291,7 +1313,7 @@ fn load_tree_object<S: Store + ?Sized>(
         )));
     };
     verify_digest(&entry.value, digest)?;
-    let object = decode_json::<TreeObject>(&entry.value)?;
+    let object = decode_tree_object(&entry.value)?;
     validate_tree_object(&object, index)?;
     Ok(object)
 }
@@ -1389,15 +1411,34 @@ fn bounded_count(count: u64) -> Result<usize, SnapshotError> {
     let count = usize::try_from(count).map_err(|_| {
         SnapshotError::Limit("snapshot count does not fit this platform".to_owned())
     })?;
-    Ok(count.saturating_add(1).min(GRAPH_SNAPSHOT_MAX_OBJECTS))
+    if count > GRAPH_SNAPSHOT_MAX_ITEMS {
+        return Err(SnapshotError::Limit(format!(
+            "snapshot count exceeds the {GRAPH_SNAPSHOT_MAX_ITEMS}-item limit"
+        )));
+    }
+    Ok(count.max(1))
 }
 
 fn encode_json<T: Serialize>(value: &T) -> Result<Vec<u8>, SnapshotError> {
     serde_json::to_vec(value).map_err(|error| SnapshotError::Encode(error.to_string()))
 }
 
+fn encode_tree_object(value: &TreeObject) -> Result<Vec<u8>, SnapshotError> {
+    rmp_serde::to_vec_named(value).map_err(|error| SnapshotError::Encode(error.to_string()))
+}
+
 fn decode_json<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, SnapshotError> {
     serde_json::from_slice(bytes).map_err(|error| SnapshotError::Decode(error.to_string()))
+}
+
+fn decode_tree_object(bytes: &[u8]) -> Result<TreeObject, SnapshotError> {
+    rmp_serde::from_slice(bytes).or_else(|message_pack_error| {
+        serde_json::from_slice(bytes).map_err(|json_error| {
+            SnapshotError::Decode(format!(
+                "tree object is neither MessagePack ({message_pack_error}) nor legacy JSON ({json_error})"
+            ))
+        })
+    })
 }
 
 fn hex_digest(bytes: &[u8]) -> String {
@@ -1463,4 +1504,25 @@ fn manifest_key(digest: &str) -> Result<Key, SnapshotError> {
 
 fn digest_bytes(value: &[u8]) -> [u8; 32] {
     Sha256::digest(value).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tree_decoder_accepts_compact_and_legacy_encodings() -> Result<(), SnapshotError> {
+        let object = TreeObject::Leaf {
+            schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
+            index: IndexKind::Nodes,
+            entries: vec![TreeEntry {
+                key: encode_graph_index_key(IndexKind::Nodes, &[b"node-id"])?,
+                value: br#"{"id":"node-id"}"#.to_vec(),
+            }],
+        };
+
+        assert_eq!(decode_tree_object(&encode_tree_object(&object)?)?, object);
+        assert_eq!(decode_tree_object(&encode_json(&object)?)?, object);
+        Ok(())
+    }
 }

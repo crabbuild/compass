@@ -94,7 +94,7 @@ it is not linked into the released CLI by default.
 The first executable Phase 2 slice is intentionally independent of a durable
 adapter. `compass-graph` now exposes a deterministic immutable snapshot builder
 and reader over the namespace-first `compass-store::Store` contract. It writes
-content-addressed JSON tree objects, a typed manifest, and a CAS-protected
+content-addressed compact tree objects, a typed manifest, and a CAS-protected
 active selector using the memory reference store. The layout includes metadata,
 nodes, edges, directional adjacency, files/source anchors, names, terms,
 communities, and diagnostics roots.

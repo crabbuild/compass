@@ -24,7 +24,7 @@ fn store_status_backup_and_restore_are_end_to_end_validated() -> Result<(), Box<
         String::from_utf8_lossy(&init.stderr)
     );
 
-    let output = BuildGuard::resolve_active_directory(&root.path().join("compass-out"))?;
+    let output = root.path().join("compass-out");
     let status = Command::new(env!("CARGO_BIN_EXE_compass"))
         .args([
             "store",
@@ -94,8 +94,9 @@ fn store_status_backup_and_restore_are_end_to_end_validated() -> Result<(), Box<
     assert!(restored_validation.status.success());
     let restored_json: Value = serde_json::from_slice(&restored_validation.stdout)?;
     assert_eq!(restored_json["valid"], true);
+    let active_output = BuildGuard::resolve_active_directory(&output)?;
     assert_eq!(
-        fs::read(output.join("graph.json"))?,
+        fs::read(active_output.join("graph.json"))?,
         fs::read(restored.join("graph.json"))?
     );
     Ok(())
@@ -112,13 +113,14 @@ fn store_validate_rejects_a_corrupt_sidecar_without_touching_graph_json()
         .env_remove("COMPASS_OUT")
         .output()?;
     assert!(init.status.success());
-    let output = BuildGuard::resolve_active_directory(&root.path().join("compass-out"))?;
-    let graph = fs::read(output.join("graph.json"))?;
-    fs::write(output.join("compass-store.sqlite3"), b"corrupt")?;
+    let output = root.path().join("compass-out");
+    let active_output = BuildGuard::resolve_active_directory(&output)?;
+    let graph = fs::read(active_output.join("graph.json"))?;
+    fs::write(active_output.join("compass-store.sqlite3"), b"corrupt")?;
     let result = Command::new(env!("CARGO_BIN_EXE_compass"))
         .args(["store", "validate", output.to_str().ok_or("output path")?])
         .output()?;
     assert!(!result.status.success());
-    assert_eq!(fs::read(output.join("graph.json"))?, graph);
+    assert_eq!(fs::read(active_output.join("graph.json"))?, graph);
     Ok(())
 }

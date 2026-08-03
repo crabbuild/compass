@@ -23,6 +23,7 @@ compass-languages = { path = "../compass-languages", version = "0.3.0" }
 compass-model = { path = "../compass-model", version = "0.3.0" }
 compass-store = { path = "../compass-store", version = "0.3.0" }
 rayon.workspace = true
+rmp-serde.workspace = true
 unicode-casefold.workspace = true
 unicode-normalization.workspace = true
 

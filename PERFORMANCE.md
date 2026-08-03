@@ -51,20 +51,52 @@ binary, 2026-08-02) was:
 
 | Adapter | Nodes | Process seconds | Peak RSS KiB | Graph bytes | Database bytes | Write amplification | Build requests (get/put) | Query requests (get/scan) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| SQLite | 32 | 0.438 | 12,240 | 33,833 | 274,432 | 8.11× | 24 / 12 | 10 / 0 |
-| SQLite | 128 | 0.161 | 24,928 | 135,361 | 1,003,520 | 7.41× | 42 / 21 | 14 / 0 |
-| SQLite | 512 | 0.521 | 46,976 | 542,017 | 3,956,736 | 7.30× | 114 / 57 | 28 / 0 |
-| redb (library) | 32 | 0.125 | 12,416 | 33,833 | 598,016 | 17.68× | 24 / 12 | 10 / 0 |
-| redb (library) | 128 | 0.243 | 24,832 | 135,361 | 1,585,152 | 11.71× | 42 / 21 | 14 / 0 |
-| redb (library) | 512 | 0.695 | 51,840 | 542,017 | 6,328,320 | 11.68× | 114 / 57 | 28 / 0 |
+| SQLite | 32 | 0.688 | 11,520 | 33,833 | 110,592 | 3.27× | 24 / 12 | 10 / 0 |
+| SQLite | 128 | 0.127 | 22,368 | 135,361 | 348,160 | 2.57× | 38 / 19 | 10 / 0 |
+| SQLite | 512 | 0.379 | 45,840 | 542,017 | 1,347,584 | 2.49× | 112 / 56 | 26 / 0 |
+| redb (library) | 32 | 0.118 | 11,904 | 33,833 | 561,152 | 16.59× | 24 / 12 | 10 / 0 |
+| redb (library) | 128 | 0.214 | 22,512 | 135,361 | 593,920 | 4.39× | 38 / 19 | 10 / 0 |
+| redb (library) | 512 | 0.531 | 46,880 | 542,017 | 2,379,776 | 4.39× | 112 / 56 | 26 / 0 |
 
-The same sample project measured CLI process times of 5.583 s (clean
-`init`), 0.092 s (unchanged update), 0.123 s (small source change), 0.034 s
-(cold JSON search), and 0.025 s (cold store search), with peak RSS of 30,896,
-24,288, 27,344, 14,192, and 14,800 KiB respectively. These are reproducible
+The same sample project measured CLI process times of 6.215 s (clean
+`init`), 0.090 s (unchanged update), 0.098 s (small source change), 0.025 s
+(cold JSON search), and 0.028 s (cold store search), with peak RSS of 31,536,
+24,496, 27,840, 14,320, and 15,072 KiB respectively. These are reproducible
 diagnostic observations, not a claim that every repository or backend is
 faster. The release gate remains correctness plus the existing 10% regression
 policy; a performance cutover requires a comparable approved JSON baseline.
+
+### Django store audit
+
+A real-repository audit on Django commit
+`957d0cee7167757ae221ffde59d2cf0a322e89c7` used 7,074 detected files and
+published a 292,582,885-byte graph with 82,654 nodes and 187,913 edges. The
+canonical graph SHA-256 was
+`30897dc82a8452512b8d4be6149beeae6d0929bbb09966a8abf838b70a436595`.
+
+The initial JSON tree encoding could not publish this graph because a valid
+qualified name exceeded the portable key limit. After bounded hashed name
+keys, a graph-scale item limit, and compact MessagePack tree objects were
+added, the SQLite sidecar was 1,051,348,992 bytes (3.59× graph bytes), down
+from 2,672,005,120 bytes with JSON tree objects. The compact reader also
+successfully validated the older JSON-object store.
+
+On the same output and release binary, cold typed search returned
+byte-identical 740,534-byte JSON from both engines. Store search measured
+17.371 s and 2,292,272 KiB peak RSS; JSON search measured 19.476 s and
+1,758,864 KiB. Store startup was 10.8% faster but used 30.3% more peak memory.
+`compass store status` completed in 7.837 s with 2,755,360 KiB peak RSS.
+
+Fresh publication remains outside the default-cutover budget: the compact
+store build completed in 206.357 s with 4,221,296 KiB peak RSS, versus the
+JSON-only control at 15.357 s and 3,628,336 KiB. Two unchanged store updates
+measured 4.300 and 4.561 s versus the JSON-only control at 1.833 s. The
+current store engine reconstructs the complete graph before query execution,
+and SQLite publishes immutable tree objects as individual durable writes.
+Direct projection execution, batched durable publication, and bounded
+generation retention remain required before claiming that Compass Store
+improves build performance or before treating it as an unconditional
+large-repository default.
 
 ## CompassQL qualification
 
