@@ -32,9 +32,9 @@ is found first on `PATH`, Compass stops before running a workflow and offers
   language adapted to the current VS Code theme. Single-click a node to inspect
   it; double-click an overview community to load its detailed graph, use
   **Overview** to go back, and double-click a detail node with an exact file and
-  line/byte location to open source. Hover a relationship to see its extraction
-  confidence and recorded source line; double-click a located relationship to
-  open the call or wiring site.
+  line/byte location to open source. Hover a relationship to see its direction,
+  extraction confidence, evidence, and recorded source line; double-click a
+  located relationship to open the call or wiring site.
 - Start a caller/callee graph from the function under the cursor in any
   call-capable language already represented in the Compass graph. Expand it by
   depth while retaining resolved, inferred, ambiguous, and unresolved calls.

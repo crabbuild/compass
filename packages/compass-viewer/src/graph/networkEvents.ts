@@ -1,4 +1,5 @@
 import type { GraphHover } from "./NodeHoverCard";
+import type { GraphEdgeHover } from "./EdgeHoverCard";
 
 export type GraphNetworkEvent = {
   nodes: Array<string | number>;
@@ -18,8 +19,7 @@ export type GraphNetworkHandlers = {
   onOpenSource(nodeId: string): void;
   onOpenRelationshipSource(edgeId: string): void;
   onHover(change: GraphHover | null): void;
-  onHoverEdge(edgeId: string): void;
-  onBlurEdge(): void;
+  onHoverEdge(change: GraphEdgeHover | null): void;
   onClear(): void;
 };
 
@@ -29,7 +29,7 @@ export function bindGraphNetworkEvents(
 ): void {
   network.on("click", (parameters) => {
     handlers.onHover(null);
-    if (parameters.edges.length === 0) handlers.onBlurEdge();
+    if (parameters.edges.length === 0) handlers.onHoverEdge(null);
     const selectedNode = parameters.nodes[0];
     if (selectedNode !== undefined) {
       handlers.onFocus(String(selectedNode));
@@ -48,6 +48,7 @@ export function bindGraphNetworkEvents(
   });
   network.on("hoverNode", (parameters) => {
     if (parameters.node === undefined) return;
+    handlers.onHoverEdge(null);
     handlers.onHover({
       nodeId: String(parameters.node),
       x: parameters.pointer.DOM.x,
@@ -57,16 +58,21 @@ export function bindGraphNetworkEvents(
   network.on("blurNode", () => handlers.onHover(null));
   network.on("hoverEdge", (parameters) => {
     if (parameters.edge !== undefined) {
-      handlers.onHoverEdge(String(parameters.edge));
+      handlers.onHover(null);
+      handlers.onHoverEdge({
+        edgeId: String(parameters.edge),
+        x: parameters.pointer.DOM.x,
+        y: parameters.pointer.DOM.y
+      });
     }
   });
-  network.on("blurEdge", () => handlers.onBlurEdge());
+  network.on("blurEdge", () => handlers.onHoverEdge(null));
   network.on("dragStart", () => {
     handlers.onHover(null);
-    handlers.onBlurEdge();
+    handlers.onHoverEdge(null);
   });
   network.on("zoom", () => {
     handlers.onHover(null);
-    handlers.onBlurEdge();
+    handlers.onHoverEdge(null);
   });
 }

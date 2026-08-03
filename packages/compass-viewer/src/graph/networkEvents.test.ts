@@ -18,7 +18,6 @@ function fixture() {
     onOpenRelationshipSource: vi.fn(),
     onHover: vi.fn(),
     onHoverEdge: vi.fn(),
-    onBlurEdge: vi.fn(),
     onClear: vi.fn()
   };
   bindGraphNetworkEvents(network, handlers);
@@ -65,14 +64,14 @@ describe("bindGraphNetworkEvents", () => {
       edges: [7]
     });
     expect(handlers.onClear).toHaveBeenCalledTimes(1);
-    expect(handlers.onBlurEdge).not.toHaveBeenCalled();
+    expect(handlers.onHoverEdge).not.toHaveBeenCalledWith(null);
   });
 
   it("clears both graph focus and edge hover on background clicks", () => {
     const { listeners, handlers } = fixture();
     listeners.get("click")?.(event([]));
     expect(handlers.onClear).toHaveBeenCalledTimes(1);
-    expect(handlers.onBlurEdge).toHaveBeenCalledTimes(1);
+    expect(handlers.onHoverEdge).toHaveBeenCalledWith(null);
   });
 
   it("forwards edge hover and clears it on blur", () => {
@@ -82,10 +81,11 @@ describe("bindGraphNetworkEvents", () => {
       edge: 7,
       edges: [7]
     });
-    expect(handlers.onHoverEdge).toHaveBeenCalledWith("7");
+    expect(handlers.onHover).toHaveBeenCalledWith(null);
+    expect(handlers.onHoverEdge).toHaveBeenCalledWith({ edgeId: "7", x: 10, y: 20 });
 
     listeners.get("blurEdge")?.(event([]));
-    expect(handlers.onBlurEdge).toHaveBeenCalledTimes(1);
+    expect(handlers.onHoverEdge).toHaveBeenLastCalledWith(null);
   });
 
   it("clears transient hover on zoom without changing label visibility", () => {
@@ -96,7 +96,7 @@ describe("bindGraphNetworkEvents", () => {
     });
 
     expect(handlers.onHover).toHaveBeenCalledWith(null);
-    expect(handlers.onBlurEdge).toHaveBeenCalledTimes(1);
+    expect(handlers.onHoverEdge).toHaveBeenCalledWith(null);
   });
 
   it("clears node and edge hover when dragging starts", () => {
@@ -104,6 +104,17 @@ describe("bindGraphNetworkEvents", () => {
     listeners.get("dragStart")?.(event([]));
 
     expect(handlers.onHover).toHaveBeenCalledWith(null);
-    expect(handlers.onBlurEdge).toHaveBeenCalledTimes(1);
+    expect(handlers.onHoverEdge).toHaveBeenCalledWith(null);
+  });
+
+  it("clears an edge card before showing a node card", () => {
+    const { listeners, handlers } = fixture();
+    listeners.get("hoverNode")?.({
+      ...event(["run"]),
+      node: "run"
+    });
+
+    expect(handlers.onHoverEdge).toHaveBeenCalledWith(null);
+    expect(handlers.onHover).toHaveBeenCalledWith({ nodeId: "run", x: 10, y: 20 });
   });
 });

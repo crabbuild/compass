@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatGraphEdgeLabel,
-  shouldShowGraphEdgeLabel
-} from "./edgeLabels";
+import { formatGraphEdgeLabel } from "./edgeLabels";
 
 describe("formatGraphEdgeLabel", () => {
   it.each([
@@ -54,24 +51,5 @@ describe("formatGraphEdgeLabel", () => {
         endLine: 45
       }
     })).toBe("calls [EXTRACTED] · src/main.rs:42–45");
-  });
-});
-
-describe("shouldShowGraphEdgeLabel", () => {
-  const edge = { id: "e1" };
-
-  it("keeps an edge hidden until it is directly hovered", () => {
-    expect(shouldShowGraphEdgeLabel(edge, {
-      hoveredEdgeId: null
-    })).toBe(false);
-    expect(shouldShowGraphEdgeLabel(edge, {
-      hoveredEdgeId: "e2"
-    })).toBe(false);
-  });
-
-  it("reveals only the directly hovered edge", () => {
-    expect(shouldShowGraphEdgeLabel(edge, {
-      hoveredEdgeId: "e1"
-    })).toBe(true);
   });
 });

@@ -2239,18 +2239,184 @@ button.compass-code-evidence-source:focus-visible {
   white-space: nowrap;
 }
 
+.compass-edge-hover-card {
+  position: absolute;
+  z-index: 8;
+  top: clamp(86px, var(--compass-hover-y), calc(100% - 15rem));
+  left: clamp(12px, var(--compass-hover-x), calc(100% - min(31rem, 92%) - 12px));
+  display: grid;
+  width: min(31rem, calc(100% - 24px));
+  gap: 10px;
+  padding: 13px 15px;
+  overflow: hidden;
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 4px;
+  background: var(--vscode-editorHoverWidget-background, var(--compass-panel));
+  color: var(--vscode-editorHoverWidget-foreground, var(--muted-foreground));
+  box-shadow: 0 8px 24px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.34));
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+  animation: compass-edge-card-enter 90ms ease-out both;
+}
+
+@keyframes compass-edge-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+.compass-edge-hover-heading,
+.compass-edge-relation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.compass-edge-hover-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--compass-faint);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.compass-edge-hover-eyebrow svg {
+  width: 12px;
+  height: 12px;
+  color: var(--compass-focus);
+}
+
+.compass-edge-confidence {
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 11%, transparent);
+  color: var(--compass-faint);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.compass-edge-confidence[data-confidence="extracted"] {
+  color: var(--compass-success);
+}
+
+.compass-edge-confidence[data-confidence="inferred"] {
+  color: var(--compass-focus);
+}
+
+.compass-edge-confidence[data-confidence="ambiguous"] {
+  color: var(--compass-warning);
+}
+
+.compass-edge-confidence[data-confidence="aggregated"] {
+  color: var(--compass-faint);
+}
+
+.compass-edge-trace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--compass-focus) 7%, transparent);
+}
+
+.compass-edge-trace strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font: 600 11px/1.35 var(--compass-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-edge-trace strong:last-child {
+  text-align: right;
+}
+
+.compass-edge-trace > span {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--compass-focus) 38%, transparent);
+  border-radius: 50%;
+  background: var(--vscode-editorHoverWidget-background, var(--compass-panel));
+  color: var(--compass-focus);
+}
+
+.compass-edge-trace svg {
+  width: 12px;
+  height: 12px;
+}
+
+.compass-edge-relation-row > strong {
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.compass-edge-relation-row > .compass-change-badge {
+  margin: 0;
+}
+
+.compass-edge-metadata {
+  display: grid;
+  gap: 5px;
+  padding-top: 1px;
+}
+
+.compass-edge-metadata p {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+}
+
+.compass-edge-metadata span {
+  color: var(--compass-faint);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.compass-edge-metadata code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  font: 10px/1.4 var(--compass-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 body.vscode-high-contrast .compass-glass-panel,
 body.vscode-high-contrast .compass-graph-inspector,
 body.vscode-high-contrast .compass-inspector-resizer,
 body.vscode-high-contrast .compass-load-action,
 body.vscode-high-contrast .compass-load-step > i,
 body.vscode-high-contrast .compass-source-metadata,
+body.vscode-high-contrast .compass-node-hover-card,
+body.vscode-high-contrast .compass-edge-hover-card,
 body.vscode-high-contrast-light .compass-glass-panel,
 body.vscode-high-contrast-light .compass-graph-inspector,
 body.vscode-high-contrast-light .compass-inspector-resizer,
 body.vscode-high-contrast-light .compass-load-action,
 body.vscode-high-contrast-light .compass-load-step > i,
-body.vscode-high-contrast-light .compass-source-metadata {
+body.vscode-high-contrast-light .compass-source-metadata,
+body.vscode-high-contrast-light .compass-node-hover-card,
+body.vscode-high-contrast-light .compass-edge-hover-card {
   border-width: 2px;
   border-color: var(--vscode-contrastBorder, var(--compass-focus));
 }

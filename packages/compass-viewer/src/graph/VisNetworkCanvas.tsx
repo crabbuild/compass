@@ -1,6 +1,5 @@
 import {
   forwardRef,
-  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -9,10 +8,7 @@ import {
 } from "react";
 import { DataSet, Network, type Edge, type Node, type Options } from "vis-network/standalone";
 import type { GraphNode, GraphViewModel } from "../contracts/graph";
-import {
-  formatGraphEdgeLabel,
-  shouldShowGraphEdgeLabel
-} from "./edgeLabels";
+import type { GraphEdgeHover } from "./EdgeHoverCard";
 import type { GraphHover } from "./NodeHoverCard";
 import { bindGraphNetworkEvents } from "./networkEvents";
 import type { GraphChangeType } from "./state";
@@ -33,6 +29,7 @@ type Props = {
   onOpenSource(nodeId: string): void;
   onOpenRelationshipSource(edgeId: string): void;
   onHover(change: GraphHover | null): void;
+  onHoverEdge(change: GraphEdgeHover | null): void;
   onClear(): void;
   onStabilized(): void;
 };
@@ -306,13 +303,12 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     onOpenSource,
     onOpenRelationshipSource,
     onHover,
+    onHoverEdge,
     onClear,
     onStabilized
   }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const networkRef = useRef<Network | null>(null);
-    const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
-    const labeledEdgeRef = useRef<string | null>(null);
     const physicsRunningRef = useRef(physicsRunning);
     physicsRunningRef.current = physicsRunning;
     const initialViewRef = useRef<{ position: { x: number; y: number }; scale: number } | null>(null);
@@ -338,24 +334,6 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         "--vscode-descriptionForeground",
         cssColor("--muted-foreground", "#60728b")
       ),
-      [themeRevision]
-    );
-    const edgeLabelColor = useMemo(
-      () => cssColor(
-        "--vscode-editor-foreground",
-        cssColor("--foreground", "#eef5ff")
-      ),
-      [themeRevision]
-    );
-    const edgeLabelBackground = useMemo(
-      () => cssColor(
-        "--vscode-editor-background",
-        cssColor("--background", "#08111f")
-      ),
-      [themeRevision]
-    );
-    const edgeLabelFont = useMemo(
-      () => cssColor("--vscode-font-family", "system-ui"),
       [themeRevision]
     );
     const comparisonPalette = useMemo<ComparisonPalette>(() => {
@@ -476,8 +454,6 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           id: edge.id,
           from: edge.source,
           to: edge.target,
-          label: "",
-          title: formatGraphEdgeLabel(edge),
           dashes: appearance.dashes,
           width: appearance.width,
           ...(comparisonMode ? { smooth: comparisonEdgeCurve(edge.change) } : {}),
@@ -485,17 +461,6 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         };
       })
     ), [comparisonMode, model.edges]);
-    const graphEdgeById = useMemo(
-      () => new Map(model.edges.map((edge) => [edge.id, edge])),
-      [model.edges]
-    );
-    const handleHoverEdge = useCallback((edgeId: string) => {
-      setHoveredEdgeId(edgeId);
-    }, []);
-    const handleBlurEdge = useCallback(() => {
-      setHoveredEdgeId(null);
-    }, []);
-
     useEffect(() => {
       const container = containerRef.current;
       if (!container) return;
@@ -512,8 +477,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         onOpenSource,
         onOpenRelationshipSource,
         onHover,
-        onHoverEdge: handleHoverEdge,
-        onBlurEdge: handleBlurEdge,
+        onHoverEdge,
         onClear
       });
       network.once("stabilizationIterationsDone", () => {
@@ -531,11 +495,10 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       edgeData,
       nodeData,
       comparisonMode,
-      handleBlurEdge,
-      handleHoverEdge,
       onClear,
       onFocus,
       onHover,
+      onHoverEdge,
       onOpenSource,
       onOpenRelationshipSource,
       onStabilized
@@ -677,40 +640,6 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       nodeData
     ]);
 
-    useEffect(() => {
-      const previousEdgeId = labeledEdgeRef.current;
-      const updates: Edge[] = [];
-      if (previousEdgeId && previousEdgeId !== hoveredEdgeId && edgeData.get(previousEdgeId)) {
-        updates.push({ id: previousEdgeId, label: "" });
-      }
-      if (hoveredEdgeId) {
-        const edge = graphEdgeById.get(hoveredEdgeId);
-        if (edge && shouldShowGraphEdgeLabel(edge, { hoveredEdgeId })) {
-          updates.push({
-            id: edge.id,
-            label: formatGraphEdgeLabel(edge),
-            font: {
-              align: "middle",
-              face: edgeLabelFont,
-              size: 11,
-              color: edgeLabelColor,
-              background: edgeLabelBackground,
-              strokeWidth: 0
-            }
-          });
-        }
-      }
-      if (updates.length > 0) edgeData.update(updates);
-      labeledEdgeRef.current = hoveredEdgeId;
-    }, [
-      edgeData,
-      edgeLabelBackground,
-      edgeLabelColor,
-      edgeLabelFont,
-      graphEdgeById,
-      hoveredEdgeId,
-    ]);
-
     useImperativeHandle(ref, () => ({
       fit() {
         networkRef.current?.fit({
@@ -741,6 +670,10 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         className="compass-canvas"
         role="region"
         aria-label="Interactive Compass code graph"
+        onMouseLeave={() => {
+          onHover(null);
+          onHoverEdge(null);
+        }}
       />
     );
   }
