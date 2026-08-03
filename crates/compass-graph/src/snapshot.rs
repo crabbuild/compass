@@ -33,7 +33,6 @@ pub const GRAPH_SNAPSHOT_MAX_OBJECTS: usize = 100_000;
 pub const GRAPH_SNAPSHOT_MAX_ITEMS: usize = 5_000_000;
 pub const GRAPH_SNAPSHOT_MAX_FANOUT: usize = 32;
 pub const GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES: usize = 128;
-const GRAPH_SNAPSHOT_LEAF_OVERHEAD_BYTES: usize = 512;
 const TREE_ZSTD_MAGIC: &[u8; 5] = b"CSTZ1";
 const TREE_ZSTD_HEADER_BYTES: usize = TREE_ZSTD_MAGIC.len() + std::mem::size_of::<u32>();
 
@@ -281,6 +280,30 @@ pub struct PreparedGraphSnapshot {
     pub bytes_written: u64,
 }
 
+/// Immutable index roots prepared independently from the canonical graph JSON
+/// publication. Keeping this intermediate typed allows callers to stream and
+/// hash `graph.json` concurrently, then bind its exact digest into the final
+/// snapshot manifest without serializing the complete graph a second time.
+pub struct PreparedGraphSnapshotContent {
+    snapshot_id: String,
+    node_count: u64,
+    edge_count: u64,
+    roots: Vec<SnapshotRoot>,
+    stats: ObjectStats,
+}
+
+/// Borrowed canonical serialization view shared by `graph.json` publication,
+/// identity verification, and store manifests. Record order is imposed through
+/// reference vectors, so producing the view does not clone the graph records.
+#[derive(Serialize)]
+pub struct CanonicalGraphDocument<'a> {
+    directed: bool,
+    multigraph: bool,
+    graph: GraphMetadata,
+    nodes: Vec<&'a NodeRecord>,
+    links: Vec<&'a EdgeRecord>,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct GraphSnapshotGcStats {
     pub retained_manifests: u64,
@@ -481,11 +504,25 @@ impl GraphSnapshotBuilder {
         store: &S,
         canonical: &GraphDocument,
     ) -> Result<PreparedGraphSnapshot, SnapshotError> {
+        let (graph_digest, graph_bytes) = digest_canonical_graph(canonical, false)?;
+        let content = self.prepare_content(store, canonical)?;
+        self.finish_content(store, content, graph_digest, graph_bytes)
+    }
+
+    /// Prepare content-addressed logical indexes without constructing the
+    /// manifest. This is the expensive backend-neutral phase and is safe to
+    /// run concurrently with canonical `graph.json` publication.
+    pub fn prepare_content<S: Store + ?Sized>(
+        &self,
+        store: &S,
+        canonical: &GraphDocument,
+    ) -> Result<PreparedGraphSnapshotContent, SnapshotError> {
         validate_code_graph(canonical)
             .map_err(|error| SnapshotError::Corrupt(format!("graph validation failed: {error}")))?;
-        let (graph_digest, graph_bytes) = digest_canonical_graph(canonical, false)?;
-        let snapshot_id = snapshot_identity(canonical)?;
-        let indexes = build_indexes(canonical)?;
+        let (snapshot_id, indexes) =
+            rayon::join(|| snapshot_identity(canonical), || build_indexes(canonical));
+        let snapshot_id = snapshot_id?;
+        let indexes = indexes?;
         let mut writer = ObjectWriter::new(store)?;
         let mut roots = Vec::with_capacity(IndexKind::ALL.len());
         for index in IndexKind::ALL {
@@ -499,29 +536,58 @@ impl GraphSnapshotBuilder {
                 entry_count: entries.len() as u64,
             });
         }
-        let manifest = GraphSnapshotManifest {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
-            canonical_encoding: GRAPH_SNAPSHOT_CANONICAL_ENCODING_V1.to_owned(),
+        let stats = writer.finish()?;
+        Ok(PreparedGraphSnapshotContent {
             snapshot_id,
-            graph_schema: CODE_GRAPH_SCHEMA_V1.to_owned(),
-            graph_digest,
-            graph_bytes,
             node_count: canonical.nodes.len() as u64,
             edge_count: canonical.links.len() as u64,
             roots,
+            stats,
+        })
+    }
+
+    /// Bind prepared index content to the digest of the exact compact
+    /// canonical JSON bytes and publish the immutable manifest.
+    pub fn finish_content<S: Store + ?Sized>(
+        &self,
+        store: &S,
+        content: PreparedGraphSnapshotContent,
+        graph_digest: String,
+        graph_bytes: u64,
+    ) -> Result<PreparedGraphSnapshot, SnapshotError> {
+        let manifest = GraphSnapshotManifest {
+            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+            canonical_encoding: GRAPH_SNAPSHOT_CANONICAL_ENCODING_V1.to_owned(),
+            snapshot_id: content.snapshot_id,
+            graph_schema: CODE_GRAPH_SCHEMA_V1.to_owned(),
+            graph_digest,
+            graph_bytes,
+            node_count: content.node_count,
+            edge_count: content.edge_count,
+            roots: content.roots,
         };
         manifest.validate()?;
         let manifest_bytes = encode_json(&manifest)?;
         let manifest_digest = hex_digest(&manifest_bytes);
+        let mut writer = ObjectWriter::new(store)?;
         put_immutable_object(&mut writer, manifest_key(&manifest_digest)?, manifest_bytes)?;
         let stats = writer.finish()?;
         Ok(PreparedGraphSnapshot {
             manifest,
             manifest_digest,
-            new_objects: stats.new_objects,
-            reused_objects: stats.reused_objects,
-            write_transactions: stats.write_transactions,
-            bytes_written: stats.bytes_written,
+            new_objects: content.stats.new_objects.saturating_add(stats.new_objects),
+            reused_objects: content
+                .stats
+                .reused_objects
+                .saturating_add(stats.reused_objects),
+            write_transactions: content
+                .stats
+                .write_transactions
+                .saturating_add(stats.write_transactions),
+            bytes_written: content
+                .stats
+                .bytes_written
+                .saturating_add(stats.bytes_written),
         })
     }
 
@@ -555,7 +621,12 @@ pub fn prepare_graph_snapshot<S: Store + ?Sized>(
 /// comparing source-order JSON bytes, so equivalent graph records have one
 /// stable identity across adapters.
 pub fn canonical_graph_json(graph: &GraphDocument) -> Result<Vec<u8>, SnapshotError> {
-    encode_json(&canonical_document(graph)?)
+    encode_json(&canonical_graph_document(graph))
+}
+
+#[must_use]
+pub fn canonical_graph_document(graph: &GraphDocument) -> CanonicalGraphDocument<'_> {
+    canonical_graph_document_with_generation(graph, false)
 }
 
 pub fn activate_graph_snapshot<S: Store + ?Sized>(
@@ -1272,28 +1343,6 @@ pub fn encode_graph_index_key(
     encode_key_segments(&all).map_err(SnapshotError::from)
 }
 
-fn canonical_document(graph: &GraphDocument) -> Result<GraphDocument, SnapshotError> {
-    canonical_document_owned(graph.clone())
-}
-
-fn canonical_document_owned(mut canonical: GraphDocument) -> Result<GraphDocument, SnapshotError> {
-    canonical
-        .nodes
-        .sort_by(|left, right| left.id.cmp(&right.id));
-    canonical.links.sort_by(|left, right| {
-        left.id
-            .cmp(&right.id)
-            .then_with(|| left.source.cmp(&right.source))
-            .then_with(|| left.target.cmp(&right.target))
-            .then_with(|| left.kind.as_str().cmp(right.kind.as_str()))
-    });
-    canonical
-        .graph
-        .files
-        .sort_by(|left, right| left.id.cmp(&right.id));
-    Ok(canonical)
-}
-
 fn snapshot_identity(graph: &GraphDocument) -> Result<String, SnapshotError> {
     digest_canonical_graph(graph, true).map(|(digest, _)| digest)
 }
@@ -1302,15 +1351,16 @@ fn digest_canonical_graph(
     graph: &GraphDocument,
     clear_generation: bool,
 ) -> Result<(String, u64), SnapshotError> {
-    #[derive(Serialize)]
-    struct CanonicalDocument<'a> {
-        directed: bool,
-        multigraph: bool,
-        graph: GraphMetadata,
-        nodes: Vec<&'a NodeRecord>,
-        links: Vec<&'a EdgeRecord>,
-    }
+    digest_json(
+        &canonical_graph_document_with_generation(graph, clear_generation),
+        MAX_GRAPH_BYTES,
+    )
+}
 
+fn canonical_graph_document_with_generation(
+    graph: &GraphDocument,
+    clear_generation: bool,
+) -> CanonicalGraphDocument<'_> {
     let mut metadata = graph.graph.clone();
     metadata.files.sort_by(|left, right| left.id.cmp(&right.id));
     if clear_generation {
@@ -1326,14 +1376,13 @@ fn digest_canonical_graph(
             .then_with(|| left.target.cmp(&right.target))
             .then_with(|| left.kind.as_str().cmp(right.kind.as_str()))
     });
-    let canonical = CanonicalDocument {
+    CanonicalGraphDocument {
         directed: graph.directed,
         multigraph: graph.multigraph,
         graph: metadata,
         nodes,
         links,
-    };
-    digest_json(&canonical, MAX_GRAPH_BYTES)
+    }
 }
 
 fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError> {
@@ -1652,51 +1701,14 @@ fn build_index_tree<S: Store + ?Sized>(
     entries: &BTreeMap<Vec<u8>, Vec<u8>>,
 ) -> Result<String, SnapshotError> {
     let mut leaves = Vec::new();
-    let mut current = Vec::new();
-    let mut current_encoded_bytes = 0_usize;
+    let mut current = Vec::with_capacity(GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES);
     for (key, value) in entries {
-        let entry = TreeEntry {
+        current.push(TreeEntry {
             key: key.clone(),
             value: value.clone(),
-        };
-        let encoded_entry_bytes = rmp_serde::to_vec_named(&entry)
-            .map_err(|error| SnapshotError::Encode(error.to_string()))?
-            .len();
-        if !current.is_empty()
-            && (current.len() == GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES
-                || current_encoded_bytes
-                    .saturating_add(encoded_entry_bytes)
-                    .saturating_add(GRAPH_SNAPSHOT_LEAF_OVERHEAD_BYTES)
-                    > MAX_VALUE_BYTES)
-        {
-            let first_key = current
-                .first()
-                .map(|entry: &TreeEntry| entry.key.clone())
-                .ok_or_else(|| SnapshotError::Corrupt("empty leaf".to_owned()))?;
-            let object = TreeObject::Leaf {
-                schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
-                index,
-                entries: std::mem::take(&mut current),
-            };
-            let digest = put_tree_object(writer, &object)?;
-            leaves.push(TreeChild { first_key, digest });
-            current_encoded_bytes = 0;
-        }
-        current_encoded_bytes = current_encoded_bytes.saturating_add(encoded_entry_bytes);
-        current.push(entry);
-        if current.len() == 1
-            && encode_tree_object(&TreeObject::Leaf {
-                schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
-                index,
-                entries: current.clone(),
-            })?
-            .len()
-                > MAX_VALUE_BYTES
-        {
-            return Err(SnapshotError::Limit(format!(
-                "{} index entry exceeds the maximum immutable object size",
-                index.as_str()
-            )));
+        });
+        if current.len() == GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES {
+            put_leaf_entries(writer, index, std::mem::take(&mut current), &mut leaves)?;
         }
     }
     if current.is_empty() {
@@ -1710,21 +1722,50 @@ fn build_index_tree<S: Store + ?Sized>(
             digest: put_tree_object(writer, &object)?,
         });
     } else {
-        let first_key = current
-            .first()
-            .map(|entry| entry.key.clone())
-            .ok_or_else(|| SnapshotError::Corrupt("empty leaf".to_owned()))?;
-        let object = TreeObject::Leaf {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
-            index,
-            entries: current,
-        };
-        leaves.push(TreeChild {
-            first_key,
-            digest: put_tree_object(writer, &object)?,
-        });
+        put_leaf_entries(writer, index, current, &mut leaves)?;
     }
     build_branch_levels(writer, index, leaves)
+}
+
+fn put_leaf_entries<S: Store + ?Sized>(
+    writer: &mut ObjectWriter<'_, S>,
+    index: IndexKind,
+    mut entries: Vec<TreeEntry>,
+    leaves: &mut Vec<TreeChild>,
+) -> Result<(), SnapshotError> {
+    let first_key = entries
+        .first()
+        .map(|entry| entry.key.clone())
+        .ok_or_else(|| SnapshotError::Corrupt("empty leaf".to_owned()))?;
+    let object = TreeObject::Leaf {
+        schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+        index,
+        entries,
+    };
+    let raw = encode_tree_object_raw(&object)?;
+    if raw.len() <= MAX_VALUE_BYTES {
+        leaves.push(TreeChild {
+            first_key,
+            digest: put_encoded_tree_object(writer, encode_tree_object_raw_bytes(raw)?)?,
+        });
+        return Ok(());
+    }
+    let TreeObject::Leaf {
+        entries: oversized, ..
+    } = object
+    else {
+        return Err(SnapshotError::Corrupt("expected a leaf object".to_owned()));
+    };
+    entries = oversized;
+    if entries.len() == 1 {
+        return Err(SnapshotError::Limit(format!(
+            "{} index entry exceeds the maximum immutable object size",
+            index.as_str()
+        )));
+    }
+    let right = entries.split_off(entries.len() / 2);
+    put_leaf_entries(writer, index, entries, leaves)?;
+    put_leaf_entries(writer, index, right, leaves)
 }
 
 fn build_branch_levels<S: Store + ?Sized>(
@@ -1771,9 +1812,15 @@ fn put_tree_object<S: Store + ?Sized>(
             "immutable tree object exceeds the store value limit".to_owned(),
         ));
     }
+    put_encoded_tree_object(writer, bytes)
+}
+
+fn put_encoded_tree_object<S: Store + ?Sized>(
+    writer: &mut ObjectWriter<'_, S>,
+    bytes: Vec<u8>,
+) -> Result<String, SnapshotError> {
     let digest = hex_digest(&bytes);
-    let key = object_key(&digest)?;
-    writer.put(key, bytes)?;
+    writer.put(object_key(&digest)?, bytes)?;
     Ok(digest)
 }
 
@@ -2118,13 +2165,20 @@ fn digest_json<T: Serialize>(value: &T, maximum: usize) -> Result<(String, u64),
 }
 
 fn encode_tree_object(value: &TreeObject) -> Result<Vec<u8>, SnapshotError> {
-    let raw =
-        rmp_serde::to_vec_named(value).map_err(|error| SnapshotError::Encode(error.to_string()))?;
+    let raw = encode_tree_object_raw(value)?;
     if raw.len() > MAX_VALUE_BYTES {
         return Err(SnapshotError::Limit(
             "uncompressed tree object exceeds the store value limit".to_owned(),
         ));
     }
+    encode_tree_object_raw_bytes(raw)
+}
+
+fn encode_tree_object_raw(value: &TreeObject) -> Result<Vec<u8>, SnapshotError> {
+    rmp_serde::to_vec_named(value).map_err(|error| SnapshotError::Encode(error.to_string()))
+}
+
+fn encode_tree_object_raw_bytes(raw: Vec<u8>) -> Result<Vec<u8>, SnapshotError> {
     let compressed = zstd::stream::encode_all(raw.as_slice(), 1)
         .map_err(|error| SnapshotError::Encode(format!("tree compression failed: {error}")))?;
     if compressed.len().saturating_add(TREE_ZSTD_HEADER_BYTES) >= raw.len() {

@@ -7,14 +7,15 @@ use std::time::{Duration, Instant};
 use ahash::{AHashMap, AHashSet};
 use compass_files::{
     BuildGuard, BuildScope, Cache, CacheKind, CacheOptions, DetectOptions, Detection, IgnorePolicy,
-    Manifest, ManifestKind, detect, write_json_atomic, write_text_atomic,
+    Manifest, ManifestKind, detect, write_json_atomic, write_json_atomic_with_digest,
+    write_text_atomic,
 };
 use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
     GRAPH_SNAPSHOT_MAX_OBJECTS, GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder,
     GraphSnapshotGcStats, InventoryEvidence, PublicationOmissions, PublicationOutcome,
     SnapshotSelector, build_owned_with_tiebreaker as build_document, canonical_edge_kind,
-    canonical_raw_edge_sites, cluster, dedupe_nodes, extraction_from_v1,
+    canonical_graph_document, canonical_raw_edge_sites, cluster, dedupe_nodes, extraction_from_v1,
     garbage_collect_graph_snapshots, graph_insights, graph_snapshot_needs_gc,
     label_communities_by_hub, normalize_document_v1_with_evidence_best_effort_owned,
     normalize_document_v1_with_inventory_best_effort,
@@ -1321,14 +1322,16 @@ fn build_graph_inner(
         let published_nodes = published.document.nodes.len();
         let published_edges = published.document.links.len();
         let store_metrics = if options.graph_storage.publishes_store() {
-            let (graph_result, store_result) = rayon::join(
-                || write_json_atomic(output_dir.join("graph.json"), &published.document, false),
-                || ensure_store_snapshot_from_canonical(&output_dir, &published.document),
-            );
-            graph_result?;
-            Some(store_result?)
+            Some(publish_graph_and_store_from_canonical(
+                &output_dir,
+                &published.document,
+            )?)
         } else {
-            write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
+            write_json_atomic(
+                output_dir.join("graph.json"),
+                &canonical_graph_document(&published.document),
+                false,
+            )?;
             None
         };
         if let Some(metrics) = store_metrics {
@@ -1754,14 +1757,16 @@ fn build_graph_inner(
     let omissions = published.omissions;
     let serialization_started = Instant::now();
     let store_metrics = if options.graph_storage.publishes_store() {
-        let (graph_result, store_result) = rayon::join(
-            || write_json_atomic(output_dir.join("graph.json"), &published.document, false),
-            || ensure_store_snapshot_from_canonical(&output_dir, &published.document),
-        );
-        graph_result?;
-        Some(store_result?)
+        Some(publish_graph_and_store_from_canonical(
+            &output_dir,
+            &published.document,
+        )?)
     } else {
-        write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
+        write_json_atomic(
+            output_dir.join("graph.json"),
+            &canonical_graph_document(&published.document),
+            false,
+        )?;
         None
     };
     if let Some(metrics) = store_metrics {
@@ -2193,7 +2198,7 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<StorePublishMetrics, CoreE
     finish_store_snapshot(output_dir, &store, &builder, prepared)
 }
 
-fn ensure_store_snapshot_from_canonical(
+fn publish_graph_and_store_from_canonical(
     output_dir: &Path,
     graph: &V1GraphDocument,
 ) -> Result<StorePublishMetrics, CoreError> {
@@ -2206,7 +2211,14 @@ fn ensure_store_snapshot_from_canonical(
     let graph_path = output_dir.join("graph.json");
     let store = SqliteStore::open(local_sqlite_store_path(&graph_path))?;
     let builder = GraphSnapshotBuilder::new();
-    let prepared = builder.prepare_canonical(&store, graph)?;
+    let canonical = canonical_graph_document(graph);
+    let (graph_receipt, content) = rayon::join(
+        || write_json_atomic_with_digest(&graph_path, &canonical),
+        || builder.prepare_content(&store, graph),
+    );
+    let graph_receipt = graph_receipt?;
+    let prepared =
+        builder.finish_content(&store, content?, graph_receipt.sha256, graph_receipt.bytes)?;
     finish_store_snapshot(output_dir, &store, &builder, prepared)
 }
 

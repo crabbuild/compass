@@ -154,8 +154,8 @@ fn snapshot_is_deterministic_and_reuses_immutable_objects() -> Result<(), Box<dy
     assert!(matches!(oversized.validate(), Err(SnapshotError::Limit(_))));
     assert_eq!(second.new_objects, 0);
     assert!(second.reused_objects > 0);
-    assert_eq!(first.write_transactions, 1);
-    assert_eq!(second.write_transactions, 1);
+    assert_eq!(first.write_transactions, 2);
+    assert_eq!(second.write_transactions, 2);
     assert!(first.bytes_written > 0);
     assert_eq!(second.bytes_written, 0);
     let selector = builder.activate(&store, &first)?;
