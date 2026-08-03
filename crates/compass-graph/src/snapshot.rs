@@ -1057,20 +1057,29 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 IndexKind::Terms,
                 &[posting_prefix.as_bytes(), b"node_prefix"],
             )?;
+            // `max_items` on the public request bounds candidate node IDs, not
+            // posting chunks. Scan the complete bounded prefix range and keep
+            // only the smallest canonical IDs; otherwise a vocabulary-heavy
+            // prefix can consume the bound before later matching terms are
+            // visited and diverge from the JSON accelerator.
+            let posting_limits = SnapshotReadLimits {
+                max_items: GRAPH_SNAPSHOT_MAX_ITEMS,
+                ..limits
+            };
             let (values, mut posting_truncated) =
-                self.scan_values_bounded(IndexKind::Terms, Some(&prefix), limits)?;
+                self.scan_values_bounded(IndexKind::Terms, Some(&prefix), posting_limits)?;
             let mut ids = BTreeSet::new();
-            'postings: for value in values {
+            for value in values {
                 let posting = decode_json::<TermPostingChunk>(&value)?;
                 if !posting.term.starts_with(&normalized) {
                     continue;
                 }
                 for node_id in posting.node_ids {
-                    if ids.len() == limits.max_items && !ids.contains(&node_id) {
-                        posting_truncated = true;
-                        break 'postings;
-                    }
                     ids.insert(node_id);
+                    if ids.len() > limits.max_items {
+                        ids.pop_last();
+                        posting_truncated = true;
+                    }
                 }
             }
             truncated |= posting_truncated;

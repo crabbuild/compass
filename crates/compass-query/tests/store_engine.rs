@@ -79,10 +79,9 @@ fn bounded_search_candidate_order_matches_store_postings() -> Result<(), Box<dyn
         .ok_or("fixture graph has no template node")?;
     for ordinal in 0..600 {
         let mut node = template.clone();
-        node.id = format!("n:bulk:{ordinal:04}");
-        node.name = format!("symbol_{ordinal:04}_{}", "padding".repeat(ordinal % 7));
+        node.id = format!("n:bulk:{:04}", 599 - ordinal);
+        node.name = format!("dja{ordinal:04}_{}", "padding".repeat(ordinal % 7));
         node.qualified_name = format!("Bulk.{}", node.name);
-        node.language = Some("django".to_owned());
         graph.nodes.push(node);
     }
     fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
@@ -95,7 +94,7 @@ fn bounded_search_candidate_order_matches_store_postings() -> Result<(), Box<dyn
     limits.max_candidates = 10;
     limits.max_nodes = 100;
     let request = SearchRequest {
-        query: "django".to_owned(),
+        query: "dja".to_owned(),
         limits,
     };
     assert_eq!(
