@@ -22,8 +22,8 @@ use compass_query::{
     open_with_engine, open_with_store,
 };
 use compass_store::{
-    Entry, Key, KeyRange, NamespaceId, PartitionKey, ScanCursor, ScanLimits, ScanPage, Store,
-    StoreCapabilities, StoreError, WriteCondition,
+    Entry, ImmutableBatchOutcome, ImmutableWrite, Key, KeyRange, NamespaceId, PartitionKey,
+    ScanCursor, ScanLimits, ScanPage, Store, StoreCapabilities, StoreError, WriteCondition,
 };
 use compass_store_redb::RedbStore;
 use serde::Serialize;
@@ -39,6 +39,8 @@ struct Counters {
     get_requests: AtomicU64,
     scan_requests: AtomicU64,
     put_requests: AtomicU64,
+    batch_requests: AtomicU64,
+    write_transactions: AtomicU64,
     delete_requests: AtomicU64,
     bytes_read: AtomicU64,
     bytes_written: AtomicU64,
@@ -50,6 +52,8 @@ struct CounterSnapshot {
     get_requests: u64,
     scan_requests: u64,
     put_requests: u64,
+    batch_requests: u64,
+    write_transactions: u64,
     delete_requests: u64,
     bytes_read: u64,
     bytes_written: u64,
@@ -61,6 +65,8 @@ impl Counters {
             get_requests: self.get_requests.load(Ordering::Relaxed),
             scan_requests: self.scan_requests.load(Ordering::Relaxed),
             put_requests: self.put_requests.load(Ordering::Relaxed),
+            batch_requests: self.batch_requests.load(Ordering::Relaxed),
+            write_transactions: self.write_transactions.load(Ordering::Relaxed),
             delete_requests: self.delete_requests.load(Ordering::Relaxed),
             bytes_read: self.bytes_read.load(Ordering::Relaxed),
             bytes_written: self.bytes_written.load(Ordering::Relaxed),
@@ -133,7 +139,13 @@ impl<S: Store> Store for CountingStore<S> {
         self.counters
             .bytes_written
             .fetch_add(value.len() as u64, Ordering::Relaxed);
-        self.inner.put(namespace, partition, key, value, condition)
+        let entry = self
+            .inner
+            .put(namespace, partition, key, value, condition)?;
+        self.counters
+            .write_transactions
+            .fetch_add(1, Ordering::Relaxed);
+        Ok(entry)
     }
 
     fn delete(
@@ -147,6 +159,25 @@ impl<S: Store> Store for CountingStore<S> {
             .delete_requests
             .fetch_add(1, Ordering::Relaxed);
         self.inner.delete(namespace, partition, key, condition)
+    }
+
+    fn put_immutable_batch(
+        &self,
+        namespace: &NamespaceId,
+        writes: &[ImmutableWrite],
+    ) -> Result<ImmutableBatchOutcome, StoreError> {
+        self.counters.batch_requests.fetch_add(1, Ordering::Relaxed);
+        self.counters
+            .put_requests
+            .fetch_add(writes.len() as u64, Ordering::Relaxed);
+        let outcome = self.inner.put_immutable_batch(namespace, writes)?;
+        self.counters
+            .write_transactions
+            .fetch_add(outcome.transactions, Ordering::Relaxed);
+        self.counters
+            .bytes_written
+            .fetch_add(outcome.bytes_written, Ordering::Relaxed);
+        Ok(outcome)
     }
 }
 
@@ -416,6 +447,10 @@ fn subtract(before: CounterSnapshot, after: CounterSnapshot) -> CounterSnapshot 
         get_requests: after.get_requests.saturating_sub(before.get_requests),
         scan_requests: after.scan_requests.saturating_sub(before.scan_requests),
         put_requests: after.put_requests.saturating_sub(before.put_requests),
+        batch_requests: after.batch_requests.saturating_sub(before.batch_requests),
+        write_transactions: after
+            .write_transactions
+            .saturating_sub(before.write_transactions),
         delete_requests: after.delete_requests.saturating_sub(before.delete_requests),
         bytes_read: after.bytes_read.saturating_sub(before.bytes_read),
         bytes_written: after.bytes_written.saturating_sub(before.bytes_written),

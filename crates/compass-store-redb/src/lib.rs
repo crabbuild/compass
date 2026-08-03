@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use compass_store::{
-    Entry, Key, KeyRange, MAX_KEY_BYTES, MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES,
+    Entry, ImmutableBatchOutcome, ImmutableWrite, Key, KeyRange, MAX_IMMUTABLE_BATCH_BYTES,
+    MAX_IMMUTABLE_BATCH_ITEMS, MAX_KEY_BYTES, MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES,
     NamespaceId, PartitionKey, ScanCursor, ScanLimits, ScanPage, Store, StoreCapabilities,
     StoreError, VersionToken, WriteCondition,
 };
@@ -367,6 +368,9 @@ impl Store for RedbStore {
             ordered_partition_scans: true,
             conditional_single_key_writes: true,
             durable_acknowledgements: true,
+            max_immutable_batch_items: MAX_IMMUTABLE_BATCH_ITEMS,
+            max_immutable_batch_bytes: MAX_IMMUTABLE_BATCH_BYTES,
+            atomic_immutable_batches: true,
         }
     }
 
@@ -510,6 +514,88 @@ impl Store for RedbStore {
             Ok(deleted.is_some())
         })
     }
+
+    fn put_immutable_batch(
+        &self,
+        namespace: &NamespaceId,
+        writes: &[ImmutableWrite],
+    ) -> Result<ImmutableBatchOutcome, StoreError> {
+        validate_immutable_batch(writes)?;
+        self.with_write(|transaction| {
+            let mut table = transaction
+                .open_table(REDB_KV)
+                .map_err(|error| backend_error("open_kv", error))?;
+            let mut outcome = ImmutableBatchOutcome {
+                entries: Vec::with_capacity(writes.len()),
+                transactions: 1,
+                ..ImmutableBatchOutcome::default()
+            };
+            for write in writes {
+                let address = (
+                    namespace.as_bytes(),
+                    write.partition().as_bytes(),
+                    write.key().as_bytes(),
+                );
+                let existing = table
+                    .get(address)
+                    .map_err(|error| backend_error("get_for_immutable_batch", error))?
+                    .as_ref()
+                    .map(|entry| decode_entry(write.key().as_bytes(), entry.value()))
+                    .transpose()
+                    .map_err(|error| StoreError::Corrupt(format!("redb value: {error}")))?;
+                if let Some(existing) = existing {
+                    if existing.digest != digest(write.value()) || existing.value != write.value() {
+                        return Err(StoreError::Conflict);
+                    }
+                    outcome.reused_entries = outcome.reused_entries.saturating_add(1);
+                    outcome.entries.push(existing);
+                    continue;
+                }
+                let digest = digest(write.value());
+                let envelope = encode_value(1, digest, write.value());
+                table
+                    .insert(address, envelope.as_slice())
+                    .map_err(|error| backend_error("put_immutable_batch", error))?;
+                outcome.new_entries = outcome.new_entries.saturating_add(1);
+                outcome.bytes_written = outcome
+                    .bytes_written
+                    .saturating_add(write.value().len() as u64);
+                outcome.entries.push(Entry {
+                    key: write.key().as_bytes().to_vec(),
+                    value: write.value().to_vec(),
+                    version: VersionToken::from_raw(1),
+                    digest,
+                });
+            }
+            Ok(outcome)
+        })
+    }
+}
+
+fn validate_immutable_batch(writes: &[ImmutableWrite]) -> Result<(), StoreError> {
+    if writes.is_empty() || writes.len() > MAX_IMMUTABLE_BATCH_ITEMS {
+        return Err(StoreError::InvalidBatch(format!(
+            "item count must be between 1 and {MAX_IMMUTABLE_BATCH_ITEMS}"
+        )));
+    }
+    let mut bytes = 0_usize;
+    let mut addresses = std::collections::BTreeSet::new();
+    for write in writes {
+        validate_value(write.value())?;
+        bytes = bytes.saturating_add(write.value().len());
+        if bytes > MAX_IMMUTABLE_BATCH_BYTES {
+            return Err(StoreError::ValueTooLarge {
+                actual: bytes,
+                maximum: MAX_IMMUTABLE_BATCH_BYTES,
+            });
+        }
+        if !addresses.insert((write.partition().as_bytes(), write.key().as_bytes())) {
+            return Err(StoreError::InvalidBatch(
+                "batch contains a duplicate address".to_owned(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_value(value: &[u8]) -> Result<(), StoreError> {

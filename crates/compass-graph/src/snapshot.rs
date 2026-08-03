@@ -14,8 +14,9 @@ use compass_model::code_graph::{
 };
 use compass_model::validate_code_graph;
 use compass_store::{
-    Key, MAX_GRAPH_BYTES, MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES, NamespaceId,
-    PartitionKey, Store, StoreError, WriteCondition, decode_key_segments, encode_key_segments,
+    ImmutableWrite, Key, MAX_GRAPH_BYTES, MAX_IMMUTABLE_BATCH_BYTES, MAX_IMMUTABLE_BATCH_ITEMS,
+    MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES, NamespaceId, PartitionKey, Store, StoreError,
+    WriteCondition, decode_key_segments, encode_key_segments,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -31,6 +32,7 @@ pub const GRAPH_SNAPSHOT_MAX_OBJECTS: usize = 100_000;
 pub const GRAPH_SNAPSHOT_MAX_ITEMS: usize = 5_000_000;
 pub const GRAPH_SNAPSHOT_MAX_FANOUT: usize = 32;
 pub const GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES: usize = 128;
+const GRAPH_SNAPSHOT_LEAF_OVERHEAD_BYTES: usize = 512;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
@@ -272,12 +274,118 @@ pub struct PreparedGraphSnapshot {
     pub manifest_digest: String,
     pub new_objects: u64,
     pub reused_objects: u64,
+    pub write_transactions: u64,
+    pub bytes_written: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
 struct ObjectStats {
     new_objects: u64,
     reused_objects: u64,
+    write_transactions: u64,
+    bytes_written: u64,
+}
+
+struct ObjectWriter<'a, S: Store + ?Sized> {
+    store: &'a S,
+    namespace: NamespaceId,
+    partition: PartitionKey,
+    pending: Vec<ImmutableWrite>,
+    pending_bytes: usize,
+    max_items: usize,
+    max_bytes: usize,
+    stats: ObjectStats,
+}
+
+impl<'a, S: Store + ?Sized> ObjectWriter<'a, S> {
+    fn new(store: &'a S) -> Result<Self, SnapshotError> {
+        let capabilities = store.capabilities();
+        let max_items = capabilities
+            .max_immutable_batch_items
+            .min(MAX_IMMUTABLE_BATCH_ITEMS);
+        let max_bytes = capabilities
+            .max_immutable_batch_bytes
+            .min(MAX_IMMUTABLE_BATCH_BYTES);
+        if max_items == 0 || max_bytes == 0 {
+            return Err(SnapshotError::Unsupported(
+                "store does not advertise bounded immutable batches".to_owned(),
+            ));
+        }
+        Ok(Self {
+            store,
+            namespace: NamespaceId::graph(),
+            partition: object_partition()?,
+            pending: Vec::with_capacity(max_items),
+            pending_bytes: 0,
+            max_items,
+            max_bytes,
+            stats: ObjectStats::default(),
+        })
+    }
+
+    fn put(&mut self, key: Key, bytes: Vec<u8>) -> Result<(), SnapshotError> {
+        if bytes.len() > MAX_VALUE_BYTES {
+            return Err(SnapshotError::Limit(
+                "immutable object exceeds the store value limit".to_owned(),
+            ));
+        }
+        if !self.pending.is_empty()
+            && (self.pending.len() == self.max_items
+                || self.pending_bytes.saturating_add(bytes.len()) > self.max_bytes)
+        {
+            self.flush()?;
+        }
+        if bytes.len() > self.max_bytes {
+            return Err(SnapshotError::Limit(
+                "immutable object exceeds the adapter batch byte limit".to_owned(),
+            ));
+        }
+        self.pending_bytes = self.pending_bytes.saturating_add(bytes.len());
+        self.pending
+            .push(ImmutableWrite::new(self.partition.clone(), key, bytes)?);
+        if self.pending.len() == self.max_items || self.pending_bytes == self.max_bytes {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), SnapshotError> {
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+        let outcome = self
+            .store
+            .put_immutable_batch(&self.namespace, &self.pending)?;
+        if outcome.entries.len() != self.pending.len()
+            || outcome.new_entries.saturating_add(outcome.reused_entries)
+                != self.pending.len() as u64
+        {
+            return Err(SnapshotError::Corrupt(
+                "store returned an incomplete immutable batch outcome".to_owned(),
+            ));
+        }
+        self.stats.new_objects = self.stats.new_objects.saturating_add(outcome.new_entries);
+        self.stats.reused_objects = self
+            .stats
+            .reused_objects
+            .saturating_add(outcome.reused_entries);
+        self.stats.write_transactions = self
+            .stats
+            .write_transactions
+            .saturating_add(outcome.transactions);
+        self.stats.bytes_written = self
+            .stats
+            .bytes_written
+            .saturating_add(outcome.bytes_written);
+        self.pending.clear();
+        self.pending_bytes = 0;
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<ObjectStats, SnapshotError> {
+        self.flush()?;
+        Ok(self.stats)
+    }
 }
 
 type SnapshotIndexes = BTreeMap<IndexKind, BTreeMap<Vec<u8>, Vec<u8>>>;
@@ -351,13 +459,13 @@ impl GraphSnapshotBuilder {
         let graph_digest = hex_digest(&graph_bytes);
         let snapshot_id = snapshot_identity(&canonical)?;
         let indexes = build_indexes(&canonical)?;
-        let mut stats = ObjectStats::default();
+        let mut writer = ObjectWriter::new(store)?;
         let mut roots = Vec::with_capacity(IndexKind::ALL.len());
         for index in IndexKind::ALL {
             let entries = indexes.get(&index).ok_or_else(|| {
                 SnapshotError::Corrupt(format!("missing {} index", index.as_str()))
             })?;
-            let digest = build_index_tree(store, index, entries, &mut stats)?;
+            let digest = build_index_tree(&mut writer, index, entries)?;
             roots.push(SnapshotRoot {
                 index,
                 digest,
@@ -378,17 +486,15 @@ impl GraphSnapshotBuilder {
         manifest.validate()?;
         let manifest_bytes = encode_json(&manifest)?;
         let manifest_digest = hex_digest(&manifest_bytes);
-        put_immutable_object(
-            store,
-            &manifest_key(&manifest_digest)?,
-            &manifest_bytes,
-            &mut stats,
-        )?;
+        put_immutable_object(&mut writer, manifest_key(&manifest_digest)?, manifest_bytes)?;
+        let stats = writer.finish()?;
         Ok(PreparedGraphSnapshot {
             manifest,
             manifest_digest,
             new_objects: stats.new_objects,
             reused_objects: stats.reused_objects,
+            write_transactions: stats.write_transactions,
+            bytes_written: stats.bytes_written,
         })
     }
 
@@ -1027,28 +1133,27 @@ fn insert_json<T: Serialize>(
 }
 
 fn build_index_tree<S: Store + ?Sized>(
-    store: &S,
+    writer: &mut ObjectWriter<'_, S>,
     index: IndexKind,
     entries: &BTreeMap<Vec<u8>, Vec<u8>>,
-    stats: &mut ObjectStats,
 ) -> Result<String, SnapshotError> {
     let mut leaves = Vec::new();
     let mut current = Vec::new();
+    let mut current_encoded_bytes = 0_usize;
     for (key, value) in entries {
         let entry = TreeEntry {
             key: key.clone(),
             value: value.clone(),
         };
-        let mut candidate = current.clone();
-        candidate.push(entry);
-        let object = TreeObject::Leaf {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
-            index,
-            entries: candidate.clone(),
-        };
-        if (candidate.len() > GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES
-            || encode_tree_object(&object)?.len() > MAX_VALUE_BYTES)
-            && !current.is_empty()
+        let encoded_entry_bytes = rmp_serde::to_vec_named(&entry)
+            .map_err(|error| SnapshotError::Encode(error.to_string()))?
+            .len();
+        if !current.is_empty()
+            && (current.len() == GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES
+                || current_encoded_bytes
+                    .saturating_add(encoded_entry_bytes)
+                    .saturating_add(GRAPH_SNAPSHOT_LEAF_OVERHEAD_BYTES)
+                    > MAX_VALUE_BYTES)
         {
             let first_key = current
                 .first()
@@ -1059,13 +1164,12 @@ fn build_index_tree<S: Store + ?Sized>(
                 index,
                 entries: std::mem::take(&mut current),
             };
-            let digest = put_tree_object(store, &object, stats)?;
+            let digest = put_tree_object(writer, &object)?;
             leaves.push(TreeChild { first_key, digest });
+            current_encoded_bytes = 0;
         }
-        current.push(TreeEntry {
-            key: key.clone(),
-            value: value.clone(),
-        });
+        current_encoded_bytes = current_encoded_bytes.saturating_add(encoded_entry_bytes);
+        current.push(entry);
         if current.len() == 1
             && encode_tree_object(&TreeObject::Leaf {
                 schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
@@ -1089,7 +1193,7 @@ fn build_index_tree<S: Store + ?Sized>(
         };
         leaves.push(TreeChild {
             first_key: Vec::new(),
-            digest: put_tree_object(store, &object, stats)?,
+            digest: put_tree_object(writer, &object)?,
         });
     } else {
         let first_key = current
@@ -1103,17 +1207,16 @@ fn build_index_tree<S: Store + ?Sized>(
         };
         leaves.push(TreeChild {
             first_key,
-            digest: put_tree_object(store, &object, stats)?,
+            digest: put_tree_object(writer, &object)?,
         });
     }
-    build_branch_levels(store, index, leaves, stats)
+    build_branch_levels(writer, index, leaves)
 }
 
 fn build_branch_levels<S: Store + ?Sized>(
-    store: &S,
+    writer: &mut ObjectWriter<'_, S>,
     index: IndexKind,
     children: Vec<TreeChild>,
-    stats: &mut ObjectStats,
 ) -> Result<String, SnapshotError> {
     if children.is_empty() {
         return Err(SnapshotError::Corrupt(
@@ -1138,16 +1241,15 @@ fn build_branch_levels<S: Store + ?Sized>(
             index,
             children: chunk,
         };
-        let digest = put_tree_object(store, &object, stats)?;
+        let digest = put_tree_object(writer, &object)?;
         parents.push(TreeChild { first_key, digest });
     }
-    build_branch_levels(store, index, parents, stats)
+    build_branch_levels(writer, index, parents)
 }
 
 fn put_tree_object<S: Store + ?Sized>(
-    store: &S,
+    writer: &mut ObjectWriter<'_, S>,
     object: &TreeObject,
-    stats: &mut ObjectStats,
 ) -> Result<String, SnapshotError> {
     let bytes = encode_tree_object(object)?;
     if bytes.len() > MAX_VALUE_BYTES {
@@ -1157,48 +1259,21 @@ fn put_tree_object<S: Store + ?Sized>(
     }
     let digest = hex_digest(&bytes);
     let key = object_key(&digest)?;
-    let namespace = NamespaceId::graph();
-    let partition = object_partition()?;
-    if let Some(existing) = store.get(&namespace, &partition, &key)? {
-        if existing.value != bytes || existing.digest != parse_digest(&digest)? {
-            return Err(SnapshotError::Corrupt(
-                "content-addressed tree object changed at an existing key".to_owned(),
-            ));
-        }
-        stats.reused_objects = stats.reused_objects.saturating_add(1);
-    } else {
-        store.put_immutable(&namespace, &partition, &key, &bytes)?;
-        stats.new_objects = stats.new_objects.saturating_add(1);
-    }
+    writer.put(key, bytes)?;
     Ok(digest)
 }
 
 fn put_immutable_object<S: Store + ?Sized>(
-    store: &S,
-    key: &Key,
-    bytes: &[u8],
-    stats: &mut ObjectStats,
+    writer: &mut ObjectWriter<'_, S>,
+    key: Key,
+    bytes: Vec<u8>,
 ) -> Result<(), SnapshotError> {
     if bytes.len() > MAX_VALUE_BYTES {
         return Err(SnapshotError::Limit(
             "snapshot manifest exceeds the store value limit".to_owned(),
         ));
     }
-    let namespace = NamespaceId::graph();
-    let partition = object_partition()?;
-    let expected = digest_bytes(bytes);
-    if let Some(existing) = store.get(&namespace, &partition, key)? {
-        if existing.value != bytes || existing.digest != expected {
-            return Err(SnapshotError::Corrupt(
-                "content-addressed manifest changed at an existing key".to_owned(),
-            ));
-        }
-        stats.reused_objects = stats.reused_objects.saturating_add(1);
-    } else {
-        store.put_immutable(&namespace, &partition, key, bytes)?;
-        stats.new_objects = stats.new_objects.saturating_add(1);
-    }
-    Ok(())
+    writer.put(key, bytes)
 }
 
 fn lookup_tree<S: Store + ?Sized>(

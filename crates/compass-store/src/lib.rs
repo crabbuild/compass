@@ -13,7 +13,7 @@
 //! can preserve these same request, ordering, and error semantics without
 //! forcing an executor into this contract crate.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -38,6 +38,8 @@ pub const MAX_KEY_BYTES: usize = 1_024;
 pub const MAX_VALUE_BYTES: usize = 256 * 1024;
 pub const MAX_SCAN_ITEMS: usize = 1_000;
 pub const MAX_SCAN_BYTES: usize = 1024 * 1024;
+pub const MAX_IMMUTABLE_BATCH_ITEMS: usize = 256;
+pub const MAX_IMMUTABLE_BATCH_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_GRAPH_BYTES: usize = 1024 * 1024 * 1024;
 const GRAPH_NAMESPACE: &[u8] = b"compass.current.graph.v1";
 const CATALOG_PARTITION: &[u8] = b"catalog";
@@ -82,6 +84,8 @@ pub enum StoreError {
     ValueTooLarge { actual: usize, maximum: usize },
     #[error("scan limit is invalid: {0}")]
     InvalidScanLimit(String),
+    #[error("immutable batch is invalid: {0}")]
+    InvalidBatch(String),
     #[error("store format is unsupported or corrupt: {0}")]
     InvalidFormat(String),
     #[error("store value is corrupt: {0}")]
@@ -276,6 +280,66 @@ pub struct StoreCapabilities {
     pub ordered_partition_scans: bool,
     pub conditional_single_key_writes: bool,
     pub durable_acknowledgements: bool,
+    /// Maximum number of immutable values accepted by one bounded request.
+    pub max_immutable_batch_items: usize,
+    /// Maximum aggregate value bytes accepted by one bounded request.
+    pub max_immutable_batch_bytes: usize,
+    /// Whether a failed batch leaves every address in its pre-request state.
+    pub atomic_immutable_batches: bool,
+}
+
+/// One namespace-scoped immutable write in a bounded backend-neutral batch.
+///
+/// A batch may span partitions but never namespaces. Values are owned so an
+/// adapter can prepare a native transaction without borrowing graph-builder
+/// scratch buffers. Immutable batches are idempotent: retrying an acknowledged
+/// or partially completed non-atomic batch must return the same values.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ImmutableWrite {
+    partition: PartitionKey,
+    key: Key,
+    value: Vec<u8>,
+}
+
+impl ImmutableWrite {
+    pub fn new(
+        partition: PartitionKey,
+        key: Key,
+        value: impl Into<Vec<u8>>,
+    ) -> Result<Self, StoreError> {
+        let value = value.into();
+        validate_value(&value)?;
+        Ok(Self {
+            partition,
+            key,
+            value,
+        })
+    }
+
+    #[must_use]
+    pub fn partition(&self) -> &PartitionKey {
+        &self.partition
+    }
+
+    #[must_use]
+    pub fn key(&self) -> &Key {
+        &self.key
+    }
+
+    #[must_use]
+    pub fn value(&self) -> &[u8] {
+        &self.value
+    }
+}
+
+/// Exact work performed by one immutable batch request.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ImmutableBatchOutcome {
+    pub entries: Vec<Entry>,
+    pub new_entries: u64,
+    pub reused_entries: u64,
+    pub transactions: u64,
+    pub bytes_written: u64,
 }
 
 pub trait Store {
@@ -322,6 +386,65 @@ pub trait Store {
         condition: WriteCondition,
     ) -> Result<bool, StoreError>;
 
+    /// Publish a bounded group of immutable values.
+    ///
+    /// The portable guarantee is ordered, idempotent processing rather than
+    /// cross-address atomicity. Adapters advertise stronger all-or-nothing
+    /// behavior through [`StoreCapabilities::atomic_immutable_batches`]. This
+    /// keeps remote backends portable while allowing embedded databases to
+    /// collapse thousands of durable commits into bounded transactions.
+    fn put_immutable_batch(
+        &self,
+        namespace: &NamespaceId,
+        writes: &[ImmutableWrite],
+    ) -> Result<ImmutableBatchOutcome, StoreError> {
+        validate_immutable_batch(writes)?;
+        let mut outcome = ImmutableBatchOutcome::default();
+        for write in writes {
+            let expected_digest = digest(write.value());
+            let entry = if let Some(existing) =
+                self.get(namespace, write.partition(), write.key())?
+            {
+                if existing.digest != expected_digest || existing.value != write.value() {
+                    return Err(StoreError::Conflict);
+                }
+                outcome.reused_entries = outcome.reused_entries.saturating_add(1);
+                existing
+            } else {
+                match self.put(
+                    namespace,
+                    write.partition(),
+                    write.key(),
+                    write.value(),
+                    WriteCondition::Missing,
+                ) {
+                    Ok(entry) => {
+                        outcome.new_entries = outcome.new_entries.saturating_add(1);
+                        outcome.bytes_written = outcome
+                            .bytes_written
+                            .saturating_add(write.value().len() as u64);
+                        entry
+                    }
+                    Err(StoreError::Conflict) => {
+                        let Some(existing) = self.get(namespace, write.partition(), write.key())?
+                        else {
+                            return Err(StoreError::Conflict);
+                        };
+                        if existing.digest != expected_digest || existing.value != write.value() {
+                            return Err(StoreError::Conflict);
+                        }
+                        outcome.reused_entries = outcome.reused_entries.saturating_add(1);
+                        existing
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
+            outcome.entries.push(entry);
+        }
+        outcome.transactions = writes.len() as u64;
+        Ok(outcome)
+    }
+
     fn put_immutable(
         &self,
         namespace: &NamespaceId,
@@ -329,26 +452,12 @@ pub trait Store {
         key: &Key,
         value: &[u8],
     ) -> Result<Entry, StoreError> {
-        if let Some(existing) = self.get(namespace, partition, key)? {
-            if existing.digest == digest(value) {
-                return Ok(existing);
-            }
-            return Err(StoreError::Conflict);
-        }
-        match self.put(namespace, partition, key, value, WriteCondition::Missing) {
-            Ok(entry) => Ok(entry),
-            Err(StoreError::Conflict) => {
-                let Some(existing) = self.get(namespace, partition, key)? else {
-                    return Err(StoreError::Conflict);
-                };
-                if existing.digest == digest(value) {
-                    Ok(existing)
-                } else {
-                    Err(StoreError::Conflict)
-                }
-            }
-            Err(error) => Err(error),
-        }
+        let write = ImmutableWrite::new(partition.clone(), key.clone(), value.to_vec())?;
+        self.put_immutable_batch(namespace, std::slice::from_ref(&write))?
+            .entries
+            .into_iter()
+            .next()
+            .ok_or_else(|| StoreError::Corrupt("immutable batch omitted its result".to_owned()))
     }
 }
 
@@ -406,6 +515,13 @@ impl<'a, S: Store + ?Sized> ScopedStore<'a, S> {
     ) -> Result<Entry, StoreError> {
         self.store
             .put_immutable(&self.namespace, partition, key, value)
+    }
+
+    pub fn put_immutable_batch(
+        &self,
+        writes: &[ImmutableWrite],
+    ) -> Result<ImmutableBatchOutcome, StoreError> {
+        self.store.put_immutable_batch(&self.namespace, writes)
     }
 }
 
@@ -1009,6 +1125,9 @@ impl Store for MemoryStore {
             ordered_partition_scans: true,
             conditional_single_key_writes: true,
             durable_acknowledgements: false,
+            max_immutable_batch_items: MAX_IMMUTABLE_BATCH_ITEMS,
+            max_immutable_batch_bytes: MAX_IMMUTABLE_BATCH_BYTES,
+            atomic_immutable_batches: true,
         }
     }
 
@@ -1172,6 +1291,71 @@ impl Store for MemoryStore {
         }
         Ok(records.remove(&address).is_some())
     }
+
+    fn put_immutable_batch(
+        &self,
+        namespace: &NamespaceId,
+        writes: &[ImmutableWrite],
+    ) -> Result<ImmutableBatchOutcome, StoreError> {
+        validate_immutable_batch(writes)?;
+        let mut records = self.lock()?;
+        for write in writes {
+            let address = (
+                namespace.as_bytes().to_vec(),
+                write.partition().as_bytes().to_vec(),
+                write.key().as_bytes().to_vec(),
+            );
+            if let Some(existing) = records.get(&address)
+                && (existing.digest != digest(write.value()) || existing.value != write.value())
+            {
+                return Err(StoreError::Conflict);
+            }
+        }
+
+        let mut outcome = ImmutableBatchOutcome {
+            entries: Vec::with_capacity(writes.len()),
+            transactions: 1,
+            ..ImmutableBatchOutcome::default()
+        };
+        for write in writes {
+            let address = (
+                namespace.as_bytes().to_vec(),
+                write.partition().as_bytes().to_vec(),
+                write.key().as_bytes().to_vec(),
+            );
+            if let Some(existing) = records.get(&address) {
+                outcome.reused_entries = outcome.reused_entries.saturating_add(1);
+                outcome.entries.push(Entry {
+                    key: write.key().as_bytes().to_vec(),
+                    value: existing.value.clone(),
+                    version: existing.version,
+                    digest: existing.digest,
+                });
+                continue;
+            }
+            let digest = digest(write.value());
+            let entry = Entry {
+                key: write.key().as_bytes().to_vec(),
+                value: write.value().to_vec(),
+                version: VersionToken(1),
+                digest,
+            };
+            records.insert(
+                address,
+                MemoryRecord {
+                    value: entry.value.clone(),
+                    digest,
+                    version: entry.version,
+                },
+            );
+            outcome.new_entries = outcome.new_entries.saturating_add(1);
+            outcome.bytes_written = outcome
+                .bytes_written
+                .saturating_add(write.value().len() as u64);
+            outcome.entries.push(entry);
+        }
+        Ok(outcome)
+    }
 }
 
 impl Store for SqliteStore {
@@ -1181,6 +1365,9 @@ impl Store for SqliteStore {
             ordered_partition_scans: true,
             conditional_single_key_writes: true,
             durable_acknowledgements: true,
+            max_immutable_batch_items: MAX_IMMUTABLE_BATCH_ITEMS,
+            max_immutable_batch_bytes: MAX_IMMUTABLE_BATCH_BYTES,
+            atomic_immutable_batches: true,
         }
     }
 
@@ -1380,6 +1567,100 @@ impl Store for SqliteStore {
         transaction.commit()?;
         Ok(deleted != 0)
     }
+
+    fn put_immutable_batch(
+        &self,
+        namespace: &NamespaceId,
+        writes: &[ImmutableWrite],
+    ) -> Result<ImmutableBatchOutcome, StoreError> {
+        if self.read_only {
+            return Err(StoreError::Unsupported(
+                "cannot write through a read-only store".to_owned(),
+            ));
+        }
+        validate_immutable_batch(writes)?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut outcome = ImmutableBatchOutcome {
+            entries: Vec::with_capacity(writes.len()),
+            transactions: 1,
+            ..ImmutableBatchOutcome::default()
+        };
+        for write in writes {
+            let expected_digest = digest(write.value());
+            let inserted = transaction.execute(
+                "INSERT INTO kv(namespace, partition, key, value, digest, version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1)
+                 ON CONFLICT(namespace, partition, key) DO NOTHING",
+                params![
+                    namespace.as_bytes(),
+                    write.partition().as_bytes(),
+                    write.key().as_bytes(),
+                    write.value(),
+                    expected_digest.as_slice(),
+                ],
+            )?;
+            if inserted == 1 {
+                outcome.new_entries = outcome.new_entries.saturating_add(1);
+                outcome.bytes_written = outcome
+                    .bytes_written
+                    .saturating_add(write.value().len() as u64);
+                outcome.entries.push(Entry {
+                    key: write.key().as_bytes().to_vec(),
+                    value: write.value().to_vec(),
+                    version: VersionToken(1),
+                    digest: expected_digest,
+                });
+                continue;
+            }
+            let existing = transaction.query_row(
+                "SELECT key, value, digest, version FROM kv
+                 WHERE namespace = ?1 AND partition = ?2 AND key = ?3",
+                params![
+                    namespace.as_bytes(),
+                    write.partition().as_bytes(),
+                    write.key().as_bytes(),
+                ],
+                read_entry,
+            )?;
+            if existing.digest != expected_digest || existing.value != write.value() {
+                return Err(StoreError::Conflict);
+            }
+            outcome.reused_entries = outcome.reused_entries.saturating_add(1);
+            outcome.entries.push(existing);
+        }
+        transaction.commit()?;
+        Ok(outcome)
+    }
+}
+
+fn validate_immutable_batch(writes: &[ImmutableWrite]) -> Result<(), StoreError> {
+    if writes.is_empty() || writes.len() > MAX_IMMUTABLE_BATCH_ITEMS {
+        return Err(StoreError::InvalidBatch(format!(
+            "immutable batch item count must be between 1 and {MAX_IMMUTABLE_BATCH_ITEMS}"
+        )));
+    }
+    let mut value_bytes = 0_usize;
+    let mut addresses = BTreeSet::new();
+    for write in writes {
+        validate_value(write.value())?;
+        value_bytes = value_bytes.saturating_add(write.value().len());
+        if value_bytes > MAX_IMMUTABLE_BATCH_BYTES {
+            return Err(StoreError::ValueTooLarge {
+                actual: value_bytes,
+                maximum: MAX_IMMUTABLE_BATCH_BYTES,
+            });
+        }
+        if !addresses.insert((
+            write.partition().as_bytes().to_vec(),
+            write.key().as_bytes().to_vec(),
+        )) {
+            return Err(StoreError::InvalidBatch(
+                "immutable batch contains a duplicate address".to_owned(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_component(
@@ -1730,7 +2011,8 @@ fn validate_manifest(manifest: &SnapshotManifest) -> Result<(), StoreError> {
 #[cfg(feature = "test-support")]
 pub mod test_support {
     use super::{
-        Key, KeyRange, NamespaceId, PartitionKey, ScanLimits, Store, StoreError, WriteCondition,
+        ImmutableWrite, Key, KeyRange, NamespaceId, PartitionKey, ScanLimits, Store, StoreError,
+        WriteCondition,
     };
 
     pub fn assert_store_contract<S: Store + ?Sized>(store: &S) -> Result<(), StoreError> {
@@ -1838,6 +2120,27 @@ pub mod test_support {
             ));
         }
 
+        let batch = [
+            ImmutableWrite::new(partition.clone(), Key::new(b"batch/one")?, b"one".to_vec())?,
+            ImmutableWrite::new(
+                other_partition.clone(),
+                Key::new(b"batch/two")?,
+                b"two".to_vec(),
+            )?,
+        ];
+        let first_batch = store.put_immutable_batch(&first_namespace, &batch)?;
+        let second_batch = store.put_immutable_batch(&first_namespace, &batch)?;
+        if first_batch.entries.len() != batch.len()
+            || first_batch.new_entries != batch.len() as u64
+            || second_batch.reused_entries != batch.len() as u64
+            || first_batch.transactions == 0
+            || second_batch.transactions == 0
+        {
+            return Err(StoreError::Corrupt(
+                "adapter violated bounded immutable-batch semantics".to_owned(),
+            ));
+        }
+
         let deleted_version = store
             .get(&first_namespace, &partition, &first)?
             .ok_or_else(|| StoreError::Corrupt("updated value is missing".to_owned()))?
@@ -1867,9 +2170,9 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use super::{
-        GRAPH_SCHEMA_V1, Key, KeyRange, MemoryStore, NamespaceId, PartitionKey, ScanLimits,
-        SqliteStore, Store, StoreError, VersionToken, WriteCondition, decode_key_segments,
-        encode_key_segments,
+        GRAPH_SCHEMA_V1, ImmutableWrite, Key, KeyRange, MemoryStore, NamespaceId, PartitionKey,
+        ScanLimits, SqliteStore, Store, StoreError, VersionToken, WriteCondition,
+        decode_key_segments, encode_key_segments,
     };
 
     #[test]
@@ -1948,6 +2251,65 @@ mod tests {
             store.put_immutable(&namespace, &partition, &immutable, b"different"),
             Err(StoreError::Conflict)
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn sqlite_batches_immutable_objects_in_one_atomic_transaction() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let store = SqliteStore::open(directory.path().join("store.sqlite3"))?;
+        let namespace = NamespaceId::new("tenant")?;
+        let partition = PartitionKey::new("objects")?;
+        let writes = (0..super::MAX_IMMUTABLE_BATCH_ITEMS)
+            .map(|index| {
+                ImmutableWrite::new(
+                    partition.clone(),
+                    Key::new(format!("object-{index:04}"))?,
+                    format!("value-{index}").into_bytes(),
+                )
+            })
+            .collect::<Result<Vec<_>, StoreError>>()?;
+
+        let first = store.put_immutable_batch(&namespace, &writes)?;
+        assert_eq!(first.entries.len(), writes.len());
+        assert_eq!(first.new_entries, writes.len() as u64);
+        assert_eq!(first.reused_entries, 0);
+        assert_eq!(first.transactions, 1);
+        assert_eq!(
+            first.bytes_written,
+            writes
+                .iter()
+                .map(|write| write.value().len() as u64)
+                .sum::<u64>()
+        );
+
+        let second = store.put_immutable_batch(&namespace, &writes)?;
+        assert_eq!(second.new_entries, 0);
+        assert_eq!(second.reused_entries, writes.len() as u64);
+        assert_eq!(second.transactions, 1);
+        assert_eq!(second.bytes_written, 0);
+
+        let conflicting = vec![
+            ImmutableWrite::new(
+                partition.clone(),
+                Key::new("must-not-commit")?,
+                b"new".to_vec(),
+            )?,
+            ImmutableWrite::new(
+                partition.clone(),
+                writes[0].key().clone(),
+                b"different".to_vec(),
+            )?,
+        ];
+        assert!(matches!(
+            store.put_immutable_batch(&namespace, &conflicting),
+            Err(StoreError::Conflict)
+        ));
+        assert!(
+            store
+                .get(&namespace, &partition, &Key::new("must-not-commit")?)?
+                .is_none()
+        );
         Ok(())
     }
 
