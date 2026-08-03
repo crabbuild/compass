@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphViewModel } from "../contracts/graph";
 import { VisNetworkCanvas } from "./VisNetworkCanvas";
 
-const mock = vi.hoisted(() => ({ dataSets: [] as Array<Array<Record<string, unknown>>> }));
+const mock = vi.hoisted(() => ({
+  dataSets: [] as Array<Array<Record<string, unknown>>>,
+  networks: 0
+}));
 
 vi.mock("vis-network/standalone", () => ({
   DataSet: class {
@@ -28,13 +31,20 @@ vi.mock("vis-network/standalone", () => ({
     }
   },
   Network: class {
+    constructor() {
+      mock.networks += 1;
+    }
+
     setOptions() {}
     stopSimulation() {}
     startSimulation() {}
+    fit() {}
     destroy() {}
     on() {}
     once() {}
     getConnectedNodes() { return []; }
+    getViewPosition() { return { x: 0, y: 0 }; }
+    getScale() { return 1; }
     unselectAll() {}
     selectNodes() {}
     focus() {}
@@ -63,6 +73,7 @@ const model: GraphViewModel = {
 describe("VisNetworkCanvas hover lifecycle", () => {
   beforeEach(() => {
     mock.dataSets.length = 0;
+    mock.networks = 0;
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
       addEventListener: vi.fn(),
@@ -119,5 +130,72 @@ describe("VisNetworkCanvas hover lifecycle", () => {
     }));
     expect(onHover).toHaveBeenCalledWith(null);
     expect(onHoverEdge).toHaveBeenCalledWith(null);
+  });
+
+  it("does not rebuild the network when event callback identities change", () => {
+    const firstCallbacks = {
+      onFocus: vi.fn(),
+      onOpenSource: vi.fn(),
+      onOpenRelationshipSource: vi.fn(),
+      onHover: vi.fn(),
+      onHoverEdge: vi.fn(),
+      onClear: vi.fn(),
+      onStabilized: vi.fn()
+    };
+    const { rerender } = render(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      {...firstCallbacks}
+    />);
+
+    rerender(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={vi.fn()}
+    />);
+
+    expect(mock.networks).toBe(1);
+  });
+
+  it("seeds explicit positions for a paused graph", () => {
+    render(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      initialPositions={new Map([
+        ["caller", { x: -40, y: 12 }],
+        ["callee", { x: 48, y: 12 }]
+      ])}
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={vi.fn()}
+    />);
+
+    expect(mock.dataSets[0]?.[0]).toMatchObject({
+      id: "caller",
+      x: -40,
+      y: 12
+    });
   });
 });

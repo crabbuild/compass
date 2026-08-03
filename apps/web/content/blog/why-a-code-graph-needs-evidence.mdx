@@ -1,0 +1,124 @@
+---
+title: "Why a code graph needs evidence"
+description: "A practical guide to reading direction, anchors, confidence, and provenance when a graph result needs to survive review."
+author: Compass team
+date: 2026-08-03
+tags:
+  - design
+  - provenance
+  - guide
+draft: false
+---
+
+When a repository becomes difficult to navigate, the first temptation is to draw a larger picture. But a picture is only useful when the relationships in it can be inspected.
+
+That distinction is the design constraint behind Compass. The graph is not an ornament that sits above the source. It is a compact, queryable record of claims made about the source—and every claim needs a route back to the code that produced it.
+
+<EvidenceAnatomyDiagram />
+
+## Direction is part of the meaning
+
+`CALLS` and `IMPORTS_FROM` are not interchangeable lines. They describe different relationships, with different questions on either side of the edge. Compass keeps that direction visible so a path can be followed instead of guessed.
+
+```bash
+compass query --cql \
+  'MATCH (caller:Function)-[:CALLS]->(target)
+   RETURN caller.id, target.id
+   ORDER BY caller.id
+   LIMIT 20'
+```
+
+Read the result from left to right: the caller reaches the target. If your question is “what reaches this changed function?”, reverse the pattern or use a bounded traversal that names the affected side. A visual line without a direction cannot answer both questions safely.
+
+## An edge has more than two endpoints
+
+The node IDs tell you *what* is connected. The relationship attributes explain *why you should believe it* and *where to look next*.
+
+```json
+{
+  "source": "checkout::handler",
+  "target": "payments::charge",
+  "relation": "CALLS",
+  "confidence": "EXTRACTED",
+  "context": "call",
+  "relationship_site": {
+    "source_file": "src/checkout.rs",
+    "source_location": "L42"
+  },
+  "target_anchor": {
+    "source_file": "src/payments.rs",
+    "source_location": "L42"
+  }
+}
+```
+
+The exact attribute names can grow as the graph contract evolves, but the rule stays stable: preserve identity, direction, multiplicity, source anchors, and provenance together. That lets a hover card stay small while still offering a direct route to the relevant code.
+
+## Anchors make a result actionable
+
+A node or edge should point back to the source range that produced it. A reviewer can move from “CheckoutHandler reaches charge” to the call expression and target declaration without searching the whole repository.
+
+In a viewer, show the high-signal fields first:
+
+1. symbol label and stable ID;
+2. relationship type and direction;
+3. source file and line for the relationship site;
+4. target anchor and provenance when the reader asks for more.
+
+This progressive disclosure keeps a graph readable. It also prevents the common failure mode where a tooltip contains so much metadata that the path itself disappears.
+
+## Provenance is not decoration
+
+Some relationships are direct. Others are inferred, unresolved, or ambiguous. A graph that hides those distinctions looks tidy but makes risky decisions easier.
+
+<EvidenceStates />
+
+Provenance describes how a fact entered the graph: parser evidence, cross-file resolution, an explicit provider, or a state that still needs inspection. It is not a promise that an edge is “probably right.” An unresolved edge can be useful when it tells you what remains unknown; turning it into a confident-looking line makes the graph harder to review.
+
+## A worked example: review a payment change
+
+Imagine a change to `src/payments.rs`. The review question is not “show me the entire application.” It is “which source-backed paths could reach this change, and where should I verify them?”
+
+Start with a bounded query:
+
+```bash
+compass query --cql \
+  'MATCH (changed)-[:CALLS|IMPORTS_FROM*1..5]-(affected)
+   WHERE changed.source_file = "src/payments.rs"
+   RETURN changed.id, affected.id, affected.source_file
+   ORDER BY affected.id
+   LIMIT 100' \
+  --format json
+```
+
+Then review the result in four passes:
+
+| Pass | Check | Why it matters |
+| --- | --- | --- |
+| 01 | Direction | A caller path and a callee path answer different review questions. |
+| 02 | Relation | `CALLS`, `IMPORTS_FROM`, and other relations carry different semantics. |
+| 03 | Anchor | Open the relationship site, not just the file that contains the target. |
+| 04 | Confidence | Treat inferred, ambiguous, and unresolved links as prompts for verification. |
+
+If the result is too large, lower the depth or row limit. If it stops at a boundary, keep that limit in the review note. A limit is part of the evidence because it says how far the answer was allowed to travel.
+
+## Guide: inspect one edge in under a minute
+
+<GuideSteps
+  items={[
+    { index: '01', title: 'Pin the source', text: 'Record the caller, target, relation, and the exact relationship site shown by the viewer or query result.' },
+    { index: '02', title: 'Open both anchors', text: 'Read the call expression and the target declaration. Confirm that the symbols mean what their labels suggest.' },
+    { index: '03', title: 'Check the confidence', text: 'Extracted is direct parser evidence; inferred is a resolution decision; ambiguous and unresolved need a human check.' },
+    { index: '04', title: 'Save the question', text: 'Keep the bounded CompassQL query with the change so another person can reproduce the same path.' },
+  ]}
+/>
+
+This is intentionally a small loop. It produces a claim that can be challenged, a source location that can be opened, and a query that can be repeated.
+
+## Smaller answers are safer answers
+
+The goal is not to model every possible meaning in a repository. It is to make the next useful question easier to ask—and easier to challenge. A graph with fewer, inspectable claims is more valuable than a graph with more opaque connections.
+
+That is the standard we use for Compass: preserve what the source can support, keep uncertainty visible, and make every useful edge a doorway back to the code.
+
+[Explore the CompassQL contract](/docs/COMPASSQL) or [read the launch guide](/blog/meet-compass) for the workflow behind the model.
