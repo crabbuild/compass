@@ -283,6 +283,31 @@ fn sqlite_adapter_round_trips_the_same_snapshot_contract() -> Result<(), Box<dyn
 }
 
 #[test]
+fn exact_leaf_fanout_does_not_publish_an_empty_trailing_child() -> Result<(), Box<dyn Error>> {
+    const EXACT_LEAF_FANOUT: usize = 128;
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut document = graph();
+    for index in document.nodes.len()..EXACT_LEAF_FANOUT {
+        document.nodes.push(node(&format!("node-{index:04}")));
+    }
+
+    let prepared = builder.prepare(&store, &document)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+
+    assert_eq!(
+        reader.nodes(limits(document.nodes.len()))?.len(),
+        document.nodes.len()
+    );
+    assert_eq!(
+        reader.export_json_bytes()?,
+        canonical_graph_json(&document)?
+    );
+    Ok(())
+}
+
+#[test]
 fn graph_snapshot_gc_retains_only_selected_immutable_trees() -> Result<(), Box<dyn Error>> {
     let store = MemoryStore::default();
     let builder = GraphSnapshotBuilder::new();

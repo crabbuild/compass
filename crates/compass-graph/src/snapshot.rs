@@ -1720,7 +1720,7 @@ fn build_index_tree<S: Store + ?Sized>(
             put_leaf_entries(writer, index, std::mem::take(&mut current), &mut leaves)?;
         }
     }
-    if current.is_empty() {
+    if current.is_empty() && leaves.is_empty() {
         let object = TreeObject::Leaf {
             schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
             index,
@@ -1730,7 +1730,7 @@ fn build_index_tree<S: Store + ?Sized>(
             first_key: Vec::new(),
             digest: put_tree_object(writer, &object)?,
         });
-    } else {
+    } else if !current.is_empty() {
         put_leaf_entries(writer, index, current, &mut leaves)?;
     }
     build_branch_levels(writer, index, leaves)
@@ -2047,11 +2047,18 @@ fn validate_tree_object(object: &TreeObject, expected: IndexKind) -> Result<(), 
                     "tree branch has an invalid child count".to_owned(),
                 ));
             }
-            for pair in children.windows(2) {
+            for (position, pair) in children.windows(2).enumerate() {
                 if pair[0].first_key >= pair[1].first_key {
-                    return Err(SnapshotError::Corrupt(
-                        "tree branch separators are not strictly ordered".to_owned(),
-                    ));
+                    return Err(SnapshotError::Corrupt(format!(
+                        "{} tree branch separators are not strictly ordered at children {} and {} (lengths {} and {}, digests {} and {})",
+                        expected.as_str(),
+                        position,
+                        position.saturating_add(1),
+                        pair[0].first_key.len(),
+                        pair[1].first_key.len(),
+                        hex_digest(&pair[0].first_key),
+                        hex_digest(&pair[1].first_key),
+                    )));
                 }
             }
             for child in children {
