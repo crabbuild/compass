@@ -543,10 +543,14 @@ impl CodeQueryEngine {
             })?;
             let mut statement = connection
                 .prepare(
+                    // Candidate truncation is part of the public response. Keep
+                    // it backend-neutral: immutable term postings and the JSON
+                    // FTS accelerator both select IDs in canonical byte order;
+                    // common Rust ranking is applied only after that bound.
                     "SELECT n.id
                          FROM node_fts JOIN nodes n ON n.id = node_fts.node_id
                          WHERE node_fts MATCH ?1
-                         ORDER BY bm25(node_fts), n.id
+                         ORDER BY n.id
                          LIMIT ?2",
                 )
                 .map_err(sql_error)?;

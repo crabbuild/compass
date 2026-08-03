@@ -66,6 +66,46 @@ fn default_query_open_uses_json_and_explicit_store_matches_results()
 }
 
 #[test]
+fn bounded_search_candidate_order_matches_store_postings() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let template = graph
+        .nodes
+        .first()
+        .cloned()
+        .ok_or("fixture graph has no template node")?;
+    for ordinal in 0..600 {
+        let mut node = template.clone();
+        node.id = format!("n:bulk:{ordinal:04}");
+        node.name = format!("symbol_{ordinal:04}_{}", "padding".repeat(ordinal % 7));
+        node.qualified_name = format!("Bulk.{}", node.name);
+        node.language = Some("django".to_owned());
+        graph.nodes.push(node);
+    }
+    fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
+
+    let cache = directory.path().join("cache");
+    let store = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
+    let json = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
+    let mut limits = CodeQueryLimits::default();
+    limits.max_candidates = 10;
+    limits.max_nodes = 100;
+    let request = SearchRequest {
+        query: "django".to_owned(),
+        limits,
+    };
+    assert_eq!(
+        serde_json::to_value(store.search(request.clone())?)?,
+        serde_json::to_value(json.search(request)?)?,
+    );
+    Ok(())
+}
+
+#[test]
 fn store_engine_reads_the_immutable_phase2_snapshot_for_all_code_queries()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
