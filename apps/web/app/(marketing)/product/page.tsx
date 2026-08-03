@@ -1,4 +1,4 @@
-import { ArrowRightIcon, BoxesIcon, CheckCircle2Icon, FileDiffIcon, LockKeyholeIcon, NetworkIcon, SearchCodeIcon, WaypointsIcon } from 'lucide-react';
+import { ArrowRightIcon, CheckCircle2Icon, FileCode2Icon, GitBranchIcon, GitCommitHorizontalIcon, LockKeyholeIcon, NetworkIcon, SearchCodeIcon } from 'lucide-react';
 
 import { EvidenceDiagram, PipelineDiagram } from '@/components/diagrams';
 import { FeatureGrid, MarketingPage, PageSection } from '@/components/marketing-page';
@@ -72,9 +72,9 @@ export default function ProductPage() {
       </section>
       <PageSection eyebrow="Built to be inspected" title="The shape of the system is part of the answer." description="Compass exposes the boundaries between discovery, extraction, resolution, analysis, and publication so you can reason about the result. ">
         <div className="grid gap-5 lg:grid-cols-3">
-          <MetricCard icon={BoxesIcon} value="per-file" label="facts before project-wide resolution" />
-          <MetricCard icon={WaypointsIcon} value="directed" label="relationships with source anchors" />
-          <MetricCard icon={FileDiffIcon} value="immutable" label="historical realizations for exact commits" />
+          <MetricCard icon={FileCode2Icon} value="per-file" label="facts before project-wide resolution" />
+          <MetricCard icon={GitBranchIcon} value="directed" label="relationships with source anchors" />
+          <MetricCard icon={GitCommitHorizontalIcon} value="immutable" label="historical realizations for exact commits" />
         </div>
       </PageSection>
       <section className="border-t border-border/70 bg-card/45">
@@ -103,6 +103,6 @@ function QuickLink({ title, text, href }: { title: string; text: string; href: s
   return <Link className={cn(buttonVariants({ variant: 'outline' }), 'h-auto min-h-28 items-start justify-between gap-4 p-4 text-left')} href={href}><span className="flex flex-col gap-2"><span className="font-heading text-base font-semibold tracking-[-0.03em]">{title}</span><span className="text-xs leading-5 text-muted-foreground">{text}</span></span><ArrowRightIcon className="mt-0.5 size-4 shrink-0 text-primary" /></Link>;
 }
 
-function MetricCard({ icon: Icon, value, label }: { icon: typeof BoxesIcon; value: string; label: string }) {
-  return <Card className="border-border/80 bg-card/70 shadow-none"><CardContent className="flex items-end justify-between gap-4 p-6"><div className="flex flex-col gap-2"><span className="font-heading text-3xl font-semibold tracking-[-0.06em]">{value}</span><span className="max-w-[13rem] text-sm leading-6 text-muted-foreground">{label}</span></div><Icon className="text-primary" /></CardContent></Card>;
+function MetricCard({ icon: Icon, value, label }: { icon: typeof FileCode2Icon; value: string; label: string }) {
+  return <Card className="border-border/80 bg-card/70 shadow-none"><CardContent className="flex min-h-44 flex-col justify-between gap-8 p-6"><span className="grid size-11 place-items-center rounded-xl border border-primary/15 bg-primary/[0.07] text-primary"><Icon aria-hidden="true" className="size-5" strokeWidth={1.8} /></span><div className="flex flex-col gap-2"><span className="font-heading text-3xl font-semibold tracking-[-0.06em]">{value}</span><span className="max-w-[15rem] text-sm leading-6 text-muted-foreground">{label}</span></div></CardContent></Card>;
 }
