@@ -128,7 +128,7 @@ RETURN module.id, p, length(p)
 LIMIT 100
 ```
 
-Verify supported path semantics in [CompassQL 1](../COMPASSQL.md).
+Verify supported path semantics in [CompassQL](../COMPASSQL.md).
 
 ## Recipe 6: create a shareable subsystem brief
 

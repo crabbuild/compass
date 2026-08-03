@@ -12,7 +12,7 @@ copying the graph into another database.
 > automation.
 >
 > **Prerequisites:** familiarity with [the graph model](graph-model.md). This is
-> a concept guide; use [CompassQL 1](../COMPASSQL.md) as the canonical syntax
+> a concept guide; use [CompassQL](../COMPASSQL.md) as the canonical syntax
 > and runtime reference.
 >
 > **Reading time:** 8–10 minutes.
@@ -254,7 +254,7 @@ Use a smaller limit when a caller has a tighter budget. Do not treat a limit
 error as an empty result.
 
 Query files and stdin are also size-limited, and parameter files have a
-separate cap. Consult [CompassQL 1](../COMPASSQL.md) for current numeric values.
+separate cap. Consult [CompassQL](../COMPASSQL.md) for current numeric values.
 
 ## Explain and profile
 
@@ -350,7 +350,7 @@ Do I know the exact nodes, relations, and columns?
 
 ## Related pages
 
-- [CompassQL 1 reference](../COMPASSQL.md)
+- [CompassQL reference](../COMPASSQL.md)
 - [CompassQL support matrix](../COMPASSQL_SUPPORT.md)
 - [Graph model](graph-model.md)
 - [Integrating Compass](../guides/integrating-compass.md)

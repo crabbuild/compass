@@ -342,6 +342,33 @@
     margin: 0;
   }
 
+  .hero-code-graph .compass-hover-hint {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0.15rem 0 0;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
+    color: var(--primary);
+    line-height: 1.4;
+  }
+
+  .hero-code-graph .compass-hover-hint svg {
+    display: block;
+    flex: 0 0 auto;
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .hero-code-graph .compass-hover-hint span {
+    min-width: 0;
+  }
+
+  .hero-code-graph .compass-hover-hint strong {
+    color: var(--foreground);
+    font-weight: 650;
+  }
+
   .hero-code-graph .compass-hover-source,
   .hero-code-graph .compass-node-hover-card code,
   .hero-code-graph .compass-edge-metadata code {
@@ -501,4 +528,17 @@
   --fd-muted-foreground: var(--muted-foreground);
   --fd-border: var(--border);
   --fd-primary: var(--primary);
+}
+
+#nd-sidebar .docs-sidebar-icon,
+#nd-sidebar-mobile .docs-sidebar-icon {
+  color: var(--fd-primary);
+  stroke-width: 1.8;
+}
+
+#nd-sidebar [data-state='open'] > button .docs-sidebar-icon,
+#nd-sidebar [data-state='open'] > a .docs-sidebar-icon,
+#nd-sidebar-mobile [data-state='open'] > button .docs-sidebar-icon,
+#nd-sidebar-mobile [data-state='open'] > a .docs-sidebar-icon {
+  color: var(--fd-primary);
 }

@@ -60,6 +60,7 @@ describe("EdgeHoverCard", () => {
     expect(markup).toContain("crates/globset/src/glob.rs:143");
     expect(markup).toContain("Double-click");
     expect(markup).toContain("to open relationship source");
+    expect(markup).toContain("lucide-git-branch");
   });
 
   it("omits source affordances when an edge has no relationship anchor", () => {

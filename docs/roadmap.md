@@ -53,7 +53,7 @@ Evidence:
 - [compatibility ledger](../COMPATIBILITY.md);
 - [performance qualification](../PERFORMANCE.md).
 
-### CompassQL 1
+### CompassQL
 
 Compass includes a native, deterministic, read-only subset of openCypher with:
 
@@ -68,7 +68,7 @@ Compass includes a native, deterministic, read-only subset of openCypher with:
 
 Evidence:
 
-- [CompassQL 1](COMPASSQL.md);
+- [CompassQL](COMPASSQL.md);
 - [CompassQL support matrix](COMPASSQL_SUPPORT.md);
 - `compass-cypher` and `compass-query`;
 - CLI/TCK/differential tests.

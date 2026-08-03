@@ -337,7 +337,7 @@ CompassQL; `--cql` is explicit.
 Before building automation, read:
 
 - [CompassQL concepts](concepts/compassql.md)
-- [CompassQL 1 reference](COMPASSQL.md)
+- [CompassQL reference](COMPASSQL.md)
 - [CompassQL support matrix](COMPASSQL_SUPPORT.md)
 
 ## 8. Install the coding-assistant integration

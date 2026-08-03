@@ -224,7 +224,7 @@ Limits:
 --max-memory-bytes N
 ```
 
-Canonical language contract: [CompassQL 1](../COMPASSQL.md).
+Canonical language contract: [CompassQL](../COMPASSQL.md).
 
 ### `path`
 
@@ -742,7 +742,7 @@ the exact command boundary your automation uses.
 
 - [Configuration reference](configuration.md)
 - [Output reference](outputs.md)
-- [CompassQL 1](../COMPASSQL.md)
+- [CompassQL](../COMPASSQL.md)
 - [Versioned history guide](../guides/versioned-history.md)
 
 **Next step:** run `compass <command> --help` for the command you will automate,

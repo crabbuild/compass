@@ -140,7 +140,7 @@ The [cookbook index](cookbook/README.md) routes to:
 | [Outputs](reference/outputs.md) | `compass-out/`, graph JSON, query results, and history exports |
 | [Document formats](reference/document-formats.md) | Markdown fields, limits, and discovery versus extraction |
 | [Compatibility](reference/compatibility.md) | Compass contracts, hard cutovers, and portability |
-| [CompassQL 1](COMPASSQL.md) | Canonical language and runtime contract |
+| [CompassQL](COMPASSQL.md) | Canonical language and runtime contract |
 | [CompassQL support](COMPASSQL_SUPPORT.md) | Checked syntax and feature matrix |
 
 ## How these documents are written
