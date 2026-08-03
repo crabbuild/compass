@@ -4,15 +4,6 @@ The cookbook contains short, outcome-focused recipes. Use it when you already
 know the problem and want commands, interpretation guidance, and caveats in one
 place.
 
-> **Who this page is for:** everyday Compass users and integrators.
->
-> **You will learn:** which recipe fits your task and how cookbook pages differ
-> from full guides and references.
->
-> **Prerequisites:** [Getting started](../getting-started.md).
->
-> **Reading time:** 3 minutes.
-
 ## Pick a problem
 
 | I need to… | Recipe |

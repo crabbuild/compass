@@ -5,16 +5,6 @@ Run `compass <command> --help` for the exact options in the installed version;
 this page explains how the families fit together and which outputs are stable
 for automation.
 
-> **Who this reference is for:** users and integrators looking up a command
-> without reading a tutorial.
->
-> **You will learn:** public command families, primary inputs/outputs, shared
-> conventions, and where exact subcommand contracts live.
->
-> **Prerequisites:** Compass installed.
->
-> **Reading time:** 12–15 minutes as a survey; use the tables for lookup.
-
 ## Global entry points
 
 ```bash

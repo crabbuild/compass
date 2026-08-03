@@ -25,21 +25,6 @@ by patch releases, while physical adapter files and disposable indexes remain
 rebuildable. The exact operator procedures and file-level backup bundle are in
 the [Compass Store operations guide](../guides/compass-store-operations.md).
 
-> **Who this page is for:** maintainers of graph publication and queries,
-> storage-adapter authors, cloud-service implementers, and reviewers of the
-> `compass-store` contract.
->
-> **You will learn:** the portable namespace/partition/key contract, the
-> store-independent graph layout, how `graph.json` remains supported, the
-> atomic publication and recovery rules, and how SQLite, redb, PostgreSQL, and
-> DynamoDB map onto the same semantics.
->
-> **Prerequisites:** [Design principles](principles.md),
-> [Storage and history](storage-and-history.md), and
-> [Query engine](../implementation/query-engine.md).
->
-> **Reading time:** 25–35 minutes.
-
 ## Decision summary
 
 Compass will introduce a backend-neutral crate named `compass-store`. Its

@@ -22,14 +22,6 @@ meta:
 
 Universal evidence is the semantic boundary between source-specific extraction and language-neutral graph construction. This reference defines the owning crates, required data, lifecycle, failure behavior, and transition gates.
 
-> **Who this page is for:** contributors implementing language adapters, resolution, projection, and framework integration.
->
-> **You will learn:** what each crate owns, which facts cross boundaries, and which invariants a language transition must preserve.
->
-> **Prerequisites:** [Language architecture](../design/language-architecture.md) and [Extraction pipeline](extraction-pipeline.md).
->
-> **Reading time:** 12 minutes.
-
 ## Implementation status
 
 The contracts on this page distinguish implemented hard cuts from approved

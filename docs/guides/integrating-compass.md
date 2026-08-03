@@ -4,19 +4,6 @@ Compass can be used interactively, as a producer of versioned JSON, through an
 MCP service, or as an exporter to graph systems. This guide focuses on stable
 boundaries and failure-safe consumption.
 
-> **Who this guide is for:** developers building scripts, CI jobs, editor
-> features, internal portals, and graph-analysis integrations.
->
-> **You will learn:** how to choose an integration surface, consume outputs
-> safely, use CompassQL parameters and versioned results, and avoid coupling to
-> unstable human text.
->
-> **Prerequisites:** a working graph and familiarity with
-> [CompassQL concepts](../concepts/compassql.md).
->
-> **Completion time:** 20 minutes for the pattern; implementation time depends
-> on the consumer.
-
 ![Compass integration surfaces](../assets/diagrams/integration-surfaces.svg)
 
 ## Choose the narrowest stable surface

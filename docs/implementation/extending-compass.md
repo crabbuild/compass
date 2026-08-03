@@ -3,17 +3,6 @@
 This guide turns common extension goals into concrete crate, contract, and
 verification checklists.
 
-> **Who this guide is for:** contributors adding a language, relation,
-> integration, query capability, output, command, or provider.
->
-> **You will learn:** where an extension belongs, which public contracts it can
-> affect, and what evidence is required before it is complete.
->
-> **Prerequisites:** [Workspace tour](workspace-tour.md) and
-> [Contributing](../../CONTRIBUTING.md).
->
-> **Reading time:** 15 minutes.
-
 ## Before editing
 
 1. Read the relevant crate `src/lib.rs`.

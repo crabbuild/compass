@@ -3,16 +3,6 @@
 This page is a symptom-to-diagnosis map. Start with the narrowest category and
 preserve the original diagnostic before deleting or rebuilding anything.
 
-> **Who this page is for:** all Compass users and operators.
->
-> **You will learn:** how to diagnose installation, build, graph, query,
-> semantic, service, assistant, and history problems safely.
->
-> **Prerequisites:** access to the failing command, stderr, and working
-> directory.
->
-> **Completion time:** 5–20 minutes for common failures.
-
 ## First five checks
 
 ```bash

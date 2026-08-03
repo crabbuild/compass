@@ -4,18 +4,6 @@ Compass stores project knowledge as entities connected by directed,
 attributed relationships. This page develops the model from a small example to
 the node-link JSON and multigraph details used by advanced queries.
 
-> **Who this page is for:** anyone interpreting Compass output or writing
-> CompassQL and graph integrations.
->
-> **You will learn:** nodes, stable IDs, labels, directed relationships,
-> attributes, parallel edges, hyperedges, communities, snapshots, and common
-> interpretation mistakes.
->
-> **Prerequisites:** [How Compass works](how-it-works.md) is helpful but not
-> required.
->
-> **Reading time:** 10–12 minutes.
-
 ## Start with two nouns and a verb
 
 The smallest useful graph statement is:

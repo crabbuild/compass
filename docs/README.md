@@ -5,16 +5,6 @@ project artifacts. It discovers the entities in a project, records how they
 relate, and gives people and tools a smaller, structured way to explore a large
 codebase.
 
-> **Who this page is for:** evaluators, Compass users, integrators, and
-> contributors.
->
-> **You will learn:** where to start, which documents answer which questions,
-> and which material describes current behavior versus future direction.
->
-> **Prerequisites:** none.
->
-> **Reading time:** about 5 minutes.
-
 Compass was inspired by
 [Graphify](https://github.com/Graphify-Labs/graphify), but the products now
 evolve independently. Compass has no Graphify runtime or test dependency. It includes
@@ -158,9 +148,9 @@ This separation is deliberate. A guide should not force you through an
 exhaustive option table, and a reference should not hide a precise contract
 inside a long tutorial.
 
-Substantial pages begin with their audience, outcomes, prerequisites, and
-estimated reading time. They end with related pages and a recommended next
-step. Small diagrams are ASCII so they remain useful in any terminal. Larger
+Substantial pages open directly with an overview and end with related pages and
+a recommended next step. Small diagrams are ASCII so they remain useful in any
+terminal. Larger
 architecture diagrams are checked-in SVG files with accessible titles and
 descriptions.
 

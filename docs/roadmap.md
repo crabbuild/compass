@@ -4,17 +4,6 @@ Compass is inspired by Graphify, implemented natively in Rust, and expected to
 evolve independently. This roadmap separates shipped/current behavior from
 committed design work and longer-term ideas.
 
-> **Who this page is for:** users evaluating project direction, integrators
-> planning adoption, and contributors choosing work.
->
-> **You will learn:** what exists in the current repository, what has a
-> committed design or implementation plan, and which ideas are explicitly
-> aspirational.
->
-> **Prerequisites:** none.
->
-> **Reading time:** 8–10 minutes.
-
 ## How to read status
 
 - **Available now** means the behavior exists in the current repository and is

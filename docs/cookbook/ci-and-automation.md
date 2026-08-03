@@ -3,16 +3,6 @@
 Use these patterns to generate, query, and publish Compass artifacts in CI
 without depending on human text or hiding failures.
 
-> **Who this page is for:** CI/platform engineers and maintainers adding graph
-> checks to pull requests or scheduled jobs.
->
-> **You will learn:** deterministic build jobs, exact query policies, artifact
-> retention, cache keys, and historical comparison.
->
-> **Prerequisites:** Compass installed in the runner and repository checkout.
->
-> **Completion time:** 15–30 minutes.
-
 ## Recipe 1: build and upload a structural graph
 
 ```bash

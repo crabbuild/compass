@@ -4,16 +4,6 @@ The extraction pipeline turns a filesystem snapshot into a coherent graph
 artifact set. This page follows the cold path, incremental path, and failure
 boundaries through the owning crates.
 
-> **Who this page is for:** contributors changing discovery, languages,
-> resolution, graph construction, or output publication.
->
-> **You will learn:** pipeline stages, core types, incremental invalidation,
-> concurrency, semantic merge, and the tests required for safe changes.
->
-> **Prerequisites:** [Workspace tour](workspace-tour.md).
->
-> **Reading time:** 15–20 minutes.
-
 ![Cold and incremental Compass update paths](../assets/diagrams/incremental-update.svg)
 
 ## Entry points

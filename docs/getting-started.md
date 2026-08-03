@@ -4,16 +4,6 @@ This guide takes you from a new installation to a useful answer about a
 codebase. It starts with structural code analysis, which runs locally and does
 not require model credentials.
 
-> **Who this guide is for:** new users and evaluators.
->
-> **You will learn:** how to install Compass, build a graph, understand its
-> output, ask four kinds of questions, and recognize a successful run.
->
-> **Prerequisites:** a macOS release target or a Rust 1.97.1+ toolchain for a
-> source build; a source-code repository to inspect.
->
-> **Completion time:** 10–15 minutes, plus compilation time for a source build.
-
 ![From a project directory to the first Compass answer](assets/diagrams/first-graph.svg)
 
 ## What you will produce

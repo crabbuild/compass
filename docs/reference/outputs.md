@@ -4,16 +4,6 @@ Compass outputs range from the current `compass-out/` directory to versioned
 CompassQL results and immutable history exports. This reference describes
 consumer responsibilities and authority.
 
-> **Who this reference is for:** integrators, operators, and contributors
-> changing an output or renderer.
->
-> **You will learn:** core artifacts, graph JSON, query schemas, derived views,
-> history export, caches, atomicity, and deterministic equivalence.
->
-> **Prerequisites:** [Graph model](../concepts/graph-model.md).
->
-> **Reading time:** 10–12 minutes.
-
 ## Current output directory
 
 Default:

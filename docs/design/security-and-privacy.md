@@ -5,17 +5,6 @@ systems. Its security model begins by separating fully local structural work
 from explicit network, credential, subprocess, and historical-checkout
 boundaries.
 
-> **Who this page is for:** security reviewers, operators, integrators, and
-> contributors changing an input or network boundary.
->
-> **You will learn:** what stays local, when data can leave the machine, how
-> untrusted input is bounded, and which operational practices remain the
-> deployer's responsibility.
->
-> **Prerequisites:** [Design principles](principles.md).
->
-> **Reading time:** 12–15 minutes.
-
 > This page explains architecture. The authoritative vulnerability-reporting
 > and supported-version policy is [SECURITY.md](../../SECURITY.md).
 
