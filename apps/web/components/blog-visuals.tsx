@@ -16,7 +16,7 @@ function BlogDiagramShell({
           <p className="eyebrow">{eyebrow}</p>
           <p className="mt-1 font-heading text-sm font-semibold tracking-[-0.02em]">{title}</p>
         </div>
-        <span className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-muted-foreground">Compass / field note</span>
+        <span className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-muted-foreground">Compass / story</span>
       </figcaption>
       <div className="p-4 sm:p-6">{children}</div>
     </figure>
