@@ -185,6 +185,8 @@ fn small_change_reuses_content_addressed_nodes() -> Result<(), Box<dyn std::erro
     first_reader.diff(&second_reader, &mut sink)?;
     let diff_latency = started.elapsed();
     assert!(sink.changes > 0);
+    drop(first_reader);
+    drop(second_reader);
 
     let started = Instant::now();
     let reconstructed = history.artifacts(&second.id)?;

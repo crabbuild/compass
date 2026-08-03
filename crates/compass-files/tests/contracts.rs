@@ -4,13 +4,14 @@ use std::fs::{self, FileTimes};
 use std::time::{Duration, UNIX_EPOCH};
 
 use compass_files::{
-    BuildGuard, Cache, CacheKind, CacheOptions, DetectOptions, FileSlice, Manifest, ManifestKind,
-    StatHashIndex, WatchPathFilter, bisect_slice, body_content, classify_file, file_hash, md5_file,
-    prompt_fingerprint, read_slice_text, read_source_lossy, slice_boundaries, split_file,
-    write_bytes_atomic, write_json_atomic, write_text_atomic,
+    BuildGuard, CACHE_ENCODING_VERSION, Cache, CacheKind, CacheOptions, DetectOptions, FileSlice,
+    Manifest, ManifestKind, StatHashIndex, WatchPathFilter, bisect_slice, body_content,
+    classify_file, file_hash, md5_file, prompt_fingerprint, read_slice_text, read_source_lossy,
+    slice_boundaries, split_file, write_bytes_atomic, write_json_atomic, write_text_atomic,
 };
 use compass_files::{FileType, IgnorePolicy};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 #[test]
 fn database_only_detection_does_not_read_local_files() -> Result<(), Box<dyn Error>> {
@@ -755,7 +756,7 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(
         default_cache
             .directory(&CacheKind::Ast, None)
-            .ends_with("ast/v5/e7")
+            .ends_with(format!("ast/v5/e{CACHE_ENCODING_VERSION}"))
     );
     assert!(!cache_root.join("compass-out/cache/ast/v0.9.21").exists());
 
@@ -1083,7 +1084,7 @@ fn program_cache_is_path_sensitive_and_namespace_isolated() -> Result<(), Box<dy
     )?;
     cache.save_program(&artifact, "index.scip:bbbbbbbb", &json!({"kind":"scip"}))?;
     let syntax_directory = cache.directory(&syntax, None);
-    assert!(syntax_directory.ends_with("e7"));
+    assert!(syntax_directory.ends_with(format!("e{CACHE_ENCODING_VERSION}")));
     assert!(
         fs::read_dir(&syntax_directory)?
             .filter_map(Result::ok)
@@ -1102,16 +1103,15 @@ fn program_cache_is_path_sensitive_and_namespace_isolated() -> Result<(), Box<dy
     assert_eq!(first["source_file"], "src/a.rs");
     assert_eq!(second["source_file"], "src/b.rs");
 
-    let first_entry = fs::read_dir(&syntax_directory)?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .find(|path| {
-            fs::read(path)
-                .ok()
-                .and_then(|bytes| rmp_serde::from_slice::<serde_json::Value>(&bytes).ok())
-                .is_some_and(|value| value["source_file"] == "src/a.rs")
-        })
-        .ok_or("missing first MessagePack syntax entry")?;
+    let program_entry = |logical_key: &str| {
+        let digest = Sha256::digest(logical_key.as_bytes());
+        syntax_directory.join(format!("{digest:x}.msgpack"))
+    };
+    let first_entry = program_entry("src/a.rs:aaaaaaaa");
+    assert!(
+        first_entry.is_file(),
+        "missing first MessagePack syntax entry"
+    );
     let legacy_directory = syntax_directory.parent().ok_or("missing encoding parent")?;
     let legacy_entry = legacy_directory.join(
         first_entry
@@ -1128,11 +1128,11 @@ fn program_cache_is_path_sensitive_and_namespace_isolated() -> Result<(), Box<dy
         "hard cutover must not decode the legacy JSON cache"
     );
 
-    let second_entry = fs::read_dir(&syntax_directory)?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .next()
-        .ok_or("missing second MessagePack syntax entry")?;
+    let second_entry = program_entry("src/b.rs:aaaaaaaa");
+    assert!(
+        second_entry.is_file(),
+        "missing second MessagePack syntax entry"
+    );
     fs::write(&second_entry, b"not-messagepack")?;
     assert!(
         cache

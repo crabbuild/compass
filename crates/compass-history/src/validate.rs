@@ -126,7 +126,7 @@ pub(crate) fn validate_publication_partition(
                 entries.len()
             );
         }
-        validate_generated_partition_records(kind, entries, &mut total_bytes, &mut problems);
+        validate_generated_partition_records(kind, entries, &mut total_bytes, &mut problems)?;
     }
     if !problems.is_empty() {
         return Err(HistoryError::InvalidRealization(problems));
@@ -296,7 +296,7 @@ fn validate_generated_partition_records(
     entries: &[(Vec<u8>, Vec<u8>)],
     total_bytes: &mut u64,
     problems: &mut Vec<ValidationProblem>,
-) {
+) -> Result<(), HistoryError> {
     let count = record_count(entries);
     if exceeds_limit(count, MAX_RECORDS_PER_TREE) {
         problems.push(ValidationProblem::ResourceLimit {
@@ -314,8 +314,9 @@ fn validate_generated_partition_records(
         }
     }
     for (key, value) in entries {
-        validate_record_size_limits(key, value, total_bytes, problems);
+        validate_record_limits(kind, key, value, total_bytes, problems)?;
     }
+    Ok(())
 }
 
 fn validate_record_limits(

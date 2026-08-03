@@ -325,6 +325,30 @@ const PAGES: &[Page] = &[
         "Examples:\n  compass history disable\n\nNotes:\n  Explicit builds, historical queries, and existing realizations remain available."
     ),
     page!(
+        "history timeline",
+        "List commit graph-history state for timeline views",
+        ["compass history timeline [OPTIONS] --format json"],
+        "Options:\n  --rev <REV>              Timeline tip [default: HEAD]\n  --limit <N>              Page size from 1 to 1000\n  --after <CURSOR>          Continue a stable paginated snapshot; requires --limit\n  --format json             Required machine-readable output\n\nExamples:\n  compass history timeline --format json\n  compass history timeline --rev main --limit 100 --format json"
+    ),
+    page!(
+        "history change-counts",
+        "Count structural graph changes between materialized revisions",
+        ["compass history change-counts <REV> [OPTIONS] --format json"],
+        "Arguments:\n  <REV>                    Materialized target revision\n\nOptions:\n  --parent <REV>           Materialized base revision [default: first parent]\n  --format json             Required machine-readable output\n\nExamples:\n  compass history change-counts HEAD --format json\n  compass history change-counts feature --parent main --format json\n\nNotes:\n  Counts use the canonical Rust structural diff over typed Prolly roots."
+    ),
+    page!(
+        "history diff",
+        "Stream an exact typed-record diff between realizations",
+        ["compass history diff <OLD> <NEW> [OPTIONS] --format jsonl"],
+        "Arguments:\n  <OLD>                    Materialized base revision\n  <NEW>                    Materialized target revision\n\nOptions:\n  --root <NAME>            Restrict to a typed root; repeatable\n  --output <PATH>          Atomically write large output\n  --format jsonl           Required streaming format\n\nExamples:\n  compass history diff HEAD~1 HEAD --format jsonl\n  compass history diff v1.2.0 HEAD --root nodes --root edges --output exact.jsonl --format jsonl\n\nNotes:\n  Roots are nodes, edges, hyperedges, analysis, metadata, program-facts, and program-summaries."
+    ),
+    page!(
+        "history verify",
+        "Validate an immutable realization and all typed roots",
+        ["compass history verify <REV_OR_REALIZATION> [OPTIONS]"],
+        "Arguments:\n  <REV_OR_REALIZATION>     Git revision or realization identifier\n\nOptions:\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass history verify HEAD\n  compass history verify 0123456789abcdef --format json"
+    ),
+    page!(
         "history status",
         "Show history configuration and realization status",
         ["compass history status [REV] [OPTIONS]"],
