@@ -20,6 +20,7 @@ import { HeroGraph } from '@/components/hero-graph';
 import { ExportGallery } from '@/components/export-gallery';
 import { InstallCommand } from '@/components/install-command';
 import { PipelineDiagram } from '@/components/diagrams';
+import { ProductionGraphExplorer } from '@/components/production-graph-explorer';
 import { SectionHeading } from '@/components/section-heading';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -132,6 +133,35 @@ export default function HomePage() {
       </section>
 
       <ExportGallery />
+
+      <section className="border-b border-border/70 bg-background" aria-labelledby="home-graph-title">
+        <div className="mx-auto max-w-7xl px-5 py-24 lg:px-8 lg:py-32">
+          <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-2xl">
+              <p className="eyebrow">Try a real codebase</p>
+              <h2 id="home-graph-title" className="mt-4 max-w-2xl font-heading text-3xl font-semibold tracking-[-0.055em] sm:text-4xl">
+                Explore the relationships before they become a change.
+              </h2>
+              <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
+                Drag, search, and pin a symbol in a real <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-foreground">dotenv@17.4.2</code> snapshot. Every node and edge keeps its source path, line range, and relationship type attached.
+              </p>
+            </div>
+            <div className="flex flex-col items-start gap-3 lg:items-end">
+              <span className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-card px-3 py-2 font-mono text-[0.65rem] uppercase tracking-[0.12em] text-muted-foreground">
+                <NetworkIcon className="size-3.5 text-primary" aria-hidden="true" />
+                25 nodes · 52 edges · local snapshot
+              </span>
+              <Link className="inline-flex items-center gap-2 text-sm font-medium text-primary" href="/product/code-graph">
+                Open the full graph workspace <ArrowRightIcon data-icon="inline-end" />
+              </Link>
+            </div>
+          </div>
+
+          <div className="mt-12">
+            <ProductionGraphExplorer />
+          </div>
+        </div>
+      </section>
 
       <section className="mx-auto max-w-7xl px-5 py-24 lg:px-8 lg:py-32">
         <SectionHeading
