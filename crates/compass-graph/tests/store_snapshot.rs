@@ -353,6 +353,32 @@ fn graph_valid_long_qualified_names_round_trip_through_the_store() -> Result<(),
     Ok(())
 }
 
+#[test]
+fn graph_valid_punctuation_names_use_an_explicit_empty_name_bucket() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut document = graph();
+    let mut punctuation = node("punctuation");
+    punctuation.name = "...".to_owned();
+    punctuation.qualified_name = ".".to_owned();
+    document.nodes.push(punctuation);
+
+    let prepared = builder.prepare(&store, &document)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    let (matches, truncated) = reader.nodes_by_normalized_name(".", limits(8))?;
+    assert!(!truncated);
+    assert_eq!(
+        matches.into_iter().map(|node| node.id).collect::<Vec<_>>(),
+        ["punctuation"]
+    );
+    assert_eq!(
+        reader.export_json_bytes()?,
+        canonical_graph_json(&document)?
+    );
+    Ok(())
+}
+
 fn graph_sorted() -> GraphDocument {
     let mut document = graph();
     document.nodes.sort_by(|left, right| left.id.cmp(&right.id));

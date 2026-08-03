@@ -1520,7 +1520,13 @@ fn insert_anchor_entry(
 /// segment prevents a digest key from colliding with the raw two-segment form.
 fn encode_name_index_key(name: &str, node_id: &str) -> Result<Vec<u8>, SnapshotError> {
     let name = normalize_symbol(name);
-    match encode_graph_index_key(IndexKind::Names, &[name.as_bytes(), node_id.as_bytes()]) {
+    if name.is_empty() {
+        return encode_graph_index_key(IndexKind::Names, &[b"empty", node_id.as_bytes()]);
+    }
+    match encode_graph_index_key(
+        IndexKind::Names,
+        &[b"value", name.as_bytes(), node_id.as_bytes()],
+    ) {
         Ok(key) => Ok(key),
         Err(SnapshotError::Store(StoreError::ComponentTooLarge { .. })) => {
             let digest = hex_digest(name.as_bytes());
@@ -1534,7 +1540,10 @@ fn encode_name_index_key(name: &str, node_id: &str) -> Result<Vec<u8>, SnapshotE
 }
 
 fn encode_name_prefix(name: &str) -> Result<Vec<u8>, SnapshotError> {
-    match encode_graph_index_key(IndexKind::Names, &[name.as_bytes()]) {
+    if name.is_empty() {
+        return encode_graph_index_key(IndexKind::Names, &[b"empty"]);
+    }
+    match encode_graph_index_key(IndexKind::Names, &[b"value", name.as_bytes()]) {
         Ok(key) => Ok(key),
         Err(SnapshotError::Store(StoreError::ComponentTooLarge { .. })) => {
             let digest = hex_digest(name.as_bytes());
