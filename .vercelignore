@@ -1,0 +1,13 @@
+# Qualification and vendored repositories are not part of the web deployment.
+3rd/
+
+# Local/build-only files.
+.git/
+.vercel/
+node_modules/
+target/
+dist/
+**/node_modules/
+**/.next/
+**/.source/
+**/dist/
