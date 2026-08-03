@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-08-03
+
 - Make versioned graph comparisons meaning-aware: source-coordinate shifts,
   clustering/layout metadata, and anchor-derived edge identities no longer
   appear as graph-wide structural changes. Historical queries now read only
