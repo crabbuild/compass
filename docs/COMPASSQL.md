@@ -1,4 +1,4 @@
-# CompassQL 1
+# CompassQL
 
 CompassQL is Compass's deterministic, read-only structural query language. It is a documented subset of openCypher that executes directly over an immutable Compass graph snapshot. It does not invoke a model, access a network, mutate the graph, or copy data into another database.
 
@@ -36,7 +36,7 @@ Use `n.id` for the portable stable Compass string ID. `id(n)` and `id(r)` return
 
 ## Supported language
 
-CompassQL 1 supports `MATCH`, multiple patterns and repeated-variable joins, `OPTIONAL MATCH`, `WHERE`, correlated one-level `EXISTS { MATCH ... }` and openCypher's `EXISTS { (...)-->() }` shorthand, `UNWIND`, `WITH`, `RETURN`, projection wildcards, `DISTINCT`, `UNION`, `UNION ALL`, `ORDER BY`, `SKIP`, and `LIMIT`.
+CompassQL supports `MATCH`, multiple patterns and repeated-variable joins, `OPTIONAL MATCH`, `WHERE`, correlated one-level `EXISTS { MATCH ... }` and openCypher's `EXISTS { (...)-->() }` shorthand, `UNWIND`, `WITH`, `RETURN`, projection wildcards, `DISTINCT`, `UNION`, `UNION ALL`, `ORDER BY`, `SKIP`, and `LIMIT`.
 
 Expressions include scalar/list/map literals, parameters, property and label access, boolean and comparison operators, three-valued null logic, `IN`, safe regex/string predicates, arithmetic, simple/searched `CASE`, and list indexing/slicing.
 

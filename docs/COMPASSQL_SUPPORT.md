@@ -1,4 +1,4 @@
-# CompassQL 1 support matrix
+# CompassQL support matrix
 
 This matrix is the public compatibility boundary. “Supported” means native parsing, semantic validation, deterministic execution, and checked evidence. CompassQL does not claim support for syntax absent from this table.
 
