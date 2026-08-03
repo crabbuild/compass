@@ -60,8 +60,8 @@ The local build publishes `graph.json` under the selected output root. Passing
 `--store sqlite` additionally publishes:
 
 ```text
-DIR/compass-store.sqlite3
-DIR/store.ref
+DIR/.compass-store/compass-store.sqlite3
+DIR/.compass-generations/<active>/store.ref
 ```
 
 `DIR` is `compass-out/` by default and can be set with `--out DIR` or the
@@ -73,14 +73,17 @@ library adapter and is not a CLI setting. PostgreSQL and DynamoDB are deferred
 service adapters, so no endpoint, credential, TLS, or cloud SDK configuration
 is read by local store commands.
 
-SQLite uses a local WAL-backed file and checkpoints it before publication and
-backup. Do not run two writers against one output root. Query indexes beneath
-the cache root are disposable and may be deleted; the graph, sidecar, and
-`store.ref` must be kept together. Use `compass store status|validate` for
+SQLite uses one shared local WAL-backed file and checkpoints it before
+publication and backup; complete generations are not database copies. Do not
+run two writers against one output root. JSON query indexes beneath the cache
+root are disposable and may be deleted; the output root, including the shared
+database and generation references, must be kept together. Use
+`compass store status|validate` for
 health, `compass store backup` for a digest-bound copy, and `compass store
 restore` into a new directory for recovery. The store API enforces bounded
-namespace, partition, key, value, scan, and graph sizes. General object GC and
-hosted quotas are deferred; local disk availability remains an operational
+namespace, partition, key, value, transaction, scan, and graph sizes. Local
+publication retains and collects two complete generations; distributed leases
+and hosted quotas are deferred. Local disk availability remains an operational
 limit. See the [store operations guide](../guides/compass-store-operations.md)
 for the support window and rebuild procedure.
 

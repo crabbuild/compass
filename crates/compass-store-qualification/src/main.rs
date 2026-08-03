@@ -8,7 +8,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use compass_cypher::{CompileLimits, CompileRequest, ParameterTypes, Parameters, compile};
-use compass_graph::{GraphSnapshotBuilder, GraphSnapshotReader, canonical_graph_json};
+use compass_graph::{
+    GRAPH_SNAPSHOT_MAX_OBJECTS, GraphSnapshotBuilder, GraphSnapshotReader, canonical_graph_json,
+    garbage_collect_graph_snapshots, graph_snapshot_needs_gc,
+};
 use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, EdgeKind, GraphDocument};
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
@@ -22,8 +25,8 @@ use compass_query::{
     open_with_engine, open_with_store,
 };
 use compass_store::{
-    Entry, Key, KeyRange, NamespaceId, PartitionKey, ScanCursor, ScanLimits, ScanPage, Store,
-    StoreCapabilities, StoreError, WriteCondition,
+    Entry, ImmutableBatchOutcome, ImmutableWrite, Key, KeyRange, NamespaceId, PartitionKey,
+    ScanCursor, ScanLimits, ScanPage, Store, StoreCapabilities, StoreError, WriteCondition,
 };
 use compass_store_redb::RedbStore;
 use serde::Serialize;
@@ -39,6 +42,8 @@ struct Counters {
     get_requests: AtomicU64,
     scan_requests: AtomicU64,
     put_requests: AtomicU64,
+    batch_requests: AtomicU64,
+    write_transactions: AtomicU64,
     delete_requests: AtomicU64,
     bytes_read: AtomicU64,
     bytes_written: AtomicU64,
@@ -50,6 +55,8 @@ struct CounterSnapshot {
     get_requests: u64,
     scan_requests: u64,
     put_requests: u64,
+    batch_requests: u64,
+    write_transactions: u64,
     delete_requests: u64,
     bytes_read: u64,
     bytes_written: u64,
@@ -61,6 +68,8 @@ impl Counters {
             get_requests: self.get_requests.load(Ordering::Relaxed),
             scan_requests: self.scan_requests.load(Ordering::Relaxed),
             put_requests: self.put_requests.load(Ordering::Relaxed),
+            batch_requests: self.batch_requests.load(Ordering::Relaxed),
+            write_transactions: self.write_transactions.load(Ordering::Relaxed),
             delete_requests: self.delete_requests.load(Ordering::Relaxed),
             bytes_read: self.bytes_read.load(Ordering::Relaxed),
             bytes_written: self.bytes_written.load(Ordering::Relaxed),
@@ -121,6 +130,24 @@ impl<S: Store> Store for CountingStore<S> {
         Ok(page)
     }
 
+    fn scan_keys(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        range: &KeyRange,
+        limits: ScanLimits,
+        cursor: Option<&ScanCursor>,
+    ) -> Result<compass_store::KeyPage, StoreError> {
+        self.counters.scan_requests.fetch_add(1, Ordering::Relaxed);
+        let page = self
+            .inner
+            .scan_keys(namespace, partition, range, limits, cursor)?;
+        self.counters
+            .bytes_read
+            .fetch_add(page.bytes_read as u64, Ordering::Relaxed);
+        Ok(page)
+    }
+
     fn put(
         &self,
         namespace: &NamespaceId,
@@ -133,7 +160,13 @@ impl<S: Store> Store for CountingStore<S> {
         self.counters
             .bytes_written
             .fetch_add(value.len() as u64, Ordering::Relaxed);
-        self.inner.put(namespace, partition, key, value, condition)
+        let entry = self
+            .inner
+            .put(namespace, partition, key, value, condition)?;
+        self.counters
+            .write_transactions
+            .fetch_add(1, Ordering::Relaxed);
+        Ok(entry)
     }
 
     fn delete(
@@ -147,6 +180,43 @@ impl<S: Store> Store for CountingStore<S> {
             .delete_requests
             .fetch_add(1, Ordering::Relaxed);
         self.inner.delete(namespace, partition, key, condition)
+    }
+
+    fn delete_batch(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        keys: &[Key],
+    ) -> Result<u64, StoreError> {
+        self.counters
+            .delete_requests
+            .fetch_add(keys.len() as u64, Ordering::Relaxed);
+        let deleted = self.inner.delete_batch(namespace, partition, keys)?;
+        if !keys.is_empty() {
+            self.counters
+                .write_transactions
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        Ok(deleted)
+    }
+
+    fn put_immutable_batch(
+        &self,
+        namespace: &NamespaceId,
+        writes: &[ImmutableWrite],
+    ) -> Result<ImmutableBatchOutcome, StoreError> {
+        self.counters.batch_requests.fetch_add(1, Ordering::Relaxed);
+        self.counters
+            .put_requests
+            .fetch_add(writes.len() as u64, Ordering::Relaxed);
+        let outcome = self.inner.put_immutable_batch(namespace, writes)?;
+        self.counters
+            .write_transactions
+            .fetch_add(outcome.transactions, Ordering::Relaxed);
+        self.counters
+            .bytes_written
+            .fetch_add(outcome.bytes_written, Ordering::Relaxed);
+        Ok(outcome)
     }
 }
 
@@ -232,18 +302,18 @@ fn run_with_store<S: Store>(
     let build_started = Instant::now();
     let prepared = GraphSnapshotBuilder::new()
         .prepare(&counted, &graph)
-        .map_err(|error| error.to_string())?;
-    GraphSnapshotBuilder::new()
+        .map_err(|error| format!("prepare snapshot: {error}"))?;
+    let active_selector = GraphSnapshotBuilder::new()
         .activate(&counted, &prepared)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| format!("activate snapshot: {error}"))?;
     let build_seconds = build_started.elapsed().as_secs_f64();
     let build_requests = counted.counters.snapshot();
     let reader = GraphSnapshotReader::open_active(&counted)
-        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("open active snapshot: {error}"))?
         .ok_or_else(|| "active snapshot is missing".to_owned())?;
     let exported = reader
         .export_json_bytes()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| format!("export active snapshot: {error}"))?;
     if exported != canonical {
         return Err("store export differs from canonical graph JSON".to_owned());
     }
@@ -255,24 +325,24 @@ fn run_with_store<S: Store>(
         None,
         &directory.path().join("store-query-cache"),
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| format!("open store query engine: {error}"))?;
     let json_engine = open_with_engine(
         &graph_path,
         None,
         &directory.path().join("json-query-cache"),
         EngineSelection::Json,
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| format!("open JSON query engine: {error}"))?;
     let request = SearchRequest {
         query: "symbol".to_owned(),
         limits: CodeQueryLimits::default(),
     };
     let store_response = store_engine
         .search(request.clone())
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| format!("execute store search: {error}"))?;
     let json_response = json_engine
         .search(request)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| format!("execute JSON search: {error}"))?;
     let canonical_results = serde_json::to_value(&store_response)
         .map_err(|error| error.to_string())?
         == serde_json::to_value(&json_response).map_err(|error| error.to_string())?;
@@ -285,6 +355,33 @@ fn run_with_store<S: Store>(
     let query_requests = subtract(build_requests.clone(), counted.counters.snapshot());
     drop(store_engine);
     drop(json_engine);
+
+    let mut orphan_graph = graph.clone();
+    orphan_graph
+        .graph
+        .build
+        .generation_id
+        .push_str("-unselected");
+    GraphSnapshotBuilder::new()
+        .prepare(&counted, &orphan_graph)
+        .map_err(|error| format!("prepare unselected snapshot for GC: {error}"))?;
+    if !graph_snapshot_needs_gc(&counted, 1)
+        .map_err(|error| format!("discover snapshots before GC: {error}"))?
+    {
+        return Err("unselected snapshot was not discoverable before GC".to_owned());
+    }
+    let gc = garbage_collect_graph_snapshots(
+        &counted,
+        std::slice::from_ref(&active_selector),
+        GRAPH_SNAPSHOT_MAX_OBJECTS,
+    )
+    .map_err(|error| format!("collect unselected snapshot: {error}"))?;
+    if gc.deleted_entries == 0
+        || graph_snapshot_needs_gc(&counted, 1)
+            .map_err(|error| format!("discover snapshots after GC: {error}"))?
+    {
+        return Err("snapshot GC did not remove the unselected realization".to_owned());
+    }
     drop(counted);
     let database_bytes = fs::metadata(&store_path)
         .map_err(|error| error.to_string())?
@@ -311,10 +408,13 @@ fn run_with_store<S: Store>(
         new_objects: prepared.new_objects,
         reused_objects: prepared.reused_objects,
         gc: json!({
-            "mode": "discovery-only",
-            "executed": false,
-            "supported": false,
-            "reason": "retention and deletion are deferred until the Phase 8 control plane",
+            "mode": "bounded-mark-sweep",
+            "executed": true,
+            "supported": true,
+            "retainedManifests": gc.retained_manifests,
+            "retainedObjects": gc.retained_objects,
+            "deletedEntries": gc.deleted_entries,
+            "deleteTransactions": gc.delete_transactions,
         }),
     })
 }
@@ -416,6 +516,10 @@ fn subtract(before: CounterSnapshot, after: CounterSnapshot) -> CounterSnapshot 
         get_requests: after.get_requests.saturating_sub(before.get_requests),
         scan_requests: after.scan_requests.saturating_sub(before.scan_requests),
         put_requests: after.put_requests.saturating_sub(before.put_requests),
+        batch_requests: after.batch_requests.saturating_sub(before.batch_requests),
+        write_transactions: after
+            .write_transactions
+            .saturating_sub(before.write_transactions),
         delete_requests: after.delete_requests.saturating_sub(before.delete_requests),
         bytes_read: after.bytes_read.saturating_sub(before.bytes_read),
         bytes_written: after.bytes_written.saturating_sub(before.bytes_written),

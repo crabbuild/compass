@@ -36,8 +36,25 @@ fi
 mkdir -p "$(dirname -- "$output")"
 output=$(CDPATH= cd -- "$(dirname -- "$output")" && pwd)/$(basename -- "$output")
 
-if [ ! -f "$output/graph.json" ]; then
-    echo "error: graph.json is required before rebuilding the store: $output/graph.json" >&2
+active_generation=
+active_directory=
+if [ -f "$output/.compass-active-generation" ]; then
+    active_generation=$(tr -d '\r\n' < "$output/.compass-active-generation")
+    case "$active_generation" in
+        ''|.|..|*/*|*\\*)
+            echo "error: invalid active Compass generation: $active_generation" >&2
+            exit 1
+            ;;
+    esac
+    active_directory="$output/.compass-generations/$active_generation"
+fi
+
+graph_path="$output/graph.json"
+if [ -n "$active_directory" ]; then
+    graph_path="$active_directory/graph.json"
+fi
+if [ ! -f "$graph_path" ]; then
+    echo "error: graph.json is required before rebuilding the store: $graph_path" >&2
     exit 1
 fi
 
@@ -47,6 +64,16 @@ mkdir -p "$backup"
 moved=0
 restore_on_failure() {
     if [ "$moved" -eq 1 ]; then
+        if [ -d "$output/.compass-store" ] && [ ! -e "$backup/failed-.compass-store" ]; then
+            mv "$output/.compass-store" "$backup/failed-.compass-store"
+        fi
+        if [ -d "$backup/.compass-store" ] && [ ! -e "$output/.compass-store" ]; then
+            mv "$backup/.compass-store" "$output/.compass-store"
+        fi
+        if [ -n "$active_directory" ] && [ -f "$backup/active-store.ref" ] \
+            && [ ! -e "$active_directory/store.ref" ]; then
+            mv "$backup/active-store.ref" "$active_directory/store.ref"
+        fi
         for name in compass-store.sqlite3 store.ref compass-store.redb \
             compass-store.sqlite3-wal compass-store.sqlite3-shm
         do
@@ -58,6 +85,18 @@ restore_on_failure() {
 }
 trap restore_on_failure EXIT HUP INT TERM
 
+if [ -d "$output/.compass-store" ]; then
+    mv "$output/.compass-store" "$backup/.compass-store"
+    moved=1
+fi
+if [ -n "$active_directory" ] && [ -f "$active_directory/store.ref" ]; then
+    printf '%s\n' "$active_generation" > "$backup/active-generation.txt"
+    mv "$active_directory/store.ref" "$backup/active-store.ref"
+    moved=1
+fi
+
+# Also preserve pre-shared-layout sidecars so this remains a hard-cut tool for
+# development and pre-release stores.
 for name in compass-store.sqlite3 store.ref compass-store.redb \
     compass-store.sqlite3-wal compass-store.sqlite3-shm
 do

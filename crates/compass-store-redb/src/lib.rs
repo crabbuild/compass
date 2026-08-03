@@ -10,9 +10,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use compass_store::{
-    Entry, Key, KeyRange, MAX_KEY_BYTES, MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES,
-    NamespaceId, PartitionKey, ScanCursor, ScanLimits, ScanPage, Store, StoreCapabilities,
-    StoreError, VersionToken, WriteCondition,
+    Entry, ImmutableBatchOutcome, ImmutableWrite, Key, KeyPage, KeyRange,
+    MAX_IMMUTABLE_BATCH_BYTES, MAX_IMMUTABLE_BATCH_ITEMS, MAX_KEY_BYTES, MAX_SCAN_BYTES,
+    MAX_SCAN_ITEMS, MAX_VALUE_BYTES, NamespaceId, PartitionKey, ScanCursor, ScanLimits, ScanPage,
+    Store, StoreCapabilities, StoreError, VersionToken, WriteCondition,
 };
 use redb::{
     Database, ReadOnlyDatabase, ReadTransaction, ReadableDatabase, ReadableTable, Table,
@@ -367,6 +368,9 @@ impl Store for RedbStore {
             ordered_partition_scans: true,
             conditional_single_key_writes: true,
             durable_acknowledgements: true,
+            max_immutable_batch_items: MAX_IMMUTABLE_BATCH_ITEMS,
+            max_immutable_batch_bytes: MAX_IMMUTABLE_BATCH_BYTES,
+            atomic_immutable_batches: true,
         }
     }
 
@@ -459,6 +463,72 @@ impl Store for RedbStore {
         })
     }
 
+    fn scan_keys(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        range: &KeyRange,
+        limits: ScanLimits,
+        cursor: Option<&ScanCursor>,
+    ) -> Result<KeyPage, StoreError> {
+        let limits = validate_limits(limits)?;
+        validate_range(range, cursor)?;
+        let max_key = vec![u8::MAX; MAX_KEY_BYTES];
+        let start = range.start_inclusive.as_deref().unwrap_or(&[]);
+        let end = range.end_exclusive.as_deref().unwrap_or(&max_key);
+        let cursor_key = cursor.map(ScanCursor::last_key);
+        self.with_read(|transaction| {
+            let table = transaction
+                .open_table(REDB_KV)
+                .map_err(|error| backend_error("open_kv", error))?;
+            let rows = table
+                .range(
+                    (namespace.as_bytes(), partition.as_bytes(), start)
+                        ..=(namespace.as_bytes(), partition.as_bytes(), end),
+                )
+                .map_err(|error| backend_error("scan_keys", error))?;
+            let mut keys = Vec::new();
+            let mut bytes_read = 0_usize;
+            let mut has_more = false;
+            for row in rows {
+                let (found_key, _) = row.map_err(|error| backend_error("scan_keys_row", error))?;
+                let (_, _, key) = found_key.value();
+                if range
+                    .start_inclusive
+                    .as_deref()
+                    .is_some_and(|start| key < start)
+                    || range.end_exclusive.as_deref().is_some_and(|end| key >= end)
+                    || cursor_key.is_some_and(|cursor| key <= cursor)
+                {
+                    continue;
+                }
+                let key = Key::new(key)?;
+                let key_bytes = key.as_bytes().len();
+                if keys.is_empty() && key_bytes > limits.max_bytes {
+                    return Err(StoreError::InvalidScanLimit(
+                        "the first matching key exceeds max_bytes".to_owned(),
+                    ));
+                }
+                if keys.len() == limits.max_items
+                    || bytes_read.saturating_add(key_bytes) > limits.max_bytes
+                {
+                    has_more = true;
+                    break;
+                }
+                bytes_read = bytes_read.saturating_add(key_bytes);
+                keys.push(key.as_bytes().to_vec());
+            }
+            let next = has_more
+                .then(|| ScanCursor::from_last_key(keys.last().cloned().unwrap_or_default()))
+                .transpose()?;
+            Ok(KeyPage {
+                keys,
+                next,
+                bytes_read,
+            })
+        })
+    }
+
     fn put(
         &self,
         namespace: &NamespaceId,
@@ -510,6 +580,131 @@ impl Store for RedbStore {
             Ok(deleted.is_some())
         })
     }
+
+    fn put_immutable_batch(
+        &self,
+        namespace: &NamespaceId,
+        writes: &[ImmutableWrite],
+    ) -> Result<ImmutableBatchOutcome, StoreError> {
+        validate_immutable_batch(writes)?;
+        self.with_write(|transaction| {
+            let mut table = transaction
+                .open_table(REDB_KV)
+                .map_err(|error| backend_error("open_kv", error))?;
+            let mut outcome = ImmutableBatchOutcome {
+                entries: Vec::with_capacity(writes.len()),
+                transactions: 1,
+                ..ImmutableBatchOutcome::default()
+            };
+            for write in writes {
+                let address = (
+                    namespace.as_bytes(),
+                    write.partition().as_bytes(),
+                    write.key().as_bytes(),
+                );
+                let existing = table
+                    .get(address)
+                    .map_err(|error| backend_error("get_for_immutable_batch", error))?
+                    .as_ref()
+                    .map(|entry| decode_entry(write.key().as_bytes(), entry.value()))
+                    .transpose()
+                    .map_err(|error| StoreError::Corrupt(format!("redb value: {error}")))?;
+                if let Some(existing) = existing {
+                    if existing.digest != digest(write.value()) || existing.value != write.value() {
+                        return Err(StoreError::Conflict);
+                    }
+                    outcome.reused_entries = outcome.reused_entries.saturating_add(1);
+                    outcome.entries.push(existing);
+                    continue;
+                }
+                let digest = digest(write.value());
+                let envelope = encode_value(1, digest, write.value());
+                table
+                    .insert(address, envelope.as_slice())
+                    .map_err(|error| backend_error("put_immutable_batch", error))?;
+                outcome.new_entries = outcome.new_entries.saturating_add(1);
+                outcome.bytes_written = outcome
+                    .bytes_written
+                    .saturating_add(write.value().len() as u64);
+                outcome.entries.push(Entry {
+                    key: write.key().as_bytes().to_vec(),
+                    value: write.value().to_vec(),
+                    version: VersionToken::from_raw(1),
+                    digest,
+                });
+            }
+            Ok(outcome)
+        })
+    }
+
+    fn delete_batch(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        keys: &[Key],
+    ) -> Result<u64, StoreError> {
+        validate_delete_batch(keys)?;
+        self.with_write(|transaction| {
+            let mut table = transaction
+                .open_table(REDB_KV)
+                .map_err(|error| backend_error("open_kv", error))?;
+            let mut deleted = 0_u64;
+            for key in keys {
+                if table
+                    .remove((namespace.as_bytes(), partition.as_bytes(), key.as_bytes()))
+                    .map_err(|error| backend_error("delete_batch", error))?
+                    .is_some()
+                {
+                    deleted = deleted.saturating_add(1);
+                }
+            }
+            Ok(deleted)
+        })
+    }
+}
+
+fn validate_delete_batch(keys: &[Key]) -> Result<(), StoreError> {
+    if keys.is_empty() || keys.len() > MAX_IMMUTABLE_BATCH_ITEMS {
+        return Err(StoreError::InvalidBatch(format!(
+            "delete batch item count must be between 1 and {MAX_IMMUTABLE_BATCH_ITEMS}"
+        )));
+    }
+    let unique = keys
+        .iter()
+        .map(Key::as_bytes)
+        .collect::<std::collections::BTreeSet<_>>();
+    if unique.len() != keys.len() {
+        return Err(StoreError::InvalidBatch(
+            "delete batch contains a duplicate key".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_immutable_batch(writes: &[ImmutableWrite]) -> Result<(), StoreError> {
+    if writes.is_empty() || writes.len() > MAX_IMMUTABLE_BATCH_ITEMS {
+        return Err(StoreError::InvalidBatch(format!(
+            "item count must be between 1 and {MAX_IMMUTABLE_BATCH_ITEMS}"
+        )));
+    }
+    let mut bytes = 0_usize;
+    let mut addresses = std::collections::BTreeSet::new();
+    for write in writes {
+        validate_value(write.value())?;
+        bytes = bytes.saturating_add(write.value().len());
+        if bytes > MAX_IMMUTABLE_BATCH_BYTES {
+            return Err(StoreError::ValueTooLarge {
+                actual: bytes,
+                maximum: MAX_IMMUTABLE_BATCH_BYTES,
+            });
+        }
+        if !addresses.insert((write.partition().as_bytes(), write.key().as_bytes())) {
+            return Err(StoreError::InvalidBatch(
+                "batch contains a duplicate address".to_owned(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_value(value: &[u8]) -> Result<(), StoreError> {

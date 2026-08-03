@@ -44,8 +44,9 @@ CSV observations are written below the selected target directory and must not
 be committed. Set `COMPASS_STORE_QUALIFICATION_SKIP_GATES=1` only for a local
 measurement rerun; a release run also executes adapter conformance, snapshot,
 query, CLI, CompassQL, product-boundary, packaging, and fixture gates. The
-release harness reports GC as `discovery-only` because general retention and
-deletion are not shipped in the local store.
+release harness verifies two-generation local retention and bounded
+reachability deletion; distributed leases and service GC are separate future
+qualification surfaces.
 
 One macOS development-run observation (Apple Silicon, Rust 1.97.1, release
 binary, 2026-08-02) was:
@@ -70,34 +71,69 @@ policy; a performance cutover requires a comparable approved JSON baseline.
 ### Django store audit
 
 A real-repository audit on Django commit
-`957d0cee7167757ae221ffde59d2cf0a322e89c7` used 7,074 detected files and
-published a 292,582,885-byte graph with 82,654 nodes and 187,913 edges. The
-canonical graph SHA-256 was
-`30897dc82a8452512b8d4be6149beeae6d0929bbb09966a8abf838b70a436595`.
+`957d0cee7167757ae221ffde59d2cf0a322e89c7` indexed 3,475 files and published
+a 288,565,683-byte canonical graph with 82,654 nodes and 187,913 edges. The
+store-qualified graph SHA-256 was
+`14c8c07324355a4a383761a825d32bc1ec24154417eb1e5243012288dffc1511`.
+The commands used a release binary, a fresh output root per mode, and:
 
-The initial JSON tree encoding could not publish this graph because a valid
-qualified name exceeded the portable key limit. After bounded hashed name
-keys, a graph-scale item limit, and compact MessagePack tree objects were
-added, the SQLite sidecar was 1,051,348,992 bytes (3.59× graph bytes), down
-from 2,672,005,120 bytes with JSON tree objects. The compact reader also
-successfully validated the older JSON-object store.
+```bash
+compass update /Users/haipingfu/Github/django \
+  --out OUTPUT --force --no-viz --no-cluster --no-program \
+  --store json|sqlite --timing
+```
 
-On the same output and release binary, cold typed search returned
-byte-identical 740,534-byte JSON from both engines. Store search measured
-17.371 s and 2,292,272 KiB peak RSS; JSON search measured 19.476 s and
-1,758,864 KiB. Store startup was 10.8% faster but used 30.3% more peak memory.
-`compass store status` completed in 7.837 s with 2,755,360 KiB peak RSS.
+The original merged implementation took 158.21 seconds for a fresh SQLite
+build versus 13.88 seconds for JSON (11.4× slower), used about 1.05 GB for the
+database, and performed roughly 16,410 durable transactions. It stored both a
+legacy full-graph payload and individually written immutable objects, copied
+the database through generation publication, and reconstructed the complete
+graph for a store query.
 
-Fresh publication remains outside the default-cutover budget: the compact
-store build completed in 206.357 s with 4,221,296 KiB peak RSS, versus the
-JSON-only control at 15.357 s and 3,628,336 KiB. Two unchanged store updates
-measured 4.300 and 4.561 s versus the JSON-only control at 1.833 s. The
-current store engine reconstructs the complete graph before query execution,
-and SQLite publishes immutable tree objects as individual durable writes.
-Direct projection execution, batched durable publication, and bounded
-generation retention remain required before claiming that Compass Store
-improves build performance or before treating it as an unconditional
-large-repository default.
+The qualified implementation instead uses bounded immutable batches, no
+existence pre-read per object, projected-only compressed snapshot roots, a
+shared database plus generation selector, streamed canonical graph hashing,
+direct projected queries, and two-generation reachability GC. Physical audit
+reported 7,583 rows: 7,582 immutable objects plus one selector. Object values
+totaled 115,336,290 bytes; the 16 KiB-page SQLite file was 190,087,168 bytes
+(0.66× `graph.json`). `PRAGMA integrity_check` and `foreign_key_check` passed.
+Point and partition-range `EXPLAIN QUERY PLAN` output both selected the
+`WITHOUT ROWID` primary key.
+
+Fresh and unchanged results on the same development runner were:
+
+| Scenario | JSON | SQLite store | Store / JSON |
+| --- | ---: | ---: | ---: |
+| Fresh build, internal wall | 10.31 s | 12.82 s | 1.24× |
+| Fresh build, process wall | 15.50 s | 12.87 s | 0.83× |
+| Fresh build peak RSS | 2,681,487,360 B | 2,880,339,968 B | 1.07× |
+| Unchanged update | 1.13 s | 1.18 s | 1.04× |
+
+The store build published 7,582 new objects (115,336,290 value bytes) in 12
+reported transactions, including activation and retention metadata. Mounted-
+volume contention produced one slower outlier, so internal phase timing and
+back-to-back controls are retained with the raw observations; the result is a
+comparable dual publication, not a promise that every filesystem makes SQLite
+faster than JSON.
+
+All six typed query families (`search`, `callers`, `callees`, `impact`,
+`explore`, and `node`) returned byte-identical JSON between engines on Django.
+The search differential includes truncation at the real candidate bound and
+therefore verifies candidate set, order, scores, diagnostics, nodes, and edges.
+Representative warm-cache process measurements were:
+
+| Query | JSON | SQLite store | Speedup |
+| --- | ---: | ---: | ---: |
+| `search django` | 11.19 s, 1,548,222,464 B RSS | 0.54 s, 41,238,528 B RSS | 20.7× |
+| callers | 19.20 s | 0.01 s | 1,920× |
+| impact | 10.55 s | 0.02 s | 527× |
+| node trail | 10.46 s | 2.76 s | 3.8× |
+
+The callers observation includes mounted-volume variability and should not be
+treated as a stable ratio. The important release evidence is exact result
+parity plus the absence of complete graph materialization on the store path.
+JSON remains the default permanent engine; SQLite remains explicit with
+`--store sqlite` and `--engine store`.
 
 ## CompassQL qualification
 

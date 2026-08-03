@@ -13,10 +13,11 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 use crate::CodeQueryEngine;
+use crate::code_query::CodeGraphBackend;
 use crate::cql::{QueryError, QueryErrorKind};
-use crate::graph_engine::open_graph_engine;
+use crate::graph_engine::{open_graph_engine, open_local_store_snapshot};
 
-const INDEX_FORMAT_VERSION: &str = "compass-code-index/1";
+const INDEX_FORMAT_VERSION: &str = "compass-code-index/2";
 
 /// Selects the source used to hydrate the typed query engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -55,6 +56,9 @@ pub fn open_with_engine(
     cache_root: &Path,
     selection: EngineSelection,
 ) -> Result<CodeQueryEngine, QueryError> {
+    if selection == EngineSelection::Store {
+        return open_from_local_store(graph_path, program_path);
+    }
     let graph_engine = open_graph_engine(graph_path, selection)?;
     open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
 }
@@ -123,15 +127,58 @@ fn open_from_graph_engine(
             )
         });
     Ok(CodeQueryEngine {
-        graph,
+        backend: CodeGraphBackend::Materialized {
+            graph: Box::new(graph),
+            adjacency: Box::new(adjacency),
+            lookup: Box::new(lookup),
+        },
         program,
-        connection,
+        connection: Some(connection),
         graph_path: graph_path.to_path_buf(),
         index_path,
-        adjacency,
-        lookup,
         partial_graph_message,
         engine_kind,
+    })
+}
+
+fn open_from_local_store(
+    graph_path: &Path,
+    program_path: Option<&Path>,
+) -> Result<CodeQueryEngine, QueryError> {
+    let snapshot = open_local_store_snapshot(graph_path)?;
+    let _metadata = snapshot.reader()?.metadata_summary().map_err(|error| {
+        QueryError::new(
+            QueryErrorKind::CorruptArtifact,
+            "store_graph_snapshot_failed",
+            error.to_string(),
+        )
+    })?;
+    let publication_summary = snapshot
+        .reader()?
+        .graph_diagnostic_by_code("publication_omission_summary")
+        .map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_snapshot_failed",
+                error.to_string(),
+            )
+        })?;
+    let partial_graph_message = publication_summary.map(|diagnostic| {
+        format!(
+            "Published graph coverage is incomplete: {}",
+            diagnostic.message
+        )
+    });
+    let (program, _) = load_program(program_path)?;
+    let index_path = snapshot.store_path.clone();
+    Ok(CodeQueryEngine {
+        backend: CodeGraphBackend::Store(Box::new(snapshot)),
+        program,
+        connection: None,
+        graph_path: graph_path.to_path_buf(),
+        index_path,
+        partial_graph_message,
+        engine_kind: QueryEngineKind::Store,
     })
 }
 
@@ -229,7 +276,7 @@ fn build_index(
     let mut connection = Connection::open(&temporary).map_err(sql_error)?;
     connection
         .execute_batch(
-            "PRAGMA journal_mode=DELETE;
+            r#"PRAGMA journal_mode=DELETE;
              PRAGMA synchronous=FULL;
              PRAGMA foreign_keys=ON;
              CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -246,8 +293,8 @@ fn build_index(
              CREATE VIRTUAL TABLE node_fts USING fts5(
                node_id UNINDEXED, name, qualified_name, aliases, kind, roles,
                language, framework, normalized_path,
-               tokenize='unicode61 remove_diacritics 2'
-             );",
+               tokenize="unicode61 remove_diacritics 2 tokenchars '_'"
+             );"#,
         )
         .map_err(sql_error)?;
     {

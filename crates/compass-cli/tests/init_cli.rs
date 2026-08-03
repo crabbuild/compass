@@ -8,7 +8,9 @@ use compass_files::{BuildGuard, ProjectConfig};
 use compass_graph::{GraphSnapshotReader, canonical_graph_json};
 use compass_model::GraphDocument;
 use compass_model::code_graph::GraphDocument as CodeGraphDocument;
-use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
+use compass_store::{
+    STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef, local_sqlite_store_path,
+};
 use serde_json::Value;
 
 #[test]
@@ -56,7 +58,7 @@ fn sqlite_store_option_publishes_a_durable_snapshot_alongside_json() -> Result<(
     fs::create_dir(root.path().join("src"))?;
     fs::write(root.path().join("src/lib.rs"), "pub fn initial() {}\n")?;
     let init = Command::new(env!("CARGO_BIN_EXE_compass"))
-        .args(["init", ".", "--yes", "--store", "sqlite"])
+        .args(["init", ".", "--yes", "--store", "sqlite", "--timing"])
         .current_dir(root.path())
         .env_remove("COMPASS_OUT")
         .output()?;
@@ -66,11 +68,16 @@ fn sqlite_store_option_publishes_a_durable_snapshot_alongside_json() -> Result<(
         String::from_utf8_lossy(&init.stdout),
         String::from_utf8_lossy(&init.stderr)
     );
+    let timing = String::from_utf8_lossy(&init.stderr);
+    assert!(timing.contains("[compass timing] store: new_objects="));
+    assert!(timing.contains("write_transactions="));
+    assert!(timing.contains("bytes_written="));
 
     let output_root = root.path().join("compass-out");
     let active = BuildGuard::resolve_active_directory(&output_root)?;
     let graph_path = active.join("graph.json");
-    let store = SqliteStore::open_read_only(active.join(STORE_FILE_NAME))?;
+    let store_path = local_sqlite_store_path(&graph_path);
+    let store = SqliteStore::open_read_only(&store_path)?;
     let graph = CodeGraphDocument::load(&graph_path)?;
     let reader = GraphSnapshotReader::open_active(&store)?.ok_or("missing active snapshot")?;
     assert_eq!(reader.export_json_bytes()?, canonical_graph_json(&graph)?);
@@ -91,7 +98,8 @@ fn sqlite_store_option_publishes_a_durable_snapshot_alongside_json() -> Result<(
     );
     let active = BuildGuard::resolve_active_directory(&output_root)?;
     assert!(active.join("graph.json").is_file());
-    assert!(active.join(STORE_FILE_NAME).is_file());
+    assert!(!active.join(STORE_FILE_NAME).exists());
+    assert!(store_path.is_file());
     assert!(active.join(STORE_REF_FILE_NAME).is_file());
     assert!(!active.join(".compass-build-incomplete").exists());
     Ok(())
@@ -131,7 +139,8 @@ fn default_json_build_replaces_an_opted_in_store_generation() -> Result<(), Box<
     assert!(sqlite.status.success());
     let output = root.path().join("compass-out");
     let active = BuildGuard::resolve_active_directory(&output)?;
-    assert!(active.join(STORE_FILE_NAME).is_file());
+    assert!(!active.join(STORE_FILE_NAME).exists());
+    assert!(local_sqlite_store_path(&active.join("graph.json")).is_file());
 
     let json = Command::new(env!("CARGO_BIN_EXE_compass"))
         .args(["update", ".", "--no-viz"])

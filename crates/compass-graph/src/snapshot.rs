@@ -7,6 +7,7 @@
 //! reconstructed from these records for export and differential testing.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::{Read, Write};
 
 use compass_model::code_graph::{
     CODE_GRAPH_SCHEMA_V1, EdgeRecord, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
@@ -14,13 +15,14 @@ use compass_model::code_graph::{
 };
 use compass_model::validate_code_graph;
 use compass_store::{
-    Key, MAX_GRAPH_BYTES, MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES, NamespaceId,
-    PartitionKey, Store, StoreError, WriteCondition, decode_key_segments, encode_key_segments,
+    ImmutableWrite, Key, MAX_GRAPH_BYTES, MAX_IMMUTABLE_BATCH_BYTES, MAX_IMMUTABLE_BATCH_ITEMS,
+    MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES, NamespaceId, PartitionKey, Store, StoreError,
+    WriteCondition, decode_key_segments, encode_key_segments,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const GRAPH_SNAPSHOT_LAYOUT_V1: &str = "compass.store.graph-index/1";
+pub const GRAPH_SNAPSHOT_LAYOUT_V2: &str = "compass.store.graph-index/2";
 pub const GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1: &str = "compass.store.graph-selector/1";
 pub const GRAPH_SNAPSHOT_CANONICAL_ENCODING_V1: &str = "canonical-json-v1";
 pub const GRAPH_SNAPSHOT_OBJECT_PARTITION: &str = "graph-snapshot/objects";
@@ -31,6 +33,8 @@ pub const GRAPH_SNAPSHOT_MAX_OBJECTS: usize = 100_000;
 pub const GRAPH_SNAPSHOT_MAX_ITEMS: usize = 5_000_000;
 pub const GRAPH_SNAPSHOT_MAX_FANOUT: usize = 32;
 pub const GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES: usize = 128;
+const TREE_ZSTD_MAGIC: &[u8; 5] = b"CSTZ1";
+const TREE_ZSTD_HEADER_BYTES: usize = TREE_ZSTD_MAGIC.len() + std::mem::size_of::<u32>();
 
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
@@ -118,9 +122,9 @@ pub struct GraphSnapshotManifest {
 
 impl GraphSnapshotManifest {
     pub fn validate(&self) -> Result<(), SnapshotError> {
-        if self.schema != GRAPH_SNAPSHOT_LAYOUT_V1 {
+        if self.schema != GRAPH_SNAPSHOT_LAYOUT_V2 {
             return Err(SnapshotError::Unsupported(format!(
-                "expected {GRAPH_SNAPSHOT_LAYOUT_V1}, found {}",
+                "expected {GRAPH_SNAPSHOT_LAYOUT_V2}, found {}",
                 self.schema
             )));
         }
@@ -272,12 +276,150 @@ pub struct PreparedGraphSnapshot {
     pub manifest_digest: String,
     pub new_objects: u64,
     pub reused_objects: u64,
+    pub write_transactions: u64,
+    pub bytes_written: u64,
+}
+
+/// Immutable index roots prepared independently from the canonical graph JSON
+/// publication. Keeping this intermediate typed allows callers to stream and
+/// hash `graph.json` concurrently, then bind its exact digest into the final
+/// snapshot manifest without serializing the complete graph a second time.
+pub struct PreparedGraphSnapshotContent {
+    snapshot_id: String,
+    node_count: u64,
+    edge_count: u64,
+    roots: Vec<SnapshotRoot>,
+    stats: ObjectStats,
+}
+
+/// Borrowed canonical serialization view shared by `graph.json` publication,
+/// identity verification, and store manifests. Record order is imposed through
+/// reference vectors, so producing the view does not clone the graph records.
+#[derive(Serialize)]
+pub struct CanonicalGraphDocument<'a> {
+    directed: bool,
+    multigraph: bool,
+    graph: GraphMetadata,
+    nodes: Vec<&'a NodeRecord>,
+    links: Vec<&'a EdgeRecord>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct GraphSnapshotGcStats {
+    pub retained_manifests: u64,
+    pub retained_objects: u64,
+    pub deleted_entries: u64,
+    pub delete_transactions: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
 struct ObjectStats {
     new_objects: u64,
     reused_objects: u64,
+    write_transactions: u64,
+    bytes_written: u64,
+}
+
+struct ObjectWriter<'a, S: Store + ?Sized> {
+    store: &'a S,
+    namespace: NamespaceId,
+    partition: PartitionKey,
+    pending: Vec<ImmutableWrite>,
+    pending_bytes: usize,
+    max_items: usize,
+    max_bytes: usize,
+    stats: ObjectStats,
+}
+
+impl<'a, S: Store + ?Sized> ObjectWriter<'a, S> {
+    fn new(store: &'a S) -> Result<Self, SnapshotError> {
+        let capabilities = store.capabilities();
+        let max_items = capabilities
+            .max_immutable_batch_items
+            .min(MAX_IMMUTABLE_BATCH_ITEMS);
+        let max_bytes = capabilities
+            .max_immutable_batch_bytes
+            .min(MAX_IMMUTABLE_BATCH_BYTES);
+        if max_items == 0 || max_bytes == 0 {
+            return Err(SnapshotError::Unsupported(
+                "store does not advertise bounded immutable batches".to_owned(),
+            ));
+        }
+        Ok(Self {
+            store,
+            namespace: NamespaceId::graph(),
+            partition: object_partition()?,
+            pending: Vec::with_capacity(max_items),
+            pending_bytes: 0,
+            max_items,
+            max_bytes,
+            stats: ObjectStats::default(),
+        })
+    }
+
+    fn put(&mut self, key: Key, bytes: Vec<u8>) -> Result<(), SnapshotError> {
+        if bytes.len() > MAX_VALUE_BYTES {
+            return Err(SnapshotError::Limit(
+                "immutable object exceeds the store value limit".to_owned(),
+            ));
+        }
+        if !self.pending.is_empty()
+            && (self.pending.len() == self.max_items
+                || self.pending_bytes.saturating_add(bytes.len()) > self.max_bytes)
+        {
+            self.flush()?;
+        }
+        if bytes.len() > self.max_bytes {
+            return Err(SnapshotError::Limit(
+                "immutable object exceeds the adapter batch byte limit".to_owned(),
+            ));
+        }
+        self.pending_bytes = self.pending_bytes.saturating_add(bytes.len());
+        self.pending
+            .push(ImmutableWrite::new(self.partition.clone(), key, bytes)?);
+        if self.pending.len() == self.max_items || self.pending_bytes == self.max_bytes {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), SnapshotError> {
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+        let outcome = self
+            .store
+            .put_immutable_batch(&self.namespace, &self.pending)?;
+        if outcome.entries.len() != self.pending.len()
+            || outcome.new_entries.saturating_add(outcome.reused_entries)
+                != self.pending.len() as u64
+        {
+            return Err(SnapshotError::Corrupt(
+                "store returned an incomplete immutable batch outcome".to_owned(),
+            ));
+        }
+        self.stats.new_objects = self.stats.new_objects.saturating_add(outcome.new_entries);
+        self.stats.reused_objects = self
+            .stats
+            .reused_objects
+            .saturating_add(outcome.reused_entries);
+        self.stats.write_transactions = self
+            .stats
+            .write_transactions
+            .saturating_add(outcome.transactions);
+        self.stats.bytes_written = self
+            .stats
+            .bytes_written
+            .saturating_add(outcome.bytes_written);
+        self.pending.clear();
+        self.pending_bytes = 0;
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<ObjectStats, SnapshotError> {
+        self.flush()?;
+        Ok(self.stats)
+    }
 }
 
 type SnapshotIndexes = BTreeMap<IndexKind, BTreeMap<Vec<u8>, Vec<u8>>>;
@@ -292,10 +434,12 @@ struct MetadataRecord {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct DiagnosticRecord {
-    owner: String,
-    diagnostic: GraphDiagnostic,
+struct TermPostingChunk {
+    term: String,
+    node_ids: Vec<String>,
 }
+
+const TERM_POSTING_CHUNK_ITEMS: usize = 128;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -339,56 +483,111 @@ impl GraphSnapshotBuilder {
         store: &S,
         graph: &GraphDocument,
     ) -> Result<PreparedGraphSnapshot, SnapshotError> {
-        let canonical = canonical_document(graph)?;
-        validate_code_graph(&canonical)
+        self.prepare_canonical(store, graph)
+    }
+
+    /// Prepare a snapshot from an owned document without cloning the complete
+    /// graph solely to establish deterministic record ordering.
+    pub fn prepare_owned<S: Store + ?Sized>(
+        &self,
+        store: &S,
+        graph: GraphDocument,
+    ) -> Result<PreparedGraphSnapshot, SnapshotError> {
+        self.prepare_canonical(store, &graph)
+    }
+
+    /// Prepare a canonical snapshot without cloning graph records or buffering
+    /// its complete JSON representation. Ordering is imposed through bounded
+    /// reference vectors while `graph.json` can be streamed in parallel.
+    pub fn prepare_canonical<S: Store + ?Sized>(
+        &self,
+        store: &S,
+        canonical: &GraphDocument,
+    ) -> Result<PreparedGraphSnapshot, SnapshotError> {
+        let (graph_digest, graph_bytes) = digest_canonical_graph(canonical, false)?;
+        let content = self.prepare_content(store, canonical)?;
+        self.finish_content(store, content, graph_digest, graph_bytes)
+    }
+
+    /// Prepare content-addressed logical indexes without constructing the
+    /// manifest. This is the expensive backend-neutral phase and is safe to
+    /// run concurrently with canonical `graph.json` publication.
+    pub fn prepare_content<S: Store + ?Sized>(
+        &self,
+        store: &S,
+        canonical: &GraphDocument,
+    ) -> Result<PreparedGraphSnapshotContent, SnapshotError> {
+        validate_code_graph(canonical)
             .map_err(|error| SnapshotError::Corrupt(format!("graph validation failed: {error}")))?;
-        let graph_bytes = encode_json(&canonical)?;
-        if graph_bytes.is_empty() || graph_bytes.len() > MAX_GRAPH_BYTES {
-            return Err(SnapshotError::Limit(format!(
-                "canonical graph exceeds the {MAX_GRAPH_BYTES}-byte limit"
-            )));
-        }
-        let graph_digest = hex_digest(&graph_bytes);
-        let snapshot_id = snapshot_identity(&canonical)?;
-        let indexes = build_indexes(&canonical)?;
-        let mut stats = ObjectStats::default();
+        let (snapshot_id, indexes) =
+            rayon::join(|| snapshot_identity(canonical), || build_indexes(canonical));
+        let snapshot_id = snapshot_id?;
+        let indexes = indexes?;
+        let mut writer = ObjectWriter::new(store)?;
         let mut roots = Vec::with_capacity(IndexKind::ALL.len());
         for index in IndexKind::ALL {
             let entries = indexes.get(&index).ok_or_else(|| {
                 SnapshotError::Corrupt(format!("missing {} index", index.as_str()))
             })?;
-            let digest = build_index_tree(store, index, entries, &mut stats)?;
+            let digest = build_index_tree(&mut writer, index, entries)?;
             roots.push(SnapshotRoot {
                 index,
                 digest,
                 entry_count: entries.len() as u64,
             });
         }
-        let manifest = GraphSnapshotManifest {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
-            canonical_encoding: GRAPH_SNAPSHOT_CANONICAL_ENCODING_V1.to_owned(),
+        let stats = writer.finish()?;
+        Ok(PreparedGraphSnapshotContent {
             snapshot_id,
-            graph_schema: CODE_GRAPH_SCHEMA_V1.to_owned(),
-            graph_digest,
-            graph_bytes: graph_bytes.len() as u64,
             node_count: canonical.nodes.len() as u64,
             edge_count: canonical.links.len() as u64,
             roots,
+            stats,
+        })
+    }
+
+    /// Bind prepared index content to the digest of the exact compact
+    /// canonical JSON bytes and publish the immutable manifest.
+    pub fn finish_content<S: Store + ?Sized>(
+        &self,
+        store: &S,
+        content: PreparedGraphSnapshotContent,
+        graph_digest: String,
+        graph_bytes: u64,
+    ) -> Result<PreparedGraphSnapshot, SnapshotError> {
+        let manifest = GraphSnapshotManifest {
+            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+            canonical_encoding: GRAPH_SNAPSHOT_CANONICAL_ENCODING_V1.to_owned(),
+            snapshot_id: content.snapshot_id,
+            graph_schema: CODE_GRAPH_SCHEMA_V1.to_owned(),
+            graph_digest,
+            graph_bytes,
+            node_count: content.node_count,
+            edge_count: content.edge_count,
+            roots: content.roots,
         };
         manifest.validate()?;
         let manifest_bytes = encode_json(&manifest)?;
         let manifest_digest = hex_digest(&manifest_bytes);
-        put_immutable_object(
-            store,
-            &manifest_key(&manifest_digest)?,
-            &manifest_bytes,
-            &mut stats,
-        )?;
+        let mut writer = ObjectWriter::new(store)?;
+        put_immutable_object(&mut writer, manifest_key(&manifest_digest)?, manifest_bytes)?;
+        let stats = writer.finish()?;
         Ok(PreparedGraphSnapshot {
             manifest,
             manifest_digest,
-            new_objects: stats.new_objects,
-            reused_objects: stats.reused_objects,
+            new_objects: content.stats.new_objects.saturating_add(stats.new_objects),
+            reused_objects: content
+                .stats
+                .reused_objects
+                .saturating_add(stats.reused_objects),
+            write_transactions: content
+                .stats
+                .write_transactions
+                .saturating_add(stats.write_transactions),
+            bytes_written: content
+                .stats
+                .bytes_written
+                .saturating_add(stats.bytes_written),
         })
     }
 
@@ -422,7 +621,12 @@ pub fn prepare_graph_snapshot<S: Store + ?Sized>(
 /// comparing source-order JSON bytes, so equivalent graph records have one
 /// stable identity across adapters.
 pub fn canonical_graph_json(graph: &GraphDocument) -> Result<Vec<u8>, SnapshotError> {
-    encode_json(&canonical_document(graph)?)
+    encode_json(&canonical_graph_document(graph))
+}
+
+#[must_use]
+pub fn canonical_graph_document(graph: &GraphDocument) -> CanonicalGraphDocument<'_> {
+    canonical_graph_document_with_generation(graph, false)
 }
 
 pub fn activate_graph_snapshot<S: Store + ?Sized>(
@@ -460,6 +664,152 @@ pub fn activate_graph_snapshot<S: Store + ?Sized>(
     });
     store.put(&namespace, &catalog, &active, &selector_bytes, condition)?;
     Ok(selector)
+}
+
+/// Mark immutable trees reachable from retained selectors and remove other
+/// graph-snapshot objects. Work is bounded and fails before sweeping if the
+/// mark set exceeds `max_objects`.
+pub fn garbage_collect_graph_snapshots<S: Store + ?Sized>(
+    store: &S,
+    selectors: &[SnapshotSelector],
+    max_objects: usize,
+) -> Result<GraphSnapshotGcStats, SnapshotError> {
+    if max_objects == 0 || max_objects > GRAPH_SNAPSHOT_MAX_OBJECTS.saturating_mul(8) {
+        return Err(SnapshotError::Limit(
+            "graph snapshot GC object bound is invalid".to_owned(),
+        ));
+    }
+    let mut reachable = BTreeSet::<Vec<u8>>::new();
+    let mut retained_manifests = 0_u64;
+    for selector in selectors {
+        let reader = GraphSnapshotReader::open_selector(store, selector.clone())?;
+        reachable.insert(manifest_key(&selector.manifest_digest)?.as_bytes().to_vec());
+        retained_manifests = retained_manifests.saturating_add(1);
+        for root in &reader.manifest.roots {
+            mark_tree_objects(
+                store,
+                root.index,
+                &root.digest,
+                &mut reachable,
+                max_objects,
+                0,
+            )?;
+        }
+    }
+    let retained_objects = reachable.len() as u64;
+    let namespace = NamespaceId::graph();
+    let partition = object_partition()?;
+    let mut cursor = None;
+    let mut scanned = 0_usize;
+    let mut deleted_entries = 0_u64;
+    let mut delete_transactions = 0_u64;
+    loop {
+        let page = store.scan_keys(
+            &namespace,
+            &partition,
+            &compass_store::KeyRange::default(),
+            compass_store::ScanLimits {
+                max_items: MAX_SCAN_ITEMS,
+                max_bytes: MAX_SCAN_BYTES,
+            },
+            cursor.as_ref(),
+        )?;
+        scanned = scanned.saturating_add(page.keys.len());
+        if scanned > max_objects {
+            return Err(SnapshotError::Limit(
+                "graph snapshot GC scan exceeded its object bound".to_owned(),
+            ));
+        }
+        let unreachable = page
+            .keys
+            .into_iter()
+            .filter(|key| !reachable.contains(key))
+            .map(|key| Key::new(key).map_err(SnapshotError::from))
+            .collect::<Result<Vec<_>, _>>()?;
+        for keys in unreachable.chunks(MAX_IMMUTABLE_BATCH_ITEMS) {
+            deleted_entries =
+                deleted_entries.saturating_add(store.delete_batch(&namespace, &partition, keys)?);
+            if !keys.is_empty() {
+                delete_transactions = delete_transactions.saturating_add(1);
+            }
+        }
+        let Some(next) = page.next else {
+            break;
+        };
+        cursor = Some(next);
+    }
+    Ok(GraphSnapshotGcStats {
+        retained_manifests,
+        retained_objects,
+        deleted_entries,
+        delete_transactions,
+    })
+}
+
+/// Check whether immutable graph manifests exceed the retained-generation
+/// budget using a key-only bounded projection.
+pub fn graph_snapshot_needs_gc<S: Store + ?Sized>(
+    store: &S,
+    retained_manifests: usize,
+) -> Result<bool, SnapshotError> {
+    if retained_manifests == 0 || retained_manifests >= MAX_SCAN_ITEMS {
+        return Err(SnapshotError::Limit(
+            "retained manifest bound is invalid".to_owned(),
+        ));
+    }
+    let namespace = NamespaceId::graph();
+    let partition = object_partition()?;
+    let page = store.scan_keys(
+        &namespace,
+        &partition,
+        &compass_store::KeyRange {
+            start_inclusive: Some(b"manifest/".to_vec()),
+            end_exclusive: Some(b"manifest0".to_vec()),
+        },
+        compass_store::ScanLimits {
+            max_items: retained_manifests.saturating_add(1),
+            max_bytes: MAX_SCAN_BYTES,
+        },
+        None,
+    )?;
+    Ok(page.keys.len() > retained_manifests || page.next.is_some())
+}
+
+fn mark_tree_objects<S: Store + ?Sized>(
+    store: &S,
+    index: IndexKind,
+    digest: &str,
+    reachable: &mut BTreeSet<Vec<u8>>,
+    max_objects: usize,
+    depth: usize,
+) -> Result<(), SnapshotError> {
+    if depth >= GRAPH_SNAPSHOT_MAX_DEPTH {
+        return Err(SnapshotError::Limit(
+            "graph snapshot GC tree depth exceeded".to_owned(),
+        ));
+    }
+    let key = object_key(digest)?;
+    if !reachable.insert(key.as_bytes().to_vec()) {
+        return Ok(());
+    }
+    if reachable.len() > max_objects {
+        return Err(SnapshotError::Limit(
+            "graph snapshot GC mark set exceeded its object bound".to_owned(),
+        ));
+    }
+    if let TreeObject::Branch { children, .. } = load_tree_object(store, index, digest)? {
+        for child in children {
+            mark_tree_objects(
+                store,
+                index,
+                &child.digest,
+                reachable,
+                max_objects,
+                depth.saturating_add(1),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 pub fn active_graph_snapshot<S: Store + ?Sized>(
@@ -556,6 +906,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 b"diagnostic" => graph
                     .diagnostics
                     .push(decode_json::<GraphDiagnostic>(&entry.value)?),
+                b"diagnostic-code" => {}
                 _ => {
                     return Err(SnapshotError::Corrupt(
                         "metadata index contains an unknown supplement".to_owned(),
@@ -569,6 +920,51 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             multigraph: record.multigraph,
             graph,
         })
+    }
+
+    /// Read graph-level metadata without materializing file, coverage, or
+    /// diagnostic supplements.
+    pub fn metadata_summary(&self) -> Result<GraphSnapshotMetadata, SnapshotError> {
+        let key = encode_graph_index_key(IndexKind::Metadata, &[])?;
+        let value = self
+            .lookup(IndexKind::Metadata, &key)?
+            .ok_or_else(|| SnapshotError::Corrupt("metadata index entry is missing".to_owned()))?;
+        let record = decode_json::<MetadataRecord>(&value)?;
+        Ok(GraphSnapshotMetadata {
+            directed: record.directed,
+            multigraph: record.multigraph,
+            graph: record.graph,
+        })
+    }
+
+    /// Read graph-level diagnostics without materializing files, coverage, or
+    /// the node and edge collections.
+    pub fn graph_diagnostics(
+        &self,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<GraphDiagnostic>, bool), SnapshotError> {
+        let prefix = encode_graph_index_key(IndexKind::Metadata, &[b"diagnostic"])?;
+        let (values, truncated) =
+            self.scan_values_bounded(IndexKind::Metadata, Some(&prefix), limits)?;
+        let diagnostics = values
+            .into_iter()
+            .map(|value| decode_json::<GraphDiagnostic>(&value))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((diagnostics, truncated))
+    }
+
+    /// Read the first graph diagnostic for a stable code through a point
+    /// projection. This avoids scanning large omission sets when a query only
+    /// needs the publication summary.
+    pub fn graph_diagnostic_by_code(
+        &self,
+        code: &str,
+    ) -> Result<Option<GraphDiagnostic>, SnapshotError> {
+        let key =
+            encode_graph_index_key(IndexKind::Metadata, &[b"diagnostic-code", code.as_bytes()])?;
+        self.lookup(IndexKind::Metadata, &key)?
+            .map(|value| decode_json::<GraphDiagnostic>(&value))
+            .transpose()
     }
 
     pub fn get_node(&self, id: &str) -> Result<Option<NodeRecord>, SnapshotError> {
@@ -613,6 +1009,166 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         limits: SnapshotReadLimits,
     ) -> Result<Vec<EdgeRecord>, SnapshotError> {
         self.adjacency(IndexKind::Incoming, node_id, limits)
+    }
+
+    pub fn nodes_by_normalized_name(
+        &self,
+        normalized_name: &str,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<NodeRecord>, bool), SnapshotError> {
+        let normalized = normalize_symbol(normalized_name);
+        let prefix = encode_name_prefix(&normalized)?;
+        let (entries, truncated) =
+            self.scan_entries_bounded(IndexKind::Names, Some(&prefix), limits)?;
+        let mut nodes = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let segments = decode_key_segments(&entry.key).map_err(SnapshotError::from)?;
+            let node_id = segments
+                .last()
+                .and_then(|segment| std::str::from_utf8(segment).ok())
+                .ok_or_else(|| {
+                    SnapshotError::Corrupt("name index node ID is invalid".to_owned())
+                })?;
+            let node = self.get_node(node_id)?.ok_or_else(|| {
+                SnapshotError::Corrupt(format!("name index references missing node {node_id}"))
+            })?;
+            nodes.push(node);
+        }
+        nodes.sort_by(|left, right| left.id.cmp(&right.id));
+        nodes.dedup_by(|left, right| left.id == right.id);
+        Ok((nodes, truncated))
+    }
+
+    /// Return node candidates present in every exact normalized term posting.
+    pub fn nodes_for_terms(
+        &self,
+        terms: &[String],
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<NodeRecord>, bool), SnapshotError> {
+        let mut intersection: Option<BTreeSet<String>> = None;
+        let mut truncated = false;
+        for term in terms {
+            let normalized = term.to_lowercase();
+            let prefix_length = normalized.len().min(3);
+            let posting_prefix = normalized
+                .get(..prefix_length)
+                .unwrap_or(normalized.as_str());
+            let prefix = encode_graph_index_key(
+                IndexKind::Terms,
+                &[posting_prefix.as_bytes(), b"node_prefix"],
+            )?;
+            // `max_items` on the public request bounds candidate node IDs, not
+            // posting chunks. Scan the complete bounded prefix range and keep
+            // only the smallest canonical IDs; otherwise a vocabulary-heavy
+            // prefix can consume the bound before later matching terms are
+            // visited and diverge from the JSON accelerator.
+            let posting_limits = SnapshotReadLimits {
+                max_items: GRAPH_SNAPSHOT_MAX_ITEMS,
+                ..limits
+            };
+            let (values, mut posting_truncated) =
+                self.scan_values_bounded(IndexKind::Terms, Some(&prefix), posting_limits)?;
+            let mut ids = BTreeSet::new();
+            for value in values {
+                let posting = decode_json::<TermPostingChunk>(&value)?;
+                if !posting.term.starts_with(&normalized) {
+                    continue;
+                }
+                for node_id in posting.node_ids {
+                    ids.insert(node_id);
+                    if ids.len() > limits.max_items {
+                        ids.pop_last();
+                        posting_truncated = true;
+                    }
+                }
+            }
+            truncated |= posting_truncated;
+            intersection = Some(match intersection {
+                Some(previous) => previous.intersection(&ids).cloned().collect(),
+                None => ids,
+            });
+            if intersection.as_ref().is_some_and(BTreeSet::is_empty) {
+                break;
+            }
+        }
+        let mut nodes = Vec::new();
+        for node_id in intersection.unwrap_or_default() {
+            if let Some(node) = self.get_node(&node_id)? {
+                nodes.push(node);
+            }
+        }
+        Ok((nodes, truncated))
+    }
+
+    pub fn file_by_path(&self, path: &str) -> Result<Option<FileRecord>, SnapshotError> {
+        let key = encode_file_path_key(path)?;
+        let Some(value) = self.lookup(IndexKind::Files, &key)? else {
+            return Ok(None);
+        };
+        let file_id = decode_json::<String>(&value)?;
+        let id_key = encode_graph_index_key(IndexKind::Metadata, &[b"file", file_id.as_bytes()])?;
+        self.lookup(IndexKind::Metadata, &id_key)?
+            .map(|value| decode_json::<FileRecord>(&value))
+            .transpose()
+    }
+
+    /// Read only requested directional kind buckets and merge by edge ID.
+    pub fn adjacency_by_kinds(
+        &self,
+        node_id: &str,
+        incoming: bool,
+        kinds: &[compass_model::code_graph::EdgeKind],
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<EdgeRecord>, bool), SnapshotError> {
+        let index = if incoming {
+            IndexKind::Incoming
+        } else {
+            IndexKind::Outgoing
+        };
+        let mut edges = BTreeMap::new();
+        let mut truncated = false;
+        for kind in kinds {
+            let prefix =
+                encode_graph_index_key(index, &[node_id.as_bytes(), kind.as_str().as_bytes()])?;
+            let (entries, bucket_truncated) =
+                self.scan_entries_bounded(index, Some(&prefix), limits)?;
+            truncated |= bucket_truncated;
+            for entry in entries {
+                let edge_id = index_entry_id(&entry, "directional adjacency")?;
+                let edge = self.get_edge(&edge_id)?.ok_or_else(|| {
+                    SnapshotError::Corrupt(format!(
+                        "{index:?} index references missing edge {edge_id}"
+                    ))
+                })?;
+                edges.insert(edge.id.clone(), edge);
+            }
+        }
+        Ok((edges.into_values().collect(), truncated))
+    }
+
+    pub fn incident(
+        &self,
+        node_id: &str,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<EdgeRecord>, bool), SnapshotError> {
+        let incoming_prefix = encode_graph_index_key(IndexKind::Incoming, &[node_id.as_bytes()])?;
+        let outgoing_prefix = encode_graph_index_key(IndexKind::Outgoing, &[node_id.as_bytes()])?;
+        let (incoming, incoming_truncated) =
+            self.scan_entries_bounded(IndexKind::Incoming, Some(&incoming_prefix), limits)?;
+        let (outgoing, outgoing_truncated) =
+            self.scan_entries_bounded(IndexKind::Outgoing, Some(&outgoing_prefix), limits)?;
+        let mut edges = BTreeMap::new();
+        for entry in incoming.into_iter().chain(outgoing) {
+            let edge_id = index_entry_id(&entry, "incident adjacency")?;
+            let edge = self.get_edge(&edge_id)?.ok_or_else(|| {
+                SnapshotError::Corrupt(format!("incident index references missing edge {edge_id}"))
+            })?;
+            edges.insert(edge.id.clone(), edge);
+        }
+        Ok((
+            edges.into_values().collect(),
+            incoming_truncated || outgoing_truncated,
+        ))
     }
 
     pub fn export_graph(&self) -> Result<GraphDocument, SnapshotError> {
@@ -661,10 +1217,10 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         limits: SnapshotReadLimits,
     ) -> Result<Vec<EdgeRecord>, SnapshotError> {
         let prefix = encode_graph_index_key(index, &[node_id.as_bytes()])?;
-        let values = self.scan_values(index, Some(&prefix), limits)?;
-        let mut edges = Vec::with_capacity(values.len());
-        for value in values {
-            let edge_id = decode_json::<String>(&value)?;
+        let entries = self.scan_entries(index, Some(&prefix), limits)?;
+        let mut edges = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let edge_id = index_entry_id(&entry, "adjacency")?;
             let edge = self.get_edge(&edge_id)?.ok_or_else(|| {
                 SnapshotError::Corrupt(format!("{index:?} index references missing edge {edge_id}"))
             })?;
@@ -705,9 +1261,54 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             objects: 0,
             bytes: 0,
             entries: Vec::new(),
+            truncate_on_limit: false,
+            truncated: false,
         };
         scan_tree(self.store, index, &root, prefix, &mut state, 0)?;
         Ok(state.entries.into_iter().map(|entry| entry.value).collect())
+    }
+
+    fn scan_values_bounded(
+        &self,
+        index: IndexKind,
+        prefix: Option<&[u8]>,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<Vec<u8>>, bool), SnapshotError> {
+        let limits = limits.validate()?;
+        let root = self.root(index)?.digest.clone();
+        let mut state = ScanState {
+            limits,
+            objects: 0,
+            bytes: 0,
+            entries: Vec::new(),
+            truncate_on_limit: true,
+            truncated: false,
+        };
+        scan_tree(self.store, index, &root, prefix, &mut state, 0)?;
+        Ok((
+            state.entries.into_iter().map(|entry| entry.value).collect(),
+            state.truncated,
+        ))
+    }
+
+    fn scan_entries_bounded(
+        &self,
+        index: IndexKind,
+        prefix: Option<&[u8]>,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<TreeEntry>, bool), SnapshotError> {
+        let limits = limits.validate()?;
+        let root = self.root(index)?.digest.clone();
+        let mut state = ScanState {
+            limits,
+            objects: 0,
+            bytes: 0,
+            entries: Vec::new(),
+            truncate_on_limit: true,
+            truncated: false,
+        };
+        scan_tree(self.store, index, &root, prefix, &mut state, 0)?;
+        Ok((state.entries, state.truncated))
     }
 
     fn scan_entries(
@@ -723,10 +1324,21 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             objects: 0,
             bytes: 0,
             entries: Vec::new(),
+            truncate_on_limit: false,
+            truncated: false,
         };
         scan_tree(self.store, index, &root, prefix, &mut state, 0)?;
         Ok(state.entries)
     }
+}
+
+fn index_entry_id(entry: &TreeEntry, label: &str) -> Result<String, SnapshotError> {
+    let segments = decode_key_segments(&entry.key).map_err(SnapshotError::from)?;
+    let id = segments
+        .last()
+        .and_then(|segment| std::str::from_utf8(segment).ok())
+        .ok_or_else(|| SnapshotError::Corrupt(format!("{label} ID is invalid")))?;
+    Ok(id.to_owned())
 }
 
 /// Encode an index key using the portable, length-prefixed store encoding.
@@ -740,30 +1352,46 @@ pub fn encode_graph_index_key(
     encode_key_segments(&all).map_err(SnapshotError::from)
 }
 
-fn canonical_document(graph: &GraphDocument) -> Result<GraphDocument, SnapshotError> {
-    let mut canonical = graph.clone();
-    canonical
-        .nodes
-        .sort_by(|left, right| left.id.cmp(&right.id));
-    canonical.links.sort_by(|left, right| {
+fn snapshot_identity(graph: &GraphDocument) -> Result<String, SnapshotError> {
+    digest_canonical_graph(graph, true).map(|(digest, _)| digest)
+}
+
+fn digest_canonical_graph(
+    graph: &GraphDocument,
+    clear_generation: bool,
+) -> Result<(String, u64), SnapshotError> {
+    digest_json(
+        &canonical_graph_document_with_generation(graph, clear_generation),
+        MAX_GRAPH_BYTES,
+    )
+}
+
+fn canonical_graph_document_with_generation(
+    graph: &GraphDocument,
+    clear_generation: bool,
+) -> CanonicalGraphDocument<'_> {
+    let mut metadata = graph.graph.clone();
+    metadata.files.sort_by(|left, right| left.id.cmp(&right.id));
+    if clear_generation {
+        metadata.build.generation_id.clear();
+    }
+    let mut nodes = graph.nodes.iter().collect::<Vec<_>>();
+    nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut links = graph.links.iter().collect::<Vec<_>>();
+    links.sort_by(|left, right| {
         left.id
             .cmp(&right.id)
             .then_with(|| left.source.cmp(&right.source))
             .then_with(|| left.target.cmp(&right.target))
             .then_with(|| left.kind.as_str().cmp(right.kind.as_str()))
     });
-    canonical
-        .graph
-        .files
-        .sort_by(|left, right| left.id.cmp(&right.id));
-    let _ = encode_json(&canonical)?;
-    Ok(canonical)
-}
-
-fn snapshot_identity(graph: &GraphDocument) -> Result<String, SnapshotError> {
-    let mut identity = graph.clone();
-    identity.graph.build.generation_id.clear();
-    Ok(hex_digest(&encode_json(&identity)?))
+    CanonicalGraphDocument {
+        directed: graph.directed,
+        multigraph: graph.multigraph,
+        graph: metadata,
+        nodes,
+        links,
+    }
 }
 
 fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError> {
@@ -818,8 +1446,38 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
             )?,
             diagnostic,
         )?;
+        if diagnostic.code == "publication_omission_summary" {
+            let key = encode_graph_index_key(
+                IndexKind::Metadata,
+                &[b"diagnostic-code", diagnostic.code.as_bytes()],
+            )?;
+            let value = encode_json(diagnostic)?;
+            indexes
+                .get_mut(&IndexKind::Metadata)
+                .ok_or_else(|| SnapshotError::Corrupt("metadata index is missing".to_owned()))?
+                .entry(key)
+                .or_insert(value);
+        }
     }
 
+    let node_by_id = graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let mut aliases_by_target = BTreeMap::<&str, BTreeSet<&str>>::new();
+    for edge in &graph.links {
+        if edge.kind == compass_model::code_graph::EdgeKind::Aliases
+            && let Some(alias) = node_by_id.get(edge.source.as_str())
+        {
+            aliases_by_target
+                .entry(edge.target.as_str())
+                .or_default()
+                .insert(alias.name.as_str());
+        }
+    }
+
+    let mut term_postings = BTreeMap::<String, Vec<String>>::new();
     for node in &graph.nodes {
         insert_json(
             &mut indexes,
@@ -831,32 +1489,53 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
             &mut indexes,
             IndexKind::Names,
             encode_name_index_key(&node.name, &node.id)?,
-            &node.id,
+            &(),
         )?;
-        if let Some(anchor) = &node.source {
-            insert_anchor_entry(&mut indexes, "node", &node.id, anchor)?;
-        }
-        for anchor in node.evidence.iter().flat_map(|item| item.anchors.iter()) {
-            insert_anchor_entry(&mut indexes, "node", &node.id, anchor)?;
-        }
         if node.qualified_name != node.name {
             insert_json(
                 &mut indexes,
                 IndexKind::Names,
                 encode_name_index_key(&node.qualified_name, &node.id)?,
-                &node.id,
+                &(),
             )?;
         }
         let mut terms = BTreeSet::new();
         terms.extend(search_terms(&node.name));
         terms.extend(search_terms(&node.qualified_name));
+        terms.extend(search_terms(node.kind.as_str()));
+        for role in &node.roles {
+            let role = format!("{role:?}");
+            terms.extend(search_terms(&role));
+        }
+        if let Some(language) = &node.language {
+            terms.extend(search_terms(language));
+        }
+        if let Some(framework) = &node.framework {
+            terms.extend(search_terms(framework));
+        }
+        if let Some(path) = node
+            .details
+            .as_ref()
+            .and_then(|details| serde_json::to_value(details).ok())
+            .and_then(|value| {
+                value
+                    .get("data")
+                    .and_then(|data| data.get("path"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })
+        {
+            terms.extend(search_terms(&path));
+        }
+        for alias in aliases_by_target
+            .get(node.id.as_str())
+            .into_iter()
+            .flat_map(|aliases| aliases.iter())
+        {
+            terms.extend(search_terms(alias));
+        }
         for term in terms {
-            insert_json(
-                &mut indexes,
-                IndexKind::Terms,
-                encode_graph_index_key(IndexKind::Terms, &[term.as_bytes(), node.id.as_bytes()])?,
-                &node.id,
-            )?;
+            term_postings.entry(term).or_default().push(node.id.clone());
         }
         if let Some(community) = &node.community {
             let community_id = community.id.to_string();
@@ -870,15 +1549,39 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
                 &node.id,
             )?;
         }
-        insert_diagnostics(&mut indexes, &node.id, &node.diagnostics)?;
     }
-    insert_diagnostics(&mut indexes, "graph", &graph.graph.diagnostics)?;
+    for (term, mut node_ids) in term_postings {
+        node_ids.sort();
+        node_ids.dedup();
+        let prefix_length = term.len().min(3);
+        let prefix = term.get(..prefix_length).unwrap_or(term.as_str());
+        for (chunk_index, chunk) in node_ids.chunks(TERM_POSTING_CHUNK_ITEMS).enumerate() {
+            let chunk_index = format!("{chunk_index:08}");
+            insert_json(
+                &mut indexes,
+                IndexKind::Terms,
+                encode_graph_index_key(
+                    IndexKind::Terms,
+                    &[
+                        prefix.as_bytes(),
+                        b"node_prefix",
+                        term.as_bytes(),
+                        chunk_index.as_bytes(),
+                    ],
+                )?,
+                &TermPostingChunk {
+                    term: term.clone(),
+                    node_ids: chunk.to_vec(),
+                },
+            )?;
+        }
+    }
     for file in &graph.graph.files {
         insert_json(
             &mut indexes,
             IndexKind::Files,
-            encode_graph_index_key(IndexKind::Files, &[file.id.as_bytes()])?,
-            file,
+            encode_file_path_key(&file.path)?,
+            &file.id,
         )?;
     }
     for edge in &graph.links {
@@ -901,7 +1604,7 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
                     edge.id.as_bytes(),
                 ],
             )?,
-            &edge.id,
+            &(),
         )?;
         insert_json(
             &mut indexes,
@@ -915,58 +1618,24 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
                     edge.id.as_bytes(),
                 ],
             )?,
-            &edge.id,
+            &(),
         )?;
-        if let Some(anchor) = &edge.relationship_site {
-            insert_anchor_entry(&mut indexes, "edge", &edge.id, anchor)?;
-        }
-        for anchor in edge.evidence.iter().flat_map(|item| item.anchors.iter()) {
-            insert_anchor_entry(&mut indexes, "edge", &edge.id, anchor)?;
-        }
-        let mut terms = BTreeSet::new();
-        if let Some(context) = &edge.context {
-            terms.extend(search_terms(context));
-        }
-        for term in terms {
-            insert_json(
-                &mut indexes,
-                IndexKind::Terms,
-                encode_graph_index_key(IndexKind::Terms, &[term.as_bytes(), edge.id.as_bytes()])?,
-                &edge.id,
-            )?;
-        }
-        insert_diagnostics(&mut indexes, &edge.id, &edge.diagnostics)?;
     }
     Ok(indexes)
-}
-
-fn insert_anchor_entry(
-    indexes: &mut SnapshotIndexes,
-    record_kind: &str,
-    record_id: &str,
-    anchor: &compass_model::provenance::SourceAnchor,
-) -> Result<(), SnapshotError> {
-    let start_byte = anchor.start_byte.to_be_bytes();
-    let end_byte = anchor.end_byte.to_be_bytes();
-    let key = encode_graph_index_key(
-        IndexKind::Files,
-        &[
-            b"anchor",
-            anchor.file.as_bytes(),
-            &start_byte,
-            &end_byte,
-            record_kind.as_bytes(),
-            record_id.as_bytes(),
-        ],
-    )?;
-    insert_json(indexes, IndexKind::Files, key, &record_id.to_owned())
 }
 
 /// Keep normal names ordered and readable while giving graph-valid, deeply
 /// qualified names a deterministic portable representation. The extra marker
 /// segment prevents a digest key from colliding with the raw two-segment form.
 fn encode_name_index_key(name: &str, node_id: &str) -> Result<Vec<u8>, SnapshotError> {
-    match encode_graph_index_key(IndexKind::Names, &[name.as_bytes(), node_id.as_bytes()]) {
+    let name = normalize_symbol(name);
+    if name.is_empty() {
+        return encode_graph_index_key(IndexKind::Names, &[b"empty", node_id.as_bytes()]);
+    }
+    match encode_graph_index_key(
+        IndexKind::Names,
+        &[b"value", name.as_bytes(), node_id.as_bytes()],
+    ) {
         Ok(key) => Ok(key),
         Err(SnapshotError::Store(StoreError::ComponentTooLarge { .. })) => {
             let digest = hex_digest(name.as_bytes());
@@ -979,28 +1648,37 @@ fn encode_name_index_key(name: &str, node_id: &str) -> Result<Vec<u8>, SnapshotE
     }
 }
 
-fn insert_diagnostics(
-    indexes: &mut SnapshotIndexes,
-    owner: &str,
-    diagnostics: &[GraphDiagnostic],
-) -> Result<(), SnapshotError> {
-    for (ordinal, diagnostic) in diagnostics.iter().enumerate() {
-        let record = DiagnosticRecord {
-            owner: owner.to_owned(),
-            diagnostic: diagnostic.clone(),
-        };
-        let ordinal = ordinal.to_string();
-        let key = encode_graph_index_key(
-            IndexKind::Diagnostics,
-            &[
-                owner.as_bytes(),
-                diagnostic.code.as_bytes(),
-                ordinal.as_bytes(),
-            ],
-        )?;
-        insert_json(indexes, IndexKind::Diagnostics, key, &record)?;
+fn encode_name_prefix(name: &str) -> Result<Vec<u8>, SnapshotError> {
+    if name.is_empty() {
+        return encode_graph_index_key(IndexKind::Names, &[b"empty"]);
     }
-    Ok(())
+    match encode_graph_index_key(IndexKind::Names, &[b"value", name.as_bytes()]) {
+        Ok(key) => Ok(key),
+        Err(SnapshotError::Store(StoreError::ComponentTooLarge { .. })) => {
+            let digest = hex_digest(name.as_bytes());
+            encode_graph_index_key(IndexKind::Names, &[b"sha256", digest.as_bytes()])
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn encode_file_path_key(path: &str) -> Result<Vec<u8>, SnapshotError> {
+    match encode_graph_index_key(IndexKind::Files, &[b"path", path.as_bytes()]) {
+        Ok(key) => Ok(key),
+        Err(SnapshotError::Store(StoreError::ComponentTooLarge { .. })) => {
+            let digest = hex_digest(path.as_bytes());
+            encode_graph_index_key(IndexKind::Files, &[b"path-sha256", digest.as_bytes()])
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn normalize_symbol(value: &str) -> String {
+    value
+        .trim()
+        .trim_end_matches("()")
+        .trim_start_matches('.')
+        .to_lowercase()
 }
 
 fn insert_json<T: Serialize>(
@@ -1027,93 +1705,82 @@ fn insert_json<T: Serialize>(
 }
 
 fn build_index_tree<S: Store + ?Sized>(
-    store: &S,
+    writer: &mut ObjectWriter<'_, S>,
     index: IndexKind,
     entries: &BTreeMap<Vec<u8>, Vec<u8>>,
-    stats: &mut ObjectStats,
 ) -> Result<String, SnapshotError> {
     let mut leaves = Vec::new();
-    let mut current = Vec::new();
+    let mut current = Vec::with_capacity(GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES);
     for (key, value) in entries {
-        let entry = TreeEntry {
-            key: key.clone(),
-            value: value.clone(),
-        };
-        let mut candidate = current.clone();
-        candidate.push(entry);
-        let object = TreeObject::Leaf {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
-            index,
-            entries: candidate.clone(),
-        };
-        if (candidate.len() > GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES
-            || encode_tree_object(&object)?.len() > MAX_VALUE_BYTES)
-            && !current.is_empty()
-        {
-            let first_key = current
-                .first()
-                .map(|entry: &TreeEntry| entry.key.clone())
-                .ok_or_else(|| SnapshotError::Corrupt("empty leaf".to_owned()))?;
-            let object = TreeObject::Leaf {
-                schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
-                index,
-                entries: std::mem::take(&mut current),
-            };
-            let digest = put_tree_object(store, &object, stats)?;
-            leaves.push(TreeChild { first_key, digest });
-        }
         current.push(TreeEntry {
             key: key.clone(),
             value: value.clone(),
         });
-        if current.len() == 1
-            && encode_tree_object(&TreeObject::Leaf {
-                schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
-                index,
-                entries: current.clone(),
-            })?
-            .len()
-                > MAX_VALUE_BYTES
-        {
-            return Err(SnapshotError::Limit(format!(
-                "{} index entry exceeds the maximum immutable object size",
-                index.as_str()
-            )));
+        if current.len() == GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES {
+            put_leaf_entries(writer, index, std::mem::take(&mut current), &mut leaves)?;
         }
     }
-    if current.is_empty() {
+    if current.is_empty() && leaves.is_empty() {
         let object = TreeObject::Leaf {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
+            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
             index,
             entries: Vec::new(),
         };
         leaves.push(TreeChild {
             first_key: Vec::new(),
-            digest: put_tree_object(store, &object, stats)?,
+            digest: put_tree_object(writer, &object)?,
         });
-    } else {
-        let first_key = current
-            .first()
-            .map(|entry| entry.key.clone())
-            .ok_or_else(|| SnapshotError::Corrupt("empty leaf".to_owned()))?;
-        let object = TreeObject::Leaf {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
-            index,
-            entries: current,
-        };
+    } else if !current.is_empty() {
+        put_leaf_entries(writer, index, current, &mut leaves)?;
+    }
+    build_branch_levels(writer, index, leaves)
+}
+
+fn put_leaf_entries<S: Store + ?Sized>(
+    writer: &mut ObjectWriter<'_, S>,
+    index: IndexKind,
+    mut entries: Vec<TreeEntry>,
+    leaves: &mut Vec<TreeChild>,
+) -> Result<(), SnapshotError> {
+    let first_key = entries
+        .first()
+        .map(|entry| entry.key.clone())
+        .ok_or_else(|| SnapshotError::Corrupt("empty leaf".to_owned()))?;
+    let object = TreeObject::Leaf {
+        schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+        index,
+        entries,
+    };
+    let raw = encode_tree_object_raw(&object)?;
+    if raw.len() <= MAX_VALUE_BYTES {
         leaves.push(TreeChild {
             first_key,
-            digest: put_tree_object(store, &object, stats)?,
+            digest: put_encoded_tree_object(writer, encode_tree_object_raw_bytes(raw)?)?,
         });
+        return Ok(());
     }
-    build_branch_levels(store, index, leaves, stats)
+    let TreeObject::Leaf {
+        entries: oversized, ..
+    } = object
+    else {
+        return Err(SnapshotError::Corrupt("expected a leaf object".to_owned()));
+    };
+    entries = oversized;
+    if entries.len() == 1 {
+        return Err(SnapshotError::Limit(format!(
+            "{} index entry exceeds the maximum immutable object size",
+            index.as_str()
+        )));
+    }
+    let right = entries.split_off(entries.len() / 2);
+    put_leaf_entries(writer, index, entries, leaves)?;
+    put_leaf_entries(writer, index, right, leaves)
 }
 
 fn build_branch_levels<S: Store + ?Sized>(
-    store: &S,
+    writer: &mut ObjectWriter<'_, S>,
     index: IndexKind,
     children: Vec<TreeChild>,
-    stats: &mut ObjectStats,
 ) -> Result<String, SnapshotError> {
     if children.is_empty() {
         return Err(SnapshotError::Corrupt(
@@ -1134,20 +1801,19 @@ fn build_branch_levels<S: Store + ?Sized>(
             .map(|child| child.first_key.clone())
             .ok_or_else(|| SnapshotError::Corrupt("empty branch group".to_owned()))?;
         let object = TreeObject::Branch {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
+            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
             index,
             children: chunk,
         };
-        let digest = put_tree_object(store, &object, stats)?;
+        let digest = put_tree_object(writer, &object)?;
         parents.push(TreeChild { first_key, digest });
     }
-    build_branch_levels(store, index, parents, stats)
+    build_branch_levels(writer, index, parents)
 }
 
 fn put_tree_object<S: Store + ?Sized>(
-    store: &S,
+    writer: &mut ObjectWriter<'_, S>,
     object: &TreeObject,
-    stats: &mut ObjectStats,
 ) -> Result<String, SnapshotError> {
     let bytes = encode_tree_object(object)?;
     if bytes.len() > MAX_VALUE_BYTES {
@@ -1155,50 +1821,29 @@ fn put_tree_object<S: Store + ?Sized>(
             "immutable tree object exceeds the store value limit".to_owned(),
         ));
     }
+    put_encoded_tree_object(writer, bytes)
+}
+
+fn put_encoded_tree_object<S: Store + ?Sized>(
+    writer: &mut ObjectWriter<'_, S>,
+    bytes: Vec<u8>,
+) -> Result<String, SnapshotError> {
     let digest = hex_digest(&bytes);
-    let key = object_key(&digest)?;
-    let namespace = NamespaceId::graph();
-    let partition = object_partition()?;
-    if let Some(existing) = store.get(&namespace, &partition, &key)? {
-        if existing.value != bytes || existing.digest != parse_digest(&digest)? {
-            return Err(SnapshotError::Corrupt(
-                "content-addressed tree object changed at an existing key".to_owned(),
-            ));
-        }
-        stats.reused_objects = stats.reused_objects.saturating_add(1);
-    } else {
-        store.put_immutable(&namespace, &partition, &key, &bytes)?;
-        stats.new_objects = stats.new_objects.saturating_add(1);
-    }
+    writer.put(object_key(&digest)?, bytes)?;
     Ok(digest)
 }
 
 fn put_immutable_object<S: Store + ?Sized>(
-    store: &S,
-    key: &Key,
-    bytes: &[u8],
-    stats: &mut ObjectStats,
+    writer: &mut ObjectWriter<'_, S>,
+    key: Key,
+    bytes: Vec<u8>,
 ) -> Result<(), SnapshotError> {
     if bytes.len() > MAX_VALUE_BYTES {
         return Err(SnapshotError::Limit(
             "snapshot manifest exceeds the store value limit".to_owned(),
         ));
     }
-    let namespace = NamespaceId::graph();
-    let partition = object_partition()?;
-    let expected = digest_bytes(bytes);
-    if let Some(existing) = store.get(&namespace, &partition, key)? {
-        if existing.value != bytes || existing.digest != expected {
-            return Err(SnapshotError::Corrupt(
-                "content-addressed manifest changed at an existing key".to_owned(),
-            ));
-        }
-        stats.reused_objects = stats.reused_objects.saturating_add(1);
-    } else {
-        store.put_immutable(&namespace, &partition, key, bytes)?;
-        stats.new_objects = stats.new_objects.saturating_add(1);
-    }
-    Ok(())
+    writer.put(key, bytes)
 }
 
 fn lookup_tree<S: Store + ?Sized>(
@@ -1235,6 +1880,8 @@ struct ScanState {
     objects: usize,
     bytes: usize,
     entries: Vec<TreeEntry>,
+    truncate_on_limit: bool,
+    truncated: bool,
 }
 
 fn scan_tree<S: Store + ?Sized>(
@@ -1245,6 +1892,9 @@ fn scan_tree<S: Store + ?Sized>(
     state: &mut ScanState,
     depth: usize,
 ) -> Result<(), SnapshotError> {
+    if state.truncated {
+        return Ok(());
+    }
     if depth >= state.limits.max_depth {
         return Err(SnapshotError::Limit("tree depth limit exceeded".to_owned()));
     }
@@ -1263,6 +1913,10 @@ fn scan_tree<S: Store + ?Sized>(
                     continue;
                 }
                 if state.entries.len() >= state.limits.max_items {
+                    if state.truncate_on_limit {
+                        state.truncated = true;
+                        return Ok(());
+                    }
                     return Err(SnapshotError::Limit(
                         "snapshot item limit exceeded".to_owned(),
                     ));
@@ -1272,6 +1926,10 @@ fn scan_tree<S: Store + ?Sized>(
                     .saturating_add(entry.key.len())
                     .saturating_add(entry.value.len());
                 if state.bytes > state.limits.max_bytes {
+                    if state.truncate_on_limit {
+                        state.truncated = true;
+                        return Ok(());
+                    }
                     return Err(SnapshotError::Limit(
                         "snapshot byte limit exceeded".to_owned(),
                     ));
@@ -1280,12 +1938,48 @@ fn scan_tree<S: Store + ?Sized>(
             }
         }
         TreeObject::Branch { children, .. } => {
-            for child in children {
+            for (child_index, child) in children.iter().enumerate() {
+                if let Some(prefix) = prefix
+                    && !child_may_match_prefix(&children, child_index, prefix)?
+                {
+                    continue;
+                }
                 scan_tree(store, index, &child.digest, prefix, state, depth + 1)?;
             }
         }
     }
     Ok(())
+}
+
+fn child_may_match_prefix(
+    children: &[TreeChild],
+    index: usize,
+    prefix: &[u8],
+) -> Result<bool, SnapshotError> {
+    let prefix_segments = decode_key_segments(prefix).map_err(SnapshotError::from)?;
+    let first = children
+        .get(index)
+        .ok_or_else(|| SnapshotError::Corrupt("tree child index is missing".to_owned()))?;
+    let first_segments = decode_key_segments(&first.first_key).map_err(SnapshotError::from)?;
+    let first_cmp = compare_key_prefix(&first_segments, &prefix_segments);
+    if first_cmp.is_gt() {
+        return Ok(false);
+    }
+    if first_cmp.is_eq() {
+        return Ok(true);
+    }
+    let Some(next) = children.get(index.saturating_add(1)) else {
+        return Ok(true);
+    };
+    let next_segments = decode_key_segments(&next.first_key).map_err(SnapshotError::from)?;
+    Ok(!compare_key_prefix(&next_segments, &prefix_segments).is_lt())
+}
+
+fn compare_key_prefix(left: &[Vec<u8>], prefix: &[Vec<u8>]) -> std::cmp::Ordering {
+    left.iter()
+        .take(prefix.len())
+        .map(Vec::as_slice)
+        .cmp(prefix.iter().map(Vec::as_slice))
 }
 
 fn key_has_segment_prefix(key: &[u8], prefix: &[u8]) -> Result<bool, SnapshotError> {
@@ -1353,11 +2047,18 @@ fn validate_tree_object(object: &TreeObject, expected: IndexKind) -> Result<(), 
                     "tree branch has an invalid child count".to_owned(),
                 ));
             }
-            for pair in children.windows(2) {
+            for (position, pair) in children.windows(2).enumerate() {
                 if pair[0].first_key >= pair[1].first_key {
-                    return Err(SnapshotError::Corrupt(
-                        "tree branch separators are not strictly ordered".to_owned(),
-                    ));
+                    return Err(SnapshotError::Corrupt(format!(
+                        "{} tree branch separators are not strictly ordered at children {} and {} (lengths {} and {}, digests {} and {})",
+                        expected.as_str(),
+                        position,
+                        position.saturating_add(1),
+                        pair[0].first_key.len(),
+                        pair[1].first_key.len(),
+                        hex_digest(&pair[0].first_key),
+                        hex_digest(&pair[1].first_key),
+                    )));
                 }
             }
             for child in children {
@@ -1374,7 +2075,7 @@ fn validate_tree_header(
     index: IndexKind,
     expected: IndexKind,
 ) -> Result<(), SnapshotError> {
-    if schema != GRAPH_SNAPSHOT_LAYOUT_V1 {
+    if schema != GRAPH_SNAPSHOT_LAYOUT_V2 {
         return Err(SnapshotError::Unsupported(format!(
             "tree object schema {schema} is not supported"
         )));
@@ -1423,8 +2124,89 @@ fn encode_json<T: Serialize>(value: &T) -> Result<Vec<u8>, SnapshotError> {
     serde_json::to_vec(value).map_err(|error| SnapshotError::Encode(error.to_string()))
 }
 
+struct DigestWriter {
+    hasher: Sha256,
+    bytes: usize,
+    maximum: usize,
+    exceeded: bool,
+}
+
+impl DigestWriter {
+    fn new(maximum: usize) -> Self {
+        Self {
+            hasher: Sha256::new(),
+            bytes: 0,
+            maximum,
+            exceeded: false,
+        }
+    }
+}
+
+impl Write for DigestWriter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        let next = self.bytes.saturating_add(buffer.len());
+        if next > self.maximum {
+            self.exceeded = true;
+            return Err(std::io::Error::other(
+                "serialized value exceeds its byte limit",
+            ));
+        }
+        self.hasher.update(buffer);
+        self.bytes = next;
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn digest_json<T: Serialize>(value: &T, maximum: usize) -> Result<(String, u64), SnapshotError> {
+    let mut writer = DigestWriter::new(maximum);
+    if let Err(error) = serde_json::to_writer(&mut writer, value) {
+        if writer.exceeded {
+            return Err(SnapshotError::Limit(format!(
+                "canonical graph exceeds the {maximum}-byte limit"
+            )));
+        }
+        return Err(SnapshotError::Encode(error.to_string()));
+    }
+    if writer.bytes == 0 {
+        return Err(SnapshotError::Limit(
+            "canonical graph serialization is empty".to_owned(),
+        ));
+    }
+    let bytes = writer.bytes as u64;
+    Ok((format!("{:x}", writer.hasher.finalize()), bytes))
+}
+
 fn encode_tree_object(value: &TreeObject) -> Result<Vec<u8>, SnapshotError> {
+    let raw = encode_tree_object_raw(value)?;
+    if raw.len() > MAX_VALUE_BYTES {
+        return Err(SnapshotError::Limit(
+            "uncompressed tree object exceeds the store value limit".to_owned(),
+        ));
+    }
+    encode_tree_object_raw_bytes(raw)
+}
+
+fn encode_tree_object_raw(value: &TreeObject) -> Result<Vec<u8>, SnapshotError> {
     rmp_serde::to_vec_named(value).map_err(|error| SnapshotError::Encode(error.to_string()))
+}
+
+fn encode_tree_object_raw_bytes(raw: Vec<u8>) -> Result<Vec<u8>, SnapshotError> {
+    let compressed = zstd::stream::encode_all(raw.as_slice(), 1)
+        .map_err(|error| SnapshotError::Encode(format!("tree compression failed: {error}")))?;
+    if compressed.len().saturating_add(TREE_ZSTD_HEADER_BYTES) >= raw.len() {
+        return Ok(raw);
+    }
+    let raw_len = u32::try_from(raw.len())
+        .map_err(|_| SnapshotError::Limit("tree object length does not fit u32".to_owned()))?;
+    let mut encoded = Vec::with_capacity(TREE_ZSTD_HEADER_BYTES.saturating_add(compressed.len()));
+    encoded.extend_from_slice(TREE_ZSTD_MAGIC);
+    encoded.extend_from_slice(&raw_len.to_be_bytes());
+    encoded.extend_from_slice(&compressed);
+    Ok(encoded)
 }
 
 fn decode_json<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, SnapshotError> {
@@ -1432,6 +2214,41 @@ fn decode_json<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, Snapshot
 }
 
 fn decode_tree_object(bytes: &[u8]) -> Result<TreeObject, SnapshotError> {
+    let mut decoded;
+    let bytes = if bytes.starts_with(TREE_ZSTD_MAGIC) {
+        let length_bytes = bytes
+            .get(TREE_ZSTD_MAGIC.len()..TREE_ZSTD_HEADER_BYTES)
+            .and_then(|value| <[u8; 4]>::try_from(value).ok())
+            .ok_or_else(|| {
+                SnapshotError::Decode("compressed tree header is truncated".to_owned())
+            })?;
+        let expected = usize::try_from(u32::from_be_bytes(length_bytes))
+            .map_err(|_| SnapshotError::Decode("compressed tree length is invalid".to_owned()))?;
+        if expected == 0 || expected > MAX_VALUE_BYTES {
+            return Err(SnapshotError::Decode(
+                "compressed tree length exceeds the bounded object limit".to_owned(),
+            ));
+        }
+        let payload = bytes.get(TREE_ZSTD_HEADER_BYTES..).ok_or_else(|| {
+            SnapshotError::Decode("compressed tree payload is missing".to_owned())
+        })?;
+        let decoder = zstd::stream::read::Decoder::new(payload).map_err(|error| {
+            SnapshotError::Decode(format!("tree decompression failed: {error}"))
+        })?;
+        let mut limited = decoder.take(expected.saturating_add(1) as u64);
+        decoded = Vec::with_capacity(expected);
+        limited.read_to_end(&mut decoded).map_err(|error| {
+            SnapshotError::Decode(format!("tree decompression failed: {error}"))
+        })?;
+        if decoded.len() != expected {
+            return Err(SnapshotError::Decode(
+                "compressed tree length does not match its header".to_owned(),
+            ));
+        }
+        decoded.as_slice()
+    } else {
+        bytes
+    };
     rmp_serde::from_slice(bytes).or_else(|message_pack_error| {
         serde_json::from_slice(bytes).map_err(|json_error| {
             SnapshotError::Decode(format!(
@@ -1513,7 +2330,7 @@ mod tests {
     #[test]
     fn tree_decoder_accepts_compact_and_legacy_encodings() -> Result<(), SnapshotError> {
         let object = TreeObject::Leaf {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
+            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
             index: IndexKind::Nodes,
             entries: vec![TreeEntry {
                 key: encode_graph_index_key(IndexKind::Nodes, &[b"node-id"])?,
@@ -1523,6 +2340,18 @@ mod tests {
 
         assert_eq!(decode_tree_object(&encode_tree_object(&object)?)?, object);
         assert_eq!(decode_tree_object(&encode_json(&object)?)?, object);
+
+        let compressible = TreeObject::Leaf {
+            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+            index: IndexKind::Nodes,
+            entries: vec![TreeEntry {
+                key: encode_graph_index_key(IndexKind::Nodes, &[b"compressible"])?,
+                value: vec![b'x'; 32 * 1024],
+            }],
+        };
+        let encoded = encode_tree_object(&compressible)?;
+        assert!(encoded.starts_with(TREE_ZSTD_MAGIC));
+        assert_eq!(decode_tree_object(&encoded)?, compressible);
         Ok(())
     }
 }

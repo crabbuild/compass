@@ -96,11 +96,14 @@ command accepts cloud credentials, endpoints, or TLS configuration.
 
 The default published location is `DIR/graph.json` under the selected
 `--out DIR` (default `compass-out/`). A `--store sqlite` build additionally
-publishes `DIR/compass-store.sqlite3` and `DIR/store.ref`.
+publishes `store.ref` beside the active generation's `graph.json` and keeps the
+shared database at `DIR/.compass-store/compass-store.sqlite3`.
 `compass store status|validate|backup|restore` are the supported operational
 surface. Backups are digest-bound directories and restores never overwrite an
-existing destination. General object GC and service quotas are deferred; the
-local API still enforces bounded values, scans, graph sizes, and request work.
+existing destination. Local publication retains two complete generations and
+performs bounded reachability GC; remote leases, service quotas, and
+distributed GC remain deferred. The local API enforces bounded values, scans,
+transactions, graph sizes, and request work.
 
 The hard-cut boundary is the sidecar and all disposable indexes. When a
 physical format is invalid or outside the support window, preserve

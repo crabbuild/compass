@@ -53,19 +53,36 @@ contract and pass the same conformance and differential suites.
 For an output root `DIR` the published set is:
 
 ```text
-DIR/graph.json                 # permanent canonical graph artifact
-DIR/compass-store.sqlite3      # with --store sqlite
-DIR/store.ref                  # with --store sqlite
 DIR/.compass-active-generation # BuildGuard publication pointer, when used
+DIR/.compass-generations/<generation>/graph.json
+DIR/.compass-generations/<generation>/store.ref  # with --store sqlite
+DIR/.compass-store/compass-store.sqlite3          # shared by store generations
 ```
 
 `graph.json` is the default generation. When `--store sqlite` is selected,
-the JSON artifact, SQLite sidecar, and `store.ref` are published as one
-generation. The sidecar uses WAL during preparation and is checkpointed before
-the generation switch. Readers open the active immutable snapshot and remain
-pinned to it. A failed or interrupted update must leave the previous coherent
-generation selected. The query-code index beneath the requested cache root is
-disposable and may be deleted at any time.
+the canonical JSON artifact and a small digest-bound `store.ref` are published
+as one generation. The SQLite database has one stable location outside the
+generation directories; it is never copied into each generation. Immutable
+objects are prepared in bounded transactions, the WAL is checkpointed, and
+only then can the BuildGuard pointer select the generation. Readers validate
+`store.ref`, open its immutable manifest, and remain pinned even if a later
+generation is published. A failed or interrupted update leaves the previous
+coherent generation selected. The JSON query index beneath the requested cache
+root is disposable and may be deleted at any time.
+
+New stores contain projected immutable graph indexes and their manifest; they
+do not duplicate the complete graph as a legacy chunked payload. `graph.json`
+remains complete, default, and independently queryable. The projected roots
+cover metadata/files, nodes, edges, names, terms, outgoing and incoming
+adjacency, communities, and diagnostics. Tree objects use bounded compact
+MessagePack with deterministic zstd compression when it reduces size.
+
+SQLite currently uses a `WITHOUT ROWID` binary primary key over
+`(namespace, partition, key)`, 16 KiB pages, WAL, `synchronous=FULL`, incremental
+auto-vacuum, bounded cache/mmap settings, and explicit transactions. These are
+adapter-private choices. `EXPLAIN QUERY PLAN` and native tests verify that both
+point reads and partition-range scans use the primary key; users must not add
+or edit physical indexes themselves.
 
 The store contract bounds namespace, partition, key, value, scan, and graph
 sizes. Those limits are correctness limits, not hints: exceeding one produces
@@ -147,12 +164,20 @@ the bundle manifest and validation command remain the portability boundary.
 Redb backups use the library adapter's read-only reopen rule; they are not
 currently exposed by the CLI.
 
-General graph-object garbage collection and retention leases are not in the
-local release. The qualification report records GC as discovery-only. Keep
-backup generations until restore has been exercised, then apply an explicit
-operator retention policy; never delete a directory that is the active
-BuildGuard generation. A future multi-tenant service must add namespace-scoped
-leases, quotas, and an auditable GC plan before advertising deletion.
+The local publisher retains the active and immediately previous complete
+BuildGuard generations. After a successful store publication it marks the
+manifests and tree objects selected by those retained references, deletes
+unreachable entries in bounded transactions, performs bounded incremental
+page reclamation, and checkpoints the WAL. Staging and active references are
+always retained; malformed retained references fail maintenance rather than
+guessing. Backup bundles are outside this automatic policy and remain under
+operator control. A future multi-tenant service still requires namespace-
+scoped leases, service quotas, and an auditable distributed GC policy.
+
+With `--timing`, publication reports `new_objects`, `reused_objects`,
+`write_transactions`, `bytes_written`, and `gc_deleted_entries`. These counters
+cover the store work inside publication timing and are the preferred evidence
+for diagnosing write amplification.
 
 ## Incident checklist
 
@@ -171,8 +196,8 @@ leases, quotas, and an auditable GC plan before advertising deletion.
 ## Qualification entry point
 
 The release harness creates a deterministic typed graph and exercises both
-embedded adapters, canonical JSON export, typed search, CompassQL, request and
-byte counters, database size, write amplification, and the explicit GC status:
+embedded adapters, canonical JSON export, typed search, CompassQL, transaction
+and byte counters, database size, write amplification, retention, and GC:
 
 ```bash
 scripts/qualify_compass_store_release.sh

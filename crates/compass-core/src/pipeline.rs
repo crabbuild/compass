@@ -7,15 +7,17 @@ use std::time::{Duration, Instant};
 use ahash::{AHashMap, AHashSet};
 use compass_files::{
     BuildGuard, BuildScope, Cache, CacheKind, CacheOptions, DetectOptions, Detection, IgnorePolicy,
-    Manifest, ManifestKind, detect, write_json_atomic, write_text_atomic,
+    Manifest, ManifestKind, detect, write_json_atomic, write_json_atomic_with_digest,
+    write_text_atomic,
 };
 use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
-    GraphSnapshotBuilder, GraphSnapshotReader, InventoryEvidence, PublicationOmissions,
-    PublicationOutcome, build_owned_with_tiebreaker as build_document, canonical_edge_kind,
-    canonical_graph_json, canonical_raw_edge_sites, cluster, dedupe_nodes, extraction_from_v1,
-    graph_insights, label_communities_by_hub,
-    normalize_document_v1_with_evidence_best_effort_owned,
+    GRAPH_SNAPSHOT_MAX_OBJECTS, GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder,
+    GraphSnapshotGcStats, InventoryEvidence, PublicationOmissions, PublicationOutcome,
+    SnapshotSelector, build_owned_with_tiebreaker as build_document, canonical_edge_kind,
+    canonical_graph_document, canonical_raw_edge_sites, cluster, dedupe_nodes, extraction_from_v1,
+    garbage_collect_graph_snapshots, graph_insights, graph_snapshot_needs_gc,
+    label_communities_by_hub, normalize_document_v1_with_evidence_best_effort_owned,
     normalize_document_v1_with_inventory_best_effort,
     normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
     score_communities,
@@ -44,7 +46,10 @@ use compass_resolve::{
     apply_program_projection, collect_program_projection_sites, merge_decl_def_classes,
     resolve_prevalidated_owned_with_root,
 };
-use compass_store::{GRAPH_SCHEMA_V1, STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
+use compass_store::{
+    GRAPH_SCHEMA_V1, STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef,
+    local_sqlite_store_path,
+};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -66,6 +71,11 @@ use crate::raw_guard::enforce_incomplete_raw_guard;
 /// repositories with intentionally large generated sources.
 pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const SEMANTIC_MARKER_FILE: &str = ".compass_semantic_marker";
+const STORE_GENERATION_EXCLUSIONS: [&str; 3] = [
+    STORE_FILE_NAME,
+    "compass-store.sqlite3-wal",
+    "compass-store.sqlite3-shm",
+];
 
 #[derive(Clone, Debug)]
 pub struct BuildOptions {
@@ -268,6 +278,19 @@ pub struct BuildTimings {
     pub graph_assembly: Duration,
     pub program_analysis: Duration,
     pub publish: Duration,
+    pub store_new_objects: u64,
+    pub store_reused_objects: u64,
+    pub store_write_transactions: u64,
+    pub store_bytes_written: u64,
+    pub store_gc_deleted_entries: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct StorePublishMetrics {
+    new_objects: u64,
+    reused_objects: u64,
+    write_transactions: u64,
+    bytes_written: u64,
 }
 
 /// Validated semantic output to merge into one atomic graph build.
@@ -473,7 +496,7 @@ fn build_graph_inner(
         source,
     })?;
     let prior_build_complete = BuildGuard::ensure_complete(&output_container).is_ok();
-    let guard = BuildGuard::begin(&output_container)?;
+    let guard = BuildGuard::begin_excluding(&output_container, &STORE_GENERATION_EXCLUSIONS)?;
     let output_dir = guard.staging_directory().to_path_buf();
     if !options.program_analysis {
         remove_if_exists(&output_dir.join("program.json"))?;
@@ -605,8 +628,13 @@ fn build_graph_inner(
             }
             remove_if_exists(&output_dir.join("needs_update"))?;
             let store_ready = storage_artifacts_complete(options.graph_storage, &output_dir);
-            let published_output_dir =
-                commit_generation(guard, &output_container, options.graph_storage, store_ready)?;
+            let published_output_dir = commit_generation(
+                guard,
+                &output_container,
+                options.graph_storage,
+                store_ready,
+                &mut timings,
+            )?;
             return Ok((
                 BuildResult {
                     root,
@@ -679,9 +707,16 @@ fn build_graph_inner(
             stats.communities,
             stats.omissions(),
             unchanged_program.as_ref(),
+            storage_artifacts_complete(options.graph_storage, &output_dir),
+            &mut timings,
         )?;
-        let published_output_dir =
-            commit_generation(guard, &output_container, options.graph_storage, true)?;
+        let published_output_dir = commit_generation(
+            guard,
+            &output_container,
+            options.graph_storage,
+            true,
+            &mut timings,
+        )?;
         return Ok((
             BuildResult {
                 root,
@@ -1206,9 +1241,16 @@ fn build_graph_inner(
             0,
             omissions,
             program.as_ref(),
+            storage_artifacts_complete(options.graph_storage, &output_dir),
+            &mut timings,
         )?;
-        let published_output_dir =
-            commit_generation(guard, &output_container, options.graph_storage, true)?;
+        let published_output_dir = commit_generation(
+            guard,
+            &output_container,
+            options.graph_storage,
+            true,
+            &mut timings,
+        )?;
         return Ok((
             BuildResult {
                 root,
@@ -1279,7 +1321,22 @@ fn build_graph_inner(
         let omissions = published.omissions;
         let published_nodes = published.document.nodes.len();
         let published_edges = published.document.links.len();
-        write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
+        let store_metrics = if options.graph_storage.publishes_store() {
+            Some(publish_graph_and_store_from_canonical(
+                &output_dir,
+                &published.document,
+            )?)
+        } else {
+            write_json_atomic(
+                output_dir.join("graph.json"),
+                &canonical_graph_document(&published.document),
+                false,
+            )?;
+            None
+        };
+        if let Some(metrics) = store_metrics {
+            record_store_metrics(&mut timings, metrics);
+        }
         remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
         save_output_stats(
             &output_dir,
@@ -1315,9 +1372,16 @@ fn build_graph_inner(
             0,
             omissions,
             program.as_ref(),
+            store_metrics.is_some(),
+            &mut timings,
         )?;
-        let published_output_dir =
-            commit_generation(guard, &output_container, options.graph_storage, true)?;
+        let published_output_dir = commit_generation(
+            guard,
+            &output_container,
+            options.graph_storage,
+            true,
+            &mut timings,
+        )?;
         timings.publish = stage_started.elapsed();
         return Ok((
             BuildResult {
@@ -1429,9 +1493,16 @@ fn build_graph_inner(
                 communities,
                 PublicationOmissions::default(),
                 program.as_ref(),
+                true,
+                &mut timings,
             )?;
-            let published_output_dir =
-                commit_generation(guard, &output_container, options.graph_storage, true)?;
+            let published_output_dir = commit_generation(
+                guard,
+                &output_container,
+                options.graph_storage,
+                true,
+                &mut timings,
+            )?;
             return Ok((
                 BuildResult {
                     root,
@@ -1669,6 +1740,7 @@ fn build_graph_inner(
         overview_elapsed,
     );
 
+    let publish_started = Instant::now();
     let graph_output_started = Instant::now();
     let mut output_profile_started = Instant::now();
     let normalization_started = Instant::now();
@@ -1684,7 +1756,22 @@ fn build_graph_inner(
     let published_edges = published.document.links.len();
     let omissions = published.omissions;
     let serialization_started = Instant::now();
-    write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
+    let store_metrics = if options.graph_storage.publishes_store() {
+        Some(publish_graph_and_store_from_canonical(
+            &output_dir,
+            &published.document,
+        )?)
+    } else {
+        write_json_atomic(
+            output_dir.join("graph.json"),
+            &canonical_graph_document(&published.document),
+            false,
+        )?;
+        None
+    };
+    if let Some(metrics) = store_metrics {
+        record_store_metrics(&mut timings, metrics);
+    }
     if options.purpose == BuildPurpose::Update {
         write_prepared_graph_overview(overview_model, &output_dir)?;
     }
@@ -1697,7 +1784,6 @@ fn build_graph_inner(
     internal_started = Instant::now();
     timings.graph_assembly += stage_started.elapsed();
 
-    let publish_started = Instant::now();
     let mut manifest = prior_manifest;
     let (manifest_result, seals_result) = rayon::join(
         || {
@@ -1723,7 +1809,6 @@ fn build_graph_inner(
     );
     manifest_result?;
     seals_result?;
-    timings.publish = publish_started.elapsed();
     if program.is_none() {
         program = join_program_worker(program_handle.take(), &mut timings)?;
     }
@@ -1737,10 +1822,18 @@ fn build_graph_inner(
         communities.len(),
         omissions,
         program.as_ref(),
+        store_metrics.is_some(),
+        &mut timings,
     )?;
     profile_internal("Program output and build seals", &mut internal_started);
-    let published_output_dir =
-        commit_generation(guard, &output_container, options.graph_storage, true)?;
+    let published_output_dir = commit_generation(
+        guard,
+        &output_container,
+        options.graph_storage,
+        true,
+        &mut timings,
+    )?;
+    timings.publish = publish_started.elapsed();
     let result = BuildResult {
         root,
         output_dir: published_output_dir,
@@ -1906,14 +1999,16 @@ fn publish_build_state(
     communities: usize,
     omissions: PublicationOmissions,
     program: Option<&ProgramBuildSummary>,
+    store_ready: bool,
+    timings: &mut BuildTimings,
 ) -> Result<(), CoreError> {
     let publish_store = options.graph_storage.publishes_store();
-    if publish_store {
-        ensure_store_snapshot(output_dir)?;
+    if publish_store && !store_ready {
+        let metrics = ensure_store_snapshot(output_dir)?;
+        record_store_metrics(timings, metrics);
     }
     let mut required = vec![output_dir.join(OUTPUT_STATS_FILE)];
     if publish_store {
-        required.push(output_dir.join(STORE_FILE_NAME));
         required.push(output_dir.join(STORE_REF_FILE_NAME));
     }
     match options.purpose {
@@ -1966,6 +2061,7 @@ fn commit_generation(
     output_container: &Path,
     graph_storage: GraphStorage,
     store_ready: bool,
+    timings: &mut BuildTimings,
 ) -> Result<PathBuf, CoreError> {
     let publish_store = graph_storage.publishes_store();
     if !publish_store {
@@ -1979,29 +2075,115 @@ fn commit_generation(
         remove_if_exists(&guard.staging_directory().join(STORE_REF_FILE_NAME))?;
     }
     if publish_store && !store_ready {
-        ensure_store_snapshot(guard.staging_directory())?;
+        let metrics = ensure_store_snapshot(guard.staging_directory())?;
+        record_store_metrics(timings, metrics);
     }
     let mut artifacts = vec!["graph.json", "manifest.json", BUILD_STATE_FILE];
     if publish_store {
-        artifacts.extend([STORE_FILE_NAME, STORE_REF_FILE_NAME]);
+        artifacts.push(STORE_REF_FILE_NAME);
     }
     if guard.staging_directory().join("program.json").is_file() {
         artifacts.push("program.json");
+    }
+    if publish_store {
+        let gc = garbage_collect_shared_store(output_container, guard.staging_directory())?;
+        timings.store_gc_deleted_entries = timings
+            .store_gc_deleted_entries
+            .saturating_add(gc.deleted_entries);
+        timings.store_write_transactions = timings
+            .store_write_transactions
+            .saturating_add(gc.delete_transactions);
     }
     guard.commit_with_artifacts(&artifacts)?;
     Ok(BuildGuard::resolve_active_directory(output_container)?)
 }
 
-/// Ensure every committed generation has a validated, queryable store snapshot
-/// whose payload is byte-identical to the published graph JSON. This is kept at
-/// the publication boundary so fast paths and incremental paths cannot bypass
-/// the store artifact.
-fn ensure_store_snapshot(output_dir: &Path) -> Result<(), CoreError> {
-    let graph_path = output_dir.join("graph.json");
-    let graph_bytes = fs::read(&graph_path).map_err(|source| compass_files::FileError::Io {
-        path: graph_path.clone(),
-        source,
+fn garbage_collect_shared_store(
+    output_container: &Path,
+    staging_directory: &Path,
+) -> Result<GraphSnapshotGcStats, CoreError> {
+    let parse_reference = |path: &Path, bytes: &[u8]| -> Result<StoreRef, CoreError> {
+        let reference = serde_json::from_slice::<StoreRef>(bytes).map_err(|error| {
+            CoreError::InvalidBuildState(format!(
+                "invalid retained store reference at {}: {error}",
+                path.display()
+            ))
+        })?;
+        reference.validate()?;
+        Ok(reference)
+    };
+    let staging_reference_path = staging_directory.join(STORE_REF_FILE_NAME);
+    let staging_reference_bytes = fs::read(&staging_reference_path).map_err(|error| {
+        CoreError::InvalidBuildState(format!(
+            "could not read staging store reference at {}: {error}",
+            staging_reference_path.display()
+        ))
     })?;
+    let mut retained_references = vec![parse_reference(
+        &staging_reference_path,
+        &staging_reference_bytes,
+    )?];
+    if let Ok(active_directory) = BuildGuard::resolve_active_directory(output_container) {
+        let path = active_directory.join(STORE_REF_FILE_NAME);
+        if let Ok(bytes) = fs::read(&path) {
+            retained_references.push(parse_reference(&path, &bytes)?);
+        }
+    }
+    retained_references.sort_by(|left, right| {
+        left.snapshot_id
+            .cmp(&right.snapshot_id)
+            .then_with(|| left.manifest_digest.cmp(&right.manifest_digest))
+    });
+    retained_references.dedup_by(|left, right| {
+        left.snapshot_id == right.snapshot_id && left.manifest_digest == right.manifest_digest
+    });
+
+    let mut all_references = retained_references.clone();
+    for directory in BuildGuard::complete_generation_directories(output_container)? {
+        let path = directory.join(STORE_REF_FILE_NAME);
+        let Ok(bytes) = fs::read(&path) else {
+            continue;
+        };
+        all_references.push(parse_reference(&path, &bytes)?);
+    }
+    all_references.sort_by(|left, right| {
+        left.snapshot_id
+            .cmp(&right.snapshot_id)
+            .then_with(|| left.manifest_digest.cmp(&right.manifest_digest))
+    });
+    all_references.dedup_by(|left, right| {
+        left.snapshot_id == right.snapshot_id && left.manifest_digest == right.manifest_digest
+    });
+    let selectors = retained_references
+        .into_iter()
+        .map(|reference| SnapshotSelector {
+            schema: GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1.to_owned(),
+            snapshot_id: reference.snapshot_id,
+            manifest_digest: reference.manifest_digest,
+        })
+        .collect::<Vec<_>>();
+    let graph_path = staging_directory.join("graph.json");
+    let store = SqliteStore::open(local_sqlite_store_path(&graph_path))?;
+    if all_references.len() <= 2 && !graph_snapshot_needs_gc(&store, 2)? {
+        return Ok(GraphSnapshotGcStats::default());
+    }
+    let stats = garbage_collect_graph_snapshots(
+        &store,
+        &selectors,
+        GRAPH_SNAPSHOT_MAX_OBJECTS.saturating_mul(8),
+    )?;
+    if stats.deleted_entries > 0 {
+        store.reclaim_unused_pages(1_024)?;
+    }
+    store.checkpoint()?;
+    Ok(stats)
+}
+
+/// Ensure every committed generation has a validated, queryable immutable
+/// snapshot in the output root's shared store. The generation publishes only a
+/// digest-bound selector beside the permanent `graph.json` artifact.
+fn ensure_store_snapshot(output_dir: &Path) -> Result<StorePublishMetrics, CoreError> {
+    let graph_path = output_dir.join("graph.json");
     let graph = V1GraphDocument::load(&graph_path)?;
     if graph.graph.schema != GRAPH_SCHEMA_V1 {
         return Err(CoreError::InvalidBuildState(format!(
@@ -2009,59 +2191,75 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<(), CoreError> {
             graph.graph.schema
         )));
     }
-    let canonical_graph = canonical_graph_json(&graph)?;
-    let store_path = output_dir.join(STORE_FILE_NAME);
+    let store_path = local_sqlite_store_path(&graph_path);
     let store = SqliteStore::open(&store_path)?;
-    if !store.read_snapshot().is_ok_and(|(manifest, existing)| {
-        existing == graph_bytes
-            && manifest.node_count == graph.nodes.len() as u64
-            && manifest.edge_count == graph.links.len() as u64
-    }) {
-        store.publish_snapshot(
-            &graph_bytes,
-            GRAPH_SCHEMA_V1,
-            graph.nodes.len(),
-            graph.links.len(),
-        )?;
-    }
     let builder = GraphSnapshotBuilder::new();
-    let active = GraphSnapshotReader::open_active(&store)?;
-    let exported = match active {
-        Some(reader) => {
-            let exported = reader.export_json_bytes()?;
-            if exported == canonical_graph {
-                exported
-            } else {
-                let prepared = builder.prepare(&store, &graph)?;
-                let selector = builder.activate(&store, &prepared)?;
-                let reader = GraphSnapshotReader::open_selector(&store, selector)?;
-                reader.export_json_bytes()?
-            }
-        }
-        None => {
-            let prepared = builder.prepare(&store, &graph)?;
-            let selector = builder.activate(&store, &prepared)?;
-            let reader = GraphSnapshotReader::open_selector(&store, selector)?;
-            reader.export_json_bytes()?
-        }
-    };
-    if exported != canonical_graph {
-        return Err(CoreError::InvalidBuildState(
-            "SQLite graph snapshot does not match graph.json; rebuild the generation".to_owned(),
-        ));
-    }
-    store.validate_snapshot()?;
-    store.checkpoint()?;
-    let reference = write_store_ref(output_dir, &store)?;
-    store.record_retention_metadata(&reference, compass_store::MAX_SCAN_ITEMS)?;
-    store.checkpoint()?;
-    Ok(())
+    let prepared = builder.prepare_owned(&store, graph)?;
+    finish_store_snapshot(output_dir, &store, &builder, prepared)
 }
 
-fn write_store_ref(output_dir: &Path, store: &SqliteStore) -> Result<StoreRef, CoreError> {
-    let reference = store.snapshot_reference()?;
+fn publish_graph_and_store_from_canonical(
+    output_dir: &Path,
+    graph: &V1GraphDocument,
+) -> Result<StorePublishMetrics, CoreError> {
+    if graph.graph.schema != GRAPH_SCHEMA_V1 {
+        return Err(CoreError::InvalidBuildState(format!(
+            "graph has unsupported schema {}; expected {GRAPH_SCHEMA_V1}",
+            graph.graph.schema
+        )));
+    }
+    let graph_path = output_dir.join("graph.json");
+    let store = SqliteStore::open(local_sqlite_store_path(&graph_path))?;
+    let builder = GraphSnapshotBuilder::new();
+    let canonical = canonical_graph_document(graph);
+    let (graph_receipt, content) = rayon::join(
+        || write_json_atomic_with_digest(&graph_path, &canonical),
+        || builder.prepare_content(&store, graph),
+    );
+    let graph_receipt = graph_receipt?;
+    let prepared =
+        builder.finish_content(&store, content?, graph_receipt.sha256, graph_receipt.bytes)?;
+    finish_store_snapshot(output_dir, &store, &builder, prepared)
+}
+
+fn finish_store_snapshot(
+    output_dir: &Path,
+    store: &SqliteStore,
+    builder: &GraphSnapshotBuilder,
+    prepared: compass_graph::PreparedGraphSnapshot,
+) -> Result<StorePublishMetrics, CoreError> {
+    let selector = builder.activate(store, &prepared)?;
+    let reference =
+        store.graph_snapshot_reference_for(&selector.snapshot_id, &selector.manifest_digest)?;
+    write_store_ref(output_dir, &reference)?;
+    store.record_retention_metadata(&reference, compass_store::MAX_SCAN_ITEMS)?;
+    store.checkpoint()?;
+    Ok(StorePublishMetrics {
+        new_objects: prepared.new_objects,
+        reused_objects: prepared.reused_objects,
+        write_transactions: prepared.write_transactions.saturating_add(2),
+        bytes_written: prepared.bytes_written,
+    })
+}
+
+fn record_store_metrics(timings: &mut BuildTimings, metrics: StorePublishMetrics) {
+    timings.store_new_objects = timings
+        .store_new_objects
+        .saturating_add(metrics.new_objects);
+    timings.store_reused_objects = timings
+        .store_reused_objects
+        .saturating_add(metrics.reused_objects);
+    timings.store_write_transactions = timings
+        .store_write_transactions
+        .saturating_add(metrics.write_transactions);
+    timings.store_bytes_written = timings
+        .store_bytes_written
+        .saturating_add(metrics.bytes_written);
+}
+
+fn write_store_ref(output_dir: &Path, reference: &StoreRef) -> Result<(), CoreError> {
     compass_files::write_json_atomic(output_dir.join(STORE_REF_FILE_NAME), &reference, false)?;
-    Ok(reference)
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -3978,7 +4176,7 @@ fn update_artifacts_complete(options: &BuildOptions, output_dir: &Path) -> bool 
         GRAPH_OVERVIEW_FILE,
     ];
     if options.graph_storage.publishes_store() {
-        required.extend([STORE_FILE_NAME, STORE_REF_FILE_NAME]);
+        required.push(STORE_REF_FILE_NAME);
     }
     required
         .into_iter()
@@ -3990,7 +4188,8 @@ fn storage_artifacts_complete(graph_storage: GraphStorage, output_dir: &Path) ->
 }
 
 fn store_artifact_complete(output_dir: &Path) -> bool {
-    let path = output_dir.join(STORE_FILE_NAME);
+    let graph_path = output_dir.join("graph.json");
+    let path = local_sqlite_store_path(&graph_path);
     let reference_path = output_dir.join(STORE_REF_FILE_NAME);
     let Ok(reference_bytes) = fs::read(reference_path) else {
         return false;
@@ -4002,7 +4201,7 @@ fn store_artifact_complete(output_dir: &Path) -> bool {
         && path.is_file()
         && SqliteStore::open_read_only(path).is_ok_and(|store| {
             store
-                .snapshot_reference()
+                .graph_snapshot_reference_for(&reference.snapshot_id, &reference.manifest_digest)
                 .is_ok_and(|actual| actual == reference)
         })
 }

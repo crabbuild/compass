@@ -34,14 +34,7 @@ fn default_query_open_uses_json_and_explicit_store_matches_results()
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
     support::write_graph(&graph_path)?;
-    let graph_bytes = fs::read(&graph_path)?;
-    let graph = GraphDocument::load(&graph_path)?;
-    SqliteStore::open(directory.path().join(STORE_FILE_NAME))?.publish_snapshot(
-        &graph_bytes,
-        CODE_GRAPH_SCHEMA_V1,
-        graph.nodes.len(),
-        graph.links.len(),
-    )?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
 
     let cache = directory.path().join("cache");
     let json_engine = open(&graph_path, None, &cache)?;
@@ -57,11 +50,57 @@ fn default_query_open_uses_json_and_explicit_store_matches_results()
         serde_json::to_value(store_engine.search(request.clone())?)?,
         serde_json::to_value(json_engine.search(request)?)?,
     );
-    assert_eq!(store_engine.index_path(), json_engine.index_path());
+    assert_ne!(store_engine.index_path(), json_engine.index_path());
+    assert_eq!(
+        store_engine
+            .index_path()
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some(STORE_FILE_NAME)
+    );
 
     drop(store_engine);
     let reopened = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
     assert_eq!(reopened.engine_kind(), QueryEngineKind::Store);
+    Ok(())
+}
+
+#[test]
+fn bounded_search_candidate_order_matches_store_postings() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let template = graph
+        .nodes
+        .first()
+        .cloned()
+        .ok_or("fixture graph has no template node")?;
+    for ordinal in 0..600 {
+        let mut node = template.clone();
+        node.id = format!("n:bulk:{:04}", 599 - ordinal);
+        node.name = format!("dja{ordinal:04}_{}", "padding".repeat(ordinal % 7));
+        node.qualified_name = format!("Bulk.{}", node.name);
+        graph.nodes.push(node);
+    }
+    fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
+
+    let cache = directory.path().join("cache");
+    let store = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
+    let json = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
+    let mut limits = CodeQueryLimits::default();
+    limits.max_candidates = 10;
+    limits.max_nodes = 100;
+    let request = SearchRequest {
+        query: "dja".to_owned(),
+        limits,
+    };
+    assert_eq!(
+        serde_json::to_value(store.search(request.clone())?)?,
+        serde_json::to_value(json.search(request)?)?,
+    );
     Ok(())
 }
 
@@ -78,7 +117,7 @@ fn store_engine_reads_the_immutable_phase2_snapshot_for_all_code_queries()
     let json = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
     assert_eq!(store.engine_kind(), QueryEngineKind::Store);
     assert_eq!(json.engine_kind(), QueryEngineKind::Json);
-    assert_eq!(store.index_path(), json.index_path());
+    assert_ne!(store.index_path(), json.index_path());
 
     let search = SearchRequest {
         query: "UserService.list".to_owned(),
@@ -345,7 +384,7 @@ fn explicit_store_selection_reports_a_missing_snapshot() -> Result<(), Box<dyn s
         Ok(_) => return Err("store selection silently fell back to JSON".into()),
         Err(error) => error,
     };
-    assert_eq!(error.code(), "store_open_failed");
+    assert_eq!(error.code(), "store_ref_missing");
     Ok(())
 }
 
@@ -355,6 +394,7 @@ fn explicit_json_selection_survives_a_corrupt_store_sidecar()
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
     support::write_graph(&graph_path)?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
     fs::write(
         directory.path().join(STORE_FILE_NAME),
         b"not a compass sqlite database",
@@ -376,14 +416,7 @@ fn a_present_malformed_store_reference_fails_closed() -> Result<(), Box<dyn std:
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
     support::write_graph(&graph_path)?;
-    let graph_bytes = fs::read(&graph_path)?;
-    let graph = GraphDocument::load(&graph_path)?;
-    SqliteStore::open(directory.path().join(STORE_FILE_NAME))?.publish_snapshot(
-        &graph_bytes,
-        CODE_GRAPH_SCHEMA_V1,
-        graph.nodes.len(),
-        graph.links.len(),
-    )?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
     fs::write(directory.path().join(STORE_REF_FILE_NAME), b"{}")?;
     let cache = directory.path().join("cache");
     assert_eq!(

@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 
 use compass_model::code_graph::{
-    BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord, GraphDocument, NodeKind,
-    NodeRecord,
+    BuildMetadata, DiagnosticSeverity, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord,
+    GraphDiagnostic, GraphDocument, NodeKind, NodeRecord,
 };
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{
@@ -69,6 +69,13 @@ pub fn write_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         configuration_digest: "sha256:config".to_owned(),
         generation_id: "sha256:generation".to_owned(),
         source_commit: None,
+    });
+    graph.graph.diagnostics.push(GraphDiagnostic {
+        severity: DiagnosticSeverity::Warning,
+        code: "publication_omission_summary".to_owned(),
+        message: "fixture intentionally represents partial coverage".to_owned(),
+        anchor: None,
+        related_ids: Vec::new(),
     });
     graph.graph.files.push(FileRecord {
         id: file_id("src/lib.rs"),

@@ -43,6 +43,23 @@ can reopen and validate a same-major SQLite sidecar. Unknown majors, a missing
 or corrupt `store.ref`, and redb or prototype files are rebuildable hard cuts;
 they are not migrated in place.
 
+The optimized immutable graph-index layout is also a hard cut from store files
+created by the pre-release per-generation/chunked-payload implementation. New
+SQLite state lives at
+`compass-out/.compass-store/compass-store.sqlite3`; active generations contain
+only canonical `graph.json` and `store.ref`. Do not move an older database into
+that location or copy a newer database into a generation directory. Preserve
+`graph.json` and rebuild from source:
+
+```bash
+compass update . --out compass-out --force --store sqlite
+compass store validate compass-out --format json
+```
+
+The disposable JSON query index advances to `compass-code-index/2` so its FTS
+underscore tokenization matches store term postings. It is rebuilt
+automatically on the first JSON query; no graph or store migration is needed.
+
 Check an output before upgrading or collecting support evidence:
 
 ```bash

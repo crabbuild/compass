@@ -3,6 +3,7 @@ use std::error::Error;
 use compass_graph::{
     GraphSnapshotBuilder, GraphSnapshotReader, IndexKind, SnapshotError, SnapshotReadLimits,
     active_graph_snapshot, canonical_graph_json, encode_graph_index_key,
+    garbage_collect_graph_snapshots, graph_snapshot_needs_gc,
 };
 use compass_model::code_graph::{
     BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord, GraphDocument, NodeKind,
@@ -153,6 +154,10 @@ fn snapshot_is_deterministic_and_reuses_immutable_objects() -> Result<(), Box<dy
     assert!(matches!(oversized.validate(), Err(SnapshotError::Limit(_))));
     assert_eq!(second.new_objects, 0);
     assert!(second.reused_objects > 0);
+    assert_eq!(first.write_transactions, 2);
+    assert_eq!(second.write_transactions, 2);
+    assert!(first.bytes_written > 0);
+    assert_eq!(second.bytes_written, 0);
     let selector = builder.activate(&store, &first)?;
     let reader = GraphSnapshotReader::open_selector(&store, selector)?;
     assert_eq!(
@@ -162,6 +167,23 @@ fn snapshot_is_deterministic_and_reuses_immutable_objects() -> Result<(), Box<dy
     assert_eq!(reader.outgoing("a", limits(4))?.len(), 2);
     assert_eq!(reader.incoming("b", limits(4))?.len(), 2);
     assert!(reader.outgoing("b", limits(4))?.is_empty());
+    let (named, named_truncated) = reader.nodes_by_normalized_name("A", limits(4))?;
+    assert!(!named_truncated);
+    assert_eq!(
+        named.into_iter().map(|node| node.id).collect::<Vec<_>>(),
+        ["a"]
+    );
+    let (term_nodes, term_truncated) = reader.nodes_for_terms(&["crat".to_owned()], limits(4))?;
+    assert!(!term_truncated);
+    assert_eq!(term_nodes.len(), 2);
+    assert_eq!(
+        reader.file_by_path("src/lib.rs")?.map(|file| file.path),
+        Some("src/lib.rs".to_owned())
+    );
+    let (calls, calls_truncated) =
+        reader.adjacency_by_kinds("a", false, &[EdgeKind::Calls], limits(4))?;
+    assert!(!calls_truncated);
+    assert_eq!(calls.len(), 2);
     assert_eq!(reader.export_graph()?, graph_sorted());
     assert_eq!(
         reader.export_json_bytes()?,
@@ -261,6 +283,62 @@ fn sqlite_adapter_round_trips_the_same_snapshot_contract() -> Result<(), Box<dyn
 }
 
 #[test]
+fn exact_leaf_fanout_does_not_publish_an_empty_trailing_child() -> Result<(), Box<dyn Error>> {
+    const EXACT_LEAF_FANOUT: usize = 128;
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut document = graph();
+    for index in document.nodes.len()..EXACT_LEAF_FANOUT {
+        document.nodes.push(node(&format!("node-{index:04}")));
+    }
+
+    let prepared = builder.prepare(&store, &document)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+
+    assert_eq!(
+        reader.nodes(limits(document.nodes.len()))?.len(),
+        document.nodes.len()
+    );
+    assert_eq!(
+        reader.export_json_bytes()?,
+        canonical_graph_json(&document)?
+    );
+    Ok(())
+}
+
+#[test]
+fn graph_snapshot_gc_retains_only_selected_immutable_trees() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let first = builder.prepare(&store, &graph())?;
+    let first_selector = builder.activate(&store, &first)?;
+    let mut changed = graph();
+    changed.nodes.push(node("c"));
+    let second = builder.prepare(&store, &changed)?;
+    let second_selector = builder.activate(&store, &second)?;
+    changed.nodes.push(node("d"));
+    let _third = builder.prepare(&store, &changed)?;
+    assert!(graph_snapshot_needs_gc(&store, 2)?);
+
+    let stats =
+        garbage_collect_graph_snapshots(&store, std::slice::from_ref(&second_selector), 10_000)?;
+    assert_eq!(stats.retained_manifests, 1);
+    assert!(stats.retained_objects > 1);
+    assert!(stats.deleted_entries > 0);
+    assert!(stats.delete_transactions > 0);
+    assert!(!graph_snapshot_needs_gc(&store, 2)?);
+    assert!(GraphSnapshotReader::open_selector(&store, first_selector).is_err());
+    assert_eq!(
+        GraphSnapshotReader::open_selector(&store, second_selector)?
+            .get_node("c")?
+            .map(|node| node.id),
+        Some("c".to_owned())
+    );
+    Ok(())
+}
+
+#[test]
 fn graph_key_vectors_are_namespace_safe_and_orderable() -> Result<(), Box<dyn Error>> {
     let left = encode_graph_index_key(IndexKind::Nodes, &[b"a"])?;
     let right = encode_graph_index_key(IndexKind::Nodes, &[b"b"])?;
@@ -296,6 +374,32 @@ fn graph_valid_long_qualified_names_round_trip_through_the_store() -> Result<(),
     assert_eq!(
         reader.get_node("b")?.map(|node| node.qualified_name),
         Some("call_chain.".repeat(120))
+    );
+    Ok(())
+}
+
+#[test]
+fn graph_valid_punctuation_names_use_an_explicit_empty_name_bucket() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut document = graph();
+    let mut punctuation = node("punctuation");
+    punctuation.name = "...".to_owned();
+    punctuation.qualified_name = ".".to_owned();
+    document.nodes.push(punctuation);
+
+    let prepared = builder.prepare(&store, &document)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    let (matches, truncated) = reader.nodes_by_normalized_name(".", limits(8))?;
+    assert!(!truncated);
+    assert_eq!(
+        matches.into_iter().map(|node| node.id).collect::<Vec<_>>(),
+        ["punctuation"]
+    );
+    assert_eq!(
+        reader.export_json_bytes()?,
+        canonical_graph_json(&document)?
     );
     Ok(())
 }

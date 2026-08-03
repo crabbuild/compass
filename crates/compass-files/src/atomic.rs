@@ -8,6 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::{FileError, io_error};
 
@@ -162,6 +163,76 @@ pub fn write_json_atomic<T: Serialize>(
     })
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AtomicJsonDigest {
+    pub sha256: String,
+    pub bytes: u64,
+}
+
+/// Atomically serialize compact JSON and return the digest of the exact bytes
+/// that reached the staging file. The digest is collected in the same bounded
+/// streaming pass, avoiding a second serialization or file read.
+pub fn write_json_atomic_with_digest<T: Serialize>(
+    path: impl AsRef<Path>,
+    value: &T,
+) -> Result<AtomicJsonDigest, FileError> {
+    let mut receipt = None;
+    atomic_replace(path.as_ref(), |writer| {
+        let mut hashing = HashingWriter::new(writer);
+        serde_json::to_writer(&mut hashing, value).map_err(|source| FileError::Json {
+            path: path.as_ref().to_path_buf(),
+            source,
+        })?;
+        receipt = Some(hashing.finish());
+        Ok(())
+    })?;
+    receipt.ok_or_else(|| {
+        io_error(
+            path.as_ref(),
+            std::io::Error::other("JSON digest receipt was not produced"),
+        )
+    })
+}
+
+struct HashingWriter<'a, W> {
+    inner: &'a mut W,
+    hasher: Sha256,
+    bytes: u64,
+}
+
+impl<'a, W> HashingWriter<'a, W> {
+    fn new(inner: &'a mut W) -> Self {
+        Self {
+            inner,
+            hasher: Sha256::new(),
+            bytes: 0,
+        }
+    }
+
+    fn finish(self) -> AtomicJsonDigest {
+        AtomicJsonDigest {
+            sha256: format!("{:x}", self.hasher.finalize()),
+            bytes: self.bytes,
+        }
+    }
+}
+
+impl<W: Write> Write for HashingWriter<'_, W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.inner.write_all(bytes)?;
+        self.hasher.update(bytes);
+        self.bytes = self
+            .bytes
+            .checked_add(bytes.len() as u64)
+            .ok_or_else(|| std::io::Error::other("JSON byte count overflow"))?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 /// Atomically serialize JSON while escaping every non-ASCII scalar exactly as
 /// Python's default `json.dump(..., ensure_ascii=True)` does.
 ///
@@ -243,7 +314,9 @@ mod tests {
 
     use serde_json::json;
 
-    use super::write_json_ascii_atomic;
+    use sha2::{Digest, Sha256};
+
+    use super::{write_json_ascii_atomic, write_json_atomic_with_digest};
 
     #[test]
     fn streams_python_compatible_ascii_json_with_optional_newline() {
@@ -253,5 +326,16 @@ mod tests {
             .unwrap_or_else(|_| std::process::abort());
         let encoded = fs::read_to_string(path).unwrap_or_else(|_| std::process::abort());
         assert_eq!(encoded, "{\"text\":\"caf\\u00e9 \\ud83e\\udd80\"}\n");
+    }
+
+    #[test]
+    fn compact_json_digest_matches_the_published_bytes() {
+        let directory = tempfile::tempdir().unwrap_or_else(|_| std::process::abort());
+        let path = directory.path().join("graph.json");
+        let receipt = write_json_atomic_with_digest(&path, &json!({"value": [1, 2, 3]}))
+            .unwrap_or_else(|_| std::process::abort());
+        let bytes = fs::read(path).unwrap_or_else(|_| std::process::abort());
+        assert_eq!(receipt.bytes, bytes.len() as u64);
+        assert_eq!(receipt.sha256, format!("{:x}", Sha256::digest(&bytes)));
     }
 }

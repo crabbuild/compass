@@ -7,10 +7,13 @@ trap 'rm -rf "$test_root"' EXIT HUP INT TERM
 
 project="$test_root/project"
 output="$project/compass-out"
-mkdir -p "$output"
-printf '%s\n' '{"graph":{"schema":"compass.graph/1"},"nodes":[],"links":[]}' > "$output/graph.json"
-printf 'old-sqlite\n' > "$output/compass-store.sqlite3"
-printf 'old-reference\n' > "$output/store.ref"
+old_generation=generation-old
+mkdir -p "$output/.compass-generations/$old_generation" "$output/.compass-store"
+printf '%s\n' "$old_generation" > "$output/.compass-active-generation"
+printf '%s\n' '{"graph":{"schema":"compass.graph/1"},"nodes":[],"links":[]}' \
+    > "$output/.compass-generations/$old_generation/graph.json"
+printf 'old-sqlite\n' > "$output/.compass-store/compass-store.sqlite3"
+printf 'old-reference\n' > "$output/.compass-generations/$old_generation/store.ref"
 
 cat > "$test_root/fake-compass" <<'EOF'
 #!/bin/sh
@@ -29,26 +32,32 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 test "$store" = sqlite
-printf 'new-sqlite\n' > "$output/compass-store.sqlite3"
-printf 'new-reference\n' > "$output/store.ref"
+new_generation=generation-new
+mkdir -p "$output/.compass-store" "$output/.compass-generations/$new_generation"
+printf 'new-sqlite\n' > "$output/.compass-store/compass-store.sqlite3"
+printf '%s\n' '{"graph":{"schema":"compass.graph/1"},"nodes":[],"links":[]}' \
+    > "$output/.compass-generations/$new_generation/graph.json"
+printf 'new-reference\n' > "$output/.compass-generations/$new_generation/store.ref"
+printf '%s\n' "$new_generation" > "$output/.compass-active-generation"
 EOF
 chmod +x "$test_root/fake-compass"
 
 FAKE_COMPASS_FAIL=0 sh "$repo_root/scripts/rebuild_compass_store.sh" "$project" --compass "$test_root/fake-compass" > "$test_root/success.txt"
 backup=$(sed -n 's/^previous sidecar backup: //p' "$test_root/success.txt")
 test -n "$backup"
-test "$(cat "$output/compass-store.sqlite3")" = new-sqlite
-test "$(cat "$backup/compass-store.sqlite3")" = old-sqlite
-test "$(cat "$backup/store.ref")" = old-reference
+test "$(cat "$output/.compass-store/compass-store.sqlite3")" = new-sqlite
+test "$(cat "$backup/.compass-store/compass-store.sqlite3")" = old-sqlite
+test "$(cat "$backup/active-store.ref")" = old-reference
 
-printf 'replacement-sqlite\n' > "$output/compass-store.sqlite3"
-printf 'replacement-reference\n' > "$output/store.ref"
+printf 'replacement-sqlite\n' > "$output/.compass-store/compass-store.sqlite3"
+printf 'replacement-reference\n' \
+    > "$output/.compass-generations/generation-new/store.ref"
 if FAKE_COMPASS_FAIL=1 sh "$repo_root/scripts/rebuild_compass_store.sh" \
     "$project" --compass "$test_root/fake-compass" > "$test_root/failure.txt" 2>&1; then
     echo "expected failed rebuild" >&2
     exit 1
 fi
-test "$(cat "$output/compass-store.sqlite3")" = replacement-sqlite
-test "$(cat "$output/store.ref")" = replacement-reference
+test "$(cat "$output/.compass-store/compass-store.sqlite3")" = replacement-sqlite
+test "$(cat "$output/.compass-generations/generation-new/store.ref")" = replacement-reference
 
 echo "store release script tests passed"

@@ -8,15 +8,17 @@ implemented. This includes the namespace-first common contract, versioned
 logical envelopes, SQLite backup/restore, explicit rebuild tooling, release
 qualification reports, canonical JSON/typed-query/CompassQL differential
 checks, and packaging boundaries. `graph.json` remains permanent and
-compatible. PostgreSQL, DynamoDB, hosted credentials/TLS, general garbage
-collection, and service quotas remain future work.
+compatible. Local bounded generation retention and reachability collection are
+implemented. PostgreSQL, DynamoDB, hosted credentials/TLS, distributed leases,
+and service quotas remain future work.
 
-Each generated sidecar now contains both a validated graph payload retained for
-compatibility and the Phase 2 content-addressed graph indexes used by the
-current store engine. The sidecar is prepared and checkpointed in the
-unpublished BuildGuard generation; only the filesystem generation switch
-publishes it. `graph.json` remains a permanent compatible engine and is never
-removed or made dependent on SQLite.
+New stores contain only the Phase 2 content-addressed projected indexes and
+their manifest; they do not duplicate the complete graph in a legacy chunked
+payload. One stable SQLite database lives below the output root, while each
+BuildGuard generation contains canonical `graph.json` and a small immutable
+`store.ref`. The database is prepared and checkpointed before the filesystem
+generation switch publishes that reference. `graph.json` remains a permanent
+compatible engine and is never removed or made dependent on SQLite.
 
 The first support window is `0.3.x`: matching logical majors may be reopened
 by patch releases, while physical adapter files and disposable indexes remain
@@ -59,7 +61,7 @@ database features:
 - ordered, bounded scans inside exactly one partition;
 - durable single-key writes;
 - put-if-absent and compare-and-swap on one address;
-- immutable, idempotent content writes; and
+- immutable, idempotent content writes plus bounded atomic batches; and
 - explicit limits, deadlines, cursors, and typed failures.
 
 Graph snapshots are built above this key-value contract as immutable,
@@ -665,11 +667,11 @@ is deliberately backend-neutral and is used before persistent adapter work so
 that tree and graph semantics are tested without SQLite transaction behavior
 masking logical errors.
 
-The v1 reference uses these fixed records and keys:
+The current graph-index layout uses these fixed records and keys:
 
-- immutable compact MessagePack tree objects in the
-  `graph-snapshot/objects` partition, with read support for the initial JSON
-  object encoding;
+- immutable compact MessagePack tree objects, deterministically zstd-compressed
+  when smaller, in the `graph-snapshot/objects` partition, with bounded read
+  support for the initial JSON and raw MessagePack encodings;
 - a manifest at `manifest/<sha256>` and one selector at
   `graph-snapshot/catalog/active`;
 - nodes, edges, outgoing, incoming, files/source anchors, names, terms,
@@ -677,8 +679,11 @@ The v1 reference uses these fixed records and keys:
 - portable length-prefixed keys whose first segment is the index kind.
 
 Leaves contain strictly ordered entries and branches contain at most 32
-children. Content-addressed writes use `put_immutable`, so repeated builds
-reuse byte-identical leaves and branches. The reader verifies the object
+children. Completed leaves are encoded once and oversized leaves split
+deterministically; construction does not repeatedly clone and serialize partial
+leaves. Content-addressed writes use bounded `put_immutable_batch`, so repeated
+builds reuse byte-identical leaves and branches without one existence read or
+durable transaction per object. The reader verifies the object
 digest, schema, index kind, ordering, root selection, and graph validation
 before returning a record. Point reads and scans enforce item, byte, object,
 and depth limits; corruption is never converted into an empty result.
@@ -692,10 +697,12 @@ to finish against that immutable realization.
 
 The Phase 3 local adapter maps these same objects and selectors to durable
 SQLite. It validates the active selector and canonical export after reopen,
-publishes a typed `store.ref`, checkpoints WAL frames before the generation
-switch, and reports bounded unreachable manifest candidates without deleting
-them. A malformed or stale store fails the unpublished build and leaves the
-previous generation and its JSON engine readable.
+publishes a typed `store.ref`, and checkpoints WAL frames before the generation
+switch. After publication, bounded mark-and-sweep collection retains objects
+reachable from the active and previous complete generations and deletes other
+entries in bounded transactions. A malformed or stale store fails the
+unpublished build and leaves the previous generation and its JSON engine
+readable.
 
 ### Structural sharing and incremental update
 
@@ -756,11 +763,12 @@ database later becomes unavailable, the published `graph.json` remains a
 usable complete engine. No best-effort sequence of “update database, then
 replace JSON” is allowed to expose two different current graphs.
 
-When selected with `--store sqlite`, the Phase 3 local implementation uses
-`compass-store.sqlite3` inside the staged generation. SQLite runs in WAL/FULL
-mode; the writer checkpoints before the generation switch, then writes
-`store.ref` and bounded retention metadata. An ordinary build omits store
-artifacts and retains the JSON publication.
+When selected with `--store sqlite`, the Phase 3 local implementation uses the
+stable `DIR/.compass-store/compass-store.sqlite3` database outside staged and
+complete generation directories. SQLite runs in WAL/FULL mode; the writer
+checkpoints before the generation switch, while the staged generation receives
+only `store.ref` and bounded retention metadata. An ordinary build omits the
+reference and retains the JSON publication. No generation copies the database.
 
 ### Store-native or cloud publication
 
@@ -834,8 +842,14 @@ roots, envelopes, and record contracts. It performs point reads and ordered
 tree walks through a scoped `NamespaceStore`. It must not downcast to a
 specific adapter for correctness.
 
-CompassQL, traversal, impact, reports, MCP, and CLI layers consume the graph
-read contract. They do not select SQL tables or DynamoDB indexes.
+The shipped typed `search`, `callers`, `callees`, `impact`, `explore`, and
+`node` paths execute directly against projected snapshot roots. They point-read
+nodes and edges and walk name, term, incoming, and outgoing indexes without
+constructing or cloning a complete `GraphDocument` or a second query index.
+The reader remains backend-neutral: SQLite and redb execute the same plan.
+CompassQL, reports, and other whole-graph consumers may still request a bounded
+materialized export where their current algorithm requires it. No consumer
+selects SQL tables or DynamoDB indexes.
 
 ## Query planning and accelerators
 
@@ -906,15 +920,16 @@ binary comparisons. Conditional updates include the observed `version` in the
 transaction and require the observed version to match. Put-if-absent uses the
 primary-key constraint and verifies the existing digest on conflict.
 
-The generated sidecar uses WAL, full synchronous durability, a bounded busy
-timeout, bounded values, and explicit transactions. The publication path calls
-an explicit WAL checkpoint before `BuildGuard` seals the generation, so the
-main database file is self-contained for copy and recovery. File creation,
-permissions, symlink handling, corruption recovery, and atomic replacement
-reuse `compass-files` primitives rather than new weaker helpers. Whether
-`WITHOUT ROWID` remains the best physical choice is still a benchmark question;
-SQLite's own documentation recommends measuring this optimization rather than
-assuming it always wins.
+The generated sidecar uses 16 KiB pages, WAL, full synchronous durability,
+incremental auto-vacuum, bounded busy/cache/mmap settings, bounded values, and
+explicit transactions. Immutable objects are compressed above the adapter and
+inserted with backend-neutral bounded batches; one conflict-checked SQL
+transaction covers each batch without a preceding existence query per object.
+The publication path explicitly checkpoints before `BuildGuard` seals the
+generation. File creation, permissions, symlink handling, corruption recovery,
+and atomic replacement reuse `compass-files` primitives. Native tests use
+`EXPLAIN QUERY PLAN` to require primary-key point and partition-range plans;
+physical choices remain benchmarked adapter details rather than public schema.
 
 ### redb
 

@@ -1,16 +1,17 @@
 //! Immutable graph-engine boundary shared by JSON and store-backed readers.
 //!
-//! The first local store implementation still materializes the validated typed
-//! document so existing query algorithms remain byte-for-byte compatible. The
-//! boundary is deliberately independent of SQLite and is the seam for the
-//! planned projection/streaming implementation.
+//! Local SQLite queries pin an immutable selector and read projected snapshot
+//! indexes directly. Generic store adapters can still use the materializing
+//! engine for compatibility and differential validation.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use compass_graph::{GraphSnapshotManifest, GraphSnapshotReader, canonical_graph_json};
+use compass_graph::{
+    GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotReader, SnapshotSelector, canonical_graph_json,
+};
 use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
-use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, Store, StoreRef};
+use compass_store::{STORE_REF_FILE_NAME, SqliteStore, Store, StoreRef, local_sqlite_store_path};
 
 use crate::cql::{QueryError, QueryErrorKind};
 use crate::index::{EngineSelection, QueryEngineKind};
@@ -71,6 +72,24 @@ pub struct StoreGraphEngine {
     graph_bytes: Vec<u8>,
 }
 
+pub(crate) struct LocalStoreSnapshot {
+    pub(crate) store: SqliteStore,
+    pub(crate) selector: SnapshotSelector,
+    pub(crate) store_path: PathBuf,
+}
+
+impl LocalStoreSnapshot {
+    pub(crate) fn reader(&self) -> Result<GraphSnapshotReader<'_, SqliteStore>, QueryError> {
+        GraphSnapshotReader::open_selector(&self.store, self.selector.clone()).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_snapshot_failed",
+                error.to_string(),
+            )
+        })
+    }
+}
+
 impl StoreGraphEngine {
     /// Open a store-backed engine from any common-contract adapter.
     ///
@@ -109,53 +128,19 @@ impl StoreGraphEngine {
     }
 
     pub fn open(graph_path: &Path) -> Result<Self, QueryError> {
-        let store_path = adjacent_store_path(graph_path);
-        let store = SqliteStore::open_read_only(&store_path).map_err(|error| {
+        let snapshot = open_local_store_snapshot(graph_path)?;
+        let reader = snapshot.reader()?;
+        let manifest = reader.manifest();
+        let graph_schema = manifest.graph_schema.clone();
+        let node_count = manifest.node_count;
+        let edge_count = manifest.edge_count;
+        let graph_bytes = reader.export_json_bytes().map_err(|error| {
             QueryError::new(
                 QueryErrorKind::CorruptArtifact,
-                "store_open_failed",
+                "store_graph_export_failed",
                 error.to_string(),
             )
         })?;
-        let active = GraphSnapshotReader::open_active(&store).map_err(|error| {
-            QueryError::new(
-                QueryErrorKind::CorruptArtifact,
-                "store_graph_snapshot_failed",
-                error.to_string(),
-            )
-        })?;
-        let (graph_schema, node_count, edge_count, graph_bytes) = if let Some(reader) = active {
-            let manifest = reader.manifest();
-            let graph_bytes = reader.export_json_bytes().map_err(|error| {
-                QueryError::new(
-                    QueryErrorKind::CorruptArtifact,
-                    "store_graph_export_failed",
-                    error.to_string(),
-                )
-            })?;
-            validate_store_ref(graph_path, &store, Some(manifest))?;
-            (
-                manifest.graph_schema.clone(),
-                manifest.node_count,
-                manifest.edge_count,
-                graph_bytes,
-            )
-        } else {
-            let (manifest, graph_bytes) = store.read_snapshot().map_err(|error| {
-                QueryError::new(
-                    QueryErrorKind::CorruptArtifact,
-                    "store_snapshot_failed",
-                    error.to_string(),
-                )
-            })?;
-            validate_store_ref(graph_path, &store, None)?;
-            (
-                manifest.graph_schema,
-                manifest.node_count,
-                manifest.edge_count,
-                graph_bytes,
-            )
-        };
         Self::from_parts(graph_schema, node_count, edge_count, graph_bytes)
     }
 
@@ -204,6 +189,61 @@ impl StoreGraphEngine {
     }
 }
 
+pub(crate) fn open_local_store_snapshot(
+    graph_path: &Path,
+) -> Result<LocalStoreSnapshot, QueryError> {
+    let reference = read_store_ref(graph_path)?;
+    let store_path = local_sqlite_store_path(graph_path);
+    let store = SqliteStore::open_read_only(&store_path).map_err(|error| {
+        QueryError::new(
+            QueryErrorKind::CorruptArtifact,
+            "store_open_failed",
+            error.to_string(),
+        )
+    })?;
+    store.begin_read_snapshot().map_err(|error| {
+        QueryError::new(
+            QueryErrorKind::CorruptArtifact,
+            "store_read_snapshot_failed",
+            error.to_string(),
+        )
+    })?;
+    let selector = SnapshotSelector {
+        schema: GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1.to_owned(),
+        snapshot_id: reference.snapshot_id.clone(),
+        manifest_digest: reference.manifest_digest.clone(),
+    };
+    let reader = GraphSnapshotReader::open_selector(&store, selector.clone()).map_err(|error| {
+        QueryError::new(
+            QueryErrorKind::CorruptArtifact,
+            "store_graph_snapshot_failed",
+            error.to_string(),
+        )
+    })?;
+    let actual = store
+        .graph_snapshot_reference_for(&reference.snapshot_id, &reference.manifest_digest)
+        .map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_ref_store_read_failed",
+                error.to_string(),
+            )
+        })?;
+    if actual != reference || reader.manifest().graph_digest != reference.graph_digest {
+        return Err(QueryError::new(
+            QueryErrorKind::CorruptArtifact,
+            "store_ref_mismatch",
+            "store.ref does not describe the selected immutable graph snapshot",
+        ));
+    }
+    drop(reader);
+    Ok(LocalStoreSnapshot {
+        store,
+        selector,
+        store_path,
+    })
+}
+
 impl GraphEngine for StoreGraphEngine {
     fn kind(&self) -> QueryEngineKind {
         QueryEngineKind::Store
@@ -232,13 +272,6 @@ pub fn open_graph_engine(
     }
 }
 
-fn adjacent_store_path(graph_path: &Path) -> PathBuf {
-    graph_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(STORE_FILE_NAME)
-}
-
 fn validate_graph_schema(graph: &GraphDocument) -> Result<(), QueryError> {
     if graph.graph.schema != CODE_GRAPH_SCHEMA_V1 {
         return Err(QueryError::new(
@@ -253,24 +286,17 @@ fn validate_graph_schema(graph: &GraphDocument) -> Result<(), QueryError> {
     Ok(())
 }
 
-fn validate_store_ref(
-    graph_path: &Path,
-    store: &SqliteStore,
-    graph_snapshot: Option<&GraphSnapshotManifest>,
-) -> Result<(), QueryError> {
+fn read_store_ref(graph_path: &Path) -> Result<StoreRef, QueryError> {
     let reference_path = graph_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(STORE_REF_FILE_NAME);
     if !reference_path.is_file() {
-        if graph_snapshot.is_some() {
-            return Err(QueryError::new(
-                QueryErrorKind::CorruptArtifact,
-                "store_ref_missing",
-                "store.ref is required for an immutable graph snapshot",
-            ));
-        }
-        return Ok(());
+        return Err(QueryError::new(
+            QueryErrorKind::CorruptArtifact,
+            "store_ref_missing",
+            "store.ref is required for an immutable graph snapshot",
+        ));
     }
     let size = fs::metadata(&reference_path)
         .map_err(|error| io_error("stat_store_ref", error))?
@@ -297,31 +323,7 @@ fn validate_store_ref(
             error.to_string(),
         )
     })?;
-    let actual = store.snapshot_reference().map_err(|error| {
-        QueryError::new(
-            QueryErrorKind::CorruptArtifact,
-            "store_ref_store_read_failed",
-            error.to_string(),
-        )
-    })?;
-    if actual != reference {
-        return Err(QueryError::new(
-            QueryErrorKind::CorruptArtifact,
-            "store_ref_mismatch",
-            "store.ref does not describe the selected store snapshot",
-        ));
-    }
-    if let Some(manifest) = graph_snapshot
-        && (reference.snapshot_id != manifest.snapshot_id
-            || reference.graph_digest != manifest.graph_digest)
-    {
-        return Err(QueryError::new(
-            QueryErrorKind::CorruptArtifact,
-            "store_ref_snapshot_mismatch",
-            "store.ref does not describe the active immutable graph snapshot",
-        ));
-    }
-    Ok(())
+    Ok(reference)
 }
 
 fn io_error(code: &'static str, error: std::io::Error) -> QueryError {
