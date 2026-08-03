@@ -39,7 +39,7 @@ run the rebuild procedure, and retain the unchanged `graph.json`.
 
 | Backend | Local CLI | Credentials/network | Platforms | Status |
 | --- | --- | --- | --- | --- |
-| SQLite | Default sidecar `compass-store.sqlite3` | None; local file only | macOS, Linux, Windows | Released local adapter |
+| SQLite | Opt-in sidecar `compass-store.sqlite3` via `--store sqlite` | None; local file only | macOS, Linux, Windows | Released local adapter |
 | redb | Explicit Rust adapter `compass-store-redb` | None; local file only | CI-supported native platforms | Library/conformance adapter; not selected by the CLI |
 | PostgreSQL | No released CLI adapter | Would require an explicit endpoint, credentials, TLS, and bounded client | Future service profile | Deferred |
 | DynamoDB | No released CLI adapter | Would require an explicit AWS boundary, credentials, TLS, retries, and quotas | Future service profile | Deferred |
@@ -54,12 +54,13 @@ For an output root `DIR` the published set is:
 
 ```text
 DIR/graph.json                 # permanent canonical graph artifact
-DIR/compass-store.sqlite3      # SQLite store snapshot
-DIR/store.ref                  # typed generation binding
+DIR/compass-store.sqlite3      # with --store sqlite
+DIR/store.ref                  # with --store sqlite
 DIR/.compass-active-generation # BuildGuard publication pointer, when used
 ```
 
-`graph.json`, the SQLite sidecar, and `store.ref` are published as one
+`graph.json` is the default generation. When `--store sqlite` is selected,
+the JSON artifact, SQLite sidecar, and `store.ref` are published as one
 generation. The sidecar uses WAL during preparation and is checkpointed before
 the generation switch. Readers open the active immutable snapshot and remain
 pinned to it. A failed or interrupted update must leave the previous coherent
@@ -108,8 +109,8 @@ compass store validate /recovered/compass-out --format json
 
 Restore validates every digest and snapshot before publication. It removes an
 incomplete destination on failure and never overwrites an existing output.
-After restore, use `--engine json` if only the graph file is available; the
-JSON engine does not require a database.
+After restore, typed queries still use JSON by default. Pass `--engine store`
+to select and validate the restored database.
 
 ## Rebuild and upgrade policy
 
@@ -126,11 +127,12 @@ scripts/rebuild_compass_store.sh . --out compass-out --compass compass
 ```
 
 The script moves existing sidecars into a timestamped rollback directory,
-runs `compass update --force`, and restores the old sidecars if the update
-fails. On success it leaves the backup for an operator to review and remove
+runs `compass update --force --store sqlite`, and restores the old sidecars if
+the update fails. On success it leaves the backup for an operator to review and remove
 according to local retention policy. The graph file is never deleted by the
-script. If source is available, a normal `compass update --force` is the
-preferred rebuild; if only `graph.json` is available, use the JSON engine or
+script. If source is available, a normal
+`compass update --force --store sqlite` is the preferred rebuild; if only
+`graph.json` is available, use the JSON engine or
 import it through a separately reviewed adapter tool.
 
 Downgrades must preserve `graph.json` and run `compass store validate` after

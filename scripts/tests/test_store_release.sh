@@ -20,12 +20,15 @@ if [ "$FAKE_COMPASS_FAIL" = 1 ]; then
 fi
 test "$1" = update
 shift
+store=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --out) output=$2; shift 2 ;;
+        --store) store=$2; shift 2 ;;
         *) shift ;;
     esac
 done
+test "$store" = sqlite
 printf 'new-sqlite\n' > "$output/compass-store.sqlite3"
 printf 'new-reference\n' > "$output/store.ref"
 EOF

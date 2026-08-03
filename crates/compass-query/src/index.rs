@@ -21,7 +21,7 @@ const INDEX_FORMAT_VERSION: &str = "compass-code-index/1";
 /// Selects the source used to hydrate the typed query engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EngineSelection {
-    /// Prefer the store sidecar and fall back to graph JSON when it is absent.
+    /// Read the compatible `graph.json` artifact. This is the public default.
     Default,
     /// Read and validate the compatible `graph.json` artifact directly.
     Json,

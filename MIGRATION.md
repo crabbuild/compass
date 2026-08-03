@@ -67,9 +67,10 @@ scripts/rebuild_compass_store.sh . --out compass-out --compass compass
 
 The script preserves existing sidecars in a timestamped rollback directory,
 restores them if `compass update --force` fails, and never replaces the JSON
-artifact. A normal `compass update --force` is also sufficient when the old
-sidecar has already been removed. If only `graph.json` is available, use
-`--engine json`; no database is required to inspect or query that artifact.
+artifact. A normal `compass update --force --store sqlite` is also sufficient
+when the old sidecar has already been removed. Builds without `--store sqlite`
+now publish JSON only and remove store files from the new generation. Typed
+queries use JSON by default; use `--engine store` to select a retained sidecar.
 
 Downgrades must validate the output with the target binary. Do not reuse a
 newer physical SQLite/redb file merely because its filename matches. Rebuild

@@ -13,7 +13,7 @@ fn store_status_backup_and_restore_are_end_to_end_validated() -> Result<(), Box<
         "fn main() { println!(\"ok\"); }\n",
     )?;
     let init = Command::new(env!("CARGO_BIN_EXE_compass"))
-        .args(["init", ".", "--yes"])
+        .args(["init", ".", "--yes", "--store", "sqlite"])
         .current_dir(root.path())
         .env_remove("COMPASS_OUT")
         .output()?;
@@ -108,7 +108,7 @@ fn store_validate_rejects_a_corrupt_sidecar_without_touching_graph_json()
     let root = tempfile::tempdir()?;
     fs::write(root.path().join("main.rs"), "fn main() {}\n")?;
     let init = Command::new(env!("CARGO_BIN_EXE_compass"))
-        .args(["init", ".", "--yes"])
+        .args(["init", ".", "--yes", "--store", "sqlite"])
         .current_dir(root.path())
         .env_remove("COMPASS_OUT")
         .output()?;

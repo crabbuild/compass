@@ -92,8 +92,14 @@ pub(crate) struct BuildProfile {
     pub resolution: f64,
     pub exclude_hubs: Option<f64>,
     pub program_analysis: bool,
+    #[serde(default = "legacy_graph_storage")]
+    pub graph_storage: String,
     #[serde(default = "default_max_source_bytes")]
     pub max_source_bytes: u64,
+}
+
+fn legacy_graph_storage() -> String {
+    "sqlite".to_owned()
 }
 
 const fn default_max_source_bytes() -> u64 {
@@ -280,6 +286,7 @@ mod tests {
             resolution: 1.0,
             exclude_hubs: None,
             program_analysis: true,
+            graph_storage: "json".to_owned(),
             max_source_bytes: default_max_source_bytes(),
         };
         let state = BuildState::capture(

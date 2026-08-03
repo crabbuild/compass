@@ -4,7 +4,8 @@ use std::fs;
 use std::path::Path;
 
 use compass_core::{
-    BuildOptions, BuildPurpose, SemanticLayer, build_graph_with_semantic, build_local_graph,
+    BuildOptions, BuildPurpose, GraphStorage, SemanticLayer, build_graph_with_semantic,
+    build_local_graph,
 };
 use compass_files::{Cache, CacheKind, CacheOptions};
 use compass_graph::{GraphSnapshotReader, canonical_graph_json};
@@ -165,6 +166,7 @@ fn build_publishes_a_reopenable_store_snapshot_matching_graph_json() -> Result<(
     let mut options = BuildOptions::new(directory.path());
     options.no_cluster = true;
     options.no_viz = true;
+    options.graph_storage = GraphStorage::Sqlite;
     options.max_workers = Some(2);
     let result = build_local_graph(&options)?;
     let graph_path = result.output_dir.join("graph.json");

@@ -67,7 +67,7 @@ do
     fi
 done
 
-if ! "$binary" update "$project" --out "$output" --force; then
+if ! "$binary" update "$project" --out "$output" --force --store sqlite; then
     echo "error: store rebuild failed; the previous sidecar remains in $backup" >&2
     exit 1
 fi

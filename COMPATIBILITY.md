@@ -60,13 +60,13 @@ A user-visible incompatible change requires:
 Versioned formats use Compass-owned identifiers. Consumers should reject
 unknown major versions instead of attempting legacy fallback behavior.
 
-The current local build publishes `graph.json` (`compass.graph/1`), a validated
-`compass-store.sqlite3` sidecar, and a typed `store.ref` selector. The store is
-selected by typed code queries by default when the selector and sidecar agree,
-while `graph.json` remains a complete compatible engine; explicit JSON
-selection never requires opening a database. The SQLite file and reference are
-internal realizations of the backend-neutral `compass-store` contract, not a
-stable SQL schema or pointer format that consumers may query directly.
+The current local build publishes `graph.json` (`compass.graph/1`) by default.
+Passing `--store sqlite` also publishes a validated `compass-store.sqlite3`
+sidecar and typed `store.ref` selector. Typed code queries use JSON by default;
+`--engine store` explicitly selects and validates the sidecar. The SQLite file
+and reference are internal realizations of the backend-neutral `compass-store`
+contract, not a stable SQL schema or pointer format that consumers may query
+directly.
 
 ## Compass Store release contract
 
@@ -94,8 +94,9 @@ qualification tests; it is not a CLI or packaging dependency. PostgreSQL and
 DynamoDB are future adapters, not supported release backends. No local store
 command accepts cloud credentials, endpoints, or TLS configuration.
 
-Published locations are `DIR/graph.json`, `DIR/compass-store.sqlite3`, and
-`DIR/store.ref` under the selected `--out DIR` (default `compass-out/`).
+The default published location is `DIR/graph.json` under the selected
+`--out DIR` (default `compass-out/`). A `--store sqlite` build additionally
+publishes `DIR/compass-store.sqlite3` and `DIR/store.ref`.
 `compass store status|validate|backup|restore` are the supported operational
 surface. Backups are digest-bound directories and restores never overwrite an
 existing destination. General object GC and service quotas are deferred; the
@@ -103,9 +104,9 @@ local API still enforces bounded values, scans, graph sizes, and request work.
 
 The hard-cut boundary is the sidecar and all disposable indexes. When a
 physical format is invalid or outside the support window, preserve
-`graph.json`, run `scripts/rebuild_compass_store.sh`, or select `--engine json`.
-The JSON engine does not require a database and is not a migration fallback
-scheduled for removal.
+`graph.json`, run `scripts/rebuild_compass_store.sh`, or continue with the
+default JSON engine. The JSON engine does not require a database and is not a
+migration fallback scheduled for removal.
 
 Markdown graph extraction is a structural, extensible projection. New
 document/block attributes and bounded diagnostic extensions may appear without

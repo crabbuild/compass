@@ -1,8 +1,8 @@
 # Compass store and graph-engine design
 
 **Status:** Architecture reference plus the local `0.3.x` release contract.
-The initial local slice, Phase 2 memory snapshot layout, Phase 3 SQLite
-shadow-publication slice, local Phase 4 snapshot-backed query routing, the
+The initial local slice, Phase 2 memory snapshot layout, Phase 3 optional
+SQLite publication, local Phase 4 snapshot-backed query routing, the
 optional Phase 5 redb adapter, and the Phase 9 local operational surface are
 implemented. This includes the namespace-first common contract, versioned
 logical envelopes, SQLite backup/restore, explicit rebuild tooling, release
@@ -219,10 +219,9 @@ JSON file. A store snapshot can always stream a canonical `graph.json` export;
 an existing `graph.json` can be imported into a new prepared store snapshot
 after full validation.
 
-The existing `init` and `update` output contract remains `json` or `dual` until
-a separately reviewed CLI/configuration change introduces `store` as an
-explicit choice. The implementation plan begins with `dual`; it does not
-silently stop creating an artifact that callers currently expect.
+The shipped local CLI uses `json` by default. `--store sqlite` selects the
+current dual profile: it retains `graph.json` and additionally publishes the
+SQLite snapshot and `store.ref`. A store-only profile remains future work.
 
 This distinction is essential to honest performance claims. A dual build must
 still encode and write all nodes and edges to JSON, so it has an unavoidable
@@ -757,11 +756,11 @@ database later becomes unavailable, the published `graph.json` remains a
 usable complete engine. No best-effort sequence of “update database, then
 replace JSON” is allowed to expose two different current graphs.
 
-The Phase 3 local implementation uses `compass-store.sqlite3` inside the
-staged generation. SQLite runs in WAL/FULL mode; the writer checkpoints before
-the generation switch, then writes `store.ref` and bounded retention metadata.
-`COMPASS_STORE_SHADOW=0` is an internal diagnosis switch that removes store
-artifacts from the staged generation while retaining the JSON publication.
+When selected with `--store sqlite`, the Phase 3 local implementation uses
+`compass-store.sqlite3` inside the staged generation. SQLite runs in WAL/FULL
+mode; the writer checkpoints before the generation switch, then writes
+`store.ref` and bounded retention metadata. An ordinary build omits store
+artifacts and retains the JSON publication.
 
 ### Store-native or cloud publication
 
