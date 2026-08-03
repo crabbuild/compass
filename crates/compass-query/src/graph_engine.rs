@@ -218,21 +218,17 @@ impl GraphEngine for StoreGraphEngine {
     }
 }
 
-/// Open the selected graph engine. Default selection prefers the co-published
-/// store and uses JSON only when no store sidecar exists, preserving direct
-/// compatibility for raw graph files.
+/// Open the selected graph engine. Default selection always uses the permanent
+/// compatible JSON artifact; the store is opened only by explicit selection.
 pub fn open_graph_engine(
     graph_path: &Path,
     selection: EngineSelection,
 ) -> Result<Box<dyn GraphEngine>, QueryError> {
-    let store_exists = adjacent_store_path(graph_path).is_file();
     match selection {
-        EngineSelection::Json => Ok(Box::new(JsonGraphEngine::open(graph_path)?)),
-        EngineSelection::Store => Ok(Box::new(StoreGraphEngine::open(graph_path)?)),
-        EngineSelection::Default if store_exists => {
-            Ok(Box::new(StoreGraphEngine::open(graph_path)?))
+        EngineSelection::Default | EngineSelection::Json => {
+            Ok(Box::new(JsonGraphEngine::open(graph_path)?))
         }
-        EngineSelection::Default => Ok(Box::new(JsonGraphEngine::open(graph_path)?)),
+        EngineSelection::Store => Ok(Box::new(StoreGraphEngine::open(graph_path)?)),
     }
 }
 

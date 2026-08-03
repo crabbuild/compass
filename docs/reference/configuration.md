@@ -56,18 +56,19 @@ Do not point two concurrent writers at one output directory.
 
 ## Compass Store configuration
 
-The local build publishes a co-located store under the selected output root:
+The local build publishes `graph.json` under the selected output root. Passing
+`--store sqlite` additionally publishes:
 
 ```text
-DIR/graph.json
 DIR/compass-store.sqlite3
 DIR/store.ref
 ```
 
 `DIR` is `compass-out/` by default and can be set with `--out DIR` or the
-documented `COMPASS_OUT` fallback. The CLI's default store engine is SQLite;
-`--engine json` explicitly uses the permanent JSON engine and `--engine store`
-requires a validated sidecar. The `compass-store-redb` crate is a separate
+documented `COMPASS_OUT` fallback. The CLI's default build and query engine is
+JSON. `--store sqlite` opts a build into the local sidecar, and
+`--engine store` requires that validated sidecar for a typed query. The
+`compass-store-redb` crate is a separate
 library adapter and is not a CLI setting. PostgreSQL and DynamoDB are deferred
 service adapters, so no endpoint, credential, TLS, or cloud SDK configuration
 is read by local store commands.

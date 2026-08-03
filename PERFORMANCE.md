@@ -31,6 +31,7 @@ peak child RSS, graph and database bytes, request/byte counters, write
 amplification, immutable-object reuse, GC state, and JSON/typed-query/
 CompassQL differential results. It also measures a small real CLI workflow:
 clean build, unchanged update, one-file update, and cold JSON/store search.
+The store workflow passes `--store sqlite`; ordinary builds remain JSON-only.
 Run it from a checkout with the required external target directory:
 
 ```bash

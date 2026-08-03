@@ -54,18 +54,17 @@ and is independently mergeable:
   versioned SQLite realization in one package. The contract does not expose
   SQL or require a particular backend, so redb, PostgreSQL, DynamoDB, or a
   service adapter can implement the same trait later.
-- Every committed local generation contains `graph.json`,
-  `compass-store.sqlite3`, and a typed `store.ref`. The store contains
+- Every committed local generation contains `graph.json`. Builds using
+  `--store sqlite` additionally contain `compass-store.sqlite3` and a typed
+  `store.ref`. The store contains
   immutable, digest-addressed graph chunks and manifests plus the Phase 2
   graph-index trees and CAS-protected selector. WAL is checkpointed before the
   BuildGuard generation switch; canonical store export is compared with
   `graph.json` before sealing; the reference is checked against the selected
   graph snapshot before a store query runs.
-- Typed code-query opening chooses the store by default when the sidecar is
-  present, keeps `graph.json` as a complete engine, and supports explicit
-  `--engine default|json|store`. Omitting `--engine` selects the store for a
-  published generation; `--engine json` is the explicit JSON choice. A raw
-  graph without a sidecar remains readable through the compatibility path.
+- Typed code-query opening chooses `graph.json` by default and supports
+  explicit `--engine default|json|store`. Both `default` and `json` select the
+  permanent JSON engine; `store` requires a published sidecar and reference.
 
 Acceptance criteria for this slice are deliberately concrete:
 
@@ -157,10 +156,10 @@ Phase 0  portable store contract + memory reference
    +--> Phase 2  immutable graph snapshot layout + memory store engine
                    |
                    v
-               Phase 3  SQLite adapter + shadow local publication
+               Phase 3  SQLite adapter + optional local publication
                    |
                    v
-               Phase 4  store-backed query routing and local cutover
+               Phase 4  explicit store-backed query routing
                  /   \
                 v     v
           Phase 5     Phase 6
@@ -465,15 +464,15 @@ This is still an unpublished internal format. If the layout is insufficient,
 change its major or discard it; do not add a migration reader merely to retain
 test data. Phase 3 must not begin until cross-engine equivalence is complete.
 
-## Phase 3: Add SQLite and shadow local publication (implemented local slice)
+## Phase 3: Add SQLite and optional local publication (implemented local slice)
 
 ### Context and objective
 
 SQLite is the first persistent adapter and exercises reopen, filesystem,
-locking, crash, and durability behavior. Local builds write the store snapshot
-in shadow mode while the JSON artifact remains a permanent independent engine;
-the existing typed query selection may already prefer the store. This isolates
-write/publication risk from the broader remote-adapter work.
+locking, crash, and durability behavior. Local builds selected with
+`--store sqlite` write the store snapshot while the JSON artifact remains a
+permanent independent engine. This isolates write/publication risk from the
+broader remote-adapter work.
 
 ### Prerequisite inputs
 
@@ -505,16 +504,14 @@ write/publication risk from the broader remote-adapter work.
 6. Define a typed, versioned `store.ref` containing store identity, namespace,
    snapshot ID, manifest digest, and graph digest but no machine-specific
    absolute path.
-7. During `init` and `update`, prepare the SQLite snapshot and stage
-   `store.ref` with `graph.json` and other output artifacts. The filesystem
-   generation switch is the only local commit.
-8. Keep `graph.json` as a permanent compatible engine. The existing typed
-   query path may select the store by default, while publication always opens
+7. During `init`, `update`, `extract`, or `watch` with `--store sqlite`, prepare
+   the SQLite snapshot and stage `store.ref` with `graph.json` and other output
+   artifacts. The filesystem generation switch is the only local commit.
+8. Keep `graph.json` as the default permanent compatible engine. An explicit
+   store query selects the database, while SQLite publication always opens
    the store snapshot and compares canonical graph identity before commit.
-9. Add an explicit internal switch to disable shadow storage for diagnosis.
-   `COMPASS_STORE_SHADOW=0` disables store creation while leaving JSON
-   publication and query compatibility intact; it is not a promise to remove
-   JSON.
+9. Make SQLite publication an explicit `--store sqlite` choice. Omitting the
+   option publishes JSON only; selecting SQLite never removes JSON.
 10. Add bounded orphan discovery and retention metadata, but defer general GC
     to Phase 8.
 
@@ -540,22 +537,20 @@ write/publication risk from the broader remote-adapter work.
   namespace/CAS/scan conformance, WAL reopen durability, orphan discovery,
   and stale-format checks; injected busy/interrupt qualification remains a
   separate release gate.
-- `compass init` and `compass update` CLI integration tests assert successful
-  exit, `graph.json`, `store.ref`, complete manifest, and no visible partial
-  generation.
-- Shadow comparison covers the published core fixture and CLI init/update
+- `compass init --store sqlite` and `compass update --store sqlite` CLI
+  integration tests assert successful exit, `graph.json`, `store.ref`,
+  complete manifest, and no visible partial generation.
+- Cross-engine comparison covers the published core fixture and CLI init/update
   generations and rejects publication on any canonical mismatch.
 - The permanent `graph.json` engine remains independently readable when the
-  store is missing or corrupt, and `COMPASS_STORE_SHADOW=0` keeps JSON
-  publication complete. The current branch's initial typed query selection may
-  prefer the store by default, while explicit JSON selection remains
-  independent of the sidecar.
+  store is missing or corrupt. Default builds and queries use JSON; explicit
+  store publication and selection remain independent opt-ins.
 - The old disposable query SQLite cache may be hard-cut or rebuilt, but the
   new durable snapshot store uses a different format identity and location.
 
 ### Exit and rollback
 
-Disable shadow writes and remove unpublished databases. Existing
+Disable SQLite publication and remove unpublished databases. Existing
 `graph.json` generations remain valid. Do not attempt to repair a partially
 published store by rewriting its immutable objects; rebuild a new snapshot.
 
@@ -563,9 +558,9 @@ published store by rewriting its immutable objects; rebuild a new snapshot.
 
 ### Context and objective
 
-After shadow publication proves equivalence and durability, local readers can
-prefer the co-published store snapshot. The local slice now reads the
-immutable Phase 2 snapshot, validates the active selector and `store.ref`, and
+After optional publication proves equivalence and durability, local readers
+can explicitly select the co-published store snapshot. The local slice reads
+the immutable Phase 2 snapshot, validates the active selector and `store.ref`, and
 compares every typed code-query operation with the JSON engine. The query
 algorithms still materialize a bounded `GraphDocument`; projection/streaming
 execution and performance qualification remain follow-on work. JSON remains
@@ -624,7 +619,7 @@ engine plumbing remains explicitly gated on that work.
   exercised;
 - partial results from one engine are never combined with retry results from
   another;
-- an explicit JSON input never opens the default store;
+- a default or explicit JSON input never opens an adjacent store;
 - stale `store.ref`, wrong namespace, wrong digest, missing object, corrupt
   envelope, unsupported major, and store timeout each have distinct tests;
 - query item, byte, frontier, depth, and deadline limits are enforced on store
@@ -642,9 +637,9 @@ engine plumbing remains explicitly gated on that work.
 - `compass-query` differential tests cover typed search, callers, callees,
   impact, explore, node trails, explicit JSON isolation, stale references,
   immutable snapshot authority, and reader pinning.
-- The default typed query path selects the immutable store snapshot only when
-  its active selector and `store.ref` validate; malformed or missing references
-  fail closed, while explicit JSON remains independent.
+- The explicit store query path selects the immutable snapshot only when its
+  active selector and `store.ref` validate; malformed or missing references
+  fail closed, while default JSON remains independent.
 - The disposable query index uses one canonical graph identity for JSON and
   store openings, so equivalent engines share cache state and ordered results.
 - Existing CompassQL TCK, OpenCypher TCK, CLI product tests, product-boundary

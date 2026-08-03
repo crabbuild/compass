@@ -51,12 +51,12 @@ fn init_persists_scope_and_builds_only_matching_files() -> Result<(), Box<dyn Er
 }
 
 #[test]
-fn init_and_update_publish_a_durable_graph_snapshot_alongside_json() -> Result<(), Box<dyn Error>> {
+fn sqlite_store_option_publishes_a_durable_snapshot_alongside_json() -> Result<(), Box<dyn Error>> {
     let root = tempfile::tempdir()?;
     fs::create_dir(root.path().join("src"))?;
     fs::write(root.path().join("src/lib.rs"), "pub fn initial() {}\n")?;
     let init = Command::new(env!("CARGO_BIN_EXE_compass"))
-        .args(["init", ".", "--yes"])
+        .args(["init", ".", "--yes", "--store", "sqlite"])
         .current_dir(root.path())
         .env_remove("COMPASS_OUT")
         .output()?;
@@ -79,7 +79,7 @@ fn init_and_update_publish_a_durable_graph_snapshot_alongside_json() -> Result<(
 
     fs::write(root.path().join("src/lib.rs"), "pub fn changed() {}\n")?;
     let update = Command::new(env!("CARGO_BIN_EXE_compass"))
-        .args(["update", ".", "--no-viz"])
+        .args(["update", ".", "--no-viz", "--store", "sqlite"])
         .current_dir(root.path())
         .env_remove("COMPASS_OUT")
         .output()?;
@@ -98,15 +98,13 @@ fn init_and_update_publish_a_durable_graph_snapshot_alongside_json() -> Result<(
 }
 
 #[test]
-fn shadow_switch_can_disable_store_artifacts_without_disabling_json() -> Result<(), Box<dyn Error>>
-{
+fn graph_build_defaults_to_json_without_store_artifacts() -> Result<(), Box<dyn Error>> {
     let root = tempfile::tempdir()?;
     fs::write(root.path().join("main.rs"), "fn main() {}\n")?;
     let output = Command::new(env!("CARGO_BIN_EXE_compass"))
         .args(["update", ".", "--no-viz"])
         .current_dir(root.path())
         .env_remove("COMPASS_OUT")
-        .env("COMPASS_STORE_SHADOW", "0")
         .output()?;
     assert!(
         output.status.success(),
@@ -115,6 +113,38 @@ fn shadow_switch_can_disable_store_artifacts_without_disabling_json() -> Result<
         String::from_utf8_lossy(&output.stderr)
     );
     let active = BuildGuard::resolve_active_directory(&root.path().join("compass-out"))?;
+    assert!(active.join("graph.json").is_file());
+    assert!(!active.join(STORE_FILE_NAME).exists());
+    assert!(!active.join(STORE_REF_FILE_NAME).exists());
+    Ok(())
+}
+
+#[test]
+fn default_json_build_replaces_an_opted_in_store_generation() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    fs::write(root.path().join("main.rs"), "fn main() {}\n")?;
+    let sqlite = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["update", ".", "--no-viz", "--store", "sqlite"])
+        .current_dir(root.path())
+        .env_remove("COMPASS_OUT")
+        .output()?;
+    assert!(sqlite.status.success());
+    let output = root.path().join("compass-out");
+    let active = BuildGuard::resolve_active_directory(&output)?;
+    assert!(active.join(STORE_FILE_NAME).is_file());
+
+    let json = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["update", ".", "--no-viz"])
+        .current_dir(root.path())
+        .env_remove("COMPASS_OUT")
+        .output()?;
+    assert!(
+        json.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&json.stdout),
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let active = BuildGuard::resolve_active_directory(&output)?;
     assert!(active.join("graph.json").is_file());
     assert!(!active.join(STORE_FILE_NAME).exists());
     assert!(!active.join(STORE_REF_FILE_NAME).exists());

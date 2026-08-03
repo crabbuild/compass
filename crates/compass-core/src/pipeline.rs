@@ -80,6 +80,11 @@ pub struct BuildOptions {
     pub reuse_cache_on_force: bool,
     pub no_cluster: bool,
     pub no_viz: bool,
+    /// Durable graph storage published with the canonical JSON artifact.
+    ///
+    /// JSON is always published and is the default. SQLite is an explicit
+    /// opt-in that adds a validated `compass-store.sqlite3` and `store.ref`.
+    pub graph_storage: GraphStorage,
     pub gitignore: bool,
     pub ignore_policy: IgnorePolicy,
     pub extra_excludes: Vec<String>,
@@ -109,6 +114,19 @@ pub struct BuildOptions {
     pub purpose: BuildPurpose,
     /// Detection already validated by an init preview.
     pub precomputed_detection: Option<Detection>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GraphStorage {
+    #[default]
+    Json,
+    Sqlite,
+}
+
+impl GraphStorage {
+    const fn publishes_store(self) -> bool {
+        matches!(self, Self::Sqlite)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -164,6 +182,7 @@ impl BuildOptions {
             reuse_cache_on_force: false,
             no_cluster: false,
             no_viz: false,
+            graph_storage: GraphStorage::default(),
             gitignore: true,
             ignore_policy: IgnorePolicy::CurrentCheckout,
             extra_excludes: Vec::new(),
@@ -573,7 +592,8 @@ fn build_graph_inner(
     } else {
         None
     };
-    let verified_output = verified_state.is_some() && store_artifact_complete(&output_dir);
+    let verified_output =
+        verified_state.is_some() && storage_artifacts_complete(options.graph_storage, &output_dir);
     if !has_program_artifacts {
         let verified = verified_state;
         if let Some(state) = verified.filter(|state| state.stats.files == sources.len()) {
@@ -584,8 +604,9 @@ fn build_graph_inner(
                 remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
             }
             remove_if_exists(&output_dir.join("needs_update"))?;
-            let store_ready = store_artifact_complete(&output_dir);
-            let published_output_dir = commit_generation(guard, &output_container, store_ready)?;
+            let store_ready = storage_artifacts_complete(options.graph_storage, &output_dir);
+            let published_output_dir =
+                commit_generation(guard, &output_container, options.graph_storage, store_ready)?;
             return Ok((
                 BuildResult {
                     root,
@@ -659,7 +680,8 @@ fn build_graph_inner(
             stats.omissions(),
             unchanged_program.as_ref(),
         )?;
-        let published_output_dir = commit_generation(guard, &output_container, true)?;
+        let published_output_dir =
+            commit_generation(guard, &output_container, options.graph_storage, true)?;
         return Ok((
             BuildResult {
                 root,
@@ -1173,7 +1195,8 @@ fn build_graph_inner(
             omissions,
             program.as_ref(),
         )?;
-        let published_output_dir = commit_generation(guard, &output_container, true)?;
+        let published_output_dir =
+            commit_generation(guard, &output_container, options.graph_storage, true)?;
         return Ok((
             BuildResult {
                 root,
@@ -1281,7 +1304,8 @@ fn build_graph_inner(
             omissions,
             program.as_ref(),
         )?;
-        let published_output_dir = commit_generation(guard, &output_container, true)?;
+        let published_output_dir =
+            commit_generation(guard, &output_container, options.graph_storage, true)?;
         timings.publish = stage_started.elapsed();
         return Ok((
             BuildResult {
@@ -1338,10 +1362,11 @@ fn build_graph_inner(
             .and_then(|directory| git_commit(&directory))
     });
     let unchanged_artifacts_complete = match options.purpose {
-        BuildPurpose::Update => update_artifacts_complete(&output_dir),
+        BuildPurpose::Update => update_artifacts_complete(options, &output_dir),
         BuildPurpose::Extract => {
             output_dir.join("graph.json").is_file()
                 && output_dir.join(".compass_analysis.json").is_file()
+                && storage_artifacts_complete(options.graph_storage, &output_dir)
         }
     };
     let unchanged_layers = semantic.is_none()
@@ -1393,7 +1418,8 @@ fn build_graph_inner(
                 PublicationOmissions::default(),
                 program.as_ref(),
             )?;
-            let published_output_dir = commit_generation(guard, &output_container, true)?;
+            let published_output_dir =
+                commit_generation(guard, &output_container, options.graph_storage, true)?;
             return Ok((
                 BuildResult {
                     root,
@@ -1701,7 +1727,8 @@ fn build_graph_inner(
         program.as_ref(),
     )?;
     profile_internal("Program output and build seals", &mut internal_started);
-    let published_output_dir = commit_generation(guard, &output_container, true)?;
+    let published_output_dir =
+        commit_generation(guard, &output_container, options.graph_storage, true)?;
     let result = BuildResult {
         root,
         output_dir: published_output_dir,
@@ -1847,6 +1874,11 @@ fn build_profile(options: &BuildOptions) -> BuildProfile {
         resolution: options.resolution,
         exclude_hubs: options.exclude_hubs,
         program_analysis: options.program_analysis,
+        graph_storage: match options.graph_storage {
+            GraphStorage::Json => "json",
+            GraphStorage::Sqlite => "sqlite",
+        }
+        .to_owned(),
         max_source_bytes: options.max_source_bytes,
     }
 }
@@ -1863,12 +1895,12 @@ fn publish_build_state(
     omissions: PublicationOmissions,
     program: Option<&ProgramBuildSummary>,
 ) -> Result<(), CoreError> {
-    let shadow_store = store_shadow_enabled();
-    if shadow_store {
+    let publish_store = options.graph_storage.publishes_store();
+    if publish_store {
         ensure_store_snapshot(output_dir)?;
     }
     let mut required = vec![output_dir.join(OUTPUT_STATS_FILE)];
-    if shadow_store {
+    if publish_store {
         required.push(output_dir.join(STORE_FILE_NAME));
         required.push(output_dir.join(STORE_REF_FILE_NAME));
     }
@@ -1920,10 +1952,11 @@ fn publish_build_state(
 fn commit_generation(
     guard: BuildGuard,
     output_container: &Path,
+    graph_storage: GraphStorage,
     store_ready: bool,
 ) -> Result<PathBuf, CoreError> {
-    let shadow_store = store_shadow_enabled();
-    if !shadow_store {
+    let publish_store = graph_storage.publishes_store();
+    if !publish_store {
         for suffix in ["", "-wal", "-shm"] {
             remove_if_exists(
                 &guard
@@ -1933,11 +1966,11 @@ fn commit_generation(
         }
         remove_if_exists(&guard.staging_directory().join(STORE_REF_FILE_NAME))?;
     }
-    if shadow_store && !store_ready {
+    if publish_store && !store_ready {
         ensure_store_snapshot(guard.staging_directory())?;
     }
     let mut artifacts = vec!["graph.json", "manifest.json", BUILD_STATE_FILE];
-    if shadow_store {
+    if publish_store {
         artifacts.extend([STORE_FILE_NAME, STORE_REF_FILE_NAME]);
     }
     if guard.staging_directory().join("program.json").is_file() {
@@ -2011,16 +2044,6 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<(), CoreError> {
     store.record_retention_metadata(&reference, compass_store::MAX_SCAN_ITEMS)?;
     store.checkpoint()?;
     Ok(())
-}
-
-fn store_shadow_enabled() -> bool {
-    let Ok(value) = std::env::var("COMPASS_STORE_SHADOW") else {
-        return true;
-    };
-    !matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "0" | "false" | "off" | "no" | "disabled"
-    )
 }
 
 fn write_store_ref(output_dir: &Path, store: &SqliteStore) -> Result<StoreRef, CoreError> {
@@ -3934,7 +3957,7 @@ fn topology_is_unchanged(existing: &GraphDocument, candidate: &GraphDocument) ->
         && canonical_hyperedges(existing) == canonical_hyperedges(candidate)
 }
 
-fn update_artifacts_complete(output_dir: &Path) -> bool {
+fn update_artifacts_complete(options: &BuildOptions, output_dir: &Path) -> bool {
     let mut required = vec![
         "graph.json",
         "GRAPH_REPORT.md",
@@ -3942,7 +3965,7 @@ fn update_artifacts_complete(output_dir: &Path) -> bool {
         ".compass_root",
         GRAPH_OVERVIEW_FILE,
     ];
-    if store_shadow_enabled() {
+    if options.graph_storage.publishes_store() {
         required.extend([STORE_FILE_NAME, STORE_REF_FILE_NAME]);
     }
     required
@@ -3950,10 +3973,11 @@ fn update_artifacts_complete(output_dir: &Path) -> bool {
         .all(|name| output_dir.join(name).is_file())
 }
 
+fn storage_artifacts_complete(graph_storage: GraphStorage, output_dir: &Path) -> bool {
+    !graph_storage.publishes_store() || store_artifact_complete(output_dir)
+}
+
 fn store_artifact_complete(output_dir: &Path) -> bool {
-    if !store_shadow_enabled() {
-        return true;
-    }
     let path = output_dir.join(STORE_FILE_NAME);
     let reference_path = output_dir.join(STORE_REF_FILE_NAME);
     let Ok(reference_bytes) = fs::read(reference_path) else {
@@ -4040,7 +4064,7 @@ fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<O
             || (!options.no_cluster
                 && (options.resolution != 1.0
                     || options.exclude_hubs.is_some()
-                    || !update_artifacts_complete(output_dir)))
+                    || !update_artifacts_complete(options, output_dir)))
             || (!options.no_viz && !output_dir.join("graph.html").is_file() && stats.nodes <= 5_000)
         {
             return None;
@@ -4072,7 +4096,7 @@ fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<O
     }
     if options.resolution != 1.0
         || options.exclude_hubs.is_some()
-        || !update_artifacts_complete(output_dir)
+        || !update_artifacts_complete(options, output_dir)
     {
         return None;
     }

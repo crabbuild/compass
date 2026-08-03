@@ -6,6 +6,9 @@
   theme-aware relationship card that shows direction, confidence, evidence,
   and source location, with explicit cleanup on edge, canvas, drag, and zoom
   transitions.
+- Make `graph.json` the default graph build and typed-query engine. SQLite
+  snapshot publication is now explicit with `--store sqlite`, and querying it
+  is explicit with `--engine store`.
 - Make VS Code editor graph actions reliable and focused: project typed graph
   source anchors into cursor-based call resolution, consolidate duplicate
   context submenus, resolve symbols without an initial prompt, and render only
@@ -19,12 +22,12 @@
   canonical JSON/typed-query/CompassQL differential evidence. `graph.json`
   remains permanent; redb is a library-only adapter and PostgreSQL/DynamoDB
   remain deferred.
-- Publish a validated `compass-store.sqlite3` namespace/partition/key snapshot
-  and typed `store.ref` beside every current `graph.json` generation. Typed
-  code-query commands now use the store by default when the selector agrees,
-  preserve deterministic JSON-equivalent results, and support explicit
-  `--engine json|store` selection; `graph.json` remains a complete compatible
-  engine.
+- Optionally publish a validated `compass-store.sqlite3`
+  namespace/partition/key snapshot and typed `store.ref` beside `graph.json`
+  with `--store sqlite`. Typed code-query commands can use the store when
+  explicitly selected and the selector agrees, preserve deterministic
+  JSON-equivalent results, and support explicit `--engine json|store`
+  selection; `graph.json` remains a complete compatible engine.
 - Restore sub-10-second cold builds for the pinned 3,105-file Django
   qualification corpus by batching and compressing portable AST cache
   publication, parallelizing independent resolver and graph-normalization

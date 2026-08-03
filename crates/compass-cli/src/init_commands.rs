@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
 
+use compass_core::GraphStorage;
 use compass_files::{
     BuildScope, DetectOptions, Detection, PROJECT_CONFIG_RELATIVE_PATH, ProjectConfig,
     ScopeMatcher, detect,
@@ -22,6 +23,7 @@ struct InitOptions {
     yes: bool,
     force: bool,
     timing: bool,
+    graph_storage: GraphStorage,
 }
 
 pub fn run_init(
@@ -334,6 +336,9 @@ fn run_init_with_builder(
     if options.timing {
         build_arguments.push("--timing".to_owned());
     }
+    if options.graph_storage == GraphStorage::Sqlite {
+        build_arguments.extend(["--store".to_owned(), "sqlite".to_owned()]);
+    }
     let outcome = build(&root, &build_arguments, detection, operation_started);
     if outcome.code != 0 {
         let _ = writeln!(
@@ -405,6 +410,7 @@ fn parse(args: &[String]) -> Result<InitOptions, String> {
         yes: false,
         force: false,
         timing: false,
+        graph_storage: GraphStorage::default(),
     };
     let mut root_seen = false;
     let mut index = 0;
@@ -413,6 +419,16 @@ fn parse(args: &[String]) -> Result<InitOptions, String> {
             "--yes" => options.yes = true,
             "--force" => options.force = true,
             "--timing" => options.timing = true,
+            "--store" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err("error: --store requires json or sqlite".to_owned());
+                };
+                options.graph_storage = parse_graph_storage(value)?;
+            }
+            value if value.starts_with("--store=") => {
+                options.graph_storage = parse_graph_storage(&value[8..])?;
+            }
             "--include" | "--exclude" => {
                 let name = args[index].clone();
                 index += 1;
@@ -451,4 +467,14 @@ fn parse(args: &[String]) -> Result<InitOptions, String> {
         index += 1;
     }
     Ok(options)
+}
+
+fn parse_graph_storage(value: &str) -> Result<GraphStorage, String> {
+    match value {
+        "json" => Ok(GraphStorage::Json),
+        "sqlite" => Ok(GraphStorage::Sqlite),
+        _ => Err(format!(
+            "error: --store must be json or sqlite (found {value})"
+        )),
+    }
 }

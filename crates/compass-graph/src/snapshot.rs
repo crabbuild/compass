@@ -418,7 +418,7 @@ pub fn prepare_graph_snapshot<S: Store + ?Sized>(
 }
 
 /// Encode a graph using the same deterministic normalization used by a store
-/// snapshot.  Publication and shadow verification use this helper instead of
+/// snapshot. Publication and cross-engine verification use this helper instead of
 /// comparing source-order JSON bytes, so equivalent graph records have one
 /// stable identity across adapters.
 pub fn canonical_graph_json(graph: &GraphDocument) -> Result<Vec<u8>, SnapshotError> {

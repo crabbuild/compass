@@ -129,10 +129,10 @@ measure_cli() {
   python3 "$measure" "$raw" -- "$@" > "$metrics"
 }
 
-measure_cli clean_build "$compass_bin" init "$project" --yes
-measure_cli no_change_build "$compass_bin" update "$project" --no-program --no-viz
+measure_cli clean_build "$compass_bin" init "$project" --yes --store sqlite
+measure_cli no_change_build "$compass_bin" update "$project" --no-program --no-viz --store sqlite
 printf '\npub fn symbol_two() -> usize { 2 }\n' >> "$project/src/lib.rs"
-measure_cli small_change_build "$compass_bin" update "$project" --no-program --no-viz
+measure_cli small_change_build "$compass_bin" update "$project" --no-program --no-viz --store sqlite
 graph="$project/compass-out/graph.json"
 measure_cli cold_query_json "$compass_bin" search symbol --graph "$graph" --engine json --format json
 measure_cli cold_query_store "$compass_bin" search symbol --graph "$graph" --engine store --format json

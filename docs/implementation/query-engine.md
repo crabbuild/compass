@@ -55,13 +55,12 @@ it.
 ## Typed code-query storage selection
 
 The typed `search`, `callers`, `callees`, `impact`, `explore`, and `node`
-commands open through `compass_query::open`. The default selector looks for a
-validated `compass-store.sqlite3` sidecar beside the requested graph. A sidecar
-with an active Phase 2 selector must also have a matching `store.ref`; if no
-sidecar exists, the permanent `graph.json` engine is used. A present reference
-is checked against store identity, snapshot ID, manifest digest, and graph
-digest before query state is created. `--engine json` always uses the
-compatible JSON engine without opening the database, while `--engine store`
+commands open through `compass_query::open`. The default selector always uses
+the permanent `graph.json` engine and does not open an adjacent database. A
+store selected with `--engine store` must have a matching `store.ref`, which is
+checked against store identity, snapshot ID, manifest digest, and graph digest
+before query state is created. `--engine json` also uses the compatible JSON
+engine without opening the database, while `--engine store`
 requires a readable, referenced store and reports corruption or absence
 explicitly. The query index remains disposable and keyed by canonical snapshot
 bytes, so JSON and store openings share the same cache identity and

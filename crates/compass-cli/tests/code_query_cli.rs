@@ -47,8 +47,8 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
 }
 
 #[test]
-fn typed_query_defaults_to_the_store_when_a_published_sidecar_is_present()
--> Result<(), Box<dyn Error>> {
+fn typed_query_defaults_to_json_and_store_requires_explicit_selection() -> Result<(), Box<dyn Error>>
+{
     let directory = tempfile::tempdir()?;
     let graph_path = support::write_typed_graph(directory.path())?;
     let graph_bytes = std::fs::read(&graph_path)?;
@@ -75,10 +75,9 @@ fn typed_query_defaults_to_the_store_when_a_published_sidecar_is_present()
             graph_path.clone().into_os_string(),
         ],
     );
-    assert_eq!(default.code, 0, "{}", default.stderr);
-    assert!(default.stdout.contains("Fixture.Target"));
+    assert_ne!(default.code, 0);
 
-    let json = run(
+    let store = run(
         Frontend::Compass,
         [
             OsString::from("search"),
@@ -86,10 +85,11 @@ fn typed_query_defaults_to_the_store_when_a_published_sidecar_is_present()
             OsString::from("--graph"),
             graph_path.into_os_string(),
             OsString::from("--engine"),
-            OsString::from("json"),
+            OsString::from("store"),
         ],
     );
-    assert_ne!(json.code, 0);
+    assert_eq!(store.code, 0, "{}", store.stderr);
+    assert!(store.stdout.contains("Fixture.Target"));
     Ok(())
 }
 

@@ -38,7 +38,7 @@ use std::time::{Duration, Instant};
 
 use compass_core::{
     BuildFileProgress, BuildOptions, BuildPurpose, BuildResult, BuildTimings,
-    ClusterExistingOptions, ExportInputs, LoadedGraph, SemanticLayer, WatchBackend,
+    ClusterExistingOptions, ExportInputs, GraphStorage, LoadedGraph, SemanticLayer, WatchBackend,
     WatchBuildReason, WatchOptions, WatchStatus, build_graph_with_layers,
     build_graph_with_layers_and_progress, build_graph_with_layers_and_tiebreaker,
     cluster_existing_graph, default_graph_path, diagnose_graph_file, format_diagnostic_json,
@@ -1004,6 +1004,7 @@ fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> 
     let mut gitignore = true;
     let mut excludes = Vec::new();
     let mut program_artifacts = Vec::new();
+    let mut graph_storage = GraphStorage::default();
     let mut force_polling = false;
     let mut index = 0;
     while index < args.len() {
@@ -1027,6 +1028,14 @@ fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> 
             value if value.starts_with("--out=") => {
                 output_root = Some(PathBuf::from(&value[6..]));
             }
+            "--store" if index + 1 < args.len() => {
+                graph_storage = parse_graph_storage(&args[index + 1])?;
+                index += 1;
+            }
+            value if value.starts_with("--store=") => {
+                graph_storage = parse_graph_storage(&value[8..])?;
+            }
+            "--store" => return Err("error: --store requires json or sqlite".to_owned()),
             "--exclude" if index + 1 < args.len() => {
                 excludes.push(args[index + 1].clone());
                 index += 1;
@@ -1067,6 +1076,7 @@ fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> 
     options.build.output_root = output_root;
     options.build.no_cluster = no_cluster;
     options.build.no_viz = no_viz;
+    options.build.graph_storage = graph_storage;
     options.build.gitignore = gitignore;
     options.build.extra_excludes = excludes;
     options.build.program_analysis = true;
@@ -1572,6 +1582,7 @@ fn command_build_with_validation_inner(
     let mut no_cluster = false;
     let mut no_viz = false;
     let mut no_program = false;
+    let mut graph_storage = GraphStorage::default();
     let mut gitignore = true;
     let mut code_only = false;
     let mut cargo = false;
@@ -1705,6 +1716,25 @@ fn command_build_with_validation_inner(
             value if value.starts_with("--out=") => {
                 output_root = Some(PathBuf::from(&value[6..]));
             }
+            "--store" if index + 1 < args.len() => {
+                graph_storage = match parse_graph_storage(&args[index + 1]) {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error),
+                };
+                index += 1;
+            }
+            value if value.starts_with("--store=") => {
+                graph_storage = match parse_graph_storage(&value[8..]) {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error),
+                };
+            }
+            "--store" => {
+                return extract_parse_failure(
+                    frontend,
+                    "error: --store requires json or sqlite".to_owned(),
+                );
+            }
             "--exclude" if index + 1 < args.len() => {
                 excludes.push(args[index + 1].clone());
                 index += 1;
@@ -1795,7 +1825,7 @@ fn command_build_with_validation_inner(
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
-                    "Usage: compass update [path] [--program-artifact PATH] [--no-program] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
+                    "Usage: compass update [path] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
                 });
             }
             value if value.starts_with('-') => {
@@ -1844,6 +1874,7 @@ fn command_build_with_validation_inner(
     options.reuse_cache_on_force = reuse_cache_on_force;
     options.no_cluster = no_cluster;
     options.no_viz = no_viz;
+    options.graph_storage = graph_storage;
     options.gitignore = gitignore;
     if environment_truthy("COMPASS_HISTORY_BUILD") {
         options.ignore_policy = compass_files::IgnorePolicy::HistoricalCommit;
@@ -2091,6 +2122,16 @@ fn command_build_with_validation_inner(
 fn apply_max_workers_override(options: &mut BuildOptions, max_workers: Option<usize>) {
     if let Some(max_workers) = max_workers {
         options.max_workers = Some(max_workers);
+    }
+}
+
+fn parse_graph_storage(value: &str) -> Result<GraphStorage, String> {
+    match value {
+        "json" => Ok(GraphStorage::Json),
+        "sqlite" => Ok(GraphStorage::Sqlite),
+        _ => Err(format!(
+            "error: --store must be json or sqlite (found {value})"
+        )),
     }
 }
 
@@ -2650,7 +2691,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: compass extract [PATH] [--program-artifact PATH] [--no-program] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: compass extract [PATH] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {
@@ -3773,7 +3814,7 @@ fn graph_load_outcome(error: GraphError) -> Outcome {
 }
 
 fn watch_help() -> String {
-    "Usage: compass watch [PATH] [--program-artifact PATH] [--debounce SECONDS] [--out DIR] [--no-cluster] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--poll]"
+    "Usage: compass watch [PATH] [--program-artifact PATH] [--debounce SECONDS] [--store json|sqlite] [--out DIR] [--no-cluster] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--poll]"
         .to_owned()
 }
 

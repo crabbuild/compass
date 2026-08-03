@@ -29,7 +29,7 @@ fn publish_phase2_snapshot(
 }
 
 #[test]
-fn default_query_open_prefers_store_and_matches_json_results()
+fn default_query_open_uses_json_and_explicit_store_matches_results()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
@@ -44,10 +44,10 @@ fn default_query_open_prefers_store_and_matches_json_results()
     )?;
 
     let cache = directory.path().join("cache");
-    let store_engine = open(&graph_path, None, &cache)?;
-    assert_eq!(store_engine.engine_kind(), QueryEngineKind::Store);
-    let json_engine = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
+    let json_engine = open(&graph_path, None, &cache)?;
     assert_eq!(json_engine.engine_kind(), QueryEngineKind::Json);
+    let store_engine = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
+    assert_eq!(store_engine.engine_kind(), QueryEngineKind::Store);
 
     let request = SearchRequest {
         query: "UserService.list".to_owned(),
@@ -360,11 +360,11 @@ fn explicit_json_selection_survives_a_corrupt_store_sidecar()
         b"not a compass sqlite database",
     )?;
     let cache = directory.path().join("cache");
-    let json_engine = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
+    let json_engine = open(&graph_path, None, &cache)?;
     assert_eq!(json_engine.engine_kind(), QueryEngineKind::Json);
-    let result = open(&graph_path, None, &cache);
+    let result = open_with_engine(&graph_path, None, &cache, EngineSelection::Store);
     let error = match result {
-        Ok(_) => return Err("default selection ignored a corrupt store".into()),
+        Ok(_) => return Err("explicit store selection ignored a corrupt store".into()),
         Err(error) => error,
     };
     assert_eq!(error.code(), "store_open_failed");
@@ -385,8 +385,13 @@ fn a_present_malformed_store_reference_fails_closed() -> Result<(), Box<dyn std:
         graph.links.len(),
     )?;
     fs::write(directory.path().join(STORE_REF_FILE_NAME), b"{}")?;
-    let error = match open(&graph_path, None, &directory.path().join("cache")) {
-        Ok(_) => return Err("malformed store reference was accepted".into()),
+    let cache = directory.path().join("cache");
+    assert_eq!(
+        open(&graph_path, None, &cache)?.engine_kind(),
+        QueryEngineKind::Json
+    );
+    let error = match open_with_engine(&graph_path, None, &cache, EngineSelection::Store) {
+        Ok(_) => return Err("explicit store selection accepted a malformed reference".into()),
         Err(error) => error,
     };
     assert_eq!(error.code(), "store_ref_decode_failed");
