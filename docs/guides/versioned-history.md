@@ -508,9 +508,8 @@ This is release evidence, not a substitute for application-specific validation.
 
 ## Related pages
 
-- [Storage and history design](../design/storage-and-history.md)
-- [History implementation](../implementation/workspace-tour.md)
 - [Output reference](../reference/outputs.md)
+- [Command reference](../reference/commands.md)
 - [Compatibility ledger](../../COMPATIBILITY.md)
 
 **Next step:** enable a code-only profile in a disposable repository, build

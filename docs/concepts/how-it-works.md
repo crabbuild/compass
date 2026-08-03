@@ -378,8 +378,8 @@ documents for automation.
 
 - [Graph model](graph-model.md)
 - [Provenance and confidence](provenance.md)
-- [System architecture](../design/architecture.md)
-- [Extraction pipeline](../implementation/extraction-pipeline.md)
+- [Getting started](../getting-started.md)
+- [Command reference](../reference/commands.md)
 
 **Next step:** read [Graph model](graph-model.md) to interpret the entities,
 relationships, and attributes returned by Compass.

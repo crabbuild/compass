@@ -463,7 +463,7 @@ First-party editor and offline-viewer contracts are versioned independently:
 
 - [Graph model](../concepts/graph-model.md)
 - [Integrating Compass](../guides/integrating-compass.md)
-- [Storage and history](../design/storage-and-history.md)
+- [Versioned history](../guides/versioned-history.md)
 - [Command reference](commands.md)
 
 **Next step:** identify the most structured available output for your consumer
