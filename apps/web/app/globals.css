@@ -344,7 +344,7 @@
 
   .hero-code-graph .compass-hover-hint {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 0.45rem;
     margin: 0.15rem 0 0;
     padding-top: 0.6rem;
@@ -358,7 +358,6 @@
     flex: 0 0 auto;
     width: 1rem;
     height: 1rem;
-    margin-top: 0.08rem;
   }
 
   .hero-code-graph .compass-hover-hint span {
