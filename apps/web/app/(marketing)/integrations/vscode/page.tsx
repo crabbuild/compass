@@ -28,7 +28,7 @@ export default function VscodePage() {
         <EditorStep icon={CheckCircle2Icon} title="Navigate" text="Double-click to open the source range." />
       </div>
     </PageSection>
-    <section className="border-t border-border/70 bg-primary text-primary-foreground"><div className="mx-auto flex max-w-7xl flex-col gap-6 px-5 py-16 lg:flex-row lg:items-center lg:justify-between lg:px-8"><div><p className="font-heading text-2xl font-semibold tracking-[-0.04em]">Start with the editor you already use.</p><p className="mt-2 text-sm text-primary-foreground/75">Install Compass locally, then open the extension from the workspace.</p></div><Link className={cn(buttonVariants({ variant: 'secondary' }), 'gap-2')} href="/install">Install Compass <ArrowRightIcon data-icon="inline-end" /></Link></div></section>
+    <section className="border-t border-border/70 bg-primary text-primary-foreground"><div className="mx-auto flex max-w-7xl flex-col gap-6 px-5 py-16 lg:flex-row lg:items-center lg:justify-between lg:px-8"><div><p className="font-heading text-2xl font-semibold tracking-[-0.04em]">Start with the editor you already use.</p><p className="mt-2 text-sm text-primary-foreground/75">Install Compass locally, then open the extension from the workspace.</p></div><Link className={cn(buttonVariants({ variant: 'secondary' }), 'gap-2')} href="/install#vscode-extension">Install Compass for VS Code <ArrowRightIcon data-icon="inline-end" /></Link></div></section>
   </MarketingPage>;
 }
 
