@@ -56,7 +56,7 @@ For an output root `DIR` the published set is:
 DIR/graph.json                 # permanent canonical graph artifact
 DIR/compass-store.sqlite3      # SQLite store snapshot
 DIR/store.ref                  # typed generation binding
-DIR/.compass-generation        # BuildGuard publication pointer, when used
+DIR/.compass-active-generation # BuildGuard publication pointer, when used
 ```
 
 `graph.json`, the SQLite sidecar, and `store.ref` are published as one

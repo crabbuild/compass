@@ -1097,6 +1097,7 @@ dependencies = [
  "compass-model",
  "compass-store",
  "rayon",
+ "rmp-serde",
  "serde",
  "serde_json",
  "sha1",

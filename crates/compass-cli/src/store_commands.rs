@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use compass_files::BuildGuard;
 use compass_graph::{GraphSnapshotReader, canonical_graph_json};
 use compass_model::code_graph::GraphDocument;
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, STORE_SCHEMA_V1, SqliteStore, StoreRef};
@@ -50,7 +51,7 @@ pub(crate) fn command(args: &[String]) -> Outcome {
 }
 
 fn status(args: &[String]) -> Result<Value, String> {
-    let output = output_root(args);
+    let output = output_root(args)?;
     let graph_path = output.join("graph.json");
     let store_path = output.join(STORE_FILE_NAME);
     let reference_path = output.join(STORE_REF_FILE_NAME);
@@ -127,7 +128,7 @@ fn status(args: &[String]) -> Result<Value, String> {
 }
 
 fn validate(args: &[String]) -> Result<Value, String> {
-    let output = output_root(args);
+    let output = output_root(args)?;
     let graph_path = output.join("graph.json");
     let store_path = output.join(STORE_FILE_NAME);
     if !store_path.is_file() {
@@ -175,7 +176,7 @@ fn validate(args: &[String]) -> Result<Value, String> {
 }
 
 fn backup(args: &[String]) -> Result<Value, String> {
-    let output = output_root(args);
+    let output = output_root(args)?;
     let destination = option(args, "--output")
         .map(PathBuf::from)
         .ok_or_else(|| "store backup requires --output DIR".to_owned())?;
@@ -379,21 +380,25 @@ fn graph_bytes_from_status(graph: &Value, bytes: &[u8]) -> Result<Vec<u8>, Strin
     canonical_graph_json(&document).map_err(|error| error.to_string())
 }
 
-fn output_root(args: &[String]) -> PathBuf {
+fn output_root(args: &[String]) -> Result<PathBuf, String> {
     let candidate = positional(args)
         .first()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("compass-out"));
     if candidate.file_name().and_then(|name| name.to_str()) == Some("graph.json") {
-        return candidate.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let graph = BuildGuard::resolve_requested_artifact(&candidate)
+            .map_err(|error| error.to_string())?;
+        return Ok(graph.parent().unwrap_or(Path::new(".")).to_path_buf());
     }
     if candidate.join("graph.json").is_file() || candidate.join(STORE_FILE_NAME).is_file() {
-        return candidate;
+        return Ok(candidate);
     }
-    if candidate.join("compass-out").is_dir() {
-        return candidate.join("compass-out");
-    }
-    candidate
+    let output_container = if candidate.join("compass-out").is_dir() {
+        candidate.join("compass-out")
+    } else {
+        candidate
+    };
+    BuildGuard::resolve_active_directory(&output_container).map_err(|error| error.to_string())
 }
 
 fn positional(args: &[String]) -> Vec<String> {

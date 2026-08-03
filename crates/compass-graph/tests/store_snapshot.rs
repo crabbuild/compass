@@ -148,6 +148,9 @@ fn snapshot_is_deterministic_and_reuses_immutable_objects() -> Result<(), Box<dy
         unknown.validate(),
         Err(SnapshotError::Unsupported(_))
     ));
+    let mut oversized = first.manifest.clone();
+    oversized.edge_count = (compass_graph::GRAPH_SNAPSHOT_MAX_ITEMS as u64) + 1;
+    assert!(matches!(oversized.validate(), Err(SnapshotError::Limit(_))));
     assert_eq!(second.new_objects, 0);
     assert!(second.reused_objects > 0);
     let selector = builder.activate(&store, &first)?;
@@ -271,6 +274,28 @@ fn graph_key_vectors_are_namespace_safe_and_orderable() -> Result<(), Box<dyn Er
     assert_ne!(
         encode_graph_index_key(IndexKind::Nodes, &[b"a", b"b"])?,
         encode_graph_index_key(IndexKind::Nodes, &[b"a|b"])?
+    );
+    Ok(())
+}
+
+#[test]
+fn graph_valid_long_qualified_names_round_trip_through_the_store() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut document = graph();
+    document.nodes[0].qualified_name = "call_chain.".repeat(120);
+
+    let prepared = builder.prepare(&store, &document)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+
+    assert_eq!(
+        reader.export_json_bytes()?,
+        canonical_graph_json(&document)?
+    );
+    assert_eq!(
+        reader.get_node("b")?.map(|node| node.qualified_name),
+        Some("call_chain.".repeat(120))
     );
     Ok(())
 }

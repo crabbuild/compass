@@ -584,7 +584,8 @@ fn build_graph_inner(
                 remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
             }
             remove_if_exists(&output_dir.join("needs_update"))?;
-            let published_output_dir = commit_generation(guard, &output_container)?;
+            let store_ready = store_artifact_complete(&output_dir);
+            let published_output_dir = commit_generation(guard, &output_container, store_ready)?;
             return Ok((
                 BuildResult {
                     root,
@@ -658,7 +659,7 @@ fn build_graph_inner(
             stats.omissions(),
             unchanged_program.as_ref(),
         )?;
-        let published_output_dir = commit_generation(guard, &output_container)?;
+        let published_output_dir = commit_generation(guard, &output_container, true)?;
         return Ok((
             BuildResult {
                 root,
@@ -1172,7 +1173,7 @@ fn build_graph_inner(
             omissions,
             program.as_ref(),
         )?;
-        let published_output_dir = commit_generation(guard, &output_container)?;
+        let published_output_dir = commit_generation(guard, &output_container, true)?;
         return Ok((
             BuildResult {
                 root,
@@ -1280,7 +1281,7 @@ fn build_graph_inner(
             omissions,
             program.as_ref(),
         )?;
-        let published_output_dir = commit_generation(guard, &output_container)?;
+        let published_output_dir = commit_generation(guard, &output_container, true)?;
         timings.publish = stage_started.elapsed();
         return Ok((
             BuildResult {
@@ -1392,7 +1393,7 @@ fn build_graph_inner(
                 PublicationOmissions::default(),
                 program.as_ref(),
             )?;
-            let published_output_dir = commit_generation(guard, &output_container)?;
+            let published_output_dir = commit_generation(guard, &output_container, true)?;
             return Ok((
                 BuildResult {
                     root,
@@ -1700,7 +1701,7 @@ fn build_graph_inner(
         program.as_ref(),
     )?;
     profile_internal("Program output and build seals", &mut internal_started);
-    let published_output_dir = commit_generation(guard, &output_container)?;
+    let published_output_dir = commit_generation(guard, &output_container, true)?;
     let result = BuildResult {
         root,
         output_dir: published_output_dir,
@@ -1916,7 +1917,11 @@ fn publish_build_state(
     state.save(output_dir)
 }
 
-fn commit_generation(guard: BuildGuard, output_container: &Path) -> Result<PathBuf, CoreError> {
+fn commit_generation(
+    guard: BuildGuard,
+    output_container: &Path,
+    store_ready: bool,
+) -> Result<PathBuf, CoreError> {
     let shadow_store = store_shadow_enabled();
     if !shadow_store {
         for suffix in ["", "-wal", "-shm"] {
@@ -1928,7 +1933,7 @@ fn commit_generation(guard: BuildGuard, output_container: &Path) -> Result<PathB
         }
         remove_if_exists(&guard.staging_directory().join(STORE_REF_FILE_NAME))?;
     }
-    if shadow_store {
+    if shadow_store && !store_ready {
         ensure_store_snapshot(guard.staging_directory())?;
     }
     let mut artifacts = vec!["graph.json", "manifest.json", BUILD_STATE_FILE];
@@ -1976,15 +1981,26 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<(), CoreError> {
     }
     let builder = GraphSnapshotBuilder::new();
     let active = GraphSnapshotReader::open_active(&store)?;
-    let reader = match active {
-        Some(reader) if reader.export_json_bytes()? == canonical_graph => reader,
-        Some(_) | None => {
+    let exported = match active {
+        Some(reader) => {
+            let exported = reader.export_json_bytes()?;
+            if exported == canonical_graph {
+                exported
+            } else {
+                let prepared = builder.prepare(&store, &graph)?;
+                let selector = builder.activate(&store, &prepared)?;
+                let reader = GraphSnapshotReader::open_selector(&store, selector)?;
+                reader.export_json_bytes()?
+            }
+        }
+        None => {
             let prepared = builder.prepare(&store, &graph)?;
             let selector = builder.activate(&store, &prepared)?;
-            GraphSnapshotReader::open_selector(&store, selector)?
+            let reader = GraphSnapshotReader::open_selector(&store, selector)?;
+            reader.export_json_bytes()?
         }
     };
-    if reader.export_json_bytes()? != canonical_graph {
+    if exported != canonical_graph {
         return Err(CoreError::InvalidBuildState(
             "SQLite graph snapshot does not match graph.json; rebuild the generation".to_owned(),
         ));

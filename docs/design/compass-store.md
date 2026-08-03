@@ -668,7 +668,9 @@ masking logical errors.
 
 The v1 reference uses these fixed records and keys:
 
-- immutable JSON tree objects in the `graph-snapshot/objects` partition;
+- immutable compact MessagePack tree objects in the
+  `graph-snapshot/objects` partition, with read support for the initial JSON
+  object encoding;
 - a manifest at `manifest/<sha256>` and one selector at
   `graph-snapshot/catalog/active`;
 - nodes, edges, outgoing, incoming, files/source anchors, names, terms,
