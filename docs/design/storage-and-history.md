@@ -223,7 +223,7 @@ execute arbitrary repository-controlled checkout behavior.
 
 ## Diff model
 
-Diff compares typed records:
+Exact diff compares typed records:
 
 - nodes;
 - edges;
@@ -235,8 +235,15 @@ Diff compares typed records:
 Topology-only diff avoids reconstructing irrelevant payloads and is qualified
 against the full diff.
 
-Normal comparison checks fingerprint compatibility first. An explicit mismatch
-flag permits inspection, not semantic equivalence.
+Structural change counts and graph-version views use a separate deterministic
+meaning projection. They preserve node and relationship identity, direction,
+multiplicity, and semantic attributes, while excluding source coordinates,
+clustering/layout fields, and anchor-derived edge-key churn. Exact source
+anchors remain available through `history diff`; they are never discarded from
+the immutable realization.
+
+Normal comparison checks complete build-profile and graph-engine compatibility
+first. Unlike profiles do not produce structural, semantic, or exact results.
 
 ## Export and reconstruction
 

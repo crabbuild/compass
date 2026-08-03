@@ -701,8 +701,11 @@ from local refs. `--limit` returns the newest bounded page, and `--after` uses
 the preceding page's opaque `nextCursor`. A cursor rejects local-ref changes
 instead of silently mixing snapshots. Responses include `hasMore`,
 `nextCursor`, and `totalEntries` once the final page establishes the exact
-count. `history change-counts` requires existing preferred realizations for
-both revisions and never builds them. `history diff` streams an exhaustive,
+count. `history change-counts` requires existing preferred realizations with
+the same complete build profile and never builds them. Its bounded structural
+counts exclude source-coordinate, clustering/layout, and anchor-derived edge
+identity churn while preserving topology and relationship multiplicity.
+`history diff` streams an exhaustive,
 deterministic record-level diff for selected immutable roots. It may lazily
 materialize a missing revision, requires identical complete build profiles and
 compatible graph engines, refuses to overwrite `--output`, and bounds stdout

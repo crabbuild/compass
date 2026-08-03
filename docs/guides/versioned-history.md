@@ -253,6 +253,17 @@ Machine-readable output:
 compass diff v1.2.0 HEAD --format json
 ```
 
+For bounded graph-version counts used by timeline and IDE views, both
+realizations must already exist:
+
+```bash
+compass history change-counts HEAD --parent HEAD~1 --format json
+```
+
+These are structural counts: source-coordinate shifts, clustering/layout
+metadata, and anchor-derived edge IDs are collapsed, while node and edge
+meaning, direction, and multiplicity remain visible.
+
 For an exhaustive record-level diff rather than a ranked semantic review, use
 the history subcommand:
 
@@ -471,7 +482,7 @@ Failure handling:
 | Provider credentials missing | Configure the selected semantic profile or build a code-only realization explicitly |
 | Provider fails mid-build | Fix provider/network and rebuild; incomplete candidate cannot publish |
 | Preferred realization fails validation | Inspect with `show`; use explicit rebuild/recovery path |
-| Profiles differ during diff | Build with `--profile-from` or inspect explicitly with mismatch allowed |
+| Profiles differ during diff | Build the missing side with `--profile-from`; unlike profiles are not compared |
 | Live lease exists | Join/wait according to command behavior; do not delete lock files |
 | Historical checkout limitation | Read the reported Gitlink/LFS/filter limitation and adjust source policy |
 | Store copy is inconsistent | Restore a coherent SQLite/WAL backup; do not guess at Prolly records |

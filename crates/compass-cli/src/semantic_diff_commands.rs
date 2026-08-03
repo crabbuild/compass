@@ -135,7 +135,7 @@ fn execute(args: &[String]) -> Result<CommandOutput, CommandError> {
                 )
                 .map_err(runtime)?;
             direct.cancel_attribute_only_dependency_churn();
-            direct.normalize_graph_delta();
+            direct.normalize_graph_delta().map_err(runtime)?;
             let snapshots = HistorySnapshots {
                 old: old_reader,
                 new: new_reader,
@@ -451,6 +451,13 @@ struct DirectChanges {
     nodes: Vec<String>,
     dependencies: Vec<DependencyDelta>,
     graph_delta: GraphDelta,
+    edge_identity_changes: Vec<EdgeIdentityChange>,
+}
+
+struct EdgeIdentityChange {
+    change: ChangeKind,
+    delta: GraphEdgeDelta,
+    value: serde_json::Value,
 }
 
 impl DirectChanges {
@@ -492,7 +499,8 @@ impl DirectChanges {
         });
     }
 
-    fn normalize_graph_delta(&mut self) {
+    fn normalize_graph_delta(&mut self) -> Result<(), HistoryError> {
+        self.normalize_edge_identity_changes()?;
         let sort_nodes = |nodes: &mut Vec<GraphNodeDelta>| {
             for node in nodes.iter_mut() {
                 node.changed_fields.sort();
@@ -534,66 +542,87 @@ impl DirectChanges {
         sort_edges(&mut self.graph_delta.added_edges);
         sort_edges(&mut self.graph_delta.removed_edges);
         sort_edges(&mut self.graph_delta.changed_edges);
-        let mut balances = std::collections::BTreeMap::<(String, String, String), i64>::new();
-        for edge in &self.graph_delta.added_edges {
-            *balances
-                .entry((
-                    edge.source.clone(),
-                    edge.relation.clone(),
-                    edge.target.clone(),
-                ))
-                .or_default() += 1;
-        }
-        for edge in &self.graph_delta.removed_edges {
-            *balances
-                .entry((
-                    edge.source.clone(),
-                    edge.relation.clone(),
-                    edge.target.clone(),
-                ))
-                .or_default() -= 1;
-        }
-        let removed_before = self.graph_delta.removed_edges.len();
-        self.graph_delta.added_edges.retain(|edge| {
-            let key = (
-                edge.source.clone(),
-                edge.relation.clone(),
-                edge.target.clone(),
+        Ok(())
+    }
+
+    fn normalize_edge_identity_changes(&mut self) -> Result<(), HistoryError> {
+        type Topology = (String, String, String);
+        type ProjectionGroups = std::collections::BTreeMap<Vec<u8>, Vec<EdgeIdentityChange>>;
+        let mut groups =
+            std::collections::BTreeMap::<Topology, (ProjectionGroups, ProjectionGroups)>::new();
+        for change in self.edge_identity_changes.drain(..) {
+            let topology = (
+                change.delta.source.clone(),
+                change.delta.relation.clone(),
+                change.delta.target.clone(),
             );
-            let Some(balance) = balances.get_mut(&key) else {
-                return true;
-            };
-            if *balance > 0 {
-                *balance -= 1;
-                true
+            let projected =
+                compass_history::structural_graph_projection(RecordKind::Edge, &change.value);
+            let projection = canonical_json_bytes(&projected)?;
+            let projections = groups.entry(topology).or_default();
+            let target = if change.change == ChangeKind::Added {
+                &mut projections.0
             } else {
-                false
-            }
-        });
-        self.graph_delta.removed_edges.retain(|edge| {
-            let key = (
-                edge.source.clone(),
-                edge.relation.clone(),
-                edge.target.clone(),
-            );
-            let Some(balance) = balances.get_mut(&key) else {
-                return true;
+                &mut projections.1
             };
-            if *balance < 0 {
-                *balance += 1;
-                true
-            } else {
-                false
-            }
-        });
-        let cancelled = removed_before.saturating_sub(self.graph_delta.removed_edges.len());
-        if cancelled > 0 {
-            *self
-                .graph_delta
-                .collapsed_attribute_changes
-                .entry("edge_identity".to_owned())
-                .or_default() += cancelled;
+            target.entry(projection).or_default().push(change);
         }
+        for (mut added, mut removed) in groups.into_values() {
+            let projections = added
+                .keys()
+                .chain(removed.keys())
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>();
+            let mut unmatched_added = Vec::new();
+            let mut unmatched_removed = Vec::new();
+            for projection in projections {
+                let mut added_records = added.remove(&projection).unwrap_or_default();
+                let mut removed_records = removed.remove(&projection).unwrap_or_default();
+                added_records.sort_by(|left, right| left.delta.key.cmp(&right.delta.key));
+                removed_records.sort_by(|left, right| left.delta.key.cmp(&right.delta.key));
+                let unchanged = added_records.len().min(removed_records.len());
+                if unchanged > 0 {
+                    *self
+                        .graph_delta
+                        .collapsed_attribute_changes
+                        .entry("edge_identity".to_owned())
+                        .or_default() += unchanged;
+                }
+                unmatched_added.extend(added_records.into_iter().skip(unchanged));
+                unmatched_removed.extend(removed_records.into_iter().skip(unchanged));
+            }
+            unmatched_added.sort_by(|left, right| left.delta.key.cmp(&right.delta.key));
+            unmatched_removed.sort_by(|left, right| left.delta.key.cmp(&right.delta.key));
+            let changed = usize::from(unmatched_added.len() == 1 && unmatched_removed.len() == 1);
+            for (added, removed) in unmatched_added
+                .iter()
+                .take(changed)
+                .zip(unmatched_removed.iter().take(changed))
+            {
+                let fields = meaningful_graph_fields(
+                    RecordKind::Edge,
+                    Some(&removed.value),
+                    Some(&added.value),
+                    &mut self.graph_delta.collapsed_attribute_changes,
+                );
+                let mut delta = added.delta.clone();
+                delta.changed_fields = fields;
+                self.graph_delta.changed_edges.push(delta);
+            }
+            self.graph_delta.added_edges.extend(
+                unmatched_added
+                    .into_iter()
+                    .skip(changed)
+                    .map(|change| change.delta),
+            );
+            self.graph_delta.removed_edges.extend(
+                unmatched_removed
+                    .into_iter()
+                    .skip(changed)
+                    .map(|change| change.delta),
+            );
+        }
+        Ok(())
     }
 }
 
@@ -602,14 +631,17 @@ impl ChangeSink for DirectChanges {
         match change.record {
             RecordKind::Node => {
                 if let Some(node_id) = change.key.first() {
-                    self.nodes.push(node_id.clone());
                     match change.change {
-                        ChangeKind::Added => self.graph_delta.added_nodes.push(graph_node_delta(
-                            node_id,
-                            change.new.as_ref(),
-                            Vec::new(),
-                        )),
+                        ChangeKind::Added => {
+                            self.nodes.push(node_id.clone());
+                            self.graph_delta.added_nodes.push(graph_node_delta(
+                                node_id,
+                                change.new.as_ref(),
+                                Vec::new(),
+                            ));
+                        }
                         ChangeKind::Removed => {
+                            self.nodes.push(node_id.clone());
                             self.graph_delta.removed_nodes.push(graph_node_delta(
                                 node_id,
                                 change.old.as_ref(),
@@ -618,11 +650,13 @@ impl ChangeSink for DirectChanges {
                         }
                         ChangeKind::Changed => {
                             let fields = meaningful_graph_fields(
+                                RecordKind::Node,
                                 change.old.as_ref(),
                                 change.new.as_ref(),
                                 &mut self.graph_delta.collapsed_attribute_changes,
                             );
                             if !fields.is_empty() {
+                                self.nodes.push(node_id.clone());
                                 self.graph_delta.changed_nodes.push(graph_node_delta(
                                     node_id,
                                     change.new.as_ref().or(change.old.as_ref()),
@@ -640,24 +674,28 @@ impl ChangeSink for DirectChanges {
                 let key = change.key.get(3).map(String::as_str).unwrap_or_default();
                 let value = change.new.as_ref().or(change.old.as_ref());
                 match change.change {
-                    ChangeKind::Added => self.graph_delta.added_edges.push(graph_edge_delta(
-                        source,
-                        target,
-                        relation,
-                        key,
-                        value,
-                        Vec::new(),
-                    )),
-                    ChangeKind::Removed => self.graph_delta.removed_edges.push(graph_edge_delta(
-                        source,
-                        target,
-                        relation,
-                        key,
-                        value,
-                        Vec::new(),
-                    )),
+                    ChangeKind::Added | ChangeKind::Removed => {
+                        let Some(value) = value.cloned() else {
+                            return Err(HistoryError::InvalidArtifacts(
+                                "edge identity change has no record value".to_owned(),
+                            ));
+                        };
+                        self.edge_identity_changes.push(EdgeIdentityChange {
+                            change: change.change,
+                            delta: graph_edge_delta(
+                                source,
+                                target,
+                                relation,
+                                key,
+                                Some(&value),
+                                Vec::new(),
+                            ),
+                            value,
+                        });
+                    }
                     ChangeKind::Changed => {
                         let fields = meaningful_graph_fields(
+                            RecordKind::Edge,
                             change.old.as_ref(),
                             change.new.as_ref(),
                             &mut self.graph_delta.collapsed_attribute_changes,
@@ -795,10 +833,15 @@ fn nested_string(value: &serde_json::Value, path: &[&str]) -> Option<String> {
 }
 
 fn meaningful_graph_fields(
+    record: RecordKind,
     old: Option<&serde_json::Value>,
     new: Option<&serde_json::Value>,
     collapsed: &mut std::collections::BTreeMap<String, usize>,
 ) -> Vec<String> {
+    let projected_old =
+        old.map(|value| compass_history::structural_graph_projection(record, value));
+    let projected_new =
+        new.map(|value| compass_history::structural_graph_projection(record, value));
     let mut keys = std::collections::BTreeSet::new();
     if let Some(object) = old.and_then(serde_json::Value::as_object) {
         keys.extend(object.keys().cloned());
@@ -811,27 +854,15 @@ fn meaningful_graph_fields(
         if old.and_then(|value| value.get(&key)) == new.and_then(|value| value.get(&key)) {
             continue;
         }
-        if is_graph_churn_field(&key) {
+        let projected_old_field = projected_old.as_ref().and_then(|value| value.get(&key));
+        let projected_new_field = projected_new.as_ref().and_then(|value| value.get(&key));
+        if projected_old_field == projected_new_field {
             *collapsed.entry(key).or_default() += 1;
         } else {
             meaningful.push(key);
         }
     }
     meaningful
-}
-
-fn is_graph_churn_field(field: &str) -> bool {
-    matches!(
-        field,
-        "community"
-            | "line_start"
-            | "line_end"
-            | "source_location"
-            | "source_hash"
-            | "start_byte"
-            | "end_byte"
-            | "column"
-    )
 }
 
 enum CommandError {
@@ -992,6 +1023,7 @@ mod tests {
                 },
             ],
             graph_delta: GraphDelta::default(),
+            edge_identity_changes: Vec::new(),
         };
         changes.cancel_attribute_only_dependency_churn();
         assert_eq!(changes.dependencies.len(), 1);
@@ -999,25 +1031,35 @@ mod tests {
     }
 
     #[test]
-    fn graph_edge_identity_churn_preserves_only_net_multigraph_multiplicity() {
-        let edge = |key: &str| GraphEdgeDelta {
-            source: "caller".to_owned(),
-            target: "target".to_owned(),
-            relation: "calls".to_owned(),
-            key: key.to_owned(),
-            source_file: "example.rs".to_owned(),
-            changed_fields: Vec::new(),
-        };
-        let mut changes = DirectChanges {
-            nodes: Vec::new(),
-            dependencies: Vec::new(),
-            graph_delta: GraphDelta {
-                added_edges: vec![edge("new-1"), edge("new-2")],
-                removed_edges: vec![edge("old-1")],
-                ..GraphDelta::default()
-            },
-        };
-        changes.normalize_graph_delta();
+    fn graph_edge_identity_churn_preserves_only_net_multigraph_multiplicity()
+    -> Result<(), HistoryError> {
+        let mut changes = DirectChanges::default();
+        for (change, key) in [
+            (ChangeKind::Removed, "old-1"),
+            (ChangeKind::Added, "new-1"),
+            (ChangeKind::Added, "new-2"),
+        ] {
+            let value = serde_json::json!({
+                "source": "caller",
+                "target": "target",
+                "relation": "calls",
+                "confidence": "extracted",
+                "relationshipSite": {"file": "example.rs", "startLine": 1}
+            });
+            changes.change(GraphChange {
+                record: RecordKind::Edge,
+                change,
+                key: vec![
+                    "caller".to_owned(),
+                    "target".to_owned(),
+                    "calls".to_owned(),
+                    key.to_owned(),
+                ],
+                old: (change == ChangeKind::Removed).then_some(value.clone()),
+                new: (change == ChangeKind::Added).then_some(value),
+            })?;
+        }
+        changes.normalize_graph_delta()?;
         assert_eq!(changes.graph_delta.added_edges.len(), 1);
         assert!(changes.graph_delta.removed_edges.is_empty());
         assert_eq!(
@@ -1027,5 +1069,78 @@ mod tests {
                 .get("edge_identity"),
             Some(&1)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn edge_attribute_change_survives_anchor_derived_identity_churn() -> Result<(), HistoryError> {
+        let mut changes = DirectChanges::default();
+        for (change, key, confidence, line) in [
+            (ChangeKind::Removed, "old", "inferred", 10),
+            (ChangeKind::Added, "new", "extracted", 11),
+        ] {
+            let value = serde_json::json!({
+                "source": "caller",
+                "target": "target",
+                "relation": "calls",
+                "confidence": confidence,
+                "relationshipSite": {"file": "example.rs", "startLine": line}
+            });
+            changes.change(GraphChange {
+                record: RecordKind::Edge,
+                change,
+                key: vec![
+                    "caller".to_owned(),
+                    "target".to_owned(),
+                    "calls".to_owned(),
+                    key.to_owned(),
+                ],
+                old: (change == ChangeKind::Removed).then_some(value.clone()),
+                new: (change == ChangeKind::Added).then_some(value),
+            })?;
+        }
+        changes.normalize_graph_delta()?;
+
+        assert!(changes.graph_delta.added_edges.is_empty());
+        assert!(changes.graph_delta.removed_edges.is_empty());
+        assert_eq!(changes.graph_delta.changed_edges.len(), 1);
+        assert_eq!(
+            changes.graph_delta.changed_edges[0].changed_fields,
+            ["confidence"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn nested_source_coordinate_churn_does_not_mark_a_node_changed() -> Result<(), HistoryError> {
+        let mut changes = DirectChanges::default();
+        changes.change(GraphChange {
+            record: RecordKind::Node,
+            change: ChangeKind::Changed,
+            key: vec!["api::serve".to_owned()],
+            old: Some(serde_json::json!({
+                "id": "api::serve",
+                "kind": "function",
+                "name": "serve",
+                "source": {"file": "src/api.rs", "startLine": 10, "endLine": 12}
+            })),
+            new: Some(serde_json::json!({
+                "id": "api::serve",
+                "kind": "function",
+                "name": "serve",
+                "source": {"file": "src/api.rs", "startLine": 11, "endLine": 13}
+            })),
+        })?;
+
+        assert!(changes.nodes.is_empty());
+        assert!(changes.graph_delta.changed_nodes.is_empty());
+        assert_eq!(
+            changes
+                .graph_delta
+                .collapsed_attribute_changes
+                .get("source"),
+            Some(&1)
+        );
+        Ok(())
     }
 }

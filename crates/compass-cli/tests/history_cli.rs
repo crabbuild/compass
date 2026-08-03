@@ -1573,6 +1573,146 @@ fn query_path_and_explain_read_the_selected_materialized_commit()
 }
 
 #[test]
+fn change_counts_report_structure_instead_of_shifted_source_coordinates()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("service.rs"), "pub fn first() {}\n")?;
+    git(directory.path(), &["add", "service.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "old"])?;
+
+    let repository = Repository::discover(directory.path())?;
+    let history = HistoryStore::create(&repository)?;
+    let profile = current_history_profile()?;
+    let old_commit = repository.resolve("HEAD")?;
+    let publish = |commit: compass_history::CommitId,
+                   fingerprint: char,
+                   line: u64,
+                   edge_key: &str|
+     -> Result<(), Box<dyn std::error::Error>> {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "directed": true,
+            "multigraph": true,
+            "nodes": [
+                {
+                    "id": "caller",
+                    "label": "caller",
+                    "source": {"file": "service.rs", "startLine": line, "endLine": line}
+                },
+                {
+                    "id": "callee",
+                    "label": "callee",
+                    "source": {"file": "service.rs", "startLine": line + 1, "endLine": line + 1}
+                }
+            ],
+            "links": [{
+                "source": "caller",
+                "target": "callee",
+                "relation": "calls",
+                "key": edge_key,
+                "relationshipSite": {
+                    "file": "service.rs",
+                    "startLine": line,
+                    "endLine": line
+                }
+            }]
+        }))?;
+        history.publish(PublishRequest {
+            commit: commit.clone(),
+            parents: repository.parents(&commit)?,
+            profile: profile.clone(),
+            fingerprint: std::iter::repeat_n(fingerprint, 64)
+                .collect::<String>()
+                .parse::<ExtractionFingerprint>()?,
+            artifacts: GraphArtifacts {
+                document,
+                program: None,
+                analysis: None,
+                labels: None,
+                manifest: None,
+                authoritative_sidecars: BTreeMap::new(),
+            },
+            completion: CompletionEvidence {
+                extraction_succeeded: true,
+                allow_partial: false,
+                semantic_files_expected: 0,
+                semantic_files_completed: 0,
+                failed_chunks: 0,
+            },
+            make_preferred: true,
+        })?;
+        Ok(())
+    };
+    publish(old_commit, 'a', 1, "edge-at-line-1")?;
+
+    std::fs::write(
+        directory.path().join("service.rs"),
+        "// inserted comment\npub fn first() {}\n",
+    )?;
+    git(directory.path(), &["add", "service.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "shift"])?;
+    publish(repository.resolve("HEAD")?, 'b', 2, "edge-at-line-2")?;
+    drop(history);
+
+    let output = run(
+        env!("CARGO_BIN_EXE_compass"),
+        directory.path(),
+        &["history", "change-counts", "HEAD", "--format=json"],
+    )?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(output["schema"], "compass.history.change_counts/1");
+    assert_eq!(
+        output["counts"],
+        json!({
+            "nodes": {"added": 0, "removed": 0, "changed": 0},
+            "edges": {"added": 0, "removed": 0, "changed": 0},
+            "hyperedges": {"added": 0, "removed": 0, "changed": 0}
+        })
+    );
+
+    let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
+    let current_commit = repository.resolve("HEAD")?;
+    let preferred = history
+        .preferred(&current_commit)?
+        .ok_or("missing preferred realization")?;
+    let current = history.artifacts(&preferred.id)?;
+    let mut incompatible_profile = profile;
+    incompatible_profile.insert("comparison_fixture", "incompatible")?;
+    history.publish(PublishRequest {
+        commit: current_commit.clone(),
+        parents: repository.parents(&current_commit)?,
+        profile: incompatible_profile,
+        fingerprint: std::iter::repeat_n('c', 64)
+            .collect::<String>()
+            .parse::<ExtractionFingerprint>()?,
+        artifacts: current.artifacts,
+        completion: current.completion,
+        make_preferred: true,
+    })?;
+    drop(history);
+    let incompatible = run(
+        env!("CARGO_BIN_EXE_compass"),
+        directory.path(),
+        &["history", "change-counts", "HEAD", "--format=json"],
+    )?;
+    assert_eq!(incompatible.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&incompatible.stderr).contains("different history build profiles")
+    );
+    Ok(())
+}
+
+#[test]
 fn missing_code_only_commit_is_built_on_first_query() -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     git(directory.path(), &["init", "--quiet"])?;

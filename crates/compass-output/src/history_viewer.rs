@@ -55,6 +55,10 @@ enum ProjectionMode {
 
 struct HistoricalViewBuilder {
     mode: ProjectionMode,
+    directed: bool,
+    multigraph: bool,
+    graph: Map<String, Value>,
+    extras: BTreeMap<String, Value>,
     attributes: BTreeMap<String, Map<String, Value>>,
     labels: Option<Value>,
     nodes: Vec<NodeRecord>,
@@ -68,6 +72,10 @@ impl HistoricalViewBuilder {
     fn new(mode: ProjectionMode) -> Self {
         Self {
             mode,
+            directed: true,
+            multigraph: false,
+            graph: Map::new(),
+            extras: BTreeMap::new(),
             attributes: BTreeMap::new(),
             labels: None,
             nodes: Vec::new(),
@@ -80,6 +88,20 @@ impl HistoricalViewBuilder {
 }
 
 impl GraphRecordSink for HistoricalViewBuilder {
+    fn document_metadata(
+        &mut self,
+        directed: bool,
+        multigraph: bool,
+        graph: Map<String, Value>,
+        extras: BTreeMap<String, Value>,
+    ) -> Result<(), HistoryError> {
+        self.directed = directed;
+        self.multigraph = multigraph;
+        self.graph = graph;
+        self.extras = extras;
+        Ok(())
+    }
+
     fn node_attribute(
         &mut self,
         node_id: String,
@@ -158,12 +180,12 @@ fn historical_graph_document_with_labels(
     });
     Ok((
         GraphDocument {
-            directed: true,
-            multigraph: false,
-            graph: Map::new(),
+            directed: builder.directed,
+            multigraph: builder.multigraph,
+            graph: builder.graph,
             nodes: builder.nodes,
             links: builder.edges,
-            extras: BTreeMap::new(),
+            extras: builder.extras,
         },
         builder.labels,
     ))
@@ -191,12 +213,12 @@ impl HistoricalViewBuilder {
             _ => None,
         };
         let document = GraphDocument {
-            directed: true,
-            multigraph: false,
-            graph: Map::new(),
+            directed: self.directed,
+            multigraph: self.multigraph,
+            graph: self.graph,
             nodes: self.nodes,
             links: self.edges,
-            extras: BTreeMap::new(),
+            extras: self.extras,
         };
         project_exact(document, self.labels, title, node_limit, selected)
     }

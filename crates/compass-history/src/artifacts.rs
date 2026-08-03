@@ -1626,7 +1626,7 @@ fn analysis_key(parts: &[&[u8]]) -> Vec<u8> {
         .finish()
 }
 
-fn metadata_key(parts: &[&[u8]]) -> Vec<u8> {
+pub(crate) fn metadata_key(parts: &[&[u8]]) -> Vec<u8> {
     parts
         .iter()
         .fold(

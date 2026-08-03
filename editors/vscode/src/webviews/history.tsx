@@ -6,6 +6,7 @@ import {
   WorkspaceState,
   GraphViewModelSchema,
   compareGraphs,
+  comparisonFromSemanticDiff,
   type GraphViewModel,
   type GraphComparison,
   type CommunityGraphDetail,
@@ -392,7 +393,7 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
       const parsedCounts = message.counts
         ? HistoryChangeCountsSchema.safeParse(message.counts)
         : undefined;
-      const exactCounts = parsedCounts?.success ? parsedCounts.data : undefined;
+      const structuralCounts = parsedCounts?.success ? parsedCounts.data : undefined;
       graph = current.data;
       graphCommit = message.commit;
       graphIdentity = {
@@ -414,22 +415,26 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
       communityError = undefined;
       activeCommunityRequest = "";
       activeCommunityContext = undefined;
+      const visibleComparison = compareGraphs(parent.data, current.data);
+      const structuralComparison = parent.data.stats.aggregated || current.data.stats.aggregated
+        ? comparisonFromSemanticDiff(message.semanticDiff, current.data) ?? visibleComparison
+        : visibleComparison;
       comparison = {
-        ...compareGraphs(parent.data, current.data),
-        ...(exactCounts
+        ...structuralComparison,
+        ...(structuralCounts
           ? {
-              addedNodes: exactCounts.counts.nodes.added,
-              removedNodes: exactCounts.counts.nodes.removed,
-              changedNodes: exactCounts.counts.nodes.changed,
-              addedEdges: exactCounts.counts.edges.added,
-              removedEdges: exactCounts.counts.edges.removed,
-              changedEdges: exactCounts.counts.edges.changed
+              addedNodes: structuralCounts.counts.nodes.added,
+              removedNodes: structuralCounts.counts.nodes.removed,
+              changedNodes: structuralCounts.counts.nodes.changed,
+              addedEdges: structuralCounts.counts.edges.added,
+              removedEdges: structuralCounts.counts.edges.removed,
+              changedEdges: structuralCounts.counts.edges.changed
             }
           : {}),
         parent: message.parent
       };
       semanticDiff = message.semanticDiff;
-      if (exactCounts) changeCounts = exactCounts;
+      if (structuralCounts) changeCounts = structuralCounts;
       operationErrors.delete(message.commit);
       revisionLoadState = "ready";
     }

@@ -28,7 +28,10 @@ pub use cache::{
 };
 pub use canonical::{CANONICAL_ENCODING_VERSION, canonical_json_bytes};
 pub use config::HistoryConfig;
-pub use diff::{ChangeKind, ChangeSink, GraphChange, RecordKind};
+pub use diff::{
+    ChangeKind, ChangeSink, GraphChange, RecordChangeCounts, RecordKind, StructuralChangeCounts,
+    structural_graph_projection,
+};
 pub use error::HistoryError;
 pub use fingerprint::{BuildProfile, ExtractionFingerprint, ExtractionFingerprintInput};
 pub use gc::{GcPlan, GcSweep};

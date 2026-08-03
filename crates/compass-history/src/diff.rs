@@ -1,6 +1,8 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use prolly::{Diff, VersionedValue, decode_segments};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::keys::{EDGE_KIND, HYPEREDGE_KIND, KEY_SCHEMA_V1, NODE_KIND};
 use crate::{HistoryError, RealizationReader, StoredTree};
@@ -38,6 +40,22 @@ pub struct GraphChange {
 
 pub trait ChangeSink {
     fn change(&mut self, change: GraphChange) -> Result<(), HistoryError>;
+}
+
+/// Bounded counts for one structural record family.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct RecordChangeCounts {
+    pub added: u64,
+    pub removed: u64,
+    pub changed: u64,
+}
+
+/// Meaning-oriented graph counts that exclude source-coordinate and clustering churn.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct StructuralChangeCounts {
+    pub nodes: RecordChangeCounts,
+    pub edges: RecordChangeCounts,
+    pub hyperedges: RecordChangeCounts,
 }
 
 impl RealizationReader<'_> {
@@ -124,6 +142,30 @@ impl RealizationReader<'_> {
         Ok(())
     }
 
+    /// Count structural graph changes without treating relocated source anchors as topology.
+    ///
+    /// Unlike [`Self::diff_records`], this projection is intended for graph-version UI and
+    /// summary queries. Exact record diffs remain available through `diff_records`. Both
+    /// realizations must use the same build profile so extractor or configuration changes never
+    /// masquerade as repository changes.
+    pub fn structural_change_counts(
+        &self,
+        new: &RealizationReader<'_>,
+    ) -> Result<StructuralChangeCounts, HistoryError> {
+        if self.published.version.build_profile != new.published.version.build_profile {
+            return Err(HistoryError::OperationalState(
+                "cannot compare structural counts for different history build profiles".to_owned(),
+            ));
+        }
+        let mut sink = StructuralChangeSink::default();
+        self.diff_records(
+            new,
+            &[RecordKind::Node, RecordKind::Edge, RecordKind::Hyperedge],
+            &mut sink,
+        )?;
+        sink.finish()
+    }
+
     fn diff_root(
         &self,
         record: RecordKind,
@@ -160,6 +202,223 @@ impl RealizationReader<'_> {
         }
         Ok(())
     }
+}
+
+type EdgeTopology = (String, String, String);
+
+#[derive(Default)]
+struct EdgeIdentityChanges {
+    added: BTreeMap<Vec<u8>, u64>,
+    removed: BTreeMap<Vec<u8>, u64>,
+}
+
+#[derive(Default)]
+struct StructuralChangeSink {
+    counts: StructuralChangeCounts,
+    // Prolly edge keys are ordered by topology then occurrence, so only one topology group needs
+    // to be retained while the exact diff streams.
+    edge_identity_changes: Option<(EdgeTopology, EdgeIdentityChanges)>,
+}
+
+impl StructuralChangeSink {
+    fn finish(mut self) -> Result<StructuralChangeCounts, HistoryError> {
+        self.flush_edge_identity_changes();
+        Ok(self.counts)
+    }
+
+    fn flush_edge_identity_changes(&mut self) {
+        let Some((_, changes)) = self.edge_identity_changes.take() else {
+            return;
+        };
+        let projections = changes
+            .added
+            .keys()
+            .chain(changes.removed.keys())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let added = changes.added.values().copied().sum::<u64>();
+        let removed = changes.removed.values().copied().sum::<u64>();
+        let unchanged = projections
+            .iter()
+            .map(|projection| {
+                changes
+                    .added
+                    .get(projection)
+                    .copied()
+                    .unwrap_or_default()
+                    .min(changes.removed.get(projection).copied().unwrap_or_default())
+            })
+            .sum::<u64>();
+        let unmatched_added = added.saturating_sub(unchanged);
+        let unmatched_removed = removed.saturating_sub(unchanged);
+        let changed = unmatched_added.min(unmatched_removed);
+        self.counts.edges.changed = self.counts.edges.changed.saturating_add(changed);
+        self.counts.edges.added = self
+            .counts
+            .edges
+            .added
+            .saturating_add(unmatched_added.saturating_sub(changed));
+        self.counts.edges.removed = self
+            .counts
+            .edges
+            .removed
+            .saturating_add(unmatched_removed.saturating_sub(changed));
+    }
+
+    fn edge_identity_change(&mut self, change: &GraphChange) -> Result<(), HistoryError> {
+        let [source, target, relation, ..] = change.key.as_slice() else {
+            return Err(HistoryError::InvalidKey(
+                "edge change has no source, target, and relation".to_owned(),
+            ));
+        };
+        let value = match change.change {
+            ChangeKind::Added => change.new.as_ref(),
+            ChangeKind::Removed => change.old.as_ref(),
+            ChangeKind::Changed => None,
+        }
+        .ok_or_else(|| {
+            HistoryError::InvalidArtifacts("edge identity change has no record value".to_owned())
+        })?;
+        let projection = structural_projection(RecordKind::Edge, value)?;
+        let topology = (source.clone(), target.clone(), relation.clone());
+        if self
+            .edge_identity_changes
+            .as_ref()
+            .is_some_and(|(current, _)| current != &topology)
+        {
+            self.flush_edge_identity_changes();
+        }
+        let (_, changes) = self
+            .edge_identity_changes
+            .get_or_insert_with(|| (topology, EdgeIdentityChanges::default()));
+        let counts = if change.change == ChangeKind::Added {
+            &mut changes.added
+        } else {
+            &mut changes.removed
+        };
+        let count = counts.entry(projection).or_default();
+        *count = count.saturating_add(1);
+        Ok(())
+    }
+}
+
+impl ChangeSink for StructuralChangeSink {
+    fn change(&mut self, change: GraphChange) -> Result<(), HistoryError> {
+        match (change.record, change.change) {
+            (RecordKind::Node, ChangeKind::Added) => {
+                self.counts.nodes.added = self.counts.nodes.added.saturating_add(1);
+            }
+            (RecordKind::Node, ChangeKind::Removed) => {
+                self.counts.nodes.removed = self.counts.nodes.removed.saturating_add(1);
+            }
+            (RecordKind::Node, ChangeKind::Changed) => {
+                if meaningful_record_changed(&change)? {
+                    self.counts.nodes.changed = self.counts.nodes.changed.saturating_add(1);
+                }
+            }
+            (RecordKind::Edge, ChangeKind::Added | ChangeKind::Removed) => {
+                self.edge_identity_change(&change)?;
+            }
+            (RecordKind::Edge, ChangeKind::Changed) => {
+                if meaningful_record_changed(&change)? {
+                    self.counts.edges.changed = self.counts.edges.changed.saturating_add(1);
+                }
+            }
+            (RecordKind::Hyperedge, ChangeKind::Added) => {
+                self.counts.hyperedges.added = self.counts.hyperedges.added.saturating_add(1);
+            }
+            (RecordKind::Hyperedge, ChangeKind::Removed) => {
+                self.counts.hyperedges.removed = self.counts.hyperedges.removed.saturating_add(1);
+            }
+            (RecordKind::Hyperedge, ChangeKind::Changed) => {
+                self.counts.hyperedges.changed = self.counts.hyperedges.changed.saturating_add(1);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+fn meaningful_record_changed(change: &GraphChange) -> Result<bool, HistoryError> {
+    let old = change.old.as_ref().ok_or_else(|| {
+        HistoryError::InvalidArtifacts("changed graph record has no old value".to_owned())
+    })?;
+    let new = change.new.as_ref().ok_or_else(|| {
+        HistoryError::InvalidArtifacts("changed graph record has no new value".to_owned())
+    })?;
+    Ok(structural_projection(change.record, old)? != structural_projection(change.record, new)?)
+}
+
+fn structural_projection(record: RecordKind, value: &Value) -> Result<Vec<u8>, HistoryError> {
+    let projected = structural_graph_projection(record, value);
+    crate::canonical_json_bytes(&projected)
+}
+
+/// Remove source-coordinate, clustering, and presentation fields from a graph record.
+///
+/// This is the shared meaning projection used by structural history summaries. It does not alter
+/// the stored record or the exact diff contract.
+pub fn structural_graph_projection(record: RecordKind, value: &Value) -> Value {
+    project_value(record, value, true)
+}
+
+fn project_value(record: RecordKind, value: &Value, root: bool) -> Value {
+    match value {
+        Value::Array(values) => Value::Array(
+            values
+                .iter()
+                .map(|value| project_value(record, value, false))
+                .collect(),
+        ),
+        Value::Object(values) => Value::Object(project_object(record, values, root)),
+        _ => value.clone(),
+    }
+}
+
+fn project_object(
+    record: RecordKind,
+    values: &Map<String, Value>,
+    root: bool,
+) -> Map<String, Value> {
+    values
+        .iter()
+        .filter(|(key, _)| !ignored_structural_field(record, key, root))
+        .map(|(key, value)| (key.clone(), project_value(record, value, false)))
+        .collect()
+}
+
+fn ignored_structural_field(record: RecordKind, field: &str, root: bool) -> bool {
+    matches!(
+        field,
+        "anchor"
+            | "anchors"
+            | "color"
+            | "community"
+            | "communityName"
+            | "community_name"
+            | "endByte"
+            | "endColumn"
+            | "endLine"
+            | "end_byte"
+            | "end_column"
+            | "line_end"
+            | "line_start"
+            | "norm_label"
+            | "relationshipSite"
+            | "relationship_site"
+            | "sourceDigest"
+            | "source_file"
+            | "source_hash"
+            | "source_location"
+            | "startByte"
+            | "startColumn"
+            | "startLine"
+            | "start_byte"
+            | "start_column"
+            | "wiringSite"
+            | "wiring_site"
+    ) || (root && record == RecordKind::Node && field == "source")
+        || (root && record == RecordKind::Edge && matches!(field, "id" | "key"))
 }
 
 fn decode_value(bytes: &[u8]) -> Result<Value, HistoryError> {
