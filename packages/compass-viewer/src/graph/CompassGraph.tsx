@@ -18,6 +18,7 @@ import {
 } from "./inspectorLayout";
 import { graphNodeActivation } from "./nodeActivation";
 import { NodeHoverCard, type GraphHover } from "./NodeHoverCard";
+import { EdgeHoverCard, type GraphEdgeHover } from "./EdgeHoverCard";
 import { navigableRelationshipSource } from "./sourceNavigation";
 import type { GraphSourceRevisions } from "./ChangeEvidence";
 import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
@@ -133,6 +134,7 @@ function CompassGraphView({
 }) {
   const [state, dispatch] = useReducer(graphReducer, initialGraphState);
   const [hover, setHover] = useState<GraphHover | null>(null);
+  const [edgeHover, setEdgeHover] = useState<GraphEdgeHover | null>(null);
   const canvasRef = useRef<GraphCanvasHandle>(null);
   const hostRef = useRef(host);
   hostRef.current = host;
@@ -151,6 +153,9 @@ function CompassGraphView({
   const hoveredActivation = hovered
     ? graphNodeActivation(model, hovered, detailCommunityId)
     : undefined;
+  const hoveredEdge = edgeHover ? edgeById.get(edgeHover.edgeId) : undefined;
+  const hoveredEdgeSource = hoveredEdge ? nodeById.get(hoveredEdge.source) : undefined;
+  const hoveredEdgeTarget = hoveredEdge ? nodeById.get(hoveredEdge.target) : undefined;
   const comparisonMode = useMemo(
     () => model.nodes.some((node) => node.change !== undefined)
       || model.edges.some((edge) => edge.change !== undefined),
@@ -194,10 +199,12 @@ function CompassGraphView({
 
   const focus = useCallback((nodeId: string) => {
     setHover(null);
+    setEdgeHover(null);
     dispatch({ type: "focus", nodeId });
   }, []);
   const clear = useCallback(() => {
     setHover(null);
+    setEdgeHover(null);
     dispatch({ type: "clearFocus" });
   }, []);
   const handleStabilized = useCallback(() => {
@@ -280,6 +287,7 @@ function CompassGraphView({
             onOpenSource={activateNode}
             onOpenRelationshipSource={activateRelationship}
             onHover={setHover}
+            onHoverEdge={setEdgeHover}
             onClear={clear}
             onStabilized={handleStabilized}
           />
@@ -347,6 +355,14 @@ function CompassGraphView({
               node={hovered}
               hover={hover}
               activation={hoveredActivation}
+            />
+          )}
+          {edgeHover && hoveredEdge && hoveredEdgeSource && hoveredEdgeTarget && (
+            <EdgeHoverCard
+              edge={hoveredEdge}
+              sourceNode={hoveredEdgeSource}
+              targetNode={hoveredEdgeTarget}
+              hover={edgeHover}
             />
           )}
         </main>

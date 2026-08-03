@@ -16,12 +16,8 @@ const RELATION_LABELS: Readonly<Record<string, string>> = {
   depends_on: "depends on"
 };
 
-export type EdgeLabelVisibility = {
-  hoveredEdgeId: string | null;
-};
-
-export function formatGraphEdgeLabel(
-  edge: Pick<GraphEdge, "relation" | "confidence" | "details" | "relationshipSite">
+export function formatGraphRelation(
+  edge: Pick<GraphEdge, "relation" | "details">
 ): string {
   const relation = edge.relation.trim();
   const relationLabel = RELATION_LABELS[relation] ?? relation;
@@ -31,9 +27,15 @@ export function formatGraphEdgeLabel(
       ? ""
       : ` ${route.position + 1}`}`
     : undefined;
-  const semanticLabel = [relationLabel, routeStage, route?.operation]
+  return [relationLabel, routeStage, route?.operation]
     .filter((part) => part !== undefined && part !== "")
     .join(" · ");
+}
+
+export function formatGraphEdgeLabel(
+  edge: Pick<GraphEdge, "relation" | "confidence" | "details" | "relationshipSite">
+): string {
+  const semanticLabel = formatGraphRelation(edge);
   const confidence = edge.confidence?.trim().toLocaleUpperCase();
   const relationship = semanticLabel && confidence
     ? `${semanticLabel} [${confidence}]`
@@ -42,7 +44,7 @@ export function formatGraphEdgeLabel(
   return [relationship, source].filter(Boolean).join(" · ");
 }
 
-function formatRelationshipSite(site: GraphEdge["relationshipSite"]): string {
+export function formatRelationshipSite(site: GraphEdge["relationshipSite"]): string {
   if (!site?.file.trim()) return "";
   const startLine = site.startLine;
   const endLine = site.endLine;
@@ -54,11 +56,4 @@ function formatRelationshipSite(site: GraphEdge["relationshipSite"]): string {
   }
   if (site.startByte !== undefined) return `${site.file}:byte ${site.startByte}`;
   return site.file;
-}
-
-export function shouldShowGraphEdgeLabel(
-  edge: Pick<GraphEdge, "id">,
-  visibility: EdgeLabelVisibility
-): boolean {
-  return visibility.hoveredEdgeId === edge.id;
 }

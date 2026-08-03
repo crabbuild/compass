@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Replace sticky native edge labels with a theme-aware relationship card that
+  shows source-to-target direction, confidence, evidence, and source location,
+  and dismisses reliably when the pointer leaves the edge or graph.
 - Replace the duplicate Call Graph and Code Graph editor submenus with one
   **Compass** menu whose actions resolve the symbol at the active cursor.
 - Render change-impact, related-symbol, and node-trail queries as focused result

@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GraphNode, GraphViewModel } from "../contracts/graph";
-import {
-  formatGraphEdgeLabel,
-  shouldShowGraphEdgeLabel
-} from "./edgeLabels";
+import { formatGraphEdgeLabel } from "./edgeLabels";
 import { graphNodeColor } from "./VisNetworkCanvas";
 
 const model: GraphViewModel = {
@@ -49,7 +46,7 @@ describe("graphNodeColor", () => {
     });
   });
 
-  it("derives relationship labels but reveals them only on direct hover", () => {
+  it("derives relationship labels for rich hover content", () => {
     const edge = {
       id: "run-helper",
       source: "run",
@@ -58,12 +55,6 @@ describe("graphNodeColor", () => {
       confidence: "extracted" as const
     };
     expect(formatGraphEdgeLabel(edge)).toBe("calls [EXTRACTED]");
-    expect(shouldShowGraphEdgeLabel(edge, {
-      hoveredEdgeId: "run-helper"
-    })).toBe(true);
-    expect(shouldShowGraphEdgeLabel(edge, {
-      hoveredEdgeId: null
-    })).toBe(false);
   });
 
   it("includes a recorded relationship line in the hover label", () => {

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Replace sticky graph-edge tooltips in the shared viewer and VS Code with a
+  theme-aware relationship card that shows direction, confidence, evidence,
+  and source location, with explicit cleanup on edge, canvas, drag, and zoom
+  transitions.
 - Make VS Code editor graph actions reliable and focused: project typed graph
   source anchors into cursor-based call resolution, consolidate duplicate
   context submenus, resolve symbols without an initial prompt, and render only
