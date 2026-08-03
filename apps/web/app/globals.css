@@ -529,3 +529,16 @@
   --fd-border: var(--border);
   --fd-primary: var(--primary);
 }
+
+#nd-sidebar .docs-sidebar-icon,
+#nd-sidebar-mobile .docs-sidebar-icon {
+  color: var(--fd-primary);
+  stroke-width: 1.8;
+}
+
+#nd-sidebar [data-state='open'] > button .docs-sidebar-icon,
+#nd-sidebar [data-state='open'] > a .docs-sidebar-icon,
+#nd-sidebar-mobile [data-state='open'] > button .docs-sidebar-icon,
+#nd-sidebar-mobile [data-state='open'] > a .docs-sidebar-icon {
+  color: var(--fd-primary);
+}
