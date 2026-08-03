@@ -34,14 +34,7 @@ fn default_query_open_uses_json_and_explicit_store_matches_results()
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
     support::write_graph(&graph_path)?;
-    let graph_bytes = fs::read(&graph_path)?;
-    let graph = GraphDocument::load(&graph_path)?;
-    SqliteStore::open(directory.path().join(STORE_FILE_NAME))?.publish_snapshot(
-        &graph_bytes,
-        CODE_GRAPH_SCHEMA_V1,
-        graph.nodes.len(),
-        graph.links.len(),
-    )?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
 
     let cache = directory.path().join("cache");
     let json_engine = open(&graph_path, None, &cache)?;
@@ -345,7 +338,7 @@ fn explicit_store_selection_reports_a_missing_snapshot() -> Result<(), Box<dyn s
         Ok(_) => return Err("store selection silently fell back to JSON".into()),
         Err(error) => error,
     };
-    assert_eq!(error.code(), "store_open_failed");
+    assert_eq!(error.code(), "store_ref_missing");
     Ok(())
 }
 
@@ -355,6 +348,7 @@ fn explicit_json_selection_survives_a_corrupt_store_sidecar()
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
     support::write_graph(&graph_path)?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
     fs::write(
         directory.path().join(STORE_FILE_NAME),
         b"not a compass sqlite database",
@@ -376,14 +370,7 @@ fn a_present_malformed_store_reference_fails_closed() -> Result<(), Box<dyn std:
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
     support::write_graph(&graph_path)?;
-    let graph_bytes = fs::read(&graph_path)?;
-    let graph = GraphDocument::load(&graph_path)?;
-    SqliteStore::open(directory.path().join(STORE_FILE_NAME))?.publish_snapshot(
-        &graph_bytes,
-        CODE_GRAPH_SCHEMA_V1,
-        graph.nodes.len(),
-        graph.links.len(),
-    )?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
     fs::write(directory.path().join(STORE_REF_FILE_NAME), b"{}")?;
     let cache = directory.path().join("cache");
     assert_eq!(

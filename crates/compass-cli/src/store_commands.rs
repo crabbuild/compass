@@ -2,9 +2,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use compass_files::BuildGuard;
-use compass_graph::{GraphSnapshotReader, canonical_graph_json};
+use compass_graph::{
+    GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotReader, SnapshotSelector, canonical_graph_json,
+};
 use compass_model::code_graph::GraphDocument;
-use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, STORE_SCHEMA_V1, SqliteStore, StoreRef};
+use compass_store::{
+    STORE_FILE_NAME, STORE_REF_FILE_NAME, STORE_SCHEMA_V1, SqliteStore, StoreRef,
+    local_sqlite_store_path,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -53,7 +58,7 @@ pub(crate) fn command(args: &[String]) -> Outcome {
 fn status(args: &[String]) -> Result<Value, String> {
     let output = output_root(args)?;
     let graph_path = output.join("graph.json");
-    let store_path = output.join(STORE_FILE_NAME);
+    let store_path = local_sqlite_store_path(&graph_path);
     let reference_path = output.join(STORE_REF_FILE_NAME);
     let graph = if graph_path.is_file() {
         let bytes = fs::read(&graph_path).map_err(|error| format!("read graph.json: {error}"))?;
@@ -130,7 +135,7 @@ fn status(args: &[String]) -> Result<Value, String> {
 fn validate(args: &[String]) -> Result<Value, String> {
     let output = output_root(args)?;
     let graph_path = output.join("graph.json");
-    let store_path = output.join(STORE_FILE_NAME);
+    let store_path = local_sqlite_store_path(&graph_path);
     if !store_path.is_file() {
         return Err(format!(
             "store sidecar is missing: {}",
@@ -187,7 +192,7 @@ fn backup(args: &[String]) -> Result<Value, String> {
         ));
     }
     let graph_path = output.join("graph.json");
-    let store_path = output.join(STORE_FILE_NAME);
+    let store_path = local_sqlite_store_path(&graph_path);
     let reference_path = output.join(STORE_REF_FILE_NAME);
     let graph_bytes = fs::read(&graph_path).map_err(|error| format!("read graph.json: {error}"))?;
     let graph = GraphDocument::load(&graph_path).map_err(|error| error.to_string())?;
@@ -335,9 +340,25 @@ fn validate_store(
     graph: Option<&Value>,
     graph_path: &Path,
 ) -> Result<(StoreRef, String, String), String> {
-    let reader = GraphSnapshotReader::open_active(store)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "active immutable graph snapshot is missing".to_owned())?;
+    let reference_path = graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(STORE_REF_FILE_NAME);
+    let reference: StoreRef = serde_json::from_slice(
+        &fs::read(&reference_path)
+            .map_err(|error| format!("read {}: {error}", reference_path.display()))?,
+    )
+    .map_err(|error| format!("decode store.ref: {error}"))?;
+    reference.validate().map_err(|error| error.to_string())?;
+    let reader = GraphSnapshotReader::open_selector(
+        store,
+        SnapshotSelector {
+            schema: GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1.to_owned(),
+            snapshot_id: reference.snapshot_id.clone(),
+            manifest_digest: reference.manifest_digest.clone(),
+        },
+    )
+    .map_err(|error| error.to_string())?;
     let manifest = reader.manifest();
     let exported = reader
         .export_json_bytes()
@@ -350,9 +371,12 @@ fn validate_store(
             return Err("store export is not byte-identical to graph.json".to_owned());
         }
     }
-    let reference = store
-        .snapshot_reference()
+    let actual = store
+        .graph_snapshot_reference_for(&reference.snapshot_id, &reference.manifest_digest)
         .map_err(|error| error.to_string())?;
+    if actual != reference {
+        return Err("store.ref does not match the selected immutable snapshot".to_owned());
+    }
     let manifest_digest = reference.manifest_digest.clone();
     Ok((reference, manifest.snapshot_id.clone(), manifest_digest))
 }

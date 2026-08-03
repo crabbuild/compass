@@ -30,6 +30,7 @@ pub const STORE_RETENTION_SCHEMA_V1: &str = "compass.store.retention/1";
 pub const GRAPH_SCHEMA_V1: &str = "compass.graph/1";
 pub const STORE_FILE_NAME: &str = "compass-store.sqlite3";
 pub const STORE_REF_FILE_NAME: &str = "store.ref";
+pub const STORE_DIRECTORY_NAME: &str = ".compass-store";
 pub const KEY_ENCODING_V1: u8 = 1;
 pub const MAX_KEY_SEGMENTS: usize = 32;
 pub const MAX_NAMESPACE_BYTES: usize = 128;
@@ -615,6 +616,34 @@ impl StoreRef {
     }
 }
 
+/// Resolve the local SQLite realization selected by a graph artifact.
+///
+/// Current build generations keep the database once under the output root and
+/// publish only a small `store.ref` beside `graph.json`. An adjacent database
+/// remains supported for standalone restored bundles and older generations.
+#[must_use]
+pub fn local_sqlite_store_path(graph_path: &Path) -> PathBuf {
+    let graph_directory = graph_path.parent().unwrap_or_else(|| Path::new("."));
+    let adjacent = graph_directory.join(STORE_FILE_NAME);
+    if adjacent.is_file() {
+        return adjacent;
+    }
+    let Some(generations_directory) = graph_directory.parent() else {
+        return adjacent;
+    };
+    if generations_directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        != Some(".compass-generations")
+    {
+        return adjacent;
+    }
+    let Some(output_root) = generations_directory.parent() else {
+        return adjacent;
+    };
+    output_root.join(STORE_DIRECTORY_NAME).join(STORE_FILE_NAME)
+}
+
 pub struct SqliteStore {
     path: PathBuf,
     connection: Mutex<Connection>,
@@ -827,7 +856,7 @@ impl SqliteStore {
             source,
         })?;
         let validation =
-            Self::open_read_only(destination).and_then(|store| store.validate_snapshot());
+            Self::open_read_only(destination).and_then(|store| store.snapshot_reference());
         if let Err(error) = validation {
             let _ = fs::remove_file(destination);
             return Err(error);
@@ -857,7 +886,7 @@ impl SqliteStore {
                 destination.display()
             )));
         }
-        Self::open_read_only(backup)?.validate_snapshot()?;
+        Self::open_read_only(backup)?.snapshot_reference()?;
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent).map_err(|source| StoreError::Io {
                 operation: "create_store_restore_parent",
@@ -871,7 +900,7 @@ impl SqliteStore {
             source,
         })?;
         let validation =
-            Self::open_read_only(destination).and_then(|store| store.validate_snapshot());
+            Self::open_read_only(destination).and_then(|store| store.snapshot_reference());
         if let Err(error) = validation {
             let _ = fs::remove_file(destination);
             return Err(error);
@@ -1024,6 +1053,54 @@ impl SqliteStore {
         Ok(reference)
     }
 
+    /// Return a typed reference for a specific immutable graph snapshot rather
+    /// than consulting the mutable active selector.
+    pub fn graph_snapshot_reference_for(
+        &self,
+        snapshot_id: &str,
+        manifest_digest: &str,
+    ) -> Result<StoreRef, StoreError> {
+        validate_digest("snapshot reference", snapshot_id)?;
+        validate_digest("snapshot reference manifest", manifest_digest)?;
+        let namespace = NamespaceId::graph();
+        let object = PartitionKey::new(GRAPH_SNAPSHOT_OBJECT_PARTITION)?;
+        let manifest_key = Key::new(format!("manifest/{manifest_digest}"))?;
+        let Some(manifest_entry) = self.get(&namespace, &object, &manifest_key)? else {
+            return Err(StoreError::Corrupt(
+                "referenced graph snapshot manifest is missing".to_owned(),
+            ));
+        };
+        if hex_digest(&manifest_entry.value) != manifest_digest {
+            return Err(StoreError::Corrupt(
+                "referenced graph snapshot manifest digest does not match".to_owned(),
+            ));
+        }
+        let manifest: GraphSnapshotManifest = serde_json::from_slice(&manifest_entry.value)
+            .map_err(|error| StoreError::Corrupt(format!("graph snapshot manifest: {error}")))?;
+        if manifest.schema != GRAPH_SNAPSHOT_LAYOUT_V1
+            || manifest.graph_schema != GRAPH_SCHEMA_V1
+            || manifest.snapshot_id != snapshot_id
+        {
+            return Err(StoreError::InvalidFormat(
+                "referenced graph snapshot uses an unsupported or mismatched format; rebuild the store"
+                    .to_owned(),
+            ));
+        }
+        validate_digest("graph snapshot graph", &manifest.graph_digest)?;
+        let reference = StoreRef {
+            schema: STORE_REF_SCHEMA_V1.to_owned(),
+            store_schema: STORE_SCHEMA_V1.to_owned(),
+            adapter: "sqlite".to_owned(),
+            store_id: "sqlite-local-v1".to_owned(),
+            namespace: String::from_utf8_lossy(GRAPH_NAMESPACE).into_owned(),
+            snapshot_id: snapshot_id.to_owned(),
+            manifest_digest: manifest_digest.to_owned(),
+            graph_digest: manifest.graph_digest,
+        };
+        reference.validate()?;
+        Ok(reference)
+    }
+
     fn graph_snapshot_reference(&self) -> Result<Option<StoreRef>, StoreError> {
         let namespace = NamespaceId::graph();
         let catalog = PartitionKey::new(GRAPH_SNAPSHOT_CATALOG_PARTITION)?;
@@ -1040,43 +1117,8 @@ impl SqliteStore {
         }
         validate_digest("snapshot selector", &selector.snapshot_id)?;
         validate_digest("snapshot selector manifest", &selector.manifest_digest)?;
-        let object = PartitionKey::new(GRAPH_SNAPSHOT_OBJECT_PARTITION)?;
-        let manifest_key = Key::new(format!("manifest/{}", selector.manifest_digest))?;
-        let Some(manifest_entry) = self.get(&namespace, &object, &manifest_key)? else {
-            return Err(StoreError::Corrupt(
-                "selected graph snapshot manifest is missing".to_owned(),
-            ));
-        };
-        if digest(&manifest_entry.value) != selector_digest(&selector.manifest_digest)? {
-            return Err(StoreError::Corrupt(
-                "selected graph snapshot manifest digest does not match".to_owned(),
-            ));
-        }
-        let manifest: GraphSnapshotManifest = serde_json::from_slice(&manifest_entry.value)
-            .map_err(|error| StoreError::Corrupt(format!("graph snapshot manifest: {error}")))?;
-        if manifest.schema != GRAPH_SNAPSHOT_LAYOUT_V1
-            || manifest.graph_schema != GRAPH_SCHEMA_V1
-            || manifest.snapshot_id != selector.snapshot_id
-        {
-            return Err(StoreError::InvalidFormat(
-                "selected graph snapshot uses an unsupported or mismatched format; rebuild the store"
-                    .to_owned(),
-            ));
-        }
-        validate_digest("graph snapshot graph", &manifest.graph_digest)?;
-        let manifest_digest = hex_digest(&manifest_entry.value);
-        let reference = StoreRef {
-            schema: STORE_REF_SCHEMA_V1.to_owned(),
-            store_schema: STORE_SCHEMA_V1.to_owned(),
-            adapter: "sqlite".to_owned(),
-            store_id: "sqlite-local-v1".to_owned(),
-            namespace: String::from_utf8_lossy(GRAPH_NAMESPACE).into_owned(),
-            snapshot_id: selector.snapshot_id,
-            manifest_digest,
-            graph_digest: manifest.graph_digest,
-        };
-        reference.validate()?;
-        Ok(Some(reference))
+        self.graph_snapshot_reference_for(&selector.snapshot_id, &selector.manifest_digest)
+            .map(Some)
     }
 
     fn connection(&self) -> Result<MutexGuard<'_, Connection>, StoreError> {
@@ -1931,30 +1973,6 @@ fn validate_digest(component: &'static str, value: &str) -> Result<(), StoreErro
         )));
     }
     Ok(())
-}
-
-fn selector_digest(value: &str) -> Result<[u8; 32], StoreError> {
-    validate_digest("manifest digest", value)?;
-    let mut output = [0_u8; 32];
-    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
-        let high = hex_digit(pair[0]).ok_or_else(|| {
-            StoreError::Corrupt("manifest digest contains a non-hex character".to_owned())
-        })?;
-        let low = hex_digit(pair[1]).ok_or_else(|| {
-            StoreError::Corrupt("manifest digest contains a non-hex character".to_owned())
-        })?;
-        output[index] = (high << 4) | low;
-    }
-    Ok(output)
-}
-
-fn hex_digit(value: u8) -> Option<u8> {
-    match value {
-        b'0'..=b'9' => Some(value - b'0'),
-        b'a'..=b'f' => Some(value - b'a' + 10),
-        b'A'..=b'F' => Some(value - b'A' + 10),
-        _ => None,
-    }
 }
 
 fn manifest_key(snapshot_id: &str) -> Vec<u8> {

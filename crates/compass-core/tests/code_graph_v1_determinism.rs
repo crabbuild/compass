@@ -8,13 +8,17 @@ use compass_core::{
     build_local_graph,
 };
 use compass_files::{Cache, CacheKind, CacheOptions};
-use compass_graph::{GraphSnapshotReader, canonical_graph_json};
+use compass_graph::{
+    GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotReader, SnapshotSelector, canonical_graph_json,
+};
 use compass_languages::Extraction;
 use compass_model::code_graph::{
     EdgeKind, GraphDocument, NodeDetails, NodeKind, NodeRole, RouteStage,
 };
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, ResolutionState};
-use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
+use compass_store::{
+    STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef, local_sqlite_store_path,
+};
 use sha2::{Digest, Sha256};
 
 const SOURCE: &str = r#"
@@ -170,24 +174,31 @@ fn build_publishes_a_reopenable_store_snapshot_matching_graph_json() -> Result<(
     options.max_workers = Some(2);
     let result = build_local_graph(&options)?;
     let graph_path = result.output_dir.join("graph.json");
-    let graph_bytes = fs::read(&graph_path)?;
     let graph = GraphDocument::load(&graph_path)?;
-    let store = SqliteStore::open_read_only(result.output_dir.join(STORE_FILE_NAME))?;
-    let (manifest, store_bytes) = store.read_snapshot()?;
+    let store_path = local_sqlite_store_path(&graph_path);
+    let store = SqliteStore::open_read_only(&store_path)?;
     let reference: StoreRef =
         serde_json::from_slice(&fs::read(result.output_dir.join(STORE_REF_FILE_NAME))?)?;
 
-    assert_eq!(store_bytes, graph_bytes);
-    assert_eq!(manifest.node_count, graph.nodes.len() as u64);
-    assert_eq!(manifest.edge_count, graph.links.len() as u64);
-    assert_eq!(store.validate_snapshot()?.snapshot_id, manifest.snapshot_id);
-    assert_eq!(reference, store.snapshot_reference()?);
+    assert_ne!(store_path, result.output_dir.join(STORE_FILE_NAME));
+    assert!(!result.output_dir.join(STORE_FILE_NAME).exists());
+    assert!(store.read_snapshot().is_err());
+    assert_eq!(
+        reference,
+        store.graph_snapshot_reference_for(&reference.snapshot_id, &reference.manifest_digest,)?
+    );
     let retention = store
         .retention_metadata()?
         .ok_or("missing retention metadata")?;
     assert_eq!(retention.active_manifest_digest, reference.manifest_digest);
-    let reader =
-        GraphSnapshotReader::open_active(&store)?.ok_or("missing active graph snapshot")?;
+    let reader = GraphSnapshotReader::open_selector(
+        &store,
+        SnapshotSelector {
+            schema: GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1.to_owned(),
+            snapshot_id: reference.snapshot_id.clone(),
+            manifest_digest: reference.manifest_digest.clone(),
+        },
+    )?;
     assert_eq!(reader.export_json_bytes()?, canonical_graph_json(&graph)?);
     assert_eq!(reference.snapshot_id, reader.selector().snapshot_id);
     assert_eq!(reference.manifest_digest, reader.selector().manifest_digest);

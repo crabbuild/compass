@@ -8,7 +8,9 @@ use compass_files::{BuildGuard, ProjectConfig};
 use compass_graph::{GraphSnapshotReader, canonical_graph_json};
 use compass_model::GraphDocument;
 use compass_model::code_graph::GraphDocument as CodeGraphDocument;
-use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
+use compass_store::{
+    STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef, local_sqlite_store_path,
+};
 use serde_json::Value;
 
 #[test]
@@ -70,7 +72,8 @@ fn sqlite_store_option_publishes_a_durable_snapshot_alongside_json() -> Result<(
     let output_root = root.path().join("compass-out");
     let active = BuildGuard::resolve_active_directory(&output_root)?;
     let graph_path = active.join("graph.json");
-    let store = SqliteStore::open_read_only(active.join(STORE_FILE_NAME))?;
+    let store_path = local_sqlite_store_path(&graph_path);
+    let store = SqliteStore::open_read_only(&store_path)?;
     let graph = CodeGraphDocument::load(&graph_path)?;
     let reader = GraphSnapshotReader::open_active(&store)?.ok_or("missing active snapshot")?;
     assert_eq!(reader.export_json_bytes()?, canonical_graph_json(&graph)?);
@@ -91,7 +94,8 @@ fn sqlite_store_option_publishes_a_durable_snapshot_alongside_json() -> Result<(
     );
     let active = BuildGuard::resolve_active_directory(&output_root)?;
     assert!(active.join("graph.json").is_file());
-    assert!(active.join(STORE_FILE_NAME).is_file());
+    assert!(!active.join(STORE_FILE_NAME).exists());
+    assert!(store_path.is_file());
     assert!(active.join(STORE_REF_FILE_NAME).is_file());
     assert!(!active.join(".compass-build-incomplete").exists());
     Ok(())
@@ -131,7 +135,8 @@ fn default_json_build_replaces_an_opted_in_store_generation() -> Result<(), Box<
     assert!(sqlite.status.success());
     let output = root.path().join("compass-out");
     let active = BuildGuard::resolve_active_directory(&output)?;
-    assert!(active.join(STORE_FILE_NAME).is_file());
+    assert!(!active.join(STORE_FILE_NAME).exists());
+    assert!(local_sqlite_store_path(&active.join("graph.json")).is_file());
 
     let json = Command::new(env!("CARGO_BIN_EXE_compass"))
         .args(["update", ".", "--no-viz"])

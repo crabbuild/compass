@@ -22,6 +22,21 @@ pub struct BuildGuard {
 
 impl BuildGuard {
     pub fn begin(output_directory: &Path) -> Result<Self, FileError> {
+        Self::begin_excluding(output_directory, &[])
+    }
+
+    /// Start a generation without copying selected top-level artifacts from
+    /// the active generation.
+    ///
+    /// Large shared sidecars can live outside immutable generations and be
+    /// addressed by a small generation-local reference. Exclusions are exact
+    /// file names rather than patterns so callers cannot accidentally omit an
+    /// unrelated artifact family.
+    pub fn begin_excluding(
+        output_directory: &Path,
+        excluded_artifacts: &[&str],
+    ) -> Result<Self, FileError> {
+        validate_exclusions(excluded_artifacts)?;
         fs::create_dir_all(output_directory)
             .map_err(|source| io_error(output_directory, source))?;
         let generations = output_directory.join(GENERATIONS_DIRECTORY);
@@ -31,7 +46,7 @@ impl BuildGuard {
             .map_err(|source| io_error(&generation_directory, source))?;
 
         let active = Self::resolve_active_directory(output_directory)?;
-        copy_generation(&active, &generation_directory)?;
+        copy_generation(&active, &generation_directory, excluded_artifacts, true)?;
         let marker = generation_directory.join(INCOMPLETE_MARKER);
         write_text_atomic(&marker, "1")?;
         Ok(Self {
@@ -169,7 +184,25 @@ fn generation_name() -> String {
     format!("generation-{nanos}-{}-{sequence}", std::process::id())
 }
 
-fn copy_generation(source: &Path, destination: &Path) -> Result<(), FileError> {
+fn validate_exclusions(excluded_artifacts: &[&str]) -> Result<(), FileError> {
+    for artifact in excluded_artifacts {
+        let path = Path::new(artifact);
+        if artifact.is_empty()
+            || path.components().count() != 1
+            || !matches!(path.components().next(), Some(Component::Normal(_)))
+        {
+            return Err(FileError::InvalidGenerationArtifact(path.to_path_buf()));
+        }
+    }
+    Ok(())
+}
+
+fn copy_generation(
+    source: &Path,
+    destination: &Path,
+    excluded_artifacts: &[&str],
+    top_level: bool,
+) -> Result<(), FileError> {
     for entry in fs::read_dir(source).map_err(|error| io_error(source, error))? {
         let entry = entry.map_err(|error| io_error(source, error))?;
         let name = entry.file_name();
@@ -182,12 +215,19 @@ fn copy_generation(source: &Path, destination: &Path) -> Result<(), FileError> {
         {
             continue;
         }
+        if top_level
+            && excluded_artifacts
+                .iter()
+                .any(|excluded| name == std::ffi::OsStr::new(excluded))
+        {
+            continue;
+        }
         let from = entry.path();
         let to = destination.join(name);
         let file_type = entry.file_type().map_err(|error| io_error(&from, error))?;
         if file_type.is_dir() {
             fs::create_dir(&to).map_err(|error| io_error(&to, error))?;
-            copy_generation(&from, &to)?;
+            copy_generation(&from, &to, excluded_artifacts, false)?;
         } else if file_type.is_file() {
             fs::copy(&from, &to).map_err(|error| io_error(&to, error))?;
         }

@@ -11,10 +11,9 @@ use compass_files::{
 };
 use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
-    GraphSnapshotBuilder, GraphSnapshotReader, InventoryEvidence, PublicationOmissions,
-    PublicationOutcome, build_owned_with_tiebreaker as build_document, canonical_edge_kind,
-    canonical_graph_json, canonical_raw_edge_sites, cluster, dedupe_nodes, extraction_from_v1,
-    graph_insights, label_communities_by_hub,
+    GraphSnapshotBuilder, InventoryEvidence, PublicationOmissions, PublicationOutcome,
+    build_owned_with_tiebreaker as build_document, canonical_edge_kind, canonical_raw_edge_sites,
+    cluster, dedupe_nodes, extraction_from_v1, graph_insights, label_communities_by_hub,
     normalize_document_v1_with_evidence_best_effort_owned,
     normalize_document_v1_with_inventory_best_effort,
     normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
@@ -44,7 +43,10 @@ use compass_resolve::{
     apply_program_projection, collect_program_projection_sites, merge_decl_def_classes,
     resolve_prevalidated_owned_with_root,
 };
-use compass_store::{GRAPH_SCHEMA_V1, STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
+use compass_store::{
+    GRAPH_SCHEMA_V1, STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef,
+    local_sqlite_store_path,
+};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -66,6 +68,11 @@ use crate::raw_guard::enforce_incomplete_raw_guard;
 /// repositories with intentionally large generated sources.
 pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const SEMANTIC_MARKER_FILE: &str = ".compass_semantic_marker";
+const STORE_GENERATION_EXCLUSIONS: [&str; 3] = [
+    STORE_FILE_NAME,
+    "compass-store.sqlite3-wal",
+    "compass-store.sqlite3-shm",
+];
 
 #[derive(Clone, Debug)]
 pub struct BuildOptions {
@@ -473,7 +480,7 @@ fn build_graph_inner(
         source,
     })?;
     let prior_build_complete = BuildGuard::ensure_complete(&output_container).is_ok();
-    let guard = BuildGuard::begin(&output_container)?;
+    let guard = BuildGuard::begin_excluding(&output_container, &STORE_GENERATION_EXCLUSIONS)?;
     let output_dir = guard.staging_directory().to_path_buf();
     if !options.program_analysis {
         remove_if_exists(&output_dir.join("program.json"))?;
@@ -1913,7 +1920,6 @@ fn publish_build_state(
     }
     let mut required = vec![output_dir.join(OUTPUT_STATS_FILE)];
     if publish_store {
-        required.push(output_dir.join(STORE_FILE_NAME));
         required.push(output_dir.join(STORE_REF_FILE_NAME));
     }
     match options.purpose {
@@ -1983,7 +1989,7 @@ fn commit_generation(
     }
     let mut artifacts = vec!["graph.json", "manifest.json", BUILD_STATE_FILE];
     if publish_store {
-        artifacts.extend([STORE_FILE_NAME, STORE_REF_FILE_NAME]);
+        artifacts.push(STORE_REF_FILE_NAME);
     }
     if guard.staging_directory().join("program.json").is_file() {
         artifacts.push("program.json");
@@ -1992,16 +1998,11 @@ fn commit_generation(
     Ok(BuildGuard::resolve_active_directory(output_container)?)
 }
 
-/// Ensure every committed generation has a validated, queryable store snapshot
-/// whose payload is byte-identical to the published graph JSON. This is kept at
-/// the publication boundary so fast paths and incremental paths cannot bypass
-/// the store artifact.
+/// Ensure every committed generation has a validated, queryable immutable
+/// snapshot in the output root's shared store. The generation publishes only a
+/// digest-bound selector beside the permanent `graph.json` artifact.
 fn ensure_store_snapshot(output_dir: &Path) -> Result<(), CoreError> {
     let graph_path = output_dir.join("graph.json");
-    let graph_bytes = fs::read(&graph_path).map_err(|source| compass_files::FileError::Io {
-        path: graph_path.clone(),
-        source,
-    })?;
     let graph = V1GraphDocument::load(&graph_path)?;
     if graph.graph.schema != GRAPH_SCHEMA_V1 {
         return Err(CoreError::InvalidBuildState(format!(
@@ -2009,59 +2010,31 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<(), CoreError> {
             graph.graph.schema
         )));
     }
-    let canonical_graph = canonical_graph_json(&graph)?;
-    let store_path = output_dir.join(STORE_FILE_NAME);
+    let store_path = local_sqlite_store_path(&graph_path);
     let store = SqliteStore::open(&store_path)?;
-    if !store.read_snapshot().is_ok_and(|(manifest, existing)| {
-        existing == graph_bytes
-            && manifest.node_count == graph.nodes.len() as u64
-            && manifest.edge_count == graph.links.len() as u64
-    }) {
-        store.publish_snapshot(
-            &graph_bytes,
-            GRAPH_SCHEMA_V1,
-            graph.nodes.len(),
-            graph.links.len(),
-        )?;
-    }
     let builder = GraphSnapshotBuilder::new();
-    let active = GraphSnapshotReader::open_active(&store)?;
-    let exported = match active {
-        Some(reader) => {
-            let exported = reader.export_json_bytes()?;
-            if exported == canonical_graph {
-                exported
-            } else {
-                let prepared = builder.prepare(&store, &graph)?;
-                let selector = builder.activate(&store, &prepared)?;
-                let reader = GraphSnapshotReader::open_selector(&store, selector)?;
-                reader.export_json_bytes()?
-            }
-        }
-        None => {
-            let prepared = builder.prepare(&store, &graph)?;
-            let selector = builder.activate(&store, &prepared)?;
-            let reader = GraphSnapshotReader::open_selector(&store, selector)?;
-            reader.export_json_bytes()?
-        }
-    };
-    if exported != canonical_graph {
+    let prepared = builder.prepare(&store, &graph)?;
+    if prepared.manifest.node_count != graph.nodes.len() as u64
+        || prepared.manifest.edge_count != graph.links.len() as u64
+    {
         return Err(CoreError::InvalidBuildState(
-            "SQLite graph snapshot does not match graph.json; rebuild the generation".to_owned(),
+            "SQLite graph snapshot identity does not match graph.json; rebuild the generation"
+                .to_owned(),
         ));
     }
-    store.validate_snapshot()?;
+    let selector = builder.activate(&store, &prepared)?;
+    let reference =
+        store.graph_snapshot_reference_for(&selector.snapshot_id, &selector.manifest_digest)?;
     store.checkpoint()?;
-    let reference = write_store_ref(output_dir, &store)?;
+    write_store_ref(output_dir, &reference)?;
     store.record_retention_metadata(&reference, compass_store::MAX_SCAN_ITEMS)?;
     store.checkpoint()?;
     Ok(())
 }
 
-fn write_store_ref(output_dir: &Path, store: &SqliteStore) -> Result<StoreRef, CoreError> {
-    let reference = store.snapshot_reference()?;
+fn write_store_ref(output_dir: &Path, reference: &StoreRef) -> Result<(), CoreError> {
     compass_files::write_json_atomic(output_dir.join(STORE_REF_FILE_NAME), &reference, false)?;
-    Ok(reference)
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -3978,7 +3951,7 @@ fn update_artifacts_complete(options: &BuildOptions, output_dir: &Path) -> bool 
         GRAPH_OVERVIEW_FILE,
     ];
     if options.graph_storage.publishes_store() {
-        required.extend([STORE_FILE_NAME, STORE_REF_FILE_NAME]);
+        required.push(STORE_REF_FILE_NAME);
     }
     required
         .into_iter()
@@ -3990,7 +3963,8 @@ fn storage_artifacts_complete(graph_storage: GraphStorage, output_dir: &Path) ->
 }
 
 fn store_artifact_complete(output_dir: &Path) -> bool {
-    let path = output_dir.join(STORE_FILE_NAME);
+    let graph_path = output_dir.join("graph.json");
+    let path = local_sqlite_store_path(&graph_path);
     let reference_path = output_dir.join(STORE_REF_FILE_NAME);
     let Ok(reference_bytes) = fs::read(reference_path) else {
         return false;
@@ -4002,7 +3976,7 @@ fn store_artifact_complete(output_dir: &Path) -> bool {
         && path.is_file()
         && SqliteStore::open_read_only(path).is_ok_and(|store| {
             store
-                .snapshot_reference()
+                .graph_snapshot_reference_for(&reference.snapshot_id, &reference.manifest_digest)
                 .is_ok_and(|actual| actual == reference)
         })
 }

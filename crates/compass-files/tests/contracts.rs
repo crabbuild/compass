@@ -706,6 +706,24 @@ fn build_guard_publishes_one_complete_generation_at_a_time() -> Result<(), Box<d
     Ok(())
 }
 
+#[test]
+fn build_guard_can_exclude_a_large_generation_sidecar() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let first = BuildGuard::begin(directory.path())?;
+    fs::write(first.staging_directory().join("graph.json"), "graph-one")?;
+    fs::write(first.staging_directory().join("large.sqlite3"), "database")?;
+    first.commit_with_artifacts(&["graph.json", "large.sqlite3"])?;
+
+    let second = BuildGuard::begin_excluding(directory.path(), &["large.sqlite3"])?;
+    assert_eq!(
+        fs::read_to_string(second.staging_directory().join("graph.json"))?,
+        "graph-one"
+    );
+    assert!(!second.staging_directory().join("large.sqlite3").exists());
+    assert!(BuildGuard::begin_excluding(directory.path(), &["../unsafe"]).is_err());
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn atomic_write_preserves_destination_symlink() -> Result<(), Box<dyn Error>> {
