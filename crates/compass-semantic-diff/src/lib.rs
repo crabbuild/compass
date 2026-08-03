@@ -19,4 +19,4 @@ pub use model::{
 pub use verification::StaticTestEvidence;
 
 /// Included in derived-cache keys. Increment whenever comparison semantics change.
-pub const ENGINE_VERSION: u32 = 2;
+pub const ENGINE_VERSION: u32 = 1;

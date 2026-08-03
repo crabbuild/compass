@@ -63,7 +63,7 @@ pub(crate) fn load_graph_at(
     let cache_key = serde_json::json!({
         "schema": "compass.history.graph_query_key/1",
         "realization": preferred.id.to_string(),
-        "projection_version": 3,
+        "projection_version": 1,
     });
     let document = cache
         .read(DerivedCacheNamespace::Viewer, &cache_key, 256 * 1024 * 1024)
