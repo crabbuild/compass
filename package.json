@@ -3,12 +3,16 @@
   "private": true,
   "packageManager": "npm@11.8.0",
   "workspaces": [
+    "apps/*",
     "packages/*",
     "editors/*",
     "tests/*"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "dev:web": "npm run dev -w @compass/web",
+    "build:web": "npm run build -w @compass/web",
+    "typecheck:web": "npm run typecheck -w @compass/web",
     "build:viewer": "npm run build -w @compass/viewer",
     "build:vscode": "npm run build -w editors/vscode",
     "test:js": "npm run test --workspaces --if-present",

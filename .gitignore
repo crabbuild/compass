@@ -1,6 +1,10 @@
 /target/
 /dist/
 node_modules/
+apps/web/.next/
+apps/web/.source/
+apps/web/out/
+apps/web/tsconfig.tsbuildinfo
 /editors/vscode/dist/
 /packages/compass-viewer/dist/
 /editors/vscode/.vscode-test/

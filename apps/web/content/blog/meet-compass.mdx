@@ -1,0 +1,146 @@
+---
+title: "Meet Compass: a local map for the next change"
+description: "A practical launch guide to building a local graph, asking a bounded structural question, and following the answer back to source."
+author: Compass team
+date: 2026-08-04
+tags:
+  - launch
+  - local-first
+  - guide
+draft: false
+---
+
+Every codebase has a shape. The trouble is that the shape is usually spread across imports, calls, modules, generated artifacts, and the assumptions people carry in their heads.
+
+Compass is a local-first code graph for making that shape easier to inspect. It builds a deterministic snapshot from the repository on your machine, keeps source evidence attached to the relationships it finds, and gives you small surfaces for exploring, querying, and comparing the result.
+
+<LaunchMapDiagram />
+
+## Start with the question, not the index
+
+Compass is designed for the moment when a file tree stops answering the question in front of you:
+
+- Where is the center of this system?
+- What reaches the payment path I am changing?
+- Which edge explains why this module is involved?
+- What changed in the architecture between two revisions?
+
+The answer does not need to be a repository-wide context dump. A useful answer is a bounded path, a handful of relationships, and the source anchors that let you verify them.
+
+## Install and build your first snapshot
+
+The quickest way to try Compass is to keep the output next to the repository and make the command explicit. The default artifact root is `compass-out/`.
+
+```bash
+# install the release binary (see the install guide for platform options)
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/crabbuild/compass/releases/latest/download/install.sh | sh
+
+# from the repository you want to inspect
+compass init . --include src --yes
+compass update .
+ls compass-out/graph.json compass-out/manifest.json
+```
+
+`init` is optional. It gives a team a reviewable scope file; `update` can also operate over the eligible repository when no scope has been configured. A successful update publishes a coherent snapshot, so readers never have to guess whether they are looking at half-written output.
+
+<GuideSteps
+  items={[
+    { index: '01', title: 'Choose the boundary', text: 'Start with one repository and an explicit include/exclude rule. Smaller scope makes the first answer easier to read.' },
+    { index: '02', title: 'Build once', text: 'Run update and keep compass-out together. The manifest records what entered the snapshot.' },
+    { index: '03', title: 'Open the map', text: 'Use the viewer or VS Code surface to find an entry point, then hover a node to reveal its source anchor.' },
+    { index: '04', title: 'Ask one bounded question', text: 'Turn the question into CompassQL when you want the same answer in a script or review checklist.' },
+  ]}
+/>
+
+## Read the artifact before you read the picture
+
+`graph.json` is the portable contract behind the viewer, exports, and integrations. It is a directed, potentially multigraph node-link document. IDs are opaque and stable; attributes stay attached to the node or link that produced them.
+
+```json
+{
+  "directed": true,
+  "multigraph": true,
+  "graph": {},
+  "nodes": [
+    {
+      "id": "checkout::handler",
+      "label": "CheckoutHandler",
+      "file_type": "Class",
+      "source_file": "src/checkout.rs",
+      "source_location": "L17"
+    }
+  ],
+  "links": [
+    {
+      "source": "checkout::handler",
+      "target": "payments::charge",
+      "relation": "CALLS",
+      "confidence": "EXTRACTED",
+      "context": "call"
+    }
+  ]
+}
+```
+
+The picture is a useful index into this document, not a replacement for it. When a node looks interesting, keep its `id`, `source_file`, and `source_location` together. When an edge looks surprising, inspect `relation`, direction, and confidence before acting on it.
+
+## Ask one bounded question
+
+CompassQL is the read-only query surface for repeatable structural questions. The `--cql` flag is intentionally explicit, and every variable-length path has a finite upper bound.
+
+```bash
+compass query --cql \
+  'MATCH (caller:Function)-[:CALLS]->(target)
+   RETURN caller.id, target.id
+   ORDER BY caller.id
+   LIMIT 20' \
+  --format json
+```
+
+For an impact review, bind the starting symbol to a source file and keep the traversal small:
+
+```bash
+compass query --cql \
+  'MATCH (changed)-[:CALLS|IMPORTS_FROM*1..5]-(affected)
+   WHERE changed.source_file = "src/payments.rs"
+   RETURN affected.id, affected.source_file
+   LIMIT 100' \
+  --format table
+```
+
+The result is deliberately narrower than a context dump. You get columns and rows (or JSONL records), plus the same identity and relationship attributes that the viewer uses. A timeout or limit is an explicit diagnostic—not an empty answer.
+
+## Pick the right surface
+
+| Surface | Best for | What to carry forward |
+| --- | --- | --- |
+| Viewer | Orienting in an unfamiliar repository | Focused neighborhood, node details, source links |
+| VS Code | Editing while tracing a path | Cursor-rooted graph and hover evidence |
+| CompassQL | Repeatable questions and review scripts | Query text, bounds, structured rows |
+| CLI / CI | Checks at a branch or revision | Exit status, JSON/JSONL, immutable artifacts |
+| MCP | Supplying a small answer to another tool | One query, one bounded result, provenance |
+
+All of these surfaces read the same model: stable identity, directed relationships, anchors, and provenance. Changing the surface should change the interaction—not the meaning of the answer.
+
+## A useful first ten minutes
+
+1. Pick the function, module, or package at the center of the change.
+2. Find it in the viewer and note its exact source path.
+3. Follow one outgoing and one incoming edge; keep their direction in your notes.
+4. Run a bounded query for the next layer of callers or imports.
+5. Open one source anchor and confirm that the edge represents the code you expected.
+6. Save the query beside the change so the next reviewer can repeat it.
+
+This workflow scales because it starts from a hypothesis and leaves a small trail of evidence. It does not require a hosted index, a model credential, or a new dashboard for every repository.
+
+## Local by default, portable when useful
+
+Compass is a native Rust product. Structural extraction, graph construction, and CompassQL queries do not require Python, embeddings, a hosted vector database, or runtime grammar downloads. The graph can still travel when a team needs it: export JSON, GraphML, SVG, HTML, or a focused result for an integration.
+
+That boundary matters for more than privacy. Local execution keeps the starting point close to the source, makes repeatable commands easier to automate, and lets a team decide explicitly when an optional provider or network operation belongs in the workflow.
+
+## Make the next change easier to start
+
+The first release is centered on a simple promise: build a local map, ask a structural question, and follow the evidence back to the source. Start with one repository and one unanswered question. The useful part is not the size of the graph; it is the confidence you gain when the path is small enough to explain.
+
+[Install Compass](/install) or [read the product guide](/product) to keep going.

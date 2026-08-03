@@ -1,0 +1,504 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-heading: var(--font-space-grotesk);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-plex-mono);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-compass-indigo: var(--compass-indigo);
+  --color-compass-grid: var(--compass-grid);
+  --color-compass-blue: var(--compass-blue);
+  --color-compass-amber: var(--compass-amber);
+  --color-compass-canvas-deep: var(--compass-canvas-deep);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --compass-indigo: #5865f2;
+  --background: #f7f8ff;
+  --foreground: #17182a;
+  --card: #ffffff;
+  --card-foreground: #17182a;
+  --popover: #ffffff;
+  --popover-foreground: #17182a;
+  --primary: var(--compass-indigo);
+  --primary-foreground: #ffffff;
+  --secondary: #edf0ff;
+  --secondary-foreground: #272b55;
+  --muted: #eef0fb;
+  --muted-foreground: #596486;
+  --accent: #e2e6ff;
+  --accent-foreground: #22264c;
+  --destructive: #cf3f58;
+  --border: #d9def4;
+  --input: #d9def4;
+  --ring: #5865f2;
+  --radius: 0.75rem;
+  --compass-grid: color-mix(in srgb, var(--compass-indigo) 16%, transparent);
+  --compass-blue: var(--compass-indigo);
+  --compass-amber: #c89a3c;
+  --compass-ink-soft: #596486;
+  --compass-canvas-deep: #eef0ff;
+}
+
+.dark {
+  --background: #191a21;
+  --foreground: #f6f7ff;
+  --card: #21232d;
+  --card-foreground: #f6f7ff;
+  --popover: #242733;
+  --popover-foreground: #f6f7ff;
+  --primary: var(--compass-indigo);
+  --primary-foreground: #ffffff;
+  --secondary: #2b2e40;
+  --secondary-foreground: #e7e9ff;
+  --muted: #252836;
+  --muted-foreground: #adb4d2;
+  --accent: #34385b;
+  --accent-foreground: #f3f4ff;
+  --destructive: #f06a7a;
+  --border: #393d56;
+  --input: #393d56;
+  --ring: #858dff;
+  --compass-grid: color-mix(in srgb, var(--compass-indigo) 28%, transparent);
+  --compass-blue: #7b84ff;
+  --compass-amber: #e2b85d;
+  --compass-ink-soft: #b9bfdb;
+  --compass-canvas-deep: #121318;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply min-h-screen bg-background text-foreground antialiased font-sans;
+  }
+
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 25%, transparent);
+  }
+}
+
+@layer components {
+  .site-grid {
+    background-image:
+      linear-gradient(to right, var(--compass-grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--compass-grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+    mask-image: linear-gradient(to bottom, black 0%, black 68%, transparent 100%);
+  }
+
+  .eyebrow {
+    @apply font-mono text-[0.68rem] font-medium uppercase tracking-[0.18em] text-muted-foreground;
+  }
+
+  .section-rule {
+    @apply border-t border-border/80;
+  }
+
+  .hero-graph-line {
+    stroke: var(--compass-blue);
+    stroke-linecap: round;
+    stroke-width: 1.5;
+    opacity: 0.48;
+  }
+
+  .hero-graph-line.is-active {
+    stroke-width: 2.5;
+    opacity: 1;
+    stroke-dasharray: 10 8;
+    animation: compass-trace 4s linear infinite;
+  }
+
+  .hero-graph-node {
+    fill: var(--card);
+    stroke: var(--compass-blue);
+    stroke-width: 1.5;
+  }
+
+  .hero-graph-node.is-selected {
+    fill: var(--compass-blue);
+    stroke: var(--primary-foreground);
+    stroke-width: 2;
+  }
+
+  .hero-graph-label {
+    fill: var(--compass-ink-soft);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 9px;
+    letter-spacing: 0.02em;
+  }
+
+  .hero-graph-label.is-selected {
+    fill: var(--foreground);
+    font-weight: 600;
+  }
+
+  .hero-code-graph {
+    position: relative;
+    height: 100%;
+    min-height: 25rem;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 48% 48%, color-mix(in oklch, var(--compass-blue) 15%, transparent), transparent 56%),
+      linear-gradient(145deg, var(--compass-canvas-deep), var(--background));
+  }
+
+  .hero-code-graph::after {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    content: '';
+    opacity: 0.42;
+    background-image:
+      linear-gradient(to right, var(--compass-grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--compass-grid) 1px, transparent 1px);
+    background-size: 32px 32px;
+    mask-image: linear-gradient(to bottom, black, transparent 86%);
+  }
+
+  .hero-code-graph-chrome,
+  .hero-code-graph-footer {
+    position: absolute;
+    right: 0;
+    left: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 1rem;
+    color: var(--muted-foreground);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.64rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+
+  .hero-code-graph-chrome {
+    top: 0;
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
+  }
+
+  .hero-code-graph-footer {
+    bottom: 0;
+    border-top: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
+    letter-spacing: 0.05em;
+    text-transform: none;
+  }
+
+  .hero-code-graph-local,
+  .hero-code-graph-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+
+  .hero-code-graph-local i,
+  .hero-code-graph-status i {
+    display: inline-block;
+    width: 0.38rem;
+    height: 0.38rem;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: var(--compass-amber);
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--compass-amber) 12%, transparent);
+  }
+
+  .hero-code-graph-status i {
+    background: var(--compass-blue);
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--compass-blue) 12%, transparent);
+  }
+
+  .hero-code-graph-canvas {
+    position: absolute;
+    top: 3.2rem;
+    right: 0;
+    bottom: 3rem;
+    left: 0;
+    z-index: 1;
+  }
+
+  .hero-code-graph .compass-canvas {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .hero-code-graph .compass-canvas canvas {
+    outline: none;
+  }
+
+  /* The shared viewer owns the interaction model; these host styles keep its
+     VS Code-style hover cards legible inside the marketing graph shell. */
+  .hero-code-graph .compass-node-hover-card,
+  .hero-code-graph .compass-edge-hover-card {
+    position: absolute;
+    z-index: 4;
+    pointer-events: none;
+    overflow: hidden;
+    border: 1px solid color-mix(in oklch, var(--primary) 32%, var(--border));
+    border-radius: 0.75rem;
+    background: color-mix(in oklch, var(--card) 94%, transparent);
+    color: var(--muted-foreground);
+    box-shadow: 0 16px 40px -24px color-mix(in oklch, var(--foreground) 55%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    font-size: 0.68rem;
+    line-height: 1.35;
+  }
+
+  .hero-code-graph .compass-node-hover-card {
+    top: clamp(3.8rem, var(--compass-hover-y), calc(100% - 10rem));
+    left: clamp(0.75rem, var(--compass-hover-x), calc(100% - min(17rem, 88%) - 0.75rem));
+    display: grid;
+    width: max-content;
+    max-width: min(17rem, calc(100% - 1.5rem));
+    gap: 0.4rem;
+    padding: 0.75rem 0.85rem;
+  }
+
+  .hero-code-graph .compass-edge-hover-card {
+    top: clamp(3.8rem, var(--compass-hover-y), calc(100% - 13rem));
+    left: clamp(0.75rem, var(--compass-hover-x), calc(100% - min(22rem, 90%) - 0.75rem));
+    display: grid;
+    width: min(22rem, calc(100% - 1.5rem));
+    gap: 0.55rem;
+    padding: 0.75rem 0.85rem;
+  }
+
+  .hero-code-graph .compass-hover-heading,
+  .hero-code-graph .compass-edge-hover-heading,
+  .hero-code-graph .compass-edge-relation-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.55rem;
+  }
+
+  .hero-code-graph .compass-hover-heading strong,
+  .hero-code-graph .compass-edge-relation-row strong {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--foreground);
+    font-family: var(--font-heading), ui-sans-serif, sans-serif;
+    font-size: 0.76rem;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hero-code-graph .compass-hover-heading span,
+  .hero-code-graph .compass-edge-hover-eyebrow,
+  .hero-code-graph .compass-edge-confidence {
+    color: var(--primary);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.56rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .hero-code-graph .compass-hover-source,
+  .hero-code-graph .compass-node-hover-card p,
+  .hero-code-graph .compass-node-hover-card code,
+  .hero-code-graph .compass-edge-metadata p {
+    margin: 0;
+  }
+
+  .hero-code-graph .compass-hover-source,
+  .hero-code-graph .compass-node-hover-card code,
+  .hero-code-graph .compass-edge-metadata code {
+    overflow: hidden;
+    color: var(--foreground);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.59rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hero-code-graph .compass-edge-hover-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--muted-foreground);
+  }
+
+  .hero-code-graph .compass-edge-hover-eyebrow svg {
+    width: 0.75rem;
+    height: 0.75rem;
+    color: var(--primary);
+  }
+
+  .hero-code-graph .compass-edge-confidence {
+    padding: 0.2rem 0.4rem;
+    border: 1px solid color-mix(in oklch, var(--primary) 26%, transparent);
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--primary) 10%, transparent);
+  }
+
+  .hero-code-graph .compass-edge-trace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.45rem;
+    background: color-mix(in oklch, var(--primary) 7%, transparent);
+  }
+
+  .hero-code-graph .compass-edge-trace strong {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--foreground);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.59rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hero-code-graph .compass-edge-trace strong:last-child {
+    text-align: right;
+  }
+
+  .hero-code-graph .compass-edge-trace > span {
+    display: grid;
+    width: 1.25rem;
+    height: 1.25rem;
+    place-items: center;
+    border: 1px solid color-mix(in oklch, var(--primary) 38%, transparent);
+    border-radius: 999px;
+    color: var(--primary);
+  }
+
+  .hero-code-graph .compass-edge-trace svg {
+    width: 0.7rem;
+    height: 0.7rem;
+  }
+
+  .hero-code-graph .compass-edge-metadata {
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .hero-code-graph .compass-edge-metadata p {
+    display: grid;
+    grid-template-columns: 3rem minmax(0, 1fr);
+    align-items: baseline;
+    gap: 0.45rem;
+  }
+
+  .hero-code-graph .compass-edge-metadata span {
+    color: var(--muted-foreground);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.54rem;
+    text-transform: uppercase;
+  }
+
+  .compass-ring {
+    fill: none;
+    stroke: var(--compass-amber);
+    stroke-width: 1;
+    stroke-dasharray: 2 9;
+    opacity: 0.8;
+    transform-origin: 50% 50%;
+    animation: compass-orbit 24s linear infinite;
+  }
+
+  .compass-crosshair {
+    stroke: var(--compass-amber);
+    stroke-width: 1;
+    opacity: 0.8;
+  }
+
+  .terminal-line::before {
+    content: '$';
+    margin-right: 0.65rem;
+    color: var(--compass-amber);
+  }
+
+  .pipeline-step {
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  }
+
+  @media (min-width: 640px) {
+    .pipeline-step:nth-child(odd) {
+      border-right: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+    }
+
+    .pipeline-step:nth-child(n + 3) {
+      border-bottom: 0;
+    }
+  }
+}
+
+@keyframes compass-trace {
+  to {
+    stroke-dashoffset: -36;
+  }
+}
+
+@keyframes compass-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .hero-graph-line.is-active,
+  .compass-ring {
+    animation: none;
+  }
+}
+
+/* Fumadocs uses these variables for its shell. Keep its documentation surface
+   on the same Compass tokens as the marketing pages. */
+:root {
+  --fd-background: var(--background);
+  --fd-foreground: var(--foreground);
+  --fd-muted: var(--muted);
+  --fd-muted-foreground: var(--muted-foreground);
+  --fd-border: var(--border);
+  --fd-primary: var(--primary);
+}
