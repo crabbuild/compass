@@ -63,7 +63,7 @@ pub(crate) fn load_graph_at(
     let cache_key = serde_json::json!({
         "schema": "compass.history.graph_query_key/1",
         "realization": preferred.id.to_string(),
-        "projection_version": 2,
+        "projection_version": 1,
     });
     let document = cache
         .read(DerivedCacheNamespace::Viewer, &cache_key, 256 * 1024 * 1024)
@@ -73,10 +73,11 @@ pub(crate) fn load_graph_at(
     let document = match document {
         Some(document) => document,
         None => {
-            let artifacts = history
-                .artifacts(&preferred.id)
+            let reader = history
+                .reader(&preferred.id)
                 .map_err(|error| error.to_string())?;
-            let document = artifacts.artifacts.document;
+            let document = compass_output::historical_graph_document(&reader)
+                .map_err(|error| error.to_string())?;
             if let Ok(value) = serde_json::to_value(&document)
                 && let Ok(bytes) = compass_history::canonical_json_bytes(&value)
             {
@@ -996,37 +997,6 @@ fn write_exact_diff<W: Write>(
     Ok(sink.counts)
 }
 
-#[derive(Default, serde::Serialize)]
-struct RecordChangeCounts {
-    added: u64,
-    removed: u64,
-    changed: u64,
-}
-
-#[derive(Default, serde::Serialize)]
-struct ChangeCounts {
-    nodes: RecordChangeCounts,
-    edges: RecordChangeCounts,
-    hyperedges: RecordChangeCounts,
-}
-
-impl ChangeSink for ChangeCounts {
-    fn change(&mut self, change: GraphChange) -> Result<(), HistoryError> {
-        let counts = match change.record {
-            compass_history::RecordKind::Node => &mut self.nodes,
-            compass_history::RecordKind::Edge => &mut self.edges,
-            compass_history::RecordKind::Hyperedge => &mut self.hyperedges,
-            _ => return Ok(()),
-        };
-        match change.change {
-            ChangeKind::Added => counts.added += 1,
-            ChangeKind::Removed => counts.removed += 1,
-            ChangeKind::Changed => counts.changed += 1,
-        }
-        Ok(())
-    }
-}
-
 fn execute_verify(repository: &Repository, args: &[String]) -> Result<String, CommandFailure> {
     let mut target = None;
     let mut format = "text";
@@ -1169,17 +1139,8 @@ fn execute_change_counts(
         .ok_or_else(|| runtime(format!("parent revision {parent} is not materialized")))?;
     let previous_reader = history.reader(&previous.id).map_err(runtime)?;
     let current_reader = history.reader(&current.id).map_err(runtime)?;
-    let mut counts = ChangeCounts::default();
-    previous_reader
-        .diff_records(
-            &current_reader,
-            &[
-                compass_history::RecordKind::Node,
-                compass_history::RecordKind::Edge,
-                compass_history::RecordKind::Hyperedge,
-            ],
-            &mut counts,
-        )
+    let counts = previous_reader
+        .structural_change_counts(&current_reader)
         .map_err(runtime)?;
     serde_json::to_string(&serde_json::json!({
         "schema": "compass.history.change_counts/1",

@@ -221,6 +221,39 @@ fn small_change_reuses_content_addressed_nodes() -> Result<(), Box<dyn std::erro
 }
 
 #[test]
+#[ignore = "performance evidence; run explicitly"]
+fn structural_diff_small_change_is_prolly_bounded() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("fixture.rs"), "pub struct Fixture;\n")?;
+    commit(directory.path(), "fixture")?;
+
+    let repository = Repository::discover(directory.path())?;
+    let history = HistoryStore::create(&repository)?;
+    let first = history.publish(request(&repository, false)?)?;
+    let second = history.publish(request(&repository, true)?)?;
+    let first_reader = history.reader(&first.id)?;
+    let second_reader = history.reader(&second.id)?;
+    let mut sink = CountingSink::default();
+    let started = Instant::now();
+    first_reader.structural_diff(&second_reader, &mut sink)?;
+    let elapsed = started.elapsed();
+
+    assert_eq!(sink.changes, 1);
+    assert_eq!(sink.peak_buffered_records, 1);
+    println!(
+        "structural_diff_latency={elapsed:?} changes={} peak_callback_buffer={}",
+        sink.changes, sink.peak_buffered_records
+    );
+    Ok(())
+}
+
+#[test]
 #[ignore = "performance evidence; requires COMPASS_HISTORY_PERF_ARTIFACTS"]
 fn real_artifact_publication_is_bounded() -> Result<(), Box<dyn std::error::Error>> {
     let artifacts_path = PathBuf::from(

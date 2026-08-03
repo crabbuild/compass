@@ -5,7 +5,11 @@ import type {
   GraphRecordEvidence,
   GraphViewModel
 } from "../contracts/graph";
-import { compareRecord } from "./recordDiff";
+import {
+  compareRecord,
+  compareStructuralRecord,
+  structuralRecordProjection
+} from "./recordDiff";
 
 export type GraphComparison = {
   addedNodes: number;
@@ -96,7 +100,7 @@ export function compareGraphs(
   const removedNodeIds = difference(parentNodes, currentNodes);
   const nodeEvidence = new Map(intersection(currentNodes, parentNodes).map((id) => [
     id,
-    compareRecord(parentNodes.get(id), currentNodes.get(id))
+    compareStructuralRecord(parentNodes.get(id), currentNodes.get(id), "node")
   ]));
   const changedNodeIds = [...nodeEvidence.entries()]
     .filter(([, evidence]) => evidence.fields.length > 0)
@@ -183,6 +187,241 @@ export function compareGraphs(
   };
 }
 
+/** Build an exact changed-subgraph when revision exports are community aggregates. */
+export function comparisonFromSemanticDiff(
+  report: unknown,
+  reference: GraphViewModel,
+  parent?: GraphViewModel
+): GraphComparison | undefined {
+  if (!isObject(report) || !isObject(report.graph_delta)) return undefined;
+  const delta = report.graph_delta;
+  const addedNodes = graphNodeDeltas(delta.added_nodes);
+  const removedNodes = graphNodeDeltas(delta.removed_nodes);
+  const changedNodes = graphNodeDeltas(delta.changed_nodes);
+  const addedEdges = graphEdgeDeltas(delta.added_edges);
+  const removedEdges = graphEdgeDeltas(delta.removed_edges);
+  const changedEdges = graphEdgeDeltas(delta.changed_edges);
+  if ([addedNodes, removedNodes, changedNodes, addedEdges, removedEdges, changedEdges]
+    .some((records) => records === undefined)) return undefined;
+
+  const displayNames = isObject(report.entity_display_names)
+    ? report.entity_display_names
+    : {};
+  const currentNodes = new Map(reference.nodes.map((node) => [node.id, node]));
+  const parentNodes = new Map((parent?.nodes ?? []).map((node) => [node.id, node]));
+  const nodes = new Map<string, GraphNode>();
+  const addDeltaNode = (
+    record: SemanticNodeDelta,
+    change: "added" | "removed" | "changed"
+  ): void => {
+    const before = parentNodes.get(record.id);
+    const after = currentNodes.get(record.id);
+    const base = (change === "removed" ? before : after) ?? before;
+    nodes.set(record.id, {
+      ...base,
+      id: record.id,
+      label: base?.label || record.label || stringField(displayNames, record.id) || record.id,
+      community: base?.community ?? 0,
+      ...(base?.kind ? {} : record.kind ? { kind: record.kind } : {}),
+      ...(base?.source ? {} : record.sourceFile ? { source: { file: record.sourceFile } } : {}),
+      change,
+      evidence: change === "added"
+        ? compareRecord(undefined, after)
+        : change === "removed"
+          ? compareRecord(before, undefined)
+          : semanticEvidence(before, after, record.changedFields)
+    });
+  };
+  addedNodes!.forEach((node) => addDeltaNode(node, "added"));
+  removedNodes!.forEach((node) => addDeltaNode(node, "removed"));
+  changedNodes!.forEach((node) => addDeltaNode(node, "changed"));
+
+  const edges: GraphEdge[] = [];
+  const currentEdgeIndexes = new Set<number>();
+  const parentEdgeIndexes = new Set<number>();
+  const takeEdge = (
+    candidates: GraphEdge[],
+    used: Set<number>,
+    record: SemanticEdgeDelta
+  ): GraphEdge | undefined => {
+    const matches = candidates
+      .map((edge, index) => ({ edge, index }))
+      .filter(({ edge, index }) => !used.has(index)
+        && edge.source === record.source
+        && edge.target === record.target
+        && edge.relation === record.relation)
+      .sort((left, right) => {
+        const leftFile = left.edge.relationshipSite?.file === record.sourceFile ? 0 : 1;
+        const rightFile = right.edge.relationshipSite?.file === record.sourceFile ? 0 : 1;
+        return leftFile - rightFile || left.edge.id.localeCompare(right.edge.id);
+      });
+    const match = matches[0];
+    if (match) used.add(match.index);
+    return match?.edge;
+  };
+  const addDeltaEdges = (
+    records: SemanticEdgeDelta[],
+    change: "added" | "removed" | "changed"
+  ): void => records.forEach((record, index) => {
+    const before = change === "added"
+      ? undefined
+      : takeEdge(parent?.edges ?? [], parentEdgeIndexes, record);
+    const after = change === "removed"
+      ? undefined
+      : takeEdge(reference.edges, currentEdgeIndexes, record);
+    const base = (change === "removed" ? before : after) ?? before;
+    for (const id of [record.source, record.target]) {
+      if (!nodes.has(id)) {
+        const context = currentNodes.get(id) ?? parentNodes.get(id);
+        nodes.set(id, {
+          ...context,
+          id,
+          label: context?.label || stringField(displayNames, id) || id,
+          community: context?.community ?? 0,
+          change: "unchanged"
+        });
+      }
+    }
+    edges.push({
+      ...base,
+      id: base?.id || record.key || `semantic-${change}-${index}-${record.source}-${record.target}`,
+      source: record.source,
+      target: record.target,
+      relation: record.relation,
+      ...(base?.relationshipSite
+        ? {}
+        : record.sourceFile ? { relationshipSite: { file: record.sourceFile } } : {}),
+      change,
+      evidence: change === "added"
+        ? compareRecord(undefined, after)
+        : change === "removed"
+          ? compareRecord(before, undefined)
+          : semanticEvidence(before, after, record.changedFields)
+    });
+  });
+  // Changed records consume their old/new occurrences first so exact evidence is retained for
+  // parallel edges before one-sided additions or removals claim a compatible rendered edge.
+  addDeltaEdges(changedEdges!, "changed");
+  addDeltaEdges(addedEdges!, "added");
+  addDeltaEdges(removedEdges!, "removed");
+  const orderedNodes = [...nodes.values()].sort((left, right) => left.id.localeCompare(right.id));
+  const orderedEdges = uniqueEdgeIds(edges.sort((left, right) => left.id.localeCompare(right.id)));
+  const communityIds = new Set(orderedNodes.map((node) => node.community));
+  const communities = [
+    ...reference.communities,
+    ...(parent?.communities ?? []).filter((community) =>
+      !reference.communities.some((candidate) => candidate.id === community.id))
+  ].filter((community) => communityIds.has(community.id));
+  if (communityIds.has(0) && !communities.some((community) => community.id === 0)) {
+    communities.push({ id: 0, label: "Changed subgraph", color: "#6688aa", hidden: false });
+  }
+  communities.sort((left, right) => left.id - right.id);
+  return {
+    addedNodes: addedNodes!.length,
+    removedNodes: removedNodes!.length,
+    changedNodes: changedNodes!.length,
+    addedEdges: addedEdges!.length,
+    removedEdges: removedEdges!.length,
+    changedEdges: changedEdges!.length,
+    graph: {
+      ...reference,
+      title: `Graph delta · ${reference.title}`,
+      stats: {
+        ...reference.stats,
+        nodes: orderedNodes.length,
+        edges: orderedEdges.length,
+        communities: communities.length,
+        aggregated: false
+      },
+      nodes: orderedNodes,
+      edges: orderedEdges,
+      communities,
+      hyperedges: []
+    }
+  };
+}
+
+type SemanticNodeDelta = {
+  id: string;
+  label: string;
+  kind: string;
+  sourceFile: string;
+  changedFields: string[];
+};
+
+type SemanticEdgeDelta = {
+  source: string;
+  target: string;
+  relation: string;
+  key: string;
+  sourceFile: string;
+  changedFields: string[];
+};
+
+function graphNodeDeltas(value: unknown): SemanticNodeDelta[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const records = value.map((item) => {
+    if (!isObject(item) || typeof item.id !== "string") return undefined;
+    return {
+      id: item.id,
+      label: stringField(item, "label"),
+      kind: stringField(item, "kind"),
+      sourceFile: stringField(item, "source_file"),
+      changedFields: stringArray(item.changed_fields)
+    };
+  });
+  return records.every((record) => record !== undefined)
+    ? records as SemanticNodeDelta[]
+    : undefined;
+}
+
+function graphEdgeDeltas(value: unknown): SemanticEdgeDelta[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const records = value.map((item) => {
+    if (!isObject(item)
+      || typeof item.source !== "string"
+      || typeof item.target !== "string"
+      || typeof item.relation !== "string") return undefined;
+    return {
+      source: item.source,
+      target: item.target,
+      relation: item.relation,
+      key: stringField(item, "key"),
+      sourceFile: stringField(item, "source_file"),
+      changedFields: stringArray(item.changed_fields)
+    };
+  });
+  return records.every((record) => record !== undefined)
+    ? records as SemanticEdgeDelta[]
+    : undefined;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringField(value: Record<string, unknown>, key: string): string {
+  return typeof value[key] === "string" ? value[key] : "";
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function semanticEvidence(
+  before: Record<string, unknown> | undefined,
+  after: Record<string, unknown> | undefined,
+  changedFields: string[]
+): GraphRecordEvidence {
+  const exact = compareRecord(before, after);
+  const exactFields = new Map(exact.fields.map((field) => [field.field, field]));
+  return {
+    ...(exact.before ? { before: exact.before } : {}),
+    ...(exact.after ? { after: exact.after } : {}),
+    fields: changedFields.map((field) => exactFields.get(field) ?? { field })
+  };
+}
+
 function difference<T>(left: ReadonlyMap<string, T>, right: ReadonlyMap<string, T>): string[] {
   return [...left.keys()].filter((id) => !right.has(id));
 }
@@ -232,9 +471,10 @@ function compareMatchedEdges(
   before: GraphEdge,
   after: GraphEdge
 ): GraphRecordEvidence {
-  return compareRecord(
+  return compareStructuralRecord(
     { ...before, id: after.id },
-    after
+    after,
+    "edge"
   );
 }
 
@@ -332,13 +572,11 @@ function pairEdgesByKey(
 }
 
 function edgeSemanticKey(edge: GraphEdge): string {
-  const record: Record<string, unknown> = { ...edge };
-  delete record.id;
-  return JSON.stringify(compareRecord(undefined, record).after);
+  return JSON.stringify(structuralRecordProjection(edge, "edge"));
 }
 
 function edgeEndpointKey(edge: GraphEdge): string {
-  return JSON.stringify([edge.source, edge.target]);
+  return JSON.stringify([edge.source, edge.target, edge.relation]);
 }
 
 function compareEdgeOrder(left: GraphEdge, right: GraphEdge): number {

@@ -257,6 +257,283 @@ fn diff_reports_topology_attribute_and_analysis_changes() -> Result<(), Box<dyn 
 }
 
 #[test]
+fn structural_counts_collapse_graph_wide_source_coordinate_churn()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_directory, repository) = repository()?;
+    let history = HistoryStore::create(&repository)?;
+    let nodes = |offset: usize| {
+        (0..256)
+            .map(|index| {
+                json!({
+                    "id": format!("node-{index:03}"),
+                    "label": format!("Node {index}"),
+                    "source_file": "src/service.rs",
+                    "source_location": format!("L{}", index + offset),
+                    "line_start": index + offset,
+                    "line_end": index + offset,
+                    "start_byte": index * 10 + offset,
+                    "end_byte": index * 10 + offset + 5,
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    let edges = |offset: usize| {
+        (0..255)
+            .map(|index| {
+                json!({
+                    "source": format!("node-{index:03}"),
+                    "target": format!("node-{:03}", index + 1),
+                    "relation": "calls",
+                    "confidence": "EXTRACTED",
+                    "source_file": "src/service.rs",
+                    "source_location": format!("L{}", index + offset),
+                    "start_byte": index * 10 + offset,
+                    "end_byte": index * 10 + offset + 5,
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    let old = history.publish(request('a', nodes(1), edges(1), Vec::new(), 1)?)?;
+    let new = history.publish(request('b', nodes(2), edges(2), Vec::new(), 1)?)?;
+    let old_reader = history.reader(&old.id)?;
+    let new_reader = history.reader(&new.id)?;
+
+    let mut exact = VecSink::default();
+    old_reader.diff_records(
+        &new_reader,
+        &[RecordKind::Node, RecordKind::Edge],
+        &mut exact,
+    )?;
+    assert_eq!(
+        exact
+            .0
+            .iter()
+            .filter(|change| change.record == RecordKind::Node)
+            .count(),
+        256
+    );
+    assert_eq!(
+        exact
+            .0
+            .iter()
+            .filter(|change| change.record == RecordKind::Edge)
+            .count(),
+        510
+    );
+
+    assert_eq!(
+        old_reader.structural_change_counts(&new_reader)?,
+        compass_history::StructuralChangeCounts::default()
+    );
+    let mut structural = VecSink::default();
+    old_reader.structural_diff(&new_reader, &mut structural)?;
+    assert!(structural.0.is_empty());
+    Ok(())
+}
+
+#[test]
+fn structural_counts_preserve_meaningful_node_edge_and_multiplicity_changes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_directory, repository) = repository()?;
+    let history = HistoryStore::create(&repository)?;
+    let old = history.publish(request(
+        'a',
+        vec![json!({"id":"a","label":"Old"}), json!({"id":"b"})],
+        vec![json!({
+            "source":"a",
+            "target":"b",
+            "relation":"calls",
+            "confidence":"INFERRED"
+        })],
+        Vec::new(),
+        1,
+    )?)?;
+    let new = history.publish(request(
+        'b',
+        vec![json!({"id":"a","label":"New"}), json!({"id":"b"})],
+        vec![
+            json!({
+                "source":"a",
+                "target":"b",
+                "relation":"calls",
+                "confidence":"EXTRACTED"
+            }),
+            json!({
+                "source":"a",
+                "target":"b",
+                "relation":"calls",
+                "confidence":"EXTRACTED",
+                "context":"second occurrence"
+            }),
+        ],
+        Vec::new(),
+        1,
+    )?)?;
+    let old_reader = history.reader(&old.id)?;
+    let new_reader = history.reader(&new.id)?;
+
+    let counts = old_reader.structural_change_counts(&new_reader)?;
+    assert_eq!(counts.nodes.changed, 1);
+    assert_eq!(counts.edges.changed, 1);
+    assert_eq!(counts.edges.added, 1);
+    assert_eq!(counts.edges.removed, 0);
+    Ok(())
+}
+
+#[test]
+fn structural_diff_pairs_every_parallel_anchor_identity_change()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_directory, repository) = repository()?;
+    let history = HistoryStore::create(&repository)?;
+    let edges = |confidence: &str, offset: u64| {
+        ["first", "second"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, context)| {
+                json!({
+                    "source": "a",
+                    "target": "b",
+                    "relation": "calls",
+                    "confidence": confidence,
+                    "context": context,
+                    "relationshipSite": {
+                        "file": "src/lib.rs",
+                        "startByte": offset + index as u64,
+                        "endByte": offset + index as u64 + 1
+                    }
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    let nodes = vec![json!({"id":"a"}), json!({"id":"b"})];
+    let old = history.publish(request(
+        'a',
+        nodes.clone(),
+        edges("INFERRED", 10),
+        Vec::new(),
+        1,
+    )?)?;
+    let new = history.publish(request('b', nodes, edges("EXTRACTED", 20), Vec::new(), 1)?)?;
+    let old_reader = history.reader(&old.id)?;
+    let new_reader = history.reader(&new.id)?;
+
+    let mut structural = VecSink::default();
+    old_reader.structural_diff(&new_reader, &mut structural)?;
+    assert_eq!(structural.0.len(), 2);
+    assert!(structural.0.iter().all(|change| {
+        change.record == RecordKind::Edge && change.change == ChangeKind::Changed
+    }));
+    assert!(structural.0.iter().all(|change| {
+        change.old.as_ref().and_then(|value| value.get("context"))
+            == change.new.as_ref().and_then(|value| value.get("context"))
+    }));
+    let counts = old_reader.structural_change_counts(&new_reader)?;
+    assert_eq!(counts.edges.added, 0);
+    assert_eq!(counts.edges.removed, 0);
+    assert_eq!(counts.edges.changed, 2);
+    Ok(())
+}
+
+#[test]
+fn structural_diff_preserves_explicit_edge_identity_replacement()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_directory, repository) = repository()?;
+    let history = HistoryStore::create(&repository)?;
+    let nodes = vec![json!({"id":"a"}), json!({"id":"b"})];
+    let old = history.publish(request(
+        'a',
+        nodes.clone(),
+        vec![json!({
+            "source":"a", "target":"b", "relation":"calls", "key":"stable-old"
+        })],
+        Vec::new(),
+        1,
+    )?)?;
+    let new = history.publish(request(
+        'b',
+        nodes,
+        vec![json!({
+            "source":"a", "target":"b", "relation":"calls", "key":"stable-new"
+        })],
+        Vec::new(),
+        1,
+    )?)?;
+    let old_reader = history.reader(&old.id)?;
+    let new_reader = history.reader(&new.id)?;
+
+    let mut structural = VecSink::default();
+    old_reader.structural_diff(&new_reader, &mut structural)?;
+    assert_eq!(structural.0.len(), 2);
+    assert_eq!(
+        structural
+            .0
+            .iter()
+            .filter(|change| change.change == ChangeKind::Added)
+            .count(),
+        1
+    );
+    assert_eq!(
+        structural
+            .0
+            .iter()
+            .filter(|change| change.change == ChangeKind::Removed)
+            .count(),
+        1
+    );
+    let counts = old_reader.structural_change_counts(&new_reader)?;
+    assert_eq!(counts.edges.added, 1);
+    assert_eq!(counts.edges.removed, 1);
+    assert_eq!(counts.edges.changed, 0);
+    Ok(())
+}
+
+#[test]
+fn structural_diff_treats_relation_as_topology() -> Result<(), Box<dyn std::error::Error>> {
+    let (_directory, repository) = repository()?;
+    let history = HistoryStore::create(&repository)?;
+    let nodes = vec![json!({"id":"a"}), json!({"id":"b"})];
+    let old = history.publish(request(
+        'a',
+        nodes.clone(),
+        vec![json!({"source":"a", "target":"b", "relation":"calls"})],
+        Vec::new(),
+        1,
+    )?)?;
+    let new = history.publish(request(
+        'b',
+        nodes,
+        vec![json!({"source":"a", "target":"b", "relation":"uses"})],
+        Vec::new(),
+        1,
+    )?)?;
+    let old_reader = history.reader(&old.id)?;
+    let new_reader = history.reader(&new.id)?;
+
+    let counts = old_reader.structural_change_counts(&new_reader)?;
+    assert_eq!(counts.edges.added, 1);
+    assert_eq!(counts.edges.removed, 1);
+    assert_eq!(counts.edges.changed, 0);
+    Ok(())
+}
+
+#[test]
+fn structural_counts_reject_different_build_profiles() -> Result<(), Box<dyn std::error::Error>> {
+    let (_directory, repository) = repository()?;
+    let history = HistoryStore::create(&repository)?;
+    let old = history.publish(request('a', vec![json!({"id":"a"})], vec![], vec![], 1)?)?;
+    let mut changed_profile = request('b', vec![json!({"id":"a"})], vec![], vec![], 1)?;
+    changed_profile
+        .profile
+        .insert("extractor_version", "different")?;
+    let new = history.publish(changed_profile)?;
+    let old_reader = history.reader(&old.id)?;
+    let new_reader = history.reader(&new.id)?;
+
+    assert!(old_reader.structural_change_counts(&new_reader).is_err());
+    Ok(())
+}
+
+#[test]
 fn identity_changes_are_remove_add_equal_roots_are_empty_and_sink_errors_stop()
 -> Result<(), Box<dyn std::error::Error>> {
     let (_directory, repository) = repository()?;

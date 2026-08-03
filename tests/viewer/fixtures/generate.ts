@@ -958,7 +958,21 @@ window.acquireVsCodeApi=()=>({postMessage(message){
           status:"modified",
           patch:"@@ -3,3 +3,3 @@ [package]\\n name = \\"compass\\"\\n-version = \\"3.1.6\\"\\n+version = \\"3.1.7\\"\\n edition = \\"2021\\"\\n"
         }],
-        findings:[{summary:"Fixture comparison"}]
+        findings:[{summary:"Fixture comparison"}],
+        graph_delta:{
+          added_nodes:[],
+          removed_nodes:[],
+          changed_nodes:[{
+            id:"run",
+            label:"run",
+            kind:"function",
+            source_file:"src/lib.rs",
+            changed_fields:["signature"]
+          }],
+          added_edges:[],
+          removed_edges:[],
+          changed_edges:[]
+        }
       }
     },"*"),0);
   } else if(message.type==="compareCommunity") {

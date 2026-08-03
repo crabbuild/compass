@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GraphViewModel } from "../contracts/graph";
-import { compareGraphs } from "./ComparisonOverlay";
+import { compareGraphs, comparisonFromSemanticDiff } from "./ComparisonOverlay";
 import { compareRecord, displayFieldValue } from "./recordDiff";
 
 function graph(
@@ -86,6 +86,89 @@ describe("compareGraphs", () => {
     expect(comparison.graph.stats).toMatchObject({ nodes: 0, edges: 0 });
   });
 
+  it("does not turn shifted source coordinates into graph-wide structural changes", () => {
+    const nodes = Array.from({ length: 256 }, (_, index) => ({
+      id: `node-${index}`,
+      label: `Node ${index}`,
+      community: index % 4,
+      source: {
+        file: "src/service.ts",
+        startLine: index + 1,
+        endLine: index + 1,
+        startByte: index * 10,
+        endByte: index * 10 + 5
+      }
+    }));
+    const edges = nodes.slice(1).map((node, index) => ({
+      id: `edge-${index}-node-${index}-${node.id}`,
+      source: `node-${index}`,
+      target: node.id,
+      relation: "calls",
+      relationshipSite: {
+        file: "src/service.ts",
+        startLine: index + 1,
+        endLine: index + 1,
+        startByte: index * 10,
+        endByte: index * 10 + 5
+      }
+    }));
+    const shiftedNodes = nodes.map((node) => ({
+      ...node,
+      source: {
+        ...node.source,
+        startLine: node.source.startLine + 1,
+        endLine: node.source.endLine + 1,
+        startByte: node.source.startByte + 1,
+        endByte: node.source.endByte + 1
+      }
+    }));
+    const shiftedEdges = edges.map((edge, index) => ({
+      ...edge,
+      id: `edge-${index}-shifted-${edge.source}-${edge.target}`,
+      relationshipSite: {
+        ...edge.relationshipSite,
+        startLine: edge.relationshipSite.startLine + 1,
+        endLine: edge.relationshipSite.endLine + 1,
+        startByte: edge.relationshipSite.startByte + 1,
+        endByte: edge.relationshipSite.endByte + 1
+      }
+    }));
+
+    const comparison = compareGraphs(graph(nodes, edges), graph(shiftedNodes, shiftedEdges));
+
+    expect(comparison).toMatchObject({
+      addedNodes: 0,
+      removedNodes: 0,
+      changedNodes: 0,
+      addedEdges: 0,
+      removedEdges: 0,
+      changedEdges: 0
+    });
+    expect(comparison.graph.nodes).toEqual([]);
+    expect(comparison.graph.edges).toEqual([]);
+  });
+
+  it("does not turn degree-derived node sizes into structural node changes", () => {
+    const parent = graph(
+      [
+        { id: "a", label: "A", community: 0, degree: 0, size: 10 },
+        { id: "b", label: "B", community: 0, degree: 0, size: 10 }
+      ],
+      []
+    );
+    const current = graph(
+      [
+        { id: "a", label: "A", community: 0, degree: 1, size: 40 },
+        { id: "b", label: "B", community: 0, degree: 1, size: 40 }
+      ],
+      [{ id: "edge-0-a-b", source: "a", target: "b", relation: "calls" }]
+    );
+
+    const comparison = compareGraphs(parent, current);
+
+    expect(comparison).toMatchObject({ changedNodes: 0, addedEdges: 1 });
+  });
+
   it("retains exact before and after fields without presentation metadata", () => {
     const parent = graph(
       [{
@@ -127,9 +210,12 @@ describe("compareGraphs", () => {
     const changedEdge = comparison.graph.edges[0];
 
     expect(changedNode?.evidence?.fields).toEqual([
-      { field: "signature", before: "old()", after: "new()" },
-      { field: "source.startLine", before: 2, after: 4 }
+      { field: "signature", before: "old()", after: "new()" }
     ]);
+    expect(changedNode?.evidence).toMatchObject({
+      before: { source: { file: "src/core.ts", startLine: 2 } },
+      after: { source: { file: "src/core.ts", startLine: 4 } }
+    });
     expect(changedNode?.evidence?.fields.map((field) => field.field))
       .not.toContain("color.background");
     expect(changedEdge?.evidence?.fields).toEqual([
@@ -189,7 +275,7 @@ describe("compareGraphs", () => {
     ]);
   });
 
-  it("retains field evidence when a shifted generated edge changes", () => {
+  it("treats a generated edge relation change as topology replacement", () => {
     const nodes = [
       { id: "a", label: "A", community: 0 },
       { id: "b", label: "B", community: 0 },
@@ -218,15 +304,11 @@ describe("compareGraphs", () => {
     const comparison = compareGraphs(parent, current);
 
     expect(comparison).toMatchObject({
-      addedEdges: 1,
-      removedEdges: 0,
-      changedEdges: 1
+      addedEdges: 2,
+      removedEdges: 1,
+      changedEdges: 0
     });
-    expect(comparison.graph.edges.find((edge) => edge.change === "changed")?.evidence?.fields)
-      .toEqual([
-        { field: "confidence", before: "inferred", after: "extracted" },
-        { field: "relation", before: "calls", after: "uses" }
-      ]);
+    expect(comparison.graph.edges.some((edge) => edge.change === "changed")).toBe(false);
   });
 
   it("keeps stable custom edge IDs authoritative when parallel records swap", () => {
@@ -283,6 +365,107 @@ describe("record diff presentation", () => {
     expect(displayFieldValue({ detail: "x".repeat(100) }, 32)).toEqual({
       text: expect.stringMatching(/…$/),
       truncated: true
+    });
+  });
+});
+
+describe("aggregated revision comparison", () => {
+  it("uses the semantic changed-subgraph instead of comparing unstable communities", () => {
+    const aggregate = graph(
+      [{ id: "community-7", label: "Renumbered cluster", community: 7, memberCount: 4000 }],
+      []
+    );
+    aggregate.stats.aggregated = true;
+    const comparison = comparisonFromSemanticDiff({
+      graph_delta: {
+        added_nodes: [],
+        removed_nodes: [],
+        changed_nodes: [{
+          id: "api::serve",
+          label: "serve",
+          kind: "function",
+          source_file: "src/api.rs",
+          changed_fields: ["signature"]
+        }],
+        added_edges: [{
+          source: "api::route",
+          target: "api::serve",
+          relation: "calls",
+          key: "route-to-serve",
+          source_file: "src/routes.rs",
+          changed_fields: []
+        }],
+        removed_edges: [],
+        changed_edges: []
+      },
+      entity_display_names: { "api::route": "route" }
+    }, aggregate);
+
+    expect(comparison).toMatchObject({
+      changedNodes: 1,
+      addedEdges: 1,
+      graph: { stats: { aggregated: false, nodes: 2, edges: 1 } }
+    });
+    expect(comparison?.graph.nodes.map((node) => [node.id, node.label, node.change])).toEqual([
+      ["api::route", "route", "unchanged"],
+      ["api::serve", "serve", "changed"]
+    ]);
+    expect(comparison?.graph.edges).toMatchObject([{
+      id: "route-to-serve",
+      source: "api::route",
+      target: "api::serve",
+      change: "added"
+    }]);
+  });
+
+  it("uses Rust graph deltas for exact views and retains rendered source evidence", () => {
+    const parent = graph(
+      [{
+        id: "api::serve",
+        label: "serve",
+        community: 0,
+        signature: "serve()",
+        source: { file: "src/api.rs", startLine: 10 }
+      }],
+      []
+    );
+    const current = graph(
+      [{
+        id: "api::serve",
+        label: "serve",
+        community: 0,
+        signature: "serve()",
+        source: { file: "src/api.rs", startLine: 11 }
+      }],
+      []
+    );
+    const comparison = comparisonFromSemanticDiff({
+      graph_delta: {
+        added_nodes: [],
+        removed_nodes: [],
+        changed_nodes: [{
+          id: "api::serve",
+          label: "serve",
+          kind: "function",
+          source_file: "src/api.rs",
+          changed_fields: ["implementation_hash"]
+        }],
+        added_edges: [],
+        removed_edges: [],
+        changed_edges: []
+      }
+    }, current, parent);
+
+    expect(comparison).toMatchObject({ changedNodes: 1 });
+    expect(comparison?.graph.nodes[0]).toMatchObject({
+      id: "api::serve",
+      change: "changed",
+      source: { file: "src/api.rs", startLine: 11 },
+      evidence: {
+        before: { source: { file: "src/api.rs", startLine: 10 } },
+        after: { source: { file: "src/api.rs", startLine: 11 } },
+        fields: [{ field: "implementation_hash" }]
+      }
     });
   });
 });

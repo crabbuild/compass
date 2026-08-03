@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Make versioned graph comparisons meaning-aware: source-coordinate shifts,
+  clustering/layout metadata, and anchor-derived edge identities no longer
+  appear as graph-wide structural changes. Historical queries now read only
+  sealed graph roots plus document metadata on a cold cache miss, while exact
+  record diffs remain lossless and profile compatibility remains mandatory.
 - Replace sticky graph-edge tooltips in the shared viewer and VS Code with a
   theme-aware relationship card that shows direction, confidence, evidence,
   and source location, with explicit cleanup on edge, canvas, drag, and zoom

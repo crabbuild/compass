@@ -1,8 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use compass_model::{EdgeRecord, NodeRecord};
 use prolly::decode_segments;
-use serde_json::Value;
+use serde::Deserialize;
+use serde_json::{Map, Value};
 
 use crate::{
     HistoryError, MAX_AUTHORITATIVE_BYTES, MAX_KEY_BYTES, MAX_RECORD_VALUE_BYTES,
@@ -11,6 +12,14 @@ use crate::{
 
 /// Receives the graph-only projection of a sealed realization.
 pub trait GraphRecordSink {
+    fn document_metadata(
+        &mut self,
+        directed: bool,
+        multigraph: bool,
+        graph: Map<String, Value>,
+        extras: BTreeMap<String, Value>,
+    ) -> Result<(), HistoryError>;
+
     fn node_attribute(
         &mut self,
         node_id: String,
@@ -29,6 +38,21 @@ impl RealizationReader<'_> {
     /// Scan only analysis, node, and edge roots for a historical graph view.
     pub fn scan_graph(&self, sink: &mut dyn GraphRecordSink) -> Result<(), HistoryError> {
         let mut total_bytes = 0_u64;
+        let metadata = self.published.version.metadata_root.to_tree();
+        let document_key = crate::artifacts::metadata_key(&[b"document"]);
+        let document_bytes = self.prolly.get(&metadata, &document_key)?.ok_or_else(|| {
+            HistoryError::InvalidArtifacts("missing document metadata".to_owned())
+        })?;
+        account(&document_key, &document_bytes, &mut total_bytes)?;
+        let document: GraphDocumentMetadata =
+            crate::artifacts::decode_typed(&document_bytes, "compass.metadata.document")?;
+        sink.document_metadata(
+            document.directed,
+            document.multigraph,
+            document.graph,
+            document.extras,
+        )?;
+
         let mut pending_analysis = HashSet::<String>::new();
         let analysis = self.published.version.analysis_root.to_tree();
         let mut analysis_count = 0_u64;
@@ -132,6 +156,14 @@ impl RealizationReader<'_> {
         }
         require_count("edges", self.published.version.edge_count, edge_count)
     }
+}
+
+#[derive(Deserialize)]
+struct GraphDocumentMetadata {
+    directed: bool,
+    multigraph: bool,
+    graph: Map<String, Value>,
+    extras: BTreeMap<String, Value>,
 }
 
 fn account(key: &[u8], value: &[u8], total: &mut u64) -> Result<(), HistoryError> {
