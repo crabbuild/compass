@@ -150,12 +150,14 @@ rows = list(csv.DictReader(metrics.open(encoding="utf-8")))
 for row in rows:
     assert row["canonical_json_equal"] == "True", row
     assert row["compassql_equal"] == "True", row
-    assert row["gc_executed"] == "False", row
-    assert row["gc_supported"] == "False", row
+    assert row["gc_executed"] == "True", row
+    assert row["gc_supported"] == "True", row
 
 reports = {}
 for path in (output / "store").glob("*.json"):
     report = json.loads(path.read_text(encoding="utf-8"))
+    assert report["gc"]["deletedEntries"] > 0, path
+    assert report["gc"]["retainedManifests"] == 1, path
     reports.setdefault(report["nodes"], {})[report["adapter"]] = report
 for nodes, engines in reports.items():
     assert set(engines) == {"sqlite", "redb"}, (nodes, engines)
@@ -189,7 +191,7 @@ summary = {
 with (output / "release-summary.md").open("w", encoding="utf-8") as stream:
     stream.write("# Compass Store release qualification\n\n")
     stream.write(f"Commit: `{commit}`\n\n")
-    stream.write("Store adapters produced byte-identical graph digests, snapshot IDs, and manifest digests for every requested size. Both typed search and CompassQL differential checks passed. Raw observations are in `store/metrics.csv`; CLI build/query observations are in `cli/*.metrics`.\n")
+    stream.write("Store adapters produced byte-identical graph digests, snapshot IDs, and manifest digests for every requested size. Typed search, CompassQL differential checks, and bounded snapshot garbage collection passed. Raw observations are in `store/metrics.csv`; CLI build/query observations are in `cli/*.metrics`.\n")
 PY
 
 echo "Compass Store release qualification written to $output_dir"
