@@ -7,6 +7,7 @@
 //! reconstructed from these records for export and differential testing.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
 
 use compass_model::code_graph::{
     CODE_GRAPH_SCHEMA_V1, EdgeRecord, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
@@ -33,6 +34,8 @@ pub const GRAPH_SNAPSHOT_MAX_ITEMS: usize = 5_000_000;
 pub const GRAPH_SNAPSHOT_MAX_FANOUT: usize = 32;
 pub const GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES: usize = 128;
 const GRAPH_SNAPSHOT_LEAF_OVERHEAD_BYTES: usize = 512;
+const TREE_ZSTD_MAGIC: &[u8; 5] = b"CSTZ1";
+const TREE_ZSTD_HEADER_BYTES: usize = TREE_ZSTD_MAGIC.len() + std::mem::size_of::<u32>();
 
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
@@ -2021,7 +2024,25 @@ fn encode_json<T: Serialize>(value: &T) -> Result<Vec<u8>, SnapshotError> {
 }
 
 fn encode_tree_object(value: &TreeObject) -> Result<Vec<u8>, SnapshotError> {
-    rmp_serde::to_vec_named(value).map_err(|error| SnapshotError::Encode(error.to_string()))
+    let raw =
+        rmp_serde::to_vec_named(value).map_err(|error| SnapshotError::Encode(error.to_string()))?;
+    if raw.len() > MAX_VALUE_BYTES {
+        return Err(SnapshotError::Limit(
+            "uncompressed tree object exceeds the store value limit".to_owned(),
+        ));
+    }
+    let compressed = zstd::stream::encode_all(raw.as_slice(), 1)
+        .map_err(|error| SnapshotError::Encode(format!("tree compression failed: {error}")))?;
+    if compressed.len().saturating_add(TREE_ZSTD_HEADER_BYTES) >= raw.len() {
+        return Ok(raw);
+    }
+    let raw_len = u32::try_from(raw.len())
+        .map_err(|_| SnapshotError::Limit("tree object length does not fit u32".to_owned()))?;
+    let mut encoded = Vec::with_capacity(TREE_ZSTD_HEADER_BYTES.saturating_add(compressed.len()));
+    encoded.extend_from_slice(TREE_ZSTD_MAGIC);
+    encoded.extend_from_slice(&raw_len.to_be_bytes());
+    encoded.extend_from_slice(&compressed);
+    Ok(encoded)
 }
 
 fn decode_json<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, SnapshotError> {
@@ -2029,6 +2050,41 @@ fn decode_json<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, Snapshot
 }
 
 fn decode_tree_object(bytes: &[u8]) -> Result<TreeObject, SnapshotError> {
+    let mut decoded;
+    let bytes = if bytes.starts_with(TREE_ZSTD_MAGIC) {
+        let length_bytes = bytes
+            .get(TREE_ZSTD_MAGIC.len()..TREE_ZSTD_HEADER_BYTES)
+            .and_then(|value| <[u8; 4]>::try_from(value).ok())
+            .ok_or_else(|| {
+                SnapshotError::Decode("compressed tree header is truncated".to_owned())
+            })?;
+        let expected = usize::try_from(u32::from_be_bytes(length_bytes))
+            .map_err(|_| SnapshotError::Decode("compressed tree length is invalid".to_owned()))?;
+        if expected == 0 || expected > MAX_VALUE_BYTES {
+            return Err(SnapshotError::Decode(
+                "compressed tree length exceeds the bounded object limit".to_owned(),
+            ));
+        }
+        let payload = bytes.get(TREE_ZSTD_HEADER_BYTES..).ok_or_else(|| {
+            SnapshotError::Decode("compressed tree payload is missing".to_owned())
+        })?;
+        let decoder = zstd::stream::read::Decoder::new(payload).map_err(|error| {
+            SnapshotError::Decode(format!("tree decompression failed: {error}"))
+        })?;
+        let mut limited = decoder.take(expected.saturating_add(1) as u64);
+        decoded = Vec::with_capacity(expected);
+        limited.read_to_end(&mut decoded).map_err(|error| {
+            SnapshotError::Decode(format!("tree decompression failed: {error}"))
+        })?;
+        if decoded.len() != expected {
+            return Err(SnapshotError::Decode(
+                "compressed tree length does not match its header".to_owned(),
+            ));
+        }
+        decoded.as_slice()
+    } else {
+        bytes
+    };
     rmp_serde::from_slice(bytes).or_else(|message_pack_error| {
         serde_json::from_slice(bytes).map_err(|json_error| {
             SnapshotError::Decode(format!(
@@ -2120,6 +2176,18 @@ mod tests {
 
         assert_eq!(decode_tree_object(&encode_tree_object(&object)?)?, object);
         assert_eq!(decode_tree_object(&encode_json(&object)?)?, object);
+
+        let compressible = TreeObject::Leaf {
+            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+            index: IndexKind::Nodes,
+            entries: vec![TreeEntry {
+                key: encode_graph_index_key(IndexKind::Nodes, &[b"compressible"])?,
+                value: vec![b'x'; 32 * 1024],
+            }],
+        };
+        let encoded = encode_tree_object(&compressible)?;
+        assert!(encoded.starts_with(TREE_ZSTD_MAGIC));
+        assert_eq!(decode_tree_object(&encoded)?, compressible);
         Ok(())
     }
 }
