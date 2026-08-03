@@ -66,8 +66,8 @@ export default function HomePage() {
     <>
       <section className="relative isolate overflow-hidden border-b border-border/70">
         <div className="site-grid pointer-events-none absolute inset-0 -z-10 opacity-70" aria-hidden="true" />
-        <div className="mx-auto grid max-w-7xl grid-cols-[minmax(0,1fr)] items-center gap-12 px-5 pb-20 pt-16 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16 lg:px-8 lg:pb-28 lg:pt-24">
-          <div className="flex flex-col items-start">
+        <div className="mx-auto grid max-w-7xl grid-cols-[minmax(0,1fr)] items-center gap-12 px-5 pb-20 pt-16 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-16 lg:px-8 lg:pb-28 lg:pt-24">
+          <div className="flex min-w-0 w-full flex-col items-start">
             <Badge className="gap-2 rounded-full px-3 py-1 font-mono text-[0.68rem] uppercase tracking-[0.14em]" variant="outline">
               <span className="size-1.5 rounded-full bg-compass-amber" />
               Native code intelligence
