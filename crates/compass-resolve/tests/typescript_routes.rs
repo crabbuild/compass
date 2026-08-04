@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -9,6 +9,7 @@ use compass_languages::{
 };
 use compass_model::provenance::ResolutionState;
 use compass_resolve::frameworks::{RouteStageRole, resolve_and_publish_framework_routes};
+use tempfile::tempdir;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -630,5 +631,114 @@ fn repository_file_routes_require_matching_project_dependencies()
         0,
         "an unrelated framework dependency must not activate a SvelteKit file route"
     );
+    Ok(())
+}
+
+#[test]
+fn next_app_and_pages_routes_use_project_evidence_and_vite_publishes_config_fact()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempdir()?;
+    let root = directory.path();
+    let app_page = root.join("src/app/users/[id]/page.tsx");
+    let app_route = root.join("src/app/api/health/route.ts");
+    let pages_api = root.join("pages/api/users.ts");
+    let vite_config = root.join("vite.config.ts");
+    for path in [&app_page, &app_route, &pages_api, &vite_config] {
+        fs::create_dir_all(path.parent().ok_or("route has no parent")?)?;
+    }
+    fs::write(&app_page, "export default function User() { return null }")?;
+    fs::write(
+        &app_route,
+        "export async function GET() { return Response.json({}) }",
+    )?;
+    fs::write(
+        &pages_api,
+        "export default function handler(req, res) { res.end() }",
+    )?;
+    fs::write(
+        &vite_config,
+        "import react from '@vitejs/plugin-react'; import { defineConfig } from 'vite'; export default defineConfig({ plugins: [react()], resolve: { alias: { '~': './src' } } });",
+    )?;
+    fs::write(
+        root.join("package.json"),
+        r#"{"dependencies":{"next":"15.0.0","vite":"7.0.0"},"devDependencies":{"@vitejs/plugin-react":"4.0.0"}}"#,
+    )?;
+
+    let sources = vec![
+        app_page.clone(),
+        app_route.clone(),
+        pages_api.clone(),
+        vite_config.clone(),
+    ];
+    let evidence = ProjectEvidenceIndex::build(root, &sources);
+    assert!(
+        evidence
+            .evidence_for(&app_page)
+            .has_route_root("next", "src/app")
+    );
+    let mut engine = Engine::with_project_evidence(Arc::new(evidence));
+    let page = engine.extract(&app_page)?;
+    let route = engine.extract(&app_route)?;
+    let api = engine.extract(&pages_api)?;
+    let vite = engine.extract(&vite_config)?;
+    assert!(routes(&page).any(|route| {
+        route.framework == "next"
+            && route.operation == "PAGE"
+            && route.normalized_path == "/users/{id}"
+    }));
+    assert!(routes(&route).any(|route| {
+        route.framework == "next"
+            && route.operation == "GET"
+            && route.normalized_path == "/api/health"
+    }));
+    assert!(routes(&api).any(|route| {
+        route.framework == "next"
+            && route.operation == "ANY"
+            && route.normalized_path == "/api/users"
+    }));
+    assert!(vite.framework_facts.iter().any(|fact| {
+        matches!(
+            fact,
+            RawFrameworkFact::Domain(domain)
+                if domain.framework == "vite" && domain.kind == "framework_configuration"
+        )
+    }));
+    let vite_source = fs::read_to_string(&vite_config)?;
+    let mut sources = HashMap::new();
+    sources.insert(vite_config.to_string_lossy().into_owned(), vite_source);
+    let graph = compass_resolve::resolve(&[vite], &sources);
+    assert!(
+        graph.error.is_none(),
+        "Vite configuration resolution failed: {:?}",
+        graph.error
+    );
+    assert!(graph.nodes.iter().any(|node| {
+        node.string("symbol_kind") == "config_key"
+            && node.string("framework") == "vite"
+            && node.string("component_type") == "framework_configuration"
+    }));
+
+    let config_only = tempdir()?;
+    let config_page = config_only.path().join("src/app/page.tsx");
+    fs::create_dir_all(
+        config_page
+            .parent()
+            .ok_or("config-only page has no parent")?,
+    )?;
+    fs::write(
+        &config_page,
+        "export default function Home() { return null }",
+    )?;
+    fs::write(
+        config_only.path().join("next.config.mjs"),
+        "export default { rewrites() { return [] } }",
+    )?;
+    let config_evidence =
+        ProjectEvidenceIndex::build(config_only.path(), std::slice::from_ref(&config_page));
+    let config_extraction =
+        Engine::with_project_evidence(Arc::new(config_evidence)).extract(&config_page)?;
+    assert!(routes(&config_extraction).any(|route| {
+        route.framework == "next" && route.operation == "PAGE" && route.normalized_path == "/"
+    }));
     Ok(())
 }

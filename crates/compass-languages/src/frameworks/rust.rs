@@ -8,7 +8,20 @@ use super::evidence::{EvidenceKind, EvidenceSet};
 use super::text::{anchor, join_route_path, literal, normalize_route_path, text};
 use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
-pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrameworkFact> {
+pub(super) fn detect_axum(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrameworkFact> {
+    detect_selected(path, source, root, Some("axum"))
+}
+
+pub(super) fn detect_non_axum(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrameworkFact> {
+    detect_selected(path, source, root, Some("non-axum"))
+}
+
+fn detect_selected(
+    path: &Path,
+    source: &[u8],
+    root: Node<'_>,
+    selected: Option<&str>,
+) -> Vec<RawFrameworkFact> {
     let body = text(source);
     let evidence = EvidenceSet::new()
         .direct_if(
@@ -35,9 +48,11 @@ pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrame
             EvidenceKind::Macro,
             "rocket route attribute",
         );
-    let axum = evidence.activates("axum");
-    let actix = evidence.activates("actix");
-    let rocket = evidence.activates("rocket");
+    let axum = selected.is_none_or(|framework| framework == "axum") && evidence.activates("axum");
+    let actix = selected.is_none_or(|framework| framework == "actix" || framework == "non-axum")
+        && evidence.activates("actix");
+    let rocket = selected.is_none_or(|framework| framework == "rocket" || framework == "non-axum")
+        && evidence.activates("rocket");
     if !axum && !actix && !rocket {
         return Vec::new();
     }
@@ -98,6 +113,20 @@ pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrame
             rule: Some("rust-route-attribute".to_owned()),
             detail: Map::new(),
         }));
+    }
+    if let Some(selected) = selected {
+        facts.retain(|fact| {
+            let framework = match fact {
+                RawFrameworkFact::Route(route) => route.framework.as_str(),
+                RawFrameworkFact::Domain(domain) => domain.framework.as_str(),
+                RawFrameworkFact::Annotation(annotation) => annotation.framework.as_str(),
+            };
+            if selected == "non-axum" {
+                framework != "axum"
+            } else {
+                framework == selected
+            }
+        });
     }
     facts
 }

@@ -15,7 +15,7 @@ const HTTP_METHODS: &[&str] = &[
     "get", "post", "put", "patch", "delete", "options", "head", "all",
 ];
 
-pub(super) fn detect(
+pub(super) fn detect_express(
     path: &Path,
     source: &[u8],
     root: Node<'_>,
@@ -38,17 +38,43 @@ pub(super) fn detect(
     let mut facts = Vec::new();
     let receivers = express_receivers(root, source);
     let mounts = express_mounts(root, source, &receivers);
+    let evidence = EvidenceSet::new().direct_if(
+        !receivers.is_empty()
+            && (imports_module("express")
+                || source_has_express_require(root, source)
+                || body.contains("require(\"express\")")
+                || body.contains("require('express')")),
+        "express",
+        EvidenceKind::Receiver,
+        "express application/router",
+    );
+    if evidence.activates("express") {
+        collect_express_routes(root, source, path, &receivers, &mounts, &mut facts);
+    }
+    facts
+}
+
+pub(super) fn detect_non_express(
+    path: &Path,
+    source: &[u8],
+    root: Node<'_>,
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    if source.is_empty() {
+        return Vec::new();
+    }
+    let mut imports = Vec::new();
+    collect_import_aliases(root, source, &mut imports);
+    attach_import_aliases(path, source, root, extraction, &imports);
+    let imports_module = |expected: &str| {
+        imports.iter().any(|(_, _, module, _)| {
+            module == expected
+                || (expected.ends_with('/') && module.starts_with(expected))
+                || (expected == "react-router" && module.starts_with("react-router-"))
+        })
+    };
+    let mut facts = Vec::new();
     let evidence = EvidenceSet::new()
-        .direct_if(
-            !receivers.is_empty()
-                && (imports_module("express")
-                    || source_has_express_require(root, source)
-                    || body.contains("require(\"express\")")
-                    || body.contains("require('express')")),
-            "express",
-            EvidenceKind::Receiver,
-            "express application/router",
-        )
         .direct_if(
             imports_module("@nestjs/"),
             "nestjs",
@@ -67,9 +93,6 @@ pub(super) fn detect(
             EvidenceKind::Import,
             "vue-router",
         );
-    if evidence.activates("express") {
-        collect_express_routes(root, source, path, &receivers, &mounts, &mut facts);
-    }
     if evidence.activates("nestjs") {
         collect_nest_routes(root, source, path, &mut facts);
     }
