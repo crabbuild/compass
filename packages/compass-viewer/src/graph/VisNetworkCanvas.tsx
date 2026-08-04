@@ -10,7 +10,10 @@ import { DataSet, Network, type Edge, type Node, type Options } from "vis-networ
 import type { GraphNode, GraphViewModel } from "../contracts/graph";
 import type { GraphEdgeHover } from "./EdgeHoverCard";
 import type { GraphHover } from "./NodeHoverCard";
-import { bindGraphNetworkEvents } from "./networkEvents";
+import {
+  bindGraphNetworkEvents,
+  type GraphNetworkHandlers
+} from "./networkEvents";
 import type { GraphChangeType } from "./state";
 
 export type GraphCanvasHandle = {
@@ -18,10 +21,16 @@ export type GraphCanvasHandle = {
   reset(): void;
 };
 
+export type GraphCanvasPosition = {
+  x: number;
+  y: number;
+};
+
 type Props = {
   model: GraphViewModel;
   focusedNodeId: string | null;
   physicsRunning: boolean;
+  initialPositions?: ReadonlyMap<string, GraphCanvasPosition>;
   forceLabels: boolean;
   hiddenCommunities: ReadonlySet<number>;
   hiddenChanges: ReadonlySet<GraphChangeType>;
@@ -296,6 +305,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     model,
     focusedNodeId,
     physicsRunning,
+    initialPositions,
     forceLabels,
     hiddenCommunities,
     hiddenChanges,
@@ -311,6 +321,24 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     const networkRef = useRef<Network | null>(null);
     const physicsRunningRef = useRef(physicsRunning);
     physicsRunningRef.current = physicsRunning;
+    const eventHandlersRef = useRef<GraphNetworkHandlers>({
+      onFocus,
+      onOpenSource,
+      onOpenRelationshipSource,
+      onHover,
+      onHoverEdge,
+      onClear
+    });
+    eventHandlersRef.current = {
+      onFocus,
+      onOpenSource,
+      onOpenRelationshipSource,
+      onHover,
+      onHoverEdge,
+      onClear
+    };
+    const onStabilizedRef = useRef(onStabilized);
+    onStabilizedRef.current = onStabilized;
     const initialViewRef = useRef<{ position: { x: number; y: number }; scale: number } | null>(null);
     const themeRevision = useThemeRevision();
     const maxDegree = useMemo(() => {
@@ -395,6 +423,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       [comparisonMode, model.nodes]
     );
     const contrastBorder = useMemo(() => {
+      if (typeof document === "undefined") return undefined;
       const highContrast = document.body.classList.contains("vscode-high-contrast")
         || document.body.classList.contains("vscode-high-contrast-light");
       return highContrast
@@ -409,7 +438,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             ? 7 + 5 * Math.sqrt((node.degree ?? 1) / maxDegree)
             : 11 + 12 * Math.sqrt((node.degree ?? 1) / maxDegree)
           : baseSize;
-        const position = comparisonPositions.get(node.id);
+        const position = comparisonPositions.get(node.id) ?? initialPositions?.get(node.id);
         return {
           id: node.id,
           label: node.label,
@@ -439,6 +468,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       comparisonMode,
       comparisonPositions,
       communityColors,
+      initialPositions,
       maxDegree,
       model
     ]);
@@ -473,20 +503,28 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       if (!physicsRunningRef.current) network.stopSimulation();
       networkRef.current = network;
       bindGraphNetworkEvents(network, {
-        onFocus,
-        onOpenSource,
-        onOpenRelationshipSource,
-        onHover,
-        onHoverEdge,
-        onClear
+        onFocus: (nodeId) => eventHandlersRef.current.onFocus(nodeId),
+        onOpenSource: (nodeId) => eventHandlersRef.current.onOpenSource(nodeId),
+        onOpenRelationshipSource: (edgeId) => eventHandlersRef.current.onOpenRelationshipSource(edgeId),
+        onHover: (change) => eventHandlersRef.current.onHover(change),
+        onHoverEdge: (change) => eventHandlersRef.current.onHoverEdge(change),
+        onClear: () => eventHandlersRef.current.onClear()
       });
       network.once("stabilizationIterationsDone", () => {
         initialViewRef.current = {
           position: network.getViewPosition(),
           scale: network.getScale()
         };
-        onStabilized();
+        onStabilizedRef.current();
       });
+      if (!physicsRunningRef.current && initialPositions && initialPositions.size > 0) {
+        network.stopSimulation();
+        network.fit({ animation: false });
+        initialViewRef.current = {
+          position: network.getViewPosition(),
+          scale: network.getScale()
+        };
+      }
       return () => {
         network.destroy();
         networkRef.current = null;
@@ -494,14 +532,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     }, [
       edgeData,
       nodeData,
-      comparisonMode,
-      onClear,
-      onFocus,
-      onHover,
-      onHoverEdge,
-      onOpenSource,
-      onOpenRelationshipSource,
-      onStabilized
+      comparisonMode
     ]);
 
     useEffect(() => {

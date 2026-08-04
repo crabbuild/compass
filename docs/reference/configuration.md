@@ -4,16 +4,6 @@ Compass configuration comes from explicit command options, environment
 variables, provider registries, repository history configuration, and generated
 integration files. This page explains ownership and safe use.
 
-> **Who this reference is for:** users, operators, and integrators configuring
-> outputs, providers, history, databases, or assistant integrations.
->
-> **You will learn:** configuration sources, practical precedence, key
-> environment families, secret handling, and reproducibility rules.
->
-> **Prerequisites:** none.
->
-> **Reading time:** 10–12 minutes.
-
 ## Precedence rule
 
 For a specific command, use:
@@ -377,8 +367,8 @@ job metadata even if Compass's own history fingerprint already includes it.
 ## Related pages
 
 - [Command reference](commands.md)
-- [Security and privacy](../design/security-and-privacy.md)
-- [Semantic implementation](../implementation/semantic-pipeline.md)
+- [Operations guide](../guides/operations.md)
+- [Assistant setup](../guides/assistant-setup.md)
 - [Versioned history](../guides/versioned-history.md)
 
 **Next step:** replace implicit defaults in one automation workflow with

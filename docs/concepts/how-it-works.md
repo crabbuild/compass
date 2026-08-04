@@ -5,18 +5,6 @@ queryable knowledge graph. This page explains the complete flow first in plain
 language, then at the level needed to reason about correctness, performance,
 and extension points.
 
-> **Who this page is for:** evaluators, users who want to interpret results,
-> and contributors building a mental model of the system.
->
-> **You will learn:** what happens during discovery, extraction, resolution,
-> graph analysis, publication, and querying; which stages are deterministic;
-> and where optional semantic providers enter.
->
-> **Prerequisites:** none. Familiarity with functions, files, and imports is
-> helpful; graph-database experience is not required.
->
-> **Reading time:** 12–15 minutes.
-
 ![The Compass graph construction and query pipeline](../assets/diagrams/graph-pipeline.svg)
 
 ## The short version
@@ -390,8 +378,8 @@ documents for automation.
 
 - [Graph model](graph-model.md)
 - [Provenance and confidence](provenance.md)
-- [System architecture](../design/architecture.md)
-- [Extraction pipeline](../implementation/extraction-pipeline.md)
+- [Getting started](../getting-started.md)
+- [Command reference](../reference/commands.md)
 
 **Next step:** read [Graph model](graph-model.md) to interpret the entities,
 relationships, and attributes returned by Compass.

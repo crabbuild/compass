@@ -45,6 +45,7 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
     let mut class_name = None::<String>;
     let mut class_prefix = String::new();
     let mut pending_route = None::<String>;
+    let mut pending_action_route = None::<String>;
     let mut pending_http = Vec::<(String, String, usize, String)>::new();
     let mut facts = Vec::new();
     let mut offset = 0_usize;
@@ -52,7 +53,11 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
         if let Some(capture) = route_attribute.captures(line)
             && let Some(value) = capture.get(1)
         {
-            pending_route = Some(value.as_str().to_owned());
+            if class_name.is_some() {
+                pending_action_route = Some(value.as_str().to_owned());
+            } else {
+                pending_route = Some(value.as_str().to_owned());
+            }
         }
         for capture in http_attribute.captures_iter(line) {
             let Some(operation) = capture.get(1) else {
@@ -78,7 +83,7 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
             offset = offset.saturating_add(line.len());
             continue;
         }
-        if !pending_http.is_empty()
+        if (!pending_http.is_empty() || pending_action_route.is_some())
             && let (Some(class_name), Some(method_name)) = (
                 class_name.as_deref(),
                 method
@@ -87,23 +92,39 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
                     .map(|value| value.as_str()),
             )
         {
-            for (operation, action_path, anchor_offset, anchor_line) in pending_http.drain(..) {
-                let normalized_path = if class_prefix.is_empty() {
-                    normalize_route_path(&action_path)
+            let action_route = pending_action_route.take();
+            let pending_http = if pending_http.is_empty() {
+                vec![("ANY".to_owned(), String::new(), offset, line.to_owned())]
+            } else {
+                std::mem::take(&mut pending_http)
+            };
+            for (operation, action_path, anchor_offset, anchor_line) in pending_http {
+                let template = action_route.as_deref().unwrap_or(&action_path);
+                let expanded_action = template
+                    .replace("[controller]", class_name.trim_end_matches("Controller"))
+                    .replace("[action]", method_name);
+                let normalized_path = if let Some(absolute) = expanded_action.strip_prefix("~/") {
+                    normalize_route_path(absolute)
+                } else if expanded_action.starts_with('/') || class_prefix.is_empty() {
+                    normalize_route_path(&expanded_action)
                 } else {
-                    join_route_path(&class_prefix, &action_path)
+                    join_route_path(&class_prefix, &expanded_action)
                 };
                 facts.push(RawFrameworkFact::Route(RawRouteFact {
                     framework: "aspnet".to_owned(),
                     operation,
-                    raw_path: action_path,
+                    raw_path: template.to_owned(),
                     normalized_path,
                     declaring_scope: class_name.to_owned(),
                     anchor: line_anchor(path, source, anchor_offset, &anchor_line),
                     handler_reference: format!("{class_name}.{method_name}"),
                     middleware_references: Vec::new(),
                     origin: RawFrameworkOrigin::Ast,
-                    rule: Some("aspnet-http-attribute".to_owned()),
+                    rule: Some(if action_route.is_some() {
+                        "aspnet-action-route-attribute".to_owned()
+                    } else {
+                        "aspnet-http-attribute".to_owned()
+                    }),
                     detail: Map::new(),
                 }));
             }

@@ -6,7 +6,9 @@ use serde_json::{Map, Value};
 use tree_sitter::Node;
 
 use super::evidence::{EvidenceKind, EvidenceSet};
-use super::{RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
+use super::{
+    RawDomainFact, RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
+};
 
 #[derive(Clone, Debug)]
 struct Receiver {
@@ -18,6 +20,7 @@ pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrame
     let text = std::str::from_utf8(source).unwrap_or_default();
     let aliases = import_aliases(root, source);
     let receivers = receiver_declarations(root, source, &aliases);
+    let mounts = receiver_mounts(root, source, &receivers);
     let django_import = aliases.values().any(|target| {
         target.starts_with("django.urls.") || target.starts_with("django.conf.urls.")
     });
@@ -46,11 +49,16 @@ pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrame
             "fastapi application receiver",
         );
     let mut facts = Vec::new();
+    facts.extend(receiver_mount_facts(
+        root, source, path, &receivers, &aliases,
+    ));
     if evidence.activates("django") {
         collect_django_routes(root, source, path, &aliases, &mut facts);
     }
     if evidence.activates("flask") || evidence.activates("fastapi") {
-        collect_decorated_routes(root, source, path, &receivers, &aliases, &mut facts);
+        collect_decorated_routes(
+            root, source, path, &receivers, &mounts, &aliases, &mut facts,
+        );
     }
     facts
 }
@@ -70,8 +78,11 @@ fn collect_django_routes(
         let terminal = function.rsplit('.').next().unwrap_or(function);
         if matches!(terminal, "path" | "re_path" | "url")
             && let Some(arguments) = call_arguments(node, source)
-            && let Some(raw_path) = arguments.first().and_then(|value| string_literal(value))
-            && let Some(handler) = arguments.get(1)
+            && let Some(raw_path) = positional_argument(&arguments, 0)
+                .and_then(string_literal)
+                .or_else(|| keyword_string(&arguments, "route"))
+            && let Some(handler) =
+                positional_argument(&arguments, 1).or_else(|| keyword_value(&arguments, "view"))
         {
             let mut detail = Map::new();
             detail.insert("django_function".into(), Value::String(terminal.to_owned()));
@@ -121,6 +132,7 @@ fn collect_decorated_routes(
     source: &[u8],
     path: &Path,
     receivers: &HashMap<String, Receiver>,
+    mounts: &HashMap<String, Vec<String>>,
     aliases: &HashMap<String, String>,
     facts: &mut Vec<RawFrameworkFact>,
 ) {
@@ -145,14 +157,25 @@ fn collect_decorated_routes(
             let Some(receiver) = receivers.get(receiver_name) else {
                 continue;
             };
-            let Some(raw_path) = arguments.first().and_then(|value| string_literal(value)) else {
+            let path_keyword = if receiver.framework == "flask" {
+                "rule"
+            } else {
+                "path"
+            };
+            let Some(raw_path) = positional_argument(&arguments, 0)
+                .and_then(string_literal)
+                .or_else(|| keyword_string(&arguments, path_keyword))
+            else {
                 continue;
             };
             let operations = operations(receiver.framework, method, &arguments);
             if operations.is_empty() {
                 continue;
             }
-            let normalized_path = join_route_paths(&receiver.prefix, &raw_path);
+            let mount_prefixes = mounts
+                .get(receiver_name)
+                .cloned()
+                .unwrap_or_else(|| vec![String::new()]);
             let middleware_references = if receiver.framework == "fastapi" {
                 fastapi_dependencies(&arguments)
                     .into_iter()
@@ -161,29 +184,152 @@ fn collect_decorated_routes(
             } else {
                 Vec::new()
             };
-            for operation in operations {
-                facts.push(RawFrameworkFact::Route(RawRouteFact {
-                    framework: receiver.framework.to_owned(),
-                    operation,
-                    raw_path: raw_path.clone(),
-                    normalized_path: normalized_path.clone(),
-                    declaring_scope: module_scope(path),
-                    anchor: anchor(path, decorator),
-                    handler_reference: name.clone(),
-                    middleware_references: middleware_references.clone(),
-                    origin: RawFrameworkOrigin::Ast,
-                    rule: None,
-                    detail: Map::from_iter([(
-                        "receiver".into(),
-                        Value::String(receiver_name.to_owned()),
-                    )]),
-                }));
+            for mount_prefix in mount_prefixes {
+                let composed_prefix = join_route_paths(&mount_prefix, &receiver.prefix);
+                let normalized_path = join_route_paths(&composed_prefix, &raw_path);
+                for operation in &operations {
+                    facts.push(RawFrameworkFact::Route(RawRouteFact {
+                        framework: receiver.framework.to_owned(),
+                        operation: operation.clone(),
+                        raw_path: raw_path.clone(),
+                        normalized_path: normalized_path.clone(),
+                        declaring_scope: module_scope(path),
+                        anchor: anchor(path, decorator),
+                        handler_reference: name.clone(),
+                        middleware_references: middleware_references.clone(),
+                        origin: RawFrameworkOrigin::Ast,
+                        rule: (!mount_prefix.is_empty())
+                            .then(|| "python-mounted-router".to_owned()),
+                        detail: Map::from_iter([
+                            ("receiver".into(), Value::String(receiver_name.to_owned())),
+                            ("mount_prefix".into(), Value::String(mount_prefix.clone())),
+                        ]),
+                    }));
+                }
             }
         }
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_decorated_routes(child, source, path, receivers, aliases, facts);
+        collect_decorated_routes(child, source, path, receivers, mounts, aliases, facts);
+    }
+}
+
+fn receiver_mounts(
+    root: Node<'_>,
+    source: &[u8],
+    receivers: &HashMap<String, Receiver>,
+) -> HashMap<String, Vec<String>> {
+    let mut mounts = HashMap::<String, Vec<String>>::new();
+    collect_receiver_mounts(root, source, receivers, &mut mounts);
+    for values in mounts.values_mut() {
+        values.sort();
+        values.dedup();
+    }
+    mounts
+}
+
+fn receiver_mount_facts(
+    root: Node<'_>,
+    source: &[u8],
+    path: &Path,
+    receivers: &HashMap<String, Receiver>,
+    aliases: &HashMap<String, String>,
+) -> Vec<RawFrameworkFact> {
+    let mut facts = Vec::new();
+    collect_receiver_mount_facts(root, source, path, receivers, aliases, &mut facts);
+    facts
+}
+
+fn collect_receiver_mount_facts(
+    node: Node<'_>,
+    source: &[u8],
+    path: &Path,
+    receivers: &HashMap<String, Receiver>,
+    aliases: &HashMap<String, String>,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "call"
+        && let Some(function) = node.child_by_field_name("function")
+        && let Some(arguments) = call_arguments(node, source)
+    {
+        let function_text = node_text(function, source);
+        let method = function_text.rsplit('.').next().unwrap_or(function_text);
+        let prefix_key = match method {
+            "include_router" => Some("prefix"),
+            "register_blueprint" => Some("url_prefix"),
+            _ => None,
+        };
+        if let Some(prefix_key) = prefix_key
+            && let Some(parent) = function_text.rsplit_once('.').map(|(parent, _)| parent)
+            && let Some(parent_receiver) = receivers.get(parent)
+            && let Some(target) = positional_argument(&arguments, 0)
+            && is_identifier(target.trim())
+            && let Some(prefix) = keyword_string(&arguments, prefix_key)
+        {
+            let expanded = expand_alias(target.trim(), aliases);
+            let target_module = expanded
+                .rsplit_once('.')
+                .map(|(module, _)| module.to_owned())
+                .unwrap_or_default();
+            facts.push(RawFrameworkFact::Domain(RawDomainFact {
+                framework: parent_receiver.framework.to_owned(),
+                kind: "router_mount".to_owned(),
+                name: target.trim().to_owned(),
+                declaring_scope: module_scope(path),
+                anchor: anchor(path, node),
+                origin: RawFrameworkOrigin::Ast,
+                detail: Map::from_iter([
+                    (
+                        "target_receiver".into(),
+                        Value::String(target.trim().to_owned()),
+                    ),
+                    ("target_module".into(), Value::String(target_module)),
+                    ("mount_prefix".into(), Value::String(prefix)),
+                    ("parent_receiver".into(), Value::String(parent.to_owned())),
+                ]),
+            }));
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_receiver_mount_facts(child, source, path, receivers, aliases, facts);
+    }
+}
+
+fn collect_receiver_mounts(
+    node: Node<'_>,
+    source: &[u8],
+    receivers: &HashMap<String, Receiver>,
+    mounts: &mut HashMap<String, Vec<String>>,
+) {
+    if node.kind() == "call"
+        && let Some(function) = node.child_by_field_name("function")
+        && let Some(arguments) = call_arguments(node, source)
+    {
+        let function = node_text(function, source);
+        let method = function.rsplit('.').next().unwrap_or(function);
+        let prefix_key = match method {
+            "include_router" => Some("prefix"),
+            "register_blueprint" => Some("url_prefix"),
+            _ => None,
+        };
+        if let Some(prefix_key) = prefix_key
+            && let Some(parent) = function.rsplit_once('.').map(|(parent, _)| parent)
+            && receivers.contains_key(parent)
+            && let Some(target) = positional_argument(&arguments, 0)
+            && is_identifier(target.trim())
+            && let Some(prefix) = keyword_string(&arguments, prefix_key)
+        {
+            mounts
+                .entry(target.trim().to_owned())
+                .or_default()
+                .push(prefix);
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_receiver_mounts(child, source, receivers, mounts);
     }
 }
 
@@ -470,9 +616,43 @@ fn string_literal(value: &str) -> Option<String> {
 
 fn keyword_value<'a>(arguments: &'a [String], key: &str) -> Option<&'a str> {
     arguments.iter().find_map(|argument| {
-        let (name, value) = argument.split_once('=')?;
+        let (name, value) = split_keyword_argument(argument)?;
         (name.trim() == key).then(|| value.trim())
     })
+}
+
+fn positional_argument(arguments: &[String], index: usize) -> Option<&str> {
+    arguments
+        .iter()
+        .filter(|argument| split_keyword_argument(argument).is_none())
+        .nth(index)
+        .map(String::as_str)
+}
+
+fn split_keyword_argument(argument: &str) -> Option<(&str, &str)> {
+    let mut depth = 0_u32;
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in argument.char_indices() {
+        if let Some(delimiter) = quote {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' => quote = Some(character),
+            '(' | '[' | '{' => depth = depth.saturating_add(1),
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            '=' if depth == 0 => return Some((&argument[..index], &argument[index + 1..])),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn keyword_string(arguments: &[String], key: &str) -> Option<String> {

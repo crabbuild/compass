@@ -1,4 +1,4 @@
-import { ArrowRightIcon, FileCode2Icon, GitBranchIcon } from "lucide-react";
+import { ArrowRightIcon, GitBranchIcon } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { GraphEdge, GraphNode } from "../contracts/graph";
 import { formatGraphRelation, formatRelationshipSite } from "./edgeLabels";
@@ -90,7 +90,7 @@ export function EdgeHoverCard({
 
       {navigable && (
         <p className="compass-hover-hint">
-          <FileCode2Icon aria-hidden="true" />
+          <GitBranchIcon aria-hidden="true" />
           <span><strong>Double-click</strong> to open relationship source</span>
         </p>
       )}

@@ -63,6 +63,109 @@ pub(super) fn expand_django_includes(
     Ok(output)
 }
 
+pub(super) fn expand_router_mounts(
+    facts: &[RawFrameworkFact],
+    routes: Vec<RawRouteFact>,
+    limits: FrameworkLimits,
+) -> Result<Vec<RawRouteFact>, FrameworkResolutionError> {
+    let mounts = facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Domain(domain) if domain.kind == "router_mount" => Some(domain),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if mounts.is_empty() {
+        return Ok(routes);
+    }
+    let mut output = Vec::new();
+    for route in routes {
+        if !matches!(route.framework.as_str(), "fastapi" | "flask")
+            || route
+                .detail
+                .get("mount_prefix")
+                .and_then(Value::as_str)
+                .is_some_and(|prefix| !prefix.is_empty())
+        {
+            output.push(route);
+            continue;
+        }
+        let receiver = route
+            .detail
+            .get("receiver")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let route_scope = normalize_mount_scope(&route.declaring_scope);
+        let applicable = mounts
+            .iter()
+            .filter(|mount| mount.framework == route.framework)
+            .filter(|mount| {
+                mount.detail.get("target_receiver").and_then(Value::as_str) == Some(receiver)
+            })
+            .filter(|mount| {
+                let target_module = mount
+                    .detail
+                    .get("target_module")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if target_module.is_empty() {
+                    // An unqualified receiver is only safe within the mount
+                    // module itself. Applying it to every same-named router
+                    // in the repository would create a false cross-module
+                    // binding when two modules both use `router`.
+                    mount.declaring_scope == route_scope
+                } else {
+                    route_scope == normalize_mount_scope(target_module)
+                        || route_scope.ends_with(&format!(".{target_module}"))
+                        || mount.declaring_scope == route_scope
+                }
+            })
+            .collect::<Vec<_>>();
+        if applicable.is_empty() {
+            output.push(route);
+            continue;
+        }
+        for mount in applicable {
+            let Some(prefix) = mount.detail.get("mount_prefix").and_then(Value::as_str) else {
+                continue;
+            };
+            let mut expanded = route.clone();
+            expanded.normalized_path = compose_paths(prefix, &route.normalized_path);
+            expanded.raw_path = format!(
+                "{}{}",
+                prefix.trim_end_matches('/'),
+                route.raw_path.trim_start_matches('/')
+            );
+            expanded
+                .detail
+                .insert("mount_prefix".into(), Value::String(prefix.to_owned()));
+            expanded.detail.insert(
+                "mount_anchor".into(),
+                serde_json::to_value(&mount.anchor).unwrap_or(Value::Null),
+            );
+            output.push(expanded);
+        }
+    }
+    let mut per_file = HashMap::new();
+    for route in &output {
+        *per_file
+            .entry(route.anchor.source_file.as_str())
+            .or_insert(0_usize) += 1;
+    }
+    for count in per_file.into_values() {
+        limits.check_facts(count)?;
+    }
+    Ok(output)
+}
+
+fn normalize_mount_scope(value: &str) -> String {
+    value
+        .replace(['/', '\\'], ".")
+        .trim_matches('.')
+        .trim_end_matches(".py")
+        .to_owned()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn expand_one(
     index: usize,

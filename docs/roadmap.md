@@ -4,17 +4,6 @@ Compass is inspired by Graphify, implemented natively in Rust, and expected to
 evolve independently. This roadmap separates shipped/current behavior from
 committed design work and longer-term ideas.
 
-> **Who this page is for:** users evaluating project direction, integrators
-> planning adoption, and contributors choosing work.
->
-> **You will learn:** what exists in the current repository, what has a
-> committed design or implementation plan, and which ideas are explicitly
-> aspirational.
->
-> **Prerequisites:** none.
->
-> **Reading time:** 8–10 minutes.
-
 ## How to read status
 
 - **Available now** means the behavior exists in the current repository and is
@@ -53,7 +42,7 @@ Evidence:
 - [compatibility ledger](../COMPATIBILITY.md);
 - [performance qualification](../PERFORMANCE.md).
 
-### CompassQL 1
+### CompassQL
 
 Compass includes a native, deterministic, read-only subset of openCypher with:
 
@@ -68,7 +57,7 @@ Compass includes a native, deterministic, read-only subset of openCypher with:
 
 Evidence:
 
-- [CompassQL 1](COMPASSQL.md);
+- [CompassQL](COMPASSQL.md);
 - [CompassQL support matrix](COMPASSQL_SUPPORT.md);
 - `compass-cypher` and `compass-query`;
 - CLI/TCK/differential tests.

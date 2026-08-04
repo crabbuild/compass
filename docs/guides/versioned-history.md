@@ -3,18 +3,6 @@
 Compass history stores complete, immutable graph realizations for exact Git
 commits in a SQLite-backed Prolly store outside normal Git history.
 
-> **Who this guide is for:** maintainers comparing revisions, auditors,
-> integrators needing reproducible snapshots, and contributors operating the
-> history subsystem.
->
-> **You will learn:** profiles, builds, lazy materialization, queries, diffs,
-> exports, preferred realizations, maintenance, failure recovery, and safety
-> boundaries.
->
-> **Prerequisites:** a Git repository and a working `compass` binary.
->
-> **Completion time:** 15–30 minutes plus extraction time.
-
 ![How Compass materializes and stores an exact Git revision](../assets/diagrams/history-materialization.svg)
 
 ## Mental model
@@ -520,9 +508,8 @@ This is release evidence, not a substitute for application-specific validation.
 
 ## Related pages
 
-- [Storage and history design](../design/storage-and-history.md)
-- [History implementation](../implementation/workspace-tour.md)
 - [Output reference](../reference/outputs.md)
+- [Command reference](../reference/commands.md)
 - [Compatibility ledger](../../COMPATIBILITY.md)
 
 **Next step:** enable a code-only profile in a disposable repository, build

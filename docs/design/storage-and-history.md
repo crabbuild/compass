@@ -4,17 +4,6 @@ Compass has two storage models: a mutable current-tree artifact directory and
 an immutable exact-revision history store. They solve different problems and
 have different recovery rules.
 
-> **Who this page is for:** history contributors, maintainers operating large
-> repositories, and integrators requiring reproducible graphs.
->
-> **You will learn:** current artifact publication, incremental caches,
-> historical fingerprints, Prolly trees, SQLite durability, jobs/leases,
-> validation, export, and garbage collection.
->
-> **Prerequisites:** [Versioned graph history](../guides/versioned-history.md).
->
-> **Reading time:** 12–15 minutes.
-
 ## Two storage planes
 
 ```text

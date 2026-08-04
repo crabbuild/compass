@@ -6,22 +6,6 @@ publishes optional SQLite plus permanent `graph.json`; redb is a library-only
 adapter. PostgreSQL, DynamoDB, hosted operation, distributed leases/GC, and
 service quotas remain explicitly deferred until their phases are complete.
 
-> **Who this page is for:** implementers and reviewers delivering
-> `compass-store`, store-backed graph snapshots, backend adapters, and the
-> future cloud storage boundary.
->
-> **You will learn:** the mergeable phases, exact ownership boundaries,
-> deliverables, verification, failure tests, compatibility decisions, and
-> acceptance criteria for each phase.
->
-> **Prerequisites:** read the complete
-> [Compass store and graph-engine design](../design/compass-store.md),
-> [Workspace tour](workspace-tour.md),
-> [Extending Compass](extending-compass.md), and
-> [Compatibility policy](../../COMPATIBILITY.md).
->
-> **Reading time:** 30–40 minutes.
-
 ## Outcome
 
 At completion, Compass has:

@@ -4,17 +4,6 @@ Compass keeps evidence quality visible. A graph is more useful when you can
 distinguish a relation copied from direct syntax from one resolved across files
 or left ambiguous.
 
-> **Who this page is for:** users reviewing graph results, integrators ranking
-> evidence, and contributors adding relations or resolvers.
->
-> **You will learn:** what `EXTRACTED`, `INFERRED`, and `AMBIGUOUS` mean; how
-> they are created; and how to use them without turning provenance into a false
-> probability.
->
-> **Prerequisites:** basic familiarity with [the graph model](graph-model.md).
->
-> **Reading time:** 7–9 minutes.
-
 ![How Compass classifies relationship provenance](../assets/diagrams/provenance.svg)
 
 ## Provenance answers “how do we know?”
@@ -271,7 +260,7 @@ public graph contract.
 - [Graph model](graph-model.md)
 - [How Compass works](how-it-works.md)
 - [Impact-analysis cookbook](../cookbook/impact-analysis.md)
-- [Extending Compass](../implementation/extending-compass.md)
+- [Output reference](../reference/outputs.md)
 
 **Next step:** read [CompassQL concepts](compassql.md) to select and filter
 evidence precisely.

@@ -4,12 +4,6 @@ This report records the 2026-08-01 Compass-versus-Graphify qualification for
 Python, Rust, Go, Java, TypeScript, and JavaScript. It is an implementation
 checkpoint, not a claim that Graphify defines the upper bound for Compass.
 
-> **Who this page is for:** contributors improving structural extraction and
-> cross-file resolution.
->
-> **You will learn:** which repositories were pinned, how parity was measured,
-> which improvements are now protected, and which gaps remain open.
-
 ## Pinned repository matrix
 
 | Language | Repository | Revision | Source size |
