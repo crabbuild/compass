@@ -40,6 +40,17 @@ export const docs = defineDocs({
           const heading = ctx.source.match(/^#\s+(.+)$/m)?.[1]?.trim();
           return heading ?? ctx.path.split('/').pop()?.replace(/\.(md|mdx)$/, '') ?? 'Compass';
         }),
+        description: z.string().default(() => {
+          const paragraph = ctx.source
+            .replace(/^---[\s\S]*?---\s*/m, '')
+            .split(/\n\s*\n/)
+            .map((block) => block.trim())
+            .find((block) => block && !block.startsWith('#') && !block.startsWith('```'));
+          const plain = paragraph?.replace(/[>*_`]/g, '').replace(/\s+/g, ' ').trim();
+          if (!plain) return 'Learn how Compass makes codebases easier to understand.';
+          if (plain.length <= 160) return plain;
+          return `${plain.slice(0, 157).replace(/\s+\S*$/, '')}…`;
+        }),
       }),
   },
 });

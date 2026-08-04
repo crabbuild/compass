@@ -30,11 +30,19 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.6,
   }));
 
-  const blogEntries = blogSource.getPages().filter((page) => !page.data.draft).map((page) => ({
-    url: `${siteUrl}${page.url}`,
-    changeFrequency: 'monthly' as const,
-    priority: 0.6,
-  }));
+  const blogEntries = blogSource.getPages()
+    .filter((page) => !page.data.draft)
+    .map((page) => ({
+      url: `${siteUrl}${page.url}`,
+      lastModified: page.data.date,
+      changeFrequency: 'monthly' as const,
+      priority: 0.6,
+    }));
 
-  return [...staticEntries, ...docsEntries, ...blogEntries];
+  const seen = new Set<string>();
+  return [...staticEntries, ...docsEntries, ...blogEntries].filter((entry) => {
+    if (seen.has(entry.url)) return false;
+    seen.add(entry.url);
+    return true;
+  });
 }
