@@ -8,8 +8,8 @@ import { pageMetadata } from '@/lib/site';
 export const metadata = pageMetadata('Versioned history', 'Compare graph realizations tied to exact Git commits without rewriting the historical snapshots you are investigating.');
 
 export default function HistoryPage() {
-  return <MarketingPage eyebrow="Versioned history" title="Compare how a system changed, not just what a diff touched." description="Compass keeps graph realizations tied to exact Git commits so historical questions have a stable object to inspect.">
-      <PageSection eyebrow="History surface" title="Three views of the same change." description="Pair source diffs with graph topology and semantic evidence when the shape of change matters.">
+  return <MarketingPage eyebrow="Versioned history" title="Compare two code graphs, not just two source diffs." description="Choose exact Git revisions, identify the immutable graph behind each one, and see the nodes, relationships, and evidence that changed.">
+      <PageSection eyebrow="History surface" title="Identify both graphs before you inspect the change." description="Every comparison keeps the baseline and current graph tied to an exact commit, then shows their topology and evidence side by side.">
         <FeatureGrid items={[{ eyebrow: 'Commit', title: 'Exact revision binding', description: 'Ask questions against an immutable graph realization for a known commit.' }, { eyebrow: 'Topology', title: 'Graph-to-graph comparison', description: 'Find added, removed, and changed nodes and relationships without rewriting history.' }, { eyebrow: 'Evidence', title: 'Confidence stays visible', description: 'Separate direct, inferred, unresolved, and ambiguous results instead of flattening them.' }]} />
       </PageSection>
       <section className="border-y border-border/70 bg-muted/25">
