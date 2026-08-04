@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Allow current graph overview and community exports up to 256 MiB so large
+  repository graphs can open while keeping other CLI output bounded at 8 MiB.
 - Replace sticky native edge labels with a theme-aware relationship card that
   shows source-to-target direction, confidence, evidence, and source location,
   and dismisses reliably when the pointer leaves the edge or graph.

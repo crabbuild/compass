@@ -22,6 +22,7 @@ import { codeQueryRequiresRebuild, runCodeQuery } from "./codeQueryClient";
 import { codeQueryGraphViewModel } from "./codeQueryGraph";
 
 const LARGE_GRAPH_BYTES = 8 * 1024 * 1024;
+export const GRAPH_EXPORT_STDOUT_LIMIT = 256 * 1024 * 1024;
 
 export class GraphPanel {
   static async open(
@@ -151,7 +152,8 @@ export class GraphPanel {
         this.session.root,
         currentGraphExportArgs(graphPath, nodeLimit),
         GraphViewModelSchema,
-        this.controller.signal
+        this.controller.signal,
+        { stdoutBytes: GRAPH_EXPORT_STDOUT_LIMIT }
       );
       await this.publishOverview(exported);
       void writeCachedGraphOverview(
@@ -206,7 +208,8 @@ export class GraphPanel {
             communityId
           ),
           GraphViewModelSchema,
-          this.controller.signal
+          this.controller.signal,
+          { stdoutBytes: GRAPH_EXPORT_STDOUT_LIMIT }
         );
         model = this.withRepositoryTitle(model);
         this.communityCache.set(communityId, model);
