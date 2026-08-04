@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Preserve JavaScript and TypeScript workspace import and re-export resolution
+  across fully cached edit/restore builds, and improve canonical graph JSON
+  publication parallelism for medium and large structural graphs without
+  changing serialized bytes.
+
 ## 0.3.2 - 2026-08-03
 
 - Harden graph correctness and make the default query path use canonical

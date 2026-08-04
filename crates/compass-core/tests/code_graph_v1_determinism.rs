@@ -298,6 +298,53 @@ export const router = createBrowserRouter([
     Ok(())
 }
 
+#[test]
+fn typescript_edit_restore_preserves_cached_workspace_module_edges() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    for (relative, source) in [
+        ("src/value.ts", "export const value = 1;\n"),
+        ("src/index.ts", "export { value } from \"./value\";\n"),
+        (
+            "src/use.ts",
+            "import { value } from \"./index\";\nexport function read() { return value; }\n",
+        ),
+        ("src/unrelated.ts", "export const unrelated = true;\n"),
+    ] {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, source)?;
+    }
+
+    let (clean, _) = build(root)?;
+    let clean_graph: GraphDocument = serde_json::from_slice(&clean)?;
+    assert!(
+        clean_graph
+            .links
+            .iter()
+            .any(|edge| edge.kind == EdgeKind::Imports),
+        "fixture must exercise TypeScript workspace import resolution"
+    );
+    assert!(
+        clean_graph
+            .links
+            .iter()
+            .any(|edge| edge.kind == EdgeKind::Exports),
+        "fixture must exercise TypeScript workspace re-export resolution"
+    );
+
+    let unrelated = root.join("src/unrelated.ts");
+    fs::write(&unrelated, "export const unrelated = false;\n")?;
+    let _ = build(root)?;
+    fs::write(&unrelated, "export const unrelated = true;\n")?;
+    let (restored, _) = build(root)?;
+
+    assert_eq!(restored, clean);
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn cached_file_symlink_keeps_its_logical_graph_identity() -> Result<(), Box<dyn Error>> {
