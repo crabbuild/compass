@@ -330,9 +330,12 @@ unregistered languages, unsupported capabilities, missing roles or relations,
 capability bypasses, unnamed heuristic activation, required manifests without
 dependency markers, invalid ordering, and zero limits.
 
-No current raw framework detector is projected into this registry. A future
-framework change removes its previous registration and adds the universal
-descriptor and implementation together.
+The internal framework-pack runtime also registers established source,
+configuration, and template adapters in the same deterministic table. Those
+adapters retain their established semantics, while the descriptor registry
+continues to validate only universal evidence-backed packs. A future framework
+change adds its adapter to the runtime and, when it is universal, adds the
+descriptor and project-wide expansion adapter in the same change.
 
 ### Minimal framework descriptor
 

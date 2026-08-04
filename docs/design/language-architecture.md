@@ -356,8 +356,11 @@ It consumes exact Java annotation, call, import, type, ownership, and hierarchy
 evidence and derives HTTP, bean, injection, messaging, scheduling, persistence,
 transaction, and security meaning before framework resolution. Its Java legacy
 detectors are removed atomically; Kotlin Spring routing remains on its explicit
-established pack until Kotlin has a universal language adapter. Other packs
-retain their established registries until their own qualification and hard cut.
+established pack until Kotlin has a universal language adapter. Established
+source, config, and template adapters execute through the same static runtime,
+which owns selection, activation, limits, and publication without requiring a
+runtime plugin ABI. Other packs retain their established semantics until their
+own qualification and hard cut.
 
 ## Quality and failure boundaries
 

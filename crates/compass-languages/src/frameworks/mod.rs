@@ -33,12 +33,6 @@ use tree_sitter::Node;
 use crate::SemanticEvidenceBatch;
 use crate::{Extraction, ProjectEvidence};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ManifestPolicy {
-    Advisory,
-    Required,
-}
-
 struct DetectionContext<'source, 'tree> {
     path: &'source Path,
     source: &'source [u8],
@@ -52,14 +46,6 @@ type SourceDetector = for<'source, 'tree> fn(
     &mut Extraction,
 ) -> Vec<RawFrameworkFact>;
 
-struct SourcePack {
-    id: &'static str,
-    languages: &'static [&'static str],
-    dependency_markers: &'static [&'static str],
-    manifest_policy: ManifestPolicy,
-    detector: SourceDetector,
-}
-
 struct UniversalDetectionContext<'source, 'tree> {
     source: &'source [u8],
     root: Node<'tree>,
@@ -70,40 +56,204 @@ struct UniversalDetectionContext<'source, 'tree> {
 type UniversalSourceDetector =
     for<'source, 'tree> fn(&UniversalDetectionContext<'source, 'tree>) -> Vec<RawFrameworkFact>;
 
-struct UniversalSourcePack {
-    descriptor: &'static FrameworkPackDescriptor,
-    detector: UniversalSourceDetector,
-}
-
 type ConfigMatcher = fn(&Path) -> bool;
 type ConfigDetector = fn(&Path, &[u8]) -> Vec<RawFrameworkFact>;
-
-struct ConfigPack {
-    id: &'static str,
-    matcher: ConfigMatcher,
-    detector: ConfigDetector,
-}
 
 type TemplateDetector =
     fn(&Path, &[u8], Option<&ProjectEvidence>, &mut Extraction) -> Vec<RawFrameworkFact>;
 
-struct TemplatePack {
-    id: &'static str,
-    dependency_markers: &'static [&'static str],
-    manifest_policy: ManifestPolicy,
-    detector: TemplateDetector,
+/// The concrete implementation stored behind one framework-pack seam.
+///
+/// The public descriptor describes the universal evidence contract. This
+/// internal adapter also carries the established source, config, and template
+/// implementations so selection, activation, limits, and publication stay in
+/// one runtime instead of being copied across four registries.
+#[derive(Clone, Copy)]
+enum FrameworkPackAdapter {
+    Source(SourceDetector),
+    Universal {
+        descriptor: &'static FrameworkPackDescriptor,
+        detector: UniversalSourceDetector,
+    },
+    Config {
+        matcher: ConfigMatcher,
+        detector: ConfigDetector,
+    },
+    Template(TemplateDetector),
 }
 
-const SOURCE_PACKS: &[SourcePack] = &[
-    source_pack("python-web", &["python"], &[], detect_python),
-    source_pack(
+#[derive(Clone, Copy)]
+struct FrameworkPack {
+    id: &'static str,
+    kind: FrameworkPackKind,
+    languages: &'static [&'static str],
+    dependency_markers: &'static [&'static str],
+    manifest_policy: FrameworkManifestPolicy,
+    limits: FrameworkLimits,
+    adapter: FrameworkPackAdapter,
+}
+
+impl FrameworkPack {
+    const fn source(
+        id: &'static str,
+        languages: &'static [&'static str],
+        dependency_markers: &'static [&'static str],
+        detector: SourceDetector,
+    ) -> Self {
+        Self {
+            id,
+            kind: FrameworkPackKind::Source,
+            languages,
+            dependency_markers,
+            manifest_policy: FrameworkManifestPolicy::Advisory,
+            limits: FrameworkLimits::DEFAULT,
+            adapter: FrameworkPackAdapter::Source(detector),
+        }
+    }
+
+    const fn universal(
+        descriptor: &'static FrameworkPackDescriptor,
+        detector: UniversalSourceDetector,
+    ) -> Self {
+        Self {
+            id: descriptor.id,
+            kind: descriptor.kind,
+            languages: descriptor.languages,
+            dependency_markers: descriptor.dependency_markers,
+            manifest_policy: descriptor.manifest_policy,
+            limits: descriptor.limits,
+            adapter: FrameworkPackAdapter::Universal {
+                descriptor,
+                detector,
+            },
+        }
+    }
+
+    const fn config(id: &'static str, matcher: ConfigMatcher, detector: ConfigDetector) -> Self {
+        Self {
+            id,
+            kind: FrameworkPackKind::Config,
+            languages: &[],
+            dependency_markers: &[],
+            manifest_policy: FrameworkManifestPolicy::Advisory,
+            limits: FrameworkLimits::DEFAULT,
+            adapter: FrameworkPackAdapter::Config { matcher, detector },
+        }
+    }
+
+    const fn template(
+        id: &'static str,
+        dependency_markers: &'static [&'static str],
+        detector: TemplateDetector,
+    ) -> Self {
+        Self {
+            id,
+            kind: FrameworkPackKind::Template,
+            languages: &[],
+            dependency_markers,
+            manifest_policy: FrameworkManifestPolicy::Required,
+            limits: FrameworkLimits::DEFAULT,
+            adapter: FrameworkPackAdapter::Template(detector),
+        }
+    }
+
+    fn enabled(self, project: Option<&ProjectEvidence>) -> bool {
+        match self.manifest_policy {
+            FrameworkManifestPolicy::Advisory => true,
+            FrameworkManifestPolicy::Required => {
+                project.is_none_or(|project| project.has_any_dependency(self.dependency_markers))
+            }
+        }
+    }
+
+    fn matches_source(self, language: &str, project: Option<&ProjectEvidence>) -> bool {
+        matches!(self.kind, FrameworkPackKind::Source)
+            && self.languages.contains(&language)
+            && self.enabled(project)
+    }
+
+    fn matches_template(self, project: Option<&ProjectEvidence>) -> bool {
+        matches!(self.kind, FrameworkPackKind::Template) && self.enabled(project)
+    }
+
+    fn matches_config(self, path: &Path) -> bool {
+        matches!(self.adapter, FrameworkPackAdapter::Config { matcher, .. } if matcher(path))
+    }
+
+    fn collect_source(
+        self,
+        context: &DetectionContext<'_, '_>,
+        extraction: &mut Extraction,
+    ) -> Result<Vec<RawFrameworkFact>, String> {
+        let facts = match self.adapter {
+            FrameworkPackAdapter::Source(detector) => detector(context, extraction),
+            FrameworkPackAdapter::Universal {
+                descriptor,
+                detector,
+            } => {
+                debug_assert_eq!(self.id, descriptor.id);
+                let Some(evidence) = extraction.semantic_evidence.as_ref() else {
+                    return Ok(Vec::new());
+                };
+                detector(&UniversalDetectionContext {
+                    source: context.source,
+                    root: context.root,
+                    project: context.project,
+                    evidence,
+                })
+            }
+            FrameworkPackAdapter::Config { .. } | FrameworkPackAdapter::Template(_) => {
+                return Ok(Vec::new());
+            }
+        };
+        self.check_fact_limit(facts.len()).map(|()| facts)
+    }
+
+    fn collect_config(self, path: &Path, source: &[u8]) -> Option<Vec<RawFrameworkFact>> {
+        let FrameworkPackAdapter::Config { detector, .. } = self.adapter else {
+            return None;
+        };
+        Some(detector(path, source))
+    }
+
+    fn collect_template(
+        self,
+        path: &Path,
+        source: &[u8],
+        project: Option<&ProjectEvidence>,
+        extraction: &mut Extraction,
+    ) -> Result<Vec<RawFrameworkFact>, String> {
+        let FrameworkPackAdapter::Template(detector) = self.adapter else {
+            return Ok(Vec::new());
+        };
+        let facts = detector(path, source, project, extraction);
+        self.check_fact_limit(facts.len()).map(|()| facts)
+    }
+
+    fn check_fact_limit(self, observed: usize) -> Result<(), String> {
+        self.limits.check_facts(observed).map_err(|error| {
+            format!(
+                "framework pack {:?} exceeded its fact budget: {error}",
+                self.id
+            )
+        })
+    }
+}
+
+/// All framework implementations pass through this table. The table is
+/// intentionally static: pack identity, ordering, activation policy, and
+/// adapter ownership remain deterministic and do not require a plugin ABI.
+const FRAMEWORK_PACKS: &[FrameworkPack] = &[
+    FrameworkPack::universal(&pack::SPRING_JAVA_DESCRIPTOR, spring::detect),
+    FrameworkPack::source("python-web", &["python"], &[], detect_python),
+    FrameworkPack::source(
         "php-frameworks",
         &["php"],
         &["laravel/framework", "drupal/core"],
         detect_php,
     ),
-    source_pack("rails-routes", &["ruby"], &["rails"], detect_ruby),
-    source_pack(
+    FrameworkPack::source("rails-routes", &["ruby"], &["rails"], detect_ruby),
+    FrameworkPack::source(
         "spring-web-kotlin",
         &["kotlin"],
         &[
@@ -112,16 +262,16 @@ const SOURCE_PACKS: &[SourcePack] = &[
         ],
         detect_kotlin,
     ),
-    source_pack("go-web", &["go"], &[], detect_go),
-    source_pack("rust-web", &["rust"], &[], detect_rust),
-    source_pack(
+    FrameworkPack::source("go-web", &["go"], &[], detect_go),
+    FrameworkPack::source("rust-web", &["rust"], &[], detect_rust),
+    FrameworkPack::source(
         "aspnet-web",
         &["csharp"],
         &["microsoft.aspnetcore.app"],
         detect_csharp,
     ),
-    source_pack("vapor-routes", &["swift"], &["vapor"], detect_swift),
-    source_pack(
+    FrameworkPack::source("vapor-routes", &["swift"], &["vapor"], detect_swift),
+    FrameworkPack::source(
         "typescript-web",
         &["javascript", "typescript", "tsx"],
         &[
@@ -133,15 +283,18 @@ const SOURCE_PACKS: &[SourcePack] = &[
         ],
         detect_typescript,
     ),
-    SourcePack {
+    FrameworkPack {
         id: "filesystem-routes",
+        kind: FrameworkPackKind::Source,
         languages: &["javascript", "typescript", "tsx"],
         dependency_markers: &["@sveltejs/kit", "nuxt", "astro"],
-        manifest_policy: ManifestPolicy::Required,
-        detector: detect_file_routes,
+        manifest_policy: FrameworkManifestPolicy::Required,
+        limits: FrameworkLimits::DEFAULT,
+        adapter: FrameworkPackAdapter::Source(detect_file_routes),
     },
-    SourcePack {
+    FrameworkPack {
         id: "enterprise-domain-facts",
+        kind: FrameworkPackKind::Source,
         languages: &[
             "python",
             "typescript",
@@ -154,49 +307,51 @@ const SOURCE_PACKS: &[SourcePack] = &[
             "rust",
         ],
         dependency_markers: &[],
-        manifest_policy: ManifestPolicy::Advisory,
-        detector: detect_enterprise,
+        manifest_policy: FrameworkManifestPolicy::Advisory,
+        limits: FrameworkLimits::DEFAULT,
+        adapter: FrameworkPackAdapter::Source(detect_enterprise),
     },
+    FrameworkPack::config(
+        "drupal-routing-config",
+        is_drupal_routing,
+        php::detect_drupal_routing,
+    ),
+    FrameworkPack::config("play-routes-config", is_play_routes, play::detect),
+    FrameworkPack::template(
+        "filesystem-template-routes",
+        &["@sveltejs/kit", "nuxt", "astro"],
+        file_routes::detect,
+    ),
 ];
 
-const UNIVERSAL_SOURCE_PACKS: &[UniversalSourcePack] = &[UniversalSourcePack {
-    descriptor: &pack::SPRING_JAVA_DESCRIPTOR,
-    detector: spring::detect,
-}];
+struct FrameworkFactAccumulator {
+    facts: Vec<RawFrameworkFact>,
+}
 
-const CONFIG_PACKS: &[ConfigPack] = &[
-    ConfigPack {
-        id: "drupal-routing-config",
-        matcher: is_drupal_routing,
-        detector: php::detect_drupal_routing,
-    },
-    ConfigPack {
-        id: "play-routes-config",
-        matcher: is_play_routes,
-        detector: play::detect,
-    },
-];
-
-const TEMPLATE_PACKS: &[TemplatePack] = &[TemplatePack {
-    id: "filesystem-template-routes",
-    dependency_markers: &["@sveltejs/kit", "nuxt", "astro"],
-    manifest_policy: ManifestPolicy::Required,
-    detector: file_routes::detect,
-}];
-
-const fn source_pack(
-    id: &'static str,
-    languages: &'static [&'static str],
-    dependency_markers: &'static [&'static str],
-    detector: SourceDetector,
-) -> SourcePack {
-    SourcePack {
-        id,
-        languages,
-        dependency_markers,
-        manifest_policy: ManifestPolicy::Advisory,
-        detector,
+impl FrameworkFactAccumulator {
+    fn new() -> Self {
+        Self { facts: Vec::new() }
     }
+
+    fn add(&mut self, pack: FrameworkPack, facts: Vec<RawFrameworkFact>) -> Result<(), String> {
+        pack.check_fact_limit(facts.len())?;
+        let observed = self.facts.len().saturating_add(facts.len());
+        FrameworkLimits::DEFAULT
+            .check_facts(observed)
+            .map_err(|error| format!("framework fact budget exceeded: {error}"))?;
+        self.facts.extend(facts);
+        Ok(())
+    }
+
+    fn publish(self, extraction: &mut Extraction) {
+        extraction.framework_facts.extend(self.facts);
+    }
+}
+
+fn record_framework_error(extraction: &mut Extraction, error: String) {
+    extraction
+        .error
+        .get_or_insert_with(|| format!("framework extraction failed: {error}"));
 }
 
 pub(crate) fn detect(
@@ -214,29 +369,24 @@ pub(crate) fn detect(
         language,
         project,
     };
-    let mut facts = Vec::new();
-    if let Some(evidence) = extraction.semantic_evidence.as_ref() {
-        for pack in UNIVERSAL_SOURCE_PACKS {
-            debug_assert_eq!(pack.descriptor.kind, FrameworkPackKind::Source);
-            if pack.descriptor.languages.contains(&language)
-                && universal_pack_enabled(pack.descriptor, project)
-            {
-                facts.extend((pack.detector)(&UniversalDetectionContext {
-                    source,
-                    root,
-                    project,
-                    evidence,
-                }));
+    let mut accumulator = FrameworkFactAccumulator::new();
+    for pack in FRAMEWORK_PACKS {
+        if !pack.matches_source(language, project) {
+            continue;
+        }
+        let facts = match pack.collect_source(&context, extraction) {
+            Ok(facts) => facts,
+            Err(error) => {
+                record_framework_error(extraction, error);
+                return;
             }
+        };
+        if let Err(error) = accumulator.add(*pack, facts) {
+            record_framework_error(extraction, error);
+            return;
         }
     }
-    for pack in SOURCE_PACKS {
-        debug_assert!(!pack.id.is_empty());
-        if pack.languages.contains(&language) && pack_enabled(pack, project) {
-            facts.extend((pack.detector)(&context, extraction));
-        }
-    }
-    publish_facts(facts, extraction);
+    accumulator.publish(extraction);
 }
 
 pub(crate) fn detect_config_file(
@@ -245,14 +395,21 @@ pub(crate) fn detect_config_file(
     _project: Option<&ProjectEvidence>,
 ) -> Extraction {
     let mut extraction = Extraction::default();
-    let facts = CONFIG_PACKS
+    let Some(pack) = FRAMEWORK_PACKS
         .iter()
-        .find(|pack| (pack.matcher)(path))
-        .map_or_else(Vec::new, |pack| {
-            debug_assert!(!pack.id.is_empty());
-            (pack.detector)(path, source)
-        });
-    publish_facts(facts, &mut extraction);
+        .find(|pack| pack.kind == FrameworkPackKind::Config && pack.matches_config(path))
+    else {
+        return extraction;
+    };
+    let Some(facts) = pack.collect_config(path, source) else {
+        return extraction;
+    };
+    let mut accumulator = FrameworkFactAccumulator::new();
+    if let Err(error) = accumulator.add(*pack, facts) {
+        record_framework_error(&mut extraction, error);
+    } else {
+        accumulator.publish(&mut extraction);
+    }
     extraction
 }
 
@@ -262,57 +419,24 @@ pub(crate) fn detect_template_file_route(
     project: Option<&ProjectEvidence>,
     extraction: &mut Extraction,
 ) {
-    let mut facts = Vec::new();
-    for pack in TEMPLATE_PACKS {
-        debug_assert!(!pack.id.is_empty());
-        if template_pack_enabled(pack, project) {
-            facts.extend((pack.detector)(path, source, project, extraction));
+    let mut accumulator = FrameworkFactAccumulator::new();
+    for pack in FRAMEWORK_PACKS {
+        if !pack.matches_template(project) {
+            continue;
+        }
+        let facts = match pack.collect_template(path, source, project, extraction) {
+            Ok(facts) => facts,
+            Err(error) => {
+                record_framework_error(extraction, error);
+                return;
+            }
+        };
+        if let Err(error) = accumulator.add(*pack, facts) {
+            record_framework_error(extraction, error);
+            return;
         }
     }
-    publish_facts(facts, extraction);
-}
-
-fn pack_enabled(pack: &SourcePack, project: Option<&ProjectEvidence>) -> bool {
-    manifest_policy_allows(pack.manifest_policy, pack.dependency_markers, project)
-}
-
-fn universal_pack_enabled(
-    descriptor: &FrameworkPackDescriptor,
-    project: Option<&ProjectEvidence>,
-) -> bool {
-    match descriptor.manifest_policy {
-        FrameworkManifestPolicy::Advisory => true,
-        FrameworkManifestPolicy::Required => {
-            project.is_none_or(|project| project.has_any_dependency(descriptor.dependency_markers))
-        }
-    }
-}
-
-fn template_pack_enabled(pack: &TemplatePack, project: Option<&ProjectEvidence>) -> bool {
-    manifest_policy_allows(pack.manifest_policy, pack.dependency_markers, project)
-}
-
-fn manifest_policy_allows(
-    policy: ManifestPolicy,
-    dependency_markers: &[&str],
-    project: Option<&ProjectEvidence>,
-) -> bool {
-    match policy {
-        ManifestPolicy::Advisory => true,
-        ManifestPolicy::Required => {
-            project.is_none_or(|project| project.has_any_dependency(dependency_markers))
-        }
-    }
-}
-
-fn publish_facts(facts: Vec<RawFrameworkFact>, extraction: &mut Extraction) {
-    if let Err(error) = FrameworkLimits::default().check_facts(facts.len()) {
-        extraction
-            .error
-            .get_or_insert_with(|| format!("framework extraction failed: {error}"));
-        return;
-    }
-    extraction.framework_facts.extend(facts);
+    accumulator.publish(extraction);
 }
 
 fn detect_python(
@@ -411,33 +535,28 @@ fn is_play_routes(path: &Path) -> bool {
 mod tests {
     use std::collections::HashSet;
 
-    use super::{CONFIG_PACKS, SOURCE_PACKS, TEMPLATE_PACKS};
+    use super::{FRAMEWORK_PACKS, FrameworkPackKind};
 
     #[test]
     fn framework_pack_registry_ids_are_unique_and_well_formed() {
         let mut ids = HashSet::new();
-        for pack in SOURCE_PACKS {
-            assert!(!pack.id.is_empty());
-            assert!(!pack.languages.is_empty());
-            assert!(ids.insert(pack.id));
-        }
-        for pack in CONFIG_PACKS {
+        for pack in FRAMEWORK_PACKS {
             assert!(!pack.id.is_empty());
             assert!(ids.insert(pack.id));
-        }
-        for pack in TEMPLATE_PACKS {
-            assert!(!pack.id.is_empty());
-            assert!(ids.insert(pack.id));
+            if pack.kind == FrameworkPackKind::Source {
+                assert!(!pack.languages.is_empty());
+            }
         }
     }
 
     #[test]
-    fn source_registry_covers_every_existing_framework_module() {
-        let ids = SOURCE_PACKS
+    fn runtime_registry_covers_every_existing_framework_adapter() {
+        let ids = FRAMEWORK_PACKS
             .iter()
             .map(|pack| pack.id)
             .collect::<HashSet<_>>();
         for expected in [
+            "spring-java",
             "python-web",
             "php-frameworks",
             "rails-routes",
@@ -449,8 +568,39 @@ mod tests {
             "typescript-web",
             "filesystem-routes",
             "enterprise-domain-facts",
+            "drupal-routing-config",
+            "play-routes-config",
+            "filesystem-template-routes",
         ] {
             assert!(ids.contains(expected), "missing framework pack {expected}");
         }
+    }
+
+    #[test]
+    fn runtime_registry_uses_one_manifest_policy_and_budget_source() {
+        for pack in FRAMEWORK_PACKS {
+            assert!(pack.limits.max_facts_per_file > 0);
+            if pack.manifest_policy == super::FrameworkManifestPolicy::Required {
+                assert!(!pack.dependency_markers.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn universal_descriptors_have_one_runtime_adapter_each() {
+        for descriptor in super::FrameworkPackRegistry::descriptors() {
+            let matches = FRAMEWORK_PACKS
+                .iter()
+                .filter(|pack| {
+                    matches!(
+                        pack.adapter,
+                        super::FrameworkPackAdapter::Universal { descriptor: registered, .. }
+                            if registered.id == descriptor.id
+                    )
+                })
+                .count();
+            assert_eq!(matches, 1, "runtime adapter count for {}", descriptor.id);
+        }
+        assert_eq!(super::FrameworkPackRegistry::validate(), Ok(()));
     }
 }
