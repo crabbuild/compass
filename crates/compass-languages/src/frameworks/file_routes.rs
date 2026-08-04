@@ -229,6 +229,172 @@ pub(super) fn detect_next(
     Vec::new()
 }
 
+/// Detect Remix flat-route and nested route modules. Remix keeps page
+/// components and resource/data handlers in the same `app/routes` tree, so a
+/// route file can publish more than one operation (`PAGE`, `LOADER`, and
+/// `ACTION`) while retaining one convention anchor.
+pub(super) fn detect_remix(
+    path: &Path,
+    source: &[u8],
+    project: Option<&ProjectEvidence>,
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    let enabled = project.is_none_or(|project| {
+        project.has_any_dependency(&[
+            "@remix-run/dev",
+            "@remix-run/node",
+            "@remix-run/react",
+            "@remix-run/router",
+            "@remix-run/serve",
+        ]) || project.has_any_configuration(&[
+            "remix.config.cjs",
+            "remix.config.js",
+            "remix.config.mjs",
+            "remix.config.ts",
+        ])
+    });
+    if !enabled || source.is_empty() {
+        return Vec::new();
+    }
+    let portable = path.to_string_lossy().replace('\\', "/");
+    let project_relative = project
+        .and_then(|project| path.strip_prefix(project.project_root()).ok())
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .unwrap_or(portable);
+    let Some(relative) = remix_route_file(&project_relative) else {
+        return Vec::new();
+    };
+    let handlers = remix_endpoint_handlers(std::str::from_utf8(source).unwrap_or_default());
+    handlers
+        .into_iter()
+        .flat_map(|handler| {
+            one_route(
+                "remix",
+                &handler.operation,
+                &remix_route_path(relative),
+                path,
+                source,
+                extraction,
+                "remix-route-convention",
+                Some(&handler),
+            )
+        })
+        .collect()
+}
+
+fn remix_route_file(relative: &str) -> Option<&str> {
+    for marker in ["app/routes/", "src/routes/"] {
+        if let Some(route) = relative.strip_prefix(marker) {
+            return (!route.is_empty()).then_some(route);
+        }
+        if let Some(index) = relative.find(marker)
+            && (index == 0 || relative.as_bytes().get(index - 1) == Some(&b'/'))
+        {
+            let route = &relative[index + marker.len()..];
+            return (!route.is_empty()).then_some(route);
+        }
+    }
+    if let Some(route) = relative.strip_prefix("routes/") {
+        return (!route.is_empty()).then_some(route);
+    }
+    None
+}
+
+fn remix_route_path(relative: &str) -> String {
+    let mut stem = trim_known_extension(relative).trim_matches('/').to_owned();
+    if stem.ends_with("/index") {
+        stem.truncate(stem.len().saturating_sub("/index".len()));
+    }
+    let mut segments = Vec::new();
+    let mut pieces = stem.split('/').filter(|piece| !piece.is_empty()).peekable();
+    while let Some(piece) = pieces.next() {
+        if pieces.peek().is_none() {
+            for segment in piece.split('.').filter(|segment| !segment.is_empty()) {
+                if segment == "_index" || segment == "index" {
+                    continue;
+                }
+                let segment = segment.strip_suffix('_').unwrap_or(segment);
+                if segment.starts_with('_') {
+                    continue;
+                }
+                segments.push(remix_route_segment(segment));
+            }
+        } else if piece != "index" && piece != "_index" && !piece.starts_with('_') {
+            segments.push(remix_route_segment(piece));
+        }
+    }
+    segments.join("/")
+}
+
+fn remix_route_segment(segment: &str) -> String {
+    if segment == "$" {
+        "[...splat]".to_owned()
+    } else if let Some(name) = segment.strip_prefix('$') {
+        format!("[{name}]")
+    } else {
+        segment.to_owned()
+    }
+}
+
+fn remix_endpoint_handlers(source: &str) -> Vec<EndpointHandler> {
+    let Ok(named) =
+        Regex::new(r"(?m)^\s*export\s+(?:(?:async\s+)?function|const|let|var)\s+(loader|action)\b")
+    else {
+        return Vec::new();
+    };
+    let mut handlers = named
+        .captures_iter(source)
+        .filter_map(|capture| capture.get(1).map(|name| name.as_str().to_owned()))
+        .map(|name| EndpointHandler {
+            operation: name.to_ascii_uppercase(),
+            reference: name,
+            module: None,
+        })
+        .collect::<Vec<_>>();
+    if let Ok(reexports) = Regex::new(r"(?m)^\s*export\s*\{([^}]*)\}") {
+        for capture in reexports.captures_iter(source) {
+            let Some(names) = capture.get(1) else {
+                continue;
+            };
+            for name in names.as_str().split(',').map(str::trim) {
+                let (local, exported) = name
+                    .split_once(" as ")
+                    .map(|(local, exported)| (local.trim(), exported.trim()))
+                    .unwrap_or((name, name));
+                if matches!(exported, "loader" | "action") {
+                    handlers.push(EndpointHandler {
+                        operation: exported.to_ascii_uppercase(),
+                        reference: local.to_owned(),
+                        module: None,
+                    });
+                }
+            }
+        }
+    }
+    if Regex::new(r"(?m)^\s*export\s+default\b").is_ok_and(|pattern| pattern.is_match(source)) {
+        let reference = Regex::new(
+            r"(?m)^\s*export\s+default\s+(?:(?:async\s+)?function|class)\s+([A-Za-z_$][\w$]*)",
+        )
+        .ok()
+        .and_then(|pattern| {
+            pattern
+                .captures(source)
+                .and_then(|capture| capture.get(1).map(|name| name.as_str().to_owned()))
+        })
+        .unwrap_or_else(|| "default".to_owned());
+        handlers.push(EndpointHandler {
+            operation: "PAGE".to_owned(),
+            reference,
+            module: None,
+        });
+    }
+    handlers.sort_by(|left, right| {
+        (&left.operation, &left.reference).cmp(&(&right.operation, &right.reference))
+    });
+    handlers.dedup();
+    handlers
+}
+
 fn next_pages_api_route(
     relative: &str,
     path: &Path,

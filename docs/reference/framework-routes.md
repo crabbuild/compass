@@ -49,7 +49,10 @@ Compass activates a framework pack only when the repository contains direct evid
 ### JavaScript and TypeScript frameworks
 
 - **Express**: `express()` and `Router()` receivers; `get`, `post`, `put`, `patch`, `delete`, `options`, `head`, and `all`; literal paths and ordered middleware chains; opaque inline callbacks remain unresolved
+- **Fastify**: `fastify()` receivers; HTTP method calls and `route({ method, url, handler })` objects; literal `prefix` registrations, ordered hook stages such as `preHandler`, and opaque inline callbacks remain unresolved
+- **Hono**: `new Hono()` receivers; HTTP method calls, `on([methods], path, handler)` arrays, `basePath` chains, and literal `route(prefix, child)` mounts with ordered middleware stages
 - **Next.js**: App Router `page.*` and `route.*` files under `app` or `src/app`, Pages Router pages and `pages/api` handlers, dynamic segments, route groups, named HTTP exports, and project activation from the `next` dependency or `next.config.*`
+- **Remix**: flat and nested route modules under `app/routes`, `routes`, or `src/routes`; `_index`, dotted nested segments, `$param` and splat names; and `PAGE`, `LOADER`, and `ACTION` operations from default, loader, and action exports. Project activation uses `@remix-run/*` dependencies or `remix.config.*`.
 - **NestJS**: `Controller` HTTP method decorators and `RequestMapping`; GraphQL `Resolver` `Query` and `Mutation` operations at `/graphql`; typed GraphQL field details; `WebSocketGateway` `SubscribeMessage`; `MessagePattern` and `EventPattern` transport registrations
 - **React Router**: JSX `Route` elements with `element={<Component />}` or `Component={Component}`, plus literal object route configs with `component`, `element`, or `Component` targets and loader or action stages
 - **SvelteKit**: `src/routes` `+page.svelte` components and `+server` endpoints, including `[param]` and `[...rest]` segments and source-backed exported HTTP methods; `+page.ts` load modules are not pages

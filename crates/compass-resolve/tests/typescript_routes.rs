@@ -94,6 +94,77 @@ api.route("/items").get(list);
 }
 
 #[test]
+fn fastify_routes_reuse_literal_stages_and_route_objects() -> Result<(), Box<dyn std::error::Error>>
+{
+    let extraction = Engine::default().extract_source(
+        Path::new("src/server.ts"),
+        br#"import fastify from "fastify";
+const app = fastify();
+function authenticate() {}
+function listUsers() {}
+function createUser() {}
+app.get("/users/:id", { preHandler: [authenticate] }, listUsers);
+app.route({ method: ["POST", "PUT"], url: "/users", preHandler: authenticate, handler: createUser });
+app.get(dynamicPath, ignored);
+        "#,
+    )?;
+    let users = routes(&extraction)
+        .find(|route| route.normalized_path == "/users/{id}")
+        .ok_or("missing Fastify route")?;
+    assert_eq!(users.framework, "fastify");
+    assert_eq!(users.operation, "GET");
+    assert_eq!(users.handler_reference, "listUsers");
+    assert_eq!(users.middleware_references, ["authenticate"]);
+    let object_routes = routes(&extraction)
+        .filter(|route| route.normalized_path == "/users")
+        .map(|route| route.operation.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(object_routes, HashSet::from(["POST", "PUT"]));
+    assert_eq!(routes(&extraction).count(), 3);
+    Ok(())
+}
+
+#[test]
+fn hono_routes_preserve_mounts_method_arrays_and_base_paths()
+-> Result<(), Box<dyn std::error::Error>> {
+    let extraction = Engine::default().extract_source(
+        Path::new("src/routes.ts"),
+        br#"import { Hono } from "hono";
+const app = new Hono();
+const api = new Hono();
+function authenticate() {}
+function listUsers() {}
+app.route("/api", api);
+app.get("/health", listUsers);
+api.on(["GET", "POST"], "/users/:id", authenticate, listUsers);
+app.basePath("/v1").get("/status", listUsers);
+unknown.get("/not-a-route", listUsers);
+"#,
+    )?;
+    assert!(routes(&extraction).any(|route| {
+        route.framework == "hono" && route.operation == "GET" && route.normalized_path == "/health"
+    }));
+    assert!(routes(&extraction).any(|route| {
+        route.framework == "hono"
+            && route.operation == "GET"
+            && route.normalized_path == "/api/users/{id}"
+            && route.middleware_references == ["authenticate"]
+    }));
+    assert!(routes(&extraction).any(|route| {
+        route.framework == "hono"
+            && route.operation == "POST"
+            && route.normalized_path == "/api/users/{id}"
+    }));
+    assert!(routes(&extraction).any(|route| {
+        route.framework == "hono"
+            && route.operation == "GET"
+            && route.normalized_path == "/v1/status"
+    }));
+    assert!(!routes(&extraction).any(|route| route.normalized_path == "/not-a-route"));
+    Ok(())
+}
+
+#[test]
 fn nest_http_graphql_and_messaging_shapes_are_distinct() -> Result<(), Box<dyn std::error::Error>> {
     let extraction = source_extract(Path::new("src/users.ts"), "nest.ts")?;
     let route_shapes = routes(&extraction)
@@ -740,5 +811,64 @@ fn next_app_and_pages_routes_use_project_evidence_and_vite_publishes_config_fact
     assert!(routes(&config_extraction).any(|route| {
         route.framework == "next" && route.operation == "PAGE" && route.normalized_path == "/"
     }));
+    Ok(())
+}
+
+#[test]
+fn remix_flat_routes_publish_nested_page_loader_and_action_operations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempdir()?;
+    let root = directory.path();
+    let index = root.join("app/routes/_index.tsx");
+    let user = root.join("app/routes/users.$id.tsx");
+    let resource = root.join("app/routes/api.users.ts");
+    for path in [&index, &user, &resource] {
+        fs::create_dir_all(path.parent().ok_or("route has no parent")?)?;
+    }
+    fs::write(&index, "export default function Home() { return null }")?;
+    fs::write(
+        &user,
+        "export async function loader() { return null }\nexport default function User() { return null }",
+    )?;
+    fs::write(
+        &resource,
+        "export async function loader() { return null }\nexport async function action() { return null }",
+    )?;
+    fs::write(
+        root.join("package.json"),
+        r#"{"dependencies":{"@remix-run/dev":"2.10.0","@remix-run/react":"2.10.0"}}"#,
+    )?;
+    let sources = vec![index.clone(), user.clone(), resource.clone()];
+    let evidence = ProjectEvidenceIndex::build(root, &sources);
+    assert!(
+        evidence
+            .evidence_for(&user)
+            .has_route_root("remix", "app/routes")
+    );
+    let mut engine = Engine::with_project_evidence(Arc::new(evidence));
+    let index_extraction = engine.extract(&index)?;
+    let user_extraction = engine.extract(&user)?;
+    let resource_extraction = engine.extract(&resource)?;
+    assert!(routes(&index_extraction).any(|route| {
+        route.framework == "remix"
+            && route.operation == "PAGE"
+            && route.normalized_path == "/"
+            && route.handler_reference == "Home"
+    }));
+    assert!(routes(&user_extraction).any(|route| {
+        route.framework == "remix"
+            && route.operation == "LOADER"
+            && route.normalized_path == "/users/{id}"
+            && route.handler_reference == "loader"
+    }));
+    assert!(routes(&user_extraction).any(|route| {
+        route.framework == "remix"
+            && route.operation == "PAGE"
+            && route.normalized_path == "/users/{id}"
+    }));
+    let resource_operations = routes(&resource_extraction)
+        .map(|route| route.operation.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(resource_operations, HashSet::from(["ACTION", "LOADER"]));
     Ok(())
 }
