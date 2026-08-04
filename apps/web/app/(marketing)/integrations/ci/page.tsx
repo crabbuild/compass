@@ -20,7 +20,7 @@ export default function CiPage() {
       <HistoryComparisonDiagram />
       <div className="mt-6 grid gap-4 md:grid-cols-3"><CiCheck icon={GitPullRequestArrowIcon} title="review" text="show what the change reaches" /><CiCheck icon={ShieldCheckIcon} title="preserve" text="keep published snapshots immutable" /><CiCheck icon={CheckCircle2Icon} title="explain" text="attach evidence to every result" /></div>
     </PageSection>
-    <section className="border-t border-border/70 bg-primary text-primary-foreground"><div className="mx-auto flex max-w-7xl flex-col gap-6 px-5 py-16 lg:flex-row lg:items-center lg:justify-between lg:px-8"><div><p className="font-heading text-2xl font-semibold tracking-[-0.04em]">Keep CI honest about what it knows.</p><p className="mt-2 text-sm text-primary-foreground/75">Start with artifacts and evidence, then add policy as a separate decision.</p></div><Link className={cn(buttonVariants({ variant: 'secondary' }), 'gap-2')} href="/product/history">Explore versioned history <ArrowRightIcon data-icon="inline-end" /></Link></div></section>
+    <section className="border-t border-border/70 bg-primary text-primary-foreground"><div className="mx-auto flex max-w-7xl flex-col gap-6 px-5 py-16 lg:flex-row lg:items-center lg:justify-between lg:px-8"><div><p className="font-heading text-2xl font-semibold tracking-[-0.04em]">Keep CI honest about what it knows.</p><p className="mt-2 text-sm text-primary-foreground/75">Start with artifacts and evidence, then add policy as a separate decision.</p></div><Link className={cn(buttonVariants({ variant: 'secondary' }), 'gap-2')} href="/product#history">Explore versioned history <ArrowRightIcon data-icon="inline-end" /></Link></div></section>
   </MarketingPage>;
 }
 

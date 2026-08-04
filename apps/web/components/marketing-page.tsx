@@ -60,9 +60,9 @@ export function FeatureGrid({ items }: { items: Array<{ eyebrow: string; title: 
   );
 }
 
-export function PageSection({ eyebrow, title, description, children }: { eyebrow: string; title: string; description?: string; children: ReactNode }) {
+export function PageSection({ id, eyebrow, title, description, children }: { id?: string; eyebrow: string; title: string; description?: string; children: ReactNode }) {
   return (
-    <section className="mx-auto max-w-7xl px-5 py-20 lg:px-8 lg:py-28">
+    <section id={id} className="mx-auto max-w-7xl scroll-mt-24 px-5 py-20 lg:px-8 lg:py-28">
       <SectionHeading eyebrow={eyebrow} title={title} description={description} />
       <div className="mt-12">{children}</div>
     </section>

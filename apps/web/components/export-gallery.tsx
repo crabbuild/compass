@@ -162,7 +162,7 @@ export function ExportGallery() {
                   <span className="mr-2 text-primary">01</span>
                   local artifact · inspectable output · source-aware UX
                 </p>
-                <Link className="inline-flex w-fit items-center gap-2 text-sm font-medium text-primary transition-[gap] hover:gap-3" href="/product/code-graph">
+                <Link className="inline-flex w-fit items-center gap-2 text-sm font-medium text-primary transition-[gap] hover:gap-3" href="/product#code-graph">
                   Explore the code graph
                   <ArrowUpRightIcon data-icon="inline-end" />
                 </Link>
