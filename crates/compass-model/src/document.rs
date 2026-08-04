@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::UNIX_EPOCH;
 
-use serde::{Deserialize, Serialize};
+use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
 use crate::GraphError;
@@ -611,6 +612,44 @@ impl GraphDocument {
         Ok(document)
     }
 
+    /// Load the bounded projection used by focused graph traversal commands.
+    ///
+    /// The projection preserves every value read by label scoring, seed
+    /// tie-breaking, traversal filtering, and text rendering while omitting
+    /// unrelated publication attributes. It is disposable and keyed by the
+    /// graph file signature; the JSON graph remains authoritative.
+    pub fn load_for_traversal(path: &Path) -> Result<Self, GraphError> {
+        if path.extension().and_then(|part| part.to_str()) != Some("json") {
+            return Err(GraphError::InvalidExtension(path.to_path_buf()));
+        }
+        if let Some((size, cap)) = Self::size_cap_exceeded(path) {
+            return Err(GraphError::TooLarge {
+                path: crate::graph::absolute_path(path),
+                size,
+                cap,
+            });
+        }
+        let signature = graph_signature(path);
+        if let Some(signature) = signature
+            && let Some(document) = load_traversal_cache(path, signature)
+            && graph_signature(path) == Some(signature)
+        {
+            return Ok(document);
+        }
+        let compact = load_traversal_projection(path)?.into_cache();
+        if let Some(signature) = signature
+            && graph_signature(path) == Some(signature)
+            && !cache_is_valid(
+                &traversal_cache_path(path),
+                TRAVERSAL_CACHE_MAGIC,
+                signature,
+            )
+        {
+            let _ = write_traversal_cache(path, signature, &compact);
+        }
+        Ok(compact.into_document())
+    }
+
     /// Load the compact, lossless projection required by `graph affected`.
     ///
     /// The projection retains every node endpoint and edge relation while
@@ -736,8 +775,602 @@ impl GraphDocument {
 
 const QUERY_CACHE_MAGIC: &[u8; 8] = b"TRAILG01";
 const AFFECTED_CACHE_MAGIC: &[u8; 8] = b"TRAILA02";
+const TRAVERSAL_CACHE_MAGIC: &[u8; 8] = b"TRAILT03";
 const QUERY_CACHE_HEADER_LEN: usize = 28;
 static QUERY_CACHE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Streaming input for natural traversal. Unlike [`GraphDocument`], these
+/// records skip unknown fields as they are read, so a first query does not
+/// materialize publication evidence, diagnostics, or graph metadata that the
+/// traversal engine cannot consume.
+#[derive(Deserialize)]
+struct TraversalRawGraphDocument {
+    #[serde(default)]
+    directed: bool,
+    #[serde(default = "networkx_default_multigraph")]
+    multigraph: bool,
+    #[serde(default)]
+    nodes: Vec<TraversalRawNode>,
+    links: Option<Vec<TraversalRawEdge>>,
+    edges: Option<Vec<TraversalRawEdge>>,
+}
+
+#[derive(Default)]
+struct TraversalRawNode {
+    id: String,
+    label: Option<Value>,
+    name: Option<Value>,
+    norm_label: Option<Value>,
+    kind: Option<Value>,
+    symbol_kind: Option<Value>,
+    node_type: Option<Value>,
+    file_type: Option<Value>,
+    community: Option<Value>,
+    community_name: Option<Value>,
+    source: Option<Value>,
+    source_file: Option<Value>,
+    source_location: Option<Value>,
+    wiring_file: Option<Value>,
+    wiring_location: Option<Value>,
+    evidence_wiring_site: Option<Value>,
+}
+
+#[derive(Default)]
+struct TraversalRawEdge {
+    source: String,
+    target: String,
+    relation: Option<Value>,
+    kind: Option<Value>,
+    confidence: Option<Value>,
+    context: Option<Value>,
+    source_file: Option<Value>,
+    source_location: Option<Value>,
+    relationship_site: Option<Value>,
+    evidence_confidence: Option<Value>,
+}
+
+#[derive(Default)]
+struct TraversalEvidenceItems(Vec<TraversalEvidenceItem>);
+
+#[derive(Default)]
+struct TraversalEvidenceItem {
+    wiring_site: Option<Value>,
+    confidence: Option<Value>,
+}
+
+impl<'de> Deserialize<'de> for TraversalRawNode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct RawNodeVisitor;
+
+        impl<'de> Visitor<'de> for RawNodeVisitor {
+            type Value = TraversalRawNode;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a node object")
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut id = None;
+                let mut node = TraversalRawNode::default();
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "id" => id = Some(map.next_value()?),
+                        "label" => node.label = Some(map.next_value()?),
+                        "name" => node.name = Some(map.next_value()?),
+                        "norm_label" => node.norm_label = Some(map.next_value()?),
+                        "kind" => node.kind = Some(map.next_value()?),
+                        "symbol_kind" => node.symbol_kind = Some(map.next_value()?),
+                        "type" => node.node_type = Some(map.next_value()?),
+                        "file_type" => node.file_type = Some(map.next_value()?),
+                        "community" => node.community = Some(map.next_value()?),
+                        "community_name" => node.community_name = Some(map.next_value()?),
+                        "source" => node.source = Some(map.next_value()?),
+                        "source_file" => node.source_file = Some(map.next_value()?),
+                        "source_location" => node.source_location = Some(map.next_value()?),
+                        "wiring_file" => node.wiring_file = Some(map.next_value()?),
+                        "wiring_location" => node.wiring_location = Some(map.next_value()?),
+                        "evidence" => {
+                            for evidence in map.next_value::<TraversalEvidenceItems>()?.0 {
+                                if node.evidence_wiring_site.is_none()
+                                    && evidence.wiring_site.as_ref().is_some_and(Value::is_object)
+                                {
+                                    node.evidence_wiring_site = evidence.wiring_site;
+                                }
+                            }
+                        }
+                        _ => {
+                            let _: IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+                node.id = id.ok_or_else(|| de::Error::missing_field("id"))?;
+                Ok(node)
+            }
+        }
+
+        deserializer.deserialize_map(RawNodeVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for TraversalRawEdge {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct RawEdgeVisitor;
+
+        impl<'de> Visitor<'de> for RawEdgeVisitor {
+            type Value = TraversalRawEdge;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("an edge object")
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut source = None;
+                let mut target = None;
+                let mut edge = TraversalRawEdge::default();
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "source" => source = Some(map.next_value()?),
+                        "target" => target = Some(map.next_value()?),
+                        "relation" => edge.relation = Some(map.next_value()?),
+                        "kind" => edge.kind = Some(map.next_value()?),
+                        "confidence" => edge.confidence = Some(map.next_value()?),
+                        "context" => edge.context = Some(map.next_value()?),
+                        "source_file" => edge.source_file = Some(map.next_value()?),
+                        "source_location" => edge.source_location = Some(map.next_value()?),
+                        "relationshipSite" => edge.relationship_site = Some(map.next_value()?),
+                        "evidence" => {
+                            let first_confidence = map
+                                .next_value::<TraversalEvidenceItems>()?
+                                .0
+                                .into_iter()
+                                .next()
+                                .and_then(|evidence| evidence.confidence);
+                            edge.evidence_confidence = first_confidence;
+                        }
+                        _ => {
+                            let _: IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+                edge.source = source.ok_or_else(|| de::Error::missing_field("source"))?;
+                edge.target = target.ok_or_else(|| de::Error::missing_field("target"))?;
+                Ok(edge)
+            }
+        }
+
+        deserializer.deserialize_map(RawEdgeVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for TraversalEvidenceItems {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct EvidenceItemsVisitor;
+
+        impl<'de> Visitor<'de> for EvidenceItemsVisitor {
+            type Value = TraversalEvidenceItems;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("an evidence array")
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut items = Vec::new();
+                while let Some(item) = sequence.next_element()? {
+                    items.push(item);
+                }
+                Ok(TraversalEvidenceItems(items))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                while map.next_key::<IgnoredAny>()?.is_some() {
+                    let _: IgnoredAny = map.next_value()?;
+                }
+                Ok(TraversalEvidenceItems::default())
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(TraversalEvidenceItems::default())
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(TraversalEvidenceItems::default())
+            }
+
+            fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(TraversalEvidenceItems::default())
+            }
+
+            fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(TraversalEvidenceItems::default())
+            }
+
+            fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(TraversalEvidenceItems::default())
+            }
+
+            fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(TraversalEvidenceItems::default())
+            }
+
+            fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(TraversalEvidenceItems::default())
+            }
+
+            fn visit_string<E>(self, _value: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(TraversalEvidenceItems::default())
+            }
+        }
+
+        deserializer.deserialize_any(EvidenceItemsVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for TraversalEvidenceItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct EvidenceItemVisitor;
+
+        impl<'de> Visitor<'de> for EvidenceItemVisitor {
+            type Value = TraversalEvidenceItem;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("an evidence object")
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut item = TraversalEvidenceItem::default();
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "wiringSite" => item.wiring_site = Some(map.next_value()?),
+                        "confidence" => item.confidence = Some(map.next_value()?),
+                        _ => {
+                            let _: IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+                Ok(item)
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(TraversalEvidenceItem::default())
+            }
+        }
+
+        deserializer.deserialize_any(EvidenceItemVisitor)
+    }
+}
+
+/// Compact, positional representation for the fields consumed by natural
+/// traversal. Keeping this cache as tuples avoids a map allocation and a key
+/// lookup for every retained attribute while leaving the published JSON graph
+/// authoritative.
+#[derive(Deserialize, Serialize)]
+struct TraversalCacheDocument(bool, bool, Vec<TraversalCacheNode>, Vec<TraversalCacheEdge>);
+
+#[derive(Deserialize, Serialize)]
+struct TraversalCacheNode(
+    String,
+    Option<Value>,
+    Option<Value>,
+    Option<Value>,
+    Option<Value>,
+    Option<Value>,
+    Option<Value>,
+    Option<Value>,
+    Option<Value>,
+    Option<Value>,
+    Option<Value>,
+    Option<Value>,
+    Option<Value>,
+);
+
+#[derive(Deserialize, Serialize)]
+struct TraversalCacheEdge(
+    String,
+    String,
+    Option<Value>,
+    Option<Value>,
+    Option<Value>,
+    Option<Value>,
+    Option<Value>,
+);
+
+impl TraversalRawGraphDocument {
+    fn into_cache(self) -> TraversalCacheDocument {
+        let links = self.links.or(self.edges).unwrap_or_default();
+        TraversalCacheDocument(
+            self.directed,
+            self.multigraph,
+            self.nodes
+                .into_iter()
+                .map(TraversalRawNode::into_cache)
+                .collect(),
+            links
+                .into_iter()
+                .map(TraversalRawEdge::into_cache)
+                .collect(),
+        )
+    }
+}
+
+impl TraversalRawNode {
+    fn into_cache(self) -> TraversalCacheNode {
+        let Self {
+            id,
+            label,
+            name,
+            norm_label,
+            kind,
+            symbol_kind,
+            node_type,
+            file_type,
+            community,
+            community_name,
+            source,
+            source_file,
+            source_location,
+            wiring_file,
+            wiring_location,
+            evidence_wiring_site,
+        } = self;
+        let source_file_value = projected_string_value(
+            source_file.as_ref(),
+            source_anchor_field(source.as_ref(), "file"),
+        );
+        let source_location_value = projected_string_value(
+            source_location.as_ref(),
+            source
+                .as_ref()
+                .and_then(Value::as_object)
+                .and_then(source_anchor_location),
+        );
+        let wiring_file_value = projected_string_value(
+            wiring_file.as_ref(),
+            source_anchor_field(evidence_wiring_site.as_ref(), "file"),
+        );
+        let wiring_location_value = projected_string_value(
+            wiring_location.as_ref(),
+            evidence_wiring_site
+                .as_ref()
+                .and_then(Value::as_object)
+                .and_then(source_anchor_location),
+        );
+        let community_name = community
+            .as_ref()
+            .and_then(|value| {
+                value
+                    .as_object()
+                    .and_then(|community| community.get("label"))
+                    .and_then(Value::as_str)
+                    .map(|label| Value::String(label.to_owned()))
+            })
+            .or(community_name);
+        let community = community.filter(|value| {
+            value
+                .as_object()
+                .and_then(|community| community.get("label"))
+                .and_then(Value::as_str)
+                .is_none()
+        });
+        let label = label
+            .filter(|value| value_as_python_string(value).is_some())
+            .or(name);
+        TraversalCacheNode(
+            id,
+            label,
+            norm_label,
+            kind,
+            symbol_kind,
+            node_type,
+            file_type,
+            community,
+            community_name,
+            source_file_value,
+            source_location_value,
+            wiring_file_value,
+            wiring_location_value,
+        )
+    }
+}
+
+impl TraversalRawEdge {
+    fn into_cache(self) -> TraversalCacheEdge {
+        let Self {
+            source,
+            target,
+            relation,
+            kind,
+            confidence,
+            context,
+            source_file,
+            source_location,
+            relationship_site,
+            evidence_confidence,
+        } = self;
+        let confidence = confidence
+            .as_ref()
+            .and_then(value_as_python_string)
+            .map(Value::String)
+            .or_else(|| {
+                evidence_confidence.map(|value| match value.as_str() {
+                    Some("exact") => Value::String("EXTRACTED".to_owned()),
+                    Some("inferred") => Value::String("INFERRED".to_owned()),
+                    Some("ambiguous") => Value::String("AMBIGUOUS".to_owned()),
+                    Some("unresolved") => Value::String("UNRESOLVED".to_owned()),
+                    Some(_) | None => value,
+                })
+            });
+        TraversalCacheEdge(
+            source,
+            target,
+            relation
+                .as_ref()
+                .and_then(value_as_python_string)
+                .map(Value::String)
+                .or_else(|| {
+                    kind.as_ref()
+                        .and_then(value_as_python_string)
+                        .map(Value::String)
+                }),
+            confidence,
+            context
+                .as_ref()
+                .and_then(value_as_python_string)
+                .map(Value::String),
+            projected_string_value(
+                source_file.as_ref(),
+                source_anchor_field(relationship_site.as_ref(), "file"),
+            ),
+            projected_string_value(
+                source_location.as_ref(),
+                relationship_site
+                    .as_ref()
+                    .and_then(Value::as_object)
+                    .and_then(source_anchor_location),
+            ),
+        )
+    }
+}
+
+fn projected_string_value(direct: Option<&Value>, fallback: Option<String>) -> Option<Value> {
+    direct
+        .and_then(value_as_python_string)
+        .or(fallback)
+        .and_then(nonempty_string_value)
+}
+
+fn source_anchor_field(anchor: Option<&Value>, field: &str) -> Option<String> {
+    anchor
+        .and_then(Value::as_object)
+        .and_then(|anchor| anchor.get(field))
+        .and_then(value_as_python_string)
+}
+
+impl TraversalCacheDocument {
+    fn into_document(self) -> GraphDocument {
+        let Self(directed, multigraph, nodes, links) = self;
+        let nodes = nodes
+            .into_iter()
+            .map(|node| {
+                let TraversalCacheNode(
+                    id,
+                    label,
+                    norm_label,
+                    kind,
+                    symbol_kind,
+                    node_type,
+                    file_type,
+                    community,
+                    community_name,
+                    source_file,
+                    source_location,
+                    wiring_file,
+                    wiring_location,
+                ) = node;
+                let mut attributes = Map::new();
+                insert_optional_value(&mut attributes, "label", label);
+                insert_optional_value(&mut attributes, "norm_label", norm_label);
+                insert_optional_value(&mut attributes, "kind", kind);
+                insert_optional_value(&mut attributes, "symbol_kind", symbol_kind);
+                insert_optional_value(&mut attributes, "type", node_type);
+                insert_optional_value(&mut attributes, "file_type", file_type);
+                insert_optional_value(&mut attributes, "community", community);
+                insert_optional_value(&mut attributes, "community_name", community_name);
+                insert_optional_value(&mut attributes, "source_file", source_file);
+                insert_optional_value(&mut attributes, "source_location", source_location);
+                insert_optional_value(&mut attributes, "wiring_file", wiring_file);
+                insert_optional_value(&mut attributes, "wiring_location", wiring_location);
+                NodeRecord { id, attributes }
+            })
+            .collect();
+        let links = links
+            .into_iter()
+            .map(|edge| {
+                let TraversalCacheEdge(
+                    source,
+                    target,
+                    relation,
+                    confidence,
+                    context,
+                    source_file,
+                    source_location,
+                ) = edge;
+                let mut attributes = Map::new();
+                insert_optional_value(&mut attributes, "relation", relation);
+                insert_optional_value(&mut attributes, "confidence", confidence);
+                insert_optional_value(&mut attributes, "context", context);
+                insert_optional_value(&mut attributes, "source_file", source_file);
+                insert_optional_value(&mut attributes, "source_location", source_location);
+                EdgeRecord {
+                    source,
+                    target,
+                    attributes,
+                }
+            })
+            .collect();
+        GraphDocument {
+            directed,
+            multigraph,
+            graph: Map::new(),
+            nodes,
+            links,
+            extras: BTreeMap::new(),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct GraphSignature {
@@ -780,6 +1413,18 @@ fn affected_cache_path(graph_path: &Path) -> PathBuf {
         .join(format!(".{file_name}.compass-affected-v1"))
 }
 
+fn traversal_cache_path(graph_path: &Path) -> PathBuf {
+    let file_name = graph_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("graph.json");
+    graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("cache")
+        .join(format!(".{file_name}.compass-traversal-v1"))
+}
+
 fn encode_cache_header(magic: &[u8; 8], signature: GraphSignature) -> [u8; QUERY_CACHE_HEADER_LEN] {
     let mut header = [0_u8; QUERY_CACHE_HEADER_LEN];
     header[..8].copy_from_slice(magic);
@@ -795,6 +1440,32 @@ fn load_query_cache(path: &Path, signature: GraphSignature) -> Option<GraphDocum
 
 fn load_affected_cache(path: &Path, signature: GraphSignature) -> Option<GraphDocument> {
     load_cache(&affected_cache_path(path), AFFECTED_CACHE_MAGIC, signature)
+}
+
+fn load_traversal_cache(path: &Path, signature: GraphSignature) -> Option<GraphDocument> {
+    let cache_path = traversal_cache_path(path);
+    let mut reader = BufReader::new(File::open(&cache_path).ok()?);
+    let mut header = [0_u8; QUERY_CACHE_HEADER_LEN];
+    reader.read_exact(&mut header).ok()?;
+    if !cache_header_matches(&cache_path, TRAVERSAL_CACHE_MAGIC, signature, &header) {
+        return None;
+    }
+    let cache: TraversalCacheDocument = rmp_serde::from_read(reader).ok()?;
+    Some(cache.into_document())
+}
+
+fn load_traversal_projection(path: &Path) -> Result<TraversalRawGraphDocument, GraphError> {
+    let file = File::open(path).map_err(|source| {
+        if source.kind() == std::io::ErrorKind::NotFound {
+            GraphError::NotFound(crate::graph::absolute_path(path))
+        } else {
+            GraphError::Read {
+                path: crate::graph::absolute_path(path),
+                source,
+            }
+        }
+    })?;
+    serde_json::from_reader(BufReader::new(file)).map_err(GraphError::Corrupt)
 }
 
 fn load_cache(
@@ -859,6 +1530,36 @@ fn write_affected_cache(
         return Ok(());
     }
     write_compact_cache(graph_path, signature, &document.compact_for_affected())
+}
+
+fn write_traversal_cache(
+    graph_path: &Path,
+    signature: GraphSignature,
+    document: &TraversalCacheDocument,
+) -> std::io::Result<()> {
+    let cache_path = traversal_cache_path(graph_path);
+    let sequence = QUERY_CACHE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = cache_path.with_extension(format!("tmp-{}-{sequence}", std::process::id()));
+    let file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)?;
+    let result = (|| {
+        let mut writer = BufWriter::new(file);
+        writer.write_all(&encode_cache_header(TRAVERSAL_CACHE_MAGIC, signature))?;
+        rmp_serde::encode::write(&mut writer, document).map_err(std::io::Error::other)?;
+        writer.flush()?;
+        drop(writer);
+        #[cfg(windows)]
+        if cache_path.exists() {
+            fs::remove_file(&cache_path)?;
+        }
+        fs::rename(&temporary, cache_path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(temporary);
+    }
+    result
 }
 
 fn write_compact_cache(
@@ -978,11 +1679,21 @@ fn value_as_python_string(value: &Value) -> Option<String> {
     }
 }
 
+fn nonempty_string_value(value: String) -> Option<Value> {
+    (!value.is_empty()).then_some(Value::String(value))
+}
+
+fn insert_optional_value(attributes: &mut Map<String, Value>, key: &str, value: Option<Value>) {
+    if let Some(value) = value {
+        attributes.insert(key.to_owned(), value);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
 
-    use super::{GraphDocument, affected_cache_path, query_cache_path};
+    use super::{GraphDocument, affected_cache_path, query_cache_path, traversal_cache_path};
 
     #[test]
     fn omitted_multigraph_uses_networkx_legacy_default() {
@@ -1115,5 +1826,39 @@ mod tests {
         assert!(!compact.nodes[0].attributes.contains_key("large_payload"));
         assert_eq!(compact.links[0].string("relation"), "custom");
         assert!(!compact.links[0].attributes.contains_key("confidence"));
+    }
+
+    #[test]
+    fn traversal_cache_retains_natural_query_fields_and_omits_large_payloads() {
+        let directory = tempfile::tempdir().unwrap_or_else(|_| std::process::abort());
+        let path = directory.path().join("graph.json");
+        fs::create_dir(directory.path().join("cache")).unwrap_or_else(|_| std::process::abort());
+        fs::write(
+            &path,
+            r#"{
+                "directed":true,
+                "multigraph":true,
+                "nodes":[
+                    {"id":"a","name":"A","kind":"function","norm_label":"a","source":{"file":"src/a.py","startLine":2},"community":{"id":4,"label":"Core"},"evidence":[{"wiringSite":{"file":"src/routes.py","startLine":8}}],"large_payload":"discard"},
+                    {"id":"b","label":"B"}
+                ],
+                "links":[{"source":"a","target":"b","kind":"calls","evidence":[{"confidence":"exact"}],"relationshipSite":{"file":"src/a.py","startLine":3},"context":"call","large_payload":"discard"}]
+            }"#,
+        )
+        .unwrap_or_else(|_| std::process::abort());
+
+        let compact =
+            GraphDocument::load_for_traversal(&path).unwrap_or_else(|_| std::process::abort());
+        assert!(traversal_cache_path(&path).is_file());
+        assert_eq!(compact.nodes[0].label(), "A");
+        assert_eq!(compact.nodes[0].string("source_file"), "src/a.py");
+        assert_eq!(compact.nodes[0].string("source_location"), "L2");
+        assert_eq!(compact.nodes[0].string("wiring_file"), "src/routes.py");
+        assert_eq!(compact.nodes[0].string("community_name"), "Core");
+        assert_eq!(compact.links[0].string("relation"), "calls");
+        assert_eq!(compact.links[0].string("confidence"), "EXTRACTED");
+        assert_eq!(compact.links[0].string("source_location"), "L3");
+        assert!(!compact.nodes[0].attributes.contains_key("large_payload"));
+        assert!(!compact.links[0].attributes.contains_key("large_payload"));
     }
 }

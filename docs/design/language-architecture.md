@@ -22,14 +22,6 @@ meta:
 
 Compass separates parsing from semantic interpretation and graph publication. The vendored language pack supplies pinned parsers, language adapters interpret syntax, and the universal evidence framework gives independently qualified languages one resolution and publication path.
 
-> **Who this page is for:** contributors and technical evaluators working on language extraction.
->
-> **You will learn:** which layer owns grammars, semantic facts, cross-file resolution, graph publication, and framework targeting.
->
-> **Prerequisites:** [System architecture](architecture.md) and [Graph model](../concepts/graph-model.md).
->
-> **Reading time:** 10 minutes.
-
 ## Current and planned status
 
 This architecture is transitioning one language at a time. The status labels below prevent planned contracts from being mistaken for shipped behavior.

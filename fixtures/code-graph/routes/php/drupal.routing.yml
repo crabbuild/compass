@@ -3,9 +3,14 @@ example.view:
   defaults:
     _controller: '\Drupal\example\Controller\ExampleController::view'
   requirements:
-    _method: 'GET'
+    _method: 'GET|POST'
 
 example.form:
   path: '/examples/create'
   defaults:
     _form: '\Drupal\example\Form\ExampleForm'
+
+example.entity_edit:
+  path: '/examples/{example}/edit'
+  defaults:
+    _entity_form: 'example.edit'

@@ -262,12 +262,18 @@ pub fn validate_code_graph_records(document: &CodeGraphDocument) -> CodeGraphVal
     }
 
     let mut nodes = HashMap::new();
-    for node in &document.nodes {
+    let mut duplicate_node_positions = HashSet::new();
+    for (index, node) in document.nodes.iter().enumerate() {
+        if nodes.insert(node.id.as_str(), node).is_some() {
+            duplicate_node_positions.insert(index);
+        }
+    }
+    let validate_node = |(index, node): (usize, &crate::code_graph::NodeRecord)| {
         let mut errors = Vec::new();
         if node.id.trim().is_empty() {
             errors.push("node ID must not be empty".to_owned());
         }
-        if nodes.insert(node.id.as_str(), node).is_some() {
+        if duplicate_node_positions.contains(&index) {
             errors.push(format!("duplicate node ID {}", node.id));
         }
         if node.name.trim().is_empty() || node.qualified_name.trim().is_empty() {
@@ -291,12 +297,30 @@ pub fn validate_code_graph_records(document: &CodeGraphDocument) -> CodeGraphVal
             ));
         }
         if !errors.is_empty() {
-            report.node_errors.push(RecordValidationErrors {
+            Some(RecordValidationErrors {
                 id: node.id.clone(),
                 errors,
-            });
+            })
+        } else {
+            None
         }
-    }
+    };
+    let node_errors = if document.nodes.len() < 512 {
+        document
+            .nodes
+            .iter()
+            .enumerate()
+            .map(validate_node)
+            .collect::<Vec<_>>()
+    } else {
+        document
+            .nodes
+            .par_iter()
+            .enumerate()
+            .map(validate_node)
+            .collect::<Vec<_>>()
+    };
+    report.node_errors.extend(node_errors.into_iter().flatten());
 
     let mut edge_ids = HashSet::with_capacity(document.links.len());
     let duplicate_edge_positions = document

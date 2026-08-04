@@ -4,16 +4,6 @@ Compass outputs range from the current `compass-out/` directory to versioned
 CompassQL results and immutable history exports. This reference describes
 consumer responsibilities and authority.
 
-> **Who this reference is for:** integrators, operators, and contributors
-> changing an output or renderer.
->
-> **You will learn:** core artifacts, graph JSON, query schemas, derived views,
-> history export, caches, atomicity, and deterministic equivalence.
->
-> **Prerequisites:** [Graph model](../concepts/graph-model.md).
->
-> **Reading time:** 10–12 minutes.
-
 ## Current output directory
 
 Default:
@@ -26,7 +16,7 @@ compass-out/
 │   └── store.ref               # with the default SQLite query index
 ├── .compass-store/
 │   └── compass-store.sqlite3   # with the default SQLite query index
-├── program.json
+├── program.json                 # only with --program or --program-artifact
 ├── GRAPH_REPORT.md
 ├── graph.html
 ├── manifest.json
@@ -43,7 +33,7 @@ compass-out/
 | `graph.json` | machine-readable graph snapshot | queries, integrations, export |
 | `.compass-store/compass-store.sqlite3` | bounded shared namespace/partition/key query index | default large-graph queries and explicit store-engine queries |
 | active generation `store.ref` | typed selector for the co-published store identity and snapshot | store-engine validation before query execution |
-| `program.json` | provenance-aware Program IR | program inspection, semantic analysis |
+| `program.json` (optional) | provenance-aware Program IR | program inspection, semantic analysis |
 | `GRAPH_REPORT.md` | derived human orientation | architecture survey |
 | `graph.html` | derived optional visualization | interactive exploration |
 | `manifest.json` | incremental build state | next compatible update |
@@ -215,8 +205,9 @@ A forced/cold build can regenerate current output.
 
 ## `program.json`
 
-`program.json` is the canonical, language-neutral Program IR produced by native
-`update`, `extract`, and `watch` builds. Its public schema identifier is:
+`program.json` is the optional canonical, language-neutral Program IR produced
+by native `init`, `update`, `extract`, and `watch` builds when `--program` or
+`--program-artifact` is selected. Its public schema identifier is:
 
 ```text
 http://crab.build/compass/v1
@@ -494,7 +485,7 @@ allocating an unbounded JSON graph.
 
 - [Graph model](../concepts/graph-model.md)
 - [Integrating Compass](../guides/integrating-compass.md)
-- [Storage and history](../design/storage-and-history.md)
+- [Versioned history](../guides/versioned-history.md)
 - [Command reference](commands.md)
 
 **Next step:** identify the most structured available output for your consumer

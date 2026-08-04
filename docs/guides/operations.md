@@ -4,17 +4,6 @@ This guide covers the long-running and optional operational surfaces around the
 core build/query loop: watch mode, MCP serving, hooks, providers, global
 registries, ingestion, PR workflows, and exports.
 
-> **Who this guide is for:** maintainers, platform engineers, editor/assistant
-> integrators, and developers running Compass beyond one-shot local commands.
->
-> **You will learn:** lifecycle, safety boundaries, observability, and recovery
-> patterns for operational commands.
->
-> **Prerequisites:** [Getting started](../getting-started.md) and a working
-> `compass update .`.
->
-> **Reading time:** 15–20 minutes.
-
 ## Operational principle: start one-shot, then automate
 
 Before enabling a watcher, hook, service, or provider-backed workflow:
@@ -384,7 +373,7 @@ Avoid deleting a live SQLite/WAL store, lock, or lease as a first response.
 
 - [Integrating Compass](integrating-compass.md)
 - [Versioned graph history](versioned-history.md)
-- [Security and privacy](../design/security-and-privacy.md)
+- [Configuration reference](../reference/configuration.md)
 - [Troubleshooting cookbook](../cookbook/troubleshooting.md)
 
 **Next step:** choose one operational surface, run its one-shot equivalent, and

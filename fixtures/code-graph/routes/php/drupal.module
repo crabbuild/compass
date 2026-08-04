@@ -6,4 +6,9 @@ class ExampleController {
 
 class ExampleForm {}
 
-function hook_entity_type_build() {}
+/**
+ * Implements hook_entity_type_build().
+ */
+function drupal_entity_type_build() {}
+
+function drupal_helper() {}

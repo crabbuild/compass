@@ -37,20 +37,38 @@ const IMPLEMENTATION_SUFFIXES: &[&str] = &["m", "mm", "cpp", "cc", "cxx", "c"];
 /// ID collision from one directory/base-stem family with exactly one header
 /// is eligible; every other collision is left for conservative disambiguation.
 pub fn merge_decl_def_classes(extractions: &mut [Extraction]) {
+    let has_declaration_definition = extractions
+        .iter()
+        .flat_map(|extraction| &extraction.nodes)
+        .any(|node| {
+            node.attributes.get("file_type").and_then(Value::as_str) == Some("code")
+                && node
+                    .attributes
+                    .get("source_file")
+                    .and_then(Value::as_str)
+                    .is_some_and(|source| {
+                        is_declaration_source(source) || is_implementation_source(source)
+                    })
+        });
+    if !has_declaration_definition {
+        return;
+    }
+
     let mut groups = HashMap::<String, Vec<(usize, usize, String)>>::new();
     for (extraction_index, extraction) in extractions.iter().enumerate() {
         for (node_index, node) in extraction.nodes.iter().enumerate() {
             let source = string_attribute(node, "source_file");
-            if string_attribute(node, "file_type") == "code"
-                && !node.id.is_empty()
-                && !source.is_empty()
+            if node.id.is_empty()
+                || source.is_empty()
+                || string_attribute(node, "file_type") != "code"
+                || (!is_declaration_source(&source) && !is_implementation_source(&source))
             {
-                groups.entry(node.id.clone()).or_default().push((
-                    extraction_index,
-                    node_index,
-                    source,
-                ));
+                continue;
             }
+            groups
+                .entry(node.id.clone())
+                .or_default()
+                .push((extraction_index, node_index, source));
         }
     }
 
@@ -61,18 +79,11 @@ pub fn merge_decl_def_classes(extractions: &mut [Extraction]) {
         let mut headers = Vec::new();
         let mut eligible = true;
         for &(extraction_index, node_index, ref source) in entries {
-            let path = Path::new(source);
-            let suffix = path
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if !DECLARATION_SUFFIXES.contains(&suffix.as_str())
-                && !IMPLEMENTATION_SUFFIXES.contains(&suffix.as_str())
-            {
+            if !is_declaration_source(source) && !is_implementation_source(source) {
                 eligible = false;
                 break;
             }
+            let path = Path::new(source);
             let stem = path
                 .file_stem()
                 .and_then(|stem| stem.to_str())
@@ -88,7 +99,7 @@ pub fn merge_decl_def_classes(extractions: &mut [Extraction]) {
                 path.parent().unwrap_or_else(|| Path::new("")).to_path_buf(),
                 stem.to_owned(),
             ));
-            if DECLARATION_SUFFIXES.contains(&suffix.as_str()) {
+            if is_declaration_source(source) {
                 headers.push((extraction_index, node_index));
             }
         }
@@ -97,12 +108,7 @@ pub fn merge_decl_def_classes(extractions: &mut [Extraction]) {
             if let Some((extraction_index, node_index, _)) = entries
                 .iter()
                 .filter(|(extraction_index, node_index, source)| {
-                    let suffix = Path::new(source)
-                        .extension()
-                        .and_then(|extension| extension.to_str())
-                        .unwrap_or_default()
-                        .to_ascii_lowercase();
-                    IMPLEMENTATION_SUFFIXES.contains(&suffix.as_str())
+                    is_implementation_source(source)
                         && extractions[*extraction_index].nodes[*node_index]
                             .attributes
                             .contains_key("implementation_hash")
@@ -165,6 +171,49 @@ pub fn merge_decl_def_classes(extractions: &mut [Extraction]) {
                 ))
         });
     }
+}
+
+/// Run declaration/definition merging only when the current source set can
+/// contain a native header/implementation pair.
+pub fn merge_decl_def_classes_if_needed(extractions: &mut [Extraction], sources: &[PathBuf]) {
+    if !sources.iter().any(|source| {
+        source
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                DECLARATION_SUFFIXES
+                    .iter()
+                    .chain(IMPLEMENTATION_SUFFIXES)
+                    .any(|suffix| extension.eq_ignore_ascii_case(suffix))
+            })
+    }) {
+        return;
+    }
+    merge_decl_def_classes(extractions);
+}
+
+fn is_declaration_source(source: &str) -> bool {
+    let Some(extension) = Path::new(source)
+        .extension()
+        .and_then(|value| value.to_str())
+    else {
+        return false;
+    };
+    DECLARATION_SUFFIXES
+        .iter()
+        .any(|suffix| extension.eq_ignore_ascii_case(suffix))
+}
+
+fn is_implementation_source(source: &str) -> bool {
+    let Some(extension) = Path::new(source)
+        .extension()
+        .and_then(|value| value.to_str())
+    else {
+        return false;
+    };
+    IMPLEMENTATION_SUFFIXES
+        .iter()
+        .any(|suffix| extension.eq_ignore_ascii_case(suffix))
 }
 
 /// Merge per-file facts in source order, then resolve shared cross-file calls.
@@ -437,9 +486,35 @@ fn finish_resolution(
     profile_internal("resolver family stubs", &mut profile_started);
     rewire_unique_stub_nodes(&mut merged);
     profile_internal("resolver unique stubs", &mut profile_started);
-    resolve_cross_file_calls_with_root_calls(&mut merged, &language_facts.calls);
+    // Member and non-member call resolution read the same pre-call graph but
+    // append independent edge families. Run their read-heavy indexing and
+    // candidate selection together, then apply the historical generic-first
+    // append order and duplicate suppression at the single mutation point.
+    let (mut generic_edges, (language_nodes, mut language_edges)) = rayon::join(
+        || resolve_cross_file_call_additions(&merged, &language_facts.calls),
+        || members::resolve_language_call_facts_additions(&language_facts, &merged),
+    );
+    let generic_keys = generic_edges
+        .iter()
+        .map(|edge| {
+            (
+                edge.source.clone(),
+                edge.target.clone(),
+                edge_occurrence_site(edge),
+            )
+        })
+        .collect::<AHashSet<_>>();
+    language_edges.retain(|edge| {
+        !generic_keys.contains(&(
+            edge.source.clone(),
+            edge.target.clone(),
+            edge_occurrence_site(edge),
+        ))
+    });
+    merged.edges.append(&mut generic_edges);
+    merged.edges.extend(language_edges);
+    merged.nodes.extend(language_nodes);
     profile_internal("resolver cross-file calls", &mut profile_started);
-    members::resolve_language_call_facts(language_facts, &mut merged);
     profile_internal("resolver language calls", &mut profile_started);
     if let Err(error) = frameworks::expand_universal_framework_facts(&mut merged) {
         merged
@@ -1774,6 +1849,14 @@ fn resolve_cross_file_calls_with_root(
 }
 
 fn resolve_cross_file_calls_with_root_calls(extraction: &mut Extraction, raw_calls: &[RawCall]) {
+    let additions = resolve_cross_file_call_additions(extraction, raw_calls);
+    extraction.edges.extend(additions);
+}
+
+fn resolve_cross_file_call_additions(
+    extraction: &Extraction,
+    raw_calls: &[RawCall],
+) -> Vec<EdgeRecord> {
     let eligible_calls = raw_calls.iter().filter(|raw| {
         !raw.callee.is_empty()
             && raw.is_member_call != Some(true)
@@ -1791,9 +1874,10 @@ fn resolve_cross_file_calls_with_root_calls(extraction: &mut Extraction, raw_cal
         }
     }
     if eligible_call_count == 0 {
-        return;
+        return Vec::new();
     }
     let mut profile_started = Instant::now();
+    let mut additions = Vec::new();
     let mut exact = AHashMap::<String, Vec<String>>::new();
     let mut folded = AHashMap::<String, Vec<String>>::new();
     let mut source_by_id = AHashMap::<String, String>::new();
@@ -1965,7 +2049,7 @@ fn resolve_cross_file_calls_with_root_calls(extraction: &mut Extraction, raw_cal
                         .cloned()
                         .unwrap_or_else(|| Value::String("argument".to_owned())),
                 );
-                extraction.edges.push(edge);
+                additions.push(edge);
             }
             continue;
         }
@@ -1995,10 +2079,11 @@ fn resolve_cross_file_calls_with_root_calls(extraction: &mut Extraction, raw_cal
             {
                 edge.attributes.remove("confidence_score");
             }
-            extraction.edges.push(edge);
+            additions.push(edge);
         }
     }
     profile_internal("resolver generic cross-file calls", &mut profile_started);
+    additions
 }
 
 fn candidate_calls(
@@ -2769,6 +2854,21 @@ mod tests {
                 .flat_map(|extraction| &extraction.edges)
                 .all(|candidate| candidate.source != candidate.target)
         );
+    }
+
+    #[test]
+    fn declaration_definition_merge_skips_non_native_source_sets() {
+        let mut extractions = vec![Extraction {
+            nodes: vec![
+                node("duplicate", "first", "package/first.py", "class"),
+                node("duplicate", "second", "package/second.py", "class"),
+            ],
+            ..Extraction::default()
+        }];
+
+        merge_decl_def_classes_if_needed(&mut extractions, &[PathBuf::from("package/first.py")]);
+
+        assert_eq!(extractions[0].nodes.len(), 2);
     }
 
     #[test]

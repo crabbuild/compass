@@ -66,12 +66,12 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
     let mut best: HashMap<String, BestSeed> = HashMap::new();
     let mut tie_breakers = HashMap::new();
     for (node_index, node) in graph.nodes() {
-        let tie_breaker = SeedTieBreaker::new(graph, node_index, node);
         let norm_label = normalized_label(node);
         let bare_label = norm_label.trim_end_matches(['(', ')']);
         let label_tokens = search_tokens(&node.string("label")).join(" ");
         let source = node.string("source_file").to_lowercase();
         let node_id = node.id.to_lowercase();
+        let mut tie_breaker = None;
         let mut score = 0.0;
         score += query_match_tier(
             &norm_label,
@@ -118,9 +118,11 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
                 let singleton =
                     singleton_score(joined_tier, tier_value, substring_value, source_value);
                 if singleton > 0.0 {
+                    let tie = *tie_breaker
+                        .get_or_insert_with(|| SeedTieBreaker::new(graph, node_index, node));
                     let candidate = BestSeed {
                         score: singleton,
-                        tie_breaker,
+                        tie_breaker: tie,
                         id: node.id.clone(),
                         node: node_index,
                     };
@@ -136,7 +138,9 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
         let coverage = matched as f64 / term_count as f64;
         score += tiered * coverage.powi(2);
         if score > 0.0 {
-            tie_breakers.insert(node_index, tie_breaker);
+            let tie =
+                *tie_breaker.get_or_insert_with(|| SeedTieBreaker::new(graph, node_index, node));
+            tie_breakers.insert(node_index, tie);
             ranked.push(ScoredNode {
                 score,
                 node: node_index,

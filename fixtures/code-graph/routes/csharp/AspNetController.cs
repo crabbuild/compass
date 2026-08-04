@@ -9,6 +9,13 @@ public class UsersController : ControllerBase
 
     [HttpPost]
     public object Create() => new();
+
+    [HttpGet("/status")]
+    public object Status() => new();
+
+    [HttpGet]
+    [Route("health")]
+    public object Health() => new();
 }
 
 public class QualificationPayload {}

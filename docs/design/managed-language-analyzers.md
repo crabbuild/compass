@@ -4,27 +4,6 @@ This document defines a shared architecture for improving Compass code-graph
 quality with optional compiler, indexer, and language-server evidence across
 Python, Rust, Go, TypeScript, JavaScript, and Java.
 
-> **Status:** Planned. Compass does not currently install or invoke managed
-> language analyzers. It can consume verified offline SCIP artifacts, and Java
-> can project fresh exact SCIP identities onto AST-proven call sites. All
-> languages continue to work through their native structural paths without the
-> integrations described here.
->
-> **Who this page is for:** contributors implementing managed tools, Program
-> providers, language adapters, project discovery, semantic resolution,
-> history, qualification, or CLI support.
->
-> **You will learn:** the shared analyzer architecture, language-specific
-> semantic policies, tool and runtime boundaries, phased implementation
-> direction, and acceptance criteria.
->
-> **Prerequisites:** [Language architecture](language-architecture.md),
-> [Managed JDT integration](java-jdt-integration.md),
-> [Security and privacy](security-and-privacy.md), and
-> [Universal semantic evidence](../reference/universal-semantic-evidence.md).
->
-> **Reading time:** 25–30 minutes.
-
 ## Decision summary
 
 Compass will add one managed-analyzer framework with language-owned semantic

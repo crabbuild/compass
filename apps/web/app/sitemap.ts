@@ -8,13 +8,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const routes = [
     '',
     '/product',
-    '/product/code-graph',
-    '/product/compassql',
-    '/product/history',
     '/use-cases',
-    '/use-cases/codebase-exploration',
-    '/use-cases/impact-analysis',
-    '/use-cases/assistants',
     '/integrations',
     '/integrations/vscode',
     '/integrations/mcp',

@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- Make structural graph builds the fast default: `init`, `update`, `extract`, and
+  `watch` now omit Program IR unless `--program` or `--program-artifact` is
+  selected. Keep `--no-program` accepted for compatibility with existing
+  automation.
+- Make `extract --code-only` scope structural extraction to code inputs as well
+  as skipping semantic-provider work; the diagnostic file inventory remains
+  available without adding document nodes to the graph.
+- Reduce large-graph build and query overhead without changing graph facts or
+  output contracts: transfer publication buffers across the v1 boundary, avoid
+  resealing already-atomic artifacts, and derive query-index identity from a
+  streaming artifact digest instead of reserializing the complete graph.
+- Document the supported framework-route matrix and harden common route forms:
+  named Django, Flask, and FastAPI path arguments; React Router `Component`
+  elements; ASP.NET absolute action templates; Drupal multi-method routing YAML;
+  and documented Drupal hook implementations. Route resolution now fails closed
+  on explicit owner mismatches, preserves opaque Express callbacks, composes
+  FastAPI/Flask registration prefixes, binds file-based endpoint exports,
+  recognizes NestJS gateways, applies Rails namespaces/Laravel resource
+  modifiers/ASP.NET action routes, and gates Spring mappings to controller
+  owners. Native route composition now covers Go chi/gorilla prefixes, Axum and
+  Actix nested builders, multiline Rust attributes, and Vapor grouped/`on`
+  registrations; the release qualification manifest exercises 27 route flows.
+  Extraction semantics and the AST cache namespace advance to version 6
+  so existing projects refresh these facts once instead of retaining stale
+  route graphs.
+
 ## 0.3.1 - 2026-08-03
 
 - Make versioned graph comparisons meaning-aware: source-coordinate shifts,

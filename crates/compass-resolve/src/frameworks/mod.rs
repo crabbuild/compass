@@ -9,6 +9,8 @@ mod spring;
 mod target_index;
 mod typescript;
 
+use rayon::join;
+
 pub use domain::{
     ResolvedDomainFact, publish_resolved_domains, resolve_and_publish_framework_domains,
     resolve_domains,
@@ -33,8 +35,8 @@ pub(crate) fn resolve_framework_facts(
     Result<Vec<ResolvedDomainFact>, FrameworkResolutionError>,
 ) {
     let targets = target_index::FrameworkTargetIndex::new_with_root(extraction, Some(root));
-    (
-        routes::resolve_routes_with_targets(extraction, limits, &targets, Some(root)),
-        domain::resolve_domains_with_targets(extraction, limits, &targets),
+    join(
+        || routes::resolve_routes_with_targets(extraction, limits, &targets, Some(root)),
+        || domain::resolve_domains_with_targets(extraction, limits, &targets),
     )
 }

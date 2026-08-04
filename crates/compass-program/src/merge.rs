@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use ahash::AHashMap;
 use compass_ir::{
     Capability, Coverage, CoverageState, EvidenceRecord, IrError, ModuleIr, OperationKind,
     ProgramBundle, ProviderDescriptor, ProviderKind, SourceAnchor, TypeRef,
 };
+use rayon::prelude::*;
 
 use crate::{EvidenceBatch, EvidenceFact, FactKind, ProviderError, normalize_source_path};
 
@@ -32,8 +34,12 @@ pub enum MergeError {
 pub fn merge_evidence(batches: Vec<EvidenceBatch>) -> Result<ProgramBundle, MergeError> {
     let batches = canonical_batches(batches)?;
     let mut providers = Vec::with_capacity(batches.len());
-    let mut evidence = BTreeMap::<String, EvidenceRecord>::new();
-    let mut modules = BTreeMap::<String, ModuleIr>::new();
+    let mut evidence = AHashMap::<String, EvidenceRecord>::with_capacity(
+        batches.iter().map(|batch| batch.evidence.len()).sum(),
+    );
+    let mut modules = AHashMap::<String, ModuleIr>::with_capacity(
+        batches.iter().map(|batch| batch.modules.len()).sum(),
+    );
     let mut facts = Vec::new();
     let mut declared_coverage = BTreeMap::<String, Coverage>::new();
 
@@ -138,17 +144,17 @@ pub fn merge_evidence(batches: Vec<EvidenceBatch>) -> Result<ProgramBundle, Merg
         evidence: evidence.into_values().collect(),
         modules: modules.into_values().collect(),
     }
-    .canonicalized();
+    .into_canonicalized();
     bundle.validate()?;
     Ok(bundle)
 }
 
 fn resolve_unique_syntax_calls(
-    modules: &mut BTreeMap<String, ModuleIr>,
-    evidence: &mut BTreeMap<String, EvidenceRecord>,
+    modules: &mut AHashMap<String, ModuleIr>,
+    evidence: &mut AHashMap<String, EvidenceRecord>,
 ) {
-    let mut local = BTreeMap::<String, BTreeMap<String, Vec<String>>>::new();
-    let mut global = BTreeMap::<String, Vec<String>>::new();
+    let mut local = AHashMap::<String, AHashMap<String, Vec<String>>>::new();
+    let mut global = AHashMap::<String, Vec<String>>::new();
     for (source_file, module) in modules.iter() {
         for function in &module.functions {
             let short = function
@@ -234,9 +240,12 @@ fn resolve_unique_syntax_calls(
 }
 
 fn canonical_batches(batches: Vec<EvidenceBatch>) -> Result<Vec<EvidenceBatch>, MergeError> {
+    let canonical_batches = batches
+        .into_par_iter()
+        .map(EvidenceBatch::into_canonicalized)
+        .collect::<Vec<_>>();
     let mut by_provider = BTreeMap::<String, EvidenceBatch>::new();
-    for batch in batches {
-        let canonical = batch.into_canonicalized();
+    for canonical in canonical_batches {
         match by_provider.get(&canonical.descriptor.id) {
             Some(existing) if existing != &canonical => {
                 return Err(MergeError::ConflictingProvider(

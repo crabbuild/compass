@@ -182,42 +182,119 @@ export function ImpactPathDiagram() {
 
 export function HistoryComparisonDiagram() {
   return (
-    <DiagramShell eyebrow="Immutable comparison" title="Compare realizations without rewriting either one.">
-      <svg
-        aria-labelledby="history-diagram-title history-diagram-description"
-        className="h-auto w-full"
-        role="img"
-        viewBox="0 0 820 310"
-      >
-        <title id="history-diagram-title">Compass graph history comparison</title>
-        <desc id="history-diagram-description">Two graph realizations bound to separate commits show stable nodes, an added edge, and a changed node.</desc>
-        <path d="M410 47V266" stroke="var(--border)" strokeDasharray="4 6" />
-        <g fontFamily="var(--font-plex-mono)" fontSize="11">
-          <rect fill="var(--compass-canvas-deep)" height="32" rx="16" stroke="var(--border)" width="180" x="99" y="20" />
-          <text fill="var(--compass-ink-soft)" x="124" y="41">parent · a83f2c</text>
-          <rect fill="var(--compass-canvas-deep)" height="32" rx="16" stroke="var(--border)" width="180" x="541" y="20" />
-          <text fill="var(--compass-ink-soft)" x="566" y="41">current · f0b219</text>
-        </g>
-        <g fill="none" stroke="var(--compass-ink-soft)" strokeWidth="2">
-          <path d="M157 148L273 101L321 205L184 231Z" />
-          <path d="M499 148L615 101L663 205L526 231Z" />
-        </g>
-        <g>
-          <circle cx="157" cy="148" fill="var(--compass-blue)" r="11" />
-          <circle cx="273" cy="101" fill="var(--compass-blue)" r="11" />
-          <circle cx="321" cy="205" fill="var(--compass-blue)" r="11" />
-          <circle cx="184" cy="231" fill="var(--compass-blue)" r="11" />
-          <circle cx="499" cy="148" fill="var(--compass-blue)" r="11" />
-          <circle cx="615" cy="101" fill="var(--compass-blue)" r="11" />
-          <circle cx="663" cy="205" fill="var(--compass-indigo)" r="14" />
-          <circle cx="526" cy="231" fill="var(--compass-blue)" r="11" />
-          <path d="M615 101L663 205" fill="none" stroke="var(--compass-indigo)" strokeDasharray="5 4" strokeWidth="3" />
-        </g>
-        <g fill="var(--compass-ink-soft)" fontFamily="var(--font-plex-mono)" fontSize="11" textAnchor="middle">
-          <text x="410" y="292">same identity · changed topology · evidence-gated diff</text>
-        </g>
-      </svg>
+    <DiagramShell eyebrow="Graph A → Graph B" title="Two code graphs. One explicit comparison.">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <HistoryGraphCard
+          commit="a83f2c"
+          graph="A"
+          label="Baseline"
+          relationships={3}
+        />
+        <HistoryGraphCard
+          changed
+          commit="f0b219"
+          graph="B"
+          label="Current"
+          relationships={4}
+        />
+      </div>
+
+      <div className="mt-4 rounded-xl border border-border/80 bg-compass-canvas-deep/70 px-4 py-4 sm:px-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3 font-mono text-xs">
+            <span className="rounded-md border border-border bg-background px-2.5 py-1.5 font-semibold text-foreground">A · a83f2c</span>
+            <span aria-hidden="true" className="text-primary">→</span>
+            <span className="rounded-md border border-primary/40 bg-background px-2.5 py-1.5 font-semibold text-foreground">B · f0b219</span>
+          </div>
+          <p className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground">Exact graph identities stay attached</p>
+        </div>
+        <div className="mt-4 grid gap-2 border-t border-border/70 pt-4 sm:grid-cols-3">
+          <HistoryDelta swatch="bg-compass-amber" text="1 relationship added" />
+          <HistoryDelta swatch="bg-primary" text="1 node changed" />
+          <HistoryDelta swatch="bg-foreground" text="source evidence retained" />
+        </div>
+      </div>
     </DiagramShell>
+  );
+}
+
+function HistoryGraphCard({
+  changed = false,
+  commit,
+  graph,
+  label,
+  relationships,
+}: {
+  changed?: boolean;
+  commit: string;
+  graph: 'A' | 'B';
+  label: string;
+  relationships: number;
+}) {
+  const titleId = `history-graph-${graph.toLowerCase()}-title`;
+  const descriptionId = `history-graph-${graph.toLowerCase()}-description`;
+
+  return (
+    <div className={`overflow-hidden rounded-xl border bg-background/80 ${changed ? 'border-primary/45' : 'border-border/80'}`}>
+      <div className="flex items-center justify-between gap-4 border-b border-border/70 px-4 py-3 sm:px-5">
+        <div className="flex items-center gap-3">
+          <span className={`grid size-8 place-items-center rounded-lg font-mono text-xs font-semibold ${changed ? 'bg-primary text-primary-foreground' : 'bg-foreground text-background'}`}>
+            {graph}
+          </span>
+          <div>
+            <p className="font-heading text-sm font-semibold tracking-[-0.025em]">Graph {graph}</p>
+            <p className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
+          </div>
+        </div>
+        <span className="rounded-full border border-border bg-card px-2.5 py-1 font-mono text-[0.62rem] uppercase tracking-[0.12em] text-muted-foreground">immutable</span>
+      </div>
+
+      <div className="flex items-end justify-between gap-4 px-4 pt-4 sm:px-5">
+        <div>
+          <p className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-muted-foreground">Exact commit</p>
+          <p className="mt-1 font-mono text-lg font-semibold text-foreground">{commit}</p>
+        </div>
+        <p className="text-right font-mono text-[0.68rem] leading-5 text-muted-foreground">4 nodes<br />{relationships} relationships</p>
+      </div>
+
+      <svg
+        aria-labelledby={`${titleId} ${descriptionId}`}
+        className="h-auto w-full px-4 py-3 sm:px-5"
+        role="img"
+        viewBox="0 0 320 175"
+      >
+        <title id={titleId}>{`Graph ${graph} at commit ${commit}`}</title>
+        <desc id={descriptionId}>{changed ? 'The current graph has four nodes, four relationships, one added relationship, and one changed node.' : 'The baseline graph has four nodes and three relationships.'}</desc>
+        <g fill="none" stroke="var(--compass-ink-soft)" strokeLinecap="round" strokeWidth="2.5">
+          <path d="M52 86L150 38M52 86L86 143M86 143L258 116" />
+        </g>
+        {changed && <path d="M150 38L258 116" fill="none" stroke="var(--compass-amber)" strokeDasharray="7 6" strokeLinecap="round" strokeWidth="4" />}
+        <g>
+          <circle cx="52" cy="86" fill="var(--compass-ink-soft)" r="12" />
+          <circle cx="150" cy="38" fill="var(--compass-ink-soft)" r="12" />
+          <circle cx="86" cy="143" fill="var(--compass-ink-soft)" r="12" />
+          <circle cx="258" cy="116" fill={changed ? 'var(--compass-indigo)' : 'var(--compass-ink-soft)'} r={changed ? 17 : 12} />
+          {changed && <circle cx="258" cy="116" fill="none" r="23" stroke="var(--compass-indigo)" strokeDasharray="3 4" strokeWidth="1.5" />}
+        </g>
+        {changed && (
+          <g fontFamily="var(--font-plex-mono)" fontSize="9">
+            <rect fill="var(--card)" height="24" rx="8" stroke="var(--compass-amber)" width="103" x="168" y="53" />
+            <text fill="var(--compass-ink-soft)" textAnchor="middle" x="219.5" y="68">ADDED RELATIONSHIP</text>
+            <rect fill="var(--card)" height="24" rx="8" stroke="var(--compass-indigo)" width="88" x="202" y="141" />
+            <text fill="var(--compass-ink-soft)" textAnchor="middle" x="246" y="156">CHANGED NODE</text>
+          </g>
+        )}
+      </svg>
+    </div>
+  );
+}
+
+function HistoryDelta({ swatch, text }: { swatch: string; text: string }) {
+  return (
+    <span className="flex items-center gap-2 font-mono text-[0.7rem] text-muted-foreground">
+      <span aria-hidden="true" className={`size-2 rounded-full ${swatch}`} />
+      {text}
+    </span>
   );
 }
 

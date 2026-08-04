@@ -3,16 +3,6 @@
 This guide gives you a repeatable way to turn a large repository into a small
 set of architectural hypotheses, implementation paths, and review targets.
 
-> **Who this guide is for:** developers onboarding to a repository, reviewers,
-> maintainers, and coding-assistant users.
->
-> **You will learn:** how to move from a repository-wide report to communities,
-> symbols, paths, impact, source verification, and a concise architecture note.
->
-> **Prerequisites:** Compass installed and a successful `compass update .`.
->
-> **Completion time:** 20–45 minutes for an initial survey.
-
 ## The investigation loop
 
 Do not try to understand the whole graph at once. Use a narrowing loop:

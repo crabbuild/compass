@@ -4,9 +4,6 @@ Compass is an independent native product. Its public behavior is defined by
 Compass documentation, native tests, and versioned Compass formats. It has no
 Graphify runtime or test dependency.
 
-> **Who this reference is for:** users, integrators, and contributors planning
-> upgrades or relying on a Compass interface.
-
 ## Product contract
 
 The supported identity is:

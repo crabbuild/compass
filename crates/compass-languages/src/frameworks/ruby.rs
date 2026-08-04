@@ -34,8 +34,40 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
 
     let mut facts = Vec::new();
     let mut prefixes = Vec::<String>::new();
+    let mut namespaces = Vec::<String>::new();
+    let mut scope_frames = Vec::<usize>::new();
+    let mut in_draw = false;
+    let mut block_depth = 0_usize;
     let mut offset = 0_usize;
     for line in body.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if !in_draw {
+            if line.contains(".routes.draw do") {
+                in_draw = true;
+                block_depth = 1;
+            }
+            offset = offset.saturating_add(line.len());
+            continue;
+        }
+        if trimmed == "end" {
+            if scope_frames
+                .last()
+                .is_some_and(|depth| *depth == block_depth)
+            {
+                scope_frames.pop();
+                prefixes.pop();
+                namespaces.pop();
+            }
+            if block_depth == 1 {
+                in_draw = false;
+                block_depth = 0;
+                offset = offset.saturating_add(line.len());
+                continue;
+            }
+            block_depth = block_depth.saturating_sub(1);
+            offset = offset.saturating_add(line.len());
+            continue;
+        }
         if let Some(capture) = scope.captures(line) {
             let prefix = capture
                 .get(1)
@@ -43,12 +75,15 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
                 .or_else(|| capture.get(2).map(|value| value.as_str().to_owned()));
             if let Some(prefix) = prefix {
                 prefixes.push(prefix);
+                namespaces.push(
+                    capture
+                        .get(2)
+                        .map(|value| camelize(value.as_str()))
+                        .unwrap_or_default(),
+                );
+                scope_frames.push(block_depth.saturating_add(1));
             }
-            offset = offset.saturating_add(line.len());
-            continue;
-        }
-        if line.trim() == "end" && !prefixes.is_empty() {
-            prefixes.pop();
+            block_depth = block_depth.saturating_add(1);
             offset = offset.saturating_add(line.len());
             continue;
         }
@@ -56,7 +91,7 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
             offset = offset.saturating_add(line.len());
             continue;
         };
-        let handler = rails_handler(&handler);
+        let handler = rails_handler(&handler, &namespaces);
         let prefix = prefixes.join("/");
         let normalized_path = if prefix.is_empty() {
             normalize_route_path(&raw_path)
@@ -85,6 +120,8 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
                 detail: Map::new(),
             }));
         }
+        let do_count = line.matches(" do").count();
+        block_depth = block_depth.saturating_add(do_count);
         offset = offset.saturating_add(line.len());
     }
     facts
@@ -143,13 +180,22 @@ fn rails_via(suffix: &str) -> Vec<String> {
         .collect()
 }
 
-fn rails_handler(value: &str) -> String {
+fn rails_handler(value: &str, namespaces: &[String]) -> String {
     let Some((controller, action)) = value.split_once('#') else {
         return value.to_owned();
     };
-    let mut namespaces = controller.split('/').collect::<Vec<_>>();
-    let controller = namespaces.pop().unwrap_or(controller);
-    namespaces
+    let mut controller_parts = controller.split('/').collect::<Vec<_>>();
+    let controller = controller_parts.pop().unwrap_or(controller);
+    let owners = if controller_parts.is_empty() {
+        namespaces
+            .iter()
+            .map(String::as_str)
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>()
+    } else {
+        controller_parts
+    };
+    owners
         .into_iter()
         .map(camelize)
         .chain(std::iter::once(format!(

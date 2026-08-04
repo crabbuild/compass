@@ -3,16 +3,6 @@
 These recipes help map a subsystem, request flow, data flow, or boundary in an
 unfamiliar repository.
 
-> **Who this page is for:** developers onboarding, debugging across modules, or
-> preparing architecture reviews.
->
-> **You will learn:** community-first, entry-to-side-effect, hub, boundary, and
-> exact-pattern recipes.
->
-> **Prerequisites:** a fresh `compass-out/`.
->
-> **Completion time:** 10–30 minutes.
-
 ## Recipe 1: map one subsystem
 
 ### Problem

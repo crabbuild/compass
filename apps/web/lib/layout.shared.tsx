@@ -1,9 +1,11 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
 
+import { CompassLockup } from '@/components/compass-mark';
+
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
-      title: 'Compass',
+      title: <CompassLockup />,
     },
     links: [
       {

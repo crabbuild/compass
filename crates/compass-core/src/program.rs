@@ -5,7 +5,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use compass_files::{Cache, CacheKind, FileError, write_bytes_atomic};
+use compass_files::{Cache, CacheKind, FileError, write_atomic_with_digest};
 use compass_ir::{ProviderDescriptor, canonical_json_bytes, hex_sha256};
 use compass_languages::{Registry, TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
 use compass_program::{
@@ -17,6 +17,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::build_state::ArtifactSeal;
 use crate::{BuildOptions, CoreError};
 
 pub(crate) const PROGRAM_ARTIFACT: &str = "program.json";
@@ -24,6 +25,8 @@ pub(crate) const PROGRAM_ARTIFACT: &str = "program.json";
 #[derive(Debug)]
 pub(crate) struct ProgramBuild {
     pub analysis: compass_analysis::AnalysisBundle,
+    /// Populated only when an existing canonical artifact was loaded for a
+    /// warm build. Fresh builds stream the artifact directly from `analysis`.
     pub canonical_bytes: Vec<u8>,
     pub syntax_analyzed: usize,
     pub syntax_reused: usize,
@@ -278,17 +281,15 @@ pub(crate) fn build_program(
     profile_internal("Program evidence merge", &mut internal_started);
     let analysis = compass_analysis::analyze_prevalidated(program)?;
     profile_internal("Program summary analysis", &mut internal_started);
-    // `analyze` canonicalizes and validates the Program before constructing
-    // summaries in canonical order. Serialize that trusted result directly;
-    // `AnalysisBundle::canonical_bytes` is intentionally stricter for
-    // untrusted offline artifacts and would clone and reanalyze this 272 MB
-    // bundle.
-    let canonical_bytes = analysis.canonical_bytes_prevalidated()?;
-    profile_internal("Program canonical JSON", &mut internal_started);
+    // `analyze_prevalidated` canonicalizes and validates the Program before
+    // constructing summaries in canonical order. The canonical artifact is
+    // streamed by `write_program` after this function returns so the complete
+    // JSON document and its per-array staging chunks do not overlap the large
+    // in-memory analysis bundle.
     let conflicts = count_conflicts(&analysis);
     Ok(ProgramBuild {
         analysis,
-        canonical_bytes,
+        canonical_bytes: Vec::new(),
         syntax_analyzed,
         syntax_reused,
         artifacts_loaded,
@@ -454,9 +455,19 @@ pub(crate) fn current_provider_manifest(
     Ok(providers)
 }
 
-pub(crate) fn write_program(output_dir: &Path, canonical_bytes: &[u8]) -> Result<(), CoreError> {
-    write_bytes_atomic(output_dir.join(PROGRAM_ARTIFACT), canonical_bytes)?;
-    Ok(())
+pub(crate) fn write_program(
+    output_dir: &Path,
+    analysis: &compass_analysis::AnalysisBundle,
+) -> Result<ArtifactSeal, CoreError> {
+    let receipt = write_atomic_with_digest(output_dir.join(PROGRAM_ARTIFACT), |writer| {
+        analysis
+            .write_canonical_prevalidated(writer)
+            .map_err(CoreError::ProgramAnalysis)
+    })?;
+    Ok(ArtifactSeal {
+        bytes: receipt.bytes,
+        sha256: receipt.sha256,
+    })
 }
 
 fn read_sources(

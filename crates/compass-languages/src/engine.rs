@@ -2019,11 +2019,19 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     fn declaration_name(&self, node: Node<'tree>) -> Option<String> {
         if self.language == "kotlin"
             && self.config.class_types.contains(&node.kind())
-            && let Some(name) = first_descendant(node, "type_identifier")
-                .and_then(|name| self.node_text(name))
-                .map(clean_name)
+            && let Some(text) = self.node_text(node)
         {
-            return Some(name);
+            for marker in ["class ", "interface ", "object "] {
+                if let Some(offset) = text.rfind(marker)
+                    && let Some(name) = text[offset + marker.len()..]
+                        .split_whitespace()
+                        .next()
+                        .map(|name| clean_name(name.to_owned()))
+                        .filter(|name| !name.is_empty())
+                {
+                    return Some(name);
+                }
+            }
         }
         node.child_by_field_name("name")
             .and_then(|name| self.node_text(name))

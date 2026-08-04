@@ -18,7 +18,13 @@ fn native_update_emits_and_reports_program_analysis() -> Result<(), Box<dyn Erro
         "pub fn helper() {}\npub fn run() { helper(); }\n",
     )?;
     let root = directory.path().to_string_lossy();
-    let args = arguments(["update", root.as_ref(), "--no-cluster", "--no-viz"]);
+    let args = arguments([
+        "update",
+        root.as_ref(),
+        "--program",
+        "--no-cluster",
+        "--no-viz",
+    ]);
 
     let cold = run(Frontend::Compass, args.clone());
     assert_eq!(cold.code, 0, "{}", cold.stderr);
@@ -72,6 +78,40 @@ fn native_update_can_publish_only_the_structural_graph() -> Result<(), Box<dyn E
 }
 
 #[test]
+fn native_update_omits_program_ir_by_default() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    fs::write(directory.path().join("lib.rs"), "pub fn run() {}\n")?;
+    let root = directory.path().to_string_lossy();
+    let outcome = run(
+        Frontend::Compass,
+        arguments(["update", root.as_ref(), "--no-cluster", "--no-viz"]),
+    );
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+    assert!(outcome.stdout.contains(
+        "Program analysis: 0 syntax analyzed, 0 syntax reused, 0 artifacts loaded, 0 artifacts reused, 0 artifact documents analyzed, 0 artifact documents reused, 0 modules, 0 summaries, 0 conflicts"
+    ));
+    assert!(
+        !BuildGuard::resolve_artifact(&directory.path().join("compass-out"), "program.json")
+            .is_ok_and(|path| path.is_file())
+    );
+    Ok(())
+}
+
+#[test]
+fn program_flag_conflicts_with_no_program() {
+    let outcome = run(
+        Frontend::Compass,
+        arguments(["update", ".", "--program", "--no-program"]),
+    );
+    assert_ne!(outcome.code, 0);
+    assert!(
+        outcome
+            .stderr
+            .contains("--program conflicts with --no-program")
+    );
+}
+
+#[test]
 fn no_program_rejects_program_artifacts() {
     let outcome = run(
         Frontend::Compass,
@@ -121,6 +161,7 @@ fn native_update_enforces_the_configured_source_size_limit() -> Result<(), Box<d
         arguments([
             "update",
             root.as_ref(),
+            "--program",
             "--max-source-bytes=64",
             "--no-cluster",
             "--no-viz",
@@ -170,7 +211,13 @@ fn program_commands_inspect_explain_and_query_canonical_ir() -> Result<(), Box<d
     let root = directory.path().to_string_lossy();
     let built = run(
         Frontend::Compass,
-        arguments(["update", root.as_ref(), "--no-cluster", "--no-viz"]),
+        arguments([
+            "update",
+            root.as_ref(),
+            "--program",
+            "--no-cluster",
+            "--no-viz",
+        ]),
     );
     assert_eq!(built.code, 0, "{}", built.stderr);
     let program = directory.path().join("compass-out/program.json");

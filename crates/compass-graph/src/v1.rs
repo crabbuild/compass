@@ -54,15 +54,52 @@ enum PublicationMode {
 
 struct PreparedEdge {
     index: usize,
-    raw: RawEdgeRecord,
     trusted: bool,
-    normalized: Result<EdgeRecord, (GraphError, String)>,
+    normalized: Result<EdgeRecord, PreparedEdgeFailure>,
+}
+
+struct PreparedEdgeFailure {
+    error: GraphError,
+    reason: String,
+    raw: RawEdgeRecord,
+}
+
+struct FinalizedEdge {
+    index: usize,
+    result: Result<Option<EdgeRecord>, PreparedEdgeFailure>,
+    test_source: Option<String>,
+    diagnostics: Vec<GraphDiagnostic>,
+    quarantine: Option<EdgeQuarantine>,
+}
+
+struct EdgeQuarantine {
+    identity: String,
+    reason: String,
+    anchor: Option<SourceAnchor>,
 }
 
 struct PreparedNode {
-    raw: RawNodeRecord,
     raw_id: String,
-    normalized: Result<NodeRecord, GraphError>,
+    normalized: Result<NodeRecord, PreparedNodeFailure>,
+}
+
+struct PreparedNodeFailure {
+    error: GraphError,
+    anchor: Option<SourceAnchor>,
+}
+
+struct EdgeNodeFacts {
+    kind: NodeKind,
+    rust_enum_member: bool,
+    unresolved_wiring_site: Option<SourceAnchor>,
+}
+
+struct PlaceholderEdgeFact {
+    index: usize,
+    anchor: SourceAnchor,
+    source_scope: Option<String>,
+    target_scope: Option<String>,
+    inferred_target: Option<(String, String, &'static str)>,
 }
 
 #[derive(Clone, Debug)]
@@ -72,6 +109,24 @@ pub struct BuildEvidence {
     pub files: Vec<FileRecord>,
     pub coverage: Vec<CoverageRecord>,
     pub diagnostics: Vec<GraphDiagnostic>,
+}
+
+struct RecordEvidence {
+    external_reference: Option<(String, SourceAnchor)>,
+    source_file: Option<String>,
+    origin_file: Option<String>,
+}
+
+/// Exact source bytes already observed by the extraction pipeline.
+///
+/// Publication can reuse this digest for files that were freshly extracted;
+/// files absent from the map are still read through the bounded publication
+/// fallback. Keeping the fallback makes incremental and externally assembled
+/// documents retain the same evidence contract.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceDigest {
+    pub content_digest: String,
+    pub byte_size: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -134,6 +189,7 @@ impl BuildEvidence {
             &extraction.nodes,
             &extraction.edges,
             configuration_digest,
+            None,
         )
     }
 
@@ -152,26 +208,74 @@ impl BuildEvidence {
             &document.nodes,
             &document.links,
             configuration_digest,
+            None,
         )
     }
 
-    fn from_records<N: AttributeRecord, E: AttributeRecord>(
+    /// Derive publication evidence while reusing exact source digests from a
+    /// build that already read those bytes for extraction.
+    pub fn from_document_with_source_digests(
+        repository_root: impl Into<PathBuf>,
+        document: &compass_model::GraphDocument,
+        configuration_digest: impl Into<String>,
+        source_digests: &BTreeMap<String, SourceDigest>,
+    ) -> Result<Self, GraphError> {
+        Self::from_records(
+            repository_root,
+            &document.nodes,
+            &document.links,
+            configuration_digest,
+            Some(source_digests),
+        )
+    }
+
+    fn from_records<N: AttributeRecord + Sync, E: AttributeRecord + Sync>(
         repository_root: impl Into<PathBuf>,
         nodes: &[N],
         edges: &[E],
         configuration_digest: impl Into<String>,
+        source_digests: Option<&BTreeMap<String, SourceDigest>>,
     ) -> Result<Self, GraphError> {
         let repository_root = repository_root.into();
+        let inspect_record = |attributes: &Map<String, Value>| {
+            let external_reference = external_reference_anchor(attributes, &repository_root)?;
+            let source_file = attributes
+                .get("source_file")
+                .and_then(Value::as_str)
+                .filter(|path| !path.trim().is_empty())
+                .map(str::to_owned);
+            let origin_file = attributes
+                .get("origin_file")
+                .and_then(Value::as_str)
+                .filter(|path| !path.trim().is_empty())
+                .map(str::to_owned);
+            Ok::<_, GraphError>(RecordEvidence {
+                external_reference,
+                source_file,
+                origin_file,
+            })
+        };
+        let (node_evidence, edge_evidence) = rayon::join(
+            || {
+                nodes
+                    .par_iter()
+                    .map(|node| inspect_record(node.evidence_attributes()))
+                    .collect::<Vec<_>>()
+            },
+            || {
+                edges
+                    .par_iter()
+                    .map(|edge| inspect_record(edge.evidence_attributes()))
+                    .collect::<Vec<_>>()
+            },
+        );
         let mut paths = BTreeSet::new();
         let mut seen_source_paths = HashSet::new();
         let mut external_reference_anchors = BTreeMap::<String, SourceAnchor>::new();
         let mut diagnostics = Vec::new();
-        for attributes in nodes
-            .iter()
-            .map(AttributeRecord::evidence_attributes)
-            .chain(edges.iter().map(AttributeRecord::evidence_attributes))
-        {
-            if let Some((path, anchor)) = external_reference_anchor(attributes, &repository_root)? {
+        for record in node_evidence.into_iter().chain(edge_evidence) {
+            let record = record?;
+            if let Some((path, anchor)) = record.external_reference {
                 external_reference_anchors
                     .entry(path)
                     .and_modify(|existing| {
@@ -181,17 +285,12 @@ impl BuildEvidence {
                     })
                     .or_insert(anchor);
             }
-            for path in ["source_file", "origin_file"]
+            for path in [record.source_file, record.origin_file]
                 .into_iter()
-                .filter_map(|key| {
-                    attributes
-                        .get(key)
-                        .and_then(Value::as_str)
-                        .filter(|path| !path.trim().is_empty())
-                })
+                .flatten()
             {
-                if seen_source_paths.insert(path.to_owned()) {
-                    paths.insert(portable_path(path, &repository_root)?);
+                if seen_source_paths.insert(path.clone()) {
+                    paths.insert(portable_path(&path, &repository_root)?);
                 }
             }
         }
@@ -206,17 +305,22 @@ impl BuildEvidence {
                 return Ok((path, None));
             }
             let language = Registry::resolve(&absolute).map(|spec| spec.name.to_owned());
-            let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
-                path: absolute,
-                source,
-            })?;
-            let content_digest = sha256_prefixed(&bytes);
+            let (content_digest, byte_size) =
+                if let Some(digest) = source_digests.and_then(|digests| digests.get(&path)) {
+                    (digest.content_digest.clone(), digest.byte_size)
+                } else {
+                    let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
+                        path: absolute,
+                        source,
+                    })?;
+                    (sha256_prefixed(&bytes), bytes.len() as u64)
+                };
             let record = FileRecord {
                 id: file_id(&path),
                 path: path.clone(),
                 language,
                 content_digest,
-                byte_size: bytes.len() as u64,
+                byte_size,
                 generated: false,
                 extraction_status: ExtractionStatus::Extracted,
                 extractor_versions: vec![format!(
@@ -622,7 +726,7 @@ pub fn normalize_v1_best_effort(
 }
 
 fn prepare_edge(
-    raw: RawEdgeRecord,
+    mut raw: RawEdgeRecord,
     index: usize,
     id_remap: &HashMap<String, String>,
     repository_root: &Path,
@@ -634,9 +738,12 @@ fn prepare_edge(
         let strict_reason = format!("source {} does not match a raw node", raw.source);
         return PreparedEdge {
             index,
-            raw,
             trusted,
-            normalized: Err((raw_error(&format!("edge[{index}]"), &strict_reason), reason)),
+            normalized: Err(PreparedEdgeFailure {
+                error: raw_error(&format!("edge[{index}]"), &strict_reason),
+                reason,
+                raw,
+            }),
         };
     };
     let Some(target) = id_remap.get(&raw.target) else {
@@ -644,12 +751,16 @@ fn prepare_edge(
         let strict_reason = format!("target {} does not match a raw node", raw.target);
         return PreparedEdge {
             index,
-            raw,
             trusted,
-            normalized: Err((raw_error(&format!("edge[{index}]"), &strict_reason), reason)),
+            normalized: Err(PreparedEdgeFailure {
+                error: raw_error(&format!("edge[{index}]"), &strict_reason),
+                reason,
+                raw,
+            }),
         };
     };
-    let normalized = match raw.attributes.get(TRUSTED_EDGE_RECORD).cloned() {
+    let trusted_record = raw.attributes.remove(TRUSTED_EDGE_RECORD);
+    let normalized = match trusted_record {
         Some(value) => normalize_trusted_edge(
             &raw,
             value,
@@ -661,15 +772,218 @@ fn prepare_edge(
         ),
         None => normalize_edge(&raw, source, target, index, repository_root, file_facts),
     }
-    .map_err(|error| {
-        let reason = error.to_string();
-        (error, reason)
+    .map_err(|error| PreparedEdgeFailure {
+        reason: error.to_string(),
+        error,
+        raw,
     });
     PreparedEdge {
         index,
-        raw,
         trusted,
         normalized,
+    }
+}
+
+fn finalize_prepared_edge(
+    prepared: PreparedEdge,
+    id_remap: &HashMap<String, String>,
+    edge_node_facts: &HashMap<&str, EdgeNodeFacts>,
+    mode: PublicationMode,
+) -> FinalizedEdge {
+    let PreparedEdge {
+        index,
+        trusted,
+        normalized,
+    } = prepared;
+    let mut edge = match normalized {
+        Ok(edge) => edge,
+        Err(failure) => {
+            return FinalizedEdge {
+                index,
+                result: Err(failure),
+                test_source: None,
+                diagnostics: Vec::new(),
+                quarantine: None,
+            };
+        }
+    };
+    let mut diagnostics = Vec::new();
+    let mut quarantine = None;
+    remap_provenance_candidates(&mut edge.evidence, id_remap);
+    let test_source = (!trusted && edge.kind == EdgeKind::Tests).then(|| edge.source.clone());
+    if !trusted
+        && edge.kind == EdgeKind::Decorates
+        && edge_node_facts
+            .get(edge.target.as_str())
+            .is_some_and(|facts| matches!(facts.kind, NodeKind::Annotation | NodeKind::Macro))
+        && edge_node_facts
+            .get(edge.source.as_str())
+            .is_some_and(|facts| !matches!(facts.kind, NodeKind::Annotation | NodeKind::Macro))
+    {
+        std::mem::swap(&mut edge.source, &mut edge.target);
+        let id = edge_id(
+            &edge.source,
+            edge.kind,
+            &edge.target,
+            edge.relationship_site.as_ref(),
+            edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
+        );
+        edge.id.clone_from(&id);
+        edge.key = id;
+    }
+    let source_kind = edge_node_facts
+        .get(edge.source.as_str())
+        .map(|facts| facts.kind)
+        .unwrap_or(NodeKind::Variable);
+    let target_kind = edge_node_facts
+        .get(edge.target.as_str())
+        .map(|facts| facts.kind)
+        .unwrap_or(NodeKind::Variable);
+    let target_is_constructible = edge_node_facts
+        .get(edge.target.as_str())
+        .is_some_and(|facts| facts.kind.is_constructible() || facts.rust_enum_member);
+    let unresolved_wiring_site = [edge.source.as_str(), edge.target.as_str()]
+        .into_iter()
+        .filter_map(|id| edge_node_facts.get(id))
+        .find_map(|facts| facts.unresolved_wiring_site.clone());
+    if let Some(wiring_site) = unresolved_wiring_site {
+        edge.deferred = true;
+        if !edge.evidence.iter().any(|evidence| {
+            evidence.extractor == "compass.graph.external-placeholder"
+                && evidence.rule.as_deref() == Some("external-symbol-placeholder")
+        }) {
+            edge.evidence.push(Provenance {
+                origin: EvidenceOrigin::Heuristic,
+                extractor: "compass.graph.external-placeholder".to_owned(),
+                confidence: EvidenceConfidence::Inferred,
+                rule: Some("external-symbol-placeholder".to_owned()),
+                anchors: Vec::new(),
+                wiring_site: Some(edge.relationship_site.clone().unwrap_or(wiring_site)),
+                score: None,
+                candidates: Vec::new(),
+            });
+            sort_dedup_serialized(&mut edge.evidence);
+        }
+    }
+    if !trusted && edge.kind == EdgeKind::TypeOf && source_kind.is_callable() {
+        edge.kind = EdgeKind::Returns;
+        edge.details = None;
+        let id = edge_id(
+            &edge.source,
+            edge.kind,
+            &edge.target,
+            edge.relationship_site.as_ref(),
+            edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
+        );
+        edge.id.clone_from(&id);
+        edge.key = id;
+    }
+    if !trusted && edge.kind == EdgeKind::Calls && target_is_constructible {
+        edge.kind = EdgeKind::Instantiates;
+        edge.details = None;
+        let id = edge_id(
+            &edge.source,
+            edge.kind,
+            &edge.target,
+            edge.relationship_site.as_ref(),
+            edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
+        );
+        edge.id.clone_from(&id);
+        edge.key = id;
+        diagnostics.push(GraphDiagnostic {
+            severity: DiagnosticSeverity::Info,
+            code: "normalized_constructor_call".to_owned(),
+            message: format!(
+                "normalized calls endpoints {} -> {} to instantiates",
+                source_kind.as_str(),
+                target_kind.as_str()
+            ),
+            anchor: edge.relationship_site.clone(),
+            related_ids: vec![edge.source.clone(), edge.target.clone()],
+        });
+    }
+    if edge.source == edge.target && edge.kind != EdgeKind::Calls {
+        let reason = format!("unsupported {} self-loop", edge.kind.as_str());
+        if mode == PublicationMode::BestEffort {
+            quarantine = Some(EdgeQuarantine {
+                identity: edge.id.clone(),
+                reason: reason.clone(),
+                anchor: edge.relationship_site.clone(),
+            });
+        }
+        diagnostics.push(GraphDiagnostic {
+            severity: DiagnosticSeverity::Warning,
+            code: "dropped_non_recursive_self_loop".to_owned(),
+            message: format!(
+                "dropped impossible {} self-loop on {}",
+                edge.kind.as_str(),
+                edge.source
+            ),
+            anchor: edge.relationship_site.clone(),
+            related_ids: vec![edge.source.clone()],
+        });
+        return FinalizedEdge {
+            index,
+            result: Ok(None),
+            test_source,
+            diagnostics,
+            quarantine,
+        };
+    }
+    if matches!(
+        edge.kind,
+        EdgeKind::Embeds | EdgeKind::Extends | EdgeKind::Implements
+    ) {
+        let valid = source_kind.is_type()
+            && match edge.kind {
+                EdgeKind::Embeds | EdgeKind::Extends => target_kind.is_type(),
+                EdgeKind::Implements => matches!(
+                    target_kind,
+                    NodeKind::Interface | NodeKind::Trait | NodeKind::Protocol
+                ),
+                _ => false,
+            };
+        if !valid {
+            let reason = format!(
+                "invalid {} endpoints {} -> {}",
+                edge.kind.as_str(),
+                source_kind.as_str(),
+                target_kind.as_str()
+            );
+            if mode == PublicationMode::BestEffort {
+                quarantine = Some(EdgeQuarantine {
+                    identity: edge.id.clone(),
+                    reason: reason.clone(),
+                    anchor: edge.relationship_site.clone(),
+                });
+            }
+            diagnostics.push(GraphDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                code: "dropped_invalid_inheritance_target".to_owned(),
+                message: format!(
+                    "dropped invalid {} endpoints {} -> {}",
+                    edge.kind.as_str(),
+                    source_kind.as_str(),
+                    target_kind.as_str()
+                ),
+                anchor: edge.relationship_site.clone(),
+                related_ids: vec![edge.source.clone(), edge.target.clone()],
+            });
+            return FinalizedEdge {
+                index,
+                result: Ok(None),
+                test_source,
+                diagnostics,
+                quarantine,
+            };
+        }
+    }
+    FinalizedEdge {
+        index,
+        result: Ok(Some(edge)),
+        test_source,
+        diagnostics,
+        quarantine,
     }
 }
 
@@ -701,14 +1015,9 @@ fn normalize_v1_with_mode(
     profile_v1("v1 file inventory normalization", &mut profile_started);
     let file_facts = published_file_facts(&evidence)?;
     profile_v1("v1 published file facts", &mut profile_started);
-    split_sourceless_placeholders(&mut extraction, &evidence.repository_root, &file_facts)?;
+    let stub_wiring_sites =
+        split_sourceless_placeholders(&mut extraction, &evidence.repository_root, &file_facts)?;
     profile_v1("v1 sourceless placeholder split", &mut profile_started);
-    let stub_wiring_sites = collect_stub_wiring_sites(
-        &extraction.nodes,
-        &extraction.edges,
-        &evidence.repository_root,
-        &file_facts,
-    )?;
     profile_v1("v1 stub wiring sites", &mut profile_started);
     resolve_or_drop_generic_symbols(
         &mut extraction,
@@ -722,11 +1031,17 @@ fn normalize_v1_with_mode(
     profile_v1("v1 generic symbol resolution", &mut profile_started);
 
     if mode == PublicationMode::BestEffort && !canonical_raw_order {
-        extraction.nodes.sort_by_cached_key(raw_node_sort_key);
+        if extraction.nodes.len() < 512 {
+            extraction.nodes.sort_by_cached_key(raw_node_sort_key);
+        } else {
+            extraction.nodes.par_sort_by_cached_key(raw_node_sort_key);
+        }
     }
+    profile_v1("v1 raw node ordering", &mut profile_started);
     let prepare_node = |mut raw: RawNodeRecord| {
         let raw_id = raw.id.clone();
-        let normalized = match raw.attributes.get(TRUSTED_NODE_RECORD).cloned() {
+        let trusted_record = raw.attributes.remove(TRUSTED_NODE_RECORD);
+        let normalized = match trusted_record {
             Some(value) => normalize_trusted_node(value, &raw_id),
             None => normalize_node(
                 &mut raw,
@@ -736,9 +1051,19 @@ fn normalize_v1_with_mode(
             ),
         };
         PreparedNode {
-            raw,
             raw_id,
-            normalized,
+            normalized: normalized.map_err(|error| PreparedNodeFailure {
+                anchor: (mode == PublicationMode::BestEffort)
+                    .then(|| {
+                        best_effort_raw_anchor(
+                            &raw.attributes,
+                            &evidence.repository_root,
+                            &file_facts,
+                        )
+                    })
+                    .flatten(),
+                error,
+            }),
         }
     };
     // Normalize nodes in bounded batches. Holding every raw record and every
@@ -763,11 +1088,7 @@ fn normalize_v1_with_mode(
             batch.into_par_iter().map(prepare_node).collect::<Vec<_>>()
         };
         for prepared in prepared_nodes {
-            let PreparedNode {
-                raw,
-                raw_id,
-                normalized,
-            } = prepared;
+            let PreparedNode { raw_id, normalized } = prepared;
             if id_remap.contains_key(&raw_id) {
                 let error = raw_error(
                     &raw_id,
@@ -777,31 +1098,30 @@ fn normalize_v1_with_mode(
                     return Err(error);
                 }
                 id_remap.remove(&raw_id);
-                quarantine.omit_node(
-                    &raw_id,
-                    &error.to_string(),
-                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
-                );
+                let anchor = normalized
+                    .as_ref()
+                    .ok()
+                    .and_then(best_effort_node_anchor)
+                    .or_else(|| {
+                        normalized
+                            .as_ref()
+                            .err()
+                            .and_then(|failure| failure.anchor.clone())
+                    });
+                quarantine.omit_node(&raw_id, &error.to_string(), anchor);
                 continue;
             }
             let node = match normalized {
                 Ok(node) => node,
-                Err(error) if mode == PublicationMode::BestEffort => {
-                    quarantine.omit_node(
-                        &raw_id,
-                        &error.to_string(),
-                        best_effort_raw_anchor(
-                            &raw.attributes,
-                            &evidence.repository_root,
-                            &file_facts,
-                        ),
-                    );
+                Err(failure) if mode == PublicationMode::BestEffort => {
+                    quarantine.omit_node(&raw_id, &failure.error.to_string(), failure.anchor);
                     continue;
                 }
-                Err(error) => return Err(error),
+                Err(failure) => return Err(failure.error),
             };
             let published_id = node.id.clone();
             if let Some(existing) = nodes.get_mut(&node.id) {
+                let collision_anchor = best_effort_node_anchor(&node);
                 let mut merged = existing.clone();
                 if let Err(error) = merge_normalized_node(&mut merged, node) {
                     if mode == PublicationMode::Strict {
@@ -810,12 +1130,7 @@ fn normalize_v1_with_mode(
                     quarantine.identity_collision(
                         &raw_id,
                         &error.to_string(),
-                        best_effort_raw_anchor(
-                            &raw.attributes,
-                            &evidence.repository_root,
-                            &file_facts,
-                        )
-                        .or_else(|| best_effort_node_anchor(existing)),
+                        collision_anchor.or_else(|| best_effort_node_anchor(existing)),
                     );
                     continue;
                 }
@@ -847,11 +1162,50 @@ fn normalize_v1_with_mode(
     }
     profile_v1("v1 node normalization", &mut profile_started);
 
+    // Edge publication consults endpoint kinds and unresolved placeholder
+    // evidence repeatedly. Snapshot the immutable facts once so the hot edge
+    // loop does not rescan node evidence or hash-map records for every edge.
+    let edge_node_facts = nodes
+        .iter()
+        .map(|(id, node)| {
+            let unresolved_external = node.source.is_none()
+                && node.evidence.iter().any(|evidence| {
+                    evidence.origin == EvidenceOrigin::Heuristic
+                        && evidence.confidence == EvidenceConfidence::Inferred
+                        && evidence.rule.as_deref() == Some("external-symbol-placeholder")
+                        && evidence.wiring_site.is_some()
+                });
+            let unresolved_wiring_site = unresolved_external
+                .then(|| {
+                    node.evidence
+                        .iter()
+                        .find_map(|evidence| evidence.wiring_site.clone())
+                })
+                .flatten();
+            (
+                id.as_str(),
+                EdgeNodeFacts {
+                    kind: node.kind,
+                    rust_enum_member: node.kind == NodeKind::EnumMember
+                        && node.language.as_deref() == Some("rust"),
+                    unresolved_wiring_site,
+                },
+            )
+        })
+        .collect::<HashMap<_, _>>();
+
     if mode == PublicationMode::BestEffort && !canonical_raw_order {
-        extraction
-            .edges
-            .sort_by_cached_key(|raw| raw_edge_sort_key(raw, &id_remap, &evidence.repository_root));
+        if extraction.edges.len() < 512 {
+            extraction.edges.sort_by_cached_key(|raw| {
+                raw_edge_sort_key(raw, &id_remap, &evidence.repository_root)
+            });
+        } else {
+            extraction.edges.par_sort_by_cached_key(|raw| {
+                raw_edge_sort_key(raw, &id_remap, &evidence.repository_root)
+            });
+        }
     }
+    profile_v1("v1 raw edge ordering", &mut profile_started);
     // Preparation is record-local after deterministic raw ordering and node-ID
     // remapping. Bounded parallel batches preserve indexed order without
     // retaining raw and normalized copies of the complete edge inventory.
@@ -859,6 +1213,7 @@ fn normalize_v1_with_mode(
     let edge_count = extraction.edges.len();
     let mut raw_edges = extraction.edges.into_iter().enumerate();
     let mut links = HashMap::<String, EdgeRecord>::with_capacity(edge_count);
+    let mut test_sources = BTreeSet::new();
     loop {
         let batch = raw_edges
             .by_ref()
@@ -879,199 +1234,59 @@ fn normalize_v1_with_mode(
                 )
             })
             .collect::<Vec<_>>();
-        for prepared in prepared_edges {
-            let PreparedEdge {
+        let finalized_edges = prepared_edges
+            .into_par_iter()
+            .map(|prepared| finalize_prepared_edge(prepared, &id_remap, &edge_node_facts, mode))
+            .collect::<Vec<_>>();
+        for finalized in finalized_edges {
+            let FinalizedEdge {
                 index,
-                raw,
-                trusted,
-                normalized,
-            } = prepared;
-            let mut edge = match normalized {
-                Ok(edge) => edge,
-                Err((_error, reason)) if mode == PublicationMode::BestEffort => {
-                    let identity = raw_edge_identity(&raw, &evidence.repository_root);
-                    let stable_reason = reason.replace(&format!("edge[{index}]"), &identity);
+                result,
+                test_source,
+                mut diagnostics,
+                quarantine: edge_quarantine,
+            } = finalized;
+            let edge = match result {
+                Ok(Some(edge)) => edge,
+                Ok(None) => {
+                    if let Some(edge_quarantine) = edge_quarantine {
+                        quarantine.omit_edge(
+                            &edge_quarantine.identity,
+                            &edge_quarantine.reason,
+                            edge_quarantine.anchor,
+                        );
+                    }
+                    evidence.diagnostics.append(&mut diagnostics);
+                    continue;
+                }
+                Err(failure) if mode == PublicationMode::BestEffort => {
+                    let identity = raw_edge_identity(&failure.raw, &evidence.repository_root);
+                    let stable_reason =
+                        failure.reason.replace(&format!("edge[{index}]"), &identity);
                     quarantine.omit_edge(
                         &identity,
                         &stable_reason,
                         best_effort_raw_anchor(
-                            &raw.attributes,
+                            &failure.raw.attributes,
                             &evidence.repository_root,
                             &file_facts,
                         ),
                     );
                     continue;
                 }
-                Err((error, _)) => return Err(error),
+                Err(failure) => return Err(failure.error),
             };
-            remap_provenance_candidates(&mut edge.evidence, &id_remap);
-            if !trusted
-                && edge.kind == EdgeKind::Tests
-                && let Some(source) = nodes.get_mut(&edge.source)
-            {
-                source.roles.push(NodeRole::Test);
-                sort_dedup_serialized(&mut source.roles);
+            if let Some(source) = test_source {
+                test_sources.insert(source);
             }
-            if !trusted
-                && edge.kind == EdgeKind::Decorates
-                && nodes
-                    .get(&edge.target)
-                    .is_some_and(|node| matches!(node.kind, NodeKind::Annotation | NodeKind::Macro))
-                && nodes.get(&edge.source).is_some_and(|node| {
-                    !matches!(node.kind, NodeKind::Annotation | NodeKind::Macro)
-                })
-            {
-                std::mem::swap(&mut edge.source, &mut edge.target);
-                let id = edge_id(
-                    &edge.source,
-                    edge.kind,
-                    &edge.target,
-                    edge.relationship_site.as_ref(),
-                    edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
+            if let Some(edge_quarantine) = edge_quarantine {
+                quarantine.omit_edge(
+                    &edge_quarantine.identity,
+                    &edge_quarantine.reason,
+                    edge_quarantine.anchor,
                 );
-                edge.id.clone_from(&id);
-                edge.key = id;
             }
-            let source_kind = nodes
-                .get(&edge.source)
-                .map(|node| node.kind)
-                .unwrap_or(NodeKind::Variable);
-            let target_kind = nodes
-                .get(&edge.target)
-                .map(|node| node.kind)
-                .unwrap_or(NodeKind::Variable);
-            let target_is_constructible = nodes.get(&edge.target).is_some_and(|node| {
-                node.kind.is_constructible()
-                    || (node.kind == NodeKind::EnumMember
-                        && node.language.as_deref() == Some("rust"))
-            });
-            let unresolved_wiring_site = [&edge.source, &edge.target]
-                .into_iter()
-                .filter_map(|id| nodes.get(id))
-                .filter(|node| is_unresolved_external_node(node))
-                .find_map(|node| {
-                    node.evidence
-                        .iter()
-                        .find_map(|evidence| evidence.wiring_site.clone())
-                });
-            if let Some(wiring_site) = unresolved_wiring_site {
-                edge.deferred = true;
-                if !edge.evidence.iter().any(|evidence| {
-                    evidence.extractor == "compass.graph.external-placeholder"
-                        && evidence.rule.as_deref() == Some("external-symbol-placeholder")
-                }) {
-                    edge.evidence.push(Provenance {
-                        origin: EvidenceOrigin::Heuristic,
-                        extractor: "compass.graph.external-placeholder".to_owned(),
-                        confidence: EvidenceConfidence::Inferred,
-                        rule: Some("external-symbol-placeholder".to_owned()),
-                        anchors: Vec::new(),
-                        wiring_site: Some(edge.relationship_site.clone().unwrap_or(wiring_site)),
-                        score: None,
-                        candidates: Vec::new(),
-                    });
-                    sort_dedup_serialized(&mut edge.evidence);
-                }
-            }
-            if !trusted && edge.kind == EdgeKind::TypeOf && source_kind.is_callable() {
-                edge.kind = EdgeKind::Returns;
-                edge.details = None;
-                let id = edge_id(
-                    &edge.source,
-                    edge.kind,
-                    &edge.target,
-                    edge.relationship_site.as_ref(),
-                    edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
-                );
-                edge.id.clone_from(&id);
-                edge.key = id;
-            }
-            if !trusted && edge.kind == EdgeKind::Calls && target_is_constructible {
-                edge.kind = EdgeKind::Instantiates;
-                edge.details = None;
-                let id = edge_id(
-                    &edge.source,
-                    edge.kind,
-                    &edge.target,
-                    edge.relationship_site.as_ref(),
-                    edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
-                );
-                edge.id.clone_from(&id);
-                edge.key = id;
-                evidence.diagnostics.push(GraphDiagnostic {
-                    severity: DiagnosticSeverity::Info,
-                    code: "normalized_constructor_call".to_owned(),
-                    message: format!(
-                        "normalized calls endpoints {} -> {} to instantiates",
-                        source_kind.as_str(),
-                        target_kind.as_str()
-                    ),
-                    anchor: edge.relationship_site.clone(),
-                    related_ids: vec![edge.source.clone(), edge.target.clone()],
-                });
-            }
-            if edge.source == edge.target && edge.kind != EdgeKind::Calls {
-                if mode == PublicationMode::BestEffort {
-                    quarantine.omit_edge(
-                        &edge.id,
-                        &format!("unsupported {} self-loop", edge.kind.as_str()),
-                        edge.relationship_site.clone(),
-                    );
-                }
-                evidence.diagnostics.push(GraphDiagnostic {
-                    severity: DiagnosticSeverity::Warning,
-                    code: "dropped_non_recursive_self_loop".to_owned(),
-                    message: format!(
-                        "dropped impossible {} self-loop on {}",
-                        edge.kind.as_str(),
-                        edge.source
-                    ),
-                    anchor: edge.relationship_site,
-                    related_ids: vec![edge.source],
-                });
-                continue;
-            }
-            if matches!(
-                edge.kind,
-                EdgeKind::Embeds | EdgeKind::Extends | EdgeKind::Implements
-            ) {
-                let valid = source_kind.is_type()
-                    && match edge.kind {
-                        EdgeKind::Embeds | EdgeKind::Extends => target_kind.is_type(),
-                        EdgeKind::Implements => matches!(
-                            target_kind,
-                            NodeKind::Interface | NodeKind::Trait | NodeKind::Protocol
-                        ),
-                        _ => false,
-                    };
-                if !valid {
-                    if mode == PublicationMode::BestEffort {
-                        quarantine.omit_edge(
-                            &edge.id,
-                            &format!(
-                                "invalid {} endpoints {} -> {}",
-                                edge.kind.as_str(),
-                                source_kind.as_str(),
-                                target_kind.as_str()
-                            ),
-                            edge.relationship_site.clone(),
-                        );
-                    }
-                    evidence.diagnostics.push(GraphDiagnostic {
-                        severity: DiagnosticSeverity::Warning,
-                        code: "dropped_invalid_inheritance_target".to_owned(),
-                        message: format!(
-                            "dropped invalid {} endpoints {} -> {}",
-                            edge.kind.as_str(),
-                            source_kind.as_str(),
-                            target_kind.as_str()
-                        ),
-                        anchor: edge.relationship_site,
-                        related_ids: vec![edge.source, edge.target],
-                    });
-                    continue;
-                }
-            }
+            evidence.diagnostics.append(&mut diagnostics);
             if let Some(existing) = links.get_mut(&edge.id) {
                 let mut merged = existing.clone();
                 if let Err(error) = merge_normalized_edge(&mut merged, edge) {
@@ -1089,6 +1304,12 @@ fn normalize_v1_with_mode(
             } else {
                 links.insert(edge.id.clone(), edge);
             }
+        }
+    }
+    for source_id in test_sources {
+        if let Some(source) = nodes.get_mut(&source_id) {
+            source.roles.push(NodeRole::Test);
+            sort_dedup_serialized(&mut source.roles);
         }
     }
     profile_v1("v1 edge normalization", &mut profile_started);
@@ -1177,18 +1398,11 @@ fn normalize_v1_with_mode(
     }
     nodes.par_sort_unstable_by(|left, right| left.id.cmp(&right.id));
     links.par_sort_unstable_by(|left, right| {
-        (
-            left.source.as_str(),
-            left.kind.as_str(),
-            left.target.as_str(),
-            left.key.as_str(),
-        )
-            .cmp(&(
-                right.source.as_str(),
-                right.kind.as_str(),
-                right.target.as_str(),
-                right.key.as_str(),
-            ))
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.target.cmp(&right.target))
+            .then_with(|| left.kind.as_str().cmp(right.kind.as_str()))
     });
     evidence
         .files
@@ -1412,7 +1626,7 @@ fn repair_route_topology(document: &mut GraphDocument) {
     }
 }
 
-fn raw_node_sort_key(raw: &RawNodeRecord) -> String {
+fn raw_node_sort_key(raw: &RawNodeRecord) -> Vec<u8> {
     let trusted = raw
         .attributes
         .get(TRUSTED_NODE_RECORD)
@@ -1458,27 +1672,39 @@ fn raw_node_sort_key(raw: &RawNodeRecord) -> String {
             }
         },
     );
-    format!(
-        "{rank}\u{1f}{}\u{1f}{}",
-        raw.id,
-        serialized(&raw.attributes)
-    )
+    let mut key = Vec::with_capacity(raw.id.len() + raw.attributes.len() * 16 + 2);
+    key.push(b'0' + rank);
+    key.push(0x1f);
+    key.extend_from_slice(raw.id.as_bytes());
+    key.push(0x1f);
+    key.extend(serde_json::to_vec(&raw.attributes).unwrap_or_default());
+    key
 }
 
 fn raw_edge_sort_key(
     raw: &RawEdgeRecord,
     id_remap: &HashMap<String, String>,
     repository_root: &Path,
-) -> String {
+) -> Vec<u8> {
     let mut attributes = Value::Object(raw.attributes.clone());
     normalize_raw_sort_paths(&mut attributes, repository_root);
-    format!(
-        "{}\u{1f}{}\u{1f}{}\u{1f}{}",
-        id_remap.get(&raw.source).unwrap_or(&raw.source),
-        optional_string(&raw.attributes, "relation").unwrap_or_default(),
-        id_remap.get(&raw.target).unwrap_or(&raw.target),
-        serialized(&attributes)
-    )
+    let relation = raw
+        .attributes
+        .get("relation")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let source = id_remap.get(&raw.source).unwrap_or(&raw.source);
+    let target = id_remap.get(&raw.target).unwrap_or(&raw.target);
+    let serialized_attributes = serde_json::to_vec(&attributes).unwrap_or_default();
+    let mut key = Vec::with_capacity(
+        source.len() + relation.len() + target.len() + serialized_attributes.len() + 3,
+    );
+    for value in [source.as_str(), relation, target.as_str()] {
+        key.extend_from_slice(value.as_bytes());
+        key.push(0x1f);
+    }
+    key.extend(serialized_attributes);
+    key
 }
 
 fn normalize_raw_sort_paths(value: &mut Value, repository_root: &Path) {
@@ -1709,72 +1935,29 @@ fn normalize_trusted_edge(
     Ok(edge)
 }
 
-fn is_unresolved_external_node(node: &NodeRecord) -> bool {
-    node.source.is_none() && node.evidence.iter().any(is_external_placeholder_evidence)
-}
-
-fn collect_stub_wiring_sites(
-    nodes: &[RawNodeRecord],
-    edges: &[RawEdgeRecord],
-    root: &Path,
-    file_facts: &HashMap<String, PublishedFileFacts>,
-) -> Result<HashMap<String, SourceAnchor>, GraphError> {
-    let mut sourceless = HashSet::new();
-    for node in nodes
-        .iter()
-        .filter(|node| node.attributes.get(TRUSTED_NODE_RECORD).is_none())
-    {
-        if raw_anchor(&node.attributes, root, file_facts)?.is_none() {
-            sourceless.insert(node.id.as_str());
-        }
-    }
-    let mut sites = HashMap::new();
-    for edge in edges {
-        let source_needs_site = sourceless.contains(edge.source.as_str());
-        let target_needs_site = sourceless.contains(edge.target.as_str());
-        if !source_needs_site && !target_needs_site {
-            continue;
-        }
-        let Some(anchor) = raw_anchor(&edge.attributes, root, file_facts)? else {
-            continue;
-        };
-        for endpoint in [
-            source_needs_site.then_some(&edge.source),
-            target_needs_site.then_some(&edge.target),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            sites
-                .entry(endpoint.clone())
-                .and_modify(|existing: &mut SourceAnchor| {
-                    if anchor_key(&anchor) < anchor_key(existing) {
-                        existing.clone_from(&anchor);
-                    }
-                })
-                .or_insert_with(|| anchor.clone());
-        }
-    }
-    Ok(sites)
-}
-
 fn split_sourceless_placeholders(
     extraction: &mut Extraction,
     root: &Path,
     file_facts: &HashMap<String, PublishedFileFacts>,
-) -> Result<(), GraphError> {
-    let sourceless = extraction
+) -> Result<HashMap<String, SourceAnchor>, GraphError> {
+    let mut sourceless = HashSet::new();
+    let mut wiring_candidates = HashSet::new();
+    for node in extraction
         .nodes
         .iter()
-        .filter(|node| {
-            node.attributes.get(TRUSTED_NODE_RECORD).is_none()
-                && optional_source_path(&node.attributes, "source_file").is_none()
-                && !node.attributes.contains_key("source_anchor")
-        })
-        .map(|node| node.id.clone())
-        .collect::<HashSet<_>>();
-    if sourceless.is_empty() {
-        return Ok(());
+        .filter(|node| node.attributes.get(TRUSTED_NODE_RECORD).is_none())
+    {
+        if optional_source_path(&node.attributes, "source_file").is_none()
+            && !node.attributes.contains_key("source_anchor")
+        {
+            sourceless.insert(node.id.clone());
+        }
+        if raw_anchor(&node.attributes, root, file_facts)?.is_none() {
+            wiring_candidates.insert(node.id.clone());
+        }
+    }
+    if sourceless.is_empty() && wiring_candidates.is_empty() {
+        return Ok(HashMap::new());
     }
     let node_positions = extraction
         .nodes
@@ -1782,17 +1965,21 @@ fn split_sourceless_placeholders(
         .enumerate()
         .map(|(index, node)| (node.id.as_str(), index))
         .collect::<HashMap<_, _>>();
-    let mut scopes = HashMap::<String, BTreeSet<String>>::new();
-    let mut inferred_kinds = HashMap::<(String, String), &'static str>::new();
-    let mut edge_rewrites = Vec::<(usize, Option<String>, Option<String>)>::new();
-    for (edge_index, edge) in extraction.edges.iter().enumerate() {
+    let inspect_edge = |(edge_index, edge): (usize, &RawEdgeRecord)|
+        -> Result<Option<PlaceholderEdgeFact>, GraphError> {
         let source_is_sourceless = sourceless.contains(&edge.source);
         let target_is_sourceless = sourceless.contains(&edge.target);
-        if !source_is_sourceless && !target_is_sourceless {
-            continue;
+        let source_needs_site = wiring_candidates.contains(&edge.source);
+        let target_needs_site = wiring_candidates.contains(&edge.target);
+        if !source_is_sourceless
+            && !target_is_sourceless
+            && !source_needs_site
+            && !target_needs_site
+        {
+            return Ok(None);
         }
         let Some(anchor) = raw_anchor(&edge.attributes, root, file_facts)? else {
-            continue;
+            return Ok(None);
         };
         let source_scope = source_is_sourceless.then(|| {
             let counterpart_attributes = node_positions
@@ -1806,18 +1993,7 @@ fn split_sourceless_placeholders(
                 .map(|&index| &extraction.nodes[index].attributes);
             placeholder_scope_key(&edge.attributes, counterpart_attributes, &anchor)
         });
-        for (endpoint, scope) in [
-            (&edge.source, source_scope.as_ref()),
-            (&edge.target, target_scope.as_ref()),
-        ] {
-            if let Some(scope) = scope {
-                scopes
-                    .entry(endpoint.clone())
-                    .or_default()
-                    .insert(scope.clone());
-            }
-        }
-        if target_is_sourceless
+        let inferred_target = if target_is_sourceless
             && let Some(kind) = inferred_external_target_kind(&edge.attributes)
             && let Some(&target_index) = node_positions.get(edge.target.as_str())
         {
@@ -1828,16 +2004,77 @@ fn split_sourceless_placeholders(
                 &["qualified_name", "qualifiedName", "name", "label"],
             )
             .unwrap_or_else(|| edge.target.clone());
-            inferred_kinds
-                .entry((scope, qualified))
-                .and_modify(|existing| {
-                    if kind == "interface" {
-                        *existing = kind;
-                    }
-                })
-                .or_insert(kind);
+            Some((scope, qualified, kind))
+        } else {
+            None
+        };
+        Ok(Some(PlaceholderEdgeFact {
+            index: edge_index,
+            anchor,
+            source_scope,
+            target_scope,
+            inferred_target,
+        }))
+    };
+    let mut scopes = HashMap::<String, BTreeSet<String>>::new();
+    let mut inferred_kinds = HashMap::<(String, String), &'static str>::new();
+    let mut edge_rewrites = Vec::<(usize, Option<String>, Option<String>)>::new();
+    let mut edge_anchors = vec![None; extraction.edges.len()];
+    const PLACEHOLDER_EDGE_BATCH_SIZE: usize = 8_192;
+    for (batch_index, batch) in extraction
+        .edges
+        .chunks(PLACEHOLDER_EDGE_BATCH_SIZE)
+        .enumerate()
+    {
+        let batch_start = batch_index * PLACEHOLDER_EDGE_BATCH_SIZE;
+        let inspected = if extraction.edges.len() < 512 {
+            batch
+                .iter()
+                .enumerate()
+                .map(|(index, edge)| inspect_edge((batch_start + index, edge)))
+                .collect::<Vec<_>>()
+        } else {
+            batch
+                .par_iter()
+                .enumerate()
+                .map(|(index, edge)| inspect_edge((batch_start + index, edge)))
+                .collect::<Vec<_>>()
+        };
+        for inspected in inspected {
+            let Some(fact) = inspected? else {
+                continue;
+            };
+            let PlaceholderEdgeFact {
+                index,
+                anchor,
+                source_scope,
+                target_scope,
+                inferred_target,
+            } = fact;
+            edge_anchors[index] = Some(anchor);
+            for (endpoint, scope) in [
+                (&extraction.edges[index].source, source_scope.as_ref()),
+                (&extraction.edges[index].target, target_scope.as_ref()),
+            ] {
+                if let Some(scope) = scope {
+                    scopes
+                        .entry(endpoint.clone())
+                        .or_default()
+                        .insert(scope.clone());
+                }
+            }
+            if let Some((scope, qualified, kind)) = inferred_target {
+                inferred_kinds
+                    .entry((scope, qualified))
+                    .and_modify(|existing| {
+                        if kind == "interface" {
+                            *existing = kind;
+                        }
+                    })
+                    .or_insert(kind);
+            }
+            edge_rewrites.push((index, source_scope, target_scope));
         }
-        edge_rewrites.push((edge_index, source_scope, target_scope));
     }
     drop(node_positions);
 
@@ -1901,7 +2138,47 @@ fn split_sourceless_placeholders(
             edge.target.clone_from(clone_id);
         }
     }
-    Ok(())
+
+    // Placeholder splitting leaves the same source-less endpoints that the
+    // former second pass searched for. Reuse the anchors already decoded above
+    // while observing the rewritten endpoint IDs, retaining the earliest
+    // deterministic wiring site for each published placeholder.
+    let mut remaining_sourceless = HashSet::new();
+    for original in wiring_candidates {
+        if let Some(clones) = split_ids.get(&original) {
+            remaining_sourceless.extend(clones.values().cloned());
+        } else {
+            remaining_sourceless.insert(original);
+        }
+    }
+    let mut sites = HashMap::new();
+    for (edge_index, edge) in extraction.edges.iter().enumerate() {
+        let source_needs_site = remaining_sourceless.contains(&edge.source);
+        let target_needs_site = remaining_sourceless.contains(&edge.target);
+        if !source_needs_site && !target_needs_site {
+            continue;
+        }
+        let Some(anchor) = edge_anchors.get(edge_index).and_then(Option::as_ref) else {
+            continue;
+        };
+        for endpoint in [
+            source_needs_site.then_some(&edge.source),
+            target_needs_site.then_some(&edge.target),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            sites
+                .entry(endpoint.clone())
+                .and_modify(|existing: &mut SourceAnchor| {
+                    if anchor_key(anchor) < anchor_key(existing) {
+                        existing.clone_from(anchor);
+                    }
+                })
+                .or_insert_with(|| anchor.clone());
+        }
+    }
+    Ok(sites)
 }
 
 fn placeholder_scope_key(
@@ -2020,16 +2297,19 @@ fn resolve_or_drop_generic_symbols(
         return Ok(());
     }
 
+    let mut incident_counts = HashMap::<&str, usize>::new();
+    for edge in &extraction.edges {
+        *incident_counts.entry(edge.source.as_str()).or_default() += 1;
+        if edge.target != edge.source {
+            *incident_counts.entry(edge.target.as_str()).or_default() += 1;
+        }
+    }
     for node in extraction
         .nodes
         .iter()
         .filter(|node| dropped.contains(&node.id))
     {
-        let incident_count = extraction
-            .edges
-            .iter()
-            .filter(|edge| edge.source == node.id || edge.target == node.id)
-            .count();
+        let incident_count = incident_counts.get(node.id.as_str()).copied().unwrap_or(0);
         let anchor = raw_anchor(&node.attributes, root, file_facts)?
             .or(raw_origin_anchor(&node.attributes, root, file_facts)?)
             .or_else(|| wiring_sites.get(&node.id).cloned());
@@ -2397,8 +2677,25 @@ fn sort_dedup_serialized<T: Serialize>(values: &mut Vec<T>) {
         }
         return;
     }
-    values.sort_by_cached_key(serialized);
-    values.dedup_by(|left, right| serialized(left) == serialized(right));
+    // Keep the canonical sort key beside each value so duplicate removal does
+    // not serialize adjacent values a second time. Evidence vectors are small
+    // but occur on a large fraction of published edges.
+    let mut keyed = values
+        .drain(..)
+        .map(|value| {
+            let key = serde_json::to_vec(&value).unwrap_or_default();
+            (key, value)
+        })
+        .collect::<Vec<_>>();
+    keyed.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    let mut previous = None;
+    for (key, value) in keyed {
+        if previous.as_ref() == Some(&key) {
+            continue;
+        }
+        previous = Some(key);
+        values.push(value);
+    }
 }
 
 fn serialized<T: Serialize>(value: &T) -> String {
@@ -3599,6 +3896,12 @@ fn normalize_candidates(
 }
 
 fn remap_provenance_candidates(evidence: &mut Vec<Provenance>, id_remap: &HashMap<String, String>) {
+    if !evidence
+        .iter()
+        .any(|provenance| !provenance.candidates.is_empty())
+    {
+        return;
+    }
     for provenance in evidence.iter_mut() {
         for candidate in &mut provenance.candidates {
             if let Some(published) = id_remap.get(&candidate.node_id) {
@@ -4598,5 +4901,20 @@ fn raw_error(record: &str, detail: &str) -> GraphError {
     GraphError::RawNormalization {
         record: record.to_owned(),
         detail: detail.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sort_dedup_serialized;
+    use serde_json::json;
+
+    #[test]
+    fn serialized_sort_dedup_preserves_canonical_order_and_collapses_duplicates() {
+        let mut values = vec![json!({"id": "z"}), json!({"id": "a"}), json!({"id": "a"})];
+
+        sort_dedup_serialized(&mut values);
+
+        assert_eq!(values, vec![json!({"id": "a"}), json!({"id": "z"})]);
     }
 }

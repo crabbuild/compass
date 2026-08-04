@@ -18,6 +18,6 @@ export default function RoadmapPage() {
     <PageSection eyebrow="Current status" title="Read the label before you read the promise.">
       <div className="grid gap-5 md:grid-cols-3">{items.map(([Icon, title, text]) => <Card className="border-border/80 bg-card/70 shadow-none" key={title}><CardHeader className="gap-4"><Icon className="text-primary" /><CardTitle className="font-heading text-xl tracking-[-0.04em]">{title}</CardTitle></CardHeader><CardContent><p className="text-sm leading-7 text-muted-foreground">{text}</p></CardContent></Card>)}</div>
     </PageSection>
-    <div className="mx-auto max-w-7xl px-5 pb-20 lg:px-8 lg:pb-28"><Link className="inline-flex items-center gap-2 text-sm font-medium text-primary" href="/docs/roadmap">Open the detailed roadmap <ArrowUpRightIcon data-icon="inline-end" /></Link></div>
+    <div className="mx-auto max-w-7xl px-5 pb-20 lg:px-8 lg:pb-28"><Link className="inline-flex items-center gap-2 text-sm font-medium text-primary" href="https://github.com/crabbuild/compass/blob/main/docs/roadmap.md" target="_blank" rel="noreferrer">Open the detailed roadmap <ArrowUpRightIcon data-icon="inline-end" /></Link></div>
   </MarketingPage>;
 }

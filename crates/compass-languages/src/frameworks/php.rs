@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
 use regex::Regex;
@@ -6,9 +6,7 @@ use serde_json::{Map, Value};
 use tree_sitter::Node;
 
 use super::evidence::{EvidenceKind, EvidenceSet};
-use super::text::{
-    anchor, join_route_path, line_anchor, literal, normalize_route_path, split_top_level, text,
-};
+use super::text::{anchor, join_route_path, literal, normalize_route_path, split_top_level, text};
 use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
 const LARAVEL_ROUTE_FACADE: &str = "Illuminate\\Support\\Facades\\Route";
@@ -72,81 +70,82 @@ pub(super) fn detect_drupal_routing(path: &Path, source: &[u8]) -> Vec<RawFramew
         return Vec::new();
     }
     let body = text(source);
-    let mut facts = Vec::new();
-    let mut current_name = None::<String>;
-    let mut current_path = None::<String>;
-    let mut current_method = None::<String>;
-    let mut current_handler = None::<(String, usize, String)>;
-    let mut offset = 0_usize;
-
-    let flush = |facts: &mut Vec<RawFrameworkFact>,
-                 name: &mut Option<String>,
-                 route_path: &mut Option<String>,
-                 method: &mut Option<String>,
-                 handler: &mut Option<(String, usize, String)>| {
-        let Some(route_name) = name.take() else {
-            return;
-        };
-        let Some(raw_path) = route_path.take() else {
-            handler.take();
-            method.take();
-            return;
-        };
-        let Some((reference, line_start, line)) = handler.take() else {
-            method.take();
-            return;
-        };
-        let operation = method
-            .take()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "ANY".to_owned());
-        facts.push(RawFrameworkFact::Route(RawRouteFact {
-            framework: "drupal".to_owned(),
-            operation: operation.to_ascii_uppercase(),
-            raw_path: raw_path.clone(),
-            normalized_path: normalize_route_path(&raw_path),
-            declaring_scope: route_name,
-            anchor: line_anchor(path, source, line_start, &line),
-            handler_reference: normalize_drupal_handler(&reference),
-            middleware_references: Vec::new(),
-            origin: RawFrameworkOrigin::Config,
-            rule: Some("drupal-routing-yaml".to_owned()),
-            detail: Map::new(),
-        }));
+    let Ok(document) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(body) else {
+        return Vec::new();
     };
-
-    for line in body.split_inclusive('\n') {
-        let trimmed = line.trim();
-        let indentation = line.len().saturating_sub(line.trim_start().len());
-        if indentation == 0 && trimmed.ends_with(':') && !trimmed.starts_with(['#', '-', '{']) {
-            flush(
-                &mut facts,
-                &mut current_name,
-                &mut current_path,
-                &mut current_method,
-                &mut current_handler,
-            );
-            current_name = Some(trimmed.trim_end_matches(':').to_owned());
-        } else if let Some((key, value)) = trimmed.split_once(':') {
-            let value = unquote_yaml(value);
-            match key.trim() {
-                "path" => current_path = Some(value),
-                "_controller" | "_form" | "_entity_form" | "_entity_view" | "_entity_list" => {
-                    current_handler = Some((value, offset, line.to_owned()));
-                }
-                "_method" => current_method = Some(value.replace('|', ",")),
-                _ => {}
-            }
+    let serde_yaml_ng::Value::Mapping(routes) = document else {
+        return Vec::new();
+    };
+    let mut entries = routes
+        .into_iter()
+        .filter_map(|(name, value)| {
+            let route_name = yaml_string(&name)?;
+            let serde_yaml_ng::Value::Mapping(fields) = value else {
+                return None;
+            };
+            let raw_path = fields.get(yaml_key("path")).and_then(yaml_string)?;
+            let defaults = fields
+                .get(yaml_key("defaults"))
+                .and_then(|value| match value {
+                    serde_yaml_ng::Value::Mapping(fields) => Some(fields),
+                    _ => None,
+                })
+                .unwrap_or(&fields);
+            let (handler_key, reference) = [
+                "_controller",
+                "_form",
+                "_entity_form",
+                "_entity_view",
+                "_entity_list",
+            ]
+            .into_iter()
+            .find_map(|key| {
+                defaults
+                    .get(yaml_key(key))
+                    .and_then(yaml_string)
+                    .map(|value| (key, value))
+            })?;
+            let requirements = fields
+                .get(yaml_key("requirements"))
+                .and_then(|value| match value {
+                    serde_yaml_ng::Value::Mapping(fields) => Some(fields),
+                    _ => None,
+                })
+                .unwrap_or(&fields);
+            let methods = requirements
+                .get(yaml_key("_method"))
+                .map(yaml_methods)
+                .filter(|methods| !methods.is_empty())
+                .unwrap_or_else(|| vec!["ANY".to_owned()]);
+            Some((route_name, raw_path, handler_key, reference, methods))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut facts = Vec::new();
+    for (route_name, raw_path, handler_key, reference, operations) in entries {
+        let needle = format!("{handler_key}: {reference}");
+        let start = body
+            .find(&needle)
+            .unwrap_or_else(|| body.find(&reference).unwrap_or(0));
+        let end = start.saturating_add(needle.len().min(source.len().saturating_sub(start)));
+        let anchor = anchor(path, source, start, end);
+        let handler_reference = normalize_drupal_handler(&reference);
+        for operation in operations {
+            facts.push(RawFrameworkFact::Route(RawRouteFact {
+                framework: "drupal".to_owned(),
+                operation,
+                raw_path: raw_path.clone(),
+                normalized_path: normalize_route_path(&raw_path),
+                declaring_scope: route_name.clone(),
+                anchor: anchor.clone(),
+                handler_reference: handler_reference.clone(),
+                middleware_references: Vec::new(),
+                origin: RawFrameworkOrigin::Config,
+                rule: Some("drupal-routing-yaml".to_owned()),
+                detail: Map::new(),
+            }));
         }
-        offset = offset.saturating_add(line.len());
     }
-    flush(
-        &mut facts,
-        &mut current_name,
-        &mut current_path,
-        &mut current_method,
-        &mut current_handler,
-    );
     facts
 }
 
@@ -165,7 +164,7 @@ fn detect_laravel(path: &Path, source: &[u8], calls: &[LaravelCall]) -> Vec<RawF
             .map(|(prefix, _, _)| prefix.as_str())
             .unwrap_or_default();
         let call_anchor = anchor(path, source, call.start, call.end);
-        if method == "resource" {
+        if matches!(method, "resource" | "apiresource") {
             let Some(resource) = call.arguments.first().and_then(|value| literal(value)) else {
                 continue;
             };
@@ -176,7 +175,14 @@ fn detect_laravel(path: &Path, source: &[u8], calls: &[LaravelCall]) -> Vec<RawF
             else {
                 continue;
             };
-            facts.extend(resource_routes(&resource, prefix, &controller, call_anchor));
+            let actions = resource_actions(source, call, method == "apiresource");
+            facts.extend(resource_routes(
+                &resource,
+                prefix,
+                &controller,
+                &actions,
+                call_anchor,
+            ));
             continue;
         }
         let (operations, path_index, handler_index) = if method == "match" {
@@ -413,6 +419,7 @@ fn resource_routes(
     resource: &str,
     prefix: &str,
     controller: &str,
+    actions: &BTreeSet<String>,
     call_anchor: super::RawFrameworkAnchor,
 ) -> Vec<RawFrameworkFact> {
     let base = join_route_path(prefix, resource);
@@ -421,7 +428,8 @@ fn resource_routes(
         .rsplit('/')
         .next()
         .unwrap_or("resource")
-        .trim_end_matches('s');
+        .to_owned();
+    let parameter = singular_resource_name(&parameter);
     [
         ("GET", base.clone(), "index"),
         ("GET", format!("{base}/create"), "create"),
@@ -433,6 +441,7 @@ fn resource_routes(
         ("DELETE", format!("{base}/{{{parameter}}}"), "destroy"),
     ]
     .into_iter()
+    .filter(|(_, _, action)| actions.contains(*action))
     .map(|(operation, route_path, action)| {
         RawFrameworkFact::Route(RawRouteFact {
             framework: "laravel".to_owned(),
@@ -454,26 +463,105 @@ fn resource_routes(
     .collect()
 }
 
+fn singular_resource_name(value: &str) -> String {
+    let lower = value.to_ascii_lowercase();
+    if lower.ends_with("ies") && value.len() > 3 {
+        return format!("{}y", &value[..value.len().saturating_sub(3)]);
+    }
+    if ["sses", "shes", "ches", "xes", "zes"]
+        .iter()
+        .any(|suffix| lower.ends_with(suffix))
+        && value.len() > 2
+    {
+        return value[..value.len().saturating_sub(2)].to_owned();
+    }
+    if lower.ends_with('s') && !lower.ends_with("ss") && value.len() > 1 {
+        return value[..value.len().saturating_sub(1)].to_owned();
+    }
+    value.to_owned()
+}
+
+fn resource_actions(source: &[u8], call: &LaravelCall, api_resource: bool) -> BTreeSet<String> {
+    let mut actions = [
+        "index", "create", "store", "show", "edit", "update", "destroy",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect::<BTreeSet<_>>();
+    if api_resource {
+        actions.remove("create");
+        actions.remove("edit");
+    }
+    let suffix = source
+        .get(call.end..)
+        .and_then(|value| std::str::from_utf8(value).ok())
+        .unwrap_or_default();
+    let Ok(modifier) = Regex::new(r"(?s)^\s*->\s*(only|except)\s*\(([^)]*)\)") else {
+        return actions;
+    };
+    let Some(capture) = modifier.captures(suffix) else {
+        return actions;
+    };
+    let selected = capture
+        .get(2)
+        .map(|value| array_literals(value.as_str()))
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if capture.get(1).is_some_and(|value| value.as_str() == "only") {
+        actions.retain(|action| selected.contains(action));
+    } else {
+        actions.retain(|action| !selected.contains(action));
+    }
+    actions
+}
+
 fn detect_drupal_hooks(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
-    let Ok(function) = Regex::new(r"(?i)\bfunction\s+(hook_[A-Za-z0-9_]+)\s*\(") else {
+    let module = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default();
+    let Ok(documented) = Regex::new(
+        r"(?is)/\*\*.*?Implements\s+hook_([A-Za-z0-9_]+)\s*\(\s*\)\s*\..*?\*/\s*function\s+([A-Za-z0-9_]+)\s*\(",
+    ) else {
         return Vec::new();
     };
-    function
+    let Ok(placeholder) = Regex::new(r"(?i)\bfunction\s+(hook_[A-Za-z0-9_]+)\s*\(") else {
+        return Vec::new();
+    };
+    let mut hooks = documented
         .captures_iter(body)
         .filter_map(|capture| {
-            let name = capture.get(1)?;
+            let hook = capture.get(1)?.as_str();
+            let function = capture.get(2)?;
+            (function.as_str() == format!("{module}_{hook}"))
+                .then(|| (function.start(), function.end(), hook.to_owned()))
+        })
+        .collect::<Vec<_>>();
+    hooks.extend(placeholder.captures_iter(body).filter_map(|capture| {
+        let function = capture.get(1)?;
+        let hook = function.as_str().get("hook_".len()..)?.to_owned();
+        Some((function.start(), function.end(), hook))
+    }));
+    let mut seen = BTreeSet::new();
+    hooks.sort();
+    hooks
+        .into_iter()
+        .filter(|(start, end, _)| seen.insert((*start, *end)))
+        .filter_map(|(start, end, hook)| {
+            let name = body.get(start..end)?;
             Some(RawFrameworkFact::Route(RawRouteFact {
                 framework: "drupal".to_owned(),
                 operation: "HOOK".to_owned(),
-                raw_path: format!("hook://{}", name.as_str()),
-                normalized_path: format!("/__hook/{}", name.as_str()),
+                raw_path: format!("hook://hook_{hook}"),
+                normalized_path: format!("/__hook/hook_{hook}"),
                 declaring_scope: path.to_string_lossy().replace('\\', "/"),
-                anchor: anchor(path, source, name.start(), name.end()),
-                handler_reference: name.as_str().to_owned(),
+                anchor: anchor(path, source, start, end),
+                handler_reference: name.to_owned(),
                 middleware_references: Vec::new(),
                 origin: RawFrameworkOrigin::Ast,
                 rule: Some("drupal-hook-implementation".to_owned()),
-                detail: Map::new(),
+                detail: Map::from_iter([("hook".into(), Value::String(hook))]),
             }))
         })
         .collect()
@@ -555,6 +643,37 @@ fn normalize_drupal_handler(value: &str) -> String {
         .replace("::", ".")
 }
 
-fn unquote_yaml(value: &str) -> String {
-    value.trim().trim_matches(['\'', '"']).trim().to_owned()
+fn drupal_methods(value: &str) -> Vec<String> {
+    let mut methods = value
+        .split(['|', ','])
+        .map(str::trim)
+        .filter(|method| !method.is_empty())
+        .map(str::to_ascii_uppercase)
+        .collect::<Vec<_>>();
+    methods.sort();
+    methods.dedup();
+    methods
+}
+
+fn yaml_key(value: &str) -> serde_yaml_ng::Value {
+    serde_yaml_ng::Value::String(value.to_owned())
+}
+
+fn yaml_string(value: &serde_yaml_ng::Value) -> Option<String> {
+    match value {
+        serde_yaml_ng::Value::String(value) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn yaml_methods(value: &serde_yaml_ng::Value) -> Vec<String> {
+    match value {
+        serde_yaml_ng::Value::String(value) => drupal_methods(value),
+        serde_yaml_ng::Value::Sequence(values) => values
+            .iter()
+            .filter_map(yaml_string)
+            .flat_map(|value| drupal_methods(&value))
+            .collect(),
+        _ => Vec::new(),
+    }
 }

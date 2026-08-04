@@ -43,6 +43,18 @@ pub struct QueryIndex {
 }
 
 impl QueryIndex {
+    pub(crate) fn empty() -> Self {
+        Self {
+            nodes_by_label: BTreeMap::new(),
+            nodes_by_display_label: HashMap::new(),
+            nodes_by_source_file: HashMap::new(),
+            edges_by_type: BTreeMap::new(),
+            outgoing_by_type: Vec::new(),
+            incoming_by_type: Vec::new(),
+            schema_fingerprint: SchemaFingerprint::empty(),
+        }
+    }
+
     pub(crate) fn build(
         nodes: &[NodeRecord],
         edges: &[EdgeRecord],

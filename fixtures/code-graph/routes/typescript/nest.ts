@@ -1,7 +1,7 @@
 import { Controller, Get, Post } from "@nestjs/common";
 import { EventPattern, MessagePattern } from "@nestjs/microservices";
 import { Mutation, Query, Resolver } from "@nestjs/graphql";
-import { SubscribeMessage } from "@nestjs/websockets";
+import { SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
 
 @Controller("/users")
 export class UsersController {
@@ -17,6 +17,10 @@ export class UsersController {
   @EventPattern("users.created")
   userCreated() {}
 
+}
+
+@WebSocketGateway()
+export class UsersGateway {
   @SubscribeMessage("users.watch")
   watchUsers() {}
 }

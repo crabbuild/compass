@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, FastAPI
 
 app = FastAPI()
 router = APIRouter(prefix="/v1")
+app.include_router(router, prefix="/api")
 
 
 def authenticate():

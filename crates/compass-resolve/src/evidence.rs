@@ -1,5 +1,6 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
+use std::hash::Hash;
 use std::path::Path;
 use std::time::Instant;
 
@@ -67,6 +68,14 @@ struct DirectBaseSet {
     complete: bool,
 }
 
+/// Compact slot into the declaration table used by secondary indexes.
+///
+/// Declaration IDs are long, repeated strings on corpus-scale Java and
+/// Python repositories. Keeping those IDs in every lookup vector dominates
+/// the universal resolver's transient memory, while the declaration table
+/// already provides the canonical ID for each slot.
+type DeclarationSlot = u32;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolutionEvidence {
     pub rule: ResolutionRule,
@@ -99,17 +108,18 @@ pub enum ResolutionDecision {
 
 pub struct UniversalResolutionIndex {
     declarations: AHashMap<String, DeclarationFact>,
+    declaration_ids: Vec<String>,
     occurrences: AHashMap<String, OccurrenceFact>,
     bindings: AHashMap<String, compass_languages::BindingFact>,
     candidates: AHashMap<String, RelationshipCandidate>,
     scopes: AHashMap<String, compass_languages::ScopeFact>,
     definition_ranges: BTreeMap<String, EvidenceRange>,
-    by_qualified: AHashMap<(String, String), Vec<String>>,
-    by_module_name: AHashMap<(String, String, String), Vec<String>>,
-    by_scope_name: AHashMap<(String, String, String), Vec<String>>,
-    by_source_directory_name: AHashMap<(String, String, String), Vec<String>>,
+    by_qualified: AHashMap<(String, String), Vec<DeclarationSlot>>,
+    by_module_name: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
+    by_scope_name: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
+    by_source_directory_name: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
     direct_bases: AHashMap<(String, String), DirectBaseSet>,
-    members_by_owner: AHashMap<(String, String, String), Vec<String>>,
+    members_by_owner: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
     inventory_by_qualified: AHashMap<(String, String), Vec<String>>,
     aliases: AHashMap<(String, String), Vec<String>>,
     wildcard_reexports_by_module: AHashMap<(String, String), Vec<String>>,
@@ -117,6 +127,16 @@ pub struct UniversalResolutionIndex {
     returns_by_callable: AHashMap<(String, String), Vec<String>>,
     go_module_path: Option<String>,
     limits: UniversalResolutionLimits,
+}
+
+struct PreparedTarget<'a> {
+    candidate_id: &'a str,
+    target: String,
+    rule: ResolutionRule,
+    target_kind: Option<String>,
+    declaration_id: Option<String>,
+    external_qualified_name: Option<String>,
+    deferred_qualified_name: Option<String>,
 }
 
 impl UniversalResolutionIndex {
@@ -163,11 +183,22 @@ impl UniversalResolutionIndex {
     ) -> Result<Self, String> {
         let mut profile_started = Instant::now();
         let go_module_path = read_go_module_path(root);
-        let mut declarations = AHashMap::new();
-        let mut occurrences = AHashMap::new();
-        let mut bindings = AHashMap::new();
-        let mut candidates = AHashMap::new();
-        let mut scopes = AHashMap::new();
+        // Reserve the aggregate fact counts before consuming the batches. A
+        // corpus-scale evidence index otherwise grows each primary map by
+        // repeated rehashes while the old and new tables overlap in memory.
+        let capacities = batches.iter().fold([0_usize; 5], |mut counts, batch| {
+            counts[0] = counts[0].saturating_add(batch.declarations.len());
+            counts[1] = counts[1].saturating_add(batch.occurrences.len());
+            counts[2] = counts[2].saturating_add(batch.bindings.len());
+            counts[3] = counts[3].saturating_add(batch.candidates.len());
+            counts[4] = counts[4].saturating_add(batch.scopes.len());
+            counts
+        });
+        let mut declarations = AHashMap::with_capacity(capacities[0]);
+        let mut occurrences = AHashMap::with_capacity(capacities[1]);
+        let mut bindings = AHashMap::with_capacity(capacities[2]);
+        let mut candidates = AHashMap::with_capacity(capacities[3]);
+        let mut scopes = AHashMap::with_capacity(capacities[4]);
         if validate_batches {
             batches.par_iter().try_for_each(|batch| {
                 validate_evidence(batch, EvidenceLimits::default())
@@ -193,6 +224,17 @@ impl UniversalResolutionIndex {
             }
         }
         profile_internal("universal fact collection", &mut profile_started);
+        let mut declaration_ids = declarations.keys().cloned().collect::<Vec<_>>();
+        declaration_ids.sort_unstable();
+        let declaration_slots = declaration_ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| {
+                u32::try_from(index)
+                    .map(|slot| (id.clone(), slot))
+                    .map_err(|_| "universal declaration slot count exceeds u32".to_owned())
+            })
+            .collect::<Result<AHashMap<_, _>, _>>()?;
         let definition_ranges = unique_definition_ranges(&declarations, &scopes);
         for (name, count, limit) in [
             ("declarations", declarations.len(), limits.declarations),
@@ -206,61 +248,126 @@ impl UniversalResolutionIndex {
                 ));
             }
         }
-        let mut by_qualified = AHashMap::<_, Vec<_>>::new();
-        let mut by_module_name = AHashMap::<_, Vec<_>>::new();
-        let mut by_scope_name = AHashMap::<_, Vec<_>>::new();
-        let mut by_source_directory_name = AHashMap::<_, Vec<_>>::new();
-        for declaration in declarations.values() {
-            by_qualified
-                .entry((
-                    declaration.language.clone(),
-                    declaration.qualified_name.clone(),
-                ))
-                .or_default()
-                .push(declaration.id.clone());
-            if let Some(module) = declaration.module_or_package.as_ref() {
-                by_module_name
-                    .entry((
-                        declaration.language.clone(),
-                        module.clone(),
-                        declaration.name.clone(),
-                    ))
-                    .or_default()
-                    .push(declaration.id.clone());
-            }
-            if let Some(scope) = declaration.scope_id.as_ref() {
-                by_scope_name
-                    .entry((
-                        declaration.language.clone(),
-                        scope.clone(),
-                        declaration.name.clone(),
-                    ))
-                    .or_default()
-                    .push(declaration.id.clone());
-            }
-            if let Some(directory) = source_directory(&declaration.range.source_file, root) {
-                by_source_directory_name
-                    .entry((
-                        declaration.language.clone(),
-                        directory,
-                        declaration.name.clone(),
-                    ))
-                    .or_default()
-                    .push(declaration.id.clone());
-            }
-        }
-        for values in by_qualified
-            .values_mut()
-            .chain(by_module_name.values_mut())
-            .chain(by_scope_name.values_mut())
-            .chain(by_source_directory_name.values_mut())
-        {
-            values.sort_unstable();
-            values.dedup();
-            if values.len() > limits.candidates_per_lookup {
-                values.truncate(limits.candidates_per_lookup);
-            }
-        }
+        let (by_qualified, (by_module_name, (by_scope_name, by_source_directory_name))) =
+            rayon::join(
+                || {
+                    let mut index = AHashMap::<(String, String), Vec<DeclarationSlot>>::new();
+                    for declaration in declarations.values() {
+                        let Some(&slot) = declaration_slots.get(&declaration.id) else {
+                            continue;
+                        };
+                        index
+                            .entry((
+                                declaration.language.clone(),
+                                declaration.qualified_name.clone(),
+                            ))
+                            .or_default()
+                            .push(slot);
+                    }
+                    sort_declaration_index(
+                        &mut index,
+                        &declaration_ids,
+                        limits.candidates_per_lookup,
+                    );
+                    index
+                },
+                || {
+                    let (by_module_name, (by_scope_name, by_source_directory_name)) = rayon::join(
+                        || {
+                            let mut index =
+                                AHashMap::<(String, String, String), Vec<DeclarationSlot>>::new();
+                            for declaration in declarations.values() {
+                                let Some(&slot) = declaration_slots.get(&declaration.id) else {
+                                    continue;
+                                };
+                                let Some(module) = declaration.module_or_package.as_ref() else {
+                                    continue;
+                                };
+                                index
+                                    .entry((
+                                        declaration.language.clone(),
+                                        module.clone(),
+                                        declaration.name.clone(),
+                                    ))
+                                    .or_default()
+                                    .push(slot);
+                            }
+                            sort_declaration_index(
+                                &mut index,
+                                &declaration_ids,
+                                limits.candidates_per_lookup,
+                            );
+                            index
+                        },
+                        || {
+                            let (by_scope_name, by_source_directory_name) = rayon::join(
+                                || {
+                                    let mut index = AHashMap::<
+                                        (String, String, String),
+                                        Vec<DeclarationSlot>,
+                                    >::new();
+                                    for declaration in declarations.values() {
+                                        let Some(&slot) = declaration_slots.get(&declaration.id)
+                                        else {
+                                            continue;
+                                        };
+                                        let Some(scope) = declaration.scope_id.as_ref() else {
+                                            continue;
+                                        };
+                                        index
+                                            .entry((
+                                                declaration.language.clone(),
+                                                scope.clone(),
+                                                declaration.name.clone(),
+                                            ))
+                                            .or_default()
+                                            .push(slot);
+                                    }
+                                    sort_declaration_index(
+                                        &mut index,
+                                        &declaration_ids,
+                                        limits.candidates_per_lookup,
+                                    );
+                                    index
+                                },
+                                || {
+                                    let mut index = AHashMap::<
+                                        (String, String, String),
+                                        Vec<DeclarationSlot>,
+                                    >::new();
+                                    for declaration in declarations.values() {
+                                        let Some(&slot) = declaration_slots.get(&declaration.id)
+                                        else {
+                                            continue;
+                                        };
+                                        let Some(directory) =
+                                            source_directory(&declaration.range.source_file, root)
+                                        else {
+                                            continue;
+                                        };
+                                        index
+                                            .entry((
+                                                declaration.language.clone(),
+                                                directory,
+                                                declaration.name.clone(),
+                                            ))
+                                            .or_default()
+                                            .push(slot);
+                                    }
+                                    sort_declaration_index(
+                                        &mut index,
+                                        &declaration_ids,
+                                        limits.candidates_per_lookup,
+                                    );
+                                    index
+                                },
+                            );
+                            (by_scope_name, by_source_directory_name)
+                        },
+                    );
+                    (by_module_name, (by_scope_name, by_source_directory_name))
+                },
+            );
         profile_internal("universal declaration indices", &mut profile_started);
         let mut inventory_by_qualified = AHashMap::<_, Vec<_>>::new();
         for node in inventory_nodes {
@@ -291,88 +398,106 @@ impl UniversalResolutionIndex {
             }
         }
         profile_internal("universal source inventory index", &mut profile_started);
-        let mut aliases = AHashMap::<_, Vec<_>>::new();
-        for binding in bindings.values() {
-            let Some(owner) = binding
-                .scope_id
-                .as_deref()
-                .and_then(|id| scopes.get(id))
-                .and_then(|scope| scope.owner_declaration_id.as_deref())
-                .and_then(|id| declarations.get(id))
-            else {
-                continue;
-            };
-            for separator in [".", "::"] {
-                aliases
-                    .entry((
-                        binding.language.clone(),
-                        format!("{}{separator}{}", owner.qualified_name, binding.spelling),
-                    ))
-                    .or_default()
-                    .push(binding.qualified_target.clone());
-            }
-        }
-        for targets in aliases.values_mut() {
-            targets.sort_unstable();
-            targets.dedup();
-        }
-        profile_internal("universal alias index", &mut profile_started);
-        let mut direct_bases = AHashMap::<(String, String), DirectBaseSet>::new();
-        for candidate in candidates.values() {
-            let Some(owner) = declarations.get(&candidate.source_declaration_id) else {
-                continue;
-            };
-            let base_set_complete = match candidate.constraints.hierarchy.as_ref() {
-                Some(HierarchyConstraint::DirectBase { base_set_complete }) => *base_set_complete,
-                None if candidate.language == "java"
-                    && matches!(
-                        candidate.relation,
-                        CandidateRelation::Extends | CandidateRelation::Implements
-                    ) =>
-                {
-                    owner.direct_bases_complete
+        let (aliases, direct_bases) = rayon::join(
+            || {
+                let mut aliases = AHashMap::<_, Vec<_>>::new();
+                for binding in bindings.values() {
+                    let Some(owner) = binding
+                        .scope_id
+                        .as_deref()
+                        .and_then(|id| scopes.get(id))
+                        .and_then(|scope| scope.owner_declaration_id.as_deref())
+                        .and_then(|id| declarations.get(id))
+                    else {
+                        continue;
+                    };
+                    for separator in [".", "::"] {
+                        aliases
+                            .entry((
+                                binding.language.clone(),
+                                format!("{}{separator}{}", owner.qualified_name, binding.spelling),
+                            ))
+                            .or_default()
+                            .push(binding.qualified_target.clone());
+                    }
                 }
-                _ => continue,
-            };
-            let range = candidate
-                .occurrence_id
-                .as_deref()
-                .and_then(|id| occurrences.get(id))
-                .map(|occurrence| &occurrence.range);
-            let entry = direct_bases
-                .entry((candidate.language.clone(), owner.qualified_name.clone()))
-                .or_insert_with(|| DirectBaseSet {
-                    links: Vec::new(),
-                    complete: true,
-                });
-            entry.complete &= base_set_complete;
-            if entry.links.len() <= limits.candidates_per_lookup {
-                entry.links.push(DirectBaseLink {
-                    qualified_name: candidate.constraints.qualified_name.clone(),
-                    source_file: range.map_or_else(String::new, |range| range.source_file.clone()),
-                    start_byte: range.map_or(u64::MAX, |range| range.start_byte),
-                    end_byte: range.map_or(u64::MAX, |range| range.end_byte),
-                    candidate_id: candidate.id.clone(),
-                });
-            } else {
-                entry.complete = false;
-            }
-        }
-        for bases in direct_bases.values_mut() {
-            bases.links.sort_unstable_by(|left, right| {
-                left.source_file
-                    .cmp(&right.source_file)
-                    .then_with(|| left.start_byte.cmp(&right.start_byte))
-                    .then_with(|| left.end_byte.cmp(&right.end_byte))
-                    .then_with(|| left.candidate_id.cmp(&right.candidate_id))
-            });
-            if bases.links.len() > limits.candidates_per_lookup {
-                bases.complete = false;
-                bases.links.truncate(limits.candidates_per_lookup);
-            }
-        }
-        let mut members_by_owner = AHashMap::<_, Vec<_>>::new();
+                for targets in aliases.values_mut() {
+                    targets.sort_unstable();
+                    targets.dedup();
+                }
+                aliases
+            },
+            || {
+                let mut direct_bases = AHashMap::<(String, String), DirectBaseSet>::new();
+                for candidate in candidates.values() {
+                    let Some(owner) = declarations.get(&candidate.source_declaration_id) else {
+                        continue;
+                    };
+                    let base_set_complete = match candidate.constraints.hierarchy.as_ref() {
+                        Some(HierarchyConstraint::DirectBase { base_set_complete }) => {
+                            *base_set_complete
+                        }
+                        None if candidate.language == "java"
+                            && matches!(
+                                candidate.relation,
+                                CandidateRelation::Extends | CandidateRelation::Implements
+                            ) =>
+                        {
+                            owner.direct_bases_complete
+                        }
+                        _ => continue,
+                    };
+                    let range = candidate
+                        .occurrence_id
+                        .as_deref()
+                        .and_then(|id| occurrences.get(id))
+                        .map(|occurrence| &occurrence.range);
+                    let entry = direct_bases
+                        .entry((candidate.language.clone(), owner.qualified_name.clone()))
+                        .or_insert_with(|| DirectBaseSet {
+                            links: Vec::new(),
+                            complete: true,
+                        });
+                    entry.complete &= base_set_complete;
+                    if entry.links.len() <= limits.candidates_per_lookup {
+                        entry.links.push(DirectBaseLink {
+                            qualified_name: candidate.constraints.qualified_name.clone(),
+                            source_file: range
+                                .map_or_else(String::new, |range| range.source_file.clone()),
+                            start_byte: range.map_or(u64::MAX, |range| range.start_byte),
+                            end_byte: range.map_or(u64::MAX, |range| range.end_byte),
+                            candidate_id: candidate.id.clone(),
+                        });
+                    } else {
+                        entry.complete = false;
+                    }
+                }
+                for bases in direct_bases.values_mut() {
+                    bases.links.sort_unstable_by(|left, right| {
+                        left.source_file
+                            .cmp(&right.source_file)
+                            .then_with(|| left.start_byte.cmp(&right.start_byte))
+                            .then_with(|| left.end_byte.cmp(&right.end_byte))
+                            .then_with(|| left.candidate_id.cmp(&right.candidate_id))
+                    });
+                    if bases.links.len() > limits.candidates_per_lookup {
+                        bases.complete = false;
+                        bases.links.truncate(limits.candidates_per_lookup);
+                    }
+                }
+                direct_bases
+            },
+        );
+        profile_internal(
+            "universal alias and hierarchy indices",
+            &mut profile_started,
+        );
+        let mut members_by_owner =
+            AHashMap::<(String, String, String), Vec<DeclarationSlot>>::new();
         for declaration in declarations.values() {
+            let Some(&slot) = declaration_slots.get(&declaration.id) else {
+                continue;
+            };
             let Some(owner) = declaration
                 .scope_id
                 .as_deref()
@@ -389,10 +514,12 @@ impl UniversalResolutionIndex {
                     declaration.name.clone(),
                 ))
                 .or_default()
-                .push(declaration.id.clone());
+                .push(slot);
         }
         for members in members_by_owner.values_mut() {
-            members.sort_unstable();
+            members.sort_unstable_by(|left, right| {
+                declaration_ids[*left as usize].cmp(&declaration_ids[*right as usize])
+            });
             members.dedup();
             if members.len() > limits.candidates_per_lookup {
                 members.truncate(limits.candidates_per_lookup);
@@ -486,6 +613,7 @@ impl UniversalResolutionIndex {
         profile_internal("universal member index", &mut profile_started);
         Ok(Self {
             declarations,
+            declaration_ids,
             occurrences,
             bindings,
             candidates,
@@ -546,6 +674,26 @@ impl UniversalResolutionIndex {
                 .then_with(|| left_id.cmp(right_id))
         });
         ordered.into_iter().map(|(id, _)| id).collect()
+    }
+
+    fn declaration_id(&self, slot: DeclarationSlot) -> Option<&str> {
+        self.declaration_ids
+            .get(usize::try_from(slot).ok()?)
+            .map(String::as_str)
+    }
+
+    fn declaration(&self, slot: DeclarationSlot) -> Option<&DeclarationFact> {
+        self.declaration_id(slot)
+            .and_then(|id| self.declarations.get(id))
+    }
+
+    fn declaration_allowed_slot(
+        &self,
+        slot: DeclarationSlot,
+        candidate: &RelationshipCandidate,
+    ) -> bool {
+        self.declaration_id(slot)
+            .is_some_and(|id| self.declaration_allowed(id, candidate))
     }
 
     #[must_use]
@@ -743,7 +891,7 @@ impl UniversalResolutionIndex {
             .and_then(|occurrence| occurrence.qualifier.as_deref());
         let mut modules = vec![binding.qualified_target.clone()];
         let mut visited = BTreeSet::new();
-        let mut declarations = BTreeSet::new();
+        let mut declarations = BTreeSet::<DeclarationSlot>::new();
         for _ in 0..64 {
             let Some(module) = modules.pop() else {
                 break;
@@ -760,7 +908,7 @@ impl UniversalResolutionIndex {
             {
                 declarations.extend(
                     ids.iter()
-                        .filter(|id| self.declaration_allowed(id, candidate))
+                        .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
                         .cloned(),
                 );
             }
@@ -779,7 +927,7 @@ impl UniversalResolutionIndex {
                 {
                     declarations.extend(
                         ids.iter()
-                            .filter(|id| self.declaration_allowed(id, candidate))
+                            .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
                             .cloned(),
                     );
                 }
@@ -801,7 +949,7 @@ impl UniversalResolutionIndex {
         }
         match declarations.into_iter().collect::<Vec<_>>().as_slice() {
             [only] => Some(ResolutionDecision::Resolved {
-                declaration_id: only.clone(),
+                declaration_id: self.declaration_id(*only)?.to_owned(),
                 evidence: ResolutionEvidence {
                     rule: ResolutionRule::WildcardBinding,
                     candidate_count: 1,
@@ -969,31 +1117,36 @@ impl UniversalResolutionIndex {
             .collect::<AHashSet<_>>();
         let mut declarations = self.declarations.values().collect::<Vec<_>>();
         declarations.sort_unstable_by(|left, right| left.id.cmp(&right.id));
-        for declaration in declarations {
-            let graph_node_id = &graph_ids[&declaration.id];
-            let definition_range = self.definition_ranges.get(&declaration.id);
-            if let Some(index) = existing_positions.get(graph_node_id) {
-                project_declaration_onto_node(
-                    &mut nodes[*index],
-                    declaration,
-                    definition_range,
-                    graph_node_id,
-                );
-                if let Some(discriminator) = overloads.get(&declaration.id) {
-                    nodes[*index].attributes.insert(
-                        "overload_discriminator".to_owned(),
-                        Value::String(discriminator.clone()),
-                    );
+        const DECLARATION_BATCH_SIZE: usize = 8_192;
+        for declaration_batch in declarations.chunks(DECLARATION_BATCH_SIZE) {
+            let prepared = declaration_batch
+                .par_iter()
+                .map(|declaration| {
+                    let graph_node_id = &graph_ids[&declaration.id];
+                    let definition_range = self.definition_ranges.get(&declaration.id);
+                    let node = declaration_node(declaration, definition_range, graph_node_id);
+                    let discriminator = overloads.get(&declaration.id).cloned();
+                    (node, discriminator)
+                })
+                .collect::<Vec<_>>();
+            for (mut node, discriminator) in prepared {
+                if let Some(index) = existing_positions.get(&node.id) {
+                    nodes[*index].attributes.extend(node.attributes);
+                    if let Some(discriminator) = discriminator {
+                        nodes[*index].attributes.insert(
+                            "overload_discriminator".to_owned(),
+                            Value::String(discriminator),
+                        );
+                    }
+                } else if existing_nodes.insert(node.id.clone()) {
+                    if let Some(discriminator) = discriminator {
+                        node.attributes.insert(
+                            "overload_discriminator".to_owned(),
+                            Value::String(discriminator),
+                        );
+                    }
+                    nodes.push(node);
                 }
-            } else if existing_nodes.insert(graph_node_id.clone()) {
-                let mut node = declaration_node(declaration, definition_range, graph_node_id);
-                if let Some(discriminator) = overloads.get(&declaration.id) {
-                    node.attributes.insert(
-                        "overload_discriminator".to_owned(),
-                        Value::String(discriminator.clone()),
-                    );
-                }
-                nodes.push(node);
             }
         }
         profile_internal("universal declaration projection", &mut profile_started);
@@ -1016,84 +1169,123 @@ impl UniversalResolutionIndex {
             .map(|candidate_id| (candidate_id, self.resolve(candidate_id)))
             .collect::<Vec<_>>();
         profile_internal("universal candidate decisions", &mut profile_started);
-        let mut resolved_targets = Vec::with_capacity(decisions.len());
-        for (candidate_id, decision) in decisions {
-            let candidate = &self.candidates[candidate_id];
-            let (target, resolution_rule, target_kind, target_site) = match decision {
+        let prepared_targets = decisions
+            .into_par_iter()
+            .map(|(candidate_id, decision)| match decision {
                 ResolutionDecision::Resolved {
                     declaration_id,
                     evidence,
                 } => {
-                    let Some(target) = self.declarations.get(&declaration_id) else {
-                        continue;
-                    };
-                    (
-                        graph_ids[&target.id].clone(),
-                        evidence.rule,
-                        Some(target.kind.clone()),
-                        Some(&target.range),
-                    )
+                    let target = self.declarations.get(&declaration_id)?;
+                    Some(PreparedTarget {
+                        candidate_id,
+                        target: graph_ids[&target.id].clone(),
+                        rule: evidence.rule,
+                        target_kind: Some(target.kind.clone()),
+                        declaration_id: Some(target.id.clone()),
+                        external_qualified_name: None,
+                        deferred_qualified_name: None,
+                    })
                 }
                 ResolutionDecision::ResolvedInventory {
                     graph_node_id,
                     evidence,
                 } => {
                     let kind = inventory_kinds.get(&graph_node_id).cloned();
-                    (graph_node_id, evidence.rule, kind, None)
+                    Some(PreparedTarget {
+                        candidate_id,
+                        target: graph_node_id,
+                        rule: evidence.rule,
+                        target_kind: kind,
+                        declaration_id: None,
+                        external_qualified_name: None,
+                        deferred_qualified_name: None,
+                    })
                 }
                 ResolutionDecision::QualifiedExternal {
                     qualified_name,
                     evidence,
                 } => {
-                    let kind = external_kind(candidate);
+                    let candidate = &self.candidates[candidate_id];
                     let id = make_id(&["external", &candidate.language, &qualified_name]);
-                    if let Some(position) = external_positions.get(&id).copied() {
-                        merge_external_node(&mut nodes[position], candidate);
-                    } else if !existing_nodes.contains(&id) {
-                        let position = nodes.len();
-                        nodes.push(external_node(
-                            &id,
-                            &qualified_name,
-                            &candidate.language,
-                            candidate,
-                        ));
-                        existing_nodes.insert(id.clone());
-                        external_positions.insert(id.clone(), position);
-                    }
-                    let projected_kind = external_positions
-                        .get(&id)
-                        .map(|position| nodes[*position].string("symbol_kind"))
-                        .filter(|kind| !kind.is_empty())
-                        .unwrap_or_else(|| kind.to_owned());
-                    (id, evidence.rule, Some(projected_kind), None)
+                    Some(PreparedTarget {
+                        candidate_id,
+                        target: id,
+                        rule: evidence.rule,
+                        target_kind: None,
+                        declaration_id: None,
+                        external_qualified_name: Some(qualified_name),
+                        deferred_qualified_name: None,
+                    })
                 }
                 ResolutionDecision::DeferredReceiver {
                     qualified_name,
                     evidence,
                 } => {
+                    let candidate = &self.candidates[candidate_id];
                     let id = make_id(&["deferred", &candidate.language, &qualified_name]);
-                    if existing_nodes.insert(id.clone()) {
-                        nodes.push(deferred_receiver_node(
-                            &id,
-                            &qualified_name,
-                            &candidate.language,
-                            candidate,
-                        ));
-                    }
-                    (
-                        id,
-                        evidence.rule,
-                        Some(external_kind(candidate).to_owned()),
-                        None,
-                    )
+                    Some(PreparedTarget {
+                        candidate_id,
+                        target: id,
+                        rule: evidence.rule,
+                        target_kind: None,
+                        declaration_id: None,
+                        external_qualified_name: None,
+                        deferred_qualified_name: Some(qualified_name),
+                    })
                 }
-                ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved => continue,
-            };
+                ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved => None,
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        let mut resolved_targets = Vec::with_capacity(prepared_targets.len());
+        for mut prepared in prepared_targets {
+            let candidate = &self.candidates[prepared.candidate_id];
+            if let Some(qualified_name) = prepared.external_qualified_name.take() {
+                if let Some(position) = external_positions.get(&prepared.target).copied() {
+                    merge_external_node(&mut nodes[position], candidate);
+                } else if !existing_nodes.contains(&prepared.target) {
+                    let position = nodes.len();
+                    nodes.push(external_node(
+                        &prepared.target,
+                        &qualified_name,
+                        &candidate.language,
+                        candidate,
+                    ));
+                    existing_nodes.insert(prepared.target.clone());
+                    external_positions.insert(prepared.target.clone(), position);
+                }
+                let fallback = external_kind(candidate).to_owned();
+                prepared.target_kind = Some(
+                    external_positions
+                        .get(&prepared.target)
+                        .map(|position| nodes[*position].string("symbol_kind"))
+                        .filter(|kind| !kind.is_empty())
+                        .unwrap_or(fallback),
+                );
+            } else if let Some(qualified_name) = prepared.deferred_qualified_name.take() {
+                if existing_nodes.insert(prepared.target.clone()) {
+                    nodes.push(deferred_receiver_node(
+                        &prepared.target,
+                        &qualified_name,
+                        &candidate.language,
+                        candidate,
+                    ));
+                }
+                prepared.target_kind = Some(external_kind(candidate).to_owned());
+            }
+            let target_site = prepared
+                .declaration_id
+                .as_deref()
+                .and_then(|id| self.declarations.get(id))
+                .map(|declaration| &declaration.range);
             resolved_targets.push((
-                candidate_id,
-                target,
-                resolution_rule,
-                target_kind,
+                prepared.candidate_id,
+                prepared.target,
+                prepared.rule,
+                prepared.target_kind,
                 target_site,
             ));
         }
@@ -1245,14 +1437,17 @@ impl UniversalResolutionIndex {
             };
             let eligible = members
                 .iter()
-                .filter(|id| self.declaration_allowed(id, candidate))
+                .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
                 .take(self.limits.candidates_per_lookup.saturating_add(1))
                 .cloned()
                 .collect::<Vec<_>>();
             match eligible.as_slice() {
                 [only] => {
+                    let Some(only) = self.declaration_id(*only) else {
+                        continue;
+                    };
                     return ResolutionDecision::Resolved {
-                        declaration_id: only.clone(),
+                        declaration_id: only.to_owned(),
                         evidence: ResolutionEvidence {
                             rule: ResolutionRule::LinearizedReceiverDispatch,
                             candidate_count: 1,
@@ -1322,13 +1517,13 @@ impl UniversalResolutionIndex {
         ))?;
         let eligible = members
             .iter()
-            .filter(|id| self.declaration_allowed(id, candidate))
+            .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
             .take(self.limits.candidates_per_lookup.saturating_add(1))
             .cloned()
             .collect::<Vec<_>>();
         match eligible.as_slice() {
             [only] => Some(ResolutionDecision::Resolved {
-                declaration_id: only.clone(),
+                declaration_id: self.declaration_id(*only)?.to_owned(),
                 evidence: ResolutionEvidence {
                     rule: ResolutionRule::LinearizedReceiverDispatch,
                     candidate_count: 1,
@@ -1400,13 +1595,13 @@ impl UniversalResolutionIndex {
         ))?;
         let eligible = members
             .iter()
-            .filter(|id| self.declaration_allowed(id, candidate))
+            .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
             .take(self.limits.candidates_per_lookup.saturating_add(1))
             .cloned()
             .collect::<Vec<_>>();
         match eligible.as_slice() {
             [only] => Some(ResolutionDecision::Resolved {
-                declaration_id: only.clone(),
+                declaration_id: self.declaration_id(*only)?.to_owned(),
                 evidence: ResolutionEvidence {
                     rule: ResolutionRule::DirectReceiverSuccessorDispatch,
                     candidate_count: 1,
@@ -1484,7 +1679,7 @@ impl UniversalResolutionIndex {
             .get(&(language.to_owned(), qualified_name))?;
         let eligible = declarations
             .iter()
-            .filter_map(|id| self.declarations.get(id))
+            .filter_map(|slot| self.declaration(*slot))
             .filter(|declaration| declaration.kind == "class")
             .take(2)
             .collect::<Vec<_>>();
@@ -1503,20 +1698,20 @@ impl UniversalResolutionIndex {
 
     fn unique_decision(
         &self,
-        ids: Option<&Vec<String>>,
+        ids: Option<&Vec<DeclarationSlot>>,
         candidate: &RelationshipCandidate,
         rule: ResolutionRule,
     ) -> Option<ResolutionDecision> {
         let ids = ids?;
         let eligible = ids
             .iter()
-            .filter(|id| self.declaration_allowed(id, candidate))
+            .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
             .take(self.limits.candidates_per_lookup.saturating_add(1))
-            .cloned()
+            .copied()
             .collect::<Vec<_>>();
         match eligible.as_slice() {
             [only] => Some(ResolutionDecision::Resolved {
-                declaration_id: only.clone(),
+                declaration_id: self.declaration_id(*only)?.to_owned(),
                 evidence: ResolutionEvidence {
                     rule,
                     candidate_count: 1,
@@ -1570,7 +1765,7 @@ impl UniversalResolutionIndex {
         language: &str,
         import_path: &str,
         spelling: &str,
-    ) -> Vec<String> {
+    ) -> Vec<DeclarationSlot> {
         if language != "go" {
             return Vec::new();
         }
@@ -1584,11 +1779,10 @@ impl UniversalResolutionIndex {
             if let Some(candidates) = self.by_source_directory_name.get(&key) {
                 let imported = candidates
                     .iter()
-                    .filter_map(|id| {
-                        self.declarations
-                            .get(id)
+                    .filter_map(|slot| {
+                        self.declaration(*slot)
                             .filter(|declaration| !declaration.qualified_name.contains("::"))
-                            .map(|_| id.clone())
+                            .map(|_| *slot)
                     })
                     .take(self.limits.candidates_per_lookup.saturating_add(1))
                     .collect::<BTreeSet<_>>();
@@ -1611,11 +1805,10 @@ impl UniversalResolutionIndex {
             ))
             .into_iter()
             .flatten()
-            .filter_map(|id| {
-                self.declarations
-                    .get(id)
+            .filter_map(|slot| {
+                self.declaration(*slot)
                     .filter(|declaration| !declaration.qualified_name.contains("::"))
-                    .map(|_| id.clone())
+                    .map(|_| *slot)
             })
             .take(self.limits.candidates_per_lookup.saturating_add(1))
             .collect::<BTreeSet<_>>()
@@ -1635,19 +1828,19 @@ impl UniversalResolutionIndex {
         let (owner, member) = qualified.rsplit_once("::")?;
         let (import_path, owner_spelling) = owner.rsplit_once('.')?;
         let owner_ids = self.imported_declarations(language, import_path, owner_spelling);
-        let mut declarations = BTreeSet::new();
+        let mut declarations = BTreeSet::<DeclarationSlot>::new();
         for owner_id in owner_ids
             .into_iter()
             .take(self.limits.candidates_per_lookup)
         {
-            let owner = &self.declarations.get(&owner_id)?.qualified_name;
+            let owner = &self.declaration(owner_id)?.qualified_name;
             if let Some(ids) = self
                 .by_qualified
                 .get(&(language.to_owned(), format!("{owner}::{member}")))
             {
                 declarations.extend(
                     ids.iter()
-                        .filter(|id| self.declaration_allowed(id, candidate))
+                        .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
                         .cloned(),
                 );
             }
@@ -1674,7 +1867,7 @@ impl UniversalResolutionIndex {
                     Err(callable_ids.len())
                 };
             };
-            let Some(callable) = self.declarations.get(callable_id) else {
+            let Some(callable) = self.declaration(*callable_id) else {
                 return Ok(None);
             };
             let Some(return_types) = self
@@ -1733,7 +1926,7 @@ impl UniversalResolutionIndex {
         Ok(Some(format!("{target}::{}", candidate.target_spelling)))
     }
 
-    fn callable_declarations(&self, language: &str, qualified: &str) -> Vec<String> {
+    fn callable_declarations(&self, language: &str, qualified: &str) -> Vec<DeclarationSlot> {
         if let Some(declarations) = self
             .by_qualified
             .get(&(language.to_owned(), qualified.to_owned()))
@@ -1752,7 +1945,7 @@ impl UniversalResolutionIndex {
                 .into_iter()
                 .take(self.limits.candidates_per_lookup)
             {
-                let Some(owner) = self.declarations.get(&owner_id) else {
+                let Some(owner) = self.declaration(owner_id) else {
                     continue;
                 };
                 if let Some(ids) = self.by_qualified.get(&(
@@ -1790,7 +1983,7 @@ impl UniversalResolutionIndex {
         language: &str,
         qualified: &str,
         candidate: &RelationshipCandidate,
-    ) -> Option<Vec<String>> {
+    ) -> Option<Vec<DeclarationSlot>> {
         let (owner, spelling) = split_qualified_member(qualified)?;
         let targets =
             self.members
@@ -1803,7 +1996,7 @@ impl UniversalResolutionIndex {
             {
                 declarations.extend(
                     ids.iter()
-                        .filter(|id| self.declaration_allowed(id, candidate))
+                        .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
                         .cloned(),
                 );
             }
@@ -1833,7 +2026,7 @@ impl UniversalResolutionIndex {
         };
         let eligible = overloads
             .iter()
-            .filter_map(|id| self.declarations.get(id))
+            .filter_map(|slot| self.declaration(*slot))
             .filter(|declaration| declaration_basic_allowed(declaration, candidate))
             .collect::<Vec<_>>();
         let exact = eligible
@@ -2048,7 +2241,7 @@ impl UniversalResolutionIndex {
             .by_qualified
             .get(&("java".to_owned(), qualified_name.to_owned()))?;
         let mut eligible = declarations.iter().filter_map(|id| {
-            self.declarations.get(id).filter(|declaration| {
+            self.declaration(*id).filter(|declaration| {
                 matches!(
                     declaration.kind.as_str(),
                     "class" | "interface" | "enum" | "record" | "annotation_type"
@@ -2351,6 +2544,22 @@ fn insert_unique<T>(map: &mut AHashMap<String, T>, id: String, value: T) -> Resu
     }
 }
 
+fn sort_declaration_index<K: Eq + Hash>(
+    index: &mut AHashMap<K, Vec<DeclarationSlot>>,
+    declaration_ids: &[String],
+    candidate_limit: usize,
+) {
+    for values in index.values_mut() {
+        values.sort_unstable_by(|left, right| {
+            declaration_ids[*left as usize].cmp(&declaration_ids[*right as usize])
+        });
+        values.dedup();
+        if values.len() > candidate_limit {
+            values.truncate(candidate_limit);
+        }
+    }
+}
+
 fn unique_definition_ranges(
     declarations: &AHashMap<String, DeclarationFact>,
     scopes: &AHashMap<String, compass_languages::ScopeFact>,
@@ -2384,16 +2593,6 @@ fn range_contains(outer: &EvidenceRange, inner: &EvidenceRange) -> bool {
         && inner.end_byte <= outer.end_byte
         && (outer.start_line, outer.start_column) <= (inner.start_line, inner.start_column)
         && (inner.end_line, inner.end_column) <= (outer.end_line, outer.end_column)
-}
-
-fn project_declaration_onto_node(
-    node: &mut NodeRecord,
-    declaration: &DeclarationFact,
-    definition_range: Option<&EvidenceRange>,
-    graph_node_id: &str,
-) {
-    node.attributes
-        .extend(declaration_node(declaration, definition_range, graph_node_id).attributes);
 }
 
 fn declaration_node(

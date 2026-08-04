@@ -20,13 +20,14 @@ pub(super) fn detect(
     }
     let portable = path.to_string_lossy().replace('\\', "/");
     let lower = portable.to_ascii_lowercase();
+    let body = std::str::from_utf8(source).unwrap_or_default();
     let evidence = EvidenceSet::new()
         .direct_if(
             project.is_none_or(|project| project.has_dependency("@sveltejs/kit"))
                 && segment_after(&portable, "src/routes/").is_some()
                 && matches!(
                     path.file_name().and_then(|name| name.to_str()),
-                    Some("+page.svelte" | "+page.ts" | "+server.ts" | "+server.js")
+                    Some("+page.svelte" | "+server.ts" | "+server.js")
                 ),
             "sveltekit",
             EvidenceKind::ConfigurationContract,
@@ -38,7 +39,7 @@ pub(super) fn detect(
                     || segment_after(&portable, "server/api/").is_some()
                     || (segment_after(&portable, "middleware/").is_some()
                         && lower.ends_with(".ts")
-                        && lower.contains("nuxt"))),
+                        && (project.is_some() || body.contains("defineNuxtRouteMiddleware")))),
             "nuxt",
             EvidenceKind::ConfigurationContract,
             "Nuxt route artifact",
@@ -58,12 +59,10 @@ pub(super) fn detect(
     if evidence.activates("sveltekit")
         && let Some(relative) = segment_after(&portable, "src/routes/")
     {
-        if lower.ends_with("/+page.svelte") || lower.ends_with("/+page.ts") {
+        if lower.ends_with("/+page.svelte") {
             return page_routes(
                 "sveltekit",
-                relative
-                    .trim_end_matches("+page.svelte")
-                    .trim_end_matches("+page.ts"),
+                relative.trim_end_matches("+page.svelte"),
                 path,
                 source,
                 extraction,
@@ -96,20 +95,28 @@ pub(super) fn detect(
         )
     {
         let (route, method) = nuxt_api_route(relative);
+        let operation = method.as_deref().unwrap_or("ANY");
+        let handler =
+            exported_endpoint_handlers(std::str::from_utf8(source).unwrap_or_default(), "nuxt")
+                .into_iter()
+                .find(|handler| handler.operation == operation || handler.operation == "ANY");
+        let Some(handler) = handler else {
+            return Vec::new();
+        };
         return one_route(
             "nuxt",
-            method.as_deref().unwrap_or("ANY"),
+            operation,
             &route,
             path,
             source,
             extraction,
             "nuxt-server-api-convention",
+            Some(&handler),
         );
     }
     if evidence.activates("nuxt")
         && let Some(relative) = segment_after(&portable, "middleware/")
         && lower.ends_with(".ts")
-        && lower.contains("nuxt")
     {
         return vec![RawFrameworkFact::Domain(RawDomainFact {
             framework: "nuxt".to_owned(),
@@ -164,6 +171,7 @@ fn page_routes(
         source,
         extraction,
         &format!("{framework}-file-route-convention"),
+        None,
     )
 }
 
@@ -175,23 +183,19 @@ fn endpoint_routes(
     extraction: &mut Extraction,
 ) -> Vec<RawFrameworkFact> {
     let text = std::str::from_utf8(source).unwrap_or_default();
-    let operations = exported_http_methods(text);
-    let operations = if operations.is_empty() {
-        vec!["ANY".to_owned()]
-    } else {
-        operations
-    };
-    operations
+    let handlers = exported_endpoint_handlers(text, framework);
+    handlers
         .into_iter()
-        .flat_map(|operation| {
+        .flat_map(|handler| {
             one_route(
                 framework,
-                &operation,
+                &handler.operation,
                 relative,
                 path,
                 source,
                 extraction,
                 &format!("{framework}-endpoint-convention"),
+                Some(&handler),
             )
         })
         .collect()
@@ -206,17 +210,25 @@ fn one_route(
     source: &[u8],
     extraction: &mut Extraction,
     rule: &str,
+    handler: Option<&EndpointHandler>,
 ) -> Vec<RawFrameworkFact> {
     let original_path = convention_path(relative);
     let normalized_path = normalize_dynamic_segments(&original_path);
-    let handler = ensure_route_component(
-        path,
-        framework,
-        operation,
-        &normalized_path,
-        source,
-        extraction,
-    );
+    let handler_reference = match handler {
+        Some(handler) if handler.reference == "default" => {
+            ensure_default_export_handler(path, framework, operation, source, extraction);
+            "default".to_owned()
+        }
+        Some(handler) => handler.reference.clone(),
+        None => ensure_route_component(
+            path,
+            framework,
+            operation,
+            &normalized_path,
+            source,
+            extraction,
+        ),
+    };
     vec![RawFrameworkFact::Route(RawRouteFact {
         framework: framework.to_owned(),
         operation: operation.to_owned(),
@@ -224,15 +236,36 @@ fn one_route(
         normalized_path,
         declaring_scope: path.to_string_lossy().replace('\\', "/"),
         anchor: file_anchor(path, source),
-        handler_reference: handler,
+        handler_reference,
         middleware_references: Vec::new(),
         origin: RawFrameworkOrigin::Convention,
         rule: Some(rule.to_owned()),
-        detail: Map::from_iter([(
+        detail: endpoint_detail(handler, path),
+    })]
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct EndpointHandler {
+    operation: String,
+    reference: String,
+    module: Option<String>,
+}
+
+fn endpoint_detail(handler: Option<&EndpointHandler>, path: &Path) -> Map<String, Value> {
+    let mut detail = Map::from_iter([
+        (
             "route_file".into(),
             Value::String(path.to_string_lossy().replace('\\', "/")),
-        )]),
-    })]
+        ),
+        (
+            "handler_source".into(),
+            Value::String(path.to_string_lossy().replace('\\', "/")),
+        ),
+    ]);
+    if let Some(module) = handler.and_then(|handler| handler.module.as_ref()) {
+        detail.insert("handler_module".into(), Value::String(module.clone()));
+    }
+    detail
 }
 
 fn ensure_route_component(
@@ -319,20 +352,157 @@ fn ensure_route_component(
     qualified_name
 }
 
-fn exported_http_methods(source: &str) -> Vec<String> {
-    let Ok(regex) = Regex::new(
-        r"(?m)\bexport\s+(?:(?:async\s+)?function|const|let|var)\s+(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b",
+fn ensure_default_export_handler(
+    path: &Path,
+    framework: &str,
+    operation: &str,
+    source: &[u8],
+    extraction: &mut Extraction,
+) {
+    let source_file = path.to_string_lossy().into_owned();
+    let id = make_id(&["route-default-handler", framework, &source_file, operation]);
+    if extraction.nodes.iter().any(|node| node.id == id) {
+        return;
+    }
+    let line_end = source.iter().filter(|byte| **byte == b'\n').count() + 1;
+    extraction.nodes.push(RawNodeRecord {
+        id: id.clone(),
+        attributes: Map::from_iter([
+            ("label".into(), Value::String("default".into())),
+            ("name".into(), Value::String("default".into())),
+            ("qualified_name".into(), Value::String("default".into())),
+            ("symbol_kind".into(), Value::String("function".into())),
+            ("file_type".into(), Value::String("code".into())),
+            ("framework".into(), Value::String(framework.to_owned())),
+            ("source_file".into(), Value::String(source_file.clone())),
+            ("source_location".into(), Value::String("L1".into())),
+            ("line_start".into(), Value::from(1)),
+            ("line_end".into(), Value::from(line_end)),
+            ("_origin".into(), Value::String("convention".into())),
+            (
+                "rule".into(),
+                Value::String(format!("{framework}-default-export-handler")),
+            ),
+            (
+                "extractor".into(),
+                Value::String(format!("compass.frameworks.{framework}")),
+            ),
+        ]),
+    });
+    if let Some(file_id) = extraction
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "file" || node.string("source_file") == source_file
+        })
+        .map(|node| node.id.clone())
+    {
+        extraction.edges.push(RawEdgeRecord {
+            source: file_id,
+            target: id,
+            attributes: Map::from_iter([
+                ("relation".into(), Value::String("contains".into())),
+                ("confidence".into(), Value::String("EXTRACTED".into())),
+                ("source_file".into(), Value::String(source_file)),
+                ("source_location".into(), Value::String("L1".into())),
+                ("_origin".into(), Value::String("convention".into())),
+                (
+                    "rule".into(),
+                    Value::String(format!("{framework}-default-export-handler")),
+                ),
+                (
+                    "extractor".into(),
+                    Value::String(format!("compass.frameworks.{framework}")),
+                ),
+            ]),
+        });
+    }
+}
+
+fn exported_endpoint_handlers(source: &str, framework: &str) -> Vec<EndpointHandler> {
+    let Ok(named) = Regex::new(
+        r"(?m)^\s*export\s+(?:(?:async\s+)?function|const|let|var)\s+(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|ALL|fallback)\b",
     ) else {
         return Vec::new();
     };
-    let mut methods = regex
+    let mut handlers = named
         .captures_iter(source)
-        .filter_map(|capture| capture.get(1))
-        .map(|method| method.as_str().to_owned())
+        .filter_map(|capture| capture.get(1).map(|name| name.as_str().to_owned()))
+        .map(|name| {
+            let operation = match name.as_str() {
+                "ALL" | "fallback" => "ANY".to_owned(),
+                method => method.to_owned(),
+            };
+            EndpointHandler {
+                operation,
+                reference: name,
+                module: None,
+            }
+        })
         .collect::<Vec<_>>();
-    methods.sort();
-    methods.dedup();
-    methods
+    let Ok(reexports) =
+        Regex::new(r#"(?m)^\s*export\s*\{([^}]*)\}(?:\s*from\s*[\"']([^\"']+)[\"'])?"#)
+    else {
+        return handlers;
+    };
+    for capture in reexports.captures_iter(source) {
+        let Some(names) = capture.get(1) else {
+            continue;
+        };
+        let module = capture.get(2).map(|value| value.as_str().to_owned());
+        for name in names.as_str().split(',').map(str::trim) {
+            let (local, exported) = name
+                .split_once(" as ")
+                .map(|(local, exported)| (local.trim(), exported.trim()))
+                .unwrap_or((name, name));
+            if matches!(
+                exported,
+                "GET"
+                    | "POST"
+                    | "PUT"
+                    | "PATCH"
+                    | "DELETE"
+                    | "OPTIONS"
+                    | "HEAD"
+                    | "ALL"
+                    | "fallback"
+            ) {
+                let operation = match exported {
+                    "ALL" | "fallback" => "ANY".to_owned(),
+                    method => method.to_owned(),
+                };
+                handlers.push(EndpointHandler {
+                    operation,
+                    reference: local.to_owned(),
+                    module: module.clone(),
+                });
+            }
+        }
+    }
+    handlers.sort_by(|left, right| {
+        (&left.operation, &left.reference, &left.module).cmp(&(
+            &right.operation,
+            &right.reference,
+            &right.module,
+        ))
+    });
+    handlers.dedup();
+
+    // Nuxt server handlers and Astro endpoints commonly use a default export.
+    // The route operation comes from the filename for Nuxt method files; for a
+    // generic endpoint it is an explicit ANY operation rather than an
+    // invented route component.
+    if handlers.is_empty()
+        && source.contains("export default")
+        && (framework == "nuxt" || framework == "astro")
+    {
+        handlers.push(EndpointHandler {
+            operation: "ANY".to_owned(),
+            reference: "default".to_owned(),
+            module: None,
+        });
+    }
+    handlers
 }
 
 fn nuxt_api_route(relative: &str) -> (String, Option<String>) {
@@ -357,14 +527,41 @@ fn convention_path(relative: &str) -> String {
 }
 
 fn normalize_dynamic_segments(path: &str) -> String {
-    let Ok(rest) = Regex::new(r"\[\.\.\.([^\]]+)\]") else {
-        return path.to_owned();
-    };
-    let path = rest.replace_all(path, "{*$1}");
-    let Ok(parameter) = Regex::new(r"\[([^\]]+)\]") else {
-        return path.into_owned();
-    };
-    parameter.replace_all(&path, "{$1}").into_owned()
+    let mut segments = Vec::new();
+    for segment in path.trim_matches('/').split('/') {
+        if segment.is_empty() || (segment.starts_with('(') && segment.ends_with(')')) {
+            continue;
+        }
+        let normalized = if let Some(rest) = segment
+            .strip_prefix("[[...")
+            .and_then(|value| value.strip_suffix("]]"))
+        {
+            format!("{{*{rest}}}")
+        } else if let Some(rest) = segment
+            .strip_prefix("[...")
+            .and_then(|value| value.strip_suffix(']'))
+        {
+            format!("{{*{rest}}}")
+        } else if let Some(rest) = segment
+            .strip_prefix("[[")
+            .and_then(|value| value.strip_suffix("]]"))
+        {
+            format!("{{{}}}", rest.split('=').next().unwrap_or(rest))
+        } else if let Some(rest) = segment
+            .strip_prefix('[')
+            .and_then(|value| value.strip_suffix(']'))
+        {
+            format!("{{{}}}", rest.split('=').next().unwrap_or(rest))
+        } else {
+            segment.to_owned()
+        };
+        segments.push(normalized);
+    }
+    if segments.is_empty() {
+        "/".to_owned()
+    } else {
+        format!("/{}", segments.join("/"))
+    }
 }
 
 fn trim_known_extension(value: &str) -> &str {

@@ -5,16 +5,6 @@ project artifacts. It discovers the entities in a project, records how they
 relate, and gives people and tools a smaller, structured way to explore a large
 codebase.
 
-> **Who this page is for:** evaluators, Compass users, integrators, and
-> contributors.
->
-> **You will learn:** where to start, which documents answer which questions,
-> and which material describes current behavior versus future direction.
->
-> **Prerequisites:** none.
->
-> **Reading time:** about 5 minutes.
-
 Compass was inspired by
 [Graphify](https://github.com/Graphify-Labs/graphify), but the products now
 evolve independently. Compass has no Graphify runtime or test dependency. It includes
@@ -35,8 +25,8 @@ Start here if you want to understand the product before adopting it:
    without needing graph-database experience.
 3. [Graph model](concepts/graph-model.md) — learn what nodes, relationships,
    communities, and provenance mean.
-4. [Security and privacy](design/security-and-privacy.md) — see what stays
-   local and when a configured provider may be contacted.
+4. [Operations](guides/operations.md) — understand local execution,
+   credentials, long-running processes, and recovery.
 5. [Compatibility](../COMPATIBILITY.md) and
    [performance](../PERFORMANCE.md) — inspect the published evidence.
 
@@ -53,24 +43,7 @@ to yours:
 - [Operate the Compass Store](guides/compass-store-operations.md)
 - [Solve a concrete problem](cookbook/README.md)
 - [Look up commands and contracts](reference/commands.md)
-
-### I contribute to Compass
-
-Read these in order when you need a durable mental model of the Rust
-workspace:
-
-1. [Design principles](design/principles.md)
-2. [System architecture](design/architecture.md)
-3. [Language architecture](design/language-architecture.md)
-4. [Workspace and crate tour](implementation/workspace-tour.md)
-5. [Extraction pipeline](implementation/extraction-pipeline.md)
-6. [Universal evidence implementation](implementation/universal-evidence.md)
-7. [Query engine](implementation/query-engine.md)
-8. [Compass store design](design/compass-store.md)
-9. [Compass store implementation plan](implementation/compass-store-plan.md)
-10. [Semantic pipeline](implementation/semantic-pipeline.md)
-11. [Extending Compass](implementation/extending-compass.md)
-12. [Contributing](../CONTRIBUTING.md)
+- [Check framework-route support](reference/framework-routes.md)
 
 ## Documentation map
 
@@ -95,33 +68,6 @@ workspace:
 | [Operations](guides/operations.md) | Safe operation of long-running and optional surfaces |
 | [Compass Store operations](guides/compass-store-operations.md) | Store health, backup, restore, rebuild, and release qualification |
 
-### Understand the design
-
-| Document | Focus |
-| --- | --- |
-| [Design principles](design/principles.md) | Local-first, deterministic, bounded, inspectable behavior |
-| [Architecture](design/architecture.md) | Major layers and the data that crosses them |
-| [Language architecture](design/language-architecture.md) | Grammar, adapter, evidence, resolution, and transition boundaries |
-| [Managed language analyzers](design/managed-language-analyzers.md) | Planned compiler, indexer, and language-server enrichment across languages |
-| [Managed JDT integration](design/java-jdt-integration.md) | Planned Java semantic tooling, trust boundaries, phases, and acceptance criteria |
-| [Storage and history](design/storage-and-history.md) | Incremental artifacts and immutable historical realizations |
-| [Compass store](design/compass-store.md) | Namespace/partition/key contract, current SQLite slice, graph engines, snapshot schema, and database mappings |
-| [Security and privacy](design/security-and-privacy.md) | Trust boundaries, credentials, and offline behavior |
-| [Document processing](design/document-processing.md) | Source-driven Markdown structure, metadata, links, and bounds |
-
-### Work on the implementation
-
-| Document | Focus |
-| --- | --- |
-| [Workspace tour](implementation/workspace-tour.md) | Which crate owns which responsibility |
-| [Extraction pipeline](implementation/extraction-pipeline.md) | Discovery through atomic output publication |
-| [Universal evidence](implementation/universal-evidence.md) | Language contracts, crate boundaries, resolution, and qualification |
-| [Code-graph parity qualification](implementation/code-graph-parity-qualification.md) | Pinned real-repository Graphify comparison and open quality gaps |
-| [Query engine](implementation/query-engine.md) | Discovery queries, traversal, and CompassQL |
-| [Compass store plan](implementation/compass-store-plan.md) | Executable phases and acceptance criteria for local and cloud database engines |
-| [Semantic pipeline](implementation/semantic-pipeline.md) | Optional provider-backed extraction |
-| [Extending Compass](implementation/extending-compass.md) | Adding languages, relations, integrations, and commands |
-
 ### Copy a recipe
 
 The [cookbook index](cookbook/README.md) routes to:
@@ -139,6 +85,7 @@ The [cookbook index](cookbook/README.md) routes to:
 | [Configuration](reference/configuration.md) | Providers, environment, paths, and precedence |
 | [Outputs](reference/outputs.md) | `compass-out/`, graph JSON, query results, and history exports |
 | [Document formats](reference/document-formats.md) | Markdown fields, limits, and discovery versus extraction |
+| [Framework routes](reference/framework-routes.md) | Recognized routing shapes, graph projection, and conservative boundaries |
 | [Compatibility](reference/compatibility.md) | Compass contracts, hard cutovers, and portability |
 | [CompassQL](COMPASSQL.md) | Canonical language and runtime contract |
 | [CompassQL support](COMPASSQL_SUPPORT.md) | Checked syntax and feature matrix |
@@ -158,25 +105,11 @@ This separation is deliberate. A guide should not force you through an
 exhaustive option table, and a reference should not hide a precise contract
 inside a long tutorial.
 
-Substantial pages begin with their audience, outcomes, prerequisites, and
-estimated reading time. They end with related pages and a recommended next
-step. Small diagrams are ASCII so they remain useful in any terminal. Larger
+Substantial pages open directly with an overview and end with related pages and
+a recommended next step. Small diagrams are ASCII so they remain useful in any
+terminal. Larger
 architecture diagrams are checked-in SVG files with accessible titles and
 descriptions.
-
-## Current, planned, and aspirational
-
-Compass evolves quickly, so future-facing documentation uses explicit labels:
-
-- **Available now** means the behavior is implemented and supported by current
-  source, help text, tests, or release evidence.
-- **Planned** means a committed design or implementation plan describes the
-  work. A plan is evidence of intent, not evidence that the feature has
-  shipped.
-- **Aspirational** means the idea expresses a direction or problem worth
-  exploring. It has no promised release, compatibility, or delivery date.
-
-See the [roadmap](roadmap.md) for the combined view.
 
 ## Canonical policy and evidence
 
@@ -210,8 +143,8 @@ compile on one developer machine.
 
 - [Getting started](getting-started.md)
 - [How Compass works](concepts/how-it-works.md)
-- [Roadmap](roadmap.md)
-- [Support](../SUPPORT.md)
+- [Explore a codebase](guides/exploring-a-codebase.md)
+- [Command reference](reference/commands.md)
 
 **Next step:** follow [Getting started](getting-started.md) to build and query
 your first graph.

@@ -4,15 +4,6 @@ This tour maps each crate to its responsibility, main public interfaces, and
 verification evidence. Use it to decide where a change belongs before opening
 large source files.
 
-> **Who this page is for:** new and returning Compass contributors.
->
-> **You will learn:** crate ownership, dependency direction, key modules, and
-> the tests that protect each boundary.
->
-> **Prerequisites:** [System architecture](../design/architecture.md).
->
-> **Reading time:** 15–20 minutes.
-
 ## Start at the workspace manifest
 
 `Cargo.toml` defines one Edition 2024 workspace, Rust 1.97, shared dependency

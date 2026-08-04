@@ -20,6 +20,7 @@ pub struct Graph {
     outgoing: Vec<Vec<EdgeIndex>>,
     incoming: Vec<Vec<EdgeIndex>>,
     query_index: Arc<QueryIndex>,
+    query_index_enabled: bool,
 }
 
 impl Graph {
@@ -40,6 +41,16 @@ impl Graph {
     /// Returns a [`GraphError`] when the path, size, JSON, or graph structure is invalid.
     pub fn load_directed(path: &Path) -> Result<Self, GraphError> {
         Self::load_with_direction(path, true)
+    }
+
+    /// Load the compact graph projection used by focused traversal commands.
+    pub fn load_for_traversal(path: &Path) -> Result<Self, GraphError> {
+        Self::load_traversal_with_direction(path, false)
+    }
+
+    /// Load the compact traversal projection while forcing stored direction.
+    pub fn load_traversal_directed(path: &Path) -> Result<Self, GraphError> {
+        Self::load_traversal_with_direction(path, true)
     }
 
     /// Load the compact projection used by affected-impact traversal.
@@ -65,12 +76,36 @@ impl Graph {
         Self::from_document(document)
     }
 
+    fn load_traversal_with_direction(
+        path: &Path,
+        force_directed: bool,
+    ) -> Result<Self, GraphError> {
+        let mut document = GraphDocument::load_for_traversal(path)?;
+        if force_directed {
+            document.directed = true;
+        }
+        Self::from_traversal_document(document)
+    }
+
     /// Build query indexes from an already decoded node-link document.
     ///
     /// # Errors
     ///
     /// Returns a [`GraphError`] if an edge endpoint cannot be indexed.
     pub fn from_document(document: GraphDocument) -> Result<Self, GraphError> {
+        Self::from_document_with_index(document, true)
+    }
+
+    /// Build the graph representation needed by focused traversal without
+    /// allocating the CompassQL query index.
+    pub fn from_traversal_document(document: GraphDocument) -> Result<Self, GraphError> {
+        Self::from_document_with_index(document, false)
+    }
+
+    fn from_document_with_index(
+        document: GraphDocument,
+        build_query_index: bool,
+    ) -> Result<Self, GraphError> {
         let GraphDocument {
             directed,
             multigraph,
@@ -110,13 +145,15 @@ impl Graph {
             }
         }
 
-        Self::from_parts(
+        let graph = Self::from_parts(
             directed,
             multigraph,
             Arc::new(nodes),
             Arc::new(edges),
             Arc::new(ids),
-        )
+            build_query_index,
+        )?;
+        Ok(graph)
     }
 
     fn from_parts(
@@ -125,6 +162,7 @@ impl Graph {
         nodes: Arc<Vec<NodeRecord>>,
         edges: Arc<Vec<EdgeRecord>>,
         ids: Arc<HashMap<String, NodeIndex>>,
+        build_query_index: bool,
     ) -> Result<Self, GraphError> {
         let mut outgoing = vec![Vec::new(); nodes.len()];
         let mut incoming = vec![Vec::new(); nodes.len()];
@@ -143,8 +181,11 @@ impl Graph {
             }
         }
 
-        let query_index = Arc::new(QueryIndex::build(&nodes, &edges, &ids));
-
+        let query_index = if build_query_index {
+            QueryIndex::build(&nodes, &edges, &ids)
+        } else {
+            QueryIndex::empty()
+        };
         Ok(Self {
             directed,
             multigraph,
@@ -153,7 +194,8 @@ impl Graph {
             ids,
             outgoing,
             incoming,
-            query_index,
+            query_index: Arc::new(query_index),
+            query_index_enabled: build_query_index,
         })
     }
 
@@ -294,6 +336,7 @@ impl Graph {
             Arc::clone(&self.nodes),
             Arc::new(edges),
             Arc::clone(&self.ids),
+            self.query_index_enabled,
         ) {
             Ok(graph) => graph,
             Err(_) => self.clone(),
