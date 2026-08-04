@@ -6,6 +6,7 @@ const router = express.Router();
 
 app.get("/health", health);
 router.get("/users/:userId", authenticate, audit(), showUser);
+app.get("/inline", authenticate, (request, response) => response.send("ok"));
 app.get(dynamicPath, ignoredHandler);
 unknown.get("/not-a-route", ignoredHandler);
 

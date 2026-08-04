@@ -59,6 +59,19 @@ pub(super) fn expand(extraction: &mut Extraction) -> Result<(), FrameworkResolut
     );
     let definitions = mapping_definitions(&annotations, &by_owner);
     let aliases = alias_definitions(&annotations);
+    let controller_owners = annotations
+        .iter()
+        .filter(|annotation| {
+            matches!(
+                annotation.owner_kind.as_str(),
+                "class" | "interface" | "record"
+            ) && matches!(
+                annotation_terminal(annotation),
+                "Controller" | "RestController"
+            )
+        })
+        .map(|annotation| annotation.owner_qualified_name.clone())
+        .collect::<BTreeSet<_>>();
     let mappings = annotations
         .iter()
         .filter_map(|annotation| {
@@ -91,6 +104,9 @@ pub(super) fn expand(extraction: &mut Extraction) -> Result<(), FrameworkResolut
             .rsplit_once("::")
             .map(|(owner, _)| owner)
             .unwrap_or(annotation.owner_qualified_name.as_str());
+        if !controller_owners.contains(owner) {
+            continue;
+        }
         let prefixes = class_mappings
             .get(owner)
             .map(|mappings| {
@@ -158,6 +174,7 @@ pub(super) fn expand(extraction: &mut Extraction) -> Result<(), FrameworkResolut
         extraction,
         &mappings,
         &class_mappings,
+        &controller_owners,
         &mut route_keys,
         &mut derived,
     );
@@ -498,6 +515,7 @@ fn derive_inherited_method_routes(
     extraction: &Extraction,
     mappings: &[(&RawFrameworkAnnotationFact, MappingSpec)],
     class_mappings: &BTreeMap<String, Vec<MappingSpec>>,
+    controller_owners: &BTreeSet<String>,
     route_keys: &mut BTreeSet<(String, u64, String, String, String)>,
     output: &mut Vec<RawFrameworkFact>,
 ) {
@@ -574,6 +592,9 @@ fn derive_inherited_method_routes(
         let Some(base_id) = types.get(base_owner) else {
             continue;
         };
+        if !controller_owners.contains(base_owner) {
+            continue;
+        }
         let expected_arity = signature_arity(annotation.owner_signature.as_deref());
         for child_id in descendants.get(base_id).into_iter().flatten() {
             for method_id in contained.get(child_id).into_iter().flatten() {
@@ -591,6 +612,9 @@ fn derive_inherited_method_routes(
                     .rsplit_once("::")
                     .map(|(owner, _)| owner)
                     .unwrap_or_default();
+                if !controller_owners.contains(child_owner) {
+                    continue;
+                }
                 let prefixes = class_mappings
                     .get(child_owner)
                     .map(|mappings| {

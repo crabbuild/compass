@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use regex::Regex;
@@ -34,6 +35,13 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
     if !evidence.activates("spring") {
         return Vec::new();
     }
+    // Method mappings are only HTTP endpoints when owned by a Spring MVC
+    // controller. Importing the annotation package alone is not sufficient;
+    // helpers, DTOs, and custom annotation declarations commonly reference
+    // the same types without registering routes.
+    if !body.contains("@RestController") && !body.contains("@Controller") {
+        return Vec::new();
+    }
     let Ok(annotation) = Regex::new(
         r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping|RequestMapping)\s*(?:\((.*)\))?",
     ) else {
@@ -54,10 +62,46 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
     let mut facts = Vec::new();
     let package = java_package_name(body);
     let mut pending = Vec::<Mapping>::new();
+    let mut multiline = BTreeMap::<usize, Vec<Mapping>>::new();
+    if let Ok(multiline_annotation) = Regex::new(
+        r"(?s)@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping|RequestMapping)\s*\((.*?)\)",
+    ) {
+        for capture in multiline_annotation.captures_iter(body) {
+            let Some(whole) = capture.get(0) else {
+                continue;
+            };
+            if !whole.as_str().contains('\n') {
+                continue;
+            }
+            let line_start = body[..whole.start()]
+                .rfind('\n')
+                .map_or(0, |index| index.saturating_add(1));
+            let line = body[line_start..]
+                .split_inclusive('\n')
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+            let Some(name) = capture.get(1) else {
+                continue;
+            };
+            multiline.entry(line_start).or_default().push(Mapping {
+                name: name.as_str().to_owned(),
+                arguments: capture
+                    .get(2)
+                    .map(|value| value.as_str().to_owned())
+                    .unwrap_or_default(),
+                offset: line_start,
+                line,
+            });
+        }
+    }
     let mut class_name = None::<String>;
     let mut class_prefix = String::new();
     let mut offset = 0_usize;
     for line in body.split_inclusive('\n') {
+        if let Some(values) = multiline.remove(&offset) {
+            pending.extend(values);
+        }
         for capture in annotation.captures_iter(line) {
             let Some(name) = capture.get(1) else {
                 continue;

@@ -4,10 +4,11 @@ use std::fs::{self, FileTimes};
 use std::time::{Duration, UNIX_EPOCH};
 
 use compass_files::{
-    BuildGuard, CACHE_ENCODING_VERSION, Cache, CacheKind, CacheOptions, DetectOptions, FileSlice,
-    Manifest, ManifestKind, StatHashIndex, WatchPathFilter, bisect_slice, body_content,
-    classify_file, file_hash, md5_file, prompt_fingerprint, read_slice_text, read_source_lossy,
-    slice_boundaries, split_file, write_bytes_atomic, write_json_atomic, write_text_atomic,
+    AST_CACHE_VERSION, BuildGuard, CACHE_ENCODING_VERSION, Cache, CacheKind, CacheOptions,
+    DetectOptions, FileSlice, Manifest, ManifestKind, StatHashIndex, WatchPathFilter, bisect_slice,
+    body_content, classify_file, file_hash, md5_file, prompt_fingerprint, read_slice_text,
+    read_source_lossy, slice_boundaries, split_file, write_bytes_atomic, write_json_atomic,
+    write_text_atomic,
 };
 use compass_files::{FileType, IgnorePolicy};
 use serde_json::json;
@@ -800,7 +801,9 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(
         default_cache
             .directory(&CacheKind::Ast, None)
-            .ends_with(format!("ast/v5/e{CACHE_ENCODING_VERSION}"))
+            .ends_with(format!(
+                "ast/v{AST_CACHE_VERSION}/e{CACHE_ENCODING_VERSION}"
+            ))
     );
     assert!(!cache_root.join("compass-out/cache/ast/v0.9.21").exists());
 

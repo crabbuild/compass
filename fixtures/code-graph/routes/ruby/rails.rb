@@ -6,8 +6,10 @@ class UsersController
   end
 end
 
-class DashboardController
-  def index
+module Admin
+  class DashboardController
+    def index
+    end
   end
 end
 
