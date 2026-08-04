@@ -93,6 +93,35 @@ fn laravel_routes_expand_resources_prefixes_and_handler_syntaxes() -> Result<(),
             && route.route.operation == "GET"
             && route.state == ResolutionState::Exact
     }));
+
+    let constrained = Engine::default().extract_source(
+        Path::new("routes/constrained.php"),
+        br#"<?php
+use Illuminate\Support\Facades\Route;
+Route::resource('/categories', CategoryController::class)->only(['index', 'show']);
+"#,
+    )?;
+    let constrained_routes = constrained
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Route(route) => Some(route),
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(constrained_routes.len(), 2);
+    assert!(constrained_routes.iter().any(|route| {
+        route.operation == "GET" && route.normalized_path == "/categories/{category}"
+    }));
+    assert!(constrained_routes.iter().all(|route| {
+        !matches!(
+            route
+                .detail
+                .get("resourceAction")
+                .and_then(|value| value.as_str()),
+            Some("create" | "edit")
+        )
+    }));
     assert!(extract("php/near_matches.php")?.framework_facts.is_empty());
     Ok(())
 }
@@ -174,17 +203,39 @@ fn drupal_yaml_and_hook_files_publish_auditable_routes() -> Result<(), Box<dyn E
     let resolved =
         resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
 
-    let view = resolved
+    let views = resolved
         .iter()
-        .find(|route| route.route.normalized_path == "/examples/{example}")
-        .ok_or("missing Drupal controller route")?;
-    assert_eq!(view.route.operation, "GET");
-    assert_eq!(view.route.origin.as_str(), "config");
-    assert_eq!(view.state, ResolutionState::Exact);
+        .filter(|route| route.route.normalized_path == "/examples/{example}")
+        .collect::<Vec<_>>();
+    assert_eq!(views.len(), 2, "routes={resolved:#?}");
+    assert_eq!(
+        views
+            .iter()
+            .map(|route| route.route.operation.as_str())
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from(["GET", "POST"])
+    );
+    assert!(views.iter().all(|route| {
+        route.route.origin.as_str() == "config" && route.state == ResolutionState::Exact
+    }));
     assert!(resolved.iter().any(|route| {
         route.route.operation == "HOOK"
-            && route.route.handler_reference == "hook_entity_type_build"
+            && route.route.normalized_path == "/__hook/hook_entity_type_build"
+            && route.route.handler_reference == "drupal_entity_type_build"
             && route.state == ResolutionState::Exact
+    }));
+    assert_eq!(
+        resolved
+            .iter()
+            .filter(|route| route.route.operation == "HOOK")
+            .count(),
+        1,
+        "same-prefix helper functions must not become Drupal hooks"
+    );
+    assert!(resolved.iter().any(|route| {
+        route.route.normalized_path == "/examples/{example}/edit"
+            && route.route.handler_reference == "example.edit"
+            && route.state == ResolutionState::Unresolved
     }));
     assert!(extraction.edges.iter().any(|edge| {
         edge.string("relation") == "routes_to"
@@ -208,7 +259,7 @@ fn rails_routes_resolve_to_controller_actions_and_compose_namespaces() -> Result
     }));
     assert!(resolved.iter().any(|route| {
         route.route.normalized_path == "/admin/dashboard"
-            && route.route.handler_reference == "DashboardController.index"
+            && route.route.handler_reference == "Admin.DashboardController.index"
     }));
     assert!(extract("ruby/near_matches.rb")?.framework_facts.is_empty());
     Ok(())
@@ -247,6 +298,20 @@ fn spring_composes_class_and_method_mappings_without_custom_annotation_matches()
         2
     );
     assert!(extract("jvm/NearMatches.java")?.framework_facts.is_empty());
+
+    let mut helper = Engine::default().extract_source(
+        Path::new("src/Helper.java"),
+        br#"import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+class Helper {
+    @GetMapping("/not-an-endpoint")
+    public String helper() { return "ok"; }
+}
+"#,
+    )?;
+    let helper_routes =
+        resolve_and_publish_framework_routes(&mut helper, FrameworkLimits::default())?;
+    assert!(helper_routes.is_empty(), "routes={helper_routes:#?}");
     Ok(())
 }
 

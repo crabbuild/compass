@@ -43,6 +43,7 @@ to yours:
 - [Operate the Compass Store](guides/compass-store-operations.md)
 - [Solve a concrete problem](cookbook/README.md)
 - [Look up commands and contracts](reference/commands.md)
+- [Check framework-route support](reference/framework-routes.md)
 
 ## Documentation map
 
@@ -84,6 +85,7 @@ The [cookbook index](cookbook/README.md) routes to:
 | [Configuration](reference/configuration.md) | Providers, environment, paths, and precedence |
 | [Outputs](reference/outputs.md) | `compass-out/`, graph JSON, query results, and history exports |
 | [Document formats](reference/document-formats.md) | Markdown fields, limits, and discovery versus extraction |
+| [Framework routes](reference/framework-routes.md) | Recognized routing shapes, graph projection, and conservative boundaries |
 | [Compatibility](reference/compatibility.md) | Compass contracts, hard cutovers, and portability |
 | [CompassQL](COMPASSQL.md) | Canonical language and runtime contract |
 | [CompassQL support](COMPASSQL_SUPPORT.md) | Checked syntax and feature matrix |

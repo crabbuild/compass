@@ -6,4 +6,7 @@ func showUser(w any, r any) {}
 
 func Routes(r chi.Router) {
 	r.Get("/users/{id}", showUser)
+	r.Route("/api", func(r chi.Router) {
+		r.Get("/items", showUser)
+	})
 }

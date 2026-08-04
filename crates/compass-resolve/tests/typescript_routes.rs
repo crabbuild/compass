@@ -45,7 +45,50 @@ fn express_routes_preserve_ordered_middleware_and_reject_computed_paths()
     assert_eq!(user.operation, "GET");
     assert_eq!(user.middleware_references, ["authenticate", "audit"]);
     assert_eq!(user.handler_reference, "showUser");
-    assert_eq!(routes(&extraction).count(), 2);
+    let inline = routes(&extraction)
+        .find(|route| route.normalized_path == "/inline")
+        .ok_or("missing Express inline route")?;
+    assert_eq!(inline.middleware_references, ["authenticate"]);
+    assert!(
+        inline
+            .handler_reference
+            .starts_with("opaque_inline_handler_at_")
+    );
+    assert_eq!(
+        inline.detail.get("opaque_handler"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(routes(&extraction).count(), 3);
+
+    let commonjs = Engine::default().extract_source(
+        Path::new("src/server.ts"),
+        br#"const express = require("express");
+const app = express();
+const api = express.Router();
+app.use("/api", api);
+function show() {}
+api.route("/users").get(show);
+"#,
+    )?;
+    let mounted = routes(&commonjs)
+        .find(|route| route.normalized_path == "/api/users")
+        .ok_or("missing mounted CommonJS Express route")?;
+    assert_eq!(mounted.handler_reference, "show");
+
+    let nested = Engine::default().extract_source(
+        Path::new("src/nest.ts"),
+        br#"const express = require("express");
+const app = express();
+const api = express.Router();
+app.use("/v1", api);
+function list() {}
+api.route("/items").get(list);
+"#,
+    )?;
+    let nested_route = routes(&nested)
+        .find(|route| route.normalized_path == "/v1/items")
+        .ok_or("missing nested Express route")?;
+    assert_eq!(nested_route.handler_reference, "list");
     Ok(())
 }
 
@@ -63,8 +106,8 @@ fn nest_http_graphql_and_messaging_shapes_are_distinct() -> Result<(), Box<dyn s
         .collect::<HashSet<_>>();
     assert!(route_shapes.contains(&("nestjs", "GET", "/users/{userId}")));
     assert!(route_shapes.contains(&("nestjs", "POST", "/users")));
-    assert!(route_shapes.contains(&("nestjs-graphql", "QUERY", "/graphql/user")));
-    assert!(route_shapes.contains(&("nestjs-graphql", "MUTATION", "/graphql/createUser")));
+    assert!(route_shapes.contains(&("nestjs-graphql", "QUERY", "/graphql")));
+    assert!(route_shapes.contains(&("nestjs-graphql", "MUTATION", "/graphql")));
 
     let domain_shapes = extraction
         .framework_facts
@@ -84,12 +127,43 @@ fn nest_http_graphql_and_messaging_shapes_are_distinct() -> Result<(), Box<dyn s
 }
 
 #[test]
+fn nest_dynamic_decorators_are_not_promoted_to_root_routes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let extraction = Engine::default().extract_source(
+        Path::new("src/nest-dynamic.ts"),
+        br#"import { Controller, Get } from "@nestjs/common";
+const PATH = "/dynamic";
+@Controller({ path: "/users" })
+class UsersController {
+  @Get(PATH)
+  dynamic() {}
+  @Get()
+  root() {}
+}
+"#,
+    )?;
+    let routes = routes(&extraction).collect::<Vec<_>>();
+    assert!(routes.iter().any(|route| route.normalized_path == "/users"));
+    assert!(
+        !routes
+            .iter()
+            .any(|route| route.normalized_path == "/users/dynamic")
+    );
+    Ok(())
+}
+
+#[test]
 fn react_and_vue_router_configs_require_literal_paths_and_known_shapes()
 -> Result<(), Box<dyn std::error::Error>> {
     let react = source_extract(Path::new("src/routes.tsx"), "react-router.tsx")?;
     assert!(routes(&react).any(|route| {
         route.framework == "react-router"
             && route.normalized_path == "/accounts/{accountId}"
+            && route.handler_reference == "AccountAlias"
+    }));
+    assert!(routes(&react).any(|route| {
+        route.framework == "react-router"
+            && route.normalized_path == "/account-settings"
             && route.handler_reference == "AccountAlias"
     }));
     assert!(routes(&react).any(|route| {
@@ -111,6 +185,49 @@ fn react_and_vue_router_configs_require_literal_paths_and_known_shapes()
         1,
         "nested route configuration objects must not duplicate their child route"
     );
+
+    let nested = Engine::default().extract_source(
+        Path::new("src/nested-routes.tsx"),
+        br#"import { createBrowserRouter } from "react-router-dom";
+const router = createBrowserRouter([
+  { path: "/admin", children: [{ path: "users/:id", Component: UserPage }] },
+]);
+const guard = <RouteGuard path="/not-a-route" component={UserPage} />;
+"#,
+    )?;
+    assert!(routes(&nested).any(|route| {
+        route.framework == "react-router"
+            && route.normalized_path == "/admin/users/{id}"
+            && route.handler_reference == "UserPage"
+    }));
+    assert!(!routes(&nested).any(|route| route.normalized_path == "/not-a-route"));
+
+    let object_routes = Engine::default().extract_source(
+        Path::new("src/object-routes.tsx"),
+        br#"import { createBrowserRouter } from "react-router-dom";
+function UserPage() { return null; }
+export const router = createBrowserRouter([
+  { path: "/users", element: <UserPage /> },
+  { path: "/lazy", component: () => import("./LazyPage") },
+]);
+const unrelated = { path: "/not-a-router", component: UserPage };
+"#,
+    )?;
+    assert!(routes(&object_routes).any(|route| {
+        route.normalized_path == "/users" && route.handler_reference == "UserPage"
+    }));
+    let lazy = routes(&object_routes)
+        .find(|route| route.normalized_path == "/lazy")
+        .ok_or("missing lazy route")?;
+    assert!(
+        lazy.handler_reference
+            .starts_with("opaque_route_handler_at_")
+    );
+    assert_eq!(
+        lazy.detail.get("opaque_handler"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert!(!routes(&object_routes).any(|route| route.normalized_path == "/not-a-router"));
     Ok(())
 }
 
@@ -281,6 +398,12 @@ fn file_routes_emit_convention_components_and_exact_bindings()
             vec!["PAGE"],
         ),
         (
+            "astro/src/pages/files/[...rest].astro",
+            "astro",
+            "/files/{*rest}",
+            vec!["PAGE"],
+        ),
+        (
             "astro/src/pages/api/items/[id].ts",
             "astro",
             "/api/items/{id}",
@@ -301,23 +424,60 @@ fn file_routes_emit_convention_components_and_exact_bindings()
         );
         let resolved =
             resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
-        assert!(resolved.iter().all(|route| {
-            route.state == ResolutionState::Exact
-                && route
-                    .stages
-                    .last()
-                    .is_some_and(|stage| stage.role == RouteStageRole::Handler)
-        }));
-        for operation in &operations {
-            assert!(extraction.nodes.iter().any(|node| {
-                node.string("symbol_kind") == "component"
-                    && node.string("_origin") == "convention"
-                    && !node.string("rule").is_empty()
-                    && node.string("qualified_name")
-                        == format!(
-                            "{expected_framework}::route-component::{operation}::{expected_path}"
-                        )
-            }));
+        assert!(
+            resolved.iter().all(|route| {
+                route.state == ResolutionState::Exact
+                    && route
+                        .stages
+                        .last()
+                        .is_some_and(|stage| stage.role == RouteStageRole::Handler)
+            }),
+            "{name}: {:?}",
+            resolved
+                .iter()
+                .map(|route| (
+                    &route.route.operation,
+                    &route.route.handler_reference,
+                    route.state,
+                    route.stages.last().map(|stage| (
+                        &stage.reference,
+                        &stage.state,
+                        &stage.target
+                    ))
+                ))
+                .collect::<Vec<_>>()
+        );
+        let endpoint =
+            name.contains("+server") || (name.contains("/api/") && name.ends_with(".ts"));
+        if endpoint {
+            assert!(
+                routes(&extraction)
+                    .filter(|route| {
+                        route.framework == expected_framework
+                            && route.normalized_path == expected_path
+                    })
+                    .all(|route| !route
+                        .handler_reference
+                        .starts_with("sveltekit::route-component::")
+                        && !route
+                            .handler_reference
+                            .starts_with("nuxt::route-component::")
+                        && !route
+                            .handler_reference
+                            .starts_with("astro::route-component::"))
+            );
+        } else {
+            for operation in &operations {
+                assert!(extraction.nodes.iter().any(|node| {
+                    node.string("symbol_kind") == "component"
+                        && node.string("_origin") == "convention"
+                        && !node.string("rule").is_empty()
+                        && node.string("qualified_name")
+                            == format!(
+                                "{expected_framework}::route-component::{operation}::{expected_path}"
+                            )
+                }));
+            }
         }
         assert!(extraction.edges.iter().any(|edge| {
             edge.string("relation") == "routes_to"
@@ -325,6 +485,76 @@ fn file_routes_emit_convention_components_and_exact_bindings()
                 && !edge.string("rule").is_empty()
         }));
     }
+    let page_load_only = Engine::default().extract_source(
+        Path::new("src/routes/users/+page.ts"),
+        b"export const load = async () => ({ data: true });\n",
+    )?;
+    assert!(routes(&page_load_only).next().is_none());
+
+    let directory = tempfile::tempdir()?;
+    let grouped_path = directory
+        .path()
+        .join("src/routes/(app)/[[lang]]/[id=integer]/+page.svelte");
+    fs::create_dir_all(grouped_path.parent().ok_or("missing route parent")?)?;
+    fs::write(&grouped_path, "<h1>User</h1>")?;
+    let grouped = Engine::default().extract(&grouped_path)?;
+    assert!(routes(&grouped).any(|route| route.normalized_path == "/{lang}/{id}"));
+    Ok(())
+}
+
+#[test]
+fn file_endpoint_reexports_bind_to_the_exported_handler_module()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut engine = Engine::default();
+    let mut extraction = Extraction::default();
+    for (path, source) in [
+        (
+            "src/pages/api/users.ts",
+            r#"export { GET } from "./handlers";
+"#,
+        ),
+        (
+            "src/pages/api/handlers.ts",
+            "export async function GET() { return new Response(); }\n",
+        ),
+    ] {
+        let mut source = engine.extract_source(Path::new(path), source.as_bytes())?;
+        extraction.nodes.append(&mut source.nodes);
+        extraction.edges.append(&mut source.edges);
+        extraction
+            .framework_facts
+            .append(&mut source.framework_facts);
+    }
+
+    let route = routes(&extraction)
+        .find(|route| route.framework == "astro" && route.normalized_path == "/api/users")
+        .ok_or("missing Astro endpoint route")?;
+    assert_eq!(route.handler_reference, "GET");
+    assert_eq!(
+        route.detail.get("handler_module"),
+        Some(&serde_json::Value::String("./handlers".into()))
+    );
+
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+    let resolved = resolved
+        .iter()
+        .find(|route| route.route.normalized_path == "/api/users")
+        .ok_or("missing resolved Astro endpoint")?;
+    assert_eq!(resolved.state, ResolutionState::Exact);
+    let target = resolved
+        .stages
+        .last()
+        .and_then(|stage| stage.target.as_deref())
+        .ok_or("missing re-export target")?;
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .find(|node| node.id == target)
+            .map(|node| node.string("source_file")),
+        Some("src/pages/api/handlers.ts".to_owned())
+    );
     Ok(())
 }
 

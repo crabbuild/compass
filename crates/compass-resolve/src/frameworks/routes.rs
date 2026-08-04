@@ -70,7 +70,11 @@ pub(super) fn resolve_routes_with_targets(
 ) -> Result<Vec<ResolvedRoute>, FrameworkResolutionError> {
     validate_fact_limits(extraction, limits)?;
     let aliases = alias_map(extraction, limits, root)?;
-    let expanded = super::python::expand_django_includes(&extraction.framework_facts, limits)?;
+    let expanded = super::python::expand_router_mounts(
+        &extraction.framework_facts,
+        super::python::expand_django_includes(&extraction.framework_facts, limits)?,
+        limits,
+    )?;
     let mut unique = BTreeMap::new();
     for route in expanded {
         route
@@ -219,6 +223,8 @@ fn resolve_one_route(
             targets,
             aliases,
             limits,
+            None,
+            None,
         )?;
         stages.push(resolved_stage(
             &route,
@@ -250,6 +256,8 @@ fn resolve_one_route(
             targets,
             aliases,
             limits,
+            route.detail.get("handler_source").and_then(Value::as_str),
+            route.detail.get("handler_module").and_then(Value::as_str),
         )?
     };
     if candidates.is_empty() {
@@ -261,6 +269,8 @@ fn resolve_one_route(
             targets,
             aliases,
             limits,
+            route.detail.get("handler_source").and_then(Value::as_str),
+            route.detail.get("handler_module").and_then(Value::as_str),
         )?;
     }
     let state = candidate_state(&candidates);
@@ -279,6 +289,7 @@ fn resolve_one_route(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_reference(
     reference: &str,
     framework: &str,
@@ -287,6 +298,8 @@ fn resolve_reference(
     targets: &FrameworkTargetIndex<'_>,
     aliases: &super::typescript::ImportAliases,
     limits: FrameworkLimits,
+    preferred_source: Option<&str>,
+    preferred_module: Option<&str>,
 ) -> Result<Vec<ResolutionCandidate>, FrameworkResolutionError> {
     let reference = canonical_framework_reference(framework, reference);
     let reference = normalize_reference(&reference);
@@ -311,6 +324,7 @@ fn resolve_reference(
     });
     let families = [TargetFamily::Route];
     let max = limits.max_candidates;
+    let mut explicit_owner_unmatched = false;
     let (mut positions, mut candidates_truncated) = targets.by_id(&expanded, &families, max);
     let mut score = 100_u8;
     let mut reason = "exact stable ID";
@@ -344,17 +358,43 @@ fn resolve_reference(
         reason = "source-module import/export alias";
     }
     if positions.is_empty()
+        && let Some(preferred_source) = preferred_source
+    {
+        (positions, candidates_truncated) =
+            targets.by_source_terminal(preferred_source, &last, &families, max);
+        score = 100;
+        reason = "exact same-source endpoint handler";
+    }
+    if positions.is_empty()
+        && let Some(preferred_module) = preferred_module
+    {
+        (positions, candidates_truncated) =
+            targets.by_module_terminal(source_file, preferred_module, &last, &families, max);
+        score = 100;
+        reason = "exact endpoint re-export module";
+    }
+    if positions.is_empty()
         && let Some(owner) = owner.as_deref()
     {
         (positions, candidates_truncated) = targets.by_owner_terminal(owner, &last, &families, max);
         score = 97;
         reason = "owner-qualified member";
+        explicit_owner_unmatched = positions.is_empty();
     }
     if positions.is_empty() {
         (positions, candidates_truncated) =
             targets.by_names(std::slice::from_ref(&expanded), &families, max);
         score = 95;
         reason = "exact qualified name";
+    }
+    // An explicitly qualified handler must not silently degrade to a
+    // same-source or terminal-name match. Doing so can bind
+    // `MissingController.show` to an unrelated `ExistingController.show` and
+    // publish a confidently wrong route edge. Exact stable IDs and exact
+    // qualified names were attempted above; once an owner is present, failure
+    // to find that owner is an unresolved reference.
+    if positions.is_empty() && explicit_owner_unmatched {
+        return Ok(Vec::new());
     }
     if positions.is_empty() {
         let scoped = scoped
@@ -832,6 +872,55 @@ mod tests {
             resolved[0].stages[0].target.as_deref(),
             Some(target_id.as_str())
         );
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_owner_mismatch_is_unresolved_instead_of_terminal_fallback()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = "src/routes.ts";
+        let mut extraction = Extraction::default();
+        extraction.nodes.push(RawNodeRecord {
+            id: "existing-show".to_owned(),
+            attributes: Map::from_iter([
+                ("name".into(), Value::String("show".into())),
+                (
+                    "qualified_name".into(),
+                    Value::String("ExistingController.show".into()),
+                ),
+                ("symbol_kind".into(), Value::String("method".into())),
+                ("source_file".into(), Value::String(source.into())),
+            ]),
+        });
+        extraction
+            .framework_facts
+            .push(RawFrameworkFact::Route(RawRouteFact {
+                framework: "express".to_owned(),
+                operation: "GET".to_owned(),
+                raw_path: "/missing".to_owned(),
+                normalized_path: "/missing".to_owned(),
+                declaring_scope: "src.routes".to_owned(),
+                anchor: RawFrameworkAnchor {
+                    source_file: source.to_owned(),
+                    start_byte: 1,
+                    end_byte: 2,
+                    start_line: 1,
+                    start_column: 0,
+                    end_line: 1,
+                    end_column: 1,
+                },
+                handler_reference: "MissingController.show".to_owned(),
+                middleware_references: Vec::new(),
+                origin: RawFrameworkOrigin::Ast,
+                rule: None,
+                detail: Map::new(),
+            }));
+
+        let resolved = resolve_routes(&extraction, FrameworkLimits::default())?;
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].state, ResolutionState::Unresolved);
+        assert!(resolved[0].stages[0].target.is_none());
+        assert!(resolved[0].candidates.is_empty());
         Ok(())
     }
 }

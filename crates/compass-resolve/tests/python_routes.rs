@@ -66,7 +66,7 @@ fn django_flask_and_fastapi_shapes_emit_framework_specific_route_facts()
     }));
     let methods = flask_routes
         .iter()
-        .filter(|route| route.normalized_path == "/api/users/<user_id>")
+        .filter(|route| route.normalized_path == "/v2/api/users/<user_id>")
         .map(|route| route.operation.as_str())
         .collect::<HashSet<_>>();
     assert_eq!(methods, HashSet::from(["GET", "PATCH"]));
@@ -75,10 +75,71 @@ fn django_flask_and_fastapi_shapes_emit_framework_specific_route_facts()
     let fastapi_routes = routes(&fastapi);
     let create = fastapi_routes
         .iter()
-        .find(|route| route.normalized_path == "/v1/users")
+        .find(|route| route.normalized_path == "/api/v1/users")
         .ok_or("missing FastAPI router route")?;
     assert_eq!(create.operation, "POST");
     assert_eq!(create.middleware_references, vec!["authenticate"]);
+    Ok(())
+}
+
+#[test]
+fn python_route_decorators_and_django_calls_accept_named_path_arguments()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut engine = Engine::default();
+    let django = engine.extract_source(
+        Path::new("project/urls.py"),
+        br#"from django.conf.urls import url
+from django.urls import path
+from . import views
+urlpatterns = [
+    path(route="named/", view=views.named),
+    url(r"^legacy/$", "project.views.named"),
+]
+"#,
+    )?;
+    assert!(routes(&django).iter().any(|route| {
+        route.framework == "django"
+            && route.normalized_path == "/named"
+            && route.handler_reference == "views.named"
+    }));
+    assert!(routes(&django).iter().any(|route| {
+        route.framework == "django"
+            && route.raw_path == "^legacy/$"
+            && route.handler_reference == "project.views.named"
+    }));
+
+    let flask = engine.extract_source(
+        Path::new("app.py"),
+        br#"from flask import Flask
+app = Flask(__name__)
+@app.route(rule="/named", methods=["POST"])
+def named(): return None
+"#,
+    )?;
+    assert!(routes(&flask).iter().any(|route| {
+        route.framework == "flask" && route.operation == "POST" && route.normalized_path == "/named"
+    }));
+
+    let fastapi = engine.extract_source(
+        Path::new("api.py"),
+        br#"from fastapi import FastAPI
+app = FastAPI()
+@app.patch(path="/named")
+def named(): return None
+@app.get("/search/a=b")
+def search(): return None
+"#,
+    )?;
+    assert!(routes(&fastapi).iter().any(|route| {
+        route.framework == "fastapi"
+            && route.operation == "PATCH"
+            && route.normalized_path == "/named"
+    }));
+    assert!(routes(&fastapi).iter().any(|route| {
+        route.framework == "fastapi"
+            && route.operation == "GET"
+            && route.normalized_path == "/search/a=b"
+    }));
     Ok(())
 }
 
@@ -89,7 +150,7 @@ fn python_routes_resolve_handlers_and_dependencies_but_not_near_matches()
     let resolved = resolve_and_publish_framework_routes(&mut fastapi, FrameworkLimits::default())?;
     let create = resolved
         .iter()
-        .find(|route| route.route.normalized_path == "/v1/users")
+        .find(|route| route.route.normalized_path == "/api/v1/users")
         .ok_or("missing create route")?;
     assert_eq!(create.state, ResolutionState::Exact);
     assert_eq!(
@@ -303,6 +364,65 @@ fn django_include_cycles_stop_and_depth_overflow_fails_explicitly()
         Err(FrameworkResolutionError::Limit(error))
             if error.limit == "max_include_depth"
     ));
+    Ok(())
+}
+
+#[test]
+fn python_router_mounts_resolve_across_imported_modules() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut engine = Engine::default();
+    let router_path = Path::new("src/api.py");
+    let app_path = Path::new("src/app.py");
+    let router_source = br#"from fastapi import APIRouter
+router = APIRouter(prefix="/v1")
+@router.get("/users")
+def users(): return None
+"#;
+    let app_source = br#"from fastapi import FastAPI
+from .api import router
+app = FastAPI()
+app.include_router(router, prefix="/api")
+"#;
+    let other_path = Path::new("src/other.py");
+    let other_source = br#"from fastapi import APIRouter
+router = APIRouter()
+@router.get("/other")
+def other(): return None
+"#;
+    let router_extraction = engine.extract_source(router_path, router_source)?;
+    let app_extraction = engine.extract_source(app_path, app_source)?;
+    let other_extraction = engine.extract_source(other_path, other_source)?;
+    let sources = HashMap::from([
+        (
+            router_path.to_string_lossy().into_owned(),
+            String::from_utf8(router_source.to_vec())?,
+        ),
+        (
+            app_path.to_string_lossy().into_owned(),
+            String::from_utf8(app_source.to_vec())?,
+        ),
+        (
+            other_path.to_string_lossy().into_owned(),
+            String::from_utf8(other_source.to_vec())?,
+        ),
+    ]);
+    let mut extraction = resolve(
+        &[router_extraction, app_extraction, other_extraction],
+        &sources,
+    );
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+    let route = resolved
+        .iter()
+        .find(|route| route.route.framework == "fastapi")
+        .ok_or("missing mounted cross-module FastAPI route")?;
+    assert_eq!(route.route.normalized_path, "/api/v1/users");
+    assert_eq!(route.state, ResolutionState::Exact);
+    assert!(
+        !resolved
+            .iter()
+            .any(|route| route.route.normalized_path == "/api/other")
+    );
     Ok(())
 }
 

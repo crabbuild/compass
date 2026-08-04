@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Document the supported framework-route matrix and harden common route forms:
+  named Django, Flask, and FastAPI path arguments; React Router `Component`
+  elements; ASP.NET absolute action templates; Drupal multi-method routing YAML;
+  and documented Drupal hook implementations. Route resolution now fails closed
+  on explicit owner mismatches, preserves opaque Express callbacks, composes
+  FastAPI/Flask registration prefixes, binds file-based endpoint exports,
+  recognizes NestJS gateways, applies Rails namespaces/Laravel resource
+  modifiers/ASP.NET action routes, and gates Spring mappings to controller
+  owners. Native route composition now covers Go chi/gorilla prefixes, Axum and
+  Actix nested builders, multiline Rust attributes, and Vapor grouped/`on`
+  registrations; the release qualification manifest exercises 27 route flows.
+  Extraction semantics and the AST cache namespace advance to version 6
+  so existing projects refresh these facts once instead of retaining stale
+  route graphs.
+
 ## 0.3.1 - 2026-08-03
 
 - Make versioned graph comparisons meaning-aware: source-coordinate shifts,

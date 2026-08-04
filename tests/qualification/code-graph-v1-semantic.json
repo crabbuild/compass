@@ -60,7 +60,7 @@
       "framework": "fastapi",
       "routeFramework": "fastapi",
       "operation": "POST",
-      "path": "/v1/users",
+      "path": "/api/v1/users",
       "routeSource": "fixtures/code-graph/routes/python/fastapi_app.py",
       "handler": {
         "qualifiedName": "fixtures.code-graph.routes.python.fastapi_app.create_user"
@@ -77,7 +77,7 @@
       ],
       "producer": "compass.frameworks.fastapi",
       "rules": [
-        "framework-route-stage:handler:1"
+        "python-mounted-router|stage:handler:1"
       ],
       "allowHeuristic": false,
       "candidates": []
@@ -90,7 +90,7 @@
       "path": "/health",
       "routeSource": "fixtures/code-graph/routes/typescript/express.ts",
       "handler": {
-        "qualifiedName": "health()@324"
+        "qualifiedName": "health()@402"
       },
       "handlerSource": "fixtures/code-graph/routes/typescript/express.ts",
       "relationship": "routes_to",
@@ -117,7 +117,7 @@
       "path": "/users/{userId}",
       "routeSource": "fixtures/code-graph/routes/typescript/nest.ts",
       "handler": {
-        "qualifiedName": "UsersController::showUser()@316"
+        "qualifiedName": "UsersController::showUser()@334"
       },
       "handlerSource": "fixtures/code-graph/routes/typescript/nest.ts",
       "relationship": "routes_to",
@@ -141,10 +141,10 @@
       "framework": "nestjs-graphql",
       "routeFramework": "nestjs-graphql",
       "operation": "QUERY",
-      "path": "/graphql/user",
+      "path": "/graphql",
       "routeSource": "fixtures/code-graph/routes/typescript/nest.ts",
       "handler": {
-        "qualifiedName": "UsersResolver::user()@582"
+        "qualifiedName": "UsersResolver::user()@651"
       },
       "handlerSource": "fixtures/code-graph/routes/typescript/nest.ts",
       "relationship": "routes_to",
@@ -380,6 +380,33 @@
       "candidates": []
     },
     {
+      "id": "flow-chi-closure",
+      "framework": "chi",
+      "routeFramework": "chi",
+      "operation": "GET",
+      "path": "/api/items",
+      "routeSource": "fixtures/code-graph/routes/go/chi.go",
+      "handler": {
+        "qualifiedName": "fixtures/code-graph/routes/routes.showUser"
+      },
+      "handlerSource": "fixtures/code-graph/routes/go/chi.go",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "go",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.chi",
+      "rules": [
+        "chi-router-call|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
       "id": "flow-axum",
       "framework": "axum",
       "routeFramework": "axum",
@@ -427,6 +454,60 @@
         "ast"
       ],
       "producer": "compass.frameworks.actix",
+      "rules": [
+        "rust-router-call|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-axum-nested-get",
+      "framework": "axum",
+      "routeFramework": "axum",
+      "operation": "GET",
+      "path": "/api/nested",
+      "routeSource": "fixtures/code-graph/routes/rust/axum.rs",
+      "handler": {
+        "qualifiedName": "crate::axum::show_user"
+      },
+      "handlerSource": "fixtures/code-graph/routes/rust/axum.rs",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "rust",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.axum",
+      "rules": [
+        "rust-router-call|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-axum-nested-post",
+      "framework": "axum",
+      "routeFramework": "axum",
+      "operation": "POST",
+      "path": "/api/nested",
+      "routeSource": "fixtures/code-graph/routes/rust/axum.rs",
+      "handler": {
+        "qualifiedName": "crate::axum::create_user"
+      },
+      "handlerSource": "fixtures/code-graph/routes/rust/axum.rs",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "rust",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.axum",
       "rules": [
         "rust-router-call|stage:handler:0"
       ],
@@ -549,13 +630,13 @@
       "path": "/api/users/{id}",
       "routeSource": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/api/users/[id]/+server.ts",
       "handler": {
-        "qualifiedName": "sveltekit::route-component::GET::/api/users/{id}"
+        "qualifiedName": "GET()@7"
       },
       "handlerSource": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/api/users/[id]/+server.ts",
       "relationship": "routes_to",
       "stage": "handler",
       "position": 0,
-      "handlerKind": "component",
+      "handlerKind": "function",
       "handlerLanguage": "typescript",
       "resolution": "exact",
       "origins": [
@@ -603,13 +684,13 @@
       "path": "/users",
       "routeSource": "fixtures/code-graph/routes/typescript/nuxt/server/api/users.get.ts",
       "handler": {
-        "qualifiedName": "nuxt::route-component::GET::/users"
+        "qualifiedName": "default"
       },
       "handlerSource": "fixtures/code-graph/routes/typescript/nuxt/server/api/users.get.ts",
       "relationship": "routes_to",
       "stage": "handler",
       "position": 0,
-      "handlerKind": "component",
+      "handlerKind": "function",
       "handlerLanguage": "typescript",
       "resolution": "exact",
       "origins": [
@@ -630,13 +711,13 @@
       "path": "/api/items/{id}",
       "routeSource": "fixtures/code-graph/routes/typescript/astro/src/pages/api/items/[id].ts",
       "handler": {
-        "qualifiedName": "astro::route-component::GET::/api/items/{id}"
+        "qualifiedName": "GET()@7"
       },
       "handlerSource": "fixtures/code-graph/routes/typescript/astro/src/pages/api/items/[id].ts",
       "relationship": "routes_to",
       "stage": "handler",
       "position": 0,
-      "handlerKind": "component",
+      "handlerKind": "function",
       "handlerLanguage": "typescript",
       "resolution": "exact",
       "origins": [
@@ -673,6 +754,12 @@
       "id": "negative-express",
       "framework": "express",
       "source": "fixtures/code-graph/routes/typescript/near-matches.ts",
+      "routeFramework": "express"
+    },
+    {
+      "id": "negative-express-owner-mismatch",
+      "framework": "express",
+      "source": "fixtures/code-graph/routes/typescript/owner-mismatch.ts",
       "routeFramework": "express"
     },
     {
