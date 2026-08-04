@@ -391,6 +391,16 @@ meaning only from universal Java evidence and publishes through the shared
 framework resolver. Established source, config, and template packs remain
 active until their individual hard cutovers.
 
+All established and universal framework adapters now execute through one
+static framework-pack runtime in `compass-languages`. The runtime owns pack
+selection, manifest activation, adapter dispatch, per-pack fact budgets,
+aggregate fact limits, deterministic ordering, and publication. Config and
+template packs use the same lifecycle as source packs, while the universal
+descriptor remains the contract for evidence-backed packs. Project-wide
+expansion uses the same stable pack ID seam in `compass-resolve`; adding a
+universal expander without a matching descriptor is rejected by resolver
+tests.
+
 The Java hard cut is limited to Spring's Java-facing behavior. Kotlin Spring,
 Rails, Rust web, ASP.NET, Vapor, TypeScript web, filesystem-route, config, and
 template semantics are unchanged.
