@@ -49,11 +49,17 @@ Compass activates a framework pack only when the repository contains direct evid
 ### JavaScript and TypeScript frameworks
 
 - **Express**: `express()` and `Router()` receivers; `get`, `post`, `put`, `patch`, `delete`, `options`, `head`, and `all`; literal paths and ordered middleware chains; opaque inline callbacks remain unresolved
+- **Next.js**: App Router `page.*` and `route.*` files under `app` or `src/app`, Pages Router pages and `pages/api` handlers, dynamic segments, route groups, named HTTP exports, and project activation from the `next` dependency or `next.config.*`
 - **NestJS**: `Controller` HTTP method decorators and `RequestMapping`; GraphQL `Resolver` `Query` and `Mutation` operations at `/graphql`; typed GraphQL field details; `WebSocketGateway` `SubscribeMessage`; `MessagePattern` and `EventPattern` transport registrations
 - **React Router**: JSX `Route` elements with `element={<Component />}` or `Component={Component}`, plus literal object route configs with `component`, `element`, or `Component` targets and loader or action stages
 - **SvelteKit**: `src/routes` `+page.svelte` components and `+server` endpoints, including `[param]` and `[...rest]` segments and source-backed exported HTTP methods; `+page.ts` load modules are not pages
 - **Vue Router and Nuxt**: Vue Router literal route objects; Nuxt `pages` components; `server/api` method-suffixed endpoints; dynamic segments; and route-middleware domain facts
 - **Astro**: `src/pages` `.astro` pages and `.ts` or `.js` endpoints, including `[param]` and `[...rest]` segments, exported HTTP methods, `ALL`, and source-backed default handlers
+
+Vite configuration is represented as a `configuration` node rather than a
+route. The node retains bounded `resolve.alias`, plugin imports, and
+configuration keys so build-time wiring remains inspectable without inventing
+HTTP endpoints.
 
 ### PHP, Ruby, and JVM frameworks
 
@@ -78,7 +84,7 @@ Some frameworks expose routes that are not HTTP URLs. Compass keeps their domain
 - Nuxt middleware retains its middleware domain fact
 - GraphQL fields retain the field name in route details while sharing the `/graphql` transport endpoint
 
-These records still retain handler references and source anchors. File-route packs require matching project dependency evidence during a normal repository build. Direct single-file extraction remains available for fixtures and tooling, but it does not activate a repository pack by itself.
+These records still retain handler references and source anchors. File-route packs require matching project dependency or framework-configuration evidence during a normal repository build. Direct single-file extraction remains available for fixtures and tooling, but it does not activate a repository pack by itself.
 
 ## Why a route can remain unresolved
 

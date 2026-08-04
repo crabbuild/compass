@@ -181,6 +181,28 @@ pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[Resolve
             continue;
         }
 
+        if matches!(
+            fact.kind.as_str(),
+            "framework_configuration" | "framework_plugin"
+        ) {
+            let domain_id = domain_id(fact);
+            if nodes.insert(domain_id.clone()) {
+                extraction.nodes.push(RawNodeRecord {
+                    id: domain_id,
+                    attributes: domain_attributes(
+                        fact,
+                        if fact.kind == "framework_plugin" {
+                            "component"
+                        } else {
+                            "config_key"
+                        },
+                        resolved.state,
+                    ),
+                });
+            }
+            continue;
+        }
+
         let Some(symbol_kind) = domain_node_kind(&fact.kind) else {
             diagnostics.push(json!({
                 "kind": "unsupported_domain_fact",
@@ -266,6 +288,17 @@ fn resolve_one(
     targets: &FrameworkTargetIndex<'_>,
     limits: FrameworkLimits,
 ) -> Result<ResolvedDomainFact, FrameworkResolutionError> {
+    if matches!(
+        fact.kind.as_str(),
+        "framework_configuration" | "framework_plugin"
+    ) {
+        return Ok(ResolvedDomainFact {
+            fact: fact.clone(),
+            state: ResolutionState::Exact,
+            source_candidates: Vec::new(),
+            target_candidates: Vec::new(),
+        });
+    }
     if fact.kind == "route_middleware" {
         return Ok(ResolvedDomainFact {
             fact: fact.clone(),
@@ -488,6 +521,8 @@ fn domain_node_kind(kind: &str) -> Option<&'static str> {
         "queue" => Some("queue"),
         "job" => Some("job"),
         "bean_definition" => Some("component"),
+        "framework_configuration" => Some("config_key"),
+        "framework_plugin" => Some("component"),
         _ => None,
     }
 }
@@ -610,6 +645,19 @@ fn domain_attributes(
             Value::String(resolution_name(state).to_owned()),
         ),
     ]);
+    if matches!(
+        fact.kind.as_str(),
+        "framework_configuration" | "framework_plugin"
+    ) {
+        attributes.insert("file_type".into(), Value::String("config".to_owned()));
+        attributes.insert("component_type".into(), Value::String(fact.kind.clone()));
+        for key in ["configuration_keys", "aliases", "plugins", "route_roots"] {
+            if let Some(value) = fact.detail.get(key).cloned() {
+                attributes.insert(key.to_owned(), value);
+            }
+        }
+        return attributes;
+    }
     if symbol_kind == "job" {
         for key in ["schedule", "queue"] {
             if let Some(value) = fact.detail.get(key).cloned() {

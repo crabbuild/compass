@@ -401,9 +401,12 @@ expansion uses the same stable pack ID seam in `compass-resolve`; adding a
 universal expander without a matching descriptor is rejected by resolver
 tests.
 
-The Java hard cut is limited to Spring's Java-facing behavior. Kotlin Spring,
-Rails, Rust web, ASP.NET, Vapor, TypeScript web, filesystem-route, config, and
-template semantics are unchanged.
+The runtime keeps Spring's Java and Kotlin mappings, Express middleware,
+Axum builders, Next.js file routing, and Vite configuration in separate
+focused adapters. Shared project evidence supplies bounded configuration,
+alias, plugin, and route-root metadata, while the qualification module checks
+that each framework's expected routes resolve exactly before a fixture can
+claim support.
 
 ## Verification gates
 
