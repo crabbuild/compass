@@ -67,7 +67,9 @@ python3 benchmarks/performance/harness.py compare \
   --output target/performance/runs/comparison
 ```
 
-Both tools use the same corpus commits. Every cold, warm, incremental, and
+Both tools use the same corpus commits. Build comparisons use the same
+structural profile: Compass `--code-only --no-cluster --no-viz --store json`
+and Graphify's native `--code-only` profile. Every cold, warm, incremental, and
 natural-language query row must independently reach
 `graphify p50 / compass p50 >= 5.00`; averages cannot hide a failed row.
 Compass build peak RSS must not exceed Graphify, and Graphify's shared graph
