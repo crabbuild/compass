@@ -648,7 +648,12 @@ pub fn canonical_graph_document_presorted(graph: &GraphDocument) -> CanonicalGra
     }
 }
 
-const CANONICAL_RECORD_CHUNK: usize = 16_384;
+// Keep enough independent work for modest real-repository graphs while
+// bounding each temporary JSON buffer. At 16K records, a 10K-node/27K-edge
+// graph exposed only three serialization tasks and retained multi-megabyte
+// chunks; 8K preserves amortized encoding while allowing the in-flight bound
+// to control both parallelism and peak memory.
+const CANONICAL_RECORD_CHUNK: usize = 8_192;
 const CANONICAL_RECORD_IN_FLIGHT: usize = 4;
 
 /// Stream the canonical graph JSON while serializing record chunks in
