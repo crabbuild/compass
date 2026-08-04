@@ -6,8 +6,8 @@ use compass_graph::{
     garbage_collect_graph_snapshots, graph_snapshot_needs_gc,
 };
 use compass_model::code_graph::{
-    BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord, GraphDocument, NodeKind,
-    NodeRecord,
+    BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails, FileRecord,
+    GraphDocument, NodeDetails, NodeKind, NodeRecord,
 };
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{
@@ -15,6 +15,7 @@ use compass_model::provenance::{
 };
 use compass_store::SqliteStore;
 use compass_store::{Key, MemoryStore, NamespaceId, PartitionKey, Store, WriteCondition};
+use sha2::Digest;
 use tempfile::tempdir;
 
 fn graph() -> GraphDocument {
@@ -38,7 +39,16 @@ fn graph() -> GraphDocument {
         coverage: Vec::new(),
         diagnostics: Vec::new(),
     });
-    document.nodes = vec![node("b"), node("a")];
+    let mut file_node = node("file");
+    file_node.kind = NodeKind::File;
+    file_node.name = "lib.rs".to_owned();
+    file_node.qualified_name = "src/lib.rs".to_owned();
+    file_node.details = Some(NodeDetails::File(FileNodeDetails {
+        content_digest: "sha256:test".to_owned(),
+        byte_size: 1,
+        generated: false,
+    }));
+    document.nodes = vec![node("b"), node("a"), file_node];
     let first_id = edge_id("a", EdgeKind::Calls, "b", None, None);
     let second_id = edge_id("a", EdgeKind::Calls, "b", None, Some("second"));
     document.links = vec![
@@ -227,6 +237,86 @@ fn selector_is_not_active_until_commit_and_reads_are_bounded() -> Result<(), Box
 }
 
 #[test]
+fn file_node_delta_reuses_unaffected_index_trees() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let previous = graph();
+    let first = builder.prepare(&store, &previous)?;
+    builder.activate(&store, &first)?;
+
+    let mut current = previous.clone();
+    current.graph.build.generation_id = "next-generation".to_owned();
+    current.graph.files[0].content_digest = "sha256:changed".to_owned();
+    current.graph.files[0].byte_size = 2;
+    let file_node = current
+        .nodes
+        .iter_mut()
+        .find(|node| node.kind == NodeKind::File)
+        .ok_or("file node missing")?;
+    file_node.details = Some(NodeDetails::File(FileNodeDetails {
+        content_digest: "sha256:changed".to_owned(),
+        byte_size: 2,
+        generated: false,
+    }));
+
+    let content = builder.prepare_file_node_delta(&store, &previous, &current)?;
+    let graph_bytes = canonical_graph_json(&current)?;
+    let graph_digest = format!("{:x}", sha2::Sha256::digest(&graph_bytes));
+    let delta = builder.finish_content(&store, content, graph_digest, graph_bytes.len() as u64)?;
+    let first_roots = first
+        .manifest
+        .roots
+        .iter()
+        .map(|root| (root.index, root.digest.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let delta_roots = delta
+        .manifest
+        .roots
+        .iter()
+        .map(|root| (root.index, root.digest.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for index in [
+        IndexKind::Edges,
+        IndexKind::Outgoing,
+        IndexKind::Incoming,
+        IndexKind::Files,
+        IndexKind::Names,
+        IndexKind::Terms,
+        IndexKind::Communities,
+        IndexKind::Diagnostics,
+    ] {
+        assert_eq!(
+            first_roots.get(&index),
+            delta_roots.get(&index),
+            "{index:?}"
+        );
+    }
+    assert_ne!(
+        first_roots.get(&IndexKind::Nodes),
+        delta_roots.get(&IndexKind::Nodes)
+    );
+    assert_ne!(
+        first_roots.get(&IndexKind::Metadata),
+        delta_roots.get(&IndexKind::Metadata)
+    );
+
+    builder.activate(&store, &delta)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    assert_eq!(
+        reader.get_node("file")?.and_then(|node| {
+            node.details.and_then(|details| match details {
+                NodeDetails::File(file) => Some(file.content_digest),
+                _ => None,
+            })
+        }),
+        Some("sha256:changed".to_owned())
+    );
+    assert_eq!(reader.metadata()?.graph.files[0].byte_size, 2);
+    assert_eq!(reader.export_graph()?, graph_sorted_with(&current));
+    Ok(())
+}
+
+#[test]
 fn missing_or_tampered_objects_fail_closed() -> Result<(), Box<dyn Error>> {
     let store = MemoryStore::default();
     let builder = GraphSnapshotBuilder::new();
@@ -405,7 +495,11 @@ fn graph_valid_punctuation_names_use_an_explicit_empty_name_bucket() -> Result<(
 }
 
 fn graph_sorted() -> GraphDocument {
-    let mut document = graph();
+    graph_sorted_with(&graph())
+}
+
+fn graph_sorted_with(source: &GraphDocument) -> GraphDocument {
+    let mut document = source.clone();
     document.nodes.sort_by(|left, right| left.id.cmp(&right.id));
     document.links.sort_by(|left, right| left.id.cmp(&right.id));
     document

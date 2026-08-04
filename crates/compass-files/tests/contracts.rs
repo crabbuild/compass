@@ -462,6 +462,28 @@ fn batched_cache_writes_are_portable_and_refresh_changed_sources() -> Result<(),
 }
 
 #[test]
+fn streaming_portable_ast_batch_round_trips() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let source = directory.path().join("streamed.rs");
+    fs::write(&source, "fn streamed() {}\n")?;
+    let mut cache = Cache::open(directory.path(), CacheOptions::output_directory(None))?;
+    let portable = json!({
+        "nodes":[{"id":"streamed","source_file":"streamed.rs"}],
+        "edges":[],
+        "framework_facts":[]
+    });
+
+    cache.write_portable_ast_batch_ref(&[(&source, &portable)])?;
+    let mut expected = portable;
+    expected["nodes"][0]["source_file"] = json!(fs::canonicalize(&source)?.to_string_lossy());
+    assert_eq!(
+        cache.load(&source, &CacheKind::Ast, None, false)?,
+        Some(expected)
+    );
+    Ok(())
+}
+
+#[test]
 fn cache_keeps_distinct_extractions_for_identical_source_bytes() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let first = directory.path().join("AGENTS.md");

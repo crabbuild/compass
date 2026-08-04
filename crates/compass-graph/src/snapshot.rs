@@ -11,7 +11,7 @@ use std::io::{self, Read, Write};
 
 use compass_model::code_graph::{
     CODE_GRAPH_SCHEMA_V1, EdgeRecord, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
-    NodeRecord,
+    NodeDetails, NodeKind, NodeRecord,
 };
 use compass_model::validate_code_graph;
 use compass_store::{
@@ -542,6 +542,86 @@ impl GraphSnapshotBuilder {
             snapshot_id,
             node_count: canonical.nodes.len() as u64,
             edge_count: canonical.links.len() as u64,
+            roots,
+            stats,
+        })
+    }
+
+    /// Prepare a snapshot for a source-only delta. This path reuses every
+    /// immutable index tree except metadata and the changed file records. It
+    /// is intentionally strict: callers may use it only when node and edge
+    /// topology is unchanged and the changed nodes are file records whose
+    /// content metadata moved with the edit.
+    pub fn prepare_file_node_delta<S: Store + ?Sized>(
+        &self,
+        store: &S,
+        previous: &GraphDocument,
+        current: &GraphDocument,
+    ) -> Result<PreparedGraphSnapshotContent, SnapshotError> {
+        validate_code_graph(current)
+            .map_err(|error| SnapshotError::Corrupt(format!("graph validation failed: {error}")))?;
+        validate_file_node_delta(previous, current)?;
+        let reader = GraphSnapshotReader::open_active(store)?.ok_or_else(|| {
+            SnapshotError::Unsupported("file-node delta requires an active snapshot".to_owned())
+        })?;
+        let previous_snapshot_id = snapshot_identity(previous)?;
+        if reader.selector().snapshot_id != previous_snapshot_id
+            || reader.manifest().node_count != previous.nodes.len() as u64
+            || reader.manifest().edge_count != previous.links.len() as u64
+        {
+            return Err(SnapshotError::Corrupt(
+                "active snapshot does not match the previous graph".to_owned(),
+            ));
+        }
+
+        let mut node_updates = BTreeMap::new();
+        let previous_nodes = previous
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect::<BTreeMap<_, _>>();
+        for node in &current.nodes {
+            if previous_nodes
+                .get(node.id.as_str())
+                .is_some_and(|previous| *previous != node)
+            {
+                node_updates.insert(
+                    encode_graph_index_key(IndexKind::Nodes, &[node.id.as_bytes()])?,
+                    Some(encode_json(node)?),
+                );
+            }
+        }
+        if node_updates.is_empty() {
+            return Err(SnapshotError::Corrupt(
+                "file-node delta contains no changed node records".to_owned(),
+            ));
+        }
+
+        let mut writer = ObjectWriter::new(store)?;
+        let metadata_entries = build_index(current, IndexKind::Metadata, None)?;
+        let metadata_entry_count = metadata_entries.len() as u64;
+        let metadata_digest = build_index_tree(&mut writer, IndexKind::Metadata, metadata_entries)?;
+        let mut roots = reader.manifest().roots.clone();
+        for root in &mut roots {
+            if root.index == IndexKind::Metadata {
+                root.entry_count = metadata_entry_count;
+                root.digest = metadata_digest.clone();
+            } else if root.index == IndexKind::Nodes {
+                root.digest = update_index_tree(
+                    store,
+                    &mut writer,
+                    root.index,
+                    &root.digest,
+                    &node_updates,
+                    0,
+                )?;
+            }
+        }
+        let stats = writer.finish()?;
+        Ok(PreparedGraphSnapshotContent {
+            snapshot_id: snapshot_identity(current)?,
+            node_count: current.nodes.len() as u64,
+            edge_count: current.links.len() as u64,
             roots,
             stats,
         })
@@ -1825,6 +1905,204 @@ fn build_index(
     }
     Ok(entries)
 }
+
+fn validate_file_node_delta(
+    previous: &GraphDocument,
+    current: &GraphDocument,
+) -> Result<(), SnapshotError> {
+    if previous.directed != current.directed || previous.multigraph != current.multigraph {
+        return Err(SnapshotError::Unsupported(
+            "file-node delta changed graph directionality".to_owned(),
+        ));
+    }
+    let previous_nodes = previous
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let current_nodes = current
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    if previous_nodes.len() != previous.nodes.len()
+        || current_nodes.len() != current.nodes.len()
+        || previous_nodes.keys().ne(current_nodes.keys())
+    {
+        return Err(SnapshotError::Unsupported(
+            "file-node delta changed the node set".to_owned(),
+        ));
+    }
+    let mut changed_node = false;
+    for (id, node) in &current_nodes {
+        let Some(previous_node) = previous_nodes.get(id) else {
+            return Err(SnapshotError::Unsupported(
+                "file-node delta changed the node set".to_owned(),
+            ));
+        };
+        let changed = *previous_node != *node;
+        if changed
+            && (node.kind != NodeKind::File
+                || !file_node_index_projection_equal(previous_node, node))
+        {
+            return Err(SnapshotError::Unsupported(
+                "file-node delta changed a non-file node".to_owned(),
+            ));
+        }
+        changed_node |= changed;
+    }
+    let previous_edges = previous
+        .links
+        .iter()
+        .map(|edge| (edge.id.as_str(), edge))
+        .collect::<BTreeMap<_, _>>();
+    let current_edges = current
+        .links
+        .iter()
+        .map(|edge| (edge.id.as_str(), edge))
+        .collect::<BTreeMap<_, _>>();
+    if previous_edges.len() != previous.links.len()
+        || current_edges.len() != current.links.len()
+        || previous_edges.len() != current_edges.len()
+        || current_edges.iter().any(|(id, edge)| {
+            previous_edges
+                .get(id)
+                .is_none_or(|previous_edge| *previous_edge != *edge)
+        })
+    {
+        return Err(SnapshotError::Unsupported(
+            "file-node delta changed graph relationships".to_owned(),
+        ));
+    }
+    let previous_files = previous
+        .graph
+        .files
+        .iter()
+        .map(|file| (file.path.clone(), file.id.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let current_files = current
+        .graph
+        .files
+        .iter()
+        .map(|file| (file.path.clone(), file.id.clone()))
+        .collect::<BTreeMap<_, _>>();
+    if previous_files != current_files {
+        return Err(SnapshotError::Unsupported(
+            "file-node delta changed the file path index".to_owned(),
+        ));
+    }
+    if !changed_node {
+        return Err(SnapshotError::Corrupt(
+            "file-node delta contains no changed node records".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn file_node_index_projection_equal(previous: &NodeRecord, current: &NodeRecord) -> bool {
+    if previous.kind != current.kind
+        || previous.roles != current.roles
+        || previous.name != current.name
+        || previous.qualified_name != current.qualified_name
+        || previous.language != current.language
+        || previous.framework != current.framework
+        || previous.community != current.community
+    {
+        return false;
+    }
+    match (&previous.details, &current.details) {
+        (Some(NodeDetails::File(previous)), Some(NodeDetails::File(current))) => {
+            previous.generated == current.generated
+        }
+        _ => previous.details == current.details,
+    }
+}
+
+fn update_index_tree<S: Store + ?Sized>(
+    store: &S,
+    writer: &mut ObjectWriter<'_, S>,
+    index: IndexKind,
+    digest: &str,
+    updates: &BTreeMap<Vec<u8>, Option<Vec<u8>>>,
+    depth: usize,
+) -> Result<String, SnapshotError> {
+    if updates.is_empty() {
+        return Ok(digest.to_owned());
+    }
+    if depth >= GRAPH_SNAPSHOT_MAX_DEPTH {
+        return Err(SnapshotError::Limit(
+            "delta tree depth limit exceeded".to_owned(),
+        ));
+    }
+    match load_tree_object(store, index, digest)? {
+        TreeObject::Leaf { entries, .. } => {
+            let mut values = entries
+                .into_iter()
+                .map(|entry| (entry.key, entry.value))
+                .collect::<BTreeMap<_, _>>();
+            for (key, value) in updates {
+                match value {
+                    Some(value) => {
+                        values.insert(key.clone(), value.clone());
+                    }
+                    None => {
+                        values.remove(key);
+                    }
+                }
+            }
+            build_index_tree(writer, index, values)
+        }
+        TreeObject::Branch { children, .. } => {
+            let mut changed = false;
+            let mut updated_children = children.clone();
+            for child_index in 0..children.len() {
+                let Some(child) = children.get(child_index) else {
+                    continue;
+                };
+                let next_first_key = children
+                    .get(child_index.saturating_add(1))
+                    .map(|next| next.first_key.as_slice());
+                let child_updates = updates
+                    .iter()
+                    .filter(|(key, _)| {
+                        child.first_key.as_slice() <= key.as_slice()
+                            && next_first_key.is_none_or(|next| key.as_slice() < next)
+                    })
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                if child_updates.is_empty() {
+                    continue;
+                }
+                let child_digest = update_index_tree(
+                    store,
+                    writer,
+                    index,
+                    &child.digest,
+                    &child_updates,
+                    depth.saturating_add(1),
+                )?;
+                if child_digest != child.digest {
+                    changed = true;
+                    if let Some(updated) = updated_children.get_mut(child_index) {
+                        updated.digest = child_digest;
+                    }
+                }
+            }
+            if !changed {
+                return Ok(digest.to_owned());
+            }
+            put_tree_object(
+                writer,
+                &TreeObject::Branch {
+                    schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+                    index,
+                    children: updated_children,
+                },
+            )
+        }
+    }
+}
+
 fn insert_json<T: Serialize>(
     entries: &mut BTreeMap<Vec<u8>, Vec<u8>>,
     key: Vec<u8>,
