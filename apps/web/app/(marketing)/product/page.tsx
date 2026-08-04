@@ -3,17 +3,24 @@ import {
   BracesIcon,
   CheckCircle2Icon,
   CircleAlertIcon,
-  CircleDotDashedIcon,
+  CompassIcon,
+  FilterIcon,
   FileCode2Icon,
+  FileOutputIcon,
   GitBranchIcon,
   GitCommitHorizontalIcon,
+  GitForkIcon,
   GitCompareArrowsIcon,
   GaugeIcon,
+  Layers3Icon,
+  ListChecksIcon,
   LockKeyholeIcon,
+  MonitorDotIcon,
   NetworkIcon,
-  SearchCodeIcon,
+  ScanSearchIcon,
+  Share2Icon,
   ShieldCheckIcon,
-  TerminalSquareIcon,
+  WorkflowIcon,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -92,8 +99,8 @@ export default function ProductPage() {
       >
         <ProductionGraphExplorer />
         <div className="mt-6 grid gap-4 md:grid-cols-3">
-          <ProductSignal icon={SearchCodeIcon} title="Orient" text="Find communities, entry points, and the symbols that hold the system together." />
-          <ProductSignal icon={NetworkIcon} title="Inspect" text="Hover a node or edge to keep identity, direction, and evidence in view." />
+          <ProductSignal icon={CompassIcon} title="Orient" text="Find communities, entry points, and the symbols that hold the system together." />
+          <ProductSignal icon={ScanSearchIcon} title="Inspect" text="Hover a node or edge to keep identity, direction, and evidence in view." />
           <ProductSignal icon={FileCode2Icon} title="Navigate" text="Open the exact source path and line instead of losing the thread in a file tree." />
         </div>
       </PageSection>
@@ -125,7 +132,7 @@ export default function ProductPage() {
               <div className="grid gap-3 sm:grid-cols-2">
                 {graphPrinciples.map(([label, text]) => <div className="rounded-lg border border-border/80 bg-card/75 p-3" key={label}><span className="font-mono text-[0.65rem] uppercase tracking-[0.12em] text-primary">{label}</span><p className="mt-1 text-sm leading-6 text-muted-foreground">{text}</p></div>)}
               </div>
-              <Link className="inline-flex items-center gap-2 text-sm font-medium text-primary" href="/docs/concepts/universal-semantic-evidence">Read the evidence model <ArrowRightIcon data-icon="inline-end" /></Link>
+              <Link className="inline-flex items-center gap-2 text-sm font-medium text-primary" href="/docs/reference/universal-semantic-evidence">Read the evidence model <ArrowRightIcon data-icon="inline-end" /></Link>
             </div>
           </div>
         </div>
@@ -159,9 +166,9 @@ export default function ProductPage() {
           </Card>
         </div>
         <div className="mt-8 grid gap-4 sm:grid-cols-3">
-          <QueryClause icon={BracesIcon} label="MATCH" text="choose a relationship and direction" />
-          <QueryClause icon={GaugeIcon} label="WHERE" text="narrow the corpus with a predicate" />
-          <QueryClause icon={TerminalSquareIcon} label="RETURN" text="select stable fields and anchors" />
+          <QueryClause icon={GitForkIcon} label="MATCH" text="choose a relationship and direction" />
+          <QueryClause icon={FilterIcon} label="WHERE" text="narrow the corpus with a predicate" />
+          <QueryClause icon={ListChecksIcon} label="RETURN" text="select stable fields and anchors" />
         </div>
         <div className="mt-10"><ImpactPathDiagram /></div>
         <div className="mt-6 grid gap-4 md:grid-cols-3">
@@ -182,17 +189,7 @@ export default function ProductPage() {
         description="Choose exact Git revisions, identify the immutable graph behind each one, and see the nodes, relationships, and evidence that changed."
       >
         <HistoryComparisonDiagram />
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
-          <HistorySignal icon={GitCommitHorizontalIcon} title="commit" text="Bind the question to an exact revision." />
-          <HistorySignal icon={GitCompareArrowsIcon} title="compare" text="Diff graph structure and source evidence." />
-          <HistorySignal icon={ShieldCheckIcon} title="preserve" text="Keep published realizations immutable." />
-        </div>
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <HistoryStep title="Select" text="Choose exact parent and current revisions." />
-          <HistoryStep title="Materialize" text="Build or reuse each compatible realization." />
-          <HistoryStep title="Compare" text="Classify topology and evidence changes." />
-          <HistoryStep title="Inspect" text="Jump from a changed edge to its source anchor." />
-        </div>
+        <HistoryWorkflow />
       </PageSection>
 
       <section className="border-y border-border/70 bg-muted/25" id="integrations">
@@ -203,10 +200,10 @@ export default function ProductPage() {
             <p className="mt-5 text-base leading-7 text-muted-foreground">Keep exploration in the editor, automation in CI, focused context in MCP, and artifacts portable when the graph needs to travel.</p>
           </div>
           <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <SurfaceLink icon={FileCode2Icon} label="VS Code" text="Inspect source and graph together." href="/integrations/vscode" />
-            <SurfaceLink icon={NetworkIcon} label="MCP + skills" text="Return focused context to tools." href="/integrations/mcp" />
-            <SurfaceLink icon={GitBranchIcon} label="CLI + CI" text="Run bounded checks in automation." href="/integrations/ci" />
-            <SurfaceLink icon={CircleDotDashedIcon} label="Graph formats" text="Export JSON, HTML, SVG, and GraphML." href="/integrations/graph-formats" />
+            <SurfaceLink icon={MonitorDotIcon} label="VS Code" text="Inspect source and graph together." href="/integrations/vscode" />
+            <SurfaceLink icon={Share2Icon} label="MCP + skills" text="Return focused context to tools." href="/integrations/mcp" />
+            <SurfaceLink icon={WorkflowIcon} label="CLI + CI" text="Run bounded checks in automation." href="/integrations/ci" />
+            <SurfaceLink icon={FileOutputIcon} label="Graph formats" text="Export JSON, HTML, SVG, and GraphML." href="/integrations/graph-formats" />
           </div>
         </div>
       </section>
@@ -241,12 +238,47 @@ function QuerySignal({ icon: Icon, title, text }: { icon: typeof GaugeIcon; titl
   return <div className="flex items-start gap-3 rounded-xl border border-border/80 bg-card/70 p-5"><Icon className="mt-1 size-4 shrink-0 text-primary" /><div className="flex flex-col gap-1"><span className="font-mono text-xs uppercase tracking-[0.12em] text-primary">{title}</span><span className="text-sm leading-6 text-muted-foreground">{text}</span></div></div>;
 }
 
-function HistorySignal({ icon: Icon, title, text }: { icon: typeof GitCommitHorizontalIcon; title: string; text: string }) {
-  return <div className="flex items-start gap-4 rounded-xl border border-border/80 bg-card/70 p-5"><Icon className="mt-1 size-4 shrink-0 text-primary" /><div className="flex flex-col gap-1"><span className="font-mono text-sm text-primary">{title}</span><span className="text-sm leading-6 text-muted-foreground">{text}</span></div></div>;
-}
+const historyWorkflow = [
+  { icon: GitCommitHorizontalIcon, label: 'Select', text: 'Choose exact parent and current revisions.' },
+  { icon: Layers3Icon, label: 'Materialize', text: 'Build or reuse each compatible realization.' },
+  { icon: GitCompareArrowsIcon, label: 'Compare', text: 'Classify topology and evidence changes.' },
+  { icon: FileCode2Icon, label: 'Inspect', text: 'Jump from a changed edge to its source anchor.' },
+] as const;
 
-function HistoryStep({ title, text }: { title: string; text: string }) {
-  return <Card className="border-border/80 bg-card/70 shadow-none"><CardContent className="flex min-h-32 flex-col justify-between gap-5 p-5"><span className="font-mono text-xs text-primary">{title.toUpperCase()}</span><span className="text-sm leading-6 text-muted-foreground">{text}</span></CardContent></Card>;
+function HistoryWorkflow() {
+  return (
+    <div className="mt-8 overflow-hidden rounded-2xl border border-border/80 bg-card/60 shadow-sm">
+      <div className="flex flex-col gap-2 border-b border-border/70 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div>
+          <p className="eyebrow">Revision review loop</p>
+          <p className="mt-1 font-heading text-sm font-semibold tracking-[-0.02em]">From exact commits to an anchored explanation.</p>
+        </div>
+        <span className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-muted-foreground">revision → source anchor</span>
+      </div>
+
+      <ol className="grid gap-px bg-border/70 sm:grid-cols-2 lg:grid-cols-4">
+        {historyWorkflow.map(({ icon: Icon, label, text }, index) => (
+          <li className="group relative flex min-h-40 flex-col justify-between gap-8 bg-card/80 p-5 transition-colors hover:bg-primary/[0.035] sm:p-6" key={label}>
+            <div className="flex items-center justify-between gap-4">
+              <span className="font-mono text-[0.68rem] uppercase tracking-[0.14em] text-primary">{String(index + 1).padStart(2, '0')}</span>
+              <Icon aria-hidden="true" className="size-5 text-primary transition-transform duration-300 group-hover:scale-110" strokeWidth={1.8} />
+            </div>
+            <div>
+              <p className="font-mono text-xs font-medium uppercase tracking-[0.12em] text-foreground">{label}</p>
+              <p className="mt-2 max-w-[18rem] text-sm leading-6 text-muted-foreground">{text}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-border/70 px-5 py-4 sm:px-6">
+        <span className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-muted-foreground">The contract stays visible</span>
+        <span className="inline-flex items-center gap-2 text-xs text-muted-foreground"><GitCommitHorizontalIcon aria-hidden="true" className="size-3.5 text-primary" /> exact revision</span>
+        <span className="inline-flex items-center gap-2 text-xs text-muted-foreground"><GitCompareArrowsIcon aria-hidden="true" className="size-3.5 text-primary" /> topology + evidence</span>
+        <span className="inline-flex items-center gap-2 text-xs text-muted-foreground"><ShieldCheckIcon aria-hidden="true" className="size-3.5 text-primary" /> immutable output</span>
+      </div>
+    </div>
+  );
 }
 
 function SurfaceLink({ icon: Icon, label, text, href }: { icon: typeof NetworkIcon; label: string; text: string; href: string }) {
