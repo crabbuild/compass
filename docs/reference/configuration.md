@@ -367,8 +367,8 @@ job metadata even if Compass's own history fingerprint already includes it.
 ## Related pages
 
 - [Command reference](commands.md)
-- [Security and privacy](../design/security-and-privacy.md)
-- [Semantic implementation](../implementation/semantic-pipeline.md)
+- [Operations guide](../guides/operations.md)
+- [Assistant setup](../guides/assistant-setup.md)
 - [Versioned history](../guides/versioned-history.md)
 
 **Next step:** replace implicit defaults in one automation workflow with

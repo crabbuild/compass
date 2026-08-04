@@ -156,7 +156,7 @@ HTML is optional and can be omitted for size or security.
 
 - [Integrating Compass](../guides/integrating-compass.md)
 - [Output reference](../reference/outputs.md)
-- [Security and privacy](../design/security-and-privacy.md)
+- [Configuration reference](../reference/configuration.md)
 
 **Next step:** implement the build-only recipe first, inspect its artifacts,
 then add one exact policy query with explicit schema validation.

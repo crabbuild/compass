@@ -14,18 +14,20 @@ export const blog = defineCollections({
   }),
 });
 
-// The repository's existing docs remain the canonical source for the public
-// documentation. Fumadocs compiles them in place for the web surface.
+// The repository's user documentation remains the canonical source for the
+// public website. Contributor-focused design and implementation documents stay
+// in the repository, but are intentionally excluded from this collection.
 export const docs = defineDocs({
   dir: '../../docs',
   docs: {
     files: [
-      '*.md',
+      'README.md',
+      'getting-started.md',
+      'COMPASSQL.md',
+      'COMPASSQL_SUPPORT.md',
       'concepts/*.md',
       'cookbook/*.md',
-      'design/*.md',
       'guides/*.md',
-      'implementation/*.md',
       'reference/*.md',
     ],
     schema: (ctx) =>

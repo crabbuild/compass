@@ -97,6 +97,6 @@ tests, and cache/version contracts before it becomes graph evidence.
 
 ## Related contracts
 
-- [Structural document processing](../design/document-processing.md)
+- [Configuration](configuration.md)
 - [Output reference](outputs.md)
 - [Compatibility](../../COMPATIBILITY.md)

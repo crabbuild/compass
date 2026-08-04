@@ -5,9 +5,7 @@ import {
   CompassIcon,
   FileTextIcon,
   FlaskConicalIcon,
-  Layers3Icon,
   MapIcon,
-  WrenchIcon,
   type LucideIcon,
 } from 'lucide-react';
 import type { Folder, Item, Node, Root } from 'fumadocs-core/page-tree';
@@ -20,7 +18,7 @@ const sidebarIcon = (Icon: LucideIcon): ReactNode =>
     className: 'docs-sidebar-icon',
   });
 
-const START_PAGES = ['README.md', 'getting-started.md', 'roadmap.md'] as const;
+const START_PAGES = ['README.md', 'getting-started.md'] as const;
 const COMPASSQL_PAGES = ['concepts/compassql.md', 'COMPASSQL.md', 'COMPASSQL_SUPPORT.md'] as const;
 
 const FOLDER_SECTIONS = [
@@ -28,8 +26,6 @@ const FOLDER_SECTIONS = [
   { path: 'guides', name: 'Task guides', icon: MapIcon },
   { path: 'cookbook', name: 'Cookbook', icon: FlaskConicalIcon },
   { path: 'reference', name: 'Reference', icon: FileTextIcon },
-  { path: 'design', name: 'Design & architecture', icon: Layers3Icon },
-  { path: 'implementation', name: 'Implementation', icon: WrenchIcon },
 ] as const;
 
 function collectPages(nodes: Node[], pages = new Map<string, Item>()): Map<string, Item> {
