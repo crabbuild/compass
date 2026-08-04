@@ -132,7 +132,7 @@ export default function ProductPage() {
               <div className="grid gap-3 sm:grid-cols-2">
                 {graphPrinciples.map(([label, text]) => <div className="rounded-lg border border-border/80 bg-card/75 p-3" key={label}><span className="font-mono text-[0.65rem] uppercase tracking-[0.12em] text-primary">{label}</span><p className="mt-1 text-sm leading-6 text-muted-foreground">{text}</p></div>)}
               </div>
-              <Link className="inline-flex items-center gap-2 text-sm font-medium text-primary" href="/docs/reference/universal-semantic-evidence">Read the evidence model <ArrowRightIcon data-icon="inline-end" /></Link>
+              <Link className="inline-flex items-center gap-2 text-sm font-medium text-primary" href="/docs/concepts/provenance">Read the provenance model <ArrowRightIcon data-icon="inline-end" /></Link>
             </div>
           </div>
         </div>
