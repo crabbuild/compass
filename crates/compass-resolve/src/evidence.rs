@@ -261,15 +261,9 @@ impl UniversalResolutionIndex {
         profile_internal("universal fact collection", &mut profile_started);
         let mut declaration_ids = declarations.keys().cloned().collect::<Vec<_>>();
         declaration_ids.sort_unstable();
-        let declaration_slots = declaration_ids
-            .iter()
-            .enumerate()
-            .map(|(index, id)| {
-                u32::try_from(index)
-                    .map(|slot| (id.clone(), slot))
-                    .map_err(|_| "universal declaration slot count exceeds u32".to_owned())
-            })
-            .collect::<Result<AHashMap<_, _>, _>>()?;
+        if u32::try_from(declaration_ids.len()).is_err() {
+            return Err("universal declaration slot count exceeds u32".to_owned());
+        }
         let definition_ranges = unique_definition_ranges(&declarations, &scopes);
         for (name, count, limit) in [
             ("declarations", declarations.len(), limits.declarations),
@@ -288,7 +282,7 @@ impl UniversalResolutionIndex {
                 || {
                     let mut index = AHashMap::<(String, String), Vec<DeclarationSlot>>::new();
                     for declaration in declarations.values() {
-                        let Some(&slot) = declaration_slots.get(&declaration.id) else {
+                        let Some(slot) = declaration_slot(&declaration_ids, &declaration.id) else {
                             continue;
                         };
                         index
@@ -312,7 +306,9 @@ impl UniversalResolutionIndex {
                             let mut index =
                                 AHashMap::<(String, String, String), Vec<DeclarationSlot>>::new();
                             for declaration in declarations.values() {
-                                let Some(&slot) = declaration_slots.get(&declaration.id) else {
+                                let Some(slot) =
+                                    declaration_slot(&declaration_ids, &declaration.id)
+                                else {
                                     continue;
                                 };
                                 let Some(module) = declaration.module_or_package.as_ref() else {
@@ -342,7 +338,8 @@ impl UniversalResolutionIndex {
                                         Vec<DeclarationSlot>,
                                     >::new();
                                     for declaration in declarations.values() {
-                                        let Some(&slot) = declaration_slots.get(&declaration.id)
+                                        let Some(slot) =
+                                            declaration_slot(&declaration_ids, &declaration.id)
                                         else {
                                             continue;
                                         };
@@ -371,7 +368,8 @@ impl UniversalResolutionIndex {
                                         Vec<DeclarationSlot>,
                                     >::new();
                                     for declaration in declarations.values() {
-                                        let Some(&slot) = declaration_slots.get(&declaration.id)
+                                        let Some(slot) =
+                                            declaration_slot(&declaration_ids, &declaration.id)
                                         else {
                                             continue;
                                         };
@@ -530,7 +528,7 @@ impl UniversalResolutionIndex {
         let mut members_by_owner =
             AHashMap::<(String, String, String), Vec<DeclarationSlot>>::new();
         for declaration in declarations.values() {
-            let Some(&slot) = declaration_slots.get(&declaration.id) else {
+            let Some(slot) = declaration_slot(&declaration_ids, &declaration.id) else {
                 continue;
             };
             let Some(owner) = declaration
@@ -2479,6 +2477,13 @@ fn materialized_declaration_ids<'a>(
         }
     }
     ids
+}
+
+fn declaration_slot(declaration_ids: &[String], id: &str) -> Option<DeclarationSlot> {
+    let index = declaration_ids
+        .binary_search_by(|candidate| candidate.as_str().cmp(id))
+        .ok()?;
+    u32::try_from(index).ok()
 }
 
 fn c3_merge(mut sequences: Vec<Vec<String>>, limit: usize) -> Result<Vec<String>, ()> {

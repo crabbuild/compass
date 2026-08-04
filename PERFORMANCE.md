@@ -220,8 +220,9 @@ Click (Python, 91 files). The run used `extract --code-only --no-cluster
 
 These are diagnostic observations, not promoted baselines or a claim of a
 4×–5× cold-build advantage. Small-project extraction now stays sequential by
-default to avoid multiplying parser/AST working sets; `--max-workers` remains
-the explicit opt-in for parallel extraction. Portable AST cache publication
+default to avoid multiplying parser/AST working sets; large-project extraction
+uses a default cap of 8 local workers so those working sets remain bounded,
+while `--max-workers` remains the explicit override. Portable AST publication
 also streams one compressed value at a time instead of retaining the entire
 compressed batch in memory.
 
@@ -249,6 +250,13 @@ the same graph SHA-256 for all four pinned repositories (`78ef5b7b` Cobra,
 `c25d3b97` Click, `06014539` Rayon, and `f620afe4` Zod). The observed peak RSS
 was 103, 168, 270, and 309 MiB respectively. These are single-run diagnostic
 measurements, not a promoted memory baseline.
+
+On the same 444-file Zod checkout, a release-binary smoke measurement recorded
+about 332 MiB peak RSS with the previous host-sized worker pool, 289 MiB with
+the new default cap of 8 workers, and 257 MiB with an explicit cap of 4. The
+8-worker run retained essentially the previous wall time; the 4-worker run
+was about 0.26 s slower. These are diagnostic measurements on one macOS
+runner, not a cross-platform performance guarantee.
 
 ## Django cold-build regression qualification
 
