@@ -54,6 +54,587 @@ pub(super) fn detect_express(
     facts
 }
 
+/// Fastify and Hono use the same JavaScript/TypeScript call shapes as
+/// Express, but their receiver construction and mount conventions differ.
+/// Keep those framework decisions behind one small router seam so the packs
+/// can share literal parsing, import identity, middleware ordering, and path
+/// normalization without making the Express adapter a catch-all detector.
+pub(super) fn detect_fastify(
+    path: &Path,
+    source: &[u8],
+    root: Node<'_>,
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    detect_node_router(path, source, root, extraction, NodeRouterKind::Fastify)
+}
+
+pub(super) fn detect_hono(
+    path: &Path,
+    source: &[u8],
+    root: Node<'_>,
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    detect_node_router(path, source, root, extraction, NodeRouterKind::Hono)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NodeRouterKind {
+    Fastify,
+    Hono,
+}
+
+impl NodeRouterKind {
+    fn framework(self) -> &'static str {
+        match self {
+            Self::Fastify => "fastify",
+            Self::Hono => "hono",
+        }
+    }
+
+    fn module(self) -> &'static str {
+        match self {
+            Self::Fastify => "fastify",
+            Self::Hono => "hono",
+        }
+    }
+
+    fn constructor_import(self, imported: &str) -> bool {
+        match self {
+            Self::Fastify => imported == "default" || imported == "*",
+            Self::Hono => imported == "Hono" || imported == "default" || imported == "*",
+        }
+    }
+
+    fn route_methods(self) -> &'static [&'static str] {
+        match self {
+            Self::Fastify => &[
+                "get", "post", "put", "patch", "delete", "options", "head", "trace", "all",
+            ],
+            Self::Hono => &[
+                "get", "post", "put", "patch", "delete", "options", "head", "trace", "all",
+            ],
+        }
+    }
+
+    fn route_method_pattern(self) -> String {
+        let methods = self.route_methods().join("|");
+        if matches!(self, Self::Hono) {
+            format!("{methods}|on")
+        } else {
+            methods
+        }
+    }
+}
+
+fn detect_node_router(
+    path: &Path,
+    source: &[u8],
+    root: Node<'_>,
+    extraction: &mut Extraction,
+    kind: NodeRouterKind,
+) -> Vec<RawFrameworkFact> {
+    if source.is_empty() {
+        return Vec::new();
+    }
+    let mut imports = Vec::new();
+    collect_import_aliases(root, source, &mut imports);
+    attach_import_aliases(path, source, root, extraction, &imports);
+    let module = kind.module();
+    let imported = imports.iter().any(|(_, _, imported_module, _)| {
+        imported_module == module || imported_module.starts_with(&format!("{module}/"))
+    });
+    let direct = imported || source_has_module_require(root, source, module);
+    if !direct {
+        return Vec::new();
+    }
+    let receivers = node_router_receivers(root, source, &imports, kind);
+    if receivers.is_empty() {
+        return Vec::new();
+    }
+    let mounts = node_router_mounts(root, source, &receivers, kind);
+    let mut facts = Vec::new();
+    collect_node_router_routes(root, source, path, &receivers, &mounts, kind, &mut facts);
+    facts
+}
+
+fn node_router_receivers(
+    root: Node<'_>,
+    source: &[u8],
+    imports: &[(String, String, String, u64)],
+    kind: NodeRouterKind,
+) -> HashSet<String> {
+    let constructors = imports
+        .iter()
+        .filter(|(_, imported, module, _)| {
+            (module == kind.module() || module.starts_with(&format!("{}/", kind.module())))
+                && kind.constructor_import(imported)
+        })
+        .map(|(local, _, _, _)| local.clone())
+        .collect::<HashSet<_>>();
+    let body = std::str::from_utf8(source).unwrap_or_default();
+    let mut receivers = HashSet::new();
+    collect_node_router_receivers(root, source, &constructors, kind, &mut receivers);
+
+    // CommonJS bindings do not appear in import aliases. Keep the binding
+    // evidence exact and let the normal AST receiver walk handle construction.
+    if let Ok(pattern) = Regex::new(&format!(
+        r#"(?m)^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\(\s*["']{}["']\s*\)\s*;?"#,
+        regex::escape(kind.module())
+    )) {
+        let mut require_constructors = constructors;
+        require_constructors.extend(
+            pattern
+                .captures_iter(body)
+                .filter_map(|capture| capture.get(1).map(|value| value.as_str().to_owned())),
+        );
+        collect_node_router_receivers(root, source, &require_constructors, kind, &mut receivers);
+    }
+    receivers
+}
+
+fn collect_node_router_receivers(
+    node: Node<'_>,
+    source: &[u8],
+    constructors: &HashSet<String>,
+    kind: NodeRouterKind,
+    receivers: &mut HashSet<String>,
+) {
+    if node.kind() == "variable_declarator"
+        && let (Some(name), Some(value)) = (
+            node.child_by_field_name("name"),
+            node.child_by_field_name("value"),
+        )
+    {
+        let variable = node_text(name, source).trim();
+        let expression = node_text(value, source).trim();
+        if is_identifier(variable) && node_router_constructor_call(expression, constructors, kind) {
+            receivers.insert(variable.to_owned());
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_node_router_receivers(child, source, constructors, kind, receivers);
+    }
+}
+
+fn node_router_constructor_call(
+    expression: &str,
+    constructors: &HashSet<String>,
+    kind: NodeRouterKind,
+) -> bool {
+    let expression = expression.trim();
+    match kind {
+        NodeRouterKind::Fastify => {
+            let callee = expression
+                .split_once('(')
+                .map_or(expression, |(callee, _)| callee.trim());
+            is_identifier(callee)
+                && (constructors.contains(callee)
+                    || callee.eq_ignore_ascii_case("fastify")
+                    || callee.eq_ignore_ascii_case("Fastify"))
+                || expression.starts_with("require(\"fastify\")")
+                || expression.starts_with("require('fastify')")
+        }
+        NodeRouterKind::Hono => {
+            let Some(constructed) = expression.strip_prefix("new ") else {
+                return false;
+            };
+            let callee = constructed
+                .split_once('(')
+                .map_or(constructed, |(callee, _)| callee.trim());
+            is_identifier(callee) && (constructors.contains(callee) || callee == "Hono")
+                || constructed.starts_with("(require(\"hono\").Hono)")
+                || constructed.starts_with("(require('hono').Hono)")
+        }
+    }
+}
+
+fn node_router_mounts(
+    root: Node<'_>,
+    source: &[u8],
+    receivers: &HashSet<String>,
+    kind: NodeRouterKind,
+) -> HashMap<String, String> {
+    let mut mounts = HashMap::new();
+    collect_node_router_mounts(root, source, receivers, kind, &mut mounts);
+    mounts
+}
+
+fn collect_node_router_mounts(
+    node: Node<'_>,
+    source: &[u8],
+    receivers: &HashSet<String>,
+    kind: NodeRouterKind,
+    mounts: &mut HashMap<String, String>,
+) {
+    let is_mount = node.kind() == "call_expression"
+        && node
+            .child_by_field_name("function")
+            .is_some_and(|function| {
+                let Some((parent, method)) = node_text(function, source).trim().rsplit_once('.')
+                else {
+                    return false;
+                };
+                receivers.contains(parent)
+                    && ((matches!(kind, NodeRouterKind::Hono) && method == "route")
+                        || (matches!(kind, NodeRouterKind::Fastify) && method == "register"))
+            });
+    if is_mount {
+        let function = node
+            .child_by_field_name("function")
+            .map(|function| node_text(function, source).trim().to_owned())
+            .unwrap_or_default();
+        let Some((parent, method)) = function.rsplit_once('.') else {
+            return;
+        };
+        let Some(arguments) = node.child_by_field_name("arguments") else {
+            return;
+        };
+        let argument_text = split_arguments(node_text(arguments, source));
+        let prefix = if method == "route" {
+            argument_text
+                .first()
+                .and_then(|value| string_literal(value))
+        } else {
+            argument_text.get(1).and_then(|value| {
+                object_property_text(value, "prefix").and_then(|value| string_literal(&value))
+            })
+        };
+        let child = argument_text
+            .first()
+            .and_then(|value| {
+                if method == "route" {
+                    argument_text.get(1)
+                } else {
+                    Some(value)
+                }
+            })
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|value| is_identifier(value));
+        if let (Some(prefix), Some(child)) = (prefix, child)
+            && receivers.contains(child)
+        {
+            let parent_prefix = mounts.get(parent).map(String::as_str).unwrap_or_default();
+            mounts.insert(child.to_owned(), join_paths(parent_prefix, &prefix));
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_node_router_mounts(child, source, receivers, kind, mounts);
+    }
+}
+
+fn collect_node_router_routes(
+    node: Node<'_>,
+    source: &[u8],
+    path: &Path,
+    receivers: &HashSet<String>,
+    mounts: &HashMap<String, String>,
+    kind: NodeRouterKind,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "call_expression"
+        && let Some(function) = node.child_by_field_name("function")
+    {
+        let function = node_text(function, source).trim();
+        let mut receiver = None;
+        let mut method = None;
+        let mut chained_path = None;
+        if let Some((candidate, candidate_method)) = function.rsplit_once('.')
+            && receivers.contains(candidate)
+            && (kind.route_methods().contains(&candidate_method)
+                || (matches!(kind, NodeRouterKind::Hono) && candidate_method == "on"))
+        {
+            receiver = Some(candidate.to_owned());
+            method = Some(candidate_method.to_owned());
+        } else if matches!(kind, NodeRouterKind::Hono)
+            && let Ok(pattern) = Regex::new(&format!(
+                r#"^([A-Za-z_$][\w$]*)\.basePath\(\s*["']([^"']+)["']\s*\)\.({})$"#,
+                kind.route_method_pattern()
+            ))
+            && let Some(capture) = pattern.captures(function)
+            && let (Some(candidate), Some(prefix), Some(candidate_method)) =
+                (capture.get(1), capture.get(2), capture.get(3))
+            && receivers.contains(candidate.as_str())
+        {
+            receiver = Some(candidate.as_str().to_owned());
+            method = Some(candidate_method.as_str().to_owned());
+            chained_path = Some(prefix.as_str().to_owned());
+        }
+
+        if let (Some(receiver), Some(method), Some(arguments)) = (
+            receiver.as_deref(),
+            method.as_deref(),
+            node.child_by_field_name("arguments"),
+        ) {
+            let arguments = split_arguments(node_text(arguments, source));
+            let (methods, path_index) = if method == "on" {
+                let methods = arguments
+                    .first()
+                    .map(|value| string_array_literals(value))
+                    .unwrap_or_default();
+                (methods, 1_usize)
+            } else {
+                (vec![method.to_owned()], 0_usize)
+            };
+            let raw_path = arguments
+                .get(path_index)
+                .and_then(|argument| string_literal(argument))
+                .map(|route_path| {
+                    chained_path
+                        .as_deref()
+                        .map_or(route_path.clone(), |prefix| join_paths(prefix, &route_path))
+                });
+            if let Some(raw_path) = raw_path {
+                let raw_stages = arguments.iter().skip(path_index + 1).collect::<Vec<_>>();
+                let (handler, middleware, mut detail) = router_stages(&raw_stages, kind, node);
+                if let Some(handler) = handler {
+                    detail.insert("receiver".into(), Value::String(receiver.to_owned()));
+                    for operation in methods {
+                        facts.push(RawFrameworkFact::Route(RawRouteFact {
+                            framework: kind.framework().to_owned(),
+                            operation: if operation.eq_ignore_ascii_case("all") {
+                                "ANY".to_owned()
+                            } else {
+                                operation.to_ascii_uppercase()
+                            },
+                            raw_path: raw_path.clone(),
+                            normalized_path: normalize_path(&join_paths(
+                                mounts.get(receiver).map(String::as_str).unwrap_or_default(),
+                                &raw_path,
+                            )),
+                            declaring_scope: module_scope(path),
+                            anchor: anchor(path, node),
+                            handler_reference: handler.clone(),
+                            middleware_references: middleware.clone(),
+                            origin: RawFrameworkOrigin::Ast,
+                            rule: None,
+                            detail: detail.clone(),
+                        }));
+                    }
+                }
+            }
+        }
+
+        if matches!(kind, NodeRouterKind::Fastify)
+            && function
+                .rsplit_once('.')
+                .is_some_and(|(receiver, method)| receivers.contains(receiver) && method == "route")
+            && let Some(arguments) = node.child_by_field_name("arguments")
+            && let Some(route_object) = arguments.named_child(0)
+        {
+            let object = node_text(route_object, source);
+            let Some(raw_path) = object_property_text(object, "url")
+                .and_then(|value| string_literal(&value))
+                .or_else(|| {
+                    object_property_text(object, "path").and_then(|value| string_literal(&value))
+                })
+            else {
+                return;
+            };
+            let methods = object_property_text(object, "method")
+                .map(|value| string_array_literals(&value))
+                .filter(|values| !values.is_empty())
+                .unwrap_or_else(|| {
+                    object_property_text(object, "method")
+                        .and_then(|value| string_literal(&value))
+                        .into_iter()
+                        .collect()
+                });
+            if methods.is_empty() {
+                return;
+            }
+            let Some(handler_value) = object_property_text(object, "handler") else {
+                return;
+            };
+            let (handler, opaque) = handler_from_value(&handler_value, node);
+            let mut detail = Map::from_iter([(
+                "receiver".into(),
+                Value::String(
+                    function
+                        .rsplit_once('.')
+                        .map(|(receiver, _)| receiver)
+                        .unwrap_or_default()
+                        .to_owned(),
+                ),
+            )]);
+            if opaque {
+                detail.insert("opaque_handler".into(), Value::Bool(true));
+            }
+            let middleware = object_hook_references(object);
+            let receiver = function
+                .rsplit_once('.')
+                .map(|(receiver, _)| receiver)
+                .unwrap_or_default();
+            for operation in methods {
+                facts.push(RawFrameworkFact::Route(RawRouteFact {
+                    framework: "fastify".to_owned(),
+                    operation: if operation.eq_ignore_ascii_case("all") {
+                        "ANY".to_owned()
+                    } else {
+                        operation.to_ascii_uppercase()
+                    },
+                    raw_path: raw_path.clone(),
+                    normalized_path: normalize_path(&join_paths(
+                        mounts.get(receiver).map(String::as_str).unwrap_or_default(),
+                        &raw_path,
+                    )),
+                    declaring_scope: module_scope(path),
+                    anchor: anchor(path, node),
+                    handler_reference: handler.clone(),
+                    middleware_references: middleware.clone(),
+                    origin: RawFrameworkOrigin::Ast,
+                    rule: None,
+                    detail: detail.clone(),
+                }));
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_node_router_routes(child, source, path, receivers, mounts, kind, facts);
+    }
+}
+
+fn router_stages(
+    stages: &[&String],
+    kind: NodeRouterKind,
+    node: Node<'_>,
+) -> (Option<String>, Vec<String>, Map<String, Value>) {
+    let mut detail = Map::new();
+    let mut candidates = Vec::new();
+    let mut middleware = Vec::new();
+    for stage in stages {
+        if matches!(kind, NodeRouterKind::Fastify) && stage.trim_start().starts_with('{') {
+            if let Some(value) = object_property_text(stage, "handler") {
+                let (handler, opaque) = handler_from_value(&value, node);
+                if opaque {
+                    detail.insert("opaque_handler".into(), Value::Bool(true));
+                }
+                candidates.push(handler);
+            }
+            middleware.extend(object_hook_references(stage));
+        } else if let Some(reference) = handler_reference(stage) {
+            candidates.push(reference);
+        } else if is_inline_handler_expression(stage) {
+            candidates.push(format!("opaque_inline_handler_at_{}", node.start_byte()));
+            detail.insert("opaque_handler".into(), Value::Bool(true));
+        }
+    }
+    let handler = candidates.pop();
+    middleware.extend(candidates);
+    (handler, middleware, detail)
+}
+
+fn handler_from_value(value: &str, node: Node<'_>) -> (String, bool) {
+    if let Some(reference) = handler_reference(value) {
+        return (reference, false);
+    }
+    (
+        format!("opaque_inline_handler_at_{}", node.start_byte()),
+        true,
+    )
+}
+
+fn object_hook_references(value: &str) -> Vec<String> {
+    let Some(value) = value
+        .trim()
+        .strip_prefix('{')
+        .and_then(|value| value.strip_suffix('}'))
+    else {
+        return Vec::new();
+    };
+    super::text::split_top_level(value)
+        .into_iter()
+        .filter_map(|entry| {
+            let entry = entry.trim();
+            let (key, value) = entry.split_once(':').unwrap_or((entry, entry));
+            let key = key
+                .trim()
+                .trim_matches(|character| matches!(character, '\'' | '"' | '`'));
+            matches!(
+                key,
+                "onRequest"
+                    | "preParsing"
+                    | "preValidation"
+                    | "preHandler"
+                    | "onSend"
+                    | "onResponse"
+            )
+            .then(|| list_or_reference(value))
+        })
+        .flatten()
+        .collect()
+}
+
+fn list_or_reference(value: &str) -> Vec<String> {
+    let value = value.trim();
+    let value = value
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(value);
+    split_arguments(value)
+        .into_iter()
+        .filter_map(|value| handler_reference(&value))
+        .collect()
+}
+
+fn object_property_text(value: &str, name: &str) -> Option<String> {
+    let value = value.trim().strip_prefix('{')?.strip_suffix('}')?;
+    super::text::split_top_level(value)
+        .into_iter()
+        .find_map(|entry| {
+            let entry = entry.trim();
+            if entry == name {
+                return Some(name.to_owned());
+            }
+            let (key, value) = entry.split_once(':')?;
+            let key = key
+                .trim()
+                .trim_matches(|character| matches!(character, '\'' | '"' | '`'));
+            (key == name).then(|| value.trim().to_owned())
+        })
+}
+
+fn string_array_literals(value: &str) -> Vec<String> {
+    let value = value
+        .trim()
+        .strip_suffix("as const")
+        .map_or(value, str::trim);
+    let value = value
+        .trim()
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(value);
+    split_arguments(value)
+        .into_iter()
+        .filter_map(|value| string_literal(&value))
+        .collect()
+}
+
+fn source_has_module_require(node: Node<'_>, source: &[u8], module: &str) -> bool {
+    if node.kind() == "call_expression"
+        && node
+            .child_by_field_name("function")
+            .is_some_and(|function| node_text(function, source).trim() == "require")
+        && node
+            .child_by_field_name("arguments")
+            .is_some_and(|arguments| {
+                split_arguments(node_text(arguments, source))
+                    .first()
+                    .and_then(|argument| string_literal(argument))
+                    .is_some_and(|value| value == module)
+            })
+    {
+        return true;
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(|child| child.is_named())
+        .any(|child| source_has_module_require(child, source, module))
+}
+
 pub(super) fn detect_non_express(
     path: &Path,
     source: &[u8],
