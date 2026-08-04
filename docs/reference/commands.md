@@ -693,8 +693,8 @@ library-only, and PostgreSQL/DynamoDB are future backends.
 uses the validated SQLite sidecar when present; use `--engine json` to force
 JSON or `--engine store` to require the sidecar. The explicit rebuild
 runbook is [`scripts/rebuild_compass_store.sh`](../../scripts/rebuild_compass_store.sh);
-the detailed durability, backup, GC, quota, and recovery policy is in the
-[Compass Store operations guide](../guides/compass-store-operations.md).
+the detailed operational workflow is in the
+[Operations guide](../guides/operations.md).
 
 ## IDE and graph-inspection commands
 

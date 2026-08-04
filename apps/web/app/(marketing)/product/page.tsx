@@ -200,10 +200,10 @@ export default function ProductPage() {
             <p className="mt-5 text-base leading-7 text-muted-foreground">Keep exploration in the editor, automation in CI, focused context in MCP, and artifacts portable when the graph needs to travel.</p>
           </div>
           <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <SurfaceLink icon={MonitorDotIcon} label="VS Code" text="Inspect source and graph together." href="/integrations/vscode" />
-            <SurfaceLink icon={Share2Icon} label="MCP + skills" text="Return focused context to tools." href="/integrations/mcp" />
-            <SurfaceLink icon={WorkflowIcon} label="CLI + CI" text="Run bounded checks in automation." href="/integrations/ci" />
-            <SurfaceLink icon={FileOutputIcon} label="Graph formats" text="Export JSON, HTML, SVG, and GraphML." href="/integrations/graph-formats" />
+            <SurfaceLink icon={MonitorDotIcon} label="VS Code" text="Inspect source and graph together." href="/integrations#editor" />
+            <SurfaceLink icon={Share2Icon} label="MCP + skills" text="Return focused context to tools." href="/integrations#assistants" />
+            <SurfaceLink icon={WorkflowIcon} label="CLI + CI" text="Run bounded checks in automation." href="/integrations#automation" />
+            <SurfaceLink icon={FileOutputIcon} label="Graph formats" text="Export JSON, HTML, SVG, and GraphML." href="/integrations#exports" />
           </div>
         </div>
       </section>

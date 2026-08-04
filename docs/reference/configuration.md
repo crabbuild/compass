@@ -76,7 +76,7 @@ restore` into a new directory for recovery. The store API enforces bounded
 namespace, partition, key, value, transaction, scan, and graph sizes. Local
 publication retains and collects two complete generations; distributed leases
 and hosted quotas are deferred. Local disk availability remains an operational
-limit. See the [store operations guide](../guides/compass-store-operations.md)
+limit. See the [operations guide](../guides/operations.md)
 for the support window and rebuild procedure.
 
 ## Build configuration
