@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Harden Python callable-value resolution so argument, collection, assignment,
+  and return references cannot fabricate external function calls; proven
+  callbacks retain indirect-call edges and other values remain references.
+
 - Split framework extraction into focused Spring, Express, Axum, Next.js, and
   Vite adapters. Project evidence now indexes framework configuration files,
   aliases, plugins, and file-route roots; Vite configuration nodes and a

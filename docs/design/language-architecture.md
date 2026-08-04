@@ -96,8 +96,8 @@ Framework packs consume normalized declarations and exact occurrences after lang
 The hard-cut route is selected by `AdapterRegistry`. Presence in the source
 registry or availability of a grammar does not select it. On the current
 branch, the registry contains `go`, `java`, `python`, and `rust`. Go is at
-adapter version 3, Java is at version 3, Rust is at version 2, and Python
-remains at version 1. Candidate status
+adapter version 3, Java is at version 3, and Python and Rust are at version 2.
+Candidate status
 describes qualification maturity; it does not re-enable the removed direct
 route. Adapter-version changes invalidate cached evidence for only the changed
 language. Go identities retain the repository-relative directory prefix and

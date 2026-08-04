@@ -863,6 +863,95 @@ def dotted():
 }
 
 #[test]
+fn python_callable_values_do_not_invent_external_calls() {
+    let provider = extract(
+        "pkg/provider.py",
+        br#"class ValidationError(Exception):
+    pass
+
+def callback():
+    return None
+"#,
+    );
+    let consumer = extract(
+        "app.py",
+        br#"from pkg.provider import ValidationError, callback
+from outside import unknown
+
+def register(consume):
+    consume(ValidationError)
+    consume(callback)
+    consume(unknown)
+"#,
+    );
+    let resolved = compass_resolve::resolve(&[provider, consumer], &HashMap::new());
+    let validation_error = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.provider.ValidationError")
+        .expect("ValidationError class");
+    let callback = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.provider.callback")
+        .expect("callback function");
+    let unknown = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "outside.unknown")
+        .expect("external unknown reference");
+
+    let validation_edges = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.target == validation_error.id)
+        .collect::<Vec<_>>();
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.target == validation_error.id
+                && edge.string("relation") == "references"
+                && edge.string("source_file") == "app.py"
+                && edge.string("source_location") == "L5"
+        }),
+        "validation edges: {validation_edges:#?}"
+    );
+    assert!(resolved.edges.iter().all(|edge| {
+        !(edge.string("relation") == "indirect_call"
+            && resolved
+                .nodes
+                .iter()
+                .any(|node| node.id == edge.target && node.string("label") == "ValidationError"))
+    }));
+    let callback_edges = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.target == callback.id)
+        .collect::<Vec<_>>();
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.target == callback.id
+                && edge.string("relation") == "references"
+                && edge.string("context") == "argument"
+        }),
+        "callback edges: {callback_edges:#?}"
+    );
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.target == callback.id
+            && edge.string("relation") == "indirect_call"
+            && edge.string("context") == "argument"
+    }));
+    assert_eq!(unknown.string("symbol_kind"), "variable");
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.target == unknown.id
+            && edge.string("relation") == "references"
+            && edge.string("context") == "argument"
+    }));
+    assert!(resolved.edges.iter().all(|edge| {
+        !(edge.target == unknown.id && edge.string("relation") == "indirect_call")
+    }));
+}
+
+#[test]
 fn sequential_python_import_rebindings_resolve_by_occurrence_time() {
     let first = extract("first.py", b"def selected():\n    return 1\n");
     let second = extract("second.py", b"def selected():\n    return 2\n");

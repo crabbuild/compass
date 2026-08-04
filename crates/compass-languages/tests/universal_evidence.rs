@@ -685,6 +685,21 @@ def dotted():
             .collect::<std::collections::BTreeSet<_>>(),
         std::collections::BTreeSet::from([Some("collection"), Some("return")])
     );
+    for reference in callback_references {
+        let candidates = evidence
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.occurrence_id.as_deref() == Some(&reference.id))
+            .collect::<Vec<_>>();
+        assert!(candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::References
+                && candidate.constraints.allow_external
+        }));
+        assert!(candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::IndirectCalls
+                && !candidate.constraints.allow_external
+        }));
+    }
 }
 
 #[test]

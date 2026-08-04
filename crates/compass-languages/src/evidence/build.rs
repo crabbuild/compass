@@ -1053,6 +1053,33 @@ impl<'source> DirectAdapterState<'source> {
             range_for_node(self.source_file, node),
         )?;
         self.builder.relate(
+            CandidateRelation::References,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            binding.as_deref(),
+            &spelling,
+            ResolutionConstraint {
+                exact_target_declaration_id: None,
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: qualified_name
+                    .as_deref()
+                    .and_then(|qualified| qualified.rsplit_once('.').map(|(module, _)| module))
+                    .map(str::to_owned)
+                    .or_else(|| Some(self.module_or_package.clone())),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: qualified_name.clone(),
+                argument_count: None,
+                argument_types: Vec::new(),
+                allowed_target_kinds: vec![
+                    "class".to_owned(),
+                    "function".to_owned(),
+                    "method".to_owned(),
+                ],
+                hierarchy: None,
+                allow_external: qualified_name.is_some(),
+            },
+        )?;
+        self.builder.relate(
             CandidateRelation::IndirectCalls,
             &owner.fact_id,
             Some(&occurrence_id),
@@ -1072,7 +1099,7 @@ impl<'source> DirectAdapterState<'source> {
                 argument_types: Vec::new(),
                 allowed_target_kinds: vec!["function".to_owned(), "method".to_owned()],
                 hierarchy: None,
-                allow_external: qualified_name.is_some(),
+                allow_external: false,
             },
         )?;
         Ok(())

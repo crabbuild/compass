@@ -2937,6 +2937,15 @@ fn materialized_edge(
             .and_then(|occurrence| occurrence.context.as_deref())
             .unwrap_or("reference"),
         ("references", _) if candidate.relation == CandidateRelation::Decorates => "decorator",
+        ("references", _)
+            if occurrence.is_some_and(|occurrence| {
+                occurrence.role == compass_languages::SemanticRole::CallableReference
+            }) =>
+        {
+            occurrence
+                .and_then(|occurrence| occurrence.context.as_deref())
+                .unwrap_or("reference")
+        }
         ("imports_from", _)
             if candidate.relation == CandidateRelation::Imports && target_kind == Some("file") =>
         {

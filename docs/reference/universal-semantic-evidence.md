@@ -228,6 +228,13 @@ local targets remain extracted evidence. Qualified external targets are
 source-scoped and inferred; they never substitute a same-named repository
 node.
 
+Python callable-value occurrences publish a reference candidate for the exact
+value use. They publish an indirect call only when the resolver proves a local
+function or method target. Qualified external fallback is not permitted for
+indirect calls because an import binding proves identity, not callability; an
+unproven external value remains a reference rather than becoming an invented
+function endpoint.
+
 The following resolution behavior is forbidden:
 
 - repository-wide terminal-label search;
