@@ -121,6 +121,20 @@ app.get(dynamicPath, ignored);
         .collect::<HashSet<_>>();
     assert_eq!(object_routes, HashSet::from(["POST", "PUT"]));
     assert_eq!(routes(&extraction).count(), 3);
+
+    let commonjs = Engine::default().extract_source(
+        Path::new("src/commonjs.ts"),
+        br#"const createFastify = require("fastify");
+const app = createFastify();
+function list() {}
+app.route({ method: ["GET", "POST"] as const, url: "/items", handler: list });
+"#,
+    )?;
+    let commonjs_operations = routes(&commonjs)
+        .filter(|route| route.normalized_path == "/items")
+        .map(|route| route.operation.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(commonjs_operations, HashSet::from(["GET", "POST"]));
     Ok(())
 }
 
@@ -138,6 +152,7 @@ app.route("/api", api);
 app.get("/health", listUsers);
 api.on(["GET", "POST"], "/users/:id", authenticate, listUsers);
 app.basePath("/v1").get("/status", listUsers);
+app.basePath("/v2").on(["GET", "POST"], "/batch", listUsers);
 unknown.get("/not-a-route", listUsers);
 "#,
     )?;
@@ -159,6 +174,11 @@ unknown.get("/not-a-route", listUsers);
         route.framework == "hono"
             && route.operation == "GET"
             && route.normalized_path == "/v1/status"
+    }));
+    assert!(routes(&extraction).any(|route| {
+        route.framework == "hono"
+            && route.operation == "POST"
+            && route.normalized_path == "/v2/batch"
     }));
     assert!(!routes(&extraction).any(|route| route.normalized_path == "/not-a-route"));
     Ok(())
@@ -822,7 +842,9 @@ fn remix_flat_routes_publish_nested_page_loader_and_action_operations()
     let index = root.join("app/routes/_index.tsx");
     let user = root.join("app/routes/users.$id.tsx");
     let resource = root.join("app/routes/api.users.ts");
-    for path in [&index, &user, &resource] {
+    let nested = root.join("app/routes/admin/users/route.tsx");
+    let reexport = root.join("app/routes/settings.tsx");
+    for path in [&index, &user, &resource, &nested, &reexport] {
         fs::create_dir_all(path.parent().ok_or("route has no parent")?)?;
     }
     fs::write(&index, "export default function Home() { return null }")?;
@@ -835,10 +857,24 @@ fn remix_flat_routes_publish_nested_page_loader_and_action_operations()
         "export async function loader() { return null }\nexport async function action() { return null }",
     )?;
     fs::write(
+        &nested,
+        "export default function AdminUser() { return null }",
+    )?;
+    fs::write(
+        &reexport,
+        "export { loader, action } from './settings.server';",
+    )?;
+    fs::write(
         root.join("package.json"),
         r#"{"dependencies":{"@remix-run/dev":"2.10.0","@remix-run/react":"2.10.0"}}"#,
     )?;
-    let sources = vec![index.clone(), user.clone(), resource.clone()];
+    let sources = vec![
+        index.clone(),
+        user.clone(),
+        resource.clone(),
+        nested.clone(),
+        reexport.clone(),
+    ];
     let evidence = ProjectEvidenceIndex::build(root, &sources);
     assert!(
         evidence
@@ -849,6 +885,8 @@ fn remix_flat_routes_publish_nested_page_loader_and_action_operations()
     let index_extraction = engine.extract(&index)?;
     let user_extraction = engine.extract(&user)?;
     let resource_extraction = engine.extract(&resource)?;
+    let nested_extraction = engine.extract(&nested)?;
+    let reexport_extraction = engine.extract(&reexport)?;
     assert!(routes(&index_extraction).any(|route| {
         route.framework == "remix"
             && route.operation == "PAGE"
@@ -870,5 +908,38 @@ fn remix_flat_routes_publish_nested_page_loader_and_action_operations()
         .map(|route| route.operation.as_str())
         .collect::<HashSet<_>>();
     assert_eq!(resource_operations, HashSet::from(["ACTION", "LOADER"]));
+    assert!(routes(&nested_extraction).any(|route| {
+        route.framework == "remix"
+            && route.operation == "PAGE"
+            && route.normalized_path == "/admin/users"
+            && route.handler_reference == "AdminUser"
+    }));
+    assert!(routes(&reexport_extraction).any(|route| {
+        route.framework == "remix"
+            && route.operation == "LOADER"
+            && route.detail.get("handler_module")
+                == Some(&serde_json::Value::String("./settings.server".to_owned()))
+    }));
+
+    let unrelated = tempdir()?;
+    let unrelated_route = unrelated.path().join("app/routes/home.tsx");
+    fs::create_dir_all(
+        unrelated_route
+            .parent()
+            .ok_or("unrelated route has no parent")?,
+    )?;
+    fs::write(
+        &unrelated_route,
+        "export default function Home() { return null }",
+    )?;
+    fs::write(
+        unrelated.path().join("package.json"),
+        r#"{"dependencies":{"react-router-dom":"7.0.0"}}"#,
+    )?;
+    let unrelated_evidence =
+        ProjectEvidenceIndex::build(unrelated.path(), std::slice::from_ref(&unrelated_route));
+    let unrelated_extraction =
+        Engine::with_project_evidence(Arc::new(unrelated_evidence)).extract(&unrelated_route)?;
+    assert!(routes(&unrelated_extraction).all(|route| route.framework != "remix"));
     Ok(())
 }

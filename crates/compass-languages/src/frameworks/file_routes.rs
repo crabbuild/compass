@@ -302,25 +302,30 @@ fn remix_route_file(relative: &str) -> Option<&str> {
 
 fn remix_route_path(relative: &str) -> String {
     let mut stem = trim_known_extension(relative).trim_matches('/').to_owned();
-    if stem.ends_with("/index") {
-        stem.truncate(stem.len().saturating_sub("/index".len()));
+    if stem.ends_with("/index") || stem.ends_with("/route") {
+        let suffix = if stem.ends_with("/index") {
+            "/index"
+        } else {
+            "/route"
+        };
+        stem.truncate(stem.len().saturating_sub(suffix.len()));
     }
     let mut segments = Vec::new();
-    let mut pieces = stem.split('/').filter(|piece| !piece.is_empty()).peekable();
-    while let Some(piece) = pieces.next() {
-        if pieces.peek().is_none() {
-            for segment in piece.split('.').filter(|segment| !segment.is_empty()) {
-                if segment == "_index" || segment == "index" {
-                    continue;
-                }
-                let segment = segment.strip_suffix('_').unwrap_or(segment);
-                if segment.starts_with('_') {
-                    continue;
-                }
-                segments.push(remix_route_segment(segment));
+    let pieces = stem
+        .split('/')
+        .filter(|piece| !piece.is_empty())
+        .collect::<Vec<_>>();
+    for (piece_index, piece) in pieces.iter().enumerate() {
+        let final_piece = piece_index + 1 == pieces.len();
+        for segment in piece.split('.').filter(|segment| !segment.is_empty()) {
+            if final_piece && matches!(segment, "_index" | "index" | "route") {
+                continue;
             }
-        } else if piece != "index" && piece != "_index" && !piece.starts_with('_') {
-            segments.push(remix_route_segment(piece));
+            let segment = segment.strip_suffix('_').unwrap_or(segment);
+            if segment.starts_with('_') {
+                continue;
+            }
+            segments.push(remix_route_segment(segment));
         }
     }
     segments.join("/")
@@ -351,11 +356,14 @@ fn remix_endpoint_handlers(source: &str) -> Vec<EndpointHandler> {
             module: None,
         })
         .collect::<Vec<_>>();
-    if let Ok(reexports) = Regex::new(r"(?m)^\s*export\s*\{([^}]*)\}") {
+    if let Ok(reexports) =
+        Regex::new(r#"(?m)^\s*export\s*\{([^}]*)\}(?:\s*from\s*["']([^"']+)["'])?"#)
+    {
         for capture in reexports.captures_iter(source) {
             let Some(names) = capture.get(1) else {
                 continue;
             };
+            let module = capture.get(2).map(|value| value.as_str().to_owned());
             for name in names.as_str().split(',').map(str::trim) {
                 let (local, exported) = name
                     .split_once(" as ")
@@ -365,7 +373,13 @@ fn remix_endpoint_handlers(source: &str) -> Vec<EndpointHandler> {
                     handlers.push(EndpointHandler {
                         operation: exported.to_ascii_uppercase(),
                         reference: local.to_owned(),
-                        module: None,
+                        module: module.clone(),
+                    });
+                } else if exported == "default" {
+                    handlers.push(EndpointHandler {
+                        operation: "PAGE".to_owned(),
+                        reference: local.to_owned(),
+                        module: module.clone(),
                     });
                 }
             }

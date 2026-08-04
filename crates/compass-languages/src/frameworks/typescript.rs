@@ -115,6 +115,15 @@ impl NodeRouterKind {
             ],
         }
     }
+
+    fn route_method_pattern(self) -> String {
+        let methods = self.route_methods().join("|");
+        if matches!(self, Self::Hono) {
+            format!("{methods}|on")
+        } else {
+            methods
+        }
+    }
 }
 
 fn detect_node_router(
@@ -342,7 +351,7 @@ fn collect_node_router_routes(
         } else if matches!(kind, NodeRouterKind::Hono)
             && let Ok(pattern) = Regex::new(&format!(
                 r#"^([A-Za-z_$][\w$]*)\.basePath\(\s*["']([^"']+)["']\s*\)\.({})$"#,
-                kind.route_methods().join("|")
+                kind.route_method_pattern()
             ))
             && let Some(capture) = pattern.captures(function)
             && let (Some(candidate), Some(prefix), Some(candidate_method)) =
@@ -539,7 +548,8 @@ fn object_hook_references(value: &str) -> Vec<String> {
     super::text::split_top_level(value)
         .into_iter()
         .filter_map(|entry| {
-            let (key, value) = entry.split_once(':')?;
+            let entry = entry.trim();
+            let (key, value) = entry.split_once(':').unwrap_or((entry, entry));
             let key = key
                 .trim()
                 .trim_matches(|character| matches!(character, '\'' | '"' | '`'));
@@ -575,6 +585,10 @@ fn object_property_text(value: &str, name: &str) -> Option<String> {
     super::text::split_top_level(value)
         .into_iter()
         .find_map(|entry| {
+            let entry = entry.trim();
+            if entry == name {
+                return Some(name.to_owned());
+            }
             let (key, value) = entry.split_once(':')?;
             let key = key
                 .trim()
@@ -584,6 +598,10 @@ fn object_property_text(value: &str, name: &str) -> Option<String> {
 }
 
 fn string_array_literals(value: &str) -> Vec<String> {
+    let value = value
+        .trim()
+        .strip_suffix("as const")
+        .map_or(value, str::trim);
     let value = value
         .trim()
         .strip_prefix('[')
