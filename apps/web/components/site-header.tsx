@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 const links = [
   { href: '/product', label: 'Product' },
   { href: '/use-cases', label: 'Use cases' },
+  { href: '/integrations', label: 'Integrations' },
   { href: '/docs', label: 'Docs' },
   { href: '/blog', label: 'Blog' },
 ];

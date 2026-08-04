@@ -25,6 +25,64 @@ function DiagramShell({
   );
 }
 
+export function IntegrationMapDiagram() {
+  return (
+    <DiagramShell eyebrow="Shared snapshot" title="One validated graph, four useful hand-offs.">
+      <svg
+        aria-labelledby="integration-map-title integration-map-description"
+        className="h-auto w-full"
+        role="img"
+        viewBox="0 0 980 420"
+      >
+        <title id="integration-map-title">Compass integration map</title>
+        <desc id="integration-map-description">A local graph JSON snapshot routes the same identity, evidence, and limits to the editor, assistants, automation, and portable exports.</desc>
+        <defs>
+          <marker id="integration-map-arrow" markerHeight="8" markerWidth="8" orient="auto-start-reverse" refX="7" refY="4">
+            <path d="M0 0L8 4L0 8Z" fill="var(--compass-blue)" />
+          </marker>
+          <radialGradient id="integration-map-glow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="var(--compass-blue)" stopOpacity="0.2" />
+            <stop offset="100%" stopColor="var(--compass-blue)" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+        <circle cx="490" cy="211" fill="url(#integration-map-glow)" r="205" />
+        <g fill="none" markerEnd="url(#integration-map-arrow)" stroke="var(--compass-blue)" strokeDasharray="5 7" strokeWidth="2">
+          <path d="M354 178H276L242 128" />
+          <path d="M626 178H704L738 128" />
+          <path d="M354 244H276L242 294" />
+          <path d="M626 244H704L738 294" />
+        </g>
+        <g fill="var(--compass-ink-soft)" fontFamily="var(--font-plex-mono)" fontSize="10" textAnchor="middle">
+          <text x="287" y="157">inspect</text>
+          <text x="693" y="157">ask</text>
+          <text x="287" y="275">automate</text>
+          <text x="693" y="275">share</text>
+        </g>
+        <g fontFamily="var(--font-space-grotesk)" fontWeight="600" textAnchor="middle">
+          <rect fill="var(--background)" height="104" rx="16" stroke="var(--border)" width="214" x="28" y="76" />
+          <text fill="var(--foreground)" fontSize="19" x="135" y="120">VS Code</text>
+          <text fill="var(--compass-ink-soft)" fontFamily="var(--font-plex-mono)" fontSize="10" fontWeight="400" x="135" y="146">source + graph together</text>
+          <rect fill="var(--background)" height="104" rx="16" stroke="var(--border)" width="214" x="738" y="76" />
+          <text fill="var(--foreground)" fontSize="19" x="845" y="120">MCP + skills</text>
+          <text fill="var(--compass-ink-soft)" fontFamily="var(--font-plex-mono)" fontSize="10" fontWeight="400" x="845" y="146">focused context in</text>
+          <rect fill="var(--background)" height="104" rx="16" stroke="var(--border)" width="214" x="28" y="292" />
+          <text fill="var(--foreground)" fontSize="19" x="135" y="336">CLI + CI</text>
+          <text fill="var(--compass-ink-soft)" fontFamily="var(--font-plex-mono)" fontSize="10" fontWeight="400" x="135" y="362">repeatable checks</text>
+          <rect fill="var(--background)" height="104" rx="16" stroke="var(--border)" width="214" x="738" y="292" />
+          <text fill="var(--foreground)" fontSize="19" x="845" y="336">Exports</text>
+          <text fill="var(--compass-ink-soft)" fontFamily="var(--font-plex-mono)" fontSize="10" fontWeight="400" x="845" y="362">HTML · JSON · SVG</text>
+        </g>
+        <rect fill="var(--compass-indigo)" height="134" rx="20" width="272" x="354" y="144" />
+        <circle cx="390" cy="181" fill="var(--compass-amber)" r="5" />
+        <text fill="var(--primary-foreground)" fontFamily="var(--font-plex-mono)" fontSize="10" letterSpacing="1.4" x="407" y="185">LOCAL SOURCE OF TRUTH</text>
+        <text fill="var(--primary-foreground)" fontFamily="var(--font-space-grotesk)" fontSize="25" fontWeight="600" textAnchor="middle" x="490" y="226">graph.json</text>
+        <text fill="var(--primary-foreground)" fontFamily="var(--font-plex-mono)" fontSize="10" opacity="0.82" textAnchor="middle" x="490" y="250">identity · evidence · limits</text>
+        <text fill="var(--compass-ink-soft)" fontFamily="var(--font-plex-mono)" fontSize="10" textAnchor="middle" x="490" y="405">same graph model · different place to use it</text>
+      </svg>
+    </DiagramShell>
+  );
+}
+
 export function PipelineDiagram() {
   return (
     <DiagramShell eyebrow="Artifact lineage" title="Four boundaries, one publishable snapshot.">
