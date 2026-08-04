@@ -373,7 +373,7 @@ Avoid deleting a live SQLite/WAL store, lock, or lease as a first response.
 
 - [Integrating Compass](integrating-compass.md)
 - [Versioned graph history](versioned-history.md)
-- [Security and privacy](../design/security-and-privacy.md)
+- [Configuration reference](../reference/configuration.md)
 - [Troubleshooting cookbook](../cookbook/troubleshooting.md)
 
 **Next step:** choose one operational surface, run its one-shot equivalent, and

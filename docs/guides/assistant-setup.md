@@ -317,7 +317,7 @@ Avoid:
 
 - [Getting started](../getting-started.md)
 - [Explore a codebase](exploring-a-codebase.md)
-- [Security and privacy](../design/security-and-privacy.md)
+- [Configuration reference](../reference/configuration.md)
 - [Troubleshooting cookbook](../cookbook/troubleshooting.md)
 
 **Next step:** ask the configured assistant one architecture question and

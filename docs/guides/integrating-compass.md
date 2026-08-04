@@ -315,7 +315,7 @@ nonzero.
 - [CompassQL concepts](../concepts/compassql.md)
 - [Output reference](../reference/outputs.md)
 - [CI and automation cookbook](../cookbook/ci-and-automation.md)
-- [Security and privacy](../design/security-and-privacy.md)
+- [Operations guide](operations.md)
 
 **Next step:** build one parameterized CompassQL query and validate its schema
 tag before connecting it to a larger application.

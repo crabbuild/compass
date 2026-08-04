@@ -260,7 +260,7 @@ public graph contract.
 - [Graph model](graph-model.md)
 - [How Compass works](how-it-works.md)
 - [Impact-analysis cookbook](../cookbook/impact-analysis.md)
-- [Extending Compass](../implementation/extending-compass.md)
+- [Output reference](../reference/outputs.md)
 
 **Next step:** read [CompassQL concepts](compassql.md) to select and filter
 evidence precisely.

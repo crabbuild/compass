@@ -542,3 +542,596 @@
 #nd-sidebar-mobile [data-state='open'] > a .docs-sidebar-icon {
   color: var(--fd-primary);
 }
+
+@layer components {
+  .code-graph-explorer {
+    --code-graph-panel: color-mix(in oklch, var(--card) 94%, transparent);
+    --code-graph-line: color-mix(in oklch, var(--border) 86%, transparent);
+    display: flex;
+    min-height: 45rem;
+    height: 45rem;
+    overflow: hidden;
+    isolation: isolate;
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    background:
+      radial-gradient(circle at 42% 45%, color-mix(in oklch, var(--primary) 16%, transparent), transparent 48%),
+      linear-gradient(145deg, var(--compass-canvas-deep), var(--background));
+    box-shadow: 0 30px 90px -54px color-mix(in oklch, var(--primary) 58%, transparent);
+  }
+
+  .code-graph-explorer::after {
+    z-index: -1;
+    opacity: 0.35;
+    background-size: 28px 28px;
+  }
+
+  .code-graph-explorer-stage {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+  }
+
+  .code-graph-explorer-stage .compass-canvas {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .code-graph-explorer-stage .compass-canvas canvas {
+    outline: none;
+  }
+
+  .code-graph-explorer-toolbar {
+    position: absolute;
+    z-index: 5;
+    top: 0.75rem;
+    right: 0.75rem;
+    left: 0.75rem;
+    display: flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.35rem 0.45rem 0.35rem 0.75rem;
+    border: 1px solid var(--code-graph-line);
+    border-radius: 0.65rem;
+    background: color-mix(in oklch, var(--card) 86%, transparent);
+    box-shadow: 0 16px 38px -28px color-mix(in oklch, var(--foreground) 55%, transparent);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  .code-graph-explorer-status,
+  .code-graph-explorer-actions,
+  .code-graph-explorer-actions button {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .code-graph-explorer-status {
+    min-width: 0;
+    gap: 0.55rem;
+    overflow: hidden;
+    color: var(--muted-foreground);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .code-graph-explorer-status i,
+  .code-graph-explorer-footer i {
+    display: block;
+    width: 0.45rem;
+    height: 0.45rem;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: var(--compass-amber);
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--compass-amber) 15%, transparent);
+  }
+
+  .code-graph-explorer-actions {
+    gap: 0.2rem;
+  }
+
+  .code-graph-explorer-actions button {
+    min-height: 2rem;
+    gap: 0.35rem;
+    padding: 0 0.55rem;
+    border: 1px solid transparent;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--muted-foreground);
+    font-size: 0.72rem;
+    transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+  }
+
+  .code-graph-explorer-actions button:hover,
+  .code-graph-explorer-actions button[aria-pressed='true'] {
+    border-color: var(--code-graph-line);
+    background: color-mix(in oklch, var(--primary) 10%, transparent);
+    color: var(--foreground);
+  }
+
+  .code-graph-explorer-actions button:focus-visible,
+  .code-graph-search input:focus-visible,
+  .code-graph-search-results button:focus-visible,
+  .code-graph-source-link:focus-visible,
+  .code-graph-relationship-list button:focus-visible,
+  .code-graph-community-list button:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  .code-graph-explorer-actions svg {
+    width: 0.9rem;
+    height: 0.9rem;
+  }
+
+  .code-graph-explorer-footer {
+    position: absolute;
+    z-index: 5;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.75rem 0.9rem;
+    border-top: 1px solid var(--code-graph-line);
+    background: color-mix(in oklch, var(--card) 68%, transparent);
+    color: var(--muted-foreground);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.62rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .code-graph-explorer-footer span {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.55rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .code-graph-explorer-inspector {
+    position: relative;
+    z-index: 6;
+    display: flex;
+    width: 21rem;
+    flex: 0 0 21rem;
+    flex-direction: column;
+    overflow: auto;
+    border-left: 1px solid var(--code-graph-line);
+    background: color-mix(in oklch, var(--card) 94%, transparent);
+  }
+
+  .code-graph-inspector-header {
+    display: flex;
+    min-height: 4.25rem;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--code-graph-line);
+  }
+
+  .code-graph-inspector-mark {
+    display: grid;
+    width: 2rem;
+    height: 2rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 0.55rem;
+    background: color-mix(in oklch, var(--primary) 15%, transparent);
+    color: var(--primary);
+  }
+
+  .code-graph-inspector-mark svg {
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+
+  .code-graph-inspector-header strong,
+  .code-graph-inspector-header span {
+    display: block;
+  }
+
+  .code-graph-inspector-header strong {
+    font-family: var(--font-heading), ui-sans-serif, sans-serif;
+    font-size: 0.9rem;
+    letter-spacing: -0.02em;
+  }
+
+  .code-graph-inspector-header span {
+    margin-top: 0.2rem;
+    overflow: hidden;
+    color: var(--muted-foreground);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.62rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .code-graph-search {
+    position: relative;
+    display: flex;
+    min-height: 2.25rem;
+    align-items: center;
+    gap: 0.55rem;
+    margin: 0.85rem 0.85rem 0.4rem;
+    padding: 0 0.65rem;
+    border: 1px solid var(--code-graph-line);
+    border-radius: 0.5rem;
+    background: color-mix(in oklch, var(--background) 74%, transparent);
+    color: var(--muted-foreground);
+  }
+
+  .code-graph-search > svg {
+    width: 0.9rem;
+    height: 0.9rem;
+    flex: 0 0 auto;
+  }
+
+  .code-graph-search input {
+    min-width: 0;
+    flex: 1;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--foreground);
+    font-size: 0.75rem;
+  }
+
+  .code-graph-search input::placeholder {
+    color: var(--muted-foreground);
+  }
+
+  .code-graph-search-results {
+    position: absolute;
+    z-index: 10;
+    top: calc(100% + 0.4rem);
+    right: -1px;
+    left: -1px;
+    overflow: hidden;
+    border: 1px solid var(--code-graph-line);
+    border-radius: 0.55rem;
+    background: var(--card);
+    box-shadow: 0 22px 44px -30px color-mix(in oklch, var(--foreground) 55%, transparent);
+  }
+
+  .code-graph-search-results button {
+    display: grid;
+    width: 100%;
+    gap: 0.2rem;
+    padding: 0.55rem 0.65rem;
+    border: 0;
+    border-bottom: 1px solid var(--code-graph-line);
+    background: transparent;
+    color: var(--foreground);
+    text-align: left;
+  }
+
+  .code-graph-search-results button:last-child {
+    border-bottom: 0;
+  }
+
+  .code-graph-search-results button:hover,
+  .code-graph-search-results button[aria-selected='true'] {
+    background: color-mix(in oklch, var(--primary) 9%, transparent);
+  }
+
+  .code-graph-search-results strong {
+    overflow: hidden;
+    font-family: var(--font-heading), ui-sans-serif, sans-serif;
+    font-size: 0.76rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .code-graph-search-results span {
+    overflow: hidden;
+    color: var(--muted-foreground);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.6rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .code-graph-inspector-section {
+    padding: 1rem;
+    border-top: 1px solid var(--code-graph-line);
+  }
+
+  .code-graph-section-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .code-graph-section-label h2 {
+    margin: 0;
+    font-family: var(--font-heading), ui-sans-serif, sans-serif;
+    font-size: 0.78rem;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+  }
+
+  .code-graph-section-label span {
+    color: var(--muted-foreground);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.58rem;
+    text-transform: uppercase;
+  }
+
+  .code-graph-node-details {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .code-graph-node-title {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .code-graph-node-title > span {
+    width: 0.7rem;
+    height: 0.7rem;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent);
+  }
+
+  .code-graph-node-title strong,
+  .code-graph-node-title span {
+    display: block;
+  }
+
+  .code-graph-node-title strong {
+    overflow: hidden;
+    font-family: var(--font-heading), ui-sans-serif, sans-serif;
+    font-size: 0.95rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .code-graph-node-title div > span {
+    margin-top: 0.18rem;
+    color: var(--primary);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.56rem;
+    letter-spacing: 0.1em;
+  }
+
+  .code-graph-node-stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .code-graph-node-stats > span {
+    display: grid;
+    min-width: 0;
+    gap: 0.22rem;
+    padding: 0.5rem;
+    border: 1px solid var(--code-graph-line);
+    border-radius: 0.4rem;
+    background: color-mix(in oklch, var(--background) 56%, transparent);
+  }
+
+  .code-graph-node-stats small {
+    color: var(--muted-foreground);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.53rem;
+    letter-spacing: 0.08em;
+  }
+
+  .code-graph-node-stats strong {
+    overflow: hidden;
+    color: var(--foreground);
+    font-size: 0.68rem;
+    font-weight: 550;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .code-graph-source-link {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.55rem;
+    min-width: 0;
+    padding: 0.6rem;
+    border: 1px solid var(--code-graph-line);
+    border-radius: 0.45rem;
+    background: color-mix(in oklch, var(--primary) 7%, transparent);
+    color: var(--primary);
+    text-align: left;
+  }
+
+  .code-graph-source-link > svg {
+    width: 0.9rem;
+    height: 0.9rem;
+  }
+
+  .code-graph-source-link > span {
+    display: grid;
+    min-width: 0;
+    gap: 0.2rem;
+  }
+
+  .code-graph-source-link strong,
+  .code-graph-source-link small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .code-graph-source-link strong {
+    color: var(--foreground);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.62rem;
+    font-weight: 500;
+  }
+
+  .code-graph-source-link small {
+    color: var(--muted-foreground);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.56rem;
+  }
+
+  .code-graph-inspector-hint,
+  .code-graph-empty-state {
+    margin: 0;
+    color: var(--muted-foreground);
+    font-size: 0.7rem;
+    line-height: 1.55;
+  }
+
+  .code-graph-inspector-hint {
+    padding-top: 0.15rem;
+  }
+
+  .code-graph-inspector-hint strong {
+    color: var(--foreground);
+    font-weight: 600;
+  }
+
+  .code-graph-relationship-list,
+  .code-graph-community-list {
+    display: grid;
+    gap: 0.35rem;
+  }
+
+  .code-graph-relationship-list button,
+  .code-graph-community-list button {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.5rem;
+    border: 1px solid transparent;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--muted-foreground);
+    text-align: left;
+  }
+
+  .code-graph-relationship-list button:hover,
+  .code-graph-community-list button:hover,
+  .code-graph-community-list button[aria-pressed='true'] {
+    border-color: var(--code-graph-line);
+    background: color-mix(in oklch, var(--primary) 7%, transparent);
+    color: var(--foreground);
+  }
+
+  .code-graph-relationship-type {
+    flex: 0 0 auto;
+    color: var(--primary);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.53rem;
+    letter-spacing: 0.07em;
+  }
+
+  .code-graph-relationship-target {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    font-size: 0.72rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .code-graph-relationship-list button > svg {
+    width: 0.8rem;
+    height: 0.8rem;
+    flex: 0 0 auto;
+  }
+
+  .code-graph-community-list button {
+    gap: 0.55rem;
+    font-size: 0.72rem;
+  }
+
+  .code-graph-community-list button[aria-pressed='false'] {
+    opacity: 0.42;
+  }
+
+  .code-graph-community-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    flex: 0 0 auto;
+    border-radius: 999px;
+  }
+
+  .code-graph-community-list button span:nth-child(2) {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .code-graph-community-list small {
+    color: var(--muted-foreground);
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-size: 0.58rem;
+  }
+
+  @media (max-width: 900px) {
+    .code-graph-explorer {
+      display: block;
+      height: auto;
+      min-height: 0;
+    }
+
+    .code-graph-explorer-stage {
+      height: 34rem;
+      min-height: 34rem;
+    }
+
+    .code-graph-explorer-inspector {
+      width: 100%;
+      max-height: none;
+      border-top: 1px solid var(--code-graph-line);
+      border-left: 0;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .code-graph-explorer-stage {
+      height: 30rem;
+      min-height: 30rem;
+    }
+
+    .code-graph-explorer-toolbar {
+      align-items: flex-start;
+      flex-direction: column;
+      padding: 0.55rem;
+    }
+
+    .code-graph-explorer-actions {
+      width: 100%;
+    }
+
+    .code-graph-explorer-actions button {
+      flex: 1;
+      justify-content: center;
+    }
+
+    .code-graph-explorer-footer {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+  }
+}

@@ -2,6 +2,7 @@ import {
   ArrowRightIcon,
   CheckCircle2Icon,
   DownloadIcon,
+  ExternalLinkIcon,
   GithubIcon,
   MonitorDownIcon,
   TerminalIcon,
@@ -17,7 +18,8 @@ import { pageMetadata } from '@/lib/site';
 
 export const metadata = pageMetadata('Install', 'Install the Compass CLI on macOS, Linux, or Windows, then add the Compass Codegraph extension to VS Code.');
 
-const vscodeInstallCommand = 'code --install-extension /path/to/crabbuild-compass-vscode-0.3.0.vsix';
+const vscodeMarketplaceUrl = 'https://marketplace.visualstudio.com/items?itemName=crabbuild.crabbuild-compass-vscode';
+const vscodeInstallCommand = 'code --install-extension crabbuild.crabbuild-compass-vscode';
 
 export default function InstallPage() {
   return (
@@ -49,11 +51,11 @@ export default function InstallPage() {
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
                 className={cn(buttonVariants({ variant: 'default', size: 'lg' }), 'gap-2 px-4')}
-                href="https://github.com/crabbuild/compass/actions/workflows/compass-vscode-release.yml"
+                href={vscodeMarketplaceUrl}
                 target="_blank"
                 rel="noreferrer"
               >
-                Get the VSIX on GitHub <GithubIcon data-icon="inline-end" />
+                Install from Marketplace <ExternalLinkIcon data-icon="inline-end" />
               </Link>
               <Link className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'gap-2 px-4')} href="/docs/guides/vscode">
                 Read the setup guide <ArrowRightIcon data-icon="inline-end" />
@@ -65,16 +67,16 @@ export default function InstallPage() {
             <CardHeader className="gap-3 border-b border-border/70 pb-5">
               <span className="grid size-10 place-items-center rounded-lg bg-primary text-primary-foreground"><MonitorDownIcon className="size-5" /></span>
               <CardTitle className="font-heading text-2xl tracking-[-0.045em]">Install the VS Code extension</CardTitle>
-              <CardDescription>Compass is currently distributed as a VSIX package and requires Compass CLI 0.3.0 or newer.</CardDescription>
+              <CardDescription>Install Compass Codegraph from the Visual Studio Marketplace. It requires Compass CLI 0.3.0 or newer.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6 pt-2">
               <ol className="space-y-5">
-                <VscodeStep number="1" title="Get the Compass VSIX" text="Download the latest crabbuild-compass-vscode package from a Compass VS Code release." />
-                <VscodeStep number="2" title="Install it in VS Code" text="Open Extensions, choose the … menu, select Install from VSIX…, then choose the downloaded file." />
-                <VscodeStep number="3" title="Open your first graph" text="Open a trusted repository, select Compass in the activity bar, and choose Initialize repository." />
+                <VscodeStep number="1" title="Install Compass Codegraph" text="Open the Marketplace listing and select Install. VS Code handles the download and future updates." />
+                <VscodeStep number="2" title="Open a trusted repository" text="Use a local folder or connect through a supported VS Code remote environment." />
+                <VscodeStep number="3" title="Initialize your first graph" text="Select Compass in the activity bar, then choose Initialize repository." />
               </ol>
               <div className="rounded-xl border border-border/70 bg-muted/45 p-4">
-                <p className="mb-3 text-sm font-medium">Already have the VSIX? Install it from a terminal:</p>
+                <p className="mb-3 text-sm font-medium">Prefer the terminal? Install with the extension ID:</p>
                 <InstallCommand ariaLabel="Copy VS Code extension install command" command={vscodeInstallCommand} prompt=">" />
               </div>
               <div className="flex items-start gap-2 text-sm leading-6 text-muted-foreground">
