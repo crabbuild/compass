@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/layouts/docs/page';
@@ -32,6 +33,19 @@ export default async function Page(props: { params: Promise<{ slug: string[] }> 
   if (!page) notFound();
 
   const MDX = page.data.body;
+  const RelativeLink = createRelativeLink(source, page);
+  const docsLink = async ({ href, ...linkProps }: ComponentProps<'a'>) => {
+    const normalizedHref =
+      typeof href === 'string' &&
+      !href.startsWith('.') &&
+      !href.startsWith('/') &&
+      !href.startsWith('#') &&
+      (href.split('#', 1)[0].endsWith('.md') || href.split('#', 1)[0].endsWith('.mdx'))
+        ? `./${href}`
+        : href;
+
+    return RelativeLink({ ...linkProps, href: normalizedHref });
+  };
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
@@ -40,7 +54,7 @@ export default async function Page(props: { params: Promise<{ slug: string[] }> 
       <DocsBody>
         <MDX
           components={getMDXComponents({
-            a: createRelativeLink(source, page),
+            a: docsLink,
           })}
         />
       </DocsBody>

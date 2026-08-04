@@ -1,9 +1,13 @@
 import Link from 'next/link';
-import { ArrowUpRightIcon } from 'lucide-react';
+import { GithubIcon, StarIcon } from 'lucide-react';
 
 import { CompassLockup } from '@/components/compass-mark';
+import { formatGitHubStarCount, getGitHubStarCount, githubRepositoryUrl } from '@/lib/github';
 
-export function SiteFooter() {
+export async function SiteFooter() {
+  const starCount = await getGitHubStarCount();
+  const formattedStarCount = starCount === null ? null : formatGitHubStarCount(starCount);
+
   return (
     <footer className="border-t border-border/70 bg-muted/25">
       <div className="mx-auto grid max-w-7xl gap-10 px-5 py-12 lg:grid-cols-[1.4fr_1fr_1fr_1fr] lg:px-8">
@@ -36,8 +40,21 @@ export function SiteFooter() {
         />
         <div className="flex flex-col gap-3">
           <span className="eyebrow">Project</span>
-          <Link className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground" href="https://github.com/crabbuild/compass" target="_blank" rel="noreferrer">
-            GitHub <ArrowUpRightIcon data-icon="inline-end" />
+          <Link
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+            href={githubRepositoryUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={formattedStarCount ? `Open Compass on GitHub, ${formattedStarCount} stars` : 'Open Compass on GitHub'}
+          >
+            <GithubIcon aria-hidden="true" className="size-4" />
+            <span>GitHub</span>
+            {formattedStarCount && (
+              <span className="inline-flex items-center gap-1 font-mono text-xs tabular-nums text-muted-foreground/80" title={`${formattedStarCount} GitHub stars`}>
+                <StarIcon aria-hidden="true" className="size-3.5 fill-current" />
+                {formattedStarCount}
+              </span>
+            )}
           </Link>
           <Link className="text-sm text-muted-foreground hover:text-foreground" href="/about">About Compass</Link>
           <Link className="text-sm text-muted-foreground hover:text-foreground" href="/changelog">Changelog</Link>

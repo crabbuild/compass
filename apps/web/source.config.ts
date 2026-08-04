@@ -30,6 +30,7 @@ export const docs = defineDocs({
       'guides/*.md',
       '!guides/compass-store-operations.md',
       'reference/*.md',
+      '!reference/universal-semantic-evidence.md',
     ],
     schema: (ctx) =>
       pageSchema.extend({

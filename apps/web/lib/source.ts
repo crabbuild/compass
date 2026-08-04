@@ -20,6 +20,13 @@ const sidebarIcon = (Icon: LucideIcon): ReactNode =>
 
 const START_PAGES = ['getting-started.md', 'README.md'] as const;
 const COMPASSQL_PAGES = ['concepts/compassql.md', 'COMPASSQL.md', 'COMPASSQL_SUPPORT.md'] as const;
+const COOKBOOK_PAGES = [
+  'cookbook/README.md',
+  'cookbook/architecture-discovery.md',
+  'cookbook/ci-and-automation.md',
+  'cookbook/impact-analysis.md',
+  'cookbook/troubleshooting.md',
+] as const;
 
 const FOLDER_SECTIONS = [
   { path: 'concepts', name: 'Core concepts', icon: BookOpenIcon },
@@ -82,9 +89,12 @@ function withPageName(page: Item, name: string): Item {
 }
 
 function withCookbookPageName(page: Item): Item {
-  if (page.$ref === 'cookbook/README.md') return withPageName(page, 'Cookbook: overview');
-  if (typeof page.name !== 'string' || page.name.toLocaleLowerCase().startsWith('cookbook:')) return page;
-  return withPageName(page, `Cookbook: ${page.name}`);
+  if (page.$ref === 'cookbook/README.md') return withPageName(page, 'Overview');
+  if (typeof page.name !== 'string') return page;
+
+  const name = page.name.replace(/^Cookbook:\s*/i, '');
+  const capitalizedName = name ? `${name[0].toUpperCase()}${name.slice(1)}` : name;
+  return capitalizedName === page.name ? page : withPageName(page, capitalizedName);
 }
 
 function keepOnlyTopLevelIcons(nodes: Node[], depth = 0): Node[] {
@@ -116,11 +126,27 @@ function withFolderPresentation(
 
 function withCookbookPresentation(folder: Folder): Folder {
   const presented = withFolderPresentation(folder, 'Cookbook', FlaskConicalIcon);
+  const orderedRefs = new Set<string>(COOKBOOK_PAGES);
+  const pagesByRef = new Map<string, Item>();
+  const nonPageChildren: Node[] = [];
+
+  for (const node of presented.children) {
+    if (node.type === 'page' && node.$ref) pagesByRef.set(node.$ref, node);
+    else nonPageChildren.push(node);
+  }
+
+  const orderedPages = COOKBOOK_PAGES.flatMap((ref) => {
+    const page = pagesByRef.get(ref);
+    return page ? [withCookbookPageName(page)] : [];
+  });
+  const remainingPages = [...pagesByRef.entries()]
+    .filter(([ref]) => !orderedRefs.has(ref))
+    .map(([, page]) => withCookbookPageName(page));
 
   return {
     ...presented,
     index: presented.index ? withCookbookPageName(presented.index) : undefined,
-    children: presented.children.map((node) => node.type === 'page' ? withCookbookPageName(node) : node),
+    children: [...orderedPages, ...remainingPages, ...nonPageChildren],
   };
 }
 
@@ -198,7 +224,11 @@ function organizeDocsTree(tree: Root): Root {
 export const source = loader({
   baseUrl: '/docs',
   source: docs.toFumadocsSource(),
-  slugs: (file) => file.path === 'README.md' ? ['docmap'] : undefined,
+  slugs: (file) => {
+    if (file.path === 'README.md') return ['docmap'];
+    if (file.path === 'cookbook/README.md') return ['cookbook', 'overview'];
+    return undefined;
+  },
   pageTree: {
     transformers: [{ root: organizeDocsTree }],
   },
