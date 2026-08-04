@@ -46,7 +46,7 @@ const featureCards = [
     eyebrow: 'Map',
     title: 'See the shape of a system',
     description: 'Communities, architecture reports, and directed relationships turn an unfamiliar repository into a navigable surface.',
-    href: '/product/code-graph',
+    href: '/product#code-graph',
     link: 'Explore code graphs',
   },
   {
@@ -54,7 +54,7 @@ const featureCards = [
     eyebrow: 'Compare',
     title: 'Know the blast radius',
     description: 'Follow reverse dependencies and compare graph realizations across exact Git commits before a change ships.',
-    href: '/product/history',
+    href: '/product#history',
     link: 'Trace historical change',
   },
   {
@@ -62,7 +62,7 @@ const featureCards = [
     eyebrow: 'Query',
     title: 'Ask exact questions',
     description: 'CompassQL gives scripts and assistants a deterministic, read-only way to ask structural questions with evidence.',
-    href: '/product/compassql',
+    href: '/product#compassql',
     link: 'Read about CompassQL',
   },
 ];
@@ -151,7 +151,7 @@ export default function HomePage() {
                 <NetworkIcon className="size-3.5 text-primary" aria-hidden="true" />
                 25 nodes · 52 edges · local snapshot
               </span>
-              <Link className="inline-flex items-center gap-2 text-sm font-medium text-primary" href="/product/code-graph">
+              <Link className="inline-flex items-center gap-2 text-sm font-medium text-primary" href="/product#code-graph">
                 Open the full graph workspace <ArrowRightIcon data-icon="inline-end" />
               </Link>
             </div>
