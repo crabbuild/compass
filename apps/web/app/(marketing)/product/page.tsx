@@ -178,8 +178,8 @@ export default function ProductPage() {
       <PageSection
         id="history"
         eyebrow="Versioned history"
-        title="Compare how a system changed, not just what a diff touched."
-        description="Compass keeps graph realizations tied to exact Git commits so historical questions have a stable object to inspect."
+        title="Compare two code graphs, not just two source diffs."
+        description="Choose exact Git revisions, identify the immutable graph behind each one, and see the nodes, relationships, and evidence that changed."
       >
         <HistoryComparisonDiagram />
         <div className="mt-6 grid gap-4 md:grid-cols-3">
