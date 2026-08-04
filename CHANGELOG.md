@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.3.2 - 2026-08-03
+
+- Harden graph correctness and make the default query path use canonical
+  `graph.json` results, with clearer diagnostics and deterministic validation
+  across graph builds and code queries.
+- Make structural builds the fast default by making Program IR opt-in and
+  reducing large-graph publication, cache, and query overhead without changing
+  graph facts or output contracts.
+- Add broad framework-aware route extraction and resolution coverage across
+  Python, TypeScript, Go, Rust, Swift, Java, PHP, Ruby, C#, and Astro, with
+  explicit owner-mismatch handling and documented route semantics.
+- Refresh public product and installation documentation, including the VS Code
+  Marketplace install path and interactive graph/history guidance.
+
 - Make structural graph builds the fast default: `init`, `update`, `extract`, and
   `watch` now omit Program IR unless `--program` or `--program-artifact` is
   selected. Keep `--no-program` accepted for compatibility with existing
