@@ -38,6 +38,8 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Qualify Compass code graph v1
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/compass-code-graph-v1
         run: ./scripts/qualify_code_graph_v1.sh --fixtures-only
 
   javascript-and-vscode:

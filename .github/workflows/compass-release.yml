@@ -39,6 +39,8 @@ jobs:
           workspaces: .
           key: release-code-graph-qualification
       - name: Qualify pinned enterprise repository
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/compass-code-graph-v1
         shell: bash
         run: >-
           ./scripts/qualify_code_graph_v1.sh
