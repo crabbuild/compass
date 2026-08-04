@@ -74,12 +74,25 @@ function removePages(
   return output;
 }
 
-function withPageIcon(page: Item, Icon: LucideIcon, name?: string): Item {
+function withPageName(page: Item, name: string): Item {
   return {
     ...page,
-    name: name ?? page.name,
-    icon: page.icon ?? sidebarIcon(Icon),
+    name,
   };
+}
+
+function keepOnlyTopLevelIcons(nodes: Node[], depth = 0): Node[] {
+  return nodes.map((node) => {
+    if (node.type === 'page') return { ...node, icon: undefined };
+    if (node.type !== 'folder') return node;
+
+    return {
+      ...node,
+      icon: depth === 0 ? node.icon : undefined,
+      index: node.index ? { ...node.index, icon: undefined } : undefined,
+      children: keepOnlyTopLevelIcons(node.children, depth + 1),
+    };
+  });
 }
 
 function withFolderPresentation(
@@ -129,12 +142,12 @@ function organizeDocsTree(tree: Root): Root {
   const getPage = (ref: string): Item | undefined => extracted.get(ref) ?? pages.get(ref);
   const startPages = START_PAGES.flatMap((ref) => {
     const page = getPage(ref);
-    return page ? [withPageIcon(page, BookOpenIcon)] : [];
+    return page ? [page] : [];
   });
   const compassqlPages = COMPASSQL_PAGES.flatMap((ref) => {
     const page = getPage(ref);
     return page
-      ? [withPageIcon(page, BracesIcon, ref === 'COMPASSQL.md' ? 'Use CompassQL' : undefined)]
+      ? [ref === 'COMPASSQL.md' ? withPageName(page, 'Use CompassQL') : page]
       : [];
   });
 
@@ -159,7 +172,7 @@ function organizeDocsTree(tree: Root): Root {
     });
   }
 
-  return { ...tree, children };
+  return { ...tree, children: keepOnlyTopLevelIcons(children) };
 }
 
 export const source = loader({
