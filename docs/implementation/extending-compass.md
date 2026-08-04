@@ -60,6 +60,30 @@ independently qualified language transition.
 - incremental edit/rename/delete;
 - multilingual corpus qualification.
 
+## Add a framework pack
+
+Framework extraction has one static runtime in `compass-languages`. It owns
+source, universal, configuration, and template pack selection, manifest
+activation, deterministic ordering, fact budgets, and publication. A new pack
+adds one adapter entry to the runtime table; it does not create a second
+registry or a language-specific dispatch branch.
+
+For a universal pack, also add the validated `FrameworkPackDescriptor` and one
+project-wide expansion adapter keyed by the same stable pack ID in
+`compass-resolve`. Resolver tests require the descriptor and expansion sets to
+match exactly. Keep framework-specific syntax interpretation in the adapter;
+keep target selection, ambiguity, direction, multiplicity, provenance, and
+resource limits in the shared runtime and resolver.
+
+Evidence requirements:
+
+- direct activation evidence plus a wrong-framework negative;
+- exact source anchors and deterministic fact ordering;
+- bounded per-pack and aggregate fact counts;
+- ambiguous and unresolved targets preserved without invented edges;
+- cold, warm, and repeated extraction equivalence; and
+- route/domain publication coverage at the resolver seam.
+
 ## Add a relation
 
 Define:

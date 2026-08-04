@@ -154,16 +154,22 @@ pub struct FrameworkLimits {
 
 impl Default for FrameworkLimits {
     fn default() -> Self {
-        Self {
-            max_candidates: 20,
-            max_include_depth: 32,
-            max_alias_expansions: 1_000,
-            max_facts_per_file: 100_000,
-        }
+        Self::DEFAULT
     }
 }
 
 impl FrameworkLimits {
+    /// The conservative default budget shared by established framework packs.
+    ///
+    /// Keeping the value as a named constant lets the pack runtime apply the
+    /// same budget without constructing a second, subtly different policy.
+    pub const DEFAULT: Self = Self {
+        max_candidates: 20,
+        max_include_depth: 32,
+        max_alias_expansions: 1_000,
+        max_facts_per_file: 100_000,
+    };
+
     pub fn check_facts(self, count: usize) -> Result<(), FrameworkLimitError> {
         if count > self.max_facts_per_file {
             return Err(FrameworkLimitError {

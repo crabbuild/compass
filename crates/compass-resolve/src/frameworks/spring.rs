@@ -592,9 +592,10 @@ fn derive_inherited_method_routes(
         let Some(base_id) = types.get(base_owner) else {
             continue;
         };
-        if !controller_owners.contains(base_owner) {
-            continue;
-        }
+        // An annotated interface can define the route contract while its
+        // implementing controller owns the runtime framework identity. The
+        // descendant check below is the safety gate; requiring the interface
+        // itself to carry @Controller would discard that valid contract.
         let expected_arity = signature_arity(annotation.owner_signature.as_deref());
         for child_id in descendants.get(base_id).into_iter().flatten() {
             for method_id in contained.get(child_id).into_iter().flatten() {
