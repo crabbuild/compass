@@ -743,20 +743,35 @@ pub fn write_canonical_graph_json<W: Write + ?Sized>(
     graph: &GraphDocument,
     writer: &mut W,
 ) -> io::Result<()> {
-    let mut metadata = graph.graph.clone();
-    metadata.files.sort_by(|left, right| left.id.cmp(&right.id));
-
     writer.write_all(b"{\"directed\":")?;
     serde_json::to_writer(&mut *writer, &graph.directed).map_err(io::Error::other)?;
     writer.write_all(b",\"multigraph\":")?;
     serde_json::to_writer(&mut *writer, &graph.multigraph).map_err(io::Error::other)?;
     writer.write_all(b",\"graph\":")?;
-    serde_json::to_writer(&mut *writer, &metadata).map_err(io::Error::other)?;
+    if graph_metadata_files_are_canonical(graph) {
+        // V1 publication already sorts the inventory. Borrowing the metadata
+        // on that hot path avoids cloning every file record before the graph
+        // stream starts; arbitrary caller-provided documents still take the
+        // canonicalizing fallback below.
+        serde_json::to_writer(&mut *writer, &graph.graph).map_err(io::Error::other)?;
+    } else {
+        let mut metadata = graph.graph.clone();
+        metadata.files.sort_by(|left, right| left.id.cmp(&right.id));
+        serde_json::to_writer(&mut *writer, &metadata).map_err(io::Error::other)?;
+    }
     writer.write_all(b",\"nodes\":")?;
     write_canonical_record_array(writer, &graph.nodes)?;
     writer.write_all(b",\"links\":")?;
     write_canonical_record_array(writer, &graph.links)?;
     writer.write_all(b"}")
+}
+
+fn graph_metadata_files_are_canonical(graph: &GraphDocument) -> bool {
+    graph
+        .graph
+        .files
+        .windows(2)
+        .all(|pair| pair[0].id.as_str() <= pair[1].id.as_str())
 }
 
 fn write_canonical_record_array<W, T>(writer: &mut W, records: &[T]) -> io::Result<()>
@@ -2740,7 +2755,7 @@ fn digest_bytes(value: &[u8]) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use compass_model::code_graph::{BuildMetadata, NodeKind};
+    use compass_model::code_graph::{BuildMetadata, ExtractionStatus, FileRecord, NodeKind};
 
     #[test]
     fn streamed_canonical_graph_json_matches_serde_encoding() -> Result<(), SnapshotError> {
@@ -2794,6 +2809,40 @@ mod tests {
         let mut actual = Vec::new();
         write_canonical_graph_json(&graph, &mut actual)
             .map_err(|error| SnapshotError::Encode(error.to_string()))?;
+        assert_eq!(actual, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn streamed_canonical_graph_json_sorts_unsorted_file_inventory() -> Result<(), SnapshotError> {
+        let mut graph = GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "tree".to_owned(),
+            configuration_digest: "config".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        });
+        let file = |id: &str| FileRecord {
+            id: id.to_owned(),
+            path: format!("{id}.rs"),
+            language: Some("rust".to_owned()),
+            content_digest: "sha256:test".to_owned(),
+            byte_size: 1,
+            generated: false,
+            extraction_status: ExtractionStatus::Extracted,
+            extractor_versions: Vec::new(),
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+        graph.graph.files = vec![file("z"), file("a")];
+
+        let expected = serde_json::to_vec(&canonical_graph_document_presorted(&graph))
+            .map_err(|error| SnapshotError::Encode(error.to_string()))?;
+        let mut actual = Vec::new();
+        write_canonical_graph_json(&graph, &mut actual)
+            .map_err(|error| SnapshotError::Encode(error.to_string()))?;
+
         assert_eq!(actual, expected);
         Ok(())
     }
