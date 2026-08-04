@@ -18,7 +18,7 @@ const sidebarIcon = (Icon: LucideIcon): ReactNode =>
     className: 'docs-sidebar-icon',
   });
 
-const START_PAGES = ['README.md', 'getting-started.md'] as const;
+const START_PAGES = ['getting-started.md', 'README.md'] as const;
 const COMPASSQL_PAGES = ['concepts/compassql.md', 'COMPASSQL.md', 'COMPASSQL_SUPPORT.md'] as const;
 
 const FOLDER_SECTIONS = [
@@ -81,6 +81,12 @@ function withPageName(page: Item, name: string): Item {
   };
 }
 
+function withCookbookPageName(page: Item): Item {
+  if (page.$ref === 'cookbook/README.md') return withPageName(page, 'Cookbook: overview');
+  if (typeof page.name !== 'string' || page.name.toLocaleLowerCase().startsWith('cookbook:')) return page;
+  return withPageName(page, `Cookbook: ${page.name}`);
+}
+
 function keepOnlyTopLevelIcons(nodes: Node[], depth = 0): Node[] {
   return nodes.map((node) => {
     if (node.type === 'page') return { ...node, icon: undefined };
@@ -105,6 +111,16 @@ function withFolderPresentation(
     name,
     icon: folder.icon ?? sidebarIcon(Icon),
     collapsible: folder.collapsible ?? true,
+  };
+}
+
+function withCookbookPresentation(folder: Folder): Folder {
+  const presented = withFolderPresentation(folder, 'Cookbook', FlaskConicalIcon);
+
+  return {
+    ...presented,
+    index: presented.index ? withCookbookPageName(presented.index) : undefined,
+    children: presented.children.map((node) => node.type === 'page' ? withCookbookPageName(node) : node),
   };
 }
 
@@ -142,7 +158,9 @@ function organizeDocsTree(tree: Root): Root {
   const getPage = (ref: string): Item | undefined => extracted.get(ref) ?? pages.get(ref);
   const startPages = START_PAGES.flatMap((ref) => {
     const page = getPage(ref);
-    return page ? [page] : [];
+    return page
+      ? [ref === 'README.md' ? withPageName(page, 'Documentation map') : page]
+      : [];
   });
   const compassqlPages = COMPASSQL_PAGES.flatMap((ref) => {
     const page = getPage(ref);
@@ -151,14 +169,16 @@ function organizeDocsTree(tree: Root): Root {
       : [];
   });
 
-  const children: Node[] = [
-    virtualFolder('start', 'Start here', CompassIcon, startPages),
-    virtualFolder('compassql', 'CompassQL', BracesIcon, compassqlPages),
-  ];
+  const children: Node[] = [virtualFolder('start', 'Start here', CompassIcon, startPages)];
 
   for (const section of FOLDER_SECTIONS) {
     const folder = folders.get(section.path);
-    if (folder) children.push(withFolderPresentation(folder, section.name, section.icon));
+    if (folder) {
+      children.push(section.path === 'cookbook'
+        ? withCookbookPresentation(folder)
+        : withFolderPresentation(folder, section.name, section.icon));
+    }
+    if (section.path === 'cookbook') children.push(virtualFolder('compassql', 'CompassQL', BracesIcon, compassqlPages));
   }
 
   if (remaining.length > 0) {
@@ -178,6 +198,7 @@ function organizeDocsTree(tree: Root): Root {
 export const source = loader({
   baseUrl: '/docs',
   source: docs.toFumadocsSource(),
+  slugs: (file) => file.path === 'README.md' ? ['docmap'] : undefined,
   pageTree: {
     transformers: [{ root: organizeDocsTree }],
   },

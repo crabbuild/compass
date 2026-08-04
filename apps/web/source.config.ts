@@ -28,6 +28,7 @@ export const docs = defineDocs({
       'concepts/*.md',
       'cookbook/*.md',
       'guides/*.md',
+      '!guides/compass-store-operations.md',
       'reference/*.md',
     ],
     schema: (ctx) =>
