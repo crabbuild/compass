@@ -409,6 +409,43 @@ impl<T> Render for Container<T> {
 }
 
 #[test]
+fn rust_generic_trait_impl_calls_resolve_to_exact_impl_owner() {
+    let source = br#"trait Render<T> {
+    fn render(&self, value: T);
+}
+struct Container<T>(T);
+impl<T> Render<T> for Container<T> {
+    fn render(&self, _value: T) {}
+}
+fn invoke(container: Container<u32>) {
+    container.render(1);
+}
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let render_method = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "<crate::Container as crate::Render>::render")
+        .expect("generic Render implementation method");
+
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.string("relation") == "calls"
+                && edge.target == render_method.id
+                && edge.string("source_location") == "L9"
+        }),
+        "generic method call was not resolved"
+    );
+}
+
+#[test]
 fn python_super_call_resolves_only_the_exact_direct_base_method() {
     let provider = extract(
         "pkg/base.py",
@@ -875,6 +912,68 @@ func caller(worker *Worker) {
 }
 
 #[test]
+fn go_variadic_ranges_and_nested_closures_resolve_element_receivers() {
+    let go_source = br#"package pkg
+type Worker struct{}
+func (worker *Worker) Run() {}
+type Command struct{}
+func (*Command) Commands() []*Command { return nil }
+func (*Command) IsAvailableCommand() bool { return true }
+func (*Command) Name() string { return "" }
+func caller(workers ...*Worker) {
+    for _, worker := range workers {
+        worker.Run()
+    }
+    visit := func(command *Command) {
+        for _, subCommand := range command.Commands() {
+            if subCommand.IsAvailableCommand() {
+                _ = subCommand.Name()
+            }
+        }
+    }
+    _ = visit
+}
+"#;
+    let extracted = extract("pkg/caller.go", go_source);
+    let sources = HashMap::from([(
+        "pkg/caller.go".to_owned(),
+        String::from_utf8(go_source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let worker_run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Worker::Run")
+        .expect("Worker.Run declaration");
+    let command_available = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Command::IsAvailableCommand")
+        .expect("Command.IsAvailableCommand declaration");
+    let command_name = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Command::Name")
+        .expect("Command.Name declaration");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == worker_run.id
+            && edge.string("source_location") == "L10"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == command_available.id
+            && edge.string("source_location") == "L14"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == command_name.id
+            && edge.string("source_location") == "L15"
+    }));
+}
+
+#[test]
 fn qualified_external_types_are_not_rebound_to_local_terminal_names() {
     let go_source = br#"package auth
 import deviceflow "example.com/deviceflow"
@@ -1165,6 +1264,36 @@ fn rust_import_binding_resolves_the_qualified_associated_function() {
             && edge.string("relation") == "calls"
             && edge.string("resolution_rule") == "member-binding"
             && edge.string("source_location") == "L2"
+    }));
+}
+
+#[test]
+fn rust_cross_file_generic_receiver_parameters_resolve_through_imported_impls() {
+    let provider = extract(
+        "src/api.rs",
+        b"pub trait Render<T> { fn render(&self, value: T); }\npub struct Container<T>(T);\nimpl<T> Render<T> for Container<T> { fn render(&self, _value: T) {} }\n",
+    );
+    let caller_source =
+        b"use crate::api::Container;\nfn invoke(container: Container<u32>) {\n    container.render(1);\n}\n";
+    let caller = extract("src/lib.rs", caller_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, caller],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(caller_source.to_vec()).expect("source"),
+        )]),
+    );
+    let render_method = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name") == "<crate::api::Container as crate::api::Render>::render"
+        })
+        .expect("cross-file generic Render implementation method");
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == render_method.id
+            && edge.string("source_location") == "L3"
     }));
 }
 

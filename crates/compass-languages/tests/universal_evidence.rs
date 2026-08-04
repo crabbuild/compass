@@ -1018,6 +1018,39 @@ func create(b *Bucket) {
 }
 
 #[test]
+fn go_calls_follow_type_assertion_receiver_types() {
+    let source = br#"package sample
+
+type Command struct{}
+
+func (c *Command) Execute() {}
+
+func invoke(value interface{}) {
+    command := value.(*Command)
+    command.Execute()
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/sample/example.go"),
+            "sample/example.go",
+            source,
+        )
+        .expect("extract go")
+        .graph
+        .semantic_evidence
+        .expect("go universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid go evidence");
+
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "Execute"
+            && candidate.constraints.qualified_name.as_deref() == Some("sample.Command::Execute")
+    }));
+}
+
+#[test]
 fn direct_adapter_ids_and_partial_diagnostics_are_deterministic() {
     let path = std::path::Path::new("/repo/src/example.py");
     let source_file = "src/example.py";

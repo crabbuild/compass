@@ -584,6 +584,9 @@ struct DirectAdapterState<'source> {
     rust_impls: HashMap<usize, RustImplContext>,
     rust_types_by_qualified_name: HashMap<String, DeclarationContext>,
     rust_types_by_name: HashMap<String, Vec<DeclarationContext>>,
+    rust_receiver_methods: HashMap<(String, String), Vec<String>>,
+    rust_typed_receivers: HashSet<(String, String)>,
+    rust_imported_typed_receivers: HashSet<(String, String)>,
     rust_import_nodes: HashSet<usize>,
     rust_test_declarations: HashSet<String>,
     go_lexical_bindings: HashMap<usize, Vec<GoLexicalBinding>>,
@@ -591,6 +594,7 @@ struct DirectAdapterState<'source> {
     go_return_types: HashMap<String, String>,
     go_member_types: HashMap<(String, String), String>,
     go_collection_element_types: HashMap<String, String>,
+    go_collection_binding_element_types: HashMap<String, HashMap<String, String>>,
     go_range_return_types: HashMap<String, String>,
     go_range_member_types: HashMap<(String, String), String>,
     java_containers: HashMap<usize, DeclarationContext>,
@@ -650,6 +654,9 @@ impl<'source> DirectAdapterState<'source> {
             rust_impls: HashMap::new(),
             rust_types_by_qualified_name: HashMap::new(),
             rust_types_by_name: HashMap::new(),
+            rust_receiver_methods: HashMap::new(),
+            rust_typed_receivers: HashSet::new(),
+            rust_imported_typed_receivers: HashSet::new(),
             rust_import_nodes: HashSet::new(),
             rust_test_declarations: HashSet::new(),
             go_lexical_bindings: HashMap::new(),
@@ -657,6 +664,7 @@ impl<'source> DirectAdapterState<'source> {
             go_return_types: HashMap::new(),
             go_member_types: HashMap::new(),
             go_collection_element_types: HashMap::new(),
+            go_collection_binding_element_types: HashMap::new(),
             go_range_return_types: HashMap::new(),
             go_range_member_types: HashMap::new(),
             java_containers: HashMap::new(),
@@ -2488,6 +2496,7 @@ impl<'source> DirectAdapterState<'source> {
         self.collect_rust_module_imports(root, &file)?;
         self.collect_rust_declarations(root, &file, None)?;
         self.collect_rust_imports(root, &file)?;
+        self.collect_rust_parameter_bindings(root, &file)?;
         self.walk_rust_evidence(root, &file, true)
     }
 
@@ -2796,11 +2805,113 @@ impl<'source> DirectAdapterState<'source> {
         self.local_targets
             .entry(parent_scope.to_owned())
             .or_default()
-            .insert(name, qualified_name);
+            .insert(name.clone(), qualified_name.clone());
+        if let Some(implementation) = active_impl {
+            self.rust_receiver_methods
+                .entry((implementation.type_qualified_name.clone(), name))
+                .or_default()
+                .push(qualified_name);
+        }
         if rust_has_test_attribute(node, self.source) {
             self.rust_test_declarations.insert(context.fact_id.clone());
         }
         self.declarations.insert(node.id(), context);
+        Ok(())
+    }
+
+    fn collect_rust_parameter_bindings(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let active = self
+            .declarations
+            .get(&node.id())
+            .cloned()
+            .unwrap_or_else(|| owner.clone());
+        if matches!(node.kind(), "function_item" | "function_signature_item")
+            && self.declarations.contains_key(&node.id())
+        {
+            self.add_rust_parameter_bindings(node, &active)?;
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_rust_parameter_bindings(child, &active)?;
+        }
+        Ok(())
+    }
+
+    fn add_rust_parameter_bindings(
+        &mut self,
+        callable: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(parameters) = callable.child_by_field_name("parameters") else {
+            return Ok(());
+        };
+        let mut cursor = parameters.walk();
+        for parameter in parameters
+            .children(&mut cursor)
+            .filter(|node| node.is_named())
+        {
+            if parameter.kind() != "parameter" {
+                continue;
+            }
+            let Some(name_node) = parameter
+                .child_by_field_name("pattern")
+                .or_else(|| parameter.child_by_field_name("name"))
+                .filter(|node| node.kind() == "identifier")
+            else {
+                continue;
+            };
+            let Some(type_node) = parameter.child_by_field_name("type") else {
+                continue;
+            };
+            let raw_type_text = self.text(type_node);
+            let Some(raw_type) = rust_nominal_type_path(&raw_type_text) else {
+                continue;
+            };
+            let local_type = self.rust_type_context(owner, &raw_type).map(|context| {
+                (
+                    context.qualified_name.clone(),
+                    Some(context.fact_id.clone()),
+                )
+            });
+            let imported_type_target = self
+                .imported_target_for_occurrence(owner, &raw_type, type_node.start_byte(), true)
+                .cloned()
+                .map(|target| (target, None));
+            let imported_type = local_type.is_none();
+            let Some((target, type_fact_id)) = local_type.or(imported_type_target) else {
+                continue;
+            };
+            let name = self.text(name_node);
+            if name.is_empty() || name == "_" {
+                continue;
+            }
+            let binding_id = self.builder.bind(
+                BindingKind::LocalAlias,
+                &name,
+                &target,
+                type_fact_id.as_deref(),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, name_node),
+            )?;
+            self.local_bindings
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .insert(name.clone(), binding_id);
+            self.local_targets
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .insert(name.clone(), target);
+            self.rust_typed_receivers
+                .insert((owner.scope_id.clone(), name.clone()));
+            if imported_type {
+                self.rust_imported_typed_receivers
+                    .insert((owner.scope_id.clone(), name));
+            }
+        }
         Ok(())
     }
 
@@ -3372,9 +3483,20 @@ impl<'source> DirectAdapterState<'source> {
         if (qualifier == "Self" || rust_receiver_is_self(qualifier))
             && let Some(enclosing) = rust_callable_owner(owner)
         {
-            return Some(rust_join_qualified(enclosing, spelling));
+            return self
+                .rust_receiver_method_target(enclosing, spelling)
+                .or_else(|| Some(rust_join_qualified(enclosing, spelling)));
         }
         if let Some(target) = self.local_target_for(owner, qualifier) {
+            if let Some(method) = self.rust_receiver_method_target(target, spelling) {
+                return Some(method);
+            }
+            if self.rust_typed_receiver_for(owner, qualifier) {
+                if self.rust_imported_typed_receiver_for(owner, qualifier) {
+                    return Some(rust_join_qualified(target, spelling));
+                }
+                return Some(rust_join_qualified(qualifier, spelling));
+            }
             return Some(rust_join_qualified(target, spelling));
         }
         if let Some(target) = self.imported_qualified_target_for(owner, qualifier, 0, true) {
@@ -3388,6 +3510,50 @@ impl<'source> DirectAdapterState<'source> {
             ));
         }
         Some(rust_join_qualified(qualifier, spelling))
+    }
+
+    fn rust_receiver_method_target(&self, receiver: &str, method: &str) -> Option<String> {
+        let targets = self
+            .rust_receiver_methods
+            .get(&(receiver.to_owned(), method.to_owned()))?;
+        let [target] = targets.as_slice() else {
+            return None;
+        };
+        Some(target.clone())
+    }
+
+    fn rust_typed_receiver_for(&self, owner: &DeclarationContext, name: &str) -> bool {
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let Some(current) = scope_id else {
+                break;
+            };
+            if self
+                .rust_typed_receivers
+                .contains(&(current.to_owned(), name.to_owned()))
+            {
+                return true;
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        false
+    }
+
+    fn rust_imported_typed_receiver_for(&self, owner: &DeclarationContext, name: &str) -> bool {
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let Some(current) = scope_id else {
+                break;
+            };
+            if self
+                .rust_imported_typed_receivers
+                .contains(&(current.to_owned(), name.to_owned()))
+            {
+                return true;
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        false
     }
 
     fn add_rust_macro_invocation(
@@ -3891,12 +4057,27 @@ impl<'source> DirectAdapterState<'source> {
                     .entry(owner.scope_id.clone())
                     .or_default()
                     .extend(names.iter().map(|(name, _)| name.clone()));
-                if parameter.kind() == "variadic_parameter_declaration" {
-                    continue;
-                }
                 let Some(type_node) = parameter.child_by_field_name("type") else {
                     continue;
                 };
+                if parameter.kind() == "variadic_parameter_declaration" {
+                    let Some(element_target) = go_direct_type_target(type_node) else {
+                        continue;
+                    };
+                    let Some(element_type) = self.go_qualified_type_target(owner, element_target)
+                    else {
+                        continue;
+                    };
+                    self.go_collection_binding_element_types
+                        .entry(owner.scope_id.clone())
+                        .or_default()
+                        .extend(
+                            names
+                                .into_iter()
+                                .map(|(name, _)| (name, element_type.clone())),
+                        );
+                    continue;
+                }
                 let mut targets = Vec::new();
                 collect_named_targets(
                     type_node,
@@ -4682,6 +4863,10 @@ impl<'source> DirectAdapterState<'source> {
                 };
                 self.go_return_types.get(&qualified_callable).cloned()
             }
+            "type_assertion_expression" | "type_assertion" => expression
+                .child_by_field_name("type")
+                .and_then(go_direct_type_target)
+                .and_then(|target| self.go_qualified_type_target(owner, target)),
             _ => None,
         }
     }
@@ -4706,6 +4891,14 @@ impl<'source> DirectAdapterState<'source> {
                     .local_target_for(owner, &name)
                     .and_then(|collection| self.go_collection_element_types.get(collection))
                     .cloned()
+                    .or_else(|| {
+                        self.local_value_for(
+                            &self.go_collection_binding_element_types,
+                            owner,
+                            &name,
+                        )
+                        .cloned()
+                    })
                     .or_else(|| {
                         go_local_initializer_before(expression, &name, self.source).and_then(
                             |initializer| {
@@ -5615,6 +5808,9 @@ fn rust_module_identity(path: &Path, source_file: &str) -> String {
 /// manifests keeps the extractor offline and deterministic while fixing the
 /// common workspace case where `foo-bar` is imported as `foo_bar`.
 fn rust_manifest_crate_name(path: &Path) -> Option<String> {
+    if !path.is_absolute() {
+        return None;
+    }
     let mut directory = path.parent();
     while let Some(current) = directory {
         let manifest = current.join("Cargo.toml");

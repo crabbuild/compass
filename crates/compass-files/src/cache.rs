@@ -439,6 +439,36 @@ impl Cache {
             .collect()
     }
 
+    /// Encode and publish already-normalized portable AST values one entry at
+    /// a time. Unlike [`Self::encode_portable_ast_batch_ref`], this does not
+    /// retain every compressed payload until the whole batch is ready, which
+    /// keeps peak memory proportional to the largest in-flight file.
+    pub fn write_portable_ast_batch_ref<T: Serialize + Sync>(
+        &mut self,
+        entries: &[(&PathBuf, &T)],
+    ) -> Result<(), FileError> {
+        let directory = self.directory(&CacheKind::Ast, None);
+        fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
+        let mut jobs = Vec::with_capacity(entries.len());
+        for &(path, value) in entries {
+            let hash = self.content_hash(path)?;
+            let key = self.source_cache_key(path, &hash);
+            jobs.push((
+                directory.join(format!("{key}.{MESSAGEPACK_EXTENSION}")),
+                value,
+            ));
+        }
+        let write_job = |(destination, value): &(PathBuf, &T)| {
+            let bytes = encode_messagepack(*value, destination)?;
+            write_cache_bytes(destination, &bytes)
+        };
+        if jobs.len() < 256 {
+            jobs.iter().try_for_each(write_job)
+        } else {
+            jobs.par_iter().try_for_each(write_job)
+        }
+    }
+
     /// Atomically publish cache payloads prepared by
     /// encode_portable_ast_batch or encode_portable_ast_batch_ref.
     pub fn write_encoded_batch(entries: &[EncodedCacheWrite]) -> Result<(), FileError> {

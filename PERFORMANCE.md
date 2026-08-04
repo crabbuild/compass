@@ -203,6 +203,43 @@ These cross-tool observations are diagnostic evidence rather than a promoted
 Compass baseline. The remaining build gap is primarily the richer graph size
 and durable publication contract, not an unresolved duplicate atomic flush.
 
+## Incremental and language-hardening observations
+
+A follow-up release-binary smoke run on 2026-08-04 used four small,
+read-only real repositories under the mounted qualification volume: Cobra
+(Go, 37 files), Zod (TypeScript, 444 files), Rayon (Rust, 191 files), and
+Click (Python, 91 files). The run used `extract --code-only --no-cluster
+--no-viz --force --store sqlite` and measured one cold process per repository:
+
+| Repository | Wall time | Nodes | Edges |
+| --- | ---: | ---: | ---: |
+| Cobra | 0.82 s | 1,204 | 5,701 |
+| Zod | 1.59 s | 11,047 | 9,632 |
+| Rayon | 2.39 s | 8,807 | 17,942 |
+| Click | 1.47 s | 3,876 | 9,471 |
+
+These are diagnostic observations, not promoted baselines or a claim of a
+4×–5× cold-build advantage. Small-project extraction now stays sequential by
+default to avoid multiplying parser/AST working sets; `--max-workers` remains
+the explicit opt-in for parallel extraction. Portable AST cache publication
+also streams one compressed value at a time instead of retaining the entire
+compressed batch in memory.
+
+The same Cobra checkout was cold-built into a fresh SQLite output and then
+received a comment-only edit. The edit extracted 1 file and reused 36 cached
+files; store publication created 5 objects and wrote 32,325 bytes, compared
+with 192 objects and 2,072,182 bytes for the cold publication. Snapshot tests
+also verify that the Edges, Incoming, Outgoing, Files, Names, Terms,
+Communities, and Diagnostics roots remain immutable for a file-only change.
+
+The language fixtures cover the remaining attribution gaps directly: Go
+variadic range elements, type assertions, and nested closure parameters now
+resolve to their receiver methods; Rust generic impl calls resolve to the
+exact impl owner both within one file and across an imported module. On the
+same filtered Graphify Go comparison, exact comparable edges improved from
+1,469 to 1,492 and missing edges fell from 38 to 15. These quality numbers are
+diagnostic and do not imply that all Graphify gaps are closed.
+
 ## Django cold-build regression qualification
 
 The 0.2.1 code-graph performance hardening was qualified against Django commit

@@ -836,7 +836,14 @@ fn build_graph_inner(
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("php"))
     });
-    let worker_pool = if missing.len() >= 256 || sources.len() >= 256 {
+    // An explicit worker count is an opt-in performance decision. Honor it
+    // even for smaller repositories so callers can trade parser-table
+    // residency for throughput instead of silently falling back to the
+    // sequential path below. On small repositories, a single requested worker
+    // remains sequential; it avoids paying for a pool that cannot add
+    // parallelism.
+    let parallel_extraction = should_parallel_extract(options, missing.len(), sources.len());
+    let worker_pool = if parallel_extraction {
         Some(
             rayon::ThreadPoolBuilder::new()
                 .num_threads(worker_count)
@@ -955,7 +962,7 @@ fn build_graph_inner(
                 )),
             ))
         };
-    let fresh_outcomes = if missing.len() < 256 {
+    let fresh_outcomes = if !parallel_extraction {
         let mut engine = Engine::with_project_evidence(Arc::clone(&project_evidence));
         missing
             .iter()
@@ -1194,23 +1201,19 @@ fn build_graph_inner(
             fresh_paths.contains(*path) && extraction_has_cacheable_ast_facts(extraction)
         })
         .collect::<Vec<_>>();
-    let ast_cache_entries = cache.encode_portable_ast_batch_ref(&ast_cache_sources)?;
+    let ast_cache_started = Instant::now();
+    cache.write_portable_ast_batch_ref(&ast_cache_sources)?;
+    cache.flush()?;
     drop(ast_cache_sources);
+    profile_internal_duration(
+        "AST cache streaming publication",
+        ast_cache_started.elapsed(),
+    );
     // Declaration/definition merging is project-wide and is not idempotent.
     // Cache the portable per-file facts before applying it so a warm build
     // executes the same single merge as a cold build.
     merge_decl_def_classes_if_needed(&mut ordered, &ordered_paths);
     profile_internal("declaration merge", &mut internal_started);
-    let ast_cache_handle = std::thread::Builder::new()
-        .name("compass-ast-cache".to_owned())
-        .spawn(move || {
-            let started = Instant::now();
-            Cache::write_encoded_batch(&ast_cache_entries)?;
-            cache.flush()?;
-            Ok::<_, CoreError>(started.elapsed())
-        })
-        .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
-    profile_internal("AST cache snapshot and dispatch", &mut internal_started);
     let read_source = |path: &PathBuf| read_source_text_with_limit(path, options.max_source_bytes);
     let read_cached_source = |path: &PathBuf| {
         (!fresh_paths.contains(path))
@@ -1238,10 +1241,6 @@ fn build_graph_inner(
     let mut resolved = resolve_prevalidated_owned_with_root(ordered, &source_text, &root);
     profile_internal("cross-file resolution total", &mut internal_started);
     drop(source_text);
-    let ast_cache_elapsed = ast_cache_handle
-        .join()
-        .map_err(|_| CoreError::WorkerPanic("AST cache publication".to_owned()))??;
-    profile_internal_duration("AST cache publication worker", ast_cache_elapsed);
     internal_started = Instant::now();
     let defer_program_join = options.force && !options.no_cluster && !has_program_artifacts;
     let mut program = if defer_program_join {
@@ -1426,8 +1425,17 @@ fn build_graph_inner(
         let published_nodes = published.document.nodes.len();
         let published_edges = published.document.links.len();
         let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
-            let (metrics, seal) =
-                publish_graph_and_store_from_canonical(&output_dir, &published.document)?;
+            let (metrics, seal) = if let Some(previous) =
+                load_file_node_delta_base(&output_dir, &published.document)
+            {
+                publish_graph_and_store_file_node_delta(
+                    &output_dir,
+                    &previous,
+                    &published.document,
+                )?
+            } else {
+                publish_graph_and_store_from_canonical(&output_dir, &published.document)?
+            };
             (Some(metrics), Some(seal))
         } else {
             let graph_path = output_dir.join("graph.json");
@@ -1912,8 +1920,13 @@ fn build_graph_inner(
     let omissions = published.omissions;
     let serialization_started = Instant::now();
     let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
-        let (metrics, seal) =
-            publish_graph_and_store_from_canonical(&output_dir, &published.document)?;
+        let (metrics, seal) = if let Some(previous) =
+            load_file_node_delta_base(&output_dir, &published.document)
+        {
+            publish_graph_and_store_file_node_delta(&output_dir, &previous, &published.document)?
+        } else {
+            publish_graph_and_store_from_canonical(&output_dir, &published.document)?
+        };
         (Some(metrics), Some(seal))
     } else {
         let graph_path = output_dir.join("graph.json");
@@ -2389,6 +2402,79 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<StorePublishMetrics, CoreE
     finish_store_snapshot(output_dir, &store, &builder, prepared)
 }
 
+/// Return the previous graph only when the current publication can use the
+/// strict file-node delta path. The check is intentionally cheap and does not
+/// serialize records; the snapshot layer repeats its bounded validation before
+/// touching the active store.
+fn load_file_node_delta_base(
+    output_dir: &Path,
+    current: &V1GraphDocument,
+) -> Option<V1GraphDocument> {
+    let previous = V1GraphDocument::load(&output_dir.join("graph.json")).ok()?;
+    file_node_delta_candidate(&previous, current).then_some(previous)
+}
+
+fn file_node_delta_candidate(previous: &V1GraphDocument, current: &V1GraphDocument) -> bool {
+    if previous.directed != current.directed || previous.multigraph != current.multigraph {
+        return false;
+    }
+    let previous_nodes = previous
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let current_nodes = current
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    if previous_nodes.len() != current_nodes.len() || previous_nodes.keys().ne(current_nodes.keys())
+    {
+        return false;
+    }
+    let mut changed_file = false;
+    for (id, current_node) in &current_nodes {
+        let Some(previous_node) = previous_nodes.get(id) else {
+            return false;
+        };
+        if *previous_node != *current_node {
+            if current_node.kind != NodeKind::File {
+                return false;
+            }
+            changed_file = true;
+        }
+    }
+    if !changed_file {
+        return false;
+    }
+    let previous_edges = previous
+        .links
+        .iter()
+        .map(|edge| (edge.id.as_str(), edge))
+        .collect::<BTreeMap<_, _>>();
+    let current_edges = current
+        .links
+        .iter()
+        .map(|edge| (edge.id.as_str(), edge))
+        .collect::<BTreeMap<_, _>>();
+    if previous_edges.len() != current_edges.len() || previous_edges != current_edges {
+        return false;
+    }
+    let previous_files = previous
+        .graph
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file.id.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let current_files = current
+        .graph
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file.id.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    previous_files == current_files
+}
+
 fn publish_graph_and_store_from_canonical(
     output_dir: &Path,
     graph: &V1GraphDocument,
@@ -2414,6 +2500,37 @@ fn publish_graph_and_store_from_canonical(
     };
     let prepared =
         builder.finish_content(&store, content?, graph_receipt.sha256, graph_receipt.bytes)?;
+    let metrics = finish_store_snapshot(output_dir, &store, &builder, prepared)?;
+    Ok((metrics, graph_seal))
+}
+
+fn publish_graph_and_store_file_node_delta(
+    output_dir: &Path,
+    previous: &V1GraphDocument,
+    graph: &V1GraphDocument,
+) -> Result<(StorePublishMetrics, ArtifactSeal), CoreError> {
+    if graph.graph.schema != GRAPH_SCHEMA_V1 {
+        return Err(CoreError::InvalidBuildState(format!(
+            "graph has unsupported schema {}; expected {GRAPH_SCHEMA_V1}",
+            graph.graph.schema
+        )));
+    }
+    let graph_path = output_dir.join("graph.json");
+    let store = SqliteStore::open(local_sqlite_store_path(&graph_path))?;
+    let builder = GraphSnapshotBuilder::new();
+    let canonical = canonical_graph_document_presorted(graph);
+    let (graph_receipt, content) = rayon::join(
+        || write_json_atomic_with_digest(&graph_path, &canonical),
+        || builder.prepare_file_node_delta(&store, previous, graph),
+    );
+    let graph_receipt = graph_receipt?;
+    let graph_seal = ArtifactSeal {
+        bytes: graph_receipt.bytes,
+        sha256: graph_receipt.sha256.clone(),
+    };
+    let content = content.or_else(|_| builder.prepare_content(&store, graph))?;
+    let prepared =
+        builder.finish_content(&store, content, graph_receipt.sha256, graph_receipt.bytes)?;
     let metrics = finish_store_snapshot(output_dir, &store, &builder, prepared)?;
     Ok((metrics, graph_seal))
 }
@@ -2466,6 +2583,10 @@ fn default_ast_workers() -> usize {
 #[cfg(not(target_os = "macos"))]
 fn default_ast_workers() -> usize {
     num_cpus::get()
+}
+
+fn should_parallel_extract(options: &BuildOptions, missing: usize, sources: usize) -> bool {
+    missing >= 256 || sources >= 256 || options.max_workers.is_some_and(|workers| workers > 1)
 }
 
 fn semantic_layer_is_empty(layer: &SemanticLayer) -> bool {
@@ -4808,6 +4929,7 @@ fn extraction_has_cacheable_ast_facts(extraction: &Extraction) -> bool {
 mod tests {
     use std::error::Error;
 
+    use compass_graph::{GraphSnapshotReader, IndexKind};
     use compass_model::code_graph::GraphDocument as V1GraphDocument;
     use serde_json::{Map, Value};
 
@@ -4821,6 +4943,19 @@ mod tests {
         assert!(cache_reuse_enabled(true, true));
         assert!(prior_published_graph_input_enabled(false));
         assert!(!prior_published_graph_input_enabled(true));
+    }
+
+    #[test]
+    fn explicit_multiple_ast_workers_enable_small_project_parallelism() {
+        let mut options = BuildOptions::new(".");
+        assert!(!should_parallel_extract(&options, 64, 64));
+
+        options.max_workers = Some(2);
+        assert!(should_parallel_extract(&options, 64, 64));
+
+        options.max_workers = Some(1);
+        assert!(!should_parallel_extract(&options, 64, 64));
+        assert!(should_parallel_extract(&options, 256, 256));
     }
 
     #[test]
@@ -5440,6 +5575,83 @@ mod tests {
                 .nodes
                 .iter()
                 .all(|node| node.source_file() != Some("helper.py"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn file_only_incremental_edit_reuses_store_index_roots() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        let source = root.join("main.py");
+        fs::write(&source, "def main():\n    return 1\n")?;
+        let mut options = BuildOptions::new(root);
+        options.no_viz = true;
+
+        let cold = build_local_graph(&options)?;
+        let store_path = local_sqlite_store_path(&cold.output_dir.join("graph.json"));
+        let before_store = SqliteStore::open(&store_path)?;
+        let before_reader = GraphSnapshotReader::open_active(&before_store)?
+            .ok_or("cold snapshot is not active")?;
+        let before_roots = before_reader
+            .manifest()
+            .roots
+            .iter()
+            .map(|root| (root.index, root.digest.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let before_graph = V1GraphDocument::load(&cold.output_dir.join("graph.json"))?;
+        drop(before_reader);
+        drop(before_store);
+
+        fs::write(
+            &source,
+            "def main():\n    return 1\n\n# metadata-only edit\n",
+        )?;
+        let changed = build_local_graph(&options)?;
+        let after_store = SqliteStore::open(&store_path)?;
+        let after_reader = GraphSnapshotReader::open_active(&after_store)?
+            .ok_or("changed snapshot is not active")?;
+        let after_roots = after_reader
+            .manifest()
+            .roots
+            .iter()
+            .map(|root| (root.index, root.digest.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let changed_graph = V1GraphDocument::load(&changed.output_dir.join("graph.json"))?;
+        let file_changed = changed_graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::File)
+            .ok_or("changed file node missing")?;
+        assert!(
+            before_graph
+                .nodes
+                .iter()
+                .any(|node| { node.id == file_changed.id && node != file_changed })
+        );
+        for index in [
+            IndexKind::Edges,
+            IndexKind::Outgoing,
+            IndexKind::Incoming,
+            IndexKind::Files,
+            IndexKind::Names,
+            IndexKind::Terms,
+            IndexKind::Communities,
+            IndexKind::Diagnostics,
+        ] {
+            assert_eq!(
+                before_roots.get(&index),
+                after_roots.get(&index),
+                "{index:?} root should be reused"
+            );
+        }
+        assert_ne!(
+            before_roots.get(&IndexKind::Nodes),
+            after_roots.get(&IndexKind::Nodes)
+        );
+        assert_ne!(
+            before_roots.get(&IndexKind::Metadata),
+            after_roots.get(&IndexKind::Metadata)
         );
         Ok(())
     }
