@@ -365,6 +365,56 @@ impl Flag for AfterContext {
 }
 
 #[test]
+fn rust_local_module_reexports_resolve_without_external_placeholders() {
+    let provider_source = b"pub fn work() {}\n";
+    let root_source = b"mod api;\npub use api::work;\nfn caller() { work(); }\n";
+    let provider = extract("src/api.rs", provider_source);
+    let root = extract("src/lib.rs", root_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, root],
+        &HashMap::from([
+            (
+                "src/api.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(root_source.to_vec()).expect("root source"),
+            ),
+        ]),
+    );
+    let work = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::api::work")
+        .expect("re-exported function");
+    let caller = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::caller")
+        .expect("caller function");
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.target == work.id
+            && edge.string("relation") == "re_exports"
+            && edge.string("resolution_rule") == "explicit-binding"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == caller.id
+            && edge.target == work.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "explicit-binding"
+    }));
+    assert!(resolved.nodes.iter().all(|node| {
+        node.string("qualified_name") != "api::work"
+            || node
+                .attributes
+                .get("placeholder")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+    }));
+}
+
+#[test]
 fn rust_generic_impl_preserves_exact_type_ownership() {
     let source = br#"trait Render {}
 struct Container<T>(T);
@@ -406,6 +456,96 @@ impl<T> Render for Container<T> {
             && edge.target == render_method.id
             && edge.string("relation") == "contains"
     }));
+}
+
+#[test]
+fn rust_cargo_manifest_resolution_uses_workspace_alias_and_custom_lib_roots()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let fixtures = [
+        (
+            "Cargo.toml",
+            r#"[workspace]
+members = ["crates/*"]
+
+[workspace.dependencies]
+provider-alias = { package = "provider-package", path = "crates/provider" }
+"#,
+        ),
+        (
+            "crates/provider/Cargo.toml",
+            r#"[package]
+name = "provider-package"
+version = "0.1.0"
+
+[lib]
+name = "provider_api"
+path = "src/api.rs"
+"#,
+        ),
+        ("crates/provider/src/api.rs", "pub fn work() {}\n"),
+        (
+            "crates/consumer/Cargo.toml",
+            r#"[package]
+name = "consumer-package"
+version = "0.1.0"
+
+[lib]
+name = "consumer_api"
+path = "src/custom_root.rs"
+
+[dependencies]
+provider_alias = { workspace = true }
+"#,
+        ),
+        (
+            "crates/consumer/src/custom_root.rs",
+            "use provider_alias::work;\npub fn caller() { work(); }\n",
+        ),
+    ];
+    let mut extractions = Vec::with_capacity(fixtures.len());
+    let mut sources = HashMap::new();
+    for (relative, source) in fixtures {
+        let path = directory.path().join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        if path.extension().and_then(|extension| extension.to_str()) == Some("rs") {
+            let source_file = path.to_str().ok_or("non-UTF-8 fixture path")?;
+            extractions.push(extract(source_file, source.as_bytes()));
+            sources.insert(source_file.to_owned(), source.to_owned());
+        }
+    }
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, directory.path());
+    let provider = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name") == "provider_api::work"
+                && node.string("source_file").ends_with("src/api.rs")
+        })
+        .ok_or("missing provider endpoint")?;
+    let caller = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name") == "consumer_api::caller"
+                && node.string("source_file").ends_with("src/custom_root.rs")
+        })
+        .ok_or("missing consumer endpoint")?;
+    assert!(
+        !resolved
+            .nodes
+            .iter()
+            .any(|node| node.string("qualified_name") == "provider_alias::work")
+    );
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == caller.id
+            && edge.target == provider.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "explicit-binding"
+    }));
+    Ok(())
 }
 
 #[test]
@@ -1169,8 +1309,146 @@ fn rust_import_binding_resolves_the_qualified_associated_function() {
 }
 
 #[test]
+fn rust_typed_receivers_resolve_parameters_and_local_values_exactly() {
+    let provider_source = b"pub struct Client;\nimpl Client { pub fn send(&self) {} }\n";
+    let caller_source = b"use crate::api::Client;\nfn run(client: &Client) { let local: Client = Client; client.send(); local.send(); }\n";
+    let provider = extract("src/api.rs", provider_source);
+    let caller = extract("src/lib.rs", caller_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, caller],
+        &HashMap::from([
+            (
+                "src/api.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(caller_source.to_vec()).expect("caller source"),
+            ),
+        ]),
+    );
+    let run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::run")
+        .expect("run declaration");
+    let send = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::api::Client::send")
+        .expect("Client.send declaration");
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.source == run.id && edge.target == send.id && edge.string("relation") == "calls"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls.len(),
+        2,
+        "typed receivers should share one exact endpoint"
+    );
+    assert!(calls.iter().all(|edge| {
+        edge.string("resolution_rule") != "deferred-receiver"
+            && edge.string("confidence") == "EXTRACTED"
+    }));
+}
+
+#[test]
+fn rust_typed_field_receivers_resolve_without_flattening_to_the_outer_type() {
+    let source = b"pub struct Transport;
+impl Transport { pub fn send(&self) {} }
+pub struct Client { transport: Transport }
+pub struct Holder { client: Client }
+impl Holder { pub fn run(&self) { self.client.transport.send(); } }
+";
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Holder::run")
+        .expect("Holder.run declaration");
+    let send = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Transport::send")
+        .expect("Transport.send declaration");
+    let call = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.source == run.id && edge.target == send.id && edge.string("relation") == "calls"
+        })
+        .expect("self.client.send call");
+    assert_ne!(call.string("resolution_rule"), "deferred-receiver");
+    assert_eq!(call.string("confidence"), "EXTRACTED");
+}
+
+#[test]
+fn rust_typed_receivers_respect_nested_shadowing() {
+    let provider_source = b"pub struct Client;
+impl Client { pub fn send(&self) {} }
+";
+    let caller_source = b"use crate::api::Client;
+fn run(client: &Client) {
+    { let client: Unknown = Unknown; client.send(); }
+    client.send();
+}
+";
+    let provider = extract("src/api.rs", provider_source);
+    let caller = extract("src/lib.rs", caller_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, caller],
+        &HashMap::from([
+            (
+                "src/api.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(caller_source.to_vec()).expect("caller source"),
+            ),
+        ]),
+    );
+    let run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::run")
+        .expect("run declaration");
+    let send = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::api::Client::send")
+        .expect("Client.send declaration");
+    let exact_calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.source == run.id
+                && edge.target == send.id
+                && edge.string("relation") == "calls"
+                && edge.string("resolution_rule") != "deferred-receiver"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(exact_calls.len(), 1, "only the outer binding is exact");
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == run.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "deferred-receiver"
+    }));
+}
+
+#[test]
 fn rust_unresolved_lexical_receiver_is_deferred_without_becoming_external() {
-    let source = b"struct World;\nfn run(world: World) { world.spawn(); }\n";
+    let source = b"fn run(world: Unknown) {\n    world.spawn();\n}\n";
     let extracted = extract("src/lib.rs", source);
     let resolved = compass_resolve::resolve(
         &[extracted],
@@ -1182,7 +1460,7 @@ fn rust_unresolved_lexical_receiver_is_deferred_without_becoming_external() {
     let deferred = resolved
         .nodes
         .iter()
-        .find(|node| node.string("qualified_name") == "world::spawn")
+        .find(|node| node.string("qualified_name") == "crate::Unknown::spawn")
         .expect("deferred world.spawn target");
 
     assert_eq!(
