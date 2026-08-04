@@ -1119,7 +1119,8 @@ impl GraphDocument {
         if found.as_deref() != Some(CODE_GRAPH_SCHEMA_V1) {
             return Err(GraphError::UnsupportedGraphSchema { found });
         }
-        let document = serde_json::from_slice(&bytes).map_err(GraphError::Corrupt)?;
+        let document: GraphDocument =
+            serde_json::from_slice(&bytes).map_err(GraphError::Corrupt)?;
         validate_code_graph(&document)?;
         let _ = write_content_cache(path, &digest, &document);
         Ok(document)

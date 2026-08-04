@@ -128,6 +128,9 @@ fn summaries_capture_behavior_and_reverse_calls() -> Result<(), Box<dyn std::err
         bundle.canonical_bytes_prevalidated()?,
         bundle.canonical_bytes()?
     );
+    let mut streamed = Vec::new();
+    bundle.write_canonical_prevalidated(&mut streamed)?;
+    assert_eq!(streamed, bundle.canonical_bytes_prevalidated()?);
     Ok(())
 }
 

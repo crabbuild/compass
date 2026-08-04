@@ -170,20 +170,43 @@ impl BuildGuard {
         self.commit_with_artifacts(&[])
     }
 
-    pub fn commit_with_artifacts(mut self, artifacts: &[&str]) -> Result<(), FileError> {
+    pub fn commit_with_artifacts(self, artifacts: &[&str]) -> Result<(), FileError> {
+        self.commit_with_artifacts_inner(artifacts, true)
+    }
+
+    /// Publish a generation whose listed artifacts were already written by an
+    /// atomic writer in this generation. The files are still checked before
+    /// publication, but are not flushed a second time during the commit.
+    pub fn commit_with_presealed_artifacts(self, artifacts: &[&str]) -> Result<(), FileError> {
+        self.commit_with_artifacts_inner(artifacts, false)
+    }
+
+    fn commit_with_artifacts_inner(
+        mut self,
+        artifacts: &[&str],
+        sync_artifacts: bool,
+    ) -> Result<(), FileError> {
         for artifact in artifacts {
             let path = self.generation_directory.join(artifact);
             if !path.is_file() {
                 return Err(FileError::InvalidGenerationArtifact(path));
             }
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&path)
-                .and_then(|file| file.sync_all())
-                .map_err(|source| io_error(&path, source))?;
+            if sync_artifacts {
+                OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&path)
+                    .and_then(|file| file.sync_all())
+                    .map_err(|source| io_error(&path, source))?;
+            }
         }
-        sync_directory(&self.generation_directory)?;
+        // Atomic writers used for presealed artifacts already sync the file
+        // and its parent directory. The final directory sync below orders the
+        // incomplete-marker removal with those durable files, so a second
+        // pre-commit directory flush is unnecessary on that path.
+        if sync_artifacts {
+            sync_directory(&self.generation_directory)?;
+        }
         fs::remove_file(&self.marker).map_err(|source| io_error(&self.marker, source))?;
         sync_directory(&self.generation_directory)?;
         let pointer = self.output_directory.join(ACTIVE_GENERATION);

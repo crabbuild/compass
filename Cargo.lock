@@ -1285,9 +1285,11 @@ dependencies = [
 name = "compass-program"
 version = "0.3.0"
 dependencies = [
+ "ahash",
  "base64",
  "compass-ir",
  "protobuf",
+ "rayon",
  "scip",
  "serde",
  "serde_json",

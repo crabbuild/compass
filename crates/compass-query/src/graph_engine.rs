@@ -4,14 +4,14 @@
 //! indexes directly. Generic store adapters can still use the materializing
 //! engine for compatibility and differential validation.
 
-use std::fs;
+use std::fs::{self, File};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
-use compass_graph::{
-    GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotReader, SnapshotSelector, canonical_graph_json,
-};
+use compass_graph::{GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotReader, SnapshotSelector};
 use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
 use compass_store::{STORE_REF_FILE_NAME, SqliteStore, Store, StoreRef, local_sqlite_store_path};
+use sha2::{Digest, Sha256};
 
 use crate::cql::{QueryError, QueryErrorKind};
 use crate::index::{EngineSelection, QueryEngineKind};
@@ -22,13 +22,18 @@ const MAX_STORE_REF_BYTES: u64 = 16 * 1024;
 pub trait GraphEngine: Send + Sync {
     fn kind(&self) -> QueryEngineKind;
     fn graph(&self) -> &GraphDocument;
-    fn graph_bytes(&self) -> &[u8];
+    /// Exact content identity used to address the materialized query index.
+    ///
+    /// JSON engines hash the authoritative artifact bytes without building a
+    /// second canonical graph-sized buffer. Store engines use the immutable
+    /// snapshot's already-verified canonical digest.
+    fn graph_identity(&self) -> &str;
 }
 
 /// Permanent compatible engine for a validated `graph.json` artifact.
 pub struct JsonGraphEngine {
     graph: GraphDocument,
-    graph_bytes: Vec<u8>,
+    graph_identity: String,
 }
 
 impl JsonGraphEngine {
@@ -41,14 +46,11 @@ impl JsonGraphEngine {
             )
         })?;
         validate_graph_schema(&graph)?;
-        let graph_bytes = canonical_graph_json(&graph).map_err(|error| {
-            QueryError::new(
-                QueryErrorKind::CorruptArtifact,
-                "graph_canonicalization_failed",
-                error.to_string(),
-            )
-        })?;
-        Ok(Self { graph, graph_bytes })
+        let graph_identity = hash_graph_artifact(path)?;
+        Ok(Self {
+            graph,
+            graph_identity,
+        })
     }
 }
 
@@ -61,15 +63,15 @@ impl GraphEngine for JsonGraphEngine {
         &self.graph
     }
 
-    fn graph_bytes(&self) -> &[u8] {
-        &self.graph_bytes
+    fn graph_identity(&self) -> &str {
+        &self.graph_identity
     }
 }
 
 /// Store-backed engine for one immutable, validated SQLite snapshot.
 pub struct StoreGraphEngine {
     graph: GraphDocument,
-    graph_bytes: Vec<u8>,
+    graph_identity: String,
 }
 
 pub(crate) struct LocalStoreSnapshot {
@@ -124,6 +126,7 @@ impl StoreGraphEngine {
             manifest.node_count,
             manifest.edge_count,
             graph_bytes,
+            manifest.graph_digest.clone(),
         )
     }
 
@@ -134,6 +137,7 @@ impl StoreGraphEngine {
         let graph_schema = manifest.graph_schema.clone();
         let node_count = manifest.node_count;
         let edge_count = manifest.edge_count;
+        let graph_identity = manifest.graph_digest.clone();
         let graph_bytes = reader.export_json_bytes().map_err(|error| {
             QueryError::new(
                 QueryErrorKind::CorruptArtifact,
@@ -141,7 +145,13 @@ impl StoreGraphEngine {
                 error.to_string(),
             )
         })?;
-        Self::from_parts(graph_schema, node_count, edge_count, graph_bytes)
+        Self::from_parts(
+            graph_schema,
+            node_count,
+            edge_count,
+            graph_bytes,
+            graph_identity,
+        )
     }
 
     fn from_parts(
@@ -149,6 +159,7 @@ impl StoreGraphEngine {
         node_count: u64,
         edge_count: u64,
         graph_bytes: Vec<u8>,
+        graph_identity: String,
     ) -> Result<Self, QueryError> {
         if graph_schema != CODE_GRAPH_SCHEMA_V1 {
             return Err(QueryError::new(
@@ -178,14 +189,10 @@ impl StoreGraphEngine {
                 "store manifest counts do not match the decoded graph",
             ));
         }
-        let graph_bytes = canonical_graph_json(&graph).map_err(|error| {
-            QueryError::new(
-                QueryErrorKind::CorruptArtifact,
-                "store_graph_canonicalization_failed",
-                error.to_string(),
-            )
-        })?;
-        Ok(Self { graph, graph_bytes })
+        Ok(Self {
+            graph,
+            graph_identity,
+        })
     }
 }
 
@@ -253,9 +260,36 @@ impl GraphEngine for StoreGraphEngine {
         &self.graph
     }
 
-    fn graph_bytes(&self) -> &[u8] {
-        &self.graph_bytes
+    fn graph_identity(&self) -> &str {
+        &self.graph_identity
     }
+}
+
+fn hash_graph_artifact(path: &Path) -> Result<String, QueryError> {
+    let file = File::open(path).map_err(|error| {
+        QueryError::new(
+            QueryErrorKind::CorruptArtifact,
+            "graph_hash_failed",
+            error.to_string(),
+        )
+    })?;
+    let mut reader = BufReader::new(file);
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let read = reader.read(&mut buffer).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "graph_hash_failed",
+                error.to_string(),
+            )
+        })?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 /// Open the selected graph engine. Default selection always uses the permanent

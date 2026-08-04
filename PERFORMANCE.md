@@ -160,6 +160,49 @@ The release gate rejects:
 Local observations are diagnostic evidence. Promote a baseline only from a
 controlled Compass CI run with retained artifacts.
 
+## Explicit Graphify comparison
+
+An isolated diagnostic comparison was run on 2026-08-03 on Apple Silicon using
+Graphify 0.9.32 (`00efd6e7969837ae4a9f11d8d504dcd3b20b09df`), Compass's release
+binary from the current working tree, and fresh output directories for every
+sample. The corpus commits were Django
+`2cace96be6d64b7dde7eb66d3ffc2c7f08ef644f` and grpc-java
+`e1fc64cada7a06c1b2fe7602980be051cf574378`.
+
+The fair structural workload used Compass `extract --code-only --no-cluster --no-viz --force`
+and Graphify's native code-only, no-clustering profile.
+Compass now omits Program IR by default; `--program` is a separate, explicit
+workload. Compass `--code-only` also excludes document extractors, while the
+file inventory remains available for diagnostics.
+
+The latest three-sample cold-build observations were:
+
+| Repository | Compass p50 | Graphify p50 | Graphify / Compass | Compass graph |
+| --- | ---: | ---: | ---: | --- |
+| Django | 10.38 s | 40.74 s | 3.92× | 80,989 nodes / 187,293 edges / 286,522,634 B |
+| grpc-java | 11.31 s | 39.073 s | 3.45× | 94,423 nodes / 241,093 edges / 377,825,842 B |
+
+The grpc-java sample ran while the shared development volume was contended,
+so its wall-time row is diagnostic rather than a clean qualification. Compass
+still publishes a richer contract: Graphify's matching graphs were about 51,526
+/ 165,454 / 78,312,513 B for Django and 34,460 / 126,990 / 77,983,036 B for
+grpc-java. These observations do not yet meet the requested 5×–10× end-to-end
+build target; dropping provenance, typed records, or Program output would not
+be a valid comparison.
+
+After one untimed index warmup and ten measured fresh Compass processes, the
+current Django code-only graph kept deterministic result digests and met the
+5× query gate:
+
+| Query | Compass p50 | Graphify p50 | Graphify / Compass |
+| --- | ---: | ---: | ---: |
+| `where is URL resolution implemented` | 0.525 s | 2.675 s | 5.10× |
+| `how does a model save data` | 0.550 s | 2.905 s | 5.28× |
+
+These cross-tool observations are diagnostic evidence rather than a promoted
+Compass baseline. The remaining build gap is primarily the richer graph size
+and durable publication contract, not an unresolved duplicate atomic flush.
+
 ## Django cold-build regression qualification
 
 The 0.2.1 code-graph performance hardening was qualified against Django commit

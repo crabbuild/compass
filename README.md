@@ -295,13 +295,14 @@ scope, strict mode, upgrades, and uninstall.
 
 ### Inspect program behavior with evidence
 
-Native `update`, `extract`, and `watch` builds also write `program.json`, a
+Native `init`, `update`, `extract`, and `watch` builds publish the structural graph by
+default. Pass `--program` when a scenario needs `program.json`, the optional
 language-neutral Program IR containing functions, conservative basic blocks,
 operations, call candidates, capability coverage, provenance, and derived
-summaries. The offline-first pipeline combines Tree-sitter syntax evidence for
-Rust and TypeScript-family languages with any SCIP indexes already on disk.
-Compass does not invoke an indexer, compiler, language server, model, or network
-service to build this artifact.
+summaries; `--program-artifact` also enables it. The offline-first pipeline
+combines Tree-sitter syntax evidence for Rust and TypeScript-family languages
+with any SCIP indexes already on disk. Compass does not invoke an indexer,
+compiler, language server, model, or network service to build this artifact.
 
 Schema `http://crab.build/compass/v1` reports each capability as `complete`,
 `partial`, `indeterminate`, or `failed`, with machine-readable reasons for

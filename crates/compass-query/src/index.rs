@@ -17,7 +17,7 @@ use crate::code_query::CodeGraphBackend;
 use crate::cql::{QueryError, QueryErrorKind};
 use crate::graph_engine::{open_graph_engine, open_local_store_snapshot};
 
-const INDEX_FORMAT_VERSION: &str = "compass-code-index/2";
+const INDEX_FORMAT_VERSION: &str = "compass-code-index/3";
 
 /// Selects the source used to hydrate the typed query engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -84,11 +84,11 @@ fn open_from_graph_engine(
     graph_engine: Box<dyn crate::graph_engine::GraphEngine>,
 ) -> Result<CodeQueryEngine, QueryError> {
     let graph = graph_engine.graph().clone();
-    let graph_bytes = graph_engine.graph_bytes().to_vec();
+    let graph_identity = graph_engine.graph_identity().to_owned();
     let engine_kind = graph_engine.kind();
     let (program, program_digest) = load_program(program_path)?;
     let key = index_key(
-        &graph_bytes,
+        &graph_identity,
         program_digest.as_deref(),
         &graph.graph.build.schema_fingerprint,
     );
@@ -119,7 +119,7 @@ fn open_from_graph_engine(
         .graph
         .diagnostics
         .iter()
-        .find(|diagnostic| diagnostic.code == "publication_omission_summary")
+        .rfind(|diagnostic| diagnostic.code == "publication_omission_summary")
         .map(|diagnostic| {
             format!(
                 "Published graph coverage is incomplete: {}",
@@ -206,10 +206,10 @@ fn load_program(
     Ok((Some(program), Some(hex_digest(&bytes))))
 }
 
-fn index_key(graph: &[u8], program_digest: Option<&str>, graph_schema: &str) -> String {
+fn index_key(graph_identity: &str, program_digest: Option<&str>, graph_schema: &str) -> String {
     let mut digest = Sha256::new();
     for value in [
-        hex_digest(graph),
+        graph_identity.to_owned(),
         program_digest.unwrap_or("none").to_owned(),
         graph_schema.to_owned(),
         CODE_QUERY_SCHEMA_V1.to_owned(),

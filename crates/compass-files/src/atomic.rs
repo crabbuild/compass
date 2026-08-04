@@ -145,6 +145,33 @@ pub fn write_bytes_atomic(path: impl AsRef<Path>, bytes: &[u8]) -> Result<(), Fi
     })
 }
 
+/// Atomically publish bytes produced by a bounded streaming callback.
+///
+/// The callback receives the same buffered writer and durability guarantees as
+/// the typed JSON helpers, while callers can choose a specialized serializer
+/// without first materializing the complete artifact.
+pub fn write_atomic_with<F, E>(path: impl AsRef<Path>, write: F) -> Result<(), E>
+where
+    F: FnOnce(&mut dyn Write) -> Result<(), E>,
+    E: From<FileError>,
+{
+    let mut callback_error = None;
+    let atomic_result = atomic_replace(path.as_ref(), |writer| {
+        if let Err(error) = write(writer) {
+            callback_error = Some(error);
+            return Err(io_error(
+                path.as_ref(),
+                std::io::Error::other("atomic byte stream callback failed"),
+            ));
+        }
+        Ok(())
+    });
+    if let Some(error) = callback_error {
+        return Err(error);
+    }
+    atomic_result.map_err(E::from)
+}
+
 pub fn write_json_atomic<T: Serialize>(
     path: impl AsRef<Path>,
     value: &T,
@@ -191,6 +218,42 @@ pub fn write_json_atomic_with_digest<T: Serialize>(
             path.as_ref(),
             std::io::Error::other("JSON digest receipt was not produced"),
         )
+    })
+}
+
+/// Atomically produce a bounded stream of bytes while returning the digest of
+/// the exact bytes that reached the staging file.
+pub fn write_atomic_with_digest<F, E>(
+    path: impl AsRef<Path>,
+    write: F,
+) -> Result<AtomicJsonDigest, E>
+where
+    F: FnOnce(&mut dyn Write) -> Result<(), E>,
+    E: From<FileError>,
+{
+    let mut receipt = None;
+    let mut callback_error = None;
+    let atomic_result = atomic_replace(path.as_ref(), |writer| {
+        let mut hashing = HashingWriter::new(writer);
+        if let Err(error) = write(&mut hashing) {
+            callback_error = Some(error);
+            return Err(io_error(
+                path.as_ref(),
+                std::io::Error::other("atomic byte stream callback failed"),
+            ));
+        }
+        receipt = Some(hashing.finish());
+        Ok(())
+    });
+    if let Some(error) = callback_error {
+        return Err(error);
+    }
+    atomic_result.map_err(E::from)?;
+    receipt.ok_or_else(|| {
+        E::from(io_error(
+            path.as_ref(),
+            std::io::Error::other("atomic byte stream did not produce a digest receipt"),
+        ))
     })
 }
 
@@ -316,7 +379,7 @@ mod tests {
 
     use sha2::{Digest, Sha256};
 
-    use super::{write_json_ascii_atomic, write_json_atomic_with_digest};
+    use super::{write_atomic_with_digest, write_json_ascii_atomic, write_json_atomic_with_digest};
 
     #[test]
     fn streams_python_compatible_ascii_json_with_optional_newline() {
@@ -334,6 +397,24 @@ mod tests {
         let path = directory.path().join("graph.json");
         let receipt = write_json_atomic_with_digest(&path, &json!({"value": [1, 2, 3]}))
             .unwrap_or_else(|_| std::process::abort());
+        let bytes = fs::read(path).unwrap_or_else(|_| std::process::abort());
+        assert_eq!(receipt.bytes, bytes.len() as u64);
+        assert_eq!(receipt.sha256, format!("{:x}", Sha256::digest(&bytes)));
+    }
+
+    #[test]
+    fn streamed_digest_matches_callback_bytes() {
+        let directory = tempfile::tempdir().unwrap_or_else(|_| std::process::abort());
+        let path = directory.path().join("streamed.bin");
+        let receipt = write_atomic_with_digest(&path, |writer| {
+            writer
+                .write_all(b"streamed bytes")
+                .map_err(|source| super::FileError::Io {
+                    path: path.clone(),
+                    source,
+                })
+        })
+        .unwrap_or_else(|_| std::process::abort());
         let bytes = fs::read(path).unwrap_or_else(|_| std::process::abort());
         assert_eq!(receipt.bytes, bytes.len() as u64);
         assert_eq!(receipt.sha256, format!("{:x}", Sha256::digest(&bytes)));

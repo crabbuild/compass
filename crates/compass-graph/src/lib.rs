@@ -29,12 +29,13 @@ pub use snapshot::{
     GraphSnapshotGcStats, GraphSnapshotManifest, GraphSnapshotMetadata, GraphSnapshotReader,
     IndexKind, PreparedGraphSnapshot, PreparedGraphSnapshotContent, SnapshotError,
     SnapshotReadLimits, SnapshotRoot, SnapshotSelector, activate_graph_snapshot,
-    active_graph_snapshot, canonical_graph_document, canonical_graph_json, encode_graph_index_key,
-    garbage_collect_graph_snapshots, graph_snapshot_needs_gc, prepare_graph_snapshot,
+    active_graph_snapshot, canonical_graph_document, canonical_graph_document_presorted,
+    canonical_graph_json, encode_graph_index_key, garbage_collect_graph_snapshots,
+    graph_snapshot_needs_gc, prepare_graph_snapshot, write_canonical_graph_json,
 };
 pub use v1::{
-    BuildEvidence, InventoryEvidence, V1_PUBLICATION_SEMANTICS_VERSION, canonical_edge_kind,
-    canonical_raw_edge_sites, extraction_from_v1, normalize_document_v1,
+    BuildEvidence, InventoryEvidence, SourceDigest, V1_PUBLICATION_SEMANTICS_VERSION,
+    canonical_edge_kind, canonical_raw_edge_sites, extraction_from_v1, normalize_document_v1,
     normalize_document_v1_with_evidence_best_effort_owned, normalize_document_v1_with_inventory,
     normalize_document_v1_with_inventory_best_effort,
     normalize_document_v1_with_inventory_best_effort_owned, normalize_v1, normalize_v1_best_effort,
@@ -59,6 +60,13 @@ use serde_json::{Map, Value};
 type EdgeRecord = RawEdgeRecord;
 type NodeRecord = RawNodeRecord;
 type EndpointAliases = HashMap<String, BTreeSet<String>>;
+
+#[derive(Clone, Copy)]
+struct NodeSourceFacts<'a> {
+    source_file: &'a str,
+    has_extension: bool,
+    language_family: Option<&'static str>,
+}
 
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
 pub const GRAPH_DIAGNOSTICS_EXTENSION: &str = "_compass_v1_graph_diagnostics";
@@ -199,9 +207,6 @@ fn build_from_owned_extraction(
     }
     profile_internal("graph ghost remapping", &mut profile_started);
 
-    let mut endpoint_remap = rekey.clone();
-    endpoint_remap.extend(doc_remap.clone());
-    endpoint_remap.extend(ghost_remap.clone());
     let mut endpoint_rewrite_evidence = HashMap::new();
     for old in rekey.keys() {
         endpoint_rewrite_evidence.insert(
@@ -211,6 +216,19 @@ fn build_from_owned_extraction(
                 score: 1.0,
             },
         );
+    }
+    // The semantic remap is the first stage in the document-twin rule. Keep
+    // only the raw endpoint IDs that can reach a document-twin remap before
+    // transferring all three maps into the single lookup table below. This
+    // preserves the self-loop quarantine check without cloning the complete
+    // remap maps at the graph-assembly peak.
+    let mut doc_twin_rewrite_sources =
+        HashSet::with_capacity(doc_remap.len().saturating_add(rekey.len()));
+    doc_twin_rewrite_sources.extend(doc_remap.keys().cloned());
+    for old in rekey.keys() {
+        if doc_remap.contains_key(&remap_endpoint(old, &rekey)) {
+            doc_twin_rewrite_sources.insert(old.clone());
+        }
     }
     for old in doc_remap.keys() {
         endpoint_rewrite_evidence.insert(
@@ -230,6 +248,9 @@ fn build_from_owned_extraction(
             },
         );
     }
+    let mut endpoint_remap = rekey;
+    endpoint_remap.extend(doc_remap);
+    endpoint_remap.extend(ghost_remap);
 
     let mut normalized = EndpointAliases::new();
     for node in &nodes {
@@ -251,6 +272,28 @@ fn build_from_owned_extraction(
     add_legacy_alias_candidates(&nodes, &needed_aliases, &mut normalized);
     profile_internal("graph alias preparation", &mut profile_started);
 
+    // Edge normalization asks the same two endpoint questions for every
+    // relation. Cache the immutable node facts once so the hot loop does not
+    // allocate a source string and parse its extension for every edge.
+    let node_source_facts = nodes
+        .iter()
+        .map(|node| {
+            let source_file = node
+                .attributes
+                .get("source_file")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            NodeSourceFacts {
+                source_file,
+                has_extension: Path::new(source_file)
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| !extension.is_empty()),
+                language_family: source_language_family(source_file),
+            }
+        })
+        .collect::<Vec<_>>();
+
     let mut source_edges = std::mem::take(&mut extraction.edges);
     for edge in &mut source_edges {
         preserve_occurrence_rule(&mut edge.attributes);
@@ -269,8 +312,8 @@ fn build_from_owned_extraction(
             stamp_graph_endpoint_rewrites(edge, &rewrites);
         }
         if edge.source == edge.target
-            && (doc_remap.contains_key(&remap_endpoint(&original_source, &rekey))
-                || doc_remap.contains_key(&remap_endpoint(&original_target, &rekey)))
+            && (doc_twin_rewrite_sources.contains(original_source.as_str())
+                || doc_twin_rewrite_sources.contains(original_target.as_str()))
         {
             edge.attributes
                 .insert("_drop".to_owned(), Value::Bool(true));
@@ -314,16 +357,22 @@ fn build_from_owned_extraction(
         edge.attributes.remove("target_file");
         sanitize_numeric(&mut edge.attributes, "weight");
         sanitize_numeric(&mut edge.attributes, "confidence_score");
-        backfill_source_file(&mut edge, &nodes, &positions);
+        backfill_source_file(&mut edge, &positions, &node_source_facts);
         normalize_attribute_path(&mut edge.attributes, "source_file", root);
         normalize_source_anchor_path(&mut edge.attributes, root);
-        if is_cross_language_phantom(&edge, &nodes, &positions) {
+        if is_cross_language_phantom(&edge, &positions, &node_source_facts) {
             return (None, diagnostics);
         }
-        edge.attributes
-            .insert("_src".to_owned(), Value::String(edge.source.clone()));
-        edge.attributes
-            .insert("_tgt".to_owned(), Value::String(edge.target.clone()));
+        // NetworkX-style undirected documents may reorder endpoints, so keep
+        // the pre-order direction as private metadata in that mode. Directed
+        // documents already retain the authoritative endpoints directly on
+        // the edge and do not need a second pair of ID strings per link.
+        if !directed {
+            edge.attributes
+                .insert("_src".to_owned(), Value::String(edge.source.clone()));
+            edge.attributes
+                .insert("_tgt".to_owned(), Value::String(edge.target.clone()));
+        }
         (Some(edge), diagnostics)
     };
     let normalized_results = if source_edges.len() < 100_000 {
@@ -915,6 +964,18 @@ pub fn dedupe_nodes(nodes: &[NodeRecord]) -> Vec<NodeRecord> {
     output
 }
 
+/// Count the nodes that remain after ID-based deduplication without cloning
+/// their attributes. This is useful for guards that only need the resulting
+/// cardinality, not the deduplicated records themselves.
+#[must_use]
+pub fn deduped_node_count(nodes: &[NodeRecord]) -> usize {
+    let mut ids = HashSet::with_capacity(nodes.len());
+    nodes
+        .iter()
+        .filter(|node| ids.insert(node.id.as_str()))
+        .count()
+}
+
 /// Collapse exact connectivity relations, preserving the first edge.
 #[must_use]
 pub fn dedupe_edges(edges: &[EdgeRecord]) -> Vec<EdgeRecord> {
@@ -1088,8 +1149,8 @@ fn sanitize_numeric(attributes: &mut Map<String, Value>, key: &str) {
 
 fn backfill_source_file(
     edge: &mut EdgeRecord,
-    nodes: &[NodeRecord],
     positions: &HashMap<String, usize>,
+    node_source_facts: &[NodeSourceFacts<'_>],
 ) {
     if edge
         .attributes
@@ -1101,16 +1162,14 @@ fn backfill_source_file(
     }
     let source = positions
         .get(&edge.source)
-        .and_then(|index| nodes.get(*index))
-        .and_then(|node| node.attributes.get("source_file"))
-        .and_then(Value::as_str)
+        .and_then(|index| node_source_facts.get(*index))
+        .map(|facts| facts.source_file)
         .filter(|value| !value.is_empty())
         .or_else(|| {
             positions
                 .get(&edge.target)
-                .and_then(|index| nodes.get(*index))
-                .and_then(|node| node.attributes.get("source_file"))
-                .and_then(Value::as_str)
+                .and_then(|index| node_source_facts.get(*index))
+                .map(|facts| facts.source_file)
                 .filter(|value| !value.is_empty())
         })
         .unwrap_or_default();
@@ -1120,8 +1179,8 @@ fn backfill_source_file(
 
 fn is_cross_language_phantom(
     edge: &EdgeRecord,
-    nodes: &[NodeRecord],
     positions: &HashMap<String, usize>,
+    node_source_facts: &[NodeSourceFacts<'_>],
 ) -> bool {
     let relation = relation(edge);
     if !matches!(
@@ -1130,52 +1189,60 @@ fn is_cross_language_phantom(
     ) {
         return false;
     }
-    let source_file = positions
+    let source_facts = positions
         .get(&edge.source)
-        .and_then(|index| nodes.get(*index))
-        .map(|node| node.string("source_file"))
-        .unwrap_or_default();
-    let target_file = positions
+        .and_then(|index| node_source_facts.get(*index));
+    let target_facts = positions
         .get(&edge.target)
-        .and_then(|index| nodes.get(*index))
-        .map(|node| node.string("source_file"))
-        .unwrap_or_default();
-    let source_ext = extension(&source_file);
-    let target_ext = extension(&target_file);
-    let source_family = edge_language_family(&source_ext);
-    let target_family = edge_language_family(&target_ext);
+        .and_then(|index| node_source_facts.get(*index));
+    let source_family = source_facts.and_then(|facts| facts.language_family);
+    let target_family = target_facts.and_then(|facts| facts.language_family);
     if relation == "calls" {
         return edge.attributes.get("confidence").and_then(Value::as_str) == Some("INFERRED")
-            && !source_ext.is_empty()
-            && !target_ext.is_empty()
+            && source_facts.is_some_and(|facts| facts.has_extension)
+            && target_facts.is_some_and(|facts| facts.has_extension)
             && source_family != target_family;
     }
     source_family.is_some() && target_family.is_some() && source_family != target_family
 }
 
-fn extension(source: &str) -> String {
-    Path::new(source)
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-}
-
-fn edge_language_family(extension: &str) -> Option<&'static str> {
-    match extension {
-        "py" | "pyi" => Some("py"),
-        "js" | "mjs" | "cjs" | "jsx" | "ts" | "tsx" | "mts" | "cts" => Some("js"),
-        "go" => Some("go"),
-        "rs" => Some("rs"),
-        "java" | "kt" | "scala" | "groovy" => Some("jvm"),
-        "c" | "h" | "cc" | "cpp" | "hpp" | "cxx" | "hh" | "hxx" | "cu" | "cuh" | "metal" | "m"
-        | "mm" => Some("c"),
-        "rb" | "rake" => Some("rb"),
-        "php" => Some("php"),
-        "cs" => Some("cs"),
-        "swift" => Some("swift"),
-        "lua" => Some("lua"),
-        _ => None,
+fn source_language_family(source: &str) -> Option<&'static str> {
+    let extension = Path::new(source).extension()?.to_str()?;
+    if extension.eq_ignore_ascii_case("py") || extension.eq_ignore_ascii_case("pyi") {
+        Some("py")
+    } else if ["js", "mjs", "cjs", "jsx", "ts", "tsx", "mts", "cts"]
+        .iter()
+        .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+    {
+        Some("js")
+    } else if extension.eq_ignore_ascii_case("go") {
+        Some("go")
+    } else if extension.eq_ignore_ascii_case("rs") {
+        Some("rs")
+    } else if ["java", "kt", "scala", "groovy"]
+        .iter()
+        .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+    {
+        Some("jvm")
+    } else if [
+        "c", "h", "cc", "cpp", "hpp", "cxx", "hh", "hxx", "cu", "cuh", "metal", "m", "mm",
+    ]
+    .iter()
+    .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+    {
+        Some("c")
+    } else if extension.eq_ignore_ascii_case("rb") || extension.eq_ignore_ascii_case("rake") {
+        Some("rb")
+    } else if extension.eq_ignore_ascii_case("php") {
+        Some("php")
+    } else if extension.eq_ignore_ascii_case("cs") {
+        Some("cs")
+    } else if extension.eq_ignore_ascii_case("swift") {
+        Some("swift")
+    } else if extension.eq_ignore_ascii_case("lua") {
+        Some("lua")
+    } else {
+        None
     }
 }
 
@@ -1331,4 +1398,31 @@ fn canonical_hyperedges(
         output.push(Value::Object(hyperedge));
     }
     (output, diagnostics)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{dedupe_nodes, deduped_node_count};
+    use compass_languages::RawNodeRecord;
+    use serde_json::Map;
+
+    #[test]
+    fn deduped_node_count_matches_record_deduplication_without_cloning_records() {
+        let nodes = vec![
+            RawNodeRecord {
+                id: "duplicate".to_owned(),
+                attributes: Map::new(),
+            },
+            RawNodeRecord {
+                id: "unique".to_owned(),
+                attributes: Map::new(),
+            },
+            RawNodeRecord {
+                id: "duplicate".to_owned(),
+                attributes: Map::new(),
+            },
+        ];
+
+        assert_eq!(deduped_node_count(&nodes), dedupe_nodes(&nodes).len());
+    }
 }

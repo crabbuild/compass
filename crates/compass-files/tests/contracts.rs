@@ -707,6 +707,22 @@ fn build_guard_publishes_one_complete_generation_at_a_time() -> Result<(), Box<d
 }
 
 #[test]
+fn build_guard_publishes_atomic_artifacts_without_resealing_them() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let guard = BuildGuard::begin(directory.path())?;
+    write_text_atomic(&guard.staging_directory().join("graph.json"), "graph")?;
+    guard.commit_with_presealed_artifacts(&["graph.json"])?;
+    assert_eq!(
+        fs::read_to_string(BuildGuard::resolve_artifact(
+            directory.path(),
+            "graph.json"
+        )?)?,
+        "graph"
+    );
+    Ok(())
+}
+
+#[test]
 fn build_guard_can_exclude_a_large_generation_sidecar() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let first = BuildGuard::begin(directory.path())?;

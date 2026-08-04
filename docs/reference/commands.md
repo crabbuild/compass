@@ -36,6 +36,7 @@ Configure repository scope and perform the first structural build:
 compass init [PATH]
   [--include PATH_OR_GLOB]
   [--exclude GLOB]
+  [--program]
   [--store json|sqlite]
   [--yes]
   [--force]
@@ -43,7 +44,9 @@ compass init [PATH]
 
 Includes and excludes are repeatable. Interactive mode previews the effective
 corpus before writing `.compass/config.toml`; scripts must pass `--yes`.
-Replacing an existing configuration requires `--force`.
+Replacing an existing configuration requires `--force`. Init builds the
+structural graph by default; pass `--program` when the initial workspace also
+needs Program IR.
 The initial build publishes JSON only by default. Pass `--store sqlite` to add
 the shared SQLite snapshot and `store.ref` to that generation. The database
 lives below the output root at `.compass-store/compass-store.sqlite3`; the
@@ -55,6 +58,7 @@ Make a saved current-tree graph match the project:
 
 ```text
 compass update [PATH]
+  [--program]
   [--program-artifact PATH]
   [--out DIR]
   [--store json|sqlite]
@@ -68,9 +72,11 @@ compass update [PATH]
   [--exclude-hubs N]
 ```
 
-Use for normal cold/incremental structural builds. The default also publishes
-`program.json`; use `--no-program` when only `graph.json` is required. Supply a
-verified offline SCIP index with repeatable `--program-artifact`. For Java,
+Use for normal cold/incremental structural builds. The default publishes the
+structural graph only; pass `--program` when Program IR inspection or graph
+enrichment is needed. `--no-program` remains accepted as an explicit
+structural-only compatibility flag. Supply a verified offline SCIP index with
+repeatable `--program-artifact` (which also enables Program IR). For Java,
 fresh exact symbol evidence can disambiguate AST-proven call sites in
 `graph.json`; stale, unverified, conflicting, and non-call references are not
 projected. `--no-program` conflicts with `--program-artifact`.
@@ -83,6 +89,7 @@ Expose the full build surface:
 
 ```text
 compass extract [PATH]
+  [--program]
   [--program-artifact PATH]
   [--no-program]
   [--code-only]
@@ -110,7 +117,11 @@ compass extract [PATH]
   [--exclude-hubs N]
 ```
 
-Use `--code-only` for an explicit fully local structural profile.
+Use `--code-only` for an explicit fully local structural profile; it limits
+structural node and edge extraction to code-classified files while retaining
+the scanned file inventory. Program IR is opt-in with `--program`;
+`--program-artifact` also enables it. `--no-program` is retained for callers
+that already use the structural-only spelling.
 
 `update`, `extract`, and watch rebuilds may succeed with a warning that Compass
 published a partial graph. The warning reports exact omitted node, omitted
@@ -125,6 +136,9 @@ nonzero exit.
 ```text
 compass watch [PATH]
   [--debounce SECONDS]
+  [--program]
+  [--program-artifact PATH]
+  [--no-program]
   [--store json|sqlite]
   [--out DIR]
   [--no-cluster]
@@ -132,6 +146,9 @@ compass watch [PATH]
   [--no-gitignore]
   [--exclude PATTERN]
   [--poll]
+
+Watch builds omit Program IR by default. Pass `--program` or
+`--program-artifact PATH` when the watcher should maintain the artifact.
 ```
 
 Long-running adaptive filesystem watcher. Compass synchronizes once at startup,

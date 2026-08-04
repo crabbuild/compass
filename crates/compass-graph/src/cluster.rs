@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_model::{EdgeRecord, GraphDocument};
+use rayon::prelude::*;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -76,29 +77,39 @@ pub fn cluster(document: &GraphDocument, options: ClusterOptions) -> Communities
 
     let positions = graph.position_map();
     let maximum_size = MIN_SPLIT_SIZE.max((graph.len() as f64 * MAX_COMMUNITY_FRACTION) as usize);
-    let mut first_pass = Vec::new();
-    for members in raw {
-        if members.len() > maximum_size {
-            first_pass.extend(split_community(&graph, &positions, &members));
-        } else {
-            first_pass.push(members);
-        }
-    }
-    let mut final_communities = Vec::new();
-    for members in first_pass {
-        if members.len() >= COHESION_SPLIT_MIN_SIZE
-            && cohesion_score_graph(&graph, &positions, &members) < COHESION_SPLIT_THRESHOLD
-        {
-            let splits = split_community(&graph, &positions, &members);
-            if splits.len() > 1 {
-                final_communities.extend(splits);
+    let first_pass = raw
+        .into_par_iter()
+        .map(|members| {
+            if members.len() > maximum_size {
+                split_community(&graph, &positions, &members)
             } else {
-                final_communities.push(members);
+                vec![members]
             }
-        } else {
-            final_communities.push(members);
-        }
-    }
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let mut final_communities = first_pass
+        .into_par_iter()
+        .map(|members| {
+            if members.len() >= COHESION_SPLIT_MIN_SIZE
+                && cohesion_score_graph(&graph, &positions, &members) < COHESION_SPLIT_THRESHOLD
+            {
+                let splits = split_community(&graph, &positions, &members);
+                if splits.len() > 1 {
+                    splits
+                } else {
+                    vec![members]
+                }
+            } else {
+                vec![members]
+            }
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
     for members in &mut final_communities {
         members.sort();
     }
@@ -507,23 +518,35 @@ fn one_level(
     let mut community_totals = degrees.clone();
     let mut nodes = (0..graph.len()).collect::<Vec<_>>();
     random.shuffle(&mut nodes);
+    let modularity_denominator = 2.0 * total_weight.powi(2);
+    // Community IDs remain dense graph-local indices throughout a Louvain
+    // level. Reuse these arrays instead of allocating and hashing a temporary
+    // map for every node visit.
+    let mut community_positions = vec![usize::MAX; graph.len()];
+    let mut weights = Vec::new();
     let mut improvement = false;
     loop {
         let mut moves = 0;
         for node in &nodes {
             let old_community = node_to_community[*node];
             let degree = degrees[*node];
-            let weights = neighbor_community_weights(graph, *node, &node_to_community);
+            let old_weight_position = neighbor_community_weights(
+                graph,
+                *node,
+                &node_to_community,
+                old_community,
+                &mut community_positions,
+                &mut weights,
+            );
             community_totals[old_community] -= degree;
-            let remove_cost = -weight_for(&weights, old_community) / total_weight
-                + resolution * (community_totals[old_community] * degree)
-                    / (2.0 * total_weight.powi(2));
+            let old_weight = old_weight_position.map_or(0.0, |position| weights[position].1);
+            let remove_cost = -old_weight / total_weight
+                + resolution * (community_totals[old_community] * degree) / modularity_denominator;
             let mut best_gain = 0.0;
             let mut best_community = old_community;
-            for (community, weight) in weights {
+            for &(community, weight) in &weights {
                 let gain = remove_cost + weight / total_weight
-                    - resolution * (community_totals[community] * degree)
-                        / (2.0 * total_weight.powi(2));
+                    - resolution * (community_totals[community] * degree) / modularity_denominator;
                 if gain > best_gain {
                     best_gain = gain;
                     best_community = community;
@@ -531,8 +554,7 @@ fn one_level(
             }
             community_totals[best_community] += degree;
             if best_community != old_community {
-                let original_members = graph.members[*node].clone();
-                for member in &original_members {
+                for member in &graph.members[*node] {
                     partition[old_community].remove(member);
                     partition[best_community].insert(member.clone());
                 }
@@ -541,6 +563,9 @@ fn one_level(
                 node_to_community[*node] = best_community;
                 improvement = true;
                 moves += 1;
+            }
+            for &(community, _) in &weights {
+                community_positions[community] = usize::MAX;
             }
         }
         if moves == 0 {
@@ -556,29 +581,32 @@ fn neighbor_community_weights(
     graph: &WeightedGraph,
     node: usize,
     node_to_community: &[usize],
-) -> Vec<(usize, f64)> {
-    let mut output = Vec::<(usize, f64)>::new();
-    let mut positions = HashMap::<usize, usize>::new();
+    old_community: usize,
+    community_positions: &mut [usize],
+    output: &mut Vec<(usize, f64)>,
+) -> Option<usize> {
+    output.clear();
+    let mut old_position = None;
     for (neighbor, weight) in &graph.adjacency[node] {
         if *neighbor == node {
             continue;
         }
         let community = node_to_community[*neighbor];
-        if let Some(position) = positions.get(&community) {
-            output[*position].1 += weight;
+        let position = if community_positions[community] != usize::MAX {
+            let position = community_positions[community];
+            output[position].1 += weight;
+            position
         } else {
-            positions.insert(community, output.len());
+            let position = output.len();
+            community_positions[community] = position;
             output.push((community, *weight));
+            position
+        };
+        if community == old_community {
+            old_position = Some(position);
         }
     }
-    output
-}
-
-fn weight_for(weights: &[(usize, f64)], community: usize) -> f64 {
-    weights
-        .iter()
-        .find(|(candidate, _)| *candidate == community)
-        .map_or(0.0, |(_, weight)| *weight)
+    old_position
 }
 
 fn modularity(graph: &WeightedGraph, communities: &[BTreeSet<usize>], resolution: f64) -> f64 {

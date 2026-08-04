@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Make structural graph builds the fast default: `init`, `update`, `extract`, and
+  `watch` now omit Program IR unless `--program` or `--program-artifact` is
+  selected. Keep `--no-program` accepted for compatibility with existing
+  automation.
+- Make `extract --code-only` scope structural extraction to code inputs as well
+  as skipping semantic-provider work; the diagnostic file inventory remains
+  available without adding document nodes to the graph.
+- Reduce large-graph build and query overhead without changing graph facts or
+  output contracts: transfer publication buffers across the v1 boundary, avoid
+  resealing already-atomic artifacts, and derive query-index identity from a
+  streaming artifact digest instead of reserializing the complete graph.
 - Make versioned graph comparisons meaning-aware: source-coordinate shifts,
   clustering/layout metadata, and anchor-derived edge identities no longer
   appear as graph-wide structural changes. Historical queries now read only

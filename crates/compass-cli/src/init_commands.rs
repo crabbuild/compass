@@ -23,6 +23,7 @@ struct InitOptions {
     yes: bool,
     force: bool,
     timing: bool,
+    program: bool,
     graph_storage: GraphStorage,
 }
 
@@ -336,6 +337,9 @@ fn run_init_with_builder(
     if options.timing {
         build_arguments.push("--timing".to_owned());
     }
+    if options.program {
+        build_arguments.push("--program".to_owned());
+    }
     if options.graph_storage == GraphStorage::Sqlite {
         build_arguments.extend(["--store".to_owned(), "sqlite".to_owned()]);
     }
@@ -410,6 +414,7 @@ fn parse(args: &[String]) -> Result<InitOptions, String> {
         yes: false,
         force: false,
         timing: false,
+        program: false,
         graph_storage: GraphStorage::default(),
     };
     let mut root_seen = false;
@@ -419,6 +424,7 @@ fn parse(args: &[String]) -> Result<InitOptions, String> {
             "--yes" => options.yes = true,
             "--force" => options.force = true,
             "--timing" => options.timing = true,
+            "--program" => options.program = true,
             "--store" => {
                 index += 1;
                 let Some(value) = args.get(index) else {

@@ -91,6 +91,8 @@ pub(crate) struct BuildProfile {
     pub no_viz: bool,
     pub resolution: f64,
     pub exclude_hubs: Option<f64>,
+    #[serde(default)]
+    pub code_only: bool,
     pub program_analysis: bool,
     #[serde(default = "legacy_graph_storage")]
     pub graph_storage: String,
@@ -141,6 +143,7 @@ impl BuildState {
         output_dir: &Path,
         profile: BuildProfile,
         manifest_path: &Path,
+        graph_seal: Option<ArtifactSeal>,
         program_seal: Option<ArtifactSeal>,
         required_paths: &[PathBuf],
         stats: SavedStats,
@@ -157,7 +160,10 @@ impl BuildState {
             || {
                 rayon::join(
                     || ArtifactSeal::capture(manifest_path),
-                    || ArtifactSeal::capture(&output_dir.join("graph.json")),
+                    || match graph_seal {
+                        Some(seal) => Ok(seal),
+                        None => ArtifactSeal::capture(&output_dir.join("graph.json")),
+                    },
                 )
             },
             || {
@@ -285,6 +291,7 @@ mod tests {
             no_viz: true,
             resolution: 1.0,
             exclude_hubs: None,
+            code_only: false,
             program_analysis: true,
             graph_storage: "json".to_owned(),
             max_source_bytes: default_max_source_bytes(),
@@ -293,6 +300,7 @@ mod tests {
             output,
             profile.clone(),
             &manifest,
+            None,
             None,
             std::slice::from_ref(&required),
             SavedStats::default(),
