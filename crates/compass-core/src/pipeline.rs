@@ -333,8 +333,9 @@ impl BuildOptions {
             program_analysis: false,
             program_artifacts: Vec::new(),
             program_artifact_limits: compass_program::ArtifactLimits::default(),
-            // Large builds use a local host-sized pool. Keeping this unset also
-            // lets CLI callers provide an explicit memory/throughput bound.
+            // Large builds use a bounded local pool. Keeping this unset uses
+            // the measured memory/throughput default; CLI callers can provide
+            // an explicit bound when their environment needs another tradeoff.
             max_workers: None,
             max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
             built_at_commit: None,
@@ -1883,8 +1884,9 @@ fn build_graph_inner(
     // A Rayon worker pool costs more resident memory than it saves time on
     // small multilingual projects, where parser-table page residency dominates.
     // Stay sequential below the measured crossover. Larger corpora use an
-    // explicit local pool so an embedding application's global Rayon settings
-    // cannot silently serialize cold extraction.
+    // bounded local pool so an embedding application's global Rayon settings
+    // cannot silently serialize cold extraction or multiply parser working
+    // sets without an explicit opt-in.
     let completed_files = Mutex::new(0_usize);
     let total_files = missing.len();
     let extract_source =
@@ -3681,13 +3683,17 @@ fn write_store_ref(output_dir: &Path, reference: &StoreRef) -> Result<(), CoreEr
 
 #[cfg(target_os = "macos")]
 fn default_ast_workers() -> usize {
-    num_cpus::get().max(num_cpus::get_physical())
+    num_cpus::get()
+        .max(num_cpus::get_physical())
+        .min(DEFAULT_AST_WORKER_CAP)
 }
 
 #[cfg(not(target_os = "macos"))]
 fn default_ast_workers() -> usize {
-    num_cpus::get()
+    num_cpus::get().min(DEFAULT_AST_WORKER_CAP)
 }
+
+const DEFAULT_AST_WORKER_CAP: usize = 8;
 
 fn should_parallel_extract(options: &BuildOptions, missing: usize, sources: usize) -> bool {
     missing >= 256 || sources >= 256 || options.max_workers.is_some_and(|workers| workers > 1)
@@ -6060,6 +6066,12 @@ mod tests {
         options.max_workers = Some(1);
         assert!(!should_parallel_extract(&options, 64, 64));
         assert!(should_parallel_extract(&options, 256, 256));
+    }
+
+    #[test]
+    fn default_ast_workers_stay_within_the_memory_bound() {
+        assert!(default_ast_workers() > 0);
+        assert!(default_ast_workers() <= DEFAULT_AST_WORKER_CAP);
     }
 
     #[test]

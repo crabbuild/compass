@@ -496,6 +496,101 @@ fn invoke(container: Container<u32>) {
 }
 
 #[test]
+fn rust_generic_trait_bound_receiver_resolves_to_trait_method() {
+    let source = br#"trait Render { fn render(&self); }
+fn invoke<T: Render>(container: T) {
+    container.render();
+}
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let render_method = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Render::render")
+        .expect("Render trait method");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == render_method.id
+            && edge.string("source_location") == "L3"
+    }));
+}
+
+#[test]
+fn rust_cross_file_generic_trait_bound_receiver_keeps_imported_trait_owner() {
+    let provider_source = b"pub trait Render { fn render(&self); }\n";
+    let caller_source = b"use crate::api::Render;\nfn invoke<T: Render>(container: T) {\n    container.render();\n}\n";
+    let provider = extract("src/api.rs", provider_source);
+    let caller = extract("src/lib.rs", caller_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, caller],
+        &HashMap::from([
+            (
+                "src/api.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(caller_source.to_vec()).expect("caller source"),
+            ),
+        ]),
+    );
+    let render_method = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::api::Render::render")
+        .expect("imported Render trait method");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == render_method.id
+            && edge.string("source_location") == "L3"
+    }));
+}
+
+#[test]
+fn rust_ambiguous_generic_trait_bounds_do_not_choose_an_arbitrary_method() {
+    let source = br#"trait First { fn run(&self); }
+trait Second { fn run(&self); }
+fn invoke<T: First + Second>(value: T) {
+    value.run();
+}
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let trait_methods = resolved
+        .nodes
+        .iter()
+        .filter(|node| {
+            matches!(
+                node.string("qualified_name").as_str(),
+                "crate::First::run" | "crate::Second::run"
+            )
+        })
+        .map(|node| node.id.clone())
+        .collect::<HashSet<_>>();
+    assert_eq!(trait_methods.len(), 2);
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "calls"
+            || edge.string("source_location") != "L4"
+            || !trait_methods.contains(&edge.target)
+    }));
+}
+
+#[test]
 fn rust_turbofish_and_explicit_trait_impl_paths_resolve_exactly() {
     let source = br#"trait Render<T> {
     fn render(&self, value: T);
@@ -1194,6 +1289,57 @@ func caller(command *Command) {
                 && edge.target == target
                 && edge.string("source_location") == location
         }));
+    }
+}
+
+#[test]
+fn go_multi_return_range_inside_closure_preserves_element_method_attribution() {
+    let go_source = br#"package pkg
+type Command struct{}
+func (*Command) Find(args []string) (*Command, []string, error) { return nil, nil, nil }
+func (*Command) Commands() []*Command { return nil }
+func (*Command) IsAvailableCommand() bool { return true }
+func (*Command) Name() string { return "" }
+func caller(command *Command) {
+    visit := func() {
+        cmd, _, _ := command.Find(nil)
+        for _, subCommand := range cmd.Commands() {
+            if subCommand.IsAvailableCommand() {
+                _ = subCommand.Name()
+            }
+        }
+    }
+    _ = visit
+}
+"#;
+    let extracted = extract("pkg/caller.go", go_source);
+    let sources = HashMap::from([(
+        "pkg/caller.go".to_owned(),
+        String::from_utf8(go_source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let command_methods = ["Find", "Commands", "IsAvailableCommand", "Name"]
+        .into_iter()
+        .map(|method| {
+            resolved
+                .nodes
+                .iter()
+                .find(|node| node.string("qualified_name") == format!("pkg.Command::{method}"))
+                .unwrap_or_else(|| panic!("Command.{method} declaration"))
+                .id
+                .clone()
+        })
+        .collect::<Vec<_>>();
+
+    for (target, location) in command_methods.into_iter().zip(["L9", "L10", "L11", "L12"]) {
+        assert!(
+            resolved.edges.iter().any(|edge| {
+                edge.string("relation") == "calls"
+                    && edge.target == target
+                    && edge.string("source_location") == location
+            }),
+            "missing Go call at {location}"
+        );
     }
 }
 

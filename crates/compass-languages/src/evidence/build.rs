@@ -592,6 +592,8 @@ struct DirectAdapterState<'source> {
     rust_impls: HashMap<usize, RustImplContext>,
     rust_types_by_qualified_name: HashMap<String, DeclarationContext>,
     rust_types_by_name: HashMap<String, Vec<DeclarationContext>>,
+    rust_trait_methods: HashMap<(String, String), Vec<String>>,
+    rust_generic_bounds: HashMap<String, HashMap<String, Vec<String>>>,
     rust_receiver_methods: HashMap<(String, String), Vec<String>>,
     rust_typed_receivers: HashSet<(String, String)>,
     rust_imported_typed_receivers: HashSet<(String, String)>,
@@ -601,11 +603,11 @@ struct DirectAdapterState<'source> {
     rust_test_declarations: HashSet<String>,
     go_lexical_bindings: HashMap<usize, Vec<GoLexicalBinding>>,
     go_call_result_bindings: HashMap<(String, String, usize), String>,
-    go_return_types: HashMap<String, String>,
+    go_return_types: HashMap<String, Vec<Option<String>>>,
     go_member_types: HashMap<(String, String), String>,
     go_collection_element_types: HashMap<String, String>,
     go_collection_binding_element_types: HashMap<String, HashMap<String, String>>,
-    go_range_return_types: HashMap<String, String>,
+    go_range_return_types: HashMap<String, Vec<Option<String>>>,
     go_range_member_types: HashMap<(String, String), String>,
     java_containers: HashMap<usize, DeclarationContext>,
     java_value_types: HashMap<String, HashMap<String, String>>,
@@ -664,6 +666,8 @@ impl<'source> DirectAdapterState<'source> {
             rust_impls: HashMap::new(),
             rust_types_by_qualified_name: HashMap::new(),
             rust_types_by_name: HashMap::new(),
+            rust_trait_methods: HashMap::new(),
+            rust_generic_bounds: HashMap::new(),
             rust_receiver_methods: HashMap::new(),
             rust_typed_receivers: HashSet::new(),
             rust_imported_typed_receivers: HashSet::new(),
@@ -2793,6 +2797,13 @@ impl<'source> DirectAdapterState<'source> {
                 .or_else(|| owner.enclosing_type_qualified_name.clone()),
         };
         self.collect_rust_value_types(node, &context);
+        self.collect_rust_generic_bounds(node, &context);
+        if owner.kind == "trait" {
+            self.rust_trait_methods
+                .entry((owner.qualified_name.clone(), name.clone()))
+                .or_default()
+                .push(qualified_name.clone());
+        }
         if let Some(implementation) = active_impl {
             if let Some(type_owner) = implementation
                 .owner_declaration_id
@@ -2830,6 +2841,48 @@ impl<'source> DirectAdapterState<'source> {
         }
         self.declarations.insert(node.id(), context);
         Ok(())
+    }
+
+    fn collect_rust_generic_bounds(&mut self, callable: Node<'_>, owner: &DeclarationContext) {
+        let Some(parameters) = callable.child_by_field_name("type_parameters") else {
+            return;
+        };
+        let mut parameter_cursor = parameters.walk();
+        for parameter in parameters
+            .children(&mut parameter_cursor)
+            .filter(|child| child.kind() == "type_parameter")
+        {
+            let Some(name_node) = parameter.child_by_field_name("name") else {
+                continue;
+            };
+            let name = self.text(name_node);
+            if name.is_empty() {
+                continue;
+            }
+            let mut bounds = Vec::new();
+            let mut pending = vec![parameter];
+            while let Some(descendant) = pending.pop() {
+                if descendant.kind() == "trait_bound"
+                    && let Some(bound) = rust_trait_bound_path(&self.text(descendant))
+                {
+                    bounds.push(bound);
+                }
+                let mut cursor = descendant.walk();
+                pending.extend(
+                    descendant
+                        .children(&mut cursor)
+                        .filter(|child| child.is_named()),
+                );
+            }
+            bounds.sort_unstable();
+            bounds.dedup();
+            if !bounds.is_empty() {
+                self.rust_generic_bounds
+                    .entry(owner.scope_id.clone())
+                    .or_default()
+                    .insert(name, bounds);
+            }
+        }
     }
 
     fn collect_rust_parameter_bindings(
@@ -3760,10 +3813,17 @@ impl<'source> DirectAdapterState<'source> {
             use_start,
             Some(use_node),
         ) && let Some(nominal_type) = rust_nominal_type_path(raw_type)
-            && let Some(receiver_type) =
-                rust_qualify_evidence_path(self, owner, &nominal_type, use_start)
         {
-            return Some(rust_join_qualified(&receiver_type, spelling));
+            if let Some(method) =
+                self.rust_generic_receiver_method_target(owner, &nominal_type, spelling, use_start)
+            {
+                return Some(method);
+            }
+            if let Some(receiver_type) =
+                rust_qualify_evidence_path(self, owner, &nominal_type, use_start)
+            {
+                return Some(rust_join_qualified(&receiver_type, spelling));
+            }
         }
         if let Some(target) = self.local_target_for(owner, qualifier) {
             if let Some(method) = self.rust_receiver_method_target(target, spelling) {
@@ -3788,6 +3848,63 @@ impl<'source> DirectAdapterState<'source> {
             ));
         }
         Some(rust_join_qualified(qualifier, spelling))
+    }
+
+    fn rust_generic_receiver_method_target(
+        &self,
+        owner: &DeclarationContext,
+        receiver_type: &str,
+        method: &str,
+        use_start: usize,
+    ) -> Option<String> {
+        let mut bounds = Vec::new();
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let Some(current) = scope_id else {
+                break;
+            };
+            if let Some(values) = self
+                .rust_generic_bounds
+                .get(current)
+                .and_then(|values| values.get(receiver_type))
+            {
+                bounds.extend(
+                    values.iter().filter_map(|bound| {
+                        rust_qualify_evidence_path(self, owner, bound, use_start)
+                    }),
+                );
+                break;
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        bounds.sort_unstable();
+        bounds.dedup();
+        if bounds.is_empty() {
+            return None;
+        }
+
+        let mut targets = bounds
+            .iter()
+            .filter_map(|bound| {
+                self.rust_trait_methods
+                    .get(&(bound.clone(), method.to_owned()))
+                    .and_then(|methods| {
+                        let [target] = methods.as_slice() else {
+                            return None;
+                        };
+                        Some(target.clone())
+                    })
+            })
+            .collect::<Vec<_>>();
+        targets.sort_unstable();
+        targets.dedup();
+        if targets.len() == 1 {
+            return targets.pop();
+        }
+        if bounds.len() == 1 {
+            return Some(rust_join_qualified(&bounds[0], method));
+        }
+        None
     }
 
     fn rust_receiver_method_target(&self, receiver: &str, method: &str) -> Option<String> {
@@ -4149,19 +4266,7 @@ impl<'source> DirectAdapterState<'source> {
                 enclosing_type_qualified_name: None,
             };
             self.add_ownership(file, &context)?;
-            if let Some(result) = node.child_by_field_name("result")
-                && let Some(target) = go_direct_type_target(result)
-                && let Some(qualified_target) = self.go_qualified_type_target(file, target)
-            {
-                self.go_return_types
-                    .insert(context.qualified_name.clone(), qualified_target);
-            }
-            if let Some(result) = node.child_by_field_name("result")
-                && let Some(qualified_target) = self.go_collection_element_type(file, result)
-            {
-                self.go_range_return_types
-                    .insert(context.qualified_name.clone(), qualified_target);
-            }
+            self.record_go_return_types(&context, file, node);
             self.declarations.insert(node.id(), context);
             return Ok(());
         }
@@ -4170,6 +4275,43 @@ impl<'source> DirectAdapterState<'source> {
             self.collect_go_declarations(child, file)?;
         }
         Ok(())
+    }
+
+    fn record_go_return_types(
+        &mut self,
+        declaration: &DeclarationContext,
+        owner: &DeclarationContext,
+        node: Node<'_>,
+    ) {
+        let Some(result) = node.child_by_field_name("result") else {
+            return;
+        };
+        let result_types = go_result_type_nodes(result);
+        if result_types.is_empty() {
+            return;
+        }
+        let direct_types = result_types
+            .iter()
+            .map(|type_node| {
+                type_node
+                    .and_then(go_direct_type_target)
+                    .and_then(|target| self.go_qualified_type_target(owner, target))
+            })
+            .collect::<Vec<_>>();
+        if direct_types.iter().any(Option::is_some) {
+            self.go_return_types
+                .insert(declaration.qualified_name.clone(), direct_types);
+        }
+        let range_types = result_types
+            .iter()
+            .map(|type_node| {
+                type_node.and_then(|type_node| self.go_collection_element_type(owner, type_node))
+            })
+            .collect::<Vec<_>>();
+        if range_types.iter().any(Option::is_some) {
+            self.go_range_return_types
+                .insert(declaration.qualified_name.clone(), range_types);
+        }
     }
 
     fn collect_go_interface_methods(
@@ -4222,19 +4364,7 @@ impl<'source> DirectAdapterState<'source> {
                 enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
             };
             self.add_ownership(owner, &context)?;
-            if let Some(result) = method.child_by_field_name("result")
-                && let Some(target) = go_direct_type_target(result)
-                && let Some(qualified_target) = self.go_qualified_type_target(owner, target)
-            {
-                self.go_return_types
-                    .insert(context.qualified_name.clone(), qualified_target);
-            }
-            if let Some(result) = method.child_by_field_name("result")
-                && let Some(qualified_target) = self.go_collection_element_type(owner, result)
-            {
-                self.go_range_return_types
-                    .insert(context.qualified_name.clone(), qualified_target);
-            }
+            self.record_go_return_types(&context, owner, method);
             self.declarations.insert(method.id(), context);
         }
         Ok(())
@@ -5057,8 +5187,15 @@ impl<'source> DirectAdapterState<'source> {
             .and_then(|range| self.go_range_expression_type(owner, range, depth + 1, visited))
             .or_else(|| self.local_target_for(owner, name).cloned())
             .or_else(|| {
-                let initializer = go_local_initializer_before(use_node, name, self.source)?;
-                self.go_expression_type(owner, initializer, depth + 1, visited)
+                let (initializer, output_index) =
+                    go_local_initializer_with_index_before(use_node, name, self.source)?;
+                self.go_expression_type_at_output(
+                    owner,
+                    initializer,
+                    depth + 1,
+                    visited,
+                    output_index,
+                )
             });
         visited.remove(name);
         result
@@ -5070,6 +5207,17 @@ impl<'source> DirectAdapterState<'source> {
         expression: Node<'_>,
         depth: usize,
         visited: &mut HashSet<String>,
+    ) -> Option<String> {
+        self.go_expression_type_at_output(owner, expression, depth, visited, None)
+    }
+
+    fn go_expression_type_at_output(
+        &self,
+        owner: &DeclarationContext,
+        expression: Node<'_>,
+        depth: usize,
+        visited: &mut HashSet<String>,
+        output_index: Option<u32>,
     ) -> Option<String> {
         if depth >= 8 {
             return None;
@@ -5123,7 +5271,9 @@ impl<'source> DirectAdapterState<'source> {
                     }
                     _ => return None,
                 };
-                self.go_return_types.get(&qualified_callable).cloned()
+                self.go_return_types
+                    .get(&qualified_callable)
+                    .and_then(|types| go_output_type(types, output_index))
             }
             "type_assertion_expression" | "type_assertion" => expression
                 .child_by_field_name("type")
@@ -5139,6 +5289,17 @@ impl<'source> DirectAdapterState<'source> {
         expression: Node<'_>,
         depth: usize,
         visited: &mut HashSet<String>,
+    ) -> Option<String> {
+        self.go_range_expression_type_at_output(owner, expression, depth, visited, None)
+    }
+
+    fn go_range_expression_type_at_output(
+        &self,
+        owner: &DeclarationContext,
+        expression: Node<'_>,
+        depth: usize,
+        visited: &mut HashSet<String>,
+        output_index: Option<u32>,
     ) -> Option<String> {
         if depth >= 8 {
             return None;
@@ -5162,16 +5323,16 @@ impl<'source> DirectAdapterState<'source> {
                         .cloned()
                     })
                     .or_else(|| {
-                        go_local_initializer_before(expression, &name, self.source).and_then(
-                            |initializer| {
-                                self.go_range_expression_type(
+                        go_local_initializer_with_index_before(expression, &name, self.source)
+                            .and_then(|(initializer, output_index)| {
+                                self.go_range_expression_type_at_output(
                                     owner,
                                     initializer,
                                     depth + 1,
                                     visited,
+                                    output_index,
                                 )
-                            },
-                        )
+                            })
                     });
                 visited.remove(&name);
                 result
@@ -5196,7 +5357,9 @@ impl<'source> DirectAdapterState<'source> {
                     }
                     _ => return None,
                 };
-                self.go_range_return_types.get(&qualified_callable).cloned()
+                self.go_range_return_types
+                    .get(&qualified_callable)
+                    .and_then(|types| go_output_type(types, output_index))
             }
             "selector_expression" => {
                 let operand = expression.child_by_field_name("operand")?;
@@ -6073,6 +6236,15 @@ fn rust_nominal_type_path(raw: &str) -> Option<String> {
             .chars()
             .all(|character| character.is_alphanumeric() || matches!(character, '_' | ':')))
     .then_some(nominal)
+}
+
+fn rust_trait_bound_path(raw: &str) -> Option<String> {
+    let raw = raw.trim().trim_start_matches('?').trim();
+    let raw = raw
+        .strip_prefix("for<")
+        .and_then(|value| value.split_once('>').map(|(_, remainder)| remainder))
+        .map_or(raw, str::trim);
+    rust_nominal_type_path(raw)
 }
 
 fn rust_qualified_parent(path: &str) -> Option<&str> {
@@ -7113,6 +7285,43 @@ fn collect_named_targets<'tree>(node: Node<'tree>, kinds: &[&str], output: &mut 
     }
 }
 
+fn go_result_type_nodes<'tree>(result: Node<'tree>) -> Vec<Option<Node<'tree>>> {
+    if result.kind() != "parameter_list" {
+        return vec![Some(result)];
+    }
+    let mut cursor = result.walk();
+    let mut output = Vec::new();
+    for parameter in result
+        .children(&mut cursor)
+        .filter(|child| child.is_named())
+    {
+        if !matches!(
+            parameter.kind(),
+            "parameter_declaration" | "variadic_parameter_declaration"
+        ) {
+            continue;
+        }
+        let mut parameter_cursor = parameter.walk();
+        let name_count = parameter
+            .children_by_field_name("name", &mut parameter_cursor)
+            .count()
+            .max(1);
+        let type_node = parameter.child_by_field_name("type");
+        output.extend(std::iter::repeat_n(type_node, name_count));
+    }
+    output
+}
+
+fn go_output_type(types: &[Option<String>], output_index: Option<u32>) -> Option<String> {
+    if output_index.is_none() && types.len() != 1 {
+        return None;
+    }
+    let index = output_index
+        .and_then(|index| usize::try_from(index).ok())
+        .unwrap_or_default();
+    types.get(index).and_then(Clone::clone)
+}
+
 fn go_direct_type_target(node: Node<'_>) -> Option<Node<'_>> {
     match node.kind() {
         "type_identifier" | "qualified_type" => Some(node),
@@ -7369,14 +7578,6 @@ fn go_local_initializer_with_index_before<'tree>(
         ancestor = scope.parent();
     }
     None
-}
-
-fn go_local_initializer_before<'tree>(
-    use_node: Node<'tree>,
-    name: &str,
-    source: &[u8],
-) -> Option<Node<'tree>> {
-    go_local_initializer_with_index_before(use_node, name, source).map(|(node, _)| node)
 }
 
 fn go_local_type_declaration_before(use_node: Node<'_>, name: &str, source: &[u8]) -> bool {
