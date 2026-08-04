@@ -106,7 +106,7 @@ fn sqlite_store_option_publishes_a_durable_snapshot_alongside_json() -> Result<(
 }
 
 #[test]
-fn graph_build_defaults_to_json_without_store_artifacts() -> Result<(), Box<dyn Error>> {
+fn graph_build_defaults_to_sqlite_query_artifacts() -> Result<(), Box<dyn Error>> {
     let root = tempfile::tempdir()?;
     fs::write(root.path().join("main.rs"), "fn main() {}\n")?;
     let output = Command::new(env!("CARGO_BIN_EXE_compass"))
@@ -122,13 +122,13 @@ fn graph_build_defaults_to_json_without_store_artifacts() -> Result<(), Box<dyn 
     );
     let active = BuildGuard::resolve_active_directory(&root.path().join("compass-out"))?;
     assert!(active.join("graph.json").is_file());
-    assert!(!active.join(STORE_FILE_NAME).exists());
-    assert!(!active.join(STORE_REF_FILE_NAME).exists());
+    assert!(active.join(STORE_REF_FILE_NAME).is_file());
+    assert!(local_sqlite_store_path(&active.join("graph.json")).is_file());
     Ok(())
 }
 
 #[test]
-fn default_json_build_replaces_an_opted_in_store_generation() -> Result<(), Box<dyn Error>> {
+fn explicit_json_build_replaces_an_opted_in_store_generation() -> Result<(), Box<dyn Error>> {
     let root = tempfile::tempdir()?;
     fs::write(root.path().join("main.rs"), "fn main() {}\n")?;
     let sqlite = Command::new(env!("CARGO_BIN_EXE_compass"))
@@ -143,7 +143,7 @@ fn default_json_build_replaces_an_opted_in_store_generation() -> Result<(), Box<
     assert!(local_sqlite_store_path(&active.join("graph.json")).is_file());
 
     let json = Command::new(env!("CARGO_BIN_EXE_compass"))
-        .args(["update", ".", "--no-viz"])
+        .args(["update", ".", "--no-viz", "--store", "json"])
         .current_dir(root.path())
         .env_remove("COMPASS_OUT")
         .output()?;

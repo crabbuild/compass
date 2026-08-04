@@ -56,6 +56,19 @@ pub fn open_with_engine(
     cache_root: &Path,
     selection: EngineSelection,
 ) -> Result<CodeQueryEngine, QueryError> {
+    // A published store is the bounded default for large graphs.  Keep the
+    // fallback to JSON for older/output-only builds, but never fall back after
+    // a store reference is present: a corrupt or mismatched sidecar must fail
+    // closed instead of silently querying a different realization.
+    if selection == EngineSelection::Default
+        && graph_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(compass_store::STORE_REF_FILE_NAME)
+            .is_file()
+    {
+        return open_from_local_store(graph_path, program_path);
+    }
     if selection == EngineSelection::Store {
         return open_from_local_store(graph_path, program_path);
     }

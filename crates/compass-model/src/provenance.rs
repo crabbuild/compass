@@ -218,6 +218,23 @@ impl EvidenceConfidence {
     }
 }
 
+/// Return the weakest claim retained by a fact's evidence set.
+///
+/// Evidence arrays may contain an exact syntax observation together with an
+/// inferred endpoint rewrite. Consumers that gate automation must not depend
+/// on serialization order, so the most conservative confidence wins.
+#[must_use]
+pub fn effective_confidence(evidence: &[Provenance]) -> Option<EvidenceConfidence> {
+    evidence
+        .iter()
+        .map(|item| item.confidence)
+        .max_by_key(|confidence| match confidence {
+            EvidenceConfidence::Exact => 0,
+            EvidenceConfidence::Inferred => 1,
+            EvidenceConfidence::Ambiguous => 2,
+        })
+}
+
 /// The outcome of resolving a symbolic or framework reference.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

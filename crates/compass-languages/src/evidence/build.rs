@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
@@ -567,6 +568,7 @@ struct DirectAdapterState<'source> {
     source: &'source [u8],
     language: &'static str,
     module_or_package: String,
+    rust_namespace_aliases: HashMap<String, String>,
     stem: String,
     file: Option<DeclarationContext>,
     declarations: HashMap<usize, DeclarationContext>,
@@ -628,6 +630,11 @@ impl<'source> DirectAdapterState<'source> {
             source,
             language: profile.language,
             module_or_package,
+            rust_namespace_aliases: if profile.language == "rust" {
+                rust_manifest_dependency_aliases(path)
+            } else {
+                HashMap::new()
+            },
             stem,
             file: None,
             declarations: HashMap::new(),
@@ -2905,6 +2912,15 @@ impl<'source> DirectAdapterState<'source> {
         self.module_or_package.clone()
     }
 
+    fn rust_canonical_import_target(&self, module: &str, raw: &str) -> String {
+        let canonical = rust_canonical_import_target(module, raw);
+        let first = canonical.split("::").next().unwrap_or_default();
+        let Some(mapped) = self.rust_namespace_aliases.get(first) else {
+            return canonical;
+        };
+        canonical.replacen(first, mapped, 1)
+    }
+
     fn add_rust_struct_fields(
         &mut self,
         node: Node<'_>,
@@ -3062,7 +3078,7 @@ impl<'source> DirectAdapterState<'source> {
         expand_rust_use_tree(&raw, "", &mut flattened);
         for (raw_target, alias, glob) in flattened {
             let target =
-                rust_canonical_import_target(&self.rust_enclosing_module(owner), &raw_target);
+                self.rust_canonical_import_target(&self.rust_enclosing_module(owner), &raw_target);
             if target.is_empty() {
                 continue;
             }
@@ -3367,7 +3383,7 @@ impl<'source> DirectAdapterState<'source> {
         let first = qualified_binding_head(qualifier);
         if matches!(first, "crate" | "self" | "super") {
             return Some(rust_join_qualified(
-                &rust_canonical_import_target(&self.rust_enclosing_module(owner), qualifier),
+                &self.rust_canonical_import_target(&self.rust_enclosing_module(owner), qualifier),
                 spelling,
             ));
         }
@@ -5556,7 +5572,7 @@ fn rust_module_identity(path: &Path, source_file: &str) -> String {
         && portable_components.first().copied() == Some("crates")
         && portable_components.len() > 2)
         .then_some(2_usize);
-    let crate_name = source_root
+    let fallback_crate_name = source_root
         .and_then(|index| index.checked_sub(1))
         .and_then(|index| portable_components.get(index).copied())
         .filter(|component| !matches!(*component, "crates" | "src"))
@@ -5564,6 +5580,8 @@ fn rust_module_identity(path: &Path, source_file: &str) -> String {
             workspace_crate_root.and_then(|index| portable_components.get(index - 1).copied())
         })
         .unwrap_or("crate");
+    let crate_name =
+        rust_manifest_crate_name(path).unwrap_or_else(|| fallback_crate_name.replace('-', "_"));
     let relative = if let Some(index) = source_root {
         portable_components[index.saturating_add(1)..].to_vec()
     } else if let Some(index) = workspace_crate_root {
@@ -5588,6 +5606,96 @@ fn rust_module_identity(path: &Path, source_file: &str) -> String {
     } else {
         format!("{crate_name}::{}", components.join("::"))
     }
+}
+
+/// Resolve the Rust namespace from the nearest manifest that owns the source.
+///
+/// Directory names are not Rust crate identities: Cargo normalizes package
+/// hyphens and permits an explicit `[lib].name`.  Reading only bounded local
+/// manifests keeps the extractor offline and deterministic while fixing the
+/// common workspace case where `foo-bar` is imported as `foo_bar`.
+fn rust_manifest_crate_name(path: &Path) -> Option<String> {
+    let mut directory = path.parent();
+    while let Some(current) = directory {
+        let manifest = current.join("Cargo.toml");
+        if let Ok(text) = fs::read_to_string(&manifest)
+            && let Ok(value) = toml::from_str::<toml::Value>(&text)
+            && let Some(name) = rust_manifest_crate_name_value(&value)
+        {
+            return Some(name);
+        }
+        directory = current.parent();
+    }
+    None
+}
+
+fn rust_manifest_crate_name_value(value: &toml::Value) -> Option<String> {
+    let package_name = value
+        .get("package")
+        .and_then(toml::Value::as_table)
+        .and_then(|package| package.get("name"))
+        .and_then(toml::Value::as_str)?;
+    let lib_name = value
+        .get("lib")
+        .and_then(toml::Value::as_table)
+        .and_then(|lib| lib.get("name"))
+        .and_then(toml::Value::as_str);
+    Some(
+        lib_name
+            .unwrap_or(package_name)
+            .replace('-', "_")
+            .to_owned(),
+    )
+}
+
+fn rust_manifest_dependency_aliases(path: &Path) -> HashMap<String, String> {
+    let mut directory = path.parent();
+    while let Some(current) = directory {
+        let manifest = current.join("Cargo.toml");
+        let Ok(text) = fs::read_to_string(&manifest) else {
+            directory = current.parent();
+            continue;
+        };
+        let Ok(value) = toml::from_str::<toml::Value>(&text) else {
+            directory = current.parent();
+            continue;
+        };
+        if rust_manifest_crate_name_value(&value).is_none() {
+            directory = current.parent();
+            continue;
+        }
+        let mut aliases = HashMap::new();
+        for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
+            let Some(table) = value.get(section).and_then(toml::Value::as_table) else {
+                continue;
+            };
+            for (alias, specification) in table {
+                let mut target = specification
+                    .as_table()
+                    .and_then(|entry| entry.get("package"))
+                    .and_then(toml::Value::as_str)
+                    .unwrap_or(alias)
+                    .replace('-', "_");
+                if let Some(path_value) = specification
+                    .as_table()
+                    .and_then(|entry| entry.get("path"))
+                    .and_then(toml::Value::as_str)
+                {
+                    let dependency_manifest = current.join(path_value).join("Cargo.toml");
+                    if let Ok(dependency_text) = fs::read_to_string(dependency_manifest)
+                        && let Ok(dependency_value) =
+                            toml::from_str::<toml::Value>(&dependency_text)
+                        && let Some(name) = rust_manifest_crate_name_value(&dependency_value)
+                    {
+                        target = name;
+                    }
+                }
+                aliases.insert(alias.replace('-', "_"), target);
+            }
+        }
+        return aliases;
+    }
+    HashMap::new()
 }
 
 fn rust_qualify_local_path(module: &str, raw: &str) -> String {
@@ -5619,7 +5727,7 @@ fn rust_qualify_imported_path(
         }
         return target.clone();
     }
-    rust_canonical_import_target(&state.rust_enclosing_module(owner), raw)
+    state.rust_canonical_import_target(&state.rust_enclosing_module(owner), raw)
 }
 
 fn rust_qualify_evidence_path(
@@ -5650,15 +5758,13 @@ fn rust_qualify_evidence_path(
         });
     }
     if matches!(binding_name, "crate" | "self" | "super") {
-        return Some(rust_canonical_import_target(
-            &state.rust_enclosing_module(owner),
-            raw,
-        ));
+        return Some(state.rust_canonical_import_target(&state.rust_enclosing_module(owner), raw));
     }
     if qualifier.is_some_and(|value| {
         value.contains("::") || value.chars().next().is_some_and(char::is_lowercase)
     }) {
-        return Some(raw.to_owned());
+        let target = state.rust_canonical_import_target(&state.rust_enclosing_module(owner), raw);
+        return Some(target);
     }
     Some(rust_join_qualified(
         &state.rust_enclosing_module(owner),

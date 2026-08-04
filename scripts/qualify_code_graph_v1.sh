@@ -5,6 +5,11 @@ QUALIFY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 QUALIFY_TMP="$(mktemp -d "${TMPDIR:-/tmp}/compass-code-graph-v1.XXXXXX")"
 trap 'chmod -R u+w "$QUALIFY_TMP" 2>/dev/null || true; rm -rf -- "$QUALIFY_TMP"' EXIT
 
+# Keep Rust build artifacts on the mounted workspace volume. Qualification
+# intentionally exercises large repositories and must not fill the checkout's
+# disk with a second target tree.
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/Volumes/Workspace/crabbuild-target/compass-main}"
+
 usage() {
   cat >&2 <<EOF
 usage:
@@ -191,6 +196,27 @@ print(
     )
 )
 PY
+    quality_json="$("$COMPASS_BIN" diagnose quality --graph "$repository_graph" --json)"
+    python3 - "$quality_json" "$repository_name" <<'PY'
+import json
+import sys
+
+summary = json.loads(sys.argv[1])
+name = sys.argv[2]
+diagnostics = summary.get("graph_diagnostics", {})
+omitted_nodes = diagnostics.get("publication_omitted_nodes", 0)
+omitted_edges = diagnostics.get("publication_omitted_edges", 0)
+collisions = diagnostics.get("identity_collisions", 0)
+if collisions:
+    raise SystemExit(
+        f"{name}: identity collisions are not acceptable "
+        f"(identity_collisions={collisions})"
+    )
+if (omitted_nodes or omitted_edges) and "publication_omission_summary" not in diagnostics.get("by_code", {}):
+    raise SystemExit(f"{name}: omissions are not accompanied by a publication summary")
+if summary.get("output_consistency", {}).get("stats_match_graph") is False:
+    raise SystemExit(f"{name}: output stats do not match canonical graph counts")
+PY
     status_after="$(git -C "$repository" status --porcelain=v1 --untracked-files=all)"
     [[ "$status_after" == "$status_before" ]] || {
       echo "$repository_name source repository changed during qualification" >&2
@@ -312,3 +338,21 @@ python3 scripts/check_code_graph_v1_coverage.py \
   --graph "$QUALIFY_TMP/restored.graph.json" \
   --compass-revision "$(git rev-parse HEAD)" \
   --comparisons "$QUALIFY_TMP/comparisons.json"
+
+quality_json="$("$COMPASS_BIN" diagnose quality --graph "$QUALIFY_TMP/restored.graph.json" --json)"
+python3 - "$quality_json" <<'PY'
+import json
+import sys
+
+summary = json.loads(sys.argv[1])
+diagnostics = summary.get("graph_diagnostics", {})
+if diagnostics.get("identity_collisions", 0):
+    raise SystemExit(f"fixture publication has identity collisions: {diagnostics}")
+if (
+    diagnostics.get("publication_omitted_nodes", 0)
+    or diagnostics.get("publication_omitted_edges", 0)
+) and "publication_omission_summary" not in diagnostics.get("by_code", {}):
+    raise SystemExit(f"fixture omissions lack a publication summary: {diagnostics}")
+if summary.get("output_consistency", {}).get("stats_match_graph") is False:
+    raise SystemExit("fixture output stats do not match canonical graph counts")
+PY

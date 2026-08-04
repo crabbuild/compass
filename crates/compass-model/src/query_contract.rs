@@ -75,6 +75,8 @@ pub struct SearchRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CallRequest {
     pub symbol: String,
+    #[serde(default)]
+    pub include_heuristic: bool,
     pub limits: CodeQueryLimits,
 }
 
@@ -91,6 +93,8 @@ pub struct ImpactRequest {
 pub struct ExploreRequest {
     pub symbols: Vec<String>,
     pub root: String,
+    #[serde(default)]
+    pub include_heuristic: bool,
     pub limits: CodeQueryLimits,
 }
 

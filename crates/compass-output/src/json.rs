@@ -168,8 +168,11 @@ struct BorrowedLink<'a> {
 
 impl Serialize for BorrowedLink<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let source = self.edge.property("_src");
-        let target = self.edge.property("_tgt");
+        // `_src`/`_tgt` are private publication overrides, not logical query
+        // aliases.  Use the raw attributes here so the streaming writer has
+        // the same output contract as `export_json_value`.
+        let source = self.edge.attributes.get("_src").cloned();
+        let target = self.edge.attributes.get("_tgt").cloned();
         let confidence_score =
             self.edge.property("confidence_score").is_none().then(|| {
                 match self.edge.string("confidence").as_str() {

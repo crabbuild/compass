@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::provenance::{Provenance, ResolutionCandidate, ResolutionState, SourceAnchor};
+use crate::provenance::{
+    Provenance, ResolutionCandidate, ResolutionState, SourceAnchor, effective_confidence,
+};
 use crate::{GraphError, validate_code_graph};
 
 pub const CODE_GRAPH_SCHEMA_V1: &str = "compass.graph/1";
@@ -726,8 +728,12 @@ impl EdgeRecord {
             }),
             "confidence" => self
                 .evidence
-                .first()
-                .map(|evidence| Value::String(evidence.confidence.legacy_str().to_owned())),
+                .is_empty()
+                .then(|| Value::String("EXTRACTED".to_owned()))
+                .or_else(|| {
+                    effective_confidence(&self.evidence)
+                        .map(|confidence| Value::String(confidence.legacy_str().to_owned()))
+                }),
             "confidence_score" => self
                 .evidence
                 .iter()
@@ -885,8 +891,12 @@ impl NodeRecord {
                 .map(|evidence| Value::String(evidence.origin.as_str().to_owned())),
             "confidence" => self
                 .evidence
-                .first()
-                .map(|evidence| Value::String(evidence.confidence.legacy_str().to_owned())),
+                .is_empty()
+                .then(|| Value::String("EXTRACTED".to_owned()))
+                .or_else(|| {
+                    effective_confidence(&self.evidence)
+                        .map(|confidence| Value::String(confidence.legacy_str().to_owned()))
+                }),
             "roles" => Some(Value::Array(
                 self.roles
                     .iter()
@@ -1068,6 +1078,43 @@ impl GraphDocument {
         Self::load_strict(path)
     }
 
+    /// Project the validated typed document into the compatibility node-link
+    /// view used by legacy renderers and CompassQL.
+    pub fn to_legacy_document(&self) -> Result<crate::GraphDocument, GraphError> {
+        let nodes = self
+            .nodes
+            .iter()
+            .map(legacy_node_record)
+            .collect::<Result<Vec<_>, _>>()?;
+        let links = self
+            .links
+            .iter()
+            .map(legacy_edge_record)
+            .collect::<Result<Vec<_>, _>>()?;
+        legacy_document(self.directed, self.multigraph, &self.graph, nodes, links)
+    }
+
+    /// Consume the typed document while projecting it into the compatibility
+    /// node-link view without first allocating a second JSON envelope.
+    pub fn into_legacy_document(self) -> Result<crate::GraphDocument, GraphError> {
+        let Self {
+            directed,
+            multigraph,
+            graph,
+            nodes,
+            links,
+        } = self;
+        let nodes = nodes
+            .into_iter()
+            .map(|node| legacy_node_record(&node))
+            .collect::<Result<Vec<_>, _>>()?;
+        let links = links
+            .into_iter()
+            .map(|edge| legacy_edge_record(&edge))
+            .collect::<Result<Vec<_>, _>>()?;
+        legacy_document(directed, multigraph, &graph, nodes, links)
+    }
+
     #[must_use]
     pub fn size_cap_exceeded(path: &Path) -> Option<(u64, u64)> {
         let size = path.metadata().ok()?.len();
@@ -1086,12 +1133,7 @@ impl GraphDocument {
                 cap,
             });
         }
-        let bytes = fs::read(path).map_err(|source| GraphError::Read {
-            path: crate::graph::absolute_path(path),
-            source,
-        })?;
-        let digest = Sha256::digest(&bytes);
-        let digest = format!("{digest:x}");
+        let digest = file_digest(path)?;
         if let Some(document) = load_content_cache(path, &digest) {
             validate_code_graph(&document)?;
             return Ok(document);
@@ -1112,18 +1154,118 @@ impl GraphDocument {
         // Inspect the version without first allocating a complete generic JSON
         // tree. Serde skips the large node and edge arrays while retaining the
         // explicit unsupported-schema diagnostic.
-        let found = serde_json::from_slice::<SchemaEnvelope>(&bytes)
+        let schema_file = File::open(path).map_err(|source| GraphError::Read {
+            path: crate::graph::absolute_path(path),
+            source,
+        })?;
+        let found = serde_json::from_reader::<_, SchemaEnvelope>(BufReader::new(schema_file))
             .map_err(GraphError::Corrupt)?
             .graph
             .and_then(|graph| graph.schema);
         if found.as_deref() != Some(CODE_GRAPH_SCHEMA_V1) {
             return Err(GraphError::UnsupportedGraphSchema { found });
         }
-        let document = serde_json::from_slice(&bytes).map_err(GraphError::Corrupt)?;
+        let document_file = File::open(path).map_err(|source| GraphError::Read {
+            path: crate::graph::absolute_path(path),
+            source,
+        })?;
+        let document =
+            serde_json::from_reader(BufReader::new(document_file)).map_err(GraphError::Corrupt)?;
         validate_code_graph(&document)?;
         let _ = write_content_cache(path, &digest, &document);
         Ok(document)
     }
+}
+
+fn legacy_document(
+    directed: bool,
+    multigraph: bool,
+    graph: &GraphMetadata,
+    nodes: Vec<crate::NodeRecord>,
+    links: Vec<crate::EdgeRecord>,
+) -> Result<crate::GraphDocument, GraphError> {
+    let graph = serde_json::to_value(graph)
+        .map_err(GraphError::Corrupt)?
+        .as_object()
+        .cloned()
+        .ok_or_else(|| {
+            GraphError::Corrupt(serde_json::Error::io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "typed graph metadata is not an object",
+            )))
+        })?;
+    Ok(crate::GraphDocument {
+        directed,
+        multigraph,
+        graph,
+        nodes,
+        links,
+        extras: std::collections::BTreeMap::new(),
+    })
+}
+
+fn legacy_node_record(node: &NodeRecord) -> Result<crate::NodeRecord, GraphError> {
+    let value = serde_json::to_value(node).map_err(GraphError::Corrupt)?;
+    let mut object = value.as_object().cloned().ok_or_else(|| {
+        GraphError::Corrupt(serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "typed node is not an object",
+        )))
+    })?;
+    let id = object
+        .remove("id")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or(GraphError::MissingNodeId)?;
+    Ok(crate::NodeRecord {
+        id,
+        attributes: object,
+    })
+}
+
+fn legacy_edge_record(edge: &EdgeRecord) -> Result<crate::EdgeRecord, GraphError> {
+    let value = serde_json::to_value(edge).map_err(GraphError::Corrupt)?;
+    let mut object = value.as_object().cloned().ok_or_else(|| {
+        GraphError::Corrupt(serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "typed edge is not an object",
+        )))
+    })?;
+    let source = object
+        .remove("source")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or(GraphError::InvalidEdgeEndpoint)?;
+    let target = object
+        .remove("target")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or(GraphError::InvalidEdgeEndpoint)?;
+    Ok(crate::EdgeRecord {
+        source,
+        target,
+        attributes: object,
+    })
+}
+
+fn file_digest(path: &Path) -> Result<String, GraphError> {
+    let file = File::open(path).map_err(|source| GraphError::Read {
+        path: crate::graph::absolute_path(path),
+        source,
+    })?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|source| GraphError::Read {
+                path: crate::graph::absolute_path(path),
+                source,
+            })?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 const CONTENT_CACHE_MAGIC: &[u8; 8] = b"CGRPHV01";

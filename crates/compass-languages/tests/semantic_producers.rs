@@ -447,6 +447,7 @@ struct Graph {}
 impl Graph {
     fn new() -> Self { Self {} }
 }
+
 fn build() {
     Graph::new();
     HashMap::new();
@@ -479,6 +480,68 @@ fn build() {
     assert!(extraction.nodes.is_empty());
     assert!(extraction.edges.is_empty());
     assert!(extraction.raw_calls.is_none());
+    Ok(())
+}
+
+#[test]
+fn rust_module_identity_follows_cargo_package_and_lib_names() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    std::fs::write(
+        directory.path().join("Cargo.toml"),
+        "[package]\nname = \"codex-thread-store\"\nversion = \"0.1.0\"\n",
+    )?;
+    std::fs::create_dir_all(directory.path().join("src"))?;
+    let path = directory.path().join("src/lib.rs");
+    let source = b"pub struct StoredThreadHistory {}\n";
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust universal evidence")?;
+    assert!(
+        evidence
+            .declarations
+            .iter()
+            .any(|declaration| declaration.qualified_name
+                == "codex_thread_store::StoredThreadHistory"),
+        "declarations={:?}",
+        evidence.declarations
+    );
+
+    std::fs::write(
+        directory.path().join("Cargo.toml"),
+        "[package]\nname = \"package-name\"\nversion = \"0.1.0\"\n[lib]\nname = \"explicit_lib_name\"\n",
+    )?;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust universal evidence after manifest update")?;
+    assert!(evidence.declarations.iter().any(|declaration| {
+        declaration.qualified_name == "explicit_lib_name::StoredThreadHistory"
+    }));
+
+    std::fs::create_dir_all(directory.path().join("db/src"))?;
+    std::fs::write(
+        directory.path().join("db/Cargo.toml"),
+        "[package]\nname = \"internal-storage\"\nversion = \"0.1.0\"\n",
+    )?;
+    std::fs::write(
+        directory.path().join("Cargo.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\ndb = { path = \"db\", package = \"internal-storage\" }\n",
+    )?;
+    let path = directory.path().join("src/main.rs");
+    let source = b"use db::StoredThreadHistory;\nfn build() { let _ = StoredThreadHistory; }\n";
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust universal evidence after dependency alias")?;
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Imports
+            && candidate.constraints.qualified_name.as_deref()
+                == Some("internal_storage::StoredThreadHistory")
+    }));
     Ok(())
 }
 

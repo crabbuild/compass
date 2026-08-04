@@ -23,9 +23,9 @@ compass-out/
 ├── .compass-active-generation
 ├── .compass-generations/<active>/
 │   ├── graph.json
-│   └── store.ref               # only with --store sqlite
+│   └── store.ref               # with the default SQLite query index
 ├── .compass-store/
-│   └── compass-store.sqlite3   # only with --store sqlite
+│   └── compass-store.sqlite3   # with the default SQLite query index
 ├── program.json
 ├── GRAPH_REPORT.md
 ├── graph.html
@@ -41,7 +41,7 @@ compass-out/
 | Artifact | Authority | Consumer use |
 | --- | --- | --- |
 | `graph.json` | machine-readable graph snapshot | queries, integrations, export |
-| `.compass-store/compass-store.sqlite3` | optional shared namespace/partition/key store | explicit store-engine queries and future store adapters |
+| `.compass-store/compass-store.sqlite3` | bounded shared namespace/partition/key query index | default large-graph queries and explicit store-engine queries |
 | active generation `store.ref` | typed selector for the co-published store identity and snapshot | store-engine validation before query execution |
 | `program.json` | provenance-aware Program IR | program inspection, semantic analysis |
 | `GRAPH_REPORT.md` | derived human orientation | architecture survey |
@@ -52,14 +52,20 @@ compass-out/
 
 Do not reconstruct graph truth from HTML when JSON is available.
 
-`.compass-store/compass-store.sqlite3` is an optional local SQLite realization
+`.compass-store/compass-store.sqlite3` is the default local SQLite realization
 shared by retained graph generations. It is addressed through the `compass-store`
 namespace/partition/key contract and is not a public SQL schema. The file is
 not copied into a published generation; a new build writes immutable content,
-checkpoints it, and publishes a digest-bound generation reference. `graph.json` remains the default complete
-compatible graph engine. Pass `--store sqlite` during a build to publish the
-sidecar, then use `--engine store` to require it and fail explicitly when it is
-missing or corrupt.
+checkpoints it, and publishes a digest-bound generation reference. `graph.json`
+remains the complete portable graph engine. Pass `--store json` during a build
+to omit the sidecar; `--engine json` forces the portable reader, while the
+default query engine uses the sidecar when it is present and fails closed if
+its reference is corrupt.
+
+The store snapshot accepts canonical graphs up to 2 GiB. This larger, still
+finite bound applies only to the indexed store path; in-memory JSON readers
+retain their independent 1 GiB cap and should be used only for bounded
+investigations or smaller outputs.
 
 ## `graph.json`
 
@@ -458,6 +464,21 @@ First-party editor and offline-viewer contracts are versioned independently:
   changes, and exact added, removed, and changed node/edge records consumed by
   the CLI HTML report and editor comparison views;
 - `compass.ide.progress/1` — newline-delimited guided-operation events.
+
+## Graph quality diagnostics
+
+Use `compass diagnose quality --graph <path> --json` to inspect the typed graph
+before giving it to an agent or downstream exporter. The report includes
+evidence confidence, source-anchor coverage, external placeholders, dangling
+relationships, publication omissions, identity collisions, and consistency
+with the publisher statistics and overview sidecars.
+
+For graphs larger than the default bounded in-memory reader cap, the command
+returns `quality_scope: "publisher-stats-only"`: counts and omission metadata
+come from `.compass_output_stats.json`, while record-level ratios are reported
+as unavailable. This is an explicit safety boundary; use a prepared store or a
+bounded investigation with `COMPASS_MAX_GRAPH_BYTES` rather than silently
+allocating an unbounded JSON graph.
 
 ## Filesystem and concurrency
 

@@ -3167,6 +3167,16 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             let mut attributes = Map::new();
             attributes.insert("label".to_owned(), Value::String(name.to_owned()));
             attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+            // This helper is used only for type references discovered while
+            // extracting a source file.  Emit the closed semantic kind up
+            // front so publication can retain the evidence even when the
+            // declaration lives in another file or dependency.  The resolver
+            // still marks the resulting source-less node as inferred and
+            // requires an exact wiring site; no declaration is fabricated.
+            attributes.insert(
+                "symbol_kind".to_owned(),
+                Value::String("type_alias".to_owned()),
+            );
             attributes.insert("source_file".to_owned(), Value::String(String::new()));
             attributes.insert("source_location".to_owned(), Value::String(String::new()));
             if origin_file {

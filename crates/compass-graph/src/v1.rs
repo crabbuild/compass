@@ -741,46 +741,42 @@ fn normalize_v1_with_mode(
             normalized,
         }
     };
-    let prepared_nodes = if extraction.nodes.len() < 512 {
-        extraction
-            .nodes
-            .into_iter()
-            .map(prepare_node)
-            .collect::<Vec<_>>()
-    } else {
-        extraction
-            .nodes
-            .into_par_iter()
-            .map(prepare_node)
-            .collect::<Vec<_>>()
-    };
-    let mut id_remap = HashMap::with_capacity(prepared_nodes.len());
-    let mut nodes = HashMap::<String, NodeRecord>::with_capacity(prepared_nodes.len());
-    for prepared in prepared_nodes {
-        let PreparedNode {
-            raw,
-            raw_id,
-            normalized,
-        } = prepared;
-        if id_remap.contains_key(&raw_id) {
-            let error = raw_error(
-                &raw_id,
-                "duplicate raw node ID cannot be resolved deterministically",
-            );
-            if mode == PublicationMode::Strict {
-                return Err(error);
-            }
-            id_remap.remove(&raw_id);
-            quarantine.omit_node(
-                &raw_id,
-                &error.to_string(),
-                best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
-            );
-            continue;
+    // Normalize nodes in bounded batches. Holding every raw record and every
+    // typed record in a `PreparedNode` vector at once nearly doubles the peak
+    // resident set on repository-scale graphs; the publication map and
+    // endpoint remap are the only state that must survive between batches.
+    const PREPARED_NODE_BATCH_SIZE: usize = 8_192;
+    let mut id_remap = HashMap::with_capacity(extraction.nodes.len());
+    let mut nodes = HashMap::<String, NodeRecord>::with_capacity(extraction.nodes.len());
+    let mut raw_nodes = extraction.nodes.into_iter();
+    loop {
+        let batch = raw_nodes
+            .by_ref()
+            .take(PREPARED_NODE_BATCH_SIZE)
+            .collect::<Vec<_>>();
+        if batch.is_empty() {
+            break;
         }
-        let node = match normalized {
-            Ok(node) => node,
-            Err(error) if mode == PublicationMode::BestEffort => {
+        let prepared_nodes = if batch.len() < 512 {
+            batch.into_iter().map(prepare_node).collect::<Vec<_>>()
+        } else {
+            batch.into_par_iter().map(prepare_node).collect::<Vec<_>>()
+        };
+        for prepared in prepared_nodes {
+            let PreparedNode {
+                raw,
+                raw_id,
+                normalized,
+            } = prepared;
+            if id_remap.contains_key(&raw_id) {
+                let error = raw_error(
+                    &raw_id,
+                    "duplicate raw node ID cannot be resolved deterministically",
+                );
+                if mode == PublicationMode::Strict {
+                    return Err(error);
+                }
+                id_remap.remove(&raw_id);
                 quarantine.omit_node(
                     &raw_id,
                     &error.to_string(),
@@ -788,28 +784,47 @@ fn normalize_v1_with_mode(
                 );
                 continue;
             }
-            Err(error) => return Err(error),
-        };
-        let published_id = node.id.clone();
-        if let Some(existing) = nodes.get_mut(&node.id) {
-            let mut merged = existing.clone();
-            if let Err(error) = merge_normalized_node(&mut merged, node) {
-                if mode == PublicationMode::Strict {
-                    return Err(error);
+            let node = match normalized {
+                Ok(node) => node,
+                Err(error) if mode == PublicationMode::BestEffort => {
+                    quarantine.omit_node(
+                        &raw_id,
+                        &error.to_string(),
+                        best_effort_raw_anchor(
+                            &raw.attributes,
+                            &evidence.repository_root,
+                            &file_facts,
+                        ),
+                    );
+                    continue;
                 }
-                quarantine.identity_collision(
-                    &raw_id,
-                    &error.to_string(),
-                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts)
+                Err(error) => return Err(error),
+            };
+            let published_id = node.id.clone();
+            if let Some(existing) = nodes.get_mut(&node.id) {
+                let mut merged = existing.clone();
+                if let Err(error) = merge_normalized_node(&mut merged, node) {
+                    if mode == PublicationMode::Strict {
+                        return Err(error);
+                    }
+                    quarantine.identity_collision(
+                        &raw_id,
+                        &error.to_string(),
+                        best_effort_raw_anchor(
+                            &raw.attributes,
+                            &evidence.repository_root,
+                            &file_facts,
+                        )
                         .or_else(|| best_effort_node_anchor(existing)),
-                );
-                continue;
+                    );
+                    continue;
+                }
+                *existing = merged;
+            } else {
+                nodes.insert(node.id.clone(), node);
             }
-            *existing = merged;
-        } else {
-            nodes.insert(node.id.clone(), node);
+            id_remap.insert(raw_id, published_id);
         }
-        id_remap.insert(raw_id, published_id);
     }
     for node in nodes.values_mut() {
         remap_provenance_candidates(&mut node.evidence, &id_remap);
@@ -1224,6 +1239,28 @@ fn normalize_v1_with_mode(
 fn normalize_trusted_node(value: Value, raw_id: &str) -> Result<NodeRecord, GraphError> {
     let mut node = serde_json::from_value::<NodeRecord>(value)
         .map_err(|error| raw_error(raw_id, &error.to_string()))?;
+    // Trusted records already carry typed semantics, but older producers used a
+    // global qualified-name identity for document blocks.  Documents are
+    // occurrences: preserve their source anchor in the canonical identity even
+    // when they arrive through the trusted path (which bypasses raw
+    // normalization).  This prevents repeated Markdown/HTML blocks with the
+    // same heading from quarantining one another.
+    if node.kind == NodeKind::Resource
+        && matches!(
+            node.details,
+            Some(NodeDetails::Resource(ResourceNodeDetails {
+                resource_kind: ResourceKind::Document,
+                ..
+            }))
+        )
+        && let Some(site) = node.source.as_ref()
+    {
+        let positional_name = format!(
+            "{}@{}:{}",
+            node.qualified_name, site.start_byte, site.end_byte
+        );
+        node.id = domain_id(NodeKind::Resource, &site.file, &positional_name);
+    }
     if node.source.is_none() {
         for evidence in &mut node.evidence {
             if evidence.rule.as_deref() == Some("external-symbol-placeholder") {
@@ -1673,13 +1710,7 @@ fn normalize_trusted_edge(
 }
 
 fn is_unresolved_external_node(node: &NodeRecord) -> bool {
-    node.source.is_none()
-        && node.evidence.iter().any(|evidence| {
-            evidence.origin == EvidenceOrigin::Heuristic
-                && evidence.confidence == EvidenceConfidence::Inferred
-                && evidence.rule.as_deref() == Some("external-symbol-placeholder")
-                && evidence.wiring_site.is_some()
-        })
+    node.source.is_none() && node.evidence.iter().any(is_external_placeholder_evidence)
 }
 
 fn collect_stub_wiring_sites(
@@ -2205,8 +2236,23 @@ fn merge_normalized_node(
         && existing.qualified_name == duplicate.qualified_name
         && existing.language == duplicate.language
         && existing.framework == duplicate.framework;
+    let compatible_external_placeholder = existing.source.is_none()
+        && duplicate.source.is_none()
+        && existing.kind == duplicate.kind
+        && existing.qualified_name == duplicate.qualified_name
+        && existing.language == duplicate.language
+        && existing.framework == duplicate.framework
+        && existing
+            .evidence
+            .iter()
+            .any(is_external_placeholder_evidence)
+        && duplicate
+            .evidence
+            .iter()
+            .any(is_external_placeholder_evidence);
     if !current_ast_is_authoritative
         && !compatible_route_registration
+        && !compatible_external_placeholder
         && (existing.kind != duplicate.kind
             || existing.name != duplicate.name
             || existing.qualified_name != duplicate.qualified_name
@@ -2237,6 +2283,15 @@ fn merge_normalized_node(
             ),
         ));
     }
+    if compatible_external_placeholder && existing.name != duplicate.name {
+        // External references often arrive once with a terminal display name
+        // and once with a fully-qualified label. They share the exact
+        // qualified identity and wiring evidence; retain one deterministic
+        // presentation value instead of quarantining a real relationship.
+        if duplicate.name < existing.name {
+            existing.name = duplicate.name.clone();
+        }
+    }
     existing.roles.append(&mut duplicate.roles);
     sort_dedup_serialized(&mut existing.roles);
     existing.evidence.append(&mut duplicate.evidence);
@@ -2253,6 +2308,13 @@ fn merge_normalized_node(
     }
     existing.community = deterministic_option(existing.community.take(), duplicate.community);
     Ok(())
+}
+
+fn is_external_placeholder_evidence(evidence: &Provenance) -> bool {
+    evidence.origin == EvidenceOrigin::Heuristic
+        && evidence.confidence == EvidenceConfidence::Inferred
+        && evidence.rule.as_deref() == Some("external-symbol-placeholder")
+        && evidence.wiring_site.is_some()
 }
 
 fn merge_normalized_edge(
@@ -2318,6 +2380,21 @@ fn deterministic_option<T: Serialize>(left: Option<T>, right: Option<T>) -> Opti
 
 fn sort_dedup_serialized<T: Serialize>(values: &mut Vec<T>) {
     if values.len() < 2 {
+        return;
+    }
+    // Most provenance/diagnostic collections contain exactly two records. In
+    // that hot path, avoid the cached-key sort followed by a second full JSON
+    // serialization during deduplication. The two comparisons below preserve
+    // the same bytewise deterministic order and semantics with bounded
+    // temporary allocation.
+    if values.len() == 2 {
+        let left = serialized(&values[0]);
+        let right = serialized(&values[1]);
+        if left == right {
+            values.truncate(1);
+        } else if right < left {
+            values.swap(0, 1);
+        }
         return;
     }
     values.sort_by_cached_key(serialized);
@@ -3945,6 +4022,24 @@ fn node_identity(
                 }))
             ) =>
         {
+            let positional_name = identity_site.map_or_else(
+                || qualified_name.to_owned(),
+                |site| format!("{qualified_name}@{}:{}", site.start_byte, site.end_byte),
+            );
+            domain_id(kind, source_path, &positional_name)
+        }
+        NodeKind::Resource
+            if matches!(
+                details,
+                Some(NodeDetails::Resource(ResourceNodeDetails {
+                    resource_kind: ResourceKind::Document,
+                    ..
+                }))
+            ) =>
+        {
+            // Markdown/HTML blocks are occurrences, not global concepts. The
+            // source anchor is part of their semantic identity so repeated
+            // blocks in one file cannot quarantine one another.
             let positional_name = identity_site.map_or_else(
                 || qualified_name.to_owned(),
                 |site| format!("{qualified_name}@{}:{}", site.start_byte, site.end_byte),

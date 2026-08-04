@@ -15,7 +15,10 @@ pub use cluster_existing::{
     ClusterExistingOptions, ClusterExistingResult, ClusterExistingTimings, ClusterLabelContext,
     ClusterLabelSelection, cluster_existing_graph, cluster_existing_graph_with_labeler,
 };
-pub use diagnostics::{diagnose_graph_file, format_diagnostic_json, format_diagnostic_report};
+pub use diagnostics::{
+    diagnose_graph_file, diagnose_graph_quality, format_diagnostic_json, format_diagnostic_report,
+    format_quality_json, format_quality_report,
+};
 pub use history::{
     CompleteGraphBuilder, MaterializeError, MaterializeObserver, MaterializeRequest,
     MaterializeStage, history_provider_manifest, materialize_history,

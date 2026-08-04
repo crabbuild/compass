@@ -150,7 +150,11 @@ impl QueryIndex {
 
 #[must_use]
 pub fn cypher_node_label(node: &NodeRecord) -> String {
-    let raw = node.string("file_type");
+    let raw = node
+        .logical_property("kind")
+        .or_else(|| node.logical_property("file_type"))
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default();
     let raw = if raw.is_empty() { "Entity" } else { &raw };
     let mut value = raw.to_lowercase();
     if let Some(first) = value.get_mut(0..1) {
@@ -191,14 +195,14 @@ fn fingerprint_schema(nodes: &[NodeRecord], edges: &[EdgeRecord]) -> SchemaFinge
         entries.insert(format!("N:L:{}", cypher_node_label(node)));
         entries.insert("N:P:id:string".to_owned());
         entries.insert("N:P:label:string".to_owned());
-        for (key, value) in node.properties() {
+        for (key, value) in node.logical_properties() {
             entries.insert(format!("N:P:{key}:{}", value_kind(&value)));
         }
     }
     for edge in edges {
         entries.insert(format!("R:T:{}", cypher_relationship_type(edge)));
         entries.insert("R:P:confidence:string".to_owned());
-        for (key, value) in edge.properties() {
+        for (key, value) in edge.logical_properties() {
             entries.insert(format!("R:P:{key}:{}", value_kind(&value)));
         }
     }

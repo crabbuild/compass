@@ -44,8 +44,8 @@ compass init [PATH]
 Includes and excludes are repeatable. Interactive mode previews the effective
 corpus before writing `.compass/config.toml`; scripts must pass `--yes`.
 Replacing an existing configuration requires `--force`.
-The initial build publishes JSON only by default. Pass `--store sqlite` to add
-the shared SQLite snapshot and `store.ref` to that generation. The database
+The initial build publishes JSON and a SQLite query snapshot by default. Pass
+`--store json` when only the portable JSON artifact is wanted. The database
 lives below the output root at `.compass-store/compass-store.sqlite3`; the
 generation contains only the small reference beside `graph.json`.
 
@@ -74,8 +74,9 @@ verified offline SCIP index with repeatable `--program-artifact`. For Java,
 fresh exact symbol evidence can disambiguate AST-proven call sites in
 `graph.json`; stale, unverified, conflicting, and non-call references are not
 projected. `--no-program` conflicts with `--program-artifact`.
-Graph storage defaults to `json`; `--store sqlite` adds the validated local
-store sidecar without replacing `graph.json`.
+Graph storage defaults to `sqlite`; `--store json` opts out of the validated
+local store sidecar without replacing `graph.json`. JSON remains the portable
+authority, while the sidecar keeps large graphs queryable under bounded memory.
 
 ### `extract`
 
@@ -653,8 +654,10 @@ Managed integration/update probe.
 - `--graph PATH` selects a graph JSON.
 - Typed code-query commands (`search`, `callers`, `callees`, `impact`,
   `explore`, and `node`) use `graph.json` by default. Their
-  `--engine default|json|store` option selects the engine; both `default` and
-  `json` use JSON, while `store` requires a validated SQLite sidecar.
+  `--engine default|json|store` option selects the engine; `default` uses the
+  validated SQLite sidecar when the build published one and otherwise falls
+  back to JSON, `json` always reads graph.json, and `store` requires the
+  sidecar and fails closed when it is missing or corrupt.
 - `--at REV` selects an exact historical graph for supported reads.
 - `--graph` and `--at` are mutually exclusive.
 - Build `PATH` defaults are command-specific; run help before scripting.
@@ -679,8 +682,9 @@ and digest state. `validate` requires a matching
 The commands currently operate on the local SQLite adapter. The redb adapter is
 library-only, and PostgreSQL/DynamoDB are future backends.
 
-`graph.json` is the default complete engine. Use `--engine store` with typed
-query commands only after a `--store sqlite` build. The explicit rebuild
+`graph.json` remains the complete portable authority. The default query engine
+uses the validated SQLite sidecar when present; use `--engine json` to force
+JSON or `--engine store` to require the sidecar. The explicit rebuild
 runbook is [`scripts/rebuild_compass_store.sh`](../../scripts/rebuild_compass_store.sh);
 the detailed durability, backup, GC, quota, and recovery policy is in the
 [Compass Store operations guide](../guides/compass-store-operations.md).

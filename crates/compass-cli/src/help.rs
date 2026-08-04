@@ -238,13 +238,13 @@ const PAGES: &[Page] = &[
         "callers",
         "List direct callers of a typed symbol",
         ["compass callers <SYMBOL> [OPTIONS]"],
-        "Arguments:\n  <SYMBOL>                      Symbol ID, name, or qualified name\n\nOptions:\n  --graph <PATH>                Typed graph [default: compass-out/graph.json]\n  --program <PATH>              Optional Program IR enrichment\n  --cache <DIR>                 Query-index cache directory\n  --engine <default|json|store> Graph storage engine [default: default]\n  --max-nodes <N>               Node bound\n  --max-edges <N>               Edge bound\n  --format <text|json>          Output format [default: text]\n\nExamples:\n  compass callers PaymentService.charge\n  compass callers sym:checkout --format json"
+        "Arguments:\n  <SYMBOL>                      Symbol ID, name, or qualified name\n\nOptions:\n  --graph <PATH>                Typed graph [default: compass-out/graph.json]\n  --program <PATH>              Optional Program IR enrichment\n  --cache <DIR>                 Query-index cache directory\n  --engine <default|json|store> Graph storage engine [default: default]\n  --max-nodes <N>               Node bound\n  --max-edges <N>               Edge bound\n  --include-heuristic           Include heuristic evidence (default is exact-first)\n  --format <text|json>          Output format [default: text]\n\nExamples:\n  compass callers PaymentService.charge\n  compass callers sym:checkout --format json"
     ),
     page!(
         "callees",
         "List direct callees of a typed symbol",
         ["compass callees <SYMBOL> [OPTIONS]"],
-        "Arguments:\n  <SYMBOL>                      Symbol ID, name, or qualified name\n\nOptions:\n  --graph <PATH>                Typed graph [default: compass-out/graph.json]\n  --program <PATH>              Optional Program IR enrichment\n  --cache <DIR>                 Query-index cache directory\n  --engine <default|json|store> Graph storage engine [default: default]\n  --max-nodes <N>               Node bound\n  --max-edges <N>               Edge bound\n  --format <text|json>          Output format [default: text]\n\nExamples:\n  compass callees CheckoutController.create\n  compass callees sym:checkout --format json"
+        "Arguments:\n  <SYMBOL>                      Symbol ID, name, or qualified name\n\nOptions:\n  --graph <PATH>                Typed graph [default: compass-out/graph.json]\n  --program <PATH>              Optional Program IR enrichment\n  --cache <DIR>                 Query-index cache directory\n  --engine <default|json|store> Graph storage engine [default: default]\n  --max-nodes <N>               Node bound\n  --max-edges <N>               Edge bound\n  --include-heuristic           Include heuristic evidence (default is exact-first)\n  --format <text|json>          Output format [default: text]\n\nExamples:\n  compass callees CheckoutController.create\n  compass callees sym:checkout --format json"
     ),
     page!(
         "impact",
@@ -256,7 +256,7 @@ const PAGES: &[Page] = &[
         "explore",
         "Return related source grouped by file with connecting paths",
         ["compass explore <SYMBOL> [SYMBOL...] [OPTIONS]"],
-        "Arguments:\n  <SYMBOL...>                   Symbol IDs, names, or qualified names\n\nOptions:\n  --root <PATH>                 Repository root used to read source\n  --graph <PATH>                Typed graph [default: compass-out/graph.json]\n  --program <PATH>              Optional Program IR enrichment\n  --cache <DIR>                 Query-index cache directory\n  --engine <default|json|store> Graph storage engine [default: default]\n  --max-paths <N>               Path bound\n  --max-source-bytes <N>        Source-byte bound\n  --max-response-bytes <N>      Serialized response bound\n  --format <text|json>          Output format [default: text]\n\nExamples:\n  compass explore CheckoutController PaymentGateway --root .\n  compass explore sym:a sym:b --root . --format json"
+        "Arguments:\n  <SYMBOL...>                   Symbol IDs, names, or qualified names\n\nOptions:\n  --root <PATH>                 Repository root used to read source\n  --graph <PATH>                Typed graph [default: compass-out/graph.json]\n  --program <PATH>              Optional Program IR enrichment\n  --cache <DIR>                 Query-index cache directory\n  --engine <default|json|store> Graph storage engine [default: default]\n  --max-paths <N>               Path bound\n  --max-source-bytes <N>        Source-byte bound\n  --max-response-bytes <N>      Serialized response bound\n  --include-heuristic           Include heuristic evidence (default is exact-first)\n  --format <text|json>          Output format [default: text]\n\nExamples:\n  compass explore CheckoutController PaymentGateway --root .\n  compass explore sym:a sym:b --root . --format json"
     ),
     page!(
         "node",
@@ -614,7 +614,13 @@ const PAGES: &[Page] = &[
         "diagnose",
         "Inspect graph health and compatibility problems",
         ["compass diagnose <COMMAND>"],
-        "Examples:\n  compass diagnose multigraph\n  compass diagnose multigraph --json"
+        "Commands:\n  multigraph                 Inspect duplicate and directed-edge behavior\n  quality                    Inspect typed evidence, anchors, omissions, and output consistency\n\nExamples:\n  compass diagnose quality\n  compass diagnose quality --json\n  compass diagnose multigraph --json"
+    ),
+    page!(
+        "diagnose quality",
+        "Inspect typed graph evidence and publication quality",
+        ["compass diagnose quality [OPTIONS]"],
+        "Options:\n  --graph <PATH>          Typed graph [default: compass-out/graph.json]\n  --json                  Emit compass.graph-quality/1 JSON\n\nChecks:\n  Evidence confidence, source anchors, external placeholders, publication omissions, identity collisions, and consistency with graph-overview.json and .compass_output_stats.json.\n\nExamples:\n  compass diagnose quality\n  compass diagnose quality --graph compass-out/graph.json --json"
     ),
     page!(
         "diagnose multigraph",
@@ -882,6 +888,16 @@ fn render_page(page: &Page, style: HelpStyle) -> String {
         let _ = output.pop();
     }
     let details = add_help_option(page.details);
+    let details = if matches!(page.path, "init" | "update" | "extract" | "watch") {
+        details
+            .replace("Graph storage [default: json]", "Graph storage [default: sqlite]")
+            .replace(
+                "SQLite is an explicit sidecar opt-in; graph.json is always published.",
+                "JSON is always published; the default SQLite sidecar keeps large graphs queryable without loading graph.json into memory. Use --store json to opt out.",
+            )
+    } else {
+        details
+    };
     if !details.is_empty() {
         output.push_str("\n\n");
         output.push_str(&details);

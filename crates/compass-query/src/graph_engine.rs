@@ -258,8 +258,9 @@ impl GraphEngine for StoreGraphEngine {
     }
 }
 
-/// Open the selected graph engine. Default selection always uses the permanent
-/// compatible JSON artifact; the store is opened only by explicit selection.
+/// Open the selected materialized graph engine. The bounded local-store path
+/// used by the public default lives in `index::open_with_engine`; callers that
+/// need this lower-level adapter can still select JSON or an explicit store.
 pub fn open_graph_engine(
     graph_path: &Path,
     selection: EngineSelection,

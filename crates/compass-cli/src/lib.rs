@@ -41,8 +41,9 @@ use compass_core::{
     ClusterExistingOptions, ExportInputs, GraphStorage, LoadedGraph, SemanticLayer, WatchBackend,
     WatchBuildReason, WatchOptions, WatchStatus, build_graph_with_layers,
     build_graph_with_layers_and_progress, build_graph_with_layers_and_tiebreaker,
-    cluster_existing_graph, default_graph_path, diagnose_graph_file, format_diagnostic_json,
-    format_diagnostic_report, merge_graphs, watch_local_graph,
+    cluster_existing_graph, default_graph_path, diagnose_graph_file, diagnose_graph_quality,
+    format_diagnostic_json, format_diagnostic_report, format_quality_json, format_quality_report,
+    merge_graphs, watch_local_graph,
 };
 use compass_files::{
     BuildScope, DetectOptions, Detection, Manifest, ManifestKind, ProjectConfig, detect,
@@ -1095,10 +1096,51 @@ fn parse_positive_seconds(value: &str, option: &str) -> Result<Duration, String>
 }
 
 fn command_diagnose(frontend: Frontend, args: &[String]) -> Outcome {
-    if args.first().map(String::as_str) != Some("multigraph") {
+    let Some(command) = args.first().map(String::as_str) else {
         return Outcome::failure(
-            "Usage: compass diagnose multigraph [--graph path] [--json] [--max-examples N] [--directed] [--undirected] [--extract-path path]"
-                .to_owned(),
+            "Usage: compass diagnose <multigraph|quality> [OPTIONS]".to_owned(),
+        );
+    };
+    if command == "quality" {
+        let mut graph_path = default_graph_path();
+        let mut json_output = false;
+        let mut index = 1;
+        while index < args.len() {
+            match args[index].as_str() {
+                "--graph" => {
+                    index += 1;
+                    let Some(value) = args.get(index) else {
+                        return Outcome::failure("error: --graph requires a path".to_owned());
+                    };
+                    graph_path = PathBuf::from(value);
+                }
+                "--json" => json_output = true,
+                value => {
+                    return Outcome::failure(format!(
+                        "error: unknown diagnose quality option {value}"
+                    ));
+                }
+            }
+            index += 1;
+        }
+        let graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&graph_path) {
+            Ok(path) => path,
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        };
+        return match diagnose_graph_quality(&graph_path) {
+            Ok(summary) if json_output => {
+                match serde_json::to_string_pretty(&format_quality_json(&summary)) {
+                    Ok(output) => Outcome::success(output),
+                    Err(error) => Outcome::failure(format!("error: {error}")),
+                }
+            }
+            Ok(summary) => Outcome::success(format_quality_report(&summary)),
+            Err(error) => Outcome::failure(format!("error: {error}")),
+        };
+    }
+    if command != "multigraph" {
+        return Outcome::failure(
+            "Usage: compass diagnose <multigraph|quality> [OPTIONS]".to_owned(),
         );
     }
     let mut graph_path = default_graph_path();

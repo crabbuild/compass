@@ -65,10 +65,12 @@ fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String
         }),
         "callers" => engine.callers(CallRequest {
             symbol: required(&positional, 0, "callers <SYMBOL>")?.to_owned(),
+            include_heuristic: args.iter().any(|arg| arg == "--include-heuristic"),
             limits,
         }),
         "callees" => engine.callees(CallRequest {
             symbol: required(&positional, 0, "callees <SYMBOL>")?.to_owned(),
+            include_heuristic: args.iter().any(|arg| arg == "--include-heuristic"),
             limits,
         }),
         "impact" => engine.impact(ImpactRequest {
@@ -79,6 +81,7 @@ fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String
         "explore" => engine.explore(ExploreRequest {
             symbols: positional,
             root: option(args, "--root").unwrap_or_default().to_owned(),
+            include_heuristic: args.iter().any(|arg| arg == "--include-heuristic"),
             limits,
         }),
         "node" => engine.node_trail(NodeTrailRequest {

@@ -221,9 +221,10 @@ JSON file. A store snapshot can always stream a canonical `graph.json` export;
 an existing `graph.json` can be imported into a new prepared store snapshot
 after full validation.
 
-The shipped local CLI uses `json` by default. `--store sqlite` selects the
-current dual profile: it retains `graph.json` and additionally publishes the
-SQLite snapshot and `store.ref`. A store-only profile remains future work.
+The shipped local CLI uses the dual SQLite profile by default: it retains
+`graph.json` and additionally publishes the SQLite snapshot and `store.ref`.
+`--store json` selects the database-free profile. A store-only profile remains
+future work.
 
 This distinction is essential to honest performance claims. A dual build must
 still encode and write all nodes and edges to JSON, so it has an unavoidable
@@ -763,7 +764,7 @@ database later becomes unavailable, the published `graph.json` remains a
 usable complete engine. No best-effort sequence of “update database, then
 replace JSON” is allowed to expose two different current graphs.
 
-When selected with `--store sqlite`, the Phase 3 local implementation uses the
+When selected by default or with `--store sqlite`, the Phase 3 local implementation uses the
 stable `DIR/.compass-store/compass-store.sqlite3` database outside staged and
 complete generation directories. SQLite runs in WAL/FULL mode; the writer
 checkpoints before the generation switch, while the staged generation receives
