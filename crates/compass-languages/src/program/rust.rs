@@ -591,14 +591,50 @@ fn add_reason(
 
 fn impl_owner(source: &[u8], node: Node<'_>) -> Option<String> {
     let type_node = node.child_by_field_name("type")?;
-    let owner = text(source, type_node);
+    let owner = normalize_rust_path(text(source, type_node));
     let trait_name = node
         .child_by_field_name("trait")
-        .map(|node| text(source, node));
+        .map(|node| normalize_rust_path(text(source, node)));
     Some(trait_name.map_or_else(
-        || owner.to_owned(),
+        || owner.clone(),
         |trait_name| format!("<{owner} as {trait_name}>"),
     ))
+}
+
+fn normalize_rust_path(raw: &str) -> String {
+    let raw = raw.trim();
+    if let Some(inner) = raw
+        .strip_prefix('<')
+        .and_then(|value| value.strip_suffix('>'))
+        && let Some((type_path, trait_path)) = inner.split_once(" as ")
+    {
+        return format!(
+            "<{} as {}>",
+            strip_rust_generic_arguments(type_path),
+            strip_rust_generic_arguments(trait_path)
+        );
+    }
+    strip_rust_generic_arguments(raw)
+}
+
+fn strip_rust_generic_arguments(raw: &str) -> String {
+    let raw = raw.trim();
+    let mut normalized = String::with_capacity(raw.len());
+    let mut angle_depth = 0_u32;
+    for character in raw.chars() {
+        match character {
+            '<' => {
+                if angle_depth == 0 && normalized.ends_with("::") {
+                    normalized.truncate(normalized.len().saturating_sub(2));
+                }
+                angle_depth = angle_depth.saturating_add(1);
+            }
+            '>' if angle_depth > 0 => angle_depth = angle_depth.saturating_sub(1),
+            _ if angle_depth > 0 => {}
+            character => normalized.push(character),
+        }
+    }
+    normalized.trim().trim_end_matches("::").to_owned()
 }
 
 fn graph_node_id(path: &str, owner: Option<&str>, name: &str) -> String {

@@ -496,6 +496,46 @@ fn invoke(container: Container<u32>) {
 }
 
 #[test]
+fn rust_turbofish_and_explicit_trait_impl_paths_resolve_exactly() {
+    let source = br#"trait Render<T> {
+    fn render(&self, value: T);
+}
+struct Container<T>(T);
+impl<T> Render<T> for Container<T> {
+    fn render(&self, _value: T) {}
+}
+fn invoke(container: Container<u32>) {
+    Container::<u32>::render(&container, 1);
+    <Container<u32> as Render<u32>>::render(&container, 1);
+}
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let render_method = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "<crate::Container as crate::Render>::render")
+        .expect("generic Render implementation method");
+
+    for line in ["L9", "L10"] {
+        assert!(
+            resolved.edges.iter().any(|edge| {
+                edge.string("relation") == "calls"
+                    && edge.target == render_method.id
+                    && edge.string("source_location") == line
+            }),
+            "generic call at {line} was not resolved"
+        );
+    }
+}
+
+#[test]
 fn rust_cargo_manifest_resolution_uses_workspace_alias_and_custom_lib_roots()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
@@ -1110,6 +1150,118 @@ func caller(workers ...*Worker) {
         edge.string("relation") == "calls"
             && edge.target == command_name.id
             && edge.string("source_location") == "L15"
+    }));
+}
+
+#[test]
+fn go_for_clause_initializers_and_empty_closures_keep_exact_attribution() {
+    let go_source = br#"package pkg
+type Worker struct{}
+func (worker *Worker) Run() {}
+func (worker *Worker) Parent() *Worker { return nil }
+func caller(worker *Worker) {
+    for current := worker; current != nil; current = current.Parent() {
+        current.Run()
+    }
+    visit := func() {
+        worker.Run()
+    }
+    _ = visit
+}
+"#;
+    let extracted = extract("pkg/caller.go", go_source);
+    let evidence = extracted
+        .semantic_evidence
+        .clone()
+        .expect("Go universal evidence");
+    let sources = HashMap::from([(
+        "pkg/caller.go".to_owned(),
+        String::from_utf8(go_source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let worker_run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Worker::Run")
+        .expect("Worker.Run declaration");
+    let worker_parent = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Worker::Parent")
+        .expect("Worker.Parent declaration");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == worker_parent.id
+            && edge.string("source_location") == "L6"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == worker_run.id
+            && edge.string("source_location") == "L7"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == worker_run.id
+            && edge.string("source_location") == "L10"
+    }));
+
+    let closure_scope_ids = evidence
+        .scopes
+        .iter()
+        .filter(|scope| scope.kind == "closure")
+        .map(|scope| scope.id.as_str())
+        .collect::<HashSet<_>>();
+    let empty_closure_call = evidence
+        .occurrences
+        .iter()
+        .find(|occurrence| occurrence.range.start_line == 10 && occurrence.spelling == "Run")
+        .expect("empty closure call occurrence");
+    assert!(
+        empty_closure_call
+            .scope_id
+            .as_deref()
+            .is_some_and(|scope_id| closure_scope_ids.contains(scope_id)),
+        "empty closures must own their call occurrences"
+    );
+}
+
+#[test]
+fn go_variadic_declarations_use_source_arity_for_calls() {
+    let go_source = br#"package pkg
+type Worker struct{}
+func fanout(workers ...*Worker) {}
+func caller(worker *Worker) {
+    fanout(worker, worker)
+}
+"#;
+    let extracted = extract("pkg/caller.go", go_source);
+    let evidence = extracted
+        .semantic_evidence
+        .clone()
+        .expect("Go universal evidence");
+    let fanout = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "fanout")
+        .expect("variadic declaration");
+    assert_eq!(fanout.parameter_count, Some(1));
+    assert!(fanout.variadic);
+
+    let sources = HashMap::from([(
+        "pkg/caller.go".to_owned(),
+        String::from_utf8(go_source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let fanout_node = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.fanout")
+        .expect("fanout node");
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == fanout_node.id
+            && edge.string("source_location") == "L5"
     }));
 }
 
