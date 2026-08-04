@@ -64,6 +64,18 @@ impl Manifest {
         &self.entries
     }
 
+    /// Return whether one path has changed under the requested content stamp.
+    /// This is the per-file form of [`Self::is_unchanged`] used by bounded
+    /// incremental callers that need to extract only changed sources.
+    #[must_use]
+    pub fn is_changed(&self, path: &Path, kind: ManifestKind) -> bool {
+        changed(
+            path,
+            self.entries.get(path.to_string_lossy().as_ref()),
+            kind,
+        )
+    }
+
     /// Return true when the detected corpus is exactly the manifest corpus and
     /// every relevant content stamp is still valid.
     #[must_use]

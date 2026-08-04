@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
-use std::io::BufReader;
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -25,13 +25,14 @@ use compass_graph::{
     score_communities, write_canonical_graph_json,
 };
 use compass_languages::{
-    EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL, EXTRACTION_QUALITY_REASON_EXTENSION,
-    Engine, Extraction, ExtractorKind, FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, ProjectEvidenceIndex,
-    RawEdgeRecord, RawFrameworkFact, RawNodeRecord, Registry, file_stem, make_id,
+    DeclarationFact, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL,
+    EXTRACTION_QUALITY_REASON_EXTENSION, Engine, Extraction, ExtractorKind,
+    FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, ProjectEvidenceIndex, RawEdgeRecord, RawFrameworkFact,
+    RawNodeRecord, Registry, SemanticEvidenceBatch, file_stem, make_id,
 };
 use compass_model::code_graph::{
-    CommunityMetadata, DiagnosticSeverity, ExtractionStatus, GraphDiagnostic,
-    GraphDocument as V1GraphDocument, NodeKind,
+    CommunityMetadata, DiagnosticSeverity, ExtractionStatus, FileNodeDetails, GraphDiagnostic,
+    GraphDocument as V1GraphDocument, NodeDetails, NodeKind,
 };
 use compass_model::provenance::{
     COALESCED_NODE_EVIDENCE_ATTRIBUTE, CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE,
@@ -53,6 +54,7 @@ use compass_store::{
     local_sqlite_store_path,
 };
 use rayon::prelude::*;
+use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -156,6 +158,10 @@ pub enum BuildPurpose {
 }
 
 const OUTPUT_STATS_FILE: &str = ".compass_output_stats.json";
+const AST_FACT_DIGESTS_FILE: &str = ".compass_ast_fact_digests.json";
+const AST_FACT_DIGESTS_SCHEMA: &str = "compass.ast-fact-digests/1";
+const MAX_AST_FACT_DIGEST_ENTRIES: usize = 100_000;
+const MAX_AST_FACT_DIGEST_FILE_BYTES: usize = 16 * 1024 * 1024;
 const GRAPH_OVERVIEW_FILE: &str = "graph-overview.json";
 const GRAPH_OVERVIEW_SCHEMA: &str = "compass.graph-overview/2";
 const GRAPH_OVERVIEW_NODE_LIMIT: isize = 5_000;
@@ -176,6 +182,32 @@ struct OutputStats {
     omitted_edges: usize,
     #[serde(default)]
     identity_collisions: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct AstFactDigestState {
+    schema: String,
+    profile_digest: String,
+    project_evidence_digest: String,
+    entries: BTreeMap<String, String>,
+}
+
+impl AstFactDigestState {
+    fn is_bounded(&self) -> bool {
+        self.schema == AST_FACT_DIGESTS_SCHEMA
+            && !self.profile_digest.is_empty()
+            && !self.project_evidence_digest.is_empty()
+            && self.entries.len() <= MAX_AST_FACT_DIGEST_ENTRIES
+            && self.entries.iter().all(|(path, digest)| {
+                path.len() <= 4_096 && digest.len() <= 128 && !path.contains(['\\', '\0'])
+            })
+    }
+}
+
+struct FactNeutralExtractionBatch {
+    extractions: Vec<Extraction>,
+    source_digests: BTreeMap<String, SourceDigest>,
+    empty_files: Vec<PathBuf>,
 }
 
 impl OutputStats {
@@ -234,6 +266,820 @@ const fn prior_published_graph_input_enabled(force: bool) -> bool {
 
 fn prior_semantic_layer_required(read_prior_published_graph: bool, output_dir: &Path) -> bool {
     read_prior_published_graph && output_dir.join(SEMANTIC_MARKER_FILE).is_file()
+}
+
+fn load_ast_fact_digest_state(output_dir: &Path) -> Option<AstFactDigestState> {
+    let path = output_dir.join(AST_FACT_DIGESTS_FILE);
+    let bytes = fs::read(path).ok()?;
+    if bytes.len() > MAX_AST_FACT_DIGEST_FILE_BYTES {
+        return None;
+    }
+    let state = serde_json::from_slice::<AstFactDigestState>(&bytes).ok()?;
+    state.is_bounded().then_some(state)
+}
+
+fn write_ast_fact_digest_state(
+    output_dir: &Path,
+    state: &AstFactDigestState,
+) -> Result<(), CoreError> {
+    if !state.is_bounded() {
+        remove_if_exists(&output_dir.join(AST_FACT_DIGESTS_FILE))?;
+        return Ok(());
+    }
+    let encoded = serde_json::to_vec(state).map_err(|source| CoreError::SerializeExtraction {
+        path: output_dir.join(AST_FACT_DIGESTS_FILE),
+        source,
+    })?;
+    if encoded.len() > MAX_AST_FACT_DIGEST_FILE_BYTES {
+        remove_if_exists(&output_dir.join(AST_FACT_DIGESTS_FILE))?;
+        return Ok(());
+    }
+    write_json_atomic(output_dir.join(AST_FACT_DIGESTS_FILE), state, false).map_err(CoreError::from)
+}
+
+fn relative_fact_path(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn build_profile_digest(profile: &BuildProfile, output_dir: &Path) -> Result<String, CoreError> {
+    let bytes = serde_json::to_vec(profile).map_err(|source| CoreError::SerializeExtraction {
+        path: output_dir.join(AST_FACT_DIGESTS_FILE),
+        source,
+    })?;
+    let mut digest = Sha256::new();
+    digest.update(b"compass.ast-fact-digests/profile/2");
+    digest.update([0]);
+    for component in [
+        compass_model::code_graph::CODE_GRAPH_SCHEMA_V1,
+        compass_graph::V1_PUBLICATION_SEMANTICS_VERSION,
+        compass_languages::EXTRACTION_SEMANTICS_VERSION,
+        compass_files::AST_CACHE_VERSION,
+    ] {
+        digest.update((component.len() as u64).to_le_bytes());
+        digest.update(component.as_bytes());
+    }
+    digest.update((bytes.len() as u64).to_le_bytes());
+    digest.update(bytes);
+    Ok(format!("sha256:{:x}", digest.finalize()))
+}
+
+fn project_evidence_digest(
+    project_evidence: &ProjectEvidenceIndex,
+    sources: &[PathBuf],
+    root: &Path,
+) -> String {
+    let mut entries = BTreeMap::new();
+    for source in sources {
+        let key = relative_fact_path(source, root);
+        entries.insert(key, project_evidence.fingerprint_for(source).to_owned());
+    }
+    let mut digest = Sha256::new();
+    for (path, fingerprint) in entries {
+        digest.update((path.len() as u64).to_le_bytes());
+        digest.update(path.as_bytes());
+        digest.update((fingerprint.len() as u64).to_le_bytes());
+        digest.update(fingerprint.as_bytes());
+    }
+    format!("sha256:{:x}", digest.finalize())
+}
+
+/// Hash the semantic extraction facts for one source file while ignoring the
+/// file-record envelope. A trailing comment or whitespace edit may legitimately
+/// change the file inventory node and digest without changing any symbol or
+/// relationship fact. Source anchors on actual symbols remain part of this
+/// digest, so edits that shift or alter graph facts still take the full path.
+const FILE_ENVELOPE_ATTRIBUTES: &[&str] = &[
+    "source_anchor",
+    "source_location",
+    "start_byte",
+    "end_byte",
+    "line_start",
+    "line_end",
+    "column_start",
+    "column_end",
+    "content_digest",
+    "byte_size",
+    "generated",
+];
+
+struct ExtractionDigestWriter(Sha256);
+
+impl Write for ExtractionDigestWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+struct FactDigestNode<'a> {
+    node: &'a RawNodeRecord,
+}
+
+impl Serialize for FactDigestNode<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let is_file = self.node.string("symbol_kind") == "file";
+        let mut map = serializer.serialize_map(Some(self.node.attributes.len() + 1))?;
+        map.serialize_entry("id", &self.node.id)?;
+        for (key, value) in &self.node.attributes {
+            if is_file && FILE_ENVELOPE_ATTRIBUTES.contains(&key.as_str()) {
+                continue;
+            }
+            map.serialize_entry(key, value)?;
+        }
+        map.end()
+    }
+}
+
+struct FactDigestNodes<'a> {
+    nodes: &'a [RawNodeRecord],
+}
+
+impl Serialize for FactDigestNodes<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(self.nodes.len()))?;
+        for node in self.nodes {
+            sequence.serialize_element(&FactDigestNode { node })?;
+        }
+        sequence.end()
+    }
+}
+
+struct FactDigestDeclaration<'a> {
+    declaration: &'a DeclarationFact,
+    is_file: bool,
+}
+
+impl Serialize for FactDigestDeclaration<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let declaration = self.declaration;
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("id", &declaration.id)?;
+        map.serialize_entry("language", &declaration.language)?;
+        map.serialize_entry("graphNodeId", &declaration.graph_node_id)?;
+        map.serialize_entry("kind", &declaration.kind)?;
+        map.serialize_entry("name", &declaration.name)?;
+        map.serialize_entry("qualifiedName", &declaration.qualified_name)?;
+        if let Some(value) = &declaration.module_or_package {
+            map.serialize_entry("moduleOrPackage", value)?;
+        }
+        if let Some(value) = &declaration.scope_id {
+            map.serialize_entry("scopeId", value)?;
+        }
+        if let Some(value) = &declaration.signature {
+            map.serialize_entry("signature", value)?;
+        }
+        if let Some(value) = declaration.parameter_count {
+            map.serialize_entry("parameterCount", &value)?;
+        }
+        if !declaration.parameter_types.is_empty() {
+            map.serialize_entry("parameterTypes", &declaration.parameter_types)?;
+        }
+        if declaration.direct_bases_complete {
+            map.serialize_entry("directBasesComplete", &true)?;
+        }
+        map.serialize_entry("variadic", &declaration.variadic)?;
+        if let Some(value) = &declaration.signature_hash {
+            map.serialize_entry("signatureHash", value)?;
+        }
+        if let Some(value) = &declaration.implementation_hash {
+            map.serialize_entry("implementationHash", value)?;
+        }
+        if let Some(value) = &declaration.source_hash {
+            map.serialize_entry("sourceHash", value)?;
+        }
+        if !self.is_file {
+            map.serialize_entry("range", &declaration.range)?;
+        }
+        map.end()
+    }
+}
+
+struct FactDigestDeclarations<'a> {
+    declarations: &'a [DeclarationFact],
+    file_ids: &'a BTreeSet<&'a str>,
+}
+
+impl Serialize for FactDigestDeclarations<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(self.declarations.len()))?;
+        for declaration in self.declarations {
+            sequence.serialize_element(&FactDigestDeclaration {
+                declaration,
+                is_file: self.file_ids.contains(declaration.graph_node_id.as_str()),
+            })?;
+        }
+        sequence.end()
+    }
+}
+
+struct FactDigestSemanticEvidence<'a> {
+    batch: &'a SemanticEvidenceBatch,
+    file_ids: &'a BTreeSet<&'a str>,
+}
+
+impl Serialize for FactDigestSemanticEvidence<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(7))?;
+        map.serialize_entry("adapter", &self.batch.adapter)?;
+        map.serialize_entry(
+            "declarations",
+            &FactDigestDeclarations {
+                declarations: &self.batch.declarations,
+                file_ids: self.file_ids,
+            },
+        )?;
+        map.serialize_entry("scopes", &self.batch.scopes)?;
+        map.serialize_entry("bindings", &self.batch.bindings)?;
+        map.serialize_entry("occurrences", &self.batch.occurrences)?;
+        map.serialize_entry("candidates", &self.batch.candidates)?;
+        if !self.batch.diagnostics.is_empty() {
+            map.serialize_entry("diagnostics", &self.batch.diagnostics)?;
+        }
+        map.end()
+    }
+}
+
+struct FactDigestExtraction<'a> {
+    extraction: &'a Extraction,
+}
+
+impl Serialize for FactDigestExtraction<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let file_ids = self
+            .extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "file")
+            .map(|node| node.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry(
+            "nodes",
+            &FactDigestNodes {
+                nodes: &self.extraction.nodes,
+            },
+        )?;
+        map.serialize_entry("edges", &self.extraction.edges)?;
+        if !self.extraction.hyperedges.is_empty() {
+            map.serialize_entry("hyperedges", &self.extraction.hyperedges)?;
+        }
+        if let Some(raw_calls) = &self.extraction.raw_calls {
+            map.serialize_entry("raw_calls", raw_calls)?;
+        }
+        if !self.extraction.framework_facts.is_empty() {
+            map.serialize_entry("framework_facts", &self.extraction.framework_facts)?;
+        }
+        if let Some(batch) = &self.extraction.semantic_evidence {
+            map.serialize_entry(
+                "semantic_evidence",
+                &FactDigestSemanticEvidence {
+                    batch,
+                    file_ids: &file_ids,
+                },
+            )?;
+        }
+        if let Some(error) = &self.extraction.error {
+            map.serialize_entry("error", error)?;
+        }
+        for (key, value) in &self.extraction.extensions {
+            map.serialize_entry(key, value)?;
+        }
+        map.end()
+    }
+}
+
+fn extraction_fact_digest(extraction: &Extraction) -> Result<String, serde_json::Error> {
+    let mut writer = ExtractionDigestWriter(Sha256::new());
+    {
+        let mut serializer = serde_json::Serializer::new(&mut writer);
+        FactDigestExtraction { extraction }.serialize(&mut serializer)?;
+    }
+    Ok(format!("sha256:{:x}", writer.0.finalize()))
+}
+
+fn ast_fact_digest_entries(
+    paths: &[PathBuf],
+    extractions: &[Extraction],
+    output_dir: &Path,
+    root: &Path,
+) -> Result<BTreeMap<String, String>, CoreError> {
+    paths
+        .iter()
+        .zip(extractions)
+        .map(|(path, extraction)| {
+            let digest = extraction_fact_digest(extraction).map_err(|source| {
+                CoreError::SerializeExtraction {
+                    path: output_dir.join(AST_FACT_DIGESTS_FILE),
+                    source,
+                }
+            })?;
+            Ok((relative_fact_path(path, root), digest))
+        })
+        .collect()
+}
+
+fn detected_file_sets_match(manifest: &Manifest, files: &BTreeMap<String, Vec<String>>) -> bool {
+    let current = files
+        .values()
+        .flatten()
+        .map(PathBuf::from)
+        .map(|path| canonical_identity(&path))
+        .collect::<BTreeSet<_>>();
+    let previous = manifest
+        .entries()
+        .keys()
+        .map(PathBuf::from)
+        .collect::<BTreeSet<_>>();
+    current == previous
+}
+
+fn source_removed_from_detection(
+    manifest: &Manifest,
+    detected_files: &BTreeMap<String, Vec<String>>,
+) -> bool {
+    let live_sources = detected_files
+        .values()
+        .flatten()
+        .map(|path| canonical_identity(Path::new(path)))
+        .collect::<HashSet<_>>();
+    manifest
+        .entries()
+        .keys()
+        .map(|path| canonical_identity(Path::new(path)))
+        .any(|path| !live_sources.contains(&path))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fact_neutral_pre_cache_sources(
+    options: &BuildOptions,
+    semantic: Option<&SemanticLayer>,
+    supplemental: &[Extraction],
+    retain_artifacts: bool,
+    prior_state: Option<&AstFactDigestState>,
+    profile_digest: &str,
+    project_evidence_digest: &str,
+    manifest: &Manifest,
+    detected_files: &BTreeMap<String, Vec<String>>,
+    sources: &[PathBuf],
+    preserve_prior_semantic: bool,
+    root: &Path,
+) -> Option<Vec<PathBuf>> {
+    if options.force
+        || options.purpose != BuildPurpose::Extract
+        || !options.no_cluster
+        || options.program_analysis
+        || semantic.is_some()
+        || !supplemental.is_empty()
+        || retain_artifacts
+        || preserve_prior_semantic
+        || !detected_file_sets_match(manifest, detected_files)
+        || source_removed_from_detection(manifest, detected_files)
+    {
+        return None;
+    }
+    let prior_state = prior_state?;
+    let expected_paths = sources
+        .iter()
+        .map(|path| relative_fact_path(path, root))
+        .collect::<BTreeSet<_>>();
+    if prior_state.profile_digest != profile_digest
+        || prior_state.project_evidence_digest != project_evidence_digest
+        || prior_state.entries.len() != expected_paths.len()
+        || prior_state.entries.keys().ne(expected_paths.iter())
+    {
+        return None;
+    }
+    let missing = sources
+        .iter()
+        .filter(|path| manifest.is_changed(path, ManifestKind::Ast))
+        .cloned()
+        .collect::<Vec<_>>();
+    (!missing.is_empty()).then_some(missing)
+}
+
+fn extract_fact_neutral_sources(
+    paths: &[PathBuf],
+    options: &BuildOptions,
+    root: &Path,
+    project_evidence: &Arc<ProjectEvidenceIndex>,
+) -> Result<Option<FactNeutralExtractionBatch>, CoreError> {
+    let mut engine = Engine::with_project_evidence(Arc::clone(project_evidence));
+    let mut extractions = Vec::with_capacity(paths.len());
+    let mut source_digests = BTreeMap::new();
+    let mut empty_files = Vec::new();
+    let mut extraction_failures = BTreeMap::new();
+    let mut extraction_partials = BTreeMap::new();
+    for path in paths {
+        let metadata = fs::metadata(path).map_err(|source| compass_files::FileError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if !metadata.is_file() || metadata.len() > options.max_source_bytes {
+            return Ok(None);
+        }
+        let bytes = fs::read(path).map_err(|source| compass_files::FileError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let source_file = path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let mut extraction = match engine.extract_source_graph_only(path, &source_file, &bytes) {
+            Ok(extraction) => extraction,
+            Err(_) => return Ok(None),
+        };
+        prepare_extraction_for_publication(
+            path,
+            &mut extraction,
+            root,
+            &mut extraction_failures,
+            &mut extraction_partials,
+        );
+        if !extraction_failures.is_empty() || !extraction_partials.is_empty() {
+            return Ok(None);
+        }
+        if !extraction_has_cacheable_ast_facts(&extraction) {
+            empty_files.push(path.clone());
+        }
+        source_digests.insert(
+            relative_fact_path(path, root),
+            SourceDigest {
+                content_digest: format!("sha256:{:x}", Sha256::digest(&bytes)),
+                byte_size: bytes.len() as u64,
+            },
+        );
+        prepare_portable_ast_cache_entry(&mut extraction, path, root);
+        extractions.push(extraction);
+    }
+    // Keep the digest representation aligned with the normal cold path. The
+    // changed-file set is sufficient for the neutral proof because every
+    // unchanged extraction is covered by the prior sidecar's exact digest.
+    merge_decl_def_classes_if_needed(&mut extractions, paths);
+    if extractions.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(FactNeutralExtractionBatch {
+        extractions,
+        source_digests,
+        empty_files,
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fact_neutral_incremental_candidate(
+    options: &BuildOptions,
+    semantic: Option<&SemanticLayer>,
+    supplemental: &[Extraction],
+    retain_artifacts: bool,
+    prior_state: Option<&AstFactDigestState>,
+    current_state: &AstFactDigestState,
+    manifest: &Manifest,
+    detected_files: &BTreeMap<String, Vec<String>>,
+    missing: &[PathBuf],
+    source_removed: bool,
+    root: &Path,
+) -> bool {
+    if options.force
+        || options.purpose != BuildPurpose::Extract
+        || !options.no_cluster
+        || options.program_analysis
+        || semantic.is_some()
+        || !supplemental.is_empty()
+        || retain_artifacts
+        || missing.is_empty()
+        || source_removed
+        || !detected_file_sets_match(manifest, detected_files)
+    {
+        return false;
+    }
+    let Some(prior_state) = prior_state else {
+        return false;
+    };
+    if prior_state.profile_digest != current_state.profile_digest
+        || prior_state.project_evidence_digest != current_state.project_evidence_digest
+        || prior_state.entries.len() != current_state.entries.len()
+        || prior_state.entries.keys().ne(current_state.entries.keys())
+    {
+        return false;
+    }
+    missing.iter().all(|path| {
+        let key = relative_fact_path(path, root);
+        prior_state.entries.get(&key) == current_state.entries.get(&key)
+    })
+}
+
+fn extraction_file_anchors(
+    extractions: &[Extraction],
+    root: &Path,
+) -> BTreeMap<String, SourceAnchor> {
+    extractions
+        .iter()
+        .flat_map(|extraction| &extraction.nodes)
+        .filter(|node| node.string("symbol_kind") == "file")
+        .filter_map(|node| {
+            let source = node.string("source_file");
+            let anchor = node
+                .attributes
+                .get("source_anchor")
+                .cloned()
+                .and_then(|value| serde_json::from_value::<SourceAnchor>(value).ok())?;
+            Some((relative_fact_path(Path::new(&source), root), anchor))
+        })
+        .collect()
+}
+
+fn full_file_source_anchor(
+    path: &Path,
+    relative_path: &str,
+    max_source_bytes: u64,
+) -> Option<SourceAnchor> {
+    let metadata = fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > max_source_bytes {
+        return None;
+    }
+    let bytes = fs::read(path).ok()?;
+    let end_line_index = bytes.iter().filter(|byte| **byte == b'\n').count();
+    let end_line_start = bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |index| index.saturating_add(1));
+    Some(SourceAnchor {
+        file: relative_path.to_owned(),
+        start_byte: 0,
+        end_byte: bytes.len() as u64,
+        start_line: 1,
+        start_column: 0,
+        end_line: u32::try_from(end_line_index.saturating_add(1)).unwrap_or(u32::MAX),
+        end_column: u32::try_from(bytes.len().saturating_sub(end_line_start)).unwrap_or(u32::MAX),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_fact_neutral_document(
+    output_dir: &Path,
+    root: &Path,
+    source_digests: &BTreeMap<String, SourceDigest>,
+    inventory: Vec<InventoryEvidence>,
+    extractions: &[Extraction],
+    configuration_digest: String,
+    max_source_bytes: u64,
+    retain_previous: bool,
+) -> Result<Option<(Option<V1GraphDocument>, V1GraphDocument)>, CoreError> {
+    let graph_path = output_dir.join("graph.json");
+    let Ok(previous) = V1GraphDocument::load(&graph_path) else {
+        return Ok(None);
+    };
+    // JSON publication only needs the updated document. Keeping a second full
+    // graph alive here doubled the largest resident allocation on neutral
+    // edits. SQLite publication still retains the previous document because
+    // the object store needs it to compute the file-node delta.
+    let (previous_for_delta, mut current) = if retain_previous {
+        (Some(previous.clone()), previous)
+    } else {
+        (None, previous)
+    };
+    let mut evidence = BuildEvidence::new(root.to_path_buf(), current.graph.build.clone());
+    evidence.files = current.graph.files.clone();
+    evidence.coverage = current
+        .graph
+        .coverage
+        .iter()
+        .filter(|coverage| coverage.capability != "file_inventory")
+        .cloned()
+        .collect();
+    evidence.diagnostics = current
+        .graph
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            !matches!(
+                diagnostic.code.as_str(),
+                "parser_recovery"
+                    | "partial_extraction"
+                    | "extractor_failure"
+                    | "unsupported_input"
+                    | "excluded_input"
+                    | "generated_input"
+                    | "binary_input"
+            )
+        })
+        .cloned()
+        .collect();
+    for file in &mut evidence.files {
+        if let Some(digest) = source_digests.get(&file.path) {
+            file.content_digest.clone_from(&digest.content_digest);
+            file.byte_size = digest.byte_size;
+        }
+    }
+    evidence.build.configuration_digest = configuration_digest;
+    evidence.include_inventory(inventory)?;
+
+    let anchors = extraction_file_anchors(extractions, root);
+    current.graph.build = evidence.build;
+    current.graph.files = evidence.files;
+    current.graph.coverage = evidence.coverage;
+    current.graph.diagnostics = evidence.diagnostics;
+    let files = current
+        .graph
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file))
+        .collect::<BTreeMap<_, _>>();
+    for node in &mut current.nodes {
+        if node.kind != NodeKind::File {
+            continue;
+        }
+        let Some(source) = node.source_file() else {
+            continue;
+        };
+        let source = relative_fact_path(Path::new(source), root);
+        let Some(file) = files.get(source.as_str()) else {
+            continue;
+        };
+        node.details = Some(NodeDetails::File(FileNodeDetails {
+            content_digest: file.content_digest.clone(),
+            byte_size: file.byte_size,
+            generated: file.generated,
+        }));
+        if let Some(anchor) = anchors
+            .get(&source)
+            .cloned()
+            .or_else(|| full_file_source_anchor(&root.join(&source), &source, max_source_bytes))
+        {
+            node.source = Some(anchor.clone());
+            for provenance in &mut node.evidence {
+                for candidate in &mut provenance.anchors {
+                    if candidate.file == source {
+                        candidate.clone_from(&anchor);
+                    }
+                }
+                if provenance
+                    .wiring_site
+                    .as_ref()
+                    .is_some_and(|candidate| candidate.file == source)
+                {
+                    provenance.wiring_site = Some(anchor.clone());
+                }
+            }
+        }
+    }
+    compass_model::validate_code_graph(&current).map_err(|error| {
+        CoreError::InvalidBuildState(format!(
+            "fact-neutral incremental graph failed validation: {error}"
+        ))
+    })?;
+    Ok(Some((previous_for_delta, current)))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish_fact_neutral_incremental(
+    options: &BuildOptions,
+    root: PathBuf,
+    output_dir: PathBuf,
+    output_container: &Path,
+    guard: BuildGuard,
+    manifest_path: &Path,
+    mut prior_manifest: Manifest,
+    detection: Detection,
+    sources: &[PathBuf],
+    missing: &[PathBuf],
+    empty_files: Vec<PathBuf>,
+    previous: Option<&V1GraphDocument>,
+    current: &V1GraphDocument,
+    fact_state: &AstFactDigestState,
+    timings: &mut BuildTimings,
+) -> Result<BuildResult, CoreError> {
+    let publish_started = Instant::now();
+    let published_nodes = current.nodes.len();
+    let published_edges = current.links.len();
+    let omissions = saved_publication_omissions(&output_dir);
+    let graph_path = output_dir.join("graph.json");
+    let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
+        let previous = previous.ok_or_else(|| {
+            CoreError::InvalidBuildState(
+                "fact-neutral SQLite publication is missing its prior graph".to_owned(),
+            )
+        })?;
+        let (metrics, seal) =
+            publish_graph_and_store_file_node_delta(&output_dir, previous, current)?;
+        (Some(metrics), Some(seal))
+    } else {
+        let receipt = write_atomic_with_digest(&graph_path, |writer| {
+            write_canonical_graph_json(current, writer).map_err(|source| {
+                compass_files::FileError::Io {
+                    path: graph_path.clone(),
+                    source,
+                }
+            })
+        })?;
+        (
+            None,
+            Some(ArtifactSeal {
+                bytes: receipt.bytes,
+                sha256: receipt.sha256,
+            }),
+        )
+    };
+    if let Some(metrics) = store_metrics {
+        record_store_metrics(timings, metrics);
+    }
+    remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
+    save_output_stats(
+        &output_dir,
+        published_nodes,
+        published_edges,
+        0,
+        false,
+        omissions,
+    )?;
+    write_ast_fact_digest_state(&output_dir, fact_state)?;
+    write_semantic_marker(&output_dir, None)?;
+    remove_if_exists(&output_dir.join("needs_update"))?;
+    save_build_manifest(
+        &mut prior_manifest,
+        &detection.files,
+        manifest_path,
+        &root,
+        None,
+    )?;
+    publish_build_state(
+        options,
+        &output_dir,
+        manifest_path,
+        sources.len(),
+        published_nodes,
+        published_edges,
+        0,
+        omissions,
+        None,
+        graph_seal,
+        store_metrics.is_some(),
+        timings,
+    )?;
+    let published_output_dir = commit_generation(
+        guard,
+        output_container,
+        options.graph_storage,
+        store_metrics.is_some(),
+        !options.graph_storage.publishes_store(),
+        timings,
+    )?;
+    timings.publish = publish_started.elapsed();
+    Ok(BuildResult {
+        root,
+        output_dir: published_output_dir,
+        detection,
+        files_considered: sources.len(),
+        files_extracted: missing.len(),
+        files_cached: sources.len().saturating_sub(missing.len()),
+        empty_files,
+        nodes: published_nodes,
+        edges: published_edges,
+        communities: 0,
+        omitted_nodes: omissions.nodes,
+        omitted_edges: omissions.edges,
+        identity_collisions: omissions.identity_collisions,
+        partial_graph: omissions.is_partial(),
+        html_written: false,
+        outputs_changed: true,
+        program_modules: 0,
+        program_summaries: 0,
+        program_syntax_analyzed: 0,
+        program_syntax_reused: 0,
+        program_artifacts_loaded: 0,
+        program_artifacts_reused: 0,
+        program_artifact_documents_analyzed: 0,
+        program_artifact_documents_reused: 0,
+        program_conflicts: 0,
+        timings: *timings,
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -516,6 +1362,7 @@ fn build_graph_inner(
     }
     let manifest_path = output_dir.join("manifest.json");
     let prior_manifest = Manifest::load(&manifest_path, Some(&root));
+    let prior_fact_digest_state = load_ast_fact_digest_state(&output_dir);
     let detect_options = DetectOptions {
         scan_filesystem: options.scan_filesystem,
         gitignore: options.gitignore,
@@ -614,6 +1461,7 @@ fn build_graph_inner(
     let manifest_unchanged = read_prior_published_graph
         && prior_manifest.is_unchanged(&detection.files, ManifestKind::Ast);
     let build_profile = build_profile(options);
+    let profile_digest = build_profile_digest(&build_profile, &output_dir)?;
     let has_program_artifacts =
         options.program_analysis && program_artifact_count(&root, options)? != 0;
     let verified_state = if reusable_semantic_layer && supplemental.is_empty() && manifest_unchanged
@@ -778,8 +1626,96 @@ fn build_graph_inner(
         || CacheOptions::output_directory(output_cache_root),
         CacheOptions::shared_history,
     );
-    let mut cache = Cache::open(&root, cache_options)?;
     let project_evidence = Arc::new(ProjectEvidenceIndex::build(&root, &sources));
+    let project_evidence_digest = project_evidence_digest(&project_evidence, &sources, &root);
+    let early_missing = fact_neutral_pre_cache_sources(
+        options,
+        semantic,
+        supplemental,
+        retain_artifacts,
+        prior_fact_digest_state.as_ref(),
+        &profile_digest,
+        &project_evidence_digest,
+        &prior_manifest,
+        &detection.files,
+        &sources,
+        preserve_prior_semantic,
+        &root,
+    );
+    if let Some(early_missing) = early_missing
+        && let Some(early_batch) =
+            extract_fact_neutral_sources(&early_missing, options, &root, &project_evidence)?
+        && let Some(prior_state) = prior_fact_digest_state.as_ref()
+    {
+        let FactNeutralExtractionBatch {
+            extractions: early_extractions,
+            source_digests: early_source_digests,
+            empty_files: early_empty_files,
+        } = early_batch;
+        let mut entries = prior_state.entries.clone();
+        for (path, digest) in
+            ast_fact_digest_entries(&early_missing, &early_extractions, &output_dir, &root)?
+        {
+            entries.insert(path, digest);
+        }
+        let current_fact_state = AstFactDigestState {
+            schema: AST_FACT_DIGESTS_SCHEMA.to_owned(),
+            profile_digest: profile_digest.clone(),
+            project_evidence_digest: project_evidence_digest.clone(),
+            entries,
+        };
+        if early_missing.iter().all(|path| {
+            let key = relative_fact_path(path, &root);
+            prior_state.entries.get(&key) == current_fact_state.entries.get(&key)
+        }) {
+            let inventory = detection_inventory(
+                &detection,
+                semantic,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &root,
+            );
+            let configuration_digest = graph_configuration_digest(options, &output_dir)?;
+            if let Some((previous, current)) = prepare_fact_neutral_document(
+                &output_dir,
+                &root,
+                &early_source_digests,
+                inventory,
+                &early_extractions,
+                configuration_digest,
+                options.max_source_bytes,
+                options.graph_storage.publishes_store(),
+            )? {
+                let mut cache = Cache::open(&root, cache_options)?;
+                let cache_sources = early_missing
+                    .iter()
+                    .zip(&early_extractions)
+                    .collect::<Vec<_>>();
+                cache.write_portable_ast_batch_ref(&cache_sources)?;
+                cache.flush()?;
+                timings.deterministic_extract = stage_started.elapsed();
+                let result = publish_fact_neutral_incremental(
+                    options,
+                    root,
+                    output_dir,
+                    &output_container,
+                    guard,
+                    &manifest_path,
+                    prior_manifest,
+                    detection,
+                    &sources,
+                    &early_missing,
+                    early_empty_files,
+                    previous.as_ref(),
+                    &current,
+                    &current_fact_state,
+                    &mut timings,
+                )?;
+                return Ok((result, None));
+            }
+        }
+    }
+    let mut cache = Cache::open(&root, cache_options)?;
     let mut extractions = BTreeMap::<PathBuf, Extraction>::new();
     let mut missing = Vec::new();
     if reuse_cached_analysis {
@@ -1214,6 +2150,76 @@ fn build_graph_inner(
     // executes the same single merge as a cold build.
     merge_decl_def_classes_if_needed(&mut ordered, &ordered_paths);
     profile_internal("declaration merge", &mut internal_started);
+    let live_sources = detection
+        .files
+        .values()
+        .flatten()
+        .map(|path| canonical_identity(Path::new(path)))
+        .collect::<HashSet<_>>();
+    let source_removed = prior_manifest
+        .entries()
+        .keys()
+        .map(|path| canonical_identity(Path::new(path)))
+        .any(|path| !live_sources.contains(&path));
+    let current_fact_state = AstFactDigestState {
+        schema: AST_FACT_DIGESTS_SCHEMA.to_owned(),
+        profile_digest: profile_digest.clone(),
+        project_evidence_digest: project_evidence_digest.clone(),
+        entries: ast_fact_digest_entries(&ordered_paths, &ordered, &output_dir, &root)?,
+    };
+    let fact_neutral = fact_neutral_incremental_candidate(
+        options,
+        semantic,
+        supplemental,
+        retain_artifacts,
+        prior_fact_digest_state.as_ref(),
+        &current_fact_state,
+        &prior_manifest,
+        &detection.files,
+        &missing,
+        source_removed,
+        &root,
+    );
+    if fact_neutral && !preserve_prior_semantic {
+        let inventory = detection_inventory(
+            &detection,
+            semantic,
+            &extraction_failures,
+            &extraction_partials,
+            &root,
+        );
+        let configuration_digest = graph_configuration_digest(options, &output_dir)?;
+        if let Some((previous, current)) = prepare_fact_neutral_document(
+            &output_dir,
+            &root,
+            &fresh_source_digests,
+            inventory,
+            &ordered,
+            configuration_digest,
+            options.max_source_bytes,
+            options.graph_storage.publishes_store(),
+        )? {
+            timings.deterministic_extract = stage_started.elapsed();
+            let result = publish_fact_neutral_incremental(
+                options,
+                root,
+                output_dir,
+                &output_container,
+                guard,
+                &manifest_path,
+                prior_manifest,
+                detection,
+                &sources,
+                &missing,
+                empty_files,
+                previous.as_ref(),
+                &current,
+                &current_fact_state,
+                &mut timings,
+            )?;
+            return Ok((result, None));
+        }
+    }
     let read_source = |path: &PathBuf| read_source_text_with_limit(path, options.max_source_bytes);
     let read_cached_source = |path: &PathBuf| {
         if fresh_paths.contains(path) {
@@ -1473,6 +2479,7 @@ fn build_graph_inner(
             false,
             omissions,
         )?;
+        write_ast_fact_digest_state(&output_dir, &current_fact_state)?;
         write_semantic_marker(&output_dir, semantic)?;
         if options.purpose == BuildPurpose::Update {
             write_text_atomic(
@@ -1992,6 +2999,7 @@ fn build_graph_inner(
     );
     manifest_result?;
     seals_result?;
+    write_ast_fact_digest_state(&output_dir, &current_fact_state)?;
     if program.is_none() {
         program = join_program_worker(program_handle.take(), &mut timings)?;
     }
@@ -5658,6 +6666,80 @@ mod tests {
         assert_ne!(
             before_roots.get(&IndexKind::Metadata),
             after_roots.get(&IndexKind::Metadata)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn fact_neutral_extract_incremental_publishes_only_file_changes() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        let source = root.join("main.py");
+        fs::write(&source, "def main():\n    return 1\n")?;
+        let mut options = BuildOptions::new(root);
+        options.no_cluster = true;
+        options.no_viz = true;
+        options.purpose = BuildPurpose::Extract;
+
+        let cold = build_local_graph(&options)?;
+        assert!(cold.output_dir.join(AST_FACT_DIGESTS_FILE).is_file());
+        let cold_graph = V1GraphDocument::load(&cold.output_dir.join("graph.json"))?;
+        let cold_fact_state: AstFactDigestState =
+            serde_json::from_slice(&fs::read(cold.output_dir.join(AST_FACT_DIGESTS_FILE))?)?;
+        assert_eq!(cold_fact_state.schema, AST_FACT_DIGESTS_SCHEMA);
+        assert_eq!(cold_fact_state.entries.len(), 1);
+
+        fs::write(
+            &source,
+            "def main():\n    return 1\n\n# metadata-only edit\n",
+        )?;
+        let changed = build_local_graph(&options)?;
+        assert_eq!(changed.files_extracted, 1);
+        assert_eq!(changed.nodes, cold.nodes);
+        assert_eq!(changed.edges, cold.edges);
+        assert_eq!(changed.timings.graph_assembly, Duration::ZERO);
+
+        let changed_graph = V1GraphDocument::load(&changed.output_dir.join("graph.json"))?;
+        let semantic_nodes = |graph: &V1GraphDocument| {
+            graph
+                .nodes
+                .iter()
+                .filter(|node| node.kind != NodeKind::File)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(semantic_nodes(&changed_graph), semantic_nodes(&cold_graph));
+        assert_eq!(changed_graph.links, cold_graph.links);
+        let cold_file = cold_graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::File)
+            .ok_or("cold file node missing")?;
+        let changed_file = changed_graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::File)
+            .ok_or("changed file node missing")?;
+        assert_eq!(changed_file.id, cold_file.id);
+        assert_ne!(changed_file, cold_file);
+        assert_ne!(changed_file.source, cold_file.source);
+        assert_ne!(changed_graph.graph.files, cold_graph.graph.files);
+
+        fs::write(&source, "def main():\n    return 2\n\n# semantic edit\n")?;
+        let semantic_change = build_local_graph(&options)?;
+        let semantic_graph = V1GraphDocument::load(&semantic_change.output_dir.join("graph.json"))?;
+        let implementation_hash = |graph: &V1GraphDocument| {
+            graph
+                .nodes
+                .iter()
+                .find(|node| node.label() == "main()")
+                .and_then(|node| node.digest("implementation_hash"))
+                .map(str::to_owned)
+        };
+        assert_ne!(
+            implementation_hash(&semantic_graph),
+            implementation_hash(&changed_graph)
         );
         Ok(())
     }

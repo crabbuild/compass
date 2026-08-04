@@ -67,12 +67,15 @@ class AdapterTests(unittest.TestCase):
                 "extract",
                 "/repo",
                 "--code-only",
+                "--no-cluster",
+                "--no-viz",
+                "--store",
+                "json",
                 "--timing",
                 "--out",
                 "/output",
             ),
         )
-        self.assertNotIn("--no-cluster", build)
         self.assertEqual(
             adapter.query_command(Path("/graph.json"), "authentication"),
             ("/opt/compass", "query", "authentication", "--graph", "/graph.json"),

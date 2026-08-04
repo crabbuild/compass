@@ -941,7 +941,12 @@ fn manifest_change_detection_distinguishes_corpus_hash_kind_and_legacy_time()
     )?;
     let current = Manifest::load(&manifest_path, None);
     assert!(current.is_unchanged(&files, ManifestKind::Ast));
+    assert!(!current.is_changed(&source, ManifestKind::Ast));
     assert!(!current.is_unchanged(&files, ManifestKind::Semantic));
+    assert!(current.is_changed(&source, ManifestKind::Semantic));
+
+    fs::write(&source, "fn changed() {}\n")?;
+    assert!(current.is_changed(&source, ManifestKind::Ast));
 
     files.insert("code".to_owned(), Vec::new());
     assert!(!current.is_unchanged(&files, ManifestKind::Ast));
