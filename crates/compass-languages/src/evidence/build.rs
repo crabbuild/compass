@@ -3724,11 +3724,22 @@ impl<'source> DirectAdapterState<'source> {
         use_start: usize,
         use_node: Node<'_>,
     ) -> Option<String> {
-        let Some(qualifier) = qualifier else {
+        let Some(raw_qualifier) = qualifier else {
             return self
                 .imported_target_for_occurrence(owner, spelling, 0, true)
                 .cloned();
         };
+        let normalized_qualifier = rust_normalize_path(raw_qualifier);
+        if let Some(inner) = normalized_qualifier
+            .strip_prefix('<')
+            .and_then(|value| value.strip_suffix('>'))
+            && let Some((type_path, trait_path)) = inner.split_once(" as ")
+            && let Some(type_name) = rust_qualify_evidence_path(self, owner, type_path, use_start)
+            && let Some(trait_name) = rust_qualify_evidence_path(self, owner, trait_path, use_start)
+        {
+            return Some(format!("<{type_name} as {trait_name}>::{spelling}"));
+        }
+        let qualifier = normalized_qualifier.as_str();
         if (qualifier == "Self" || rust_receiver_is_self(qualifier))
             && let Some(enclosing) = rust_callable_owner(owner)
         {
@@ -4104,7 +4115,10 @@ impl<'source> DirectAdapterState<'source> {
             } else {
                 "function"
             };
-            let metadata = self.declaration_metadata(node);
+            let mut metadata = self.declaration_metadata(node);
+            let (parameter_count, variadic) = go_parameter_signature(node);
+            metadata.parameter_count = Some(parameter_count);
+            metadata.variadic = variadic;
             let fact_id = self.builder.declare_with_metadata(
                 kind,
                 &graph_node_id,
@@ -4174,7 +4188,10 @@ impl<'source> DirectAdapterState<'source> {
             let qualified_name = format!("{}::{name}", owner.qualified_name);
             let graph_node_id =
                 self.unique_graph_id(make_id(&[&owner.graph_node_id, &name]), method);
-            let metadata = self.declaration_metadata(method);
+            let mut metadata = self.declaration_metadata(method);
+            let (parameter_count, variadic) = go_parameter_signature(method);
+            metadata.parameter_count = Some(parameter_count);
+            metadata.variadic = variadic;
             let fact_id = self.builder.declare_with_metadata(
                 "method",
                 &graph_node_id,
@@ -4232,7 +4249,7 @@ impl<'source> DirectAdapterState<'source> {
             .get(&node.id())
             .cloned()
             .unwrap_or_else(|| owner.clone());
-        if node.kind() == "func_literal" && self.go_has_named_parameters(node) {
+        if node.kind() == "func_literal" {
             let parent_scope_id = active.scope_id.clone();
             let scope_id = self.builder.open_scope(
                 "closure",
@@ -4391,32 +4408,6 @@ impl<'source> DirectAdapterState<'source> {
             }
         }
         Ok(())
-    }
-
-    fn go_has_named_parameters(&self, declaration: Node<'_>) -> bool {
-        let Some(parameters) = declaration.child_by_field_name("parameters") else {
-            return false;
-        };
-        let mut parameter_declarations = Vec::new();
-        collect_nodes(
-            parameters,
-            "parameter_declaration",
-            &mut parameter_declarations,
-        );
-        collect_nodes(
-            parameters,
-            "variadic_parameter_declaration",
-            &mut parameter_declarations,
-        );
-        parameter_declarations.into_iter().any(|parameter| {
-            let mut cursor = parameter.walk();
-            parameter
-                .children_by_field_name("name", &mut cursor)
-                .any(|name_node| {
-                    let name = self.text(name_node);
-                    !name.is_empty() && name != "_"
-                })
-        })
     }
 
     fn add_go_imports(
@@ -4794,6 +4785,10 @@ impl<'source> DirectAdapterState<'source> {
         } else {
             (SemanticRole::Call, CandidateRelation::Calls)
         };
+        let argument_count = (self.language == "go")
+            .then(|| call.child_by_field_name("arguments"))
+            .flatten()
+            .and_then(|arguments| u32::try_from(arguments.named_child_count()).ok());
         let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
         let call_result_binding = if self.language == "go" {
             qualifier
@@ -4875,7 +4870,7 @@ impl<'source> DirectAdapterState<'source> {
                     .or_else(|| Some(self.module_or_package.clone())),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: qualified_name.clone(),
-                argument_count: None,
+                argument_count,
                 argument_types: Vec::new(),
                 allowed_target_kinds: if construction {
                     vec![
@@ -5726,6 +5721,35 @@ fn java_qualified_parent(target: &str) -> Option<&str> {
         .map(|(parent, _)| parent)
 }
 
+fn go_parameter_signature(node: Node<'_>) -> (u32, bool) {
+    let Some(parameters) = node.child_by_field_name("parameters") else {
+        return (0, false);
+    };
+    let mut count = 0_u32;
+    let mut variadic = false;
+    let mut cursor = parameters.walk();
+    for parameter in parameters
+        .children(&mut cursor)
+        .filter(|child| child.is_named())
+    {
+        let is_variadic = parameter.kind() == "variadic_parameter_declaration";
+        if !matches!(
+            parameter.kind(),
+            "parameter_declaration" | "variadic_parameter_declaration"
+        ) {
+            continue;
+        }
+        let mut parameter_cursor = parameter.walk();
+        let names = parameter
+            .children_by_field_name("name", &mut parameter_cursor)
+            .count();
+        let slots = names.max(1);
+        count = count.saturating_add(u32::try_from(slots).unwrap_or(u32::MAX));
+        variadic |= is_variadic;
+    }
+    (count, variadic)
+}
+
 fn last_java_import_name(node: Node<'_>) -> Option<Node<'_>> {
     let mut cursor = node.walk();
     node.children(&mut cursor)
@@ -5981,6 +6005,42 @@ fn rust_path_leaf(path: &str) -> &str {
         .unwrap_or_default()
 }
 
+fn rust_strip_generic_arguments(raw: &str) -> String {
+    let raw = raw.trim();
+    let mut normalized = String::with_capacity(raw.len());
+    let mut angle_depth = 0_u32;
+    for character in raw.chars() {
+        match character {
+            '<' => {
+                if angle_depth == 0 && normalized.ends_with("::") {
+                    normalized.truncate(normalized.len().saturating_sub(2));
+                }
+                angle_depth = angle_depth.saturating_add(1);
+            }
+            '>' if angle_depth > 0 => angle_depth = angle_depth.saturating_sub(1),
+            _ if angle_depth > 0 => {}
+            character => normalized.push(character),
+        }
+    }
+    normalized.trim().trim_end_matches("::").to_owned()
+}
+
+fn rust_normalize_path(raw: &str) -> String {
+    let raw = raw.trim();
+    if let Some(inner) = raw
+        .strip_prefix('<')
+        .and_then(|value| value.strip_suffix('>'))
+        && let Some((type_path, trait_path)) = inner.split_once(" as ")
+    {
+        return format!(
+            "<{} as {}>",
+            rust_strip_generic_arguments(type_path),
+            rust_strip_generic_arguments(trait_path)
+        );
+    }
+    rust_strip_generic_arguments(raw)
+}
+
 fn rust_nominal_type_path(raw: &str) -> Option<String> {
     let mut raw = raw.trim();
     loop {
@@ -6005,12 +6065,12 @@ fn rust_nominal_type_path(raw: &str) -> Option<String> {
     if raw.is_empty() || raw.starts_with(['<', '[', '(']) {
         return None;
     }
-    let nominal = raw.split('<').next().unwrap_or_default().trim();
+    let nominal = rust_normalize_path(raw);
     (!nominal.is_empty()
         && nominal
             .chars()
             .all(|character| character.is_alphanumeric() || matches!(character, '_' | ':')))
-    .then(|| nominal.to_owned())
+    .then_some(nominal)
 }
 
 fn rust_qualified_parent(path: &str) -> Option<&str> {
@@ -6284,14 +6344,14 @@ fn rust_manifest_dependency_aliases(path: &Path) -> HashMap<String, String> {
 }
 
 fn rust_qualify_local_path(module: &str, raw: &str) -> String {
-    let raw = raw.trim().trim_start_matches(['&', '*']);
+    let raw = rust_normalize_path(raw.trim().trim_start_matches(['&', '*']));
     if raw.is_empty() {
         return module.to_owned();
     }
     if raw == "Self" {
         return module.to_owned();
     }
-    rust_canonical_import_target(module, raw)
+    rust_canonical_import_target(module, &raw)
 }
 
 fn rust_qualify_imported_path(
@@ -6300,7 +6360,8 @@ fn rust_qualify_imported_path(
     raw: &str,
     use_start: usize,
 ) -> String {
-    let (qualifier, spelling) = split_qualified(raw);
+    let raw = rust_normalize_path(raw);
+    let (qualifier, spelling) = split_qualified(&raw);
     if let Some(target) = state.imported_target_for_occurrence(
         owner,
         qualifier.map(qualified_binding_head).unwrap_or(spelling),
@@ -6312,7 +6373,7 @@ fn rust_qualify_imported_path(
         }
         return target.clone();
     }
-    state.rust_canonical_import_target(&state.rust_enclosing_module(owner), raw)
+    state.rust_canonical_import_target(&state.rust_enclosing_module(owner), &raw)
 }
 
 fn rust_qualify_evidence_path(
@@ -6321,11 +6382,11 @@ fn rust_qualify_evidence_path(
     raw: &str,
     use_start: usize,
 ) -> Option<String> {
-    let raw = raw.trim().trim_start_matches(['&', '*']);
-    if raw.is_empty() || rust_primitive_type(raw) {
+    let raw = rust_normalize_path(raw.trim().trim_start_matches(['&', '*']));
+    if raw.is_empty() || rust_primitive_type(&raw) {
         return None;
     }
-    let (qualifier, spelling) = split_qualified(raw);
+    let (qualifier, spelling) = split_qualified(&raw);
     let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
     if let Some(target) = state.imported_target_for_occurrence(owner, binding_name, use_start, true)
     {
@@ -6343,17 +6404,17 @@ fn rust_qualify_evidence_path(
         });
     }
     if matches!(binding_name, "crate" | "self" | "super") {
-        return Some(state.rust_canonical_import_target(&state.rust_enclosing_module(owner), raw));
+        return Some(state.rust_canonical_import_target(&state.rust_enclosing_module(owner), &raw));
     }
     if qualifier.is_some_and(|value| {
         value.contains("::") || value.chars().next().is_some_and(char::is_lowercase)
     }) {
-        let target = state.rust_canonical_import_target(&state.rust_enclosing_module(owner), raw);
+        let target = state.rust_canonical_import_target(&state.rust_enclosing_module(owner), &raw);
         return Some(target);
     }
     Some(rust_join_qualified(
         &state.rust_enclosing_module(owner),
-        raw,
+        &raw,
     ))
 }
 
@@ -7272,6 +7333,23 @@ fn go_local_initializer_with_index_before<'tree>(
     let use_start = use_node.start_byte();
     let mut ancestor = use_node.parent();
     while let Some(scope) = ancestor {
+        let for_initializer = if scope.kind() == "for_clause" {
+            scope.child_by_field_name("initializer")
+        } else if scope.kind() == "for_statement" {
+            let mut cursor = scope.walk();
+            scope
+                .children(&mut cursor)
+                .filter(|child| child.is_named() && child.kind() == "for_clause")
+                .find_map(|clause| clause.child_by_field_name("initializer"))
+        } else {
+            None
+        };
+        if let Some(initializer) = for_initializer
+            && initializer.end_byte() <= use_start
+            && let Some(found) = in_statement(initializer, name, source)
+        {
+            return Some(found);
+        }
         if matches!(scope.kind(), "block" | "statement_list") {
             let mut statements = named_children(scope);
             statements.reverse();

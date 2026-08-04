@@ -210,6 +210,94 @@ struct FactNeutralExtractionBatch {
     empty_files: Vec<PathBuf>,
 }
 
+/// Release parser/extractor over-allocation before a result crosses the worker
+/// boundary. Extractors grow vectors and JSON maps incrementally, so a large
+/// source can otherwise retain roughly the next power-of-two capacity for
+/// every node, edge, and evidence container while the project-wide resolver
+/// keeps all file facts alive.
+///
+/// This only changes allocation capacity. It deliberately does not remove or
+/// normalize any fact, because the portable AST cache and the resolver must
+/// see the exact same evidence as the non-compacted path.
+fn compact_extraction(extraction: &mut Extraction) {
+    for node in &mut extraction.nodes {
+        compact_json_map(&mut node.attributes);
+    }
+    for edge in &mut extraction.edges {
+        compact_json_map(&mut edge.attributes);
+    }
+    for value in &mut extraction.hyperedges {
+        compact_json_value(value);
+    }
+    if let Some(calls) = extraction.raw_calls.as_mut() {
+        for call in &mut *calls {
+            compact_json_map(&mut call.extensions);
+        }
+        calls.shrink_to_fit();
+    }
+    for fact in &mut extraction.framework_facts {
+        match fact {
+            compass_languages::RawFrameworkFact::Route(route) => {
+                route.middleware_references.shrink_to_fit();
+                compact_json_map(&mut route.detail);
+            }
+            compass_languages::RawFrameworkFact::Domain(domain) => {
+                compact_json_map(&mut domain.detail);
+            }
+            compass_languages::RawFrameworkFact::Annotation(annotation) => {
+                compact_json_map(&mut annotation.arguments);
+                compact_json_map(&mut annotation.detail);
+            }
+        }
+    }
+    if let Some(evidence) = extraction.semantic_evidence.as_mut() {
+        evidence.adapter.capabilities.shrink_to_fit();
+        evidence.declarations.shrink_to_fit();
+        evidence.scopes.shrink_to_fit();
+        evidence.bindings.shrink_to_fit();
+        evidence.occurrences.shrink_to_fit();
+        evidence.candidates.shrink_to_fit();
+        evidence.diagnostics.shrink_to_fit();
+    }
+    compact_json_map(&mut extraction.extensions);
+    extraction.nodes.shrink_to_fit();
+    extraction.edges.shrink_to_fit();
+    extraction.hyperedges.shrink_to_fit();
+    extraction.framework_facts.shrink_to_fit();
+}
+
+fn compact_json_map(map: &mut serde_json::Map<String, Value>) {
+    for value in map.values_mut() {
+        compact_json_value(value);
+    }
+    // serde_json intentionally keeps its backing map implementation private,
+    // so rebuild genuinely large maps with an exact initial capacity. Medium
+    // maps are left alone because rebuilding them costs more than their bounded
+    // slack on the common per-node/per-edge path.
+    if map.len() < 32 {
+        return;
+    }
+    let values = std::mem::take(map);
+    let mut compacted = serde_json::Map::with_capacity(values.len());
+    for (key, value) in values {
+        compacted.insert(key, value);
+    }
+    *map = compacted;
+}
+
+fn compact_json_value(value: &mut Value) {
+    match value {
+        Value::Array(values) => {
+            for value in values.iter_mut() {
+                compact_json_value(value);
+            }
+            values.shrink_to_fit();
+        }
+        Value::Object(map) => compact_json_map(map),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
 impl OutputStats {
     const fn omissions(&self) -> PublicationOmissions {
         PublicationOmissions {
@@ -742,6 +830,7 @@ fn extract_fact_neutral_sources(
     // changed-file set is sufficient for the neutral proof because every
     // unchanged extraction is covered by the prior sidecar's exact digest.
     merge_decl_def_classes_if_needed(&mut extractions, paths);
+    extractions.iter_mut().for_each(compact_extraction);
     if extractions.is_empty() {
         return Ok(None);
     }
@@ -1860,6 +1949,7 @@ fn build_graph_inner(
             if empty_structured_document && graph.error.is_none() {
                 graph.error = Some(format!("{language} extraction failed: empty document"));
             }
+            compact_extraction(&mut graph);
             let source = if needs_resolver_source_text {
                 (
                     path.to_string_lossy().into_owned(),
@@ -5970,6 +6060,42 @@ mod tests {
         options.max_workers = Some(1);
         assert!(!should_parallel_extract(&options, 64, 64));
         assert!(should_parallel_extract(&options, 256, 256));
+    }
+
+    #[test]
+    fn compact_extraction_preserves_nested_ast_facts() -> Result<(), Box<dyn Error>> {
+        let mut attributes = Map::with_capacity(64);
+        for index in 0..32 {
+            attributes.insert(format!("attribute_{index}"), json!(index));
+        }
+        attributes.insert(
+            "nested".to_owned(),
+            json!([{"deep": ["a", "b", {"value": true}]}]),
+        );
+        let mut extraction = Extraction {
+            nodes: vec![compass_languages::RawNodeRecord {
+                id: "node".to_owned(),
+                attributes,
+            }],
+            ..Extraction::default()
+        };
+        extraction.raw_calls = Some(vec![compass_languages::RawCall {
+            caller_nid: "node".to_owned(),
+            callee: "callee".to_owned(),
+            is_member_call: None,
+            source_file: "source.go".to_owned(),
+            source_location: "1:1".to_owned(),
+            receiver: None,
+            receiver_type: None,
+            lang: Some("go".to_owned()),
+            extensions: Map::new(),
+        }]);
+        let before = serde_json::to_value(&extraction)?;
+
+        compact_extraction(&mut extraction);
+
+        assert_eq!(before, serde_json::to_value(extraction)?);
+        Ok(())
     }
 
     #[test]

@@ -240,6 +240,16 @@ same filtered Graphify Go comparison, exact comparable edges improved from
 1,469 to 1,492 and missing edges fell from 38 to 15. These quality numbers are
 diagnostic and do not imply that all Graphify gaps are closed.
 
+The extraction handoff now releases excess capacity from the AST fact working
+set before project-wide resolution. Large nested JSON fact maps are rebuilt
+only above a high cardinality threshold; this keeps the common per-node and
+per-edge path allocation-neutral while bounding the large-map case. The
+compaction is lossless: a threshold-tuned release-binary smoke run produced
+the same graph SHA-256 for all four pinned repositories (`78ef5b7b` Cobra,
+`c25d3b97` Click, `06014539` Rayon, and `f620afe4` Zod). The observed peak RSS
+was 103, 168, 270, and 309 MiB respectively. These are single-run diagnostic
+measurements, not a promoted memory baseline.
+
 ## Django cold-build regression qualification
 
 The 0.2.1 code-graph performance hardening was qualified against Django commit
