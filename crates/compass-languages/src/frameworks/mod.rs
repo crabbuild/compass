@@ -1,10 +1,13 @@
+mod axum;
 mod csharp;
 mod enterprise;
 mod evidence;
+mod express;
 mod file_routes;
 mod go;
 mod java;
 mod model;
+mod next;
 mod pack;
 mod php;
 mod play;
@@ -12,9 +15,11 @@ mod python;
 mod ruby;
 mod rust;
 mod spring;
+mod spring_kotlin;
 mod swift;
 mod text;
 mod typescript;
+mod vite;
 
 pub use model::{
     FrameworkLimitError, FrameworkLimits, RawDomainFact, RawFrameworkAnchor,
@@ -88,6 +93,7 @@ struct FrameworkPack {
     kind: FrameworkPackKind,
     languages: &'static [&'static str],
     dependency_markers: &'static [&'static str],
+    configuration_markers: &'static [&'static str],
     manifest_policy: FrameworkManifestPolicy,
     limits: FrameworkLimits,
     adapter: FrameworkPackAdapter,
@@ -105,7 +111,27 @@ impl FrameworkPack {
             kind: FrameworkPackKind::Source,
             languages,
             dependency_markers,
+            configuration_markers: &[],
             manifest_policy: FrameworkManifestPolicy::Advisory,
+            limits: FrameworkLimits::DEFAULT,
+            adapter: FrameworkPackAdapter::Source(detector),
+        }
+    }
+
+    const fn source_required(
+        id: &'static str,
+        languages: &'static [&'static str],
+        dependency_markers: &'static [&'static str],
+        configuration_markers: &'static [&'static str],
+        detector: SourceDetector,
+    ) -> Self {
+        Self {
+            id,
+            kind: FrameworkPackKind::Source,
+            languages,
+            dependency_markers,
+            configuration_markers,
+            manifest_policy: FrameworkManifestPolicy::Required,
             limits: FrameworkLimits::DEFAULT,
             adapter: FrameworkPackAdapter::Source(detector),
         }
@@ -120,6 +146,7 @@ impl FrameworkPack {
             kind: descriptor.kind,
             languages: descriptor.languages,
             dependency_markers: descriptor.dependency_markers,
+            configuration_markers: &[],
             manifest_policy: descriptor.manifest_policy,
             limits: descriptor.limits,
             adapter: FrameworkPackAdapter::Universal {
@@ -135,6 +162,7 @@ impl FrameworkPack {
             kind: FrameworkPackKind::Config,
             languages: &[],
             dependency_markers: &[],
+            configuration_markers: &[],
             manifest_policy: FrameworkManifestPolicy::Advisory,
             limits: FrameworkLimits::DEFAULT,
             adapter: FrameworkPackAdapter::Config { matcher, detector },
@@ -151,6 +179,7 @@ impl FrameworkPack {
             kind: FrameworkPackKind::Template,
             languages: &[],
             dependency_markers,
+            configuration_markers: &[],
             manifest_policy: FrameworkManifestPolicy::Required,
             limits: FrameworkLimits::DEFAULT,
             adapter: FrameworkPackAdapter::Template(detector),
@@ -160,9 +189,10 @@ impl FrameworkPack {
     fn enabled(self, project: Option<&ProjectEvidence>) -> bool {
         match self.manifest_policy {
             FrameworkManifestPolicy::Advisory => true,
-            FrameworkManifestPolicy::Required => {
-                project.is_none_or(|project| project.has_any_dependency(self.dependency_markers))
-            }
+            FrameworkManifestPolicy::Required => project.is_none_or(|project| {
+                project.has_any_dependency(self.dependency_markers)
+                    || project.has_any_configuration(self.configuration_markers)
+            }),
         }
     }
 
@@ -263,6 +293,7 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
         detect_kotlin,
     ),
     FrameworkPack::source("go-web", &["go"], &[], detect_go),
+    FrameworkPack::source("axum-web", &["rust"], &["axum"], detect_axum),
     FrameworkPack::source("rust-web", &["rust"], &[], detect_rust),
     FrameworkPack::source(
         "aspnet-web",
@@ -272,10 +303,15 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
     ),
     FrameworkPack::source("vapor-routes", &["swift"], &["vapor"], detect_swift),
     FrameworkPack::source(
+        "express-web",
+        &["javascript", "typescript", "tsx"],
+        &["express"],
+        detect_express,
+    ),
+    FrameworkPack::source(
         "typescript-web",
         &["javascript", "typescript", "tsx"],
         &[
-            "express",
             "@nestjs/common",
             "react-router",
             "react-router-dom",
@@ -283,11 +319,31 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
         ],
         detect_typescript,
     ),
+    FrameworkPack::source_required(
+        "nextjs-routes",
+        &["javascript", "typescript", "tsx"],
+        &["next"],
+        &["next.config.js", "next.config.mjs", "next.config.ts"],
+        detect_next,
+    ),
+    FrameworkPack::source_required(
+        "vite-config",
+        &["javascript", "typescript", "tsx"],
+        &["vite"],
+        &[
+            "vite.config.cjs",
+            "vite.config.js",
+            "vite.config.mjs",
+            "vite.config.ts",
+        ],
+        detect_vite,
+    ),
     FrameworkPack {
         id: "filesystem-routes",
         kind: FrameworkPackKind::Source,
         languages: &["javascript", "typescript", "tsx"],
         dependency_markers: &["@sveltejs/kit", "nuxt", "astro"],
+        configuration_markers: &[],
         manifest_policy: FrameworkManifestPolicy::Required,
         limits: FrameworkLimits::DEFAULT,
         adapter: FrameworkPackAdapter::Source(detect_file_routes),
@@ -307,6 +363,7 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
             "rust",
         ],
         dependency_markers: &[],
+        configuration_markers: &[],
         manifest_policy: FrameworkManifestPolicy::Advisory,
         limits: FrameworkLimits::DEFAULT,
         adapter: FrameworkPackAdapter::Source(detect_enterprise),
@@ -464,7 +521,7 @@ fn detect_kotlin(
     context: &DetectionContext<'_, '_>,
     _extraction: &mut Extraction,
 ) -> Vec<RawFrameworkFact> {
-    java::detect(context.path, context.source, context.root)
+    spring_kotlin::detect(context.path, context.source, context.root)
 }
 
 fn detect_go(
@@ -478,7 +535,14 @@ fn detect_rust(
     context: &DetectionContext<'_, '_>,
     _extraction: &mut Extraction,
 ) -> Vec<RawFrameworkFact> {
-    rust::detect(context.path, context.source, context.root)
+    rust::detect_non_axum(context.path, context.source, context.root)
+}
+
+fn detect_axum(
+    context: &DetectionContext<'_, '_>,
+    _extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    axum::detect(context.path, context.source, context.root)
 }
 
 fn detect_csharp(
@@ -499,7 +563,28 @@ fn detect_typescript(
     context: &DetectionContext<'_, '_>,
     extraction: &mut Extraction,
 ) -> Vec<RawFrameworkFact> {
-    typescript::detect(context.path, context.source, context.root, extraction)
+    typescript::detect_non_express(context.path, context.source, context.root, extraction)
+}
+
+fn detect_express(
+    context: &DetectionContext<'_, '_>,
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    express::detect(context.path, context.source, context.root, extraction)
+}
+
+fn detect_next(
+    context: &DetectionContext<'_, '_>,
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    next::detect(context.path, context.source, context.project, extraction)
+}
+
+fn detect_vite(
+    context: &DetectionContext<'_, '_>,
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    vite::detect(context.path, context.source, context.project, extraction)
 }
 
 fn detect_file_routes(
@@ -562,10 +647,14 @@ mod tests {
             "rails-routes",
             "spring-web-kotlin",
             "go-web",
+            "axum-web",
             "rust-web",
             "aspnet-web",
             "vapor-routes",
+            "express-web",
             "typescript-web",
+            "nextjs-routes",
+            "vite-config",
             "filesystem-routes",
             "enterprise-domain-facts",
             "drupal-routing-config",

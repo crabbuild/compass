@@ -3,6 +3,7 @@ mod jvm;
 mod native;
 mod php;
 mod python;
+mod qualification;
 mod routes;
 mod ruby;
 mod spring;
@@ -30,6 +31,10 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[UniversalFramewor
 pub use domain::{
     ResolvedDomainFact, publish_resolved_domains, resolve_and_publish_framework_domains,
     resolve_domains,
+};
+pub use qualification::{
+    FrameworkQualificationCase, FrameworkQualificationError, FrameworkQualificationReport,
+    FrameworkRouteExpectation, qualify_framework_case,
 };
 pub use routes::{
     FrameworkResolutionError, ResolvedRoute, RouteStage, RouteStageRole, publish_resolved_routes,

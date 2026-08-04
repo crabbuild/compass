@@ -156,6 +156,125 @@ pub(super) fn detect(
     Vec::new()
 }
 
+/// Detect Next.js App Router and Pages Router conventions. The generic
+/// filesystem adapter deliberately excludes Next so a project cannot receive
+/// duplicate route facts from two convention packs.
+pub(super) fn detect_next(
+    path: &Path,
+    source: &[u8],
+    project: Option<&ProjectEvidence>,
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    let enabled = project.is_none_or(|project| {
+        project.has_dependency("next")
+            || project.has_configuration("next.config.js")
+            || project.has_configuration("next.config.mjs")
+            || project.has_configuration("next.config.ts")
+    });
+    if !enabled || source.is_empty() {
+        return Vec::new();
+    }
+    let portable = path.to_string_lossy().replace('\\', "/");
+    let project_relative = project
+        .and_then(|project| path.strip_prefix(project.project_root()).ok())
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .unwrap_or(portable);
+    let Some((router, relative)) = next_route_file(&project_relative) else {
+        return Vec::new();
+    };
+    let lower = relative.to_ascii_lowercase();
+    if router == "app" {
+        if ["page.tsx", "page.ts", "page.jsx", "page.js"]
+            .iter()
+            .any(|name| next_file_is(&lower, name))
+        {
+            let route = relative
+                .rsplit_once('/')
+                .map_or("", |(parent, _)| parent)
+                .trim_matches('/');
+            return page_routes("next", route, path, source, extraction);
+        }
+        if ["route.tsx", "route.ts", "route.jsx", "route.js"]
+            .iter()
+            .any(|name| next_file_is(&lower, name))
+        {
+            let route = relative
+                .rsplit_once('/')
+                .map_or("", |(parent, _)| parent)
+                .trim_matches('/');
+            return endpoint_routes("next", route, path, source, extraction);
+        }
+    } else if router == "pages" {
+        let page_route = trim_known_extension(relative);
+        if page_route == "api" || page_route.starts_with("api/") {
+            return next_pages_api_route(relative, path, source, extraction);
+        }
+        if matches!(page_route, "_app" | "_document" | "_error") {
+            return Vec::new();
+        }
+        if lower.ends_with(".tsx")
+            || lower.ends_with(".ts")
+            || lower.ends_with(".jsx")
+            || lower.ends_with(".js")
+        {
+            return page_routes(
+                "next",
+                trim_known_extension(relative),
+                path,
+                source,
+                extraction,
+            );
+        }
+    }
+    Vec::new()
+}
+
+fn next_pages_api_route(
+    relative: &str,
+    path: &Path,
+    source: &[u8],
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    let handler = EndpointHandler {
+        operation: "ANY".to_owned(),
+        reference: "default".to_owned(),
+        module: None,
+    };
+    one_route(
+        "next",
+        "ANY",
+        trim_known_extension(relative),
+        path,
+        source,
+        extraction,
+        "next-pages-api-convention",
+        Some(&handler),
+    )
+}
+
+fn next_route_file(relative: &str) -> Option<(&'static str, &str)> {
+    for (marker, router) in [
+        ("src/app/", "app"),
+        ("app/", "app"),
+        ("src/pages/", "pages"),
+        ("pages/", "pages"),
+    ] {
+        if let Some(relative) = relative.strip_prefix(marker) {
+            return Some((router, relative));
+        }
+        if let Some(index) = relative.find(marker)
+            && (index == 0 || relative.as_bytes().get(index - 1) == Some(&b'/'))
+        {
+            return Some((router, &relative[index + marker.len()..]));
+        }
+    }
+    None
+}
+
+fn next_file_is(relative: &str, file_name: &str) -> bool {
+    relative == file_name || relative.ends_with(&format!("/{file_name}"))
+}
+
 fn page_routes(
     framework: &str,
     relative: &str,

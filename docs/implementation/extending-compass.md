@@ -84,6 +84,14 @@ Evidence requirements:
 - cold, warm, and repeated extraction equivalence; and
 - route/domain publication coverage at the resolver seam.
 
+For repeatable framework qualification, use
+`compass_resolve::frameworks::qualify_framework_case`. A case names its
+expectations as `(framework, operation, normalized_path)` values and may pin a
+handler reference. Qualification requires one exact route per expectation;
+missing, ambiguous, duplicate, or mismatched handlers fail explicitly. This
+keeps fixture checks reusable across Express, Next.js, Axum, Spring, and new
+adapters without coupling the harness to one detector implementation.
+
 ## Add a relation
 
 Define:

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Split framework extraction into focused Spring, Express, Axum, Next.js, and
+  Vite adapters. Project evidence now indexes framework configuration files,
+  aliases, plugins, and file-route roots; Vite configuration nodes and a
+  reusable exact-route qualification API are available to graph consumers.
+  Extraction semantics advance to version 7 so cached source facts refresh.
 - Preserve JavaScript and TypeScript workspace import and re-export resolution
   across fully cached edit/restore builds, and improve canonical graph JSON
   publication parallelism for medium and large structural graphs without
