@@ -182,29 +182,64 @@ impl UniversalResolutionIndex {
         validate_batches: bool,
     ) -> Result<Self, String> {
         let mut profile_started = Instant::now();
-        let go_module_path = read_go_module_path(root);
-        // Reserve the aggregate fact counts before consuming the batches. A
-        // corpus-scale evidence index otherwise grows each primary map by
-        // repeated rehashes while the old and new tables overlap in memory.
-        let capacities = batches.iter().fold([0_usize; 5], |mut counts, batch| {
-            counts[0] = counts[0].saturating_add(batch.declarations.len());
-            counts[1] = counts[1].saturating_add(batch.occurrences.len());
-            counts[2] = counts[2].saturating_add(batch.bindings.len());
-            counts[3] = counts[3].saturating_add(batch.candidates.len());
-            counts[4] = counts[4].saturating_add(batch.scopes.len());
-            counts
-        });
-        let mut declarations = AHashMap::with_capacity(capacities[0]);
-        let mut occurrences = AHashMap::with_capacity(capacities[1]);
-        let mut bindings = AHashMap::with_capacity(capacities[2]);
-        let mut candidates = AHashMap::with_capacity(capacities[3]);
-        let mut scopes = AHashMap::with_capacity(capacities[4]);
         if validate_batches {
             batches.par_iter().try_for_each(|batch| {
                 validate_evidence(batch, EvidenceLimits::default())
                     .map_err(|error| format!("invalid universal evidence: {error}"))
             })?;
         }
+
+        // Check aggregate input sizes before reserving hash-map capacity. A
+        // valid batch is bounded on its own, but an unbounded number of valid
+        // batches could otherwise make the old aggregate reservation attempt
+        // a very large allocation before the resolver's configured limits are
+        // consulted. The scope table has no separate public limit; sharing the
+        // candidate ceiling keeps the public limit shape stable while still
+        // bounding every resolver-owned primary table.
+        let capacities = batches.iter().try_fold(
+            [0_usize; 5],
+            |mut counts, batch| -> Result<[usize; 5], String> {
+                for (index, (name, value)) in [
+                    ("declarations", batch.declarations.len()),
+                    ("occurrences", batch.occurrences.len()),
+                    ("bindings", batch.bindings.len()),
+                    ("candidates", batch.candidates.len()),
+                    ("scopes", batch.scopes.len()),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    counts[index] = counts[index].checked_add(value).ok_or_else(|| {
+                        format!("universal aggregate {name} count overflows usize")
+                    })?;
+                }
+                Ok(counts)
+            },
+        )?;
+        for (name, count, limit) in [
+            ("declarations", capacities[0], limits.declarations),
+            ("occurrences", capacities[1], limits.occurrences),
+            ("bindings", capacities[2], limits.bindings),
+            ("candidates", capacities[3], limits.candidates),
+            ("scopes", capacities[4], limits.candidates),
+        ] {
+            if count > limit {
+                return Err(format!(
+                    "universal aggregate {name} count {count} exceeds limit {limit}"
+                ));
+            }
+        }
+
+        let go_module_path = read_go_module_path(root);
+        // Reserve the checked aggregate fact counts before consuming the
+        // batches. A corpus-scale evidence index otherwise grows each primary
+        // map by repeated rehashes while the old and new tables overlap in
+        // memory.
+        let mut declarations = AHashMap::with_capacity(capacities[0]);
+        let mut occurrences = AHashMap::with_capacity(capacities[1]);
+        let mut bindings = AHashMap::with_capacity(capacities[2]);
+        let mut candidates = AHashMap::with_capacity(capacities[3]);
+        let mut scopes = AHashMap::with_capacity(capacities[4]);
         profile_internal("universal evidence validation", &mut profile_started);
         for batch in batches {
             for fact in batch.declarations {
@@ -394,7 +429,7 @@ impl UniversalResolutionIndex {
             values.sort_unstable();
             values.dedup();
             if values.len() > limits.candidates_per_lookup {
-                values.truncate(limits.candidates_per_lookup);
+                values.truncate(candidate_storage_limit(limits.candidates_per_lookup));
             }
         }
         profile_internal("universal source inventory index", &mut profile_started);
@@ -522,7 +557,7 @@ impl UniversalResolutionIndex {
             });
             members.dedup();
             if members.len() > limits.candidates_per_lookup {
-                members.truncate(limits.candidates_per_lookup);
+                members.truncate(candidate_storage_limit(limits.candidates_per_lookup));
             }
         }
         profile_internal("universal hierarchy indices", &mut profile_started);
@@ -547,7 +582,7 @@ impl UniversalResolutionIndex {
             values.sort_unstable();
             values.dedup();
             if values.len() > limits.candidates_per_lookup {
-                values.truncate(limits.candidates_per_lookup);
+                values.truncate(candidate_storage_limit(limits.candidates_per_lookup));
             }
         }
         profile_internal("universal wildcard index", &mut profile_started);
@@ -603,7 +638,7 @@ impl UniversalResolutionIndex {
             .into_iter()
             .map(|(key, mut entries)| {
                 entries.sort_unstable();
-                entries.truncate(limits.candidates_per_lookup);
+                entries.truncate(candidate_storage_limit(limits.candidates_per_lookup));
                 (
                     key,
                     entries.into_iter().map(|(_, _, target)| target).collect(),
@@ -1831,7 +1866,7 @@ impl UniversalResolutionIndex {
         let mut declarations = BTreeSet::<DeclarationSlot>::new();
         for owner_id in owner_ids
             .into_iter()
-            .take(self.limits.candidates_per_lookup)
+            .take(candidate_storage_limit(self.limits.candidates_per_lookup))
         {
             let owner = &self.declaration(owner_id)?.qualified_name;
             if let Some(ids) = self
@@ -1960,7 +1995,7 @@ impl UniversalResolutionIndex {
         }
         declarations
             .into_iter()
-            .take(self.limits.candidates_per_lookup)
+            .take(candidate_storage_limit(self.limits.candidates_per_lookup))
             .collect()
     }
 
@@ -2555,8 +2590,23 @@ fn sort_declaration_index<K: Eq + Hash>(
         });
         values.dedup();
         if values.len() > candidate_limit {
-            values.truncate(candidate_limit);
+            values.truncate(candidate_storage_limit(candidate_limit));
         }
+    }
+}
+
+/// Keep one extra candidate as an overflow marker when an index is bounded.
+///
+/// A lookup is allowed to resolve only when exactly one eligible candidate is
+/// present. Truncating a vector of two candidates to a configured limit of one
+/// erased the evidence that the result was ambiguous and could manufacture a
+/// false unique resolution. The extra slot keeps the operation bounded while
+/// making incompleteness observable to the existing `take(limit + 1)` checks.
+fn candidate_storage_limit(candidate_limit: usize) -> usize {
+    if candidate_limit == 0 {
+        0
+    } else {
+        candidate_limit.saturating_add(1)
     }
 }
 

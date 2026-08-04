@@ -502,7 +502,8 @@ pub(crate) fn extract_tree_evidence(
     let mut state = DirectAdapterState::new(path, source_file, source, root, profile);
     state.add_file(root)?;
     if root.end_byte() == root.start_byte() {
-        return state.builder.finish();
+        let DirectAdapterState { builder, .. } = state;
+        return builder.finish();
     }
     state.capture_parser_errors(root);
     match profile.language {
@@ -528,7 +529,8 @@ pub(crate) fn extract_tree_evidence(
             "parser recovered from malformed source; emitted evidence remains source-bounded",
         )?;
     }
-    state.builder.finish()
+    let DirectAdapterState { builder, .. } = state;
+    builder.finish()
 }
 
 #[derive(Clone)]

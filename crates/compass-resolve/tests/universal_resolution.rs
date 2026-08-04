@@ -1154,6 +1154,50 @@ func caller(workers ...*Worker) {
 }
 
 #[test]
+fn go_top_level_range_variable_preserves_method_attribution() {
+    let go_source = br#"package pkg
+type Command struct{}
+func (*Command) Commands() []*Command { return nil }
+func (*Command) IsAvailableCommand() bool { return true }
+func (*Command) Name() string { return "" }
+func caller(command *Command) {
+    for _, c := range command.Commands() {
+        if !c.IsAvailableCommand() {
+            continue
+        }
+        _ = c.Name()
+    }
+}
+"#;
+    let extracted = extract("pkg/caller.go", go_source);
+    let sources = HashMap::from([(
+        "pkg/caller.go".to_owned(),
+        String::from_utf8(go_source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let command_methods = ["Commands", "IsAvailableCommand", "Name"]
+        .into_iter()
+        .map(|method| {
+            resolved
+                .nodes
+                .iter()
+                .find(|node| node.string("qualified_name") == format!("pkg.Command::{method}"))
+                .unwrap_or_else(|| panic!("Command.{method} declaration"))
+                .id
+                .clone()
+        })
+        .collect::<Vec<_>>();
+
+    for (target, location) in command_methods.into_iter().zip(["L7", "L8", "L11"]) {
+        assert!(resolved.edges.iter().any(|edge| {
+            edge.string("relation") == "calls"
+                && edge.target == target
+                && edge.string("source_location") == location
+        }));
+    }
+}
+
+#[test]
 fn go_for_clause_initializers_and_empty_closures_keep_exact_attribution() {
     let go_source = br#"package pkg
 type Worker struct{}

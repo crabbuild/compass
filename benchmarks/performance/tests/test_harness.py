@@ -3,11 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 
 from benchmarks.performance.compass.model import RepositorySpec
 from benchmarks.performance.harness import (
     _existing_ancestor,
+    _shared_graph_gate,
     build_parser,
     requested_repository_commits,
 )
@@ -105,6 +107,19 @@ class HarnessTests(unittest.TestCase):
     def test_disk_check_accepts_a_not_yet_created_workspace(self) -> None:
         missing = Path("/tmp") / "compass-does-not-exist" / "workspace"
         self.assertEqual(Path("/tmp").resolve(), _existing_ancestor(missing))
+
+    def test_shared_graph_gate_reports_bounded_child_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report = _shared_graph_gate(
+                root / "missing-compass.json",
+                root / "missing-graphify.json",
+                "fixture",
+                root,
+                5,
+            )
+        self.assertFalse(report.passed)
+        self.assertEqual("graph-comparison-failure", report.issues[0].code)
 
 
 if __name__ == "__main__":
