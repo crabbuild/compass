@@ -1,7 +1,7 @@
 import { pageMetadata } from '@/lib/site';
 import { FeatureGrid, MarketingPage, PageSection } from '@/components/marketing-page';
 
-export const metadata = pageMetadata('About', 'Learn why Compass is built as a local-first, deterministic, inspectable tool for understanding complex codebases.');
+export const metadata = pageMetadata('About', 'Learn why Compass is built as a local-first, deterministic, inspectable tool for understanding complex codebases.', { path: '/about' });
 
 export default function AboutPage() {
   return <MarketingPage eyebrow="About Compass" title="A native tool for making complex systems legible." description="Compass is an independent local-first product inspired by the code-graph workflow: extract structure, preserve evidence, and make the next question smaller.">

@@ -19,8 +19,10 @@ npm run build:web
 ```
 
 Set `NEXT_PUBLIC_SITE_URL` when deploying to a domain other than the default
-`https://compass.crabbuild.dev`. The value is used for metadata, canonical URLs,
-robots, and the sitemap.
+`https://compass.crab.build`. The value is used for metadata, canonical URLs,
+robots, social cards, and the sitemap. If you use Google or Bing Search
+Console, set `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` or
+`NEXT_PUBLIC_BING_SITE_VERIFICATION` as the corresponding verification token.
 
 ## Content and routes
 

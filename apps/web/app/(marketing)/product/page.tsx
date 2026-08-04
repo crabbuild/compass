@@ -32,14 +32,17 @@ import {
 } from '@/components/diagrams';
 import { MarketingPage, PageSection } from '@/components/marketing-page';
 import { ProductionGraphExplorer } from '@/components/production-graph-explorer';
+import { JsonLd } from '@/components/structured-data';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { pageMetadata } from '@/lib/site';
+import { breadcrumbJsonLd, softwareApplicationJsonLd } from '@/lib/seo';
 
 export const metadata = pageMetadata(
   'Product',
   'Explore Compass in one place: source graphs, CompassQL, versioned history, integrations, and portable evidence.',
+  { path: '/product' },
 );
 
 const surfaces = [
@@ -75,7 +78,15 @@ const graphPrinciples = [
 
 export default function ProductPage() {
   return (
-    <MarketingPage
+    <>
+      <JsonLd data={softwareApplicationJsonLd()} />
+      <JsonLd
+        data={breadcrumbJsonLd([
+          { name: 'Compass', path: '/' },
+          { name: 'Product', path: '/product' },
+        ])}
+      />
+      <MarketingPage
       eyebrow="Product"
       title="One local graph. Every useful question."
       description="Compass turns a repository into an inspectable, evidence-backed graph, then gives you the smallest surface for exploring, querying, comparing, and sharing what you found."
@@ -214,7 +225,8 @@ export default function ProductPage() {
           <div className="flex flex-col gap-3 sm:flex-row"><Link className={cn(buttonVariants({ variant: 'secondary', size: 'lg' }), 'gap-2')} href="/install">Install Compass <ArrowRightIcon data-icon="inline-end" /></Link><Link className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground')} href="/docs">Read the docs</Link></div>
         </div>
       </section>
-    </MarketingPage>
+      </MarketingPage>
+    </>
   );
 }
 

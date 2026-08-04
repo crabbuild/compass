@@ -4,6 +4,9 @@ import { ArrowRightIcon, BookOpenIcon, BoxesIcon, Code2Icon, FileTextIcon } from
 
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { JsonLd } from '@/components/structured-data';
+import { pageMetadata } from '@/lib/site';
+import { breadcrumbJsonLd } from '@/lib/seo';
 
 const paths = [
   { icon: BookOpenIcon, eyebrow: 'Start', title: 'Build your first graph', description: 'Install Compass, scan a repository, and answer your first structural question.', href: '/docs/getting-started', action: 'Start the guide' },
@@ -12,14 +15,21 @@ const paths = [
   { icon: FileTextIcon, eyebrow: 'Look up', title: 'Find commands and formats', description: 'Check exact commands, configuration options, output formats, and CompassQL syntax.', href: '/docs/reference/commands', action: 'Open the reference' },
 ];
 
-export const metadata: Metadata = {
-  title: 'Documentation',
-  description: 'Install Compass, learn the core concepts, follow task guides, and look up commands and formats.',
-};
+export const metadata: Metadata = pageMetadata(
+  'Documentation',
+  'Install Compass, learn the core concepts, follow task guides, and look up commands and formats.',
+  { path: '/docs' },
+);
 
 export default function DocsLandingPage() {
   return (
     <>
+      <JsonLd
+        data={breadcrumbJsonLd([
+          { name: 'Compass', path: '/' },
+          { name: 'Documentation', path: '/docs' },
+        ])}
+      />
       <section className="relative overflow-hidden border-b border-border/70">
         <div className="site-grid pointer-events-none absolute inset-0 opacity-50" aria-hidden="true" />
         <div className="relative mx-auto max-w-7xl px-5 pb-16 pt-20 lg:px-8 lg:pb-24 lg:pt-28">

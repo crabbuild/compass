@@ -6,6 +6,9 @@ import { DocsBody } from 'fumadocs-ui/layouts/docs/page';
 
 import { getMDXComponents } from '@/components/mdx';
 import { blogSource } from '@/lib/blog';
+import { JsonLd } from '@/components/structured-data';
+import { blogPostingJsonLd, breadcrumbJsonLd } from '@/lib/seo';
+import { pageMetadata } from '@/lib/site';
 
 export function generateStaticParams() {
   return blogSource.getPages().map((page) => ({ slug: page.slugs[0] }));
@@ -15,7 +18,15 @@ export async function generateMetadata(props: { params: Promise<{ slug: string }
   const { slug } = await props.params;
   const post = blogSource.getPage([slug]);
   if (!post) return {};
-  return { title: post.data.title, description: post.data.description, alternates: { canonical: post.url } };
+  const description = post.data.description ?? `Read ${post.data.title} from the Compass team.`;
+  return pageMetadata(post.data.title, description, {
+    path: post.url,
+    type: 'article',
+    publishedTime: post.data.date.toISOString(),
+    authors: [post.data.author],
+    tags: post.data.tags,
+    keywords: [...post.data.tags, 'Compass', 'code graph'],
+  });
 }
 
 export default async function BlogPostPage(props: { params: Promise<{ slug: string }> }) {
@@ -23,6 +34,28 @@ export default async function BlogPostPage(props: { params: Promise<{ slug: stri
   const post = blogSource.getPage([slug]);
   if (!post || post.data.draft) notFound();
   const MDX = post.data.body;
+  const description = post.data.description ?? `Read ${post.data.title} from the Compass team.`;
 
-  return <article className="mx-auto max-w-4xl px-5 py-16 lg:px-8 lg:py-24"><Link className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground" href="/blog"><ArrowLeftIcon data-icon="inline-start" /> All stories</Link><header className="mt-12 border-b border-border/70 pb-10"><p className="eyebrow">{post.data.tags.join(' / ') || 'Compass'}</p><h1 className="mt-5 font-heading text-4xl font-semibold leading-tight tracking-[-0.06em] sm:text-5xl">{post.data.title}</h1><p className="mt-5 text-lg leading-8 text-muted-foreground">{post.data.description}</p><p className="mt-7 font-mono text-xs text-muted-foreground">{post.data.author} · {new Intl.DateTimeFormat('en', { dateStyle: 'long' }).format(post.data.date)}</p></header><DocsBody className="mt-12"><MDX components={getMDXComponents()} /></DocsBody></article>;
+  return (
+    <>
+      <JsonLd
+        data={breadcrumbJsonLd([
+          { name: 'Compass', path: '/' },
+          { name: 'Blog', path: '/blog' },
+          { name: post.data.title, path: post.url },
+        ])}
+      />
+      <JsonLd
+        data={blogPostingJsonLd({
+          title: post.data.title,
+          description,
+          path: post.url,
+          author: post.data.author,
+          datePublished: post.data.date,
+          tags: post.data.tags,
+        })}
+      />
+      <article className="mx-auto max-w-4xl px-5 py-16 lg:px-8 lg:py-24"><Link className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground" href="/blog"><ArrowLeftIcon data-icon="inline-start" /> All stories</Link><header className="mt-12 border-b border-border/70 pb-10"><p className="eyebrow">{post.data.tags.join(' / ') || 'Compass'}</p><h1 className="mt-5 font-heading text-4xl font-semibold leading-tight tracking-[-0.06em] sm:text-5xl">{post.data.title}</h1><p className="mt-5 text-lg leading-8 text-muted-foreground">{description}</p><p className="mt-7 font-mono text-xs text-muted-foreground">{post.data.author} · {new Intl.DateTimeFormat('en', { dateStyle: 'long' }).format(post.data.date)}</p></header><DocsBody className="mt-12"><MDX components={getMDXComponents()} /></DocsBody></article>
+    </>
+  );
 }

@@ -1,15 +1,18 @@
-import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowRightIcon, CalendarDaysIcon } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { blogSource } from '@/lib/blog';
+import { JsonLd } from '@/components/structured-data';
+import { breadcrumbJsonLd } from '@/lib/seo';
+import { pageMetadata } from '@/lib/site';
 
-export const metadata: Metadata = {
-  title: 'Blog',
-  description: 'Stories about code graphs, provenance, local-first tooling, and building Compass.',
-};
+export const metadata = pageMetadata(
+  'Blog',
+  'Stories about code graphs, provenance, local-first tooling, and building Compass.',
+  { path: '/blog' },
+);
 
 export default function BlogPage() {
   const posts = blogSource.getPages().filter((page) => !page.data.draft).sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
@@ -17,6 +20,12 @@ export default function BlogPage() {
 
   return (
     <>
+      <JsonLd
+        data={breadcrumbJsonLd([
+          { name: 'Compass', path: '/' },
+          { name: 'Blog', path: '/blog' },
+        ])}
+      />
       <section className="relative overflow-hidden border-b border-border/70">
         <div className="site-grid pointer-events-none absolute inset-0 opacity-50" aria-hidden="true" />
         <div className="relative mx-auto grid max-w-7xl gap-10 px-5 pb-16 pt-20 lg:grid-cols-[1fr_0.7fr] lg:items-end lg:px-8 lg:pb-24 lg:pt-28">

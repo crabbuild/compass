@@ -5,7 +5,7 @@ import { MarketingPage, PageSection } from '@/components/marketing-page';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { pageMetadata } from '@/lib/site';
 
-export const metadata = pageMetadata('Changelog', 'Follow release-visible changes to the Compass CLI, graph formats, history, integrations, and documentation.');
+export const metadata = pageMetadata('Changelog', 'Follow release-visible changes to the Compass CLI, graph formats, history, integrations, and documentation.', { path: '/changelog' });
 
 export default function ChangelogPage() {
   return <MarketingPage eyebrow="Changelog" title="Small releases, visible contracts." description="Follow release-visible changes to the CLI, graph formats, history, integrations, and documentation.">

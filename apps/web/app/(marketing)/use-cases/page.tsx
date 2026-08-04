@@ -28,6 +28,7 @@ import { pageMetadata } from '@/lib/site';
 export const metadata = pageMetadata(
   'Use cases',
   'Use Compass to explore unfamiliar codebases, review change impact, focus assistant context, and understand system evolution.',
+  { path: '/use-cases' },
 );
 
 const workflows = [

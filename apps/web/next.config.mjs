@@ -7,6 +7,16 @@ const config = {
   async redirects() {
     return [
       {
+        source: '/docs/README',
+        destination: '/docs/docmap',
+        permanent: true,
+      },
+      {
+        source: '/docs/cookbook/README',
+        destination: '/docs/cookbook/overview',
+        permanent: true,
+      },
+      {
         source: '/docs/:path*.md',
         destination: '/docs/:path*',
         permanent: true,

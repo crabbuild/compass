@@ -5,7 +5,7 @@ import { MarketingPage, PageSection } from '@/components/marketing-page';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { pageMetadata } from '@/lib/site';
 
-export const metadata = pageMetadata('Roadmap', 'See what Compass ships today, what is in progress, and which ideas remain explicitly aspirational.');
+export const metadata = pageMetadata('Roadmap', 'See what Compass ships today, what is in progress, and which ideas remain explicitly aspirational.', { path: '/roadmap' });
 
 const items = [
   [CircleDotIcon, 'Available now', 'Native structural extraction, graph queries, CompassQL, history, exports, and the VS Code workflow.'],

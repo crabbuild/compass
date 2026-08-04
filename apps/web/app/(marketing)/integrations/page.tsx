@@ -9,7 +9,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { pageMetadata } from '@/lib/site';
 
-export const metadata = pageMetadata('Integrations', 'Bring Compass into editors, assistants, automation, and portable graph workflows without leaving the local workspace.');
+export const metadata = pageMetadata('Integrations', 'Bring Compass into editors, assistants, automation, and portable graph workflows without leaving the local workspace.', { path: '/integrations' });
 
 const surfaces = [
   {

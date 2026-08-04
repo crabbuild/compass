@@ -16,7 +16,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { pageMetadata } from '@/lib/site';
 
-export const metadata = pageMetadata('Install', 'Install the Compass CLI on macOS, Linux, or Windows, then add the Compass Codegraph extension to VS Code.');
+export const metadata = pageMetadata('Install', 'Install the Compass CLI on macOS, Linux, or Windows, then add the Compass Codegraph extension to VS Code.', { path: '/install' });
 
 const vscodeMarketplaceUrl = 'https://marketplace.visualstudio.com/items?itemName=crabbuild.crabbuild-compass-vscode';
 const vscodeInstallCommand = 'code --install-extension crabbuild.crabbuild-compass-vscode';

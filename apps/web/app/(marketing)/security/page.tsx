@@ -3,7 +3,7 @@ import { CheckCircle2Icon, CloudOffIcon, KeyRoundIcon, ShieldCheckIcon } from 'l
 import { FeatureGrid, MarketingPage, PageSection } from '@/components/marketing-page';
 import { pageMetadata } from '@/lib/site';
 
-export const metadata = pageMetadata('Security and privacy', 'Understand Compass local-first defaults, optional provider boundaries, bounded inputs, and validated outputs.');
+export const metadata = pageMetadata('Security and privacy', 'Understand Compass local-first defaults, optional provider boundaries, bounded inputs, and validated outputs.', { path: '/security' });
 
 export default function SecurityPage() {
   return <MarketingPage eyebrow="Security and privacy" title="Local-first is a boundary, not a slogan." description="Compass keeps structural extraction and graph queries on the machine where the repository lives. Optional network and credential paths are explicit.">
