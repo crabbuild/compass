@@ -68,6 +68,16 @@ and reference are internal realizations of the backend-neutral `compass-store`
 contract, not a stable SQL schema or pointer format that consumers may query
 directly.
 
+Structural `init`, `update`, `extract`, and `watch` builds publish
+`program.json` only when `--program` or `--program-artifact` is selected. The
+legacy `--no-program` flag remains accepted and continues to request the
+structural-only profile. Program inspection commands remain read-only and
+require an existing canonical Program IR artifact.
+
+The `extract --code-only` profile excludes document extractors from structural
+node and edge publication while retaining the scanned file inventory and its
+status records.
+
 ## Compass Store release contract
 
 The first supported local store line is `0.3.x`. Its logical machine formats

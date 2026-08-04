@@ -1,8 +1,8 @@
-use std::fs;
 use std::path::Path;
+use std::{collections::BTreeMap, fs};
 
 use compass_graph::{
-    BuildEvidence, InventoryEvidence, build_from_extraction, extraction_from_v1,
+    BuildEvidence, InventoryEvidence, SourceDigest, build_from_extraction, extraction_from_v1,
     normalize_document_v1, normalize_document_v1_with_inventory_best_effort_owned, normalize_v1,
     normalize_v1_best_effort,
 };
@@ -2205,6 +2205,39 @@ fn build_evidence_derives_digests_generation_and_byte_anchors()
     let rebuilt = normalize_v1(projected, rebuilt_evidence)?;
     assert_eq!(rebuilt.nodes, graph.nodes);
     assert_eq!(rebuilt.links, graph.links);
+    Ok(())
+}
+
+#[test]
+fn build_evidence_reuses_precomputed_source_digests_without_changing_file_records()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join("src"))?;
+    let bytes = b"fn source() {}\n";
+    fs::write(root.join("src/lib.rs"), bytes)?;
+    let extraction = Extraction {
+        nodes: vec![raw_node(root, "raw:source", "source", 0)],
+        ..Extraction::default()
+    };
+    let document = build_from_extraction(&extraction, true, Some(root));
+    let baseline = BuildEvidence::from_document(root, &document, "sha256:config")?;
+    let digests = BTreeMap::from([(
+        "src/lib.rs".to_owned(),
+        SourceDigest {
+            content_digest: format!("sha256:{:x}", Sha256::digest(bytes)),
+            byte_size: bytes.len() as u64,
+        },
+    )]);
+    let reused = BuildEvidence::from_document_with_source_digests(
+        root,
+        &document,
+        "sha256:config",
+        &digests,
+    )?;
+
+    assert_eq!(reused.files, baseline.files);
+    assert_eq!(reused.build, baseline.build);
     Ok(())
 }
 

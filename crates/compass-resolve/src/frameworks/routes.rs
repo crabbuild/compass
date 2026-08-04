@@ -13,6 +13,7 @@ use compass_model::provenance::{
     EvidenceConfidence, EvidenceOrigin, Provenance, ResolutionCandidate, ResolutionState,
     SourceAnchor,
 };
+use rayon::prelude::*;
 use serde_json::{Map, Value};
 
 use super::target_index::{
@@ -99,10 +100,12 @@ pub(super) fn resolve_routes_with_targets(
         unique.entry(key).or_insert(route);
     }
 
-    unique
-        .into_values()
+    let routes = unique.into_values().collect::<Vec<_>>();
+    let resolved = routes
+        .into_par_iter()
         .map(|route| resolve_one_route(route, targets, &aliases, limits, root))
-        .collect()
+        .collect::<Vec<_>>();
+    resolved.into_iter().collect()
 }
 
 pub fn resolve_and_publish_framework_routes(

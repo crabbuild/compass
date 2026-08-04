@@ -16,7 +16,7 @@ compass-out/
 │   └── store.ref               # only with --store sqlite
 ├── .compass-store/
 │   └── compass-store.sqlite3   # only with --store sqlite
-├── program.json
+├── program.json                 # only with --program or --program-artifact
 ├── GRAPH_REPORT.md
 ├── graph.html
 ├── manifest.json
@@ -33,7 +33,7 @@ compass-out/
 | `graph.json` | machine-readable graph snapshot | queries, integrations, export |
 | `.compass-store/compass-store.sqlite3` | optional shared namespace/partition/key store | explicit store-engine queries and future store adapters |
 | active generation `store.ref` | typed selector for the co-published store identity and snapshot | store-engine validation before query execution |
-| `program.json` | provenance-aware Program IR | program inspection, semantic analysis |
+| `program.json` (optional) | provenance-aware Program IR | program inspection, semantic analysis |
 | `GRAPH_REPORT.md` | derived human orientation | architecture survey |
 | `graph.html` | derived optional visualization | interactive exploration |
 | `manifest.json` | incremental build state | next compatible update |
@@ -199,8 +199,9 @@ A forced/cold build can regenerate current output.
 
 ## `program.json`
 
-`program.json` is the canonical, language-neutral Program IR produced by native
-`update`, `extract`, and `watch` builds. Its public schema identifier is:
+`program.json` is the optional canonical, language-neutral Program IR produced
+by native `init`, `update`, `extract`, and `watch` builds when `--program` or
+`--program-artifact` is selected. Its public schema identifier is:
 
 ```text
 http://crab.build/compass/v1

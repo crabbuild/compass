@@ -23,6 +23,15 @@ compass update .
 
 Set `COMPASS_OUT` before running Compass when you need a custom output directory.
 
+## Opt into Program IR generation
+
+Structural graph builds now omit the optional `program.json` artifact by
+default. Add `--program` to `init`, `update`, `extract`, or `watch` when
+program inspection or Program-backed enrichment is part of the workflow.
+Supplying `--program-artifact` also enables Program IR on update, extract, and
+watch. Existing scripts may keep using `--no-program`; it remains accepted as
+an explicit structural-only spelling.
+
 Rename repository and user configuration before the first build:
 
 ```text

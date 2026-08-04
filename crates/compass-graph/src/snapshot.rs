@@ -7,7 +7,7 @@
 //! reconstructed from these records for export and differential testing.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 
 use compass_model::code_graph::{
     CODE_GRAPH_SCHEMA_V1, EdgeRecord, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
@@ -19,7 +19,9 @@ use compass_store::{
     MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES, NamespaceId, PartitionKey, Store, StoreError,
     WriteCondition, decode_key_segments, encode_key_segments,
 };
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_json::ser::Formatter;
 use sha2::{Digest, Sha256};
 
 pub const GRAPH_SNAPSHOT_LAYOUT_V2: &str = "compass.store.graph-index/2";
@@ -627,6 +629,123 @@ pub fn canonical_graph_json(graph: &GraphDocument) -> Result<Vec<u8>, SnapshotEr
 #[must_use]
 pub fn canonical_graph_document(graph: &GraphDocument) -> CanonicalGraphDocument<'_> {
     canonical_graph_document_with_generation(graph, false)
+}
+
+/// Build the canonical serialization view for a document that already has
+/// v1's node and link ordering. The v1 publication boundary guarantees node
+/// order by ID and link order by the same tuple used by the canonical view;
+/// retaining those references avoids sorting two large pointer vectors again
+/// immediately before graph publication.
+#[must_use]
+pub fn canonical_graph_document_presorted(graph: &GraphDocument) -> CanonicalGraphDocument<'_> {
+    let mut metadata = graph.graph.clone();
+    metadata.files.sort_by(|left, right| left.id.cmp(&right.id));
+    CanonicalGraphDocument {
+        directed: graph.directed,
+        multigraph: graph.multigraph,
+        graph: metadata,
+        nodes: graph.nodes.iter().collect(),
+        links: graph.links.iter().collect(),
+    }
+}
+
+const CANONICAL_RECORD_CHUNK: usize = 16_384;
+const CANONICAL_RECORD_IN_FLIGHT: usize = 4;
+
+/// Stream the canonical graph JSON while serializing record chunks in
+/// parallel. The chunk boundary keeps temporary buffers bounded, and records
+/// are still written in the exact v1 order used by the canonical view.
+pub fn write_canonical_graph_json<W: Write + ?Sized>(
+    graph: &GraphDocument,
+    writer: &mut W,
+) -> io::Result<()> {
+    let mut metadata = graph.graph.clone();
+    metadata.files.sort_by(|left, right| left.id.cmp(&right.id));
+
+    writer.write_all(b"{\"directed\":")?;
+    serde_json::to_writer(&mut *writer, &graph.directed).map_err(io::Error::other)?;
+    writer.write_all(b",\"multigraph\":")?;
+    serde_json::to_writer(&mut *writer, &graph.multigraph).map_err(io::Error::other)?;
+    writer.write_all(b",\"graph\":")?;
+    serde_json::to_writer(&mut *writer, &metadata).map_err(io::Error::other)?;
+    writer.write_all(b",\"nodes\":")?;
+    write_canonical_record_array(writer, &graph.nodes)?;
+    writer.write_all(b",\"links\":")?;
+    write_canonical_record_array(writer, &graph.links)?;
+    writer.write_all(b"}")
+}
+
+fn write_canonical_record_array<W, T>(writer: &mut W, records: &[T]) -> io::Result<()>
+where
+    W: Write + ?Sized,
+    T: Serialize + Sync,
+{
+    writer.write_all(b"[")?;
+    let mut chunks = records.chunks(CANONICAL_RECORD_CHUNK);
+    let mut first = true;
+    loop {
+        let batch = (0..CANONICAL_RECORD_IN_FLIGHT)
+            .filter_map(|_| chunks.next())
+            .collect::<Vec<_>>();
+        if batch.is_empty() {
+            break;
+        }
+        let encoded = batch
+            .par_iter()
+            .map(|records| encode_canonical_record_chunk(records))
+            .collect::<Result<Vec<_>, _>>()?;
+        for chunk in encoded {
+            if !first {
+                writer.write_all(b",")?;
+            }
+            writer.write_all(&chunk)?;
+            first = false;
+        }
+    }
+    writer.write_all(b"]")
+}
+
+fn encode_canonical_record_chunk<T: Serialize>(records: &[T]) -> io::Result<Vec<u8>> {
+    let mut encoded = Vec::new();
+    let mut serializer =
+        serde_json::Serializer::with_formatter(&mut encoded, ArrayBodyFormatter::default());
+    records
+        .serialize(&mut serializer)
+        .map_err(io::Error::other)?;
+    Ok(encoded)
+}
+
+#[derive(Clone, Debug, Default)]
+struct ArrayBodyFormatter {
+    depth: usize,
+}
+
+impl Formatter for ArrayBodyFormatter {
+    fn begin_array<W>(&mut self, writer: &mut W) -> io::Result<()>
+    where
+        W: ?Sized + Write,
+    {
+        let outer = self.depth == 0;
+        self.depth = self.depth.saturating_add(1);
+        if outer {
+            Ok(())
+        } else {
+            writer.write_all(b"[")
+        }
+    }
+
+    fn end_array<W>(&mut self, writer: &mut W) -> io::Result<()>
+    where
+        W: ?Sized + Write,
+    {
+        let outer = self.depth == 1;
+        self.depth = self.depth.saturating_sub(1);
+        if outer {
+            Ok(())
+        } else {
+            writer.write_all(b"]")
+        }
+    }
 }
 
 pub fn activate_graph_snapshot<S: Store + ?Sized>(
@@ -2326,6 +2445,63 @@ fn digest_bytes(value: &[u8]) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use compass_model::code_graph::{BuildMetadata, NodeKind};
+
+    #[test]
+    fn streamed_canonical_graph_json_matches_serde_encoding() -> Result<(), SnapshotError> {
+        let graph = GraphDocument {
+            directed: true,
+            multigraph: true,
+            graph: GraphMetadata::v1(BuildMetadata {
+                builder_version: "test".to_owned(),
+                schema_fingerprint: "schema".to_owned(),
+                source_tree_digest: "tree".to_owned(),
+                configuration_digest: "config".to_owned(),
+                generation_id: "generation".to_owned(),
+                source_commit: None,
+            }),
+            nodes: vec![
+                NodeRecord {
+                    id: "b".to_owned(),
+                    kind: NodeKind::Function,
+                    roles: Vec::new(),
+                    name: "B".to_owned(),
+                    qualified_name: "b".to_owned(),
+                    language: Some("rust".to_owned()),
+                    framework: None,
+                    source: None,
+                    details: None,
+                    evidence: Vec::new(),
+                    coverage: Vec::new(),
+                    diagnostics: Vec::new(),
+                    community: None,
+                },
+                NodeRecord {
+                    id: "a".to_owned(),
+                    kind: NodeKind::Function,
+                    roles: Vec::new(),
+                    name: "A".to_owned(),
+                    qualified_name: "a".to_owned(),
+                    language: Some("rust".to_owned()),
+                    framework: None,
+                    source: None,
+                    details: None,
+                    evidence: Vec::new(),
+                    coverage: Vec::new(),
+                    diagnostics: Vec::new(),
+                    community: None,
+                },
+            ],
+            links: Vec::new(),
+        };
+        let expected = serde_json::to_vec(&canonical_graph_document_presorted(&graph))
+            .map_err(|error| SnapshotError::Encode(error.to_string()))?;
+        let mut actual = Vec::new();
+        write_canonical_graph_json(&graph, &mut actual)
+            .map_err(|error| SnapshotError::Encode(error.to_string()))?;
+        assert_eq!(actual, expected);
+        Ok(())
+    }
 
     #[test]
     fn tree_decoder_accepts_compact_and_legacy_encodings() -> Result<(), SnapshotError> {

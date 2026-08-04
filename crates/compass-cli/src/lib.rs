@@ -1001,6 +1001,8 @@ fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> 
     let mut debounce = Duration::from_millis(150);
     let mut no_cluster = false;
     let mut no_viz = false;
+    let mut no_program = false;
+    let mut program_requested = false;
     let mut gitignore = true;
     let mut excludes = Vec::new();
     let mut program_artifacts = Vec::new();
@@ -1012,6 +1014,8 @@ fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> 
             "-h" | "--help" => return Ok(None),
             "--no-cluster" => no_cluster = true,
             "--no-viz" => no_viz = true,
+            "--no-program" => no_program = true,
+            "--program" => program_requested = true,
             "--no-gitignore" => gitignore = false,
             "--poll" => force_polling = true,
             "--debounce" if index + 1 < args.len() => {
@@ -1067,6 +1071,12 @@ fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> 
         }
         index += 1;
     }
+    if no_program && program_requested {
+        return Err("error: --program conflicts with --no-program".to_owned());
+    }
+    if no_program && !program_artifacts.is_empty() {
+        return Err("error: --no-program conflicts with --program-artifact".to_owned());
+    }
     let mut options = WatchOptions::new(root.unwrap_or_else(|| PathBuf::from(".")));
     options.build.scope = ProjectConfig::load(&options.build.root)
         .map_err(|error| format!("error: {error}"))?
@@ -1079,7 +1089,7 @@ fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> 
     options.build.graph_storage = graph_storage;
     options.build.gitignore = gitignore;
     options.build.extra_excludes = excludes;
-    options.build.program_analysis = true;
+    options.build.program_analysis = program_requested || !program_artifacts.is_empty();
     options.build.program_artifacts = program_artifacts;
     Ok(Some(options))
 }
@@ -1582,6 +1592,7 @@ fn command_build_with_validation_inner(
     let mut no_cluster = false;
     let mut no_viz = false;
     let mut no_program = false;
+    let mut program_requested = false;
     let mut graph_storage = GraphStorage::default();
     let mut gitignore = true;
     let mut code_only = false;
@@ -1613,6 +1624,7 @@ fn command_build_with_validation_inner(
             "--no-cluster" => no_cluster = true,
             "--no-viz" => no_viz = true,
             "--no-program" => no_program = true,
+            "--program" => program_requested = true,
             "--no-gitignore" => gitignore = false,
             "--code-only" => code_only = true,
             "--cargo" if extract => cargo = true,
@@ -1825,7 +1837,7 @@ fn command_build_with_validation_inner(
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
-                    "Usage: compass update [path] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
+                    "Usage: compass update [path] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
                 });
             }
             value if value.starts_with('-') => {
@@ -1843,6 +1855,9 @@ fn command_build_with_validation_inner(
         index += 1;
     }
     let has_explicit_root = root.is_some();
+    if no_program && program_requested {
+        return Outcome::failure("error: --program conflicts with --no-program".to_owned());
+    }
     if no_program && !program_artifacts.is_empty() {
         return Outcome::failure(
             "error: --no-program conflicts with --program-artifact".to_owned(),
@@ -1882,6 +1897,7 @@ fn command_build_with_validation_inner(
     options.extra_excludes = excludes;
     options.resolution = resolution;
     options.exclude_hubs = exclude_hubs;
+    options.code_only = code_only;
     options.purpose = if extract {
         BuildPurpose::Extract
     } else {
@@ -1889,7 +1905,11 @@ fn command_build_with_validation_inner(
     };
     options.google_workspace =
         google_workspace || compass_google_workspace::google_workspace_enabled(None);
-    options.program_analysis = !no_program;
+    // Structural extraction is the fast, complete graph contract. Program IR
+    // is an explicit opt-in because it adds a second analysis/output workload
+    // that only some scenarios need. Keep --no-program accepted as a
+    // compatibility spelling for callers that already select that profile.
+    options.program_analysis = program_requested || !program_artifacts.is_empty();
     options.program_artifacts = program_artifacts;
     options.precomputed_detection = precomputed_detection;
     apply_max_workers_override(&mut options, max_workers);
@@ -2705,7 +2725,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: compass extract [PATH] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: compass extract [PATH] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {
@@ -3828,7 +3848,7 @@ fn graph_load_outcome(error: GraphError) -> Outcome {
 }
 
 fn watch_help() -> String {
-    "Usage: compass watch [PATH] [--program-artifact PATH] [--debounce SECONDS] [--store json|sqlite] [--out DIR] [--no-cluster] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--poll]"
+    "Usage: compass watch [PATH] [--program] [--program-artifact PATH] [--no-program] [--debounce SECONDS] [--store json|sqlite] [--out DIR] [--no-cluster] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--poll]"
         .to_owned()
 }
 
@@ -4288,6 +4308,10 @@ mod mcp_option_tests {
         let defaults = parse_watch_options(&[])?.ok_or("unexpected help")?;
         assert_eq!(defaults.debounce, Duration::from_millis(150));
         assert!(defaults.adaptive);
+        assert!(!defaults.build.program_analysis);
+
+        let program = parse_watch_options(&["--program".to_owned()])?.ok_or("unexpected help")?;
+        assert!(program.build.program_analysis);
 
         assert_eq!(
             command_cluster_only(Frontend::Compass, &["--help".to_owned()]).code,

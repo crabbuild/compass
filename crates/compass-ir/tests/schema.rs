@@ -103,6 +103,7 @@ fn canonical_bytes_ignore_set_order() -> Result<(), IrError> {
     second.modules[0].evidence.push(C.to_owned());
     assert_eq!(first.canonical_bytes()?, second.canonical_bytes()?);
     assert_eq!(first.digest()?, second.digest()?);
+    assert_eq!(first.clone().into_canonicalized(), first.canonicalized());
     assert!(
         first
             .canonical_bytes()?

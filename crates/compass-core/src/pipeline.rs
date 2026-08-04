@@ -1,26 +1,29 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ahash::{AHashMap, AHashSet};
 use compass_files::{
     BuildGuard, BuildScope, Cache, CacheKind, CacheOptions, DetectOptions, Detection, IgnorePolicy,
-    Manifest, ManifestKind, detect, write_json_atomic, write_json_atomic_with_digest,
-    write_text_atomic,
+    Manifest, ManifestKind, detect, write_atomic_with_digest, write_json_atomic,
+    write_json_atomic_with_digest, write_text_atomic,
 };
 use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
     GRAPH_SNAPSHOT_MAX_OBJECTS, GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder,
     GraphSnapshotGcStats, InventoryEvidence, PublicationOmissions, PublicationOutcome,
-    SnapshotSelector, build_owned_with_tiebreaker as build_document, canonical_edge_kind,
-    canonical_graph_document, canonical_raw_edge_sites, cluster, dedupe_nodes, extraction_from_v1,
-    garbage_collect_graph_snapshots, graph_insights, graph_snapshot_needs_gc,
-    label_communities_by_hub, normalize_document_v1_with_evidence_best_effort_owned,
+    SnapshotSelector, SourceDigest, build_owned_with_tiebreaker as build_document,
+    canonical_edge_kind, canonical_graph_document_presorted, canonical_raw_edge_sites, cluster,
+    deduped_node_count, extraction_from_v1, garbage_collect_graph_snapshots, graph_insights,
+    graph_snapshot_needs_gc, label_communities_by_hub,
+    normalize_document_v1_with_evidence_best_effort_owned,
     normalize_document_v1_with_inventory_best_effort,
     normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
-    score_communities,
+    score_communities, write_canonical_graph_json,
 };
 use compass_languages::{
     EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL, EXTRACTION_QUALITY_REASON_EXTENSION,
@@ -43,7 +46,7 @@ use compass_output::{
     generate_report, graph_view_model_document, write_html,
 };
 use compass_resolve::{
-    apply_program_projection, collect_program_projection_sites, merge_decl_def_classes,
+    apply_program_projection, collect_program_projection_sites, merge_decl_def_classes_if_needed,
     resolve_prevalidated_owned_with_root,
 };
 use compass_store::{
@@ -102,6 +105,12 @@ pub struct BuildOptions {
     pub resolution: f64,
     pub exclude_hubs: Option<f64>,
     pub google_workspace: bool,
+    /// Restrict structural extraction to files classified as code.
+    ///
+    /// This is the core representation of the CLI's `--code-only` profile;
+    /// keeping it in the build profile prevents a document-inclusive output
+    /// from being reused for a code-only build.
+    pub code_only: bool,
     /// Enable deterministic Program IR analysis and `program.json` output.
     pub program_analysis: bool,
     /// Explicit offline program evidence artifacts, in addition to `index.scip`.
@@ -200,6 +209,7 @@ impl BuildOptions {
             resolution: 1.0,
             exclude_hubs: None,
             google_workspace: false,
+            code_only: false,
             program_analysis: false,
             program_artifacts: Vec::new(),
             program_artifact_limits: compass_program::ArtifactLimits::default(),
@@ -579,22 +589,24 @@ fn build_graph_inner(
         .map(PathBuf::from)
         .filter(|path| Registry::resolve(path).is_some())
         .collect::<Vec<_>>();
-    sources.extend(
-        detection
-            .files
-            .get("document")
-            .into_iter()
-            .flatten()
-            .map(PathBuf::from)
-            .filter(|path| {
-                let structural_document = Registry::resolve(path).is_some_and(|spec| {
-                    matches!(spec.kind, ExtractorKind::Markdown | ExtractorKind::Html)
-                });
-                Registry::resolve(path).is_some()
-                    && (structural_document
-                        || !semantic_documents.contains(&canonical_identity(path)))
-            }),
-    );
+    if !options.code_only {
+        sources.extend(
+            detection
+                .files
+                .get("document")
+                .into_iter()
+                .flatten()
+                .map(PathBuf::from)
+                .filter(|path| {
+                    let structural_document = Registry::resolve(path).is_some_and(|spec| {
+                        matches!(spec.kind, ExtractorKind::Markdown | ExtractorKind::Html)
+                    });
+                    Registry::resolve(path).is_some()
+                        && (structural_document
+                            || !semantic_documents.contains(&canonical_identity(path)))
+                }),
+        );
+    }
 
     let reusable_semantic_layer = semantic.is_none()
         || (options.purpose == BuildPurpose::Extract
@@ -633,6 +645,7 @@ fn build_graph_inner(
                 &output_container,
                 options.graph_storage,
                 store_ready,
+                false,
                 &mut timings,
             )?;
             return Ok((
@@ -707,6 +720,7 @@ fn build_graph_inner(
             stats.communities,
             stats.omissions(),
             unchanged_program.as_ref(),
+            None,
             storage_artifacts_complete(options.graph_storage, &output_dir),
             &mut timings,
         )?;
@@ -715,6 +729,7 @@ fn build_graph_inner(
             &output_container,
             options.graph_storage,
             true,
+            false,
             &mut timings,
         )?;
         return Ok((
@@ -812,6 +827,15 @@ fn build_graph_inner(
         }
     }
     let worker_count = options.max_workers.unwrap_or_else(default_ast_workers);
+    // Resolver source text is only consulted by the PHP type-reference pass.
+    // Keeping every decoded source string alive across extraction and graph
+    // publication otherwise duplicates the repository's source footprint in
+    // memory for languages whose resolution is entirely fact-based.
+    let needs_resolver_source_text = sources.iter().any(|source| {
+        source
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("php"))
+    });
     let worker_pool = if missing.len() >= 256 || sources.len() >= 256 {
         Some(
             rayon::ThreadPoolBuilder::new()
@@ -855,12 +879,19 @@ fn build_graph_inner(
                     graph,
                     (path.to_string_lossy().into_owned(), String::new()),
                     None,
+                    None,
                 ));
             }
             let bytes = fs::read(path).map_err(|source| compass_files::FileError::Io {
                 path: path.clone(),
                 source,
             })?;
+            let content_hash = cache.content_hash_from_bytes(path, &bytes);
+            let source_digest = SourceDigest {
+                content_digest: format!("sha256:{:x}", Sha256::digest(&bytes)),
+                byte_size: bytes.len() as u64,
+            };
+            let byte_len = bytes.len() as u64;
             let source_file = path
                 .strip_prefix(&root)
                 .unwrap_or(path)
@@ -886,10 +917,18 @@ fn build_graph_inner(
             if empty_structured_document && graph.error.is_none() {
                 graph.error = Some(format!("{language} extraction failed: empty document"));
             }
+            let source = if needs_resolver_source_text {
+                (
+                    path.to_string_lossy().into_owned(),
+                    String::from_utf8_lossy(&bytes).into_owned(),
+                )
+            } else {
+                (path.to_string_lossy().into_owned(), String::new())
+            };
             let prepared = program.map(|batch| PreparedSyntaxInput {
                 source_file,
                 language: language.to_owned(),
-                bytes: bytes.clone(),
+                bytes,
                 batch,
             });
             if let Some(progress) = progress {
@@ -903,11 +942,18 @@ fn build_graph_inner(
                     path: path.clone(),
                 });
             }
-            let source = (
-                path.to_string_lossy().into_owned(),
-                String::from_utf8_lossy(&bytes).into_owned(),
-            );
-            Ok((path.clone(), graph, source, prepared))
+            Ok((
+                path.clone(),
+                graph,
+                source,
+                prepared,
+                Some((
+                    content_hash,
+                    byte_len,
+                    metadata.modified().ok(),
+                    source_digest,
+                )),
+            ))
         };
     let fresh_outcomes = if missing.len() < 256 {
         let mut engine = Engine::with_project_evidence(Arc::clone(&project_evidence));
@@ -958,7 +1004,7 @@ fn build_graph_inner(
             &mut extraction_partials,
         );
     }
-    for (path, extraction, _, _) in &mut fresh {
+    for (path, extraction, _, _, _) in &mut fresh {
         prepare_extraction_for_publication(
             path,
             extraction,
@@ -971,7 +1017,7 @@ fn build_graph_inner(
     let prepared = if !reuse_cached_analysis {
         fresh
             .iter_mut()
-            .filter_map(|(_, _, _, prepared)| prepared.take())
+            .filter_map(|(_, _, _, prepared, _)| prepared.take())
             .collect::<Vec<_>>()
     } else {
         Vec::new()
@@ -1002,12 +1048,58 @@ fn build_graph_inner(
                         &program_cache,
                         prepared,
                     )?;
-                    let (summary, canonical_bytes) =
-                        ProgramBuildSummary::from_program_with_canonical_bytes(
-                            program,
-                            retain_artifacts,
+                    let summary = if retain_artifacts {
+                        let canonical_started = Instant::now();
+                        let program_seal = write_program(&program_output_dir, &program.analysis)?;
+                        profile_internal_duration(
+                            "Program canonical JSON",
+                            canonical_started.elapsed(),
                         );
-                    write_program(&program_output_dir, &canonical_bytes)?;
+                        ProgramBuildSummary::from_program_with_seal(program, true, program_seal)
+                    } else {
+                        let ProgramBuild {
+                            analysis,
+                            canonical_bytes: _,
+                            syntax_analyzed,
+                            syntax_reused,
+                            artifacts_loaded,
+                            artifacts_reused,
+                            artifact_documents_analyzed,
+                            artifact_documents_reused,
+                            conflicts,
+                            compiler_projection,
+                        } = program;
+                        let modules = analysis.program.modules.len();
+                        let summaries = analysis.summaries.len();
+                        let providers = analysis.program.providers.len();
+                        let writer_output_dir = program_output_dir.clone();
+                        let writer = std::thread::Builder::new()
+                            .name("compass-program-json".to_owned())
+                            .spawn(move || {
+                                let canonical_started = Instant::now();
+                                let seal = write_program(&writer_output_dir, &analysis)?;
+                                let elapsed = canonical_started.elapsed();
+                                profile_internal_duration("Program canonical JSON", elapsed);
+                                Ok::<_, CoreError>((seal, elapsed))
+                            })
+                            .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
+                        ProgramBuildSummary {
+                            seal: None,
+                            pending_seal: Some(writer),
+                            modules,
+                            summaries,
+                            providers,
+                            syntax_analyzed,
+                            syntax_reused,
+                            artifacts_loaded,
+                            artifacts_reused,
+                            artifact_documents_analyzed,
+                            artifact_documents_reused,
+                            conflicts,
+                            compiler_projection: Some(compiler_projection),
+                            analysis: None,
+                        }
+                    };
                     Ok::<_, CoreError>((summary, started.elapsed()))
                 })
                 .map_err(|error| CoreError::WorkerPool(error.to_string()))?,
@@ -1018,13 +1110,24 @@ fn build_graph_inner(
     let mut empty_files = Vec::new();
     let fresh_paths = fresh
         .iter()
-        .map(|(path, _, _, _)| path.clone())
+        .map(|(path, _, _, _, _)| path.clone())
         .collect::<HashSet<_>>();
     let mut fresh_source_text = HashMap::with_capacity(fresh.len());
-    for (path, extraction, (source_path, source), _) in fresh {
+    let mut fresh_source_digests = BTreeMap::new();
+    for (path, extraction, source, _, content_hash) in fresh {
         if !extraction_has_cacheable_ast_facts(&extraction) {
             empty_files.push(path.clone());
         }
+        if let Some((hash, size, modified, source_digest)) = content_hash {
+            cache.seed_content_hash(&path, hash, size, modified)?;
+            let relative_source = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            fresh_source_digests.insert(relative_source, source_digest);
+        }
+        let (source_path, source) = source;
         fresh_source_text.insert(source_path, source);
         extractions.insert(path, extraction);
     }
@@ -1091,19 +1194,12 @@ fn build_graph_inner(
             fresh_paths.contains(*path) && extraction_has_cacheable_ast_facts(extraction)
         })
         .collect::<Vec<_>>();
-    let ast_cache_entries =
-        cache.encode_portable_ast_batch(&ast_cache_sources, |path, extraction| {
-            let mut cache_entry = extraction.clone();
-            // Keep this normalization at the cache boundary as a defensive
-            // invariant for callers that construct cache entries directly.
-            prepare_portable_ast_cache_entry(&mut cache_entry, path, &root);
-            cache_entry
-        })?;
+    let ast_cache_entries = cache.encode_portable_ast_batch_ref(&ast_cache_sources)?;
     drop(ast_cache_sources);
     // Declaration/definition merging is project-wide and is not idempotent.
     // Cache the portable per-file facts before applying it so a warm build
     // executes the same single merge as a cold build.
-    merge_decl_def_classes(&mut ordered);
+    merge_decl_def_classes_if_needed(&mut ordered, &ordered_paths);
     profile_internal("declaration merge", &mut internal_started);
     let ast_cache_handle = std::thread::Builder::new()
         .name("compass-ast-cache".to_owned())
@@ -1121,7 +1217,9 @@ fn build_graph_inner(
             .then(|| read_source(path))
             .flatten()
     };
-    let cached_source_text: HashMap<_, _> = if sources.len() < 256 {
+    let cached_source_text: HashMap<_, _> = if !needs_resolver_source_text {
+        HashMap::new()
+    } else if sources.len() < 256 {
         sources.iter().filter_map(read_cached_source).collect()
     } else if let Some(pool) = &worker_pool {
         pool.install(|| sources.par_iter().filter_map(read_cached_source).collect())
@@ -1241,6 +1339,7 @@ fn build_graph_inner(
             0,
             omissions,
             program.as_ref(),
+            None,
             storage_artifacts_complete(options.graph_storage, &output_dir),
             &mut timings,
         )?;
@@ -1249,6 +1348,7 @@ fn build_graph_inner(
             &output_container,
             options.graph_storage,
             true,
+            false,
             &mut timings,
         )?;
         return Ok((
@@ -1294,8 +1394,12 @@ fn build_graph_inner(
         ));
     }
     if options.no_cluster {
-        let nodes = dedupe_nodes(&resolved.nodes);
-        enforce_incomplete_raw_guard(semantic, &output_dir.join("graph.json"), &root, nodes.len())?;
+        enforce_incomplete_raw_guard(
+            semantic,
+            &output_dir.join("graph.json"),
+            &root,
+            deduped_node_count(&resolved.nodes),
+        )?;
         let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
         let configuration_digest = graph_configuration_digest(options, &output_dir)?;
         let source_commit = options
@@ -1321,18 +1425,27 @@ fn build_graph_inner(
         let omissions = published.omissions;
         let published_nodes = published.document.nodes.len();
         let published_edges = published.document.links.len();
-        let store_metrics = if options.graph_storage.publishes_store() {
-            Some(publish_graph_and_store_from_canonical(
-                &output_dir,
-                &published.document,
-            )?)
+        let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
+            let (metrics, seal) =
+                publish_graph_and_store_from_canonical(&output_dir, &published.document)?;
+            (Some(metrics), Some(seal))
         } else {
-            write_json_atomic(
-                output_dir.join("graph.json"),
-                &canonical_graph_document(&published.document),
-                false,
-            )?;
-            None
+            let graph_path = output_dir.join("graph.json");
+            let receipt = write_atomic_with_digest(&graph_path, |writer| {
+                write_canonical_graph_json(&published.document, writer).map_err(|source| {
+                    compass_files::FileError::Io {
+                        path: graph_path.clone(),
+                        source,
+                    }
+                })
+            })?;
+            (
+                None,
+                Some(ArtifactSeal {
+                    bytes: receipt.bytes,
+                    sha256: receipt.sha256,
+                }),
+            )
         };
         if let Some(metrics) = store_metrics {
             record_store_metrics(&mut timings, metrics);
@@ -1362,6 +1475,9 @@ fn build_graph_inner(
             semantic,
         )?;
         remove_if_exists(&output_dir.join("needs_update"))?;
+        if let Some(program) = program.as_mut() {
+            program.finish_pending_seal(&mut timings)?;
+        }
         publish_build_state(
             options,
             &output_dir,
@@ -1372,6 +1488,7 @@ fn build_graph_inner(
             0,
             omissions,
             program.as_ref(),
+            graph_seal,
             store_metrics.is_some(),
             &mut timings,
         )?;
@@ -1380,6 +1497,7 @@ fn build_graph_inner(
             &output_container,
             options.graph_storage,
             true,
+            !options.graph_storage.publishes_store(),
             &mut timings,
         )?;
         timings.publish = stage_started.elapsed();
@@ -1483,6 +1601,9 @@ fn build_graph_inner(
                 semantic,
             )?;
             remove_if_exists(&output_dir.join("needs_update"))?;
+            if let Some(program) = program.as_mut() {
+                program.finish_pending_seal(&mut timings)?;
+            }
             publish_build_state(
                 options,
                 &output_dir,
@@ -1493,6 +1614,7 @@ fn build_graph_inner(
                 communities,
                 PublicationOmissions::default(),
                 program.as_ref(),
+                None,
                 true,
                 &mut timings,
             )?;
@@ -1501,6 +1623,7 @@ fn build_graph_inner(
                 &output_container,
                 options.graph_storage,
                 true,
+                false,
                 &mut timings,
             )?;
             return Ok((
@@ -1566,7 +1689,12 @@ fn build_graph_inner(
     );
     let publication_evidence = || -> Result<(BuildEvidence, Duration), CoreError> {
         let started = Instant::now();
-        let mut evidence = BuildEvidence::from_document(&root, &document, configuration_digest)?;
+        let mut evidence = BuildEvidence::from_document_with_source_digests(
+            &root,
+            &document,
+            configuration_digest,
+            &fresh_source_digests,
+        )?;
         evidence.include_inventory(publication_inventory)?;
         evidence.build.source_commit.clone_from(&commit);
         Ok((evidence, started.elapsed()))
@@ -1756,18 +1884,27 @@ fn build_graph_inner(
     let published_edges = published.document.links.len();
     let omissions = published.omissions;
     let serialization_started = Instant::now();
-    let store_metrics = if options.graph_storage.publishes_store() {
-        Some(publish_graph_and_store_from_canonical(
-            &output_dir,
-            &published.document,
-        )?)
+    let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
+        let (metrics, seal) =
+            publish_graph_and_store_from_canonical(&output_dir, &published.document)?;
+        (Some(metrics), Some(seal))
     } else {
-        write_json_atomic(
-            output_dir.join("graph.json"),
-            &canonical_graph_document(&published.document),
-            false,
-        )?;
-        None
+        let graph_path = output_dir.join("graph.json");
+        let receipt = write_atomic_with_digest(&graph_path, |writer| {
+            write_canonical_graph_json(&published.document, writer).map_err(|source| {
+                compass_files::FileError::Io {
+                    path: graph_path.clone(),
+                    source,
+                }
+            })
+        })?;
+        (
+            None,
+            Some(ArtifactSeal {
+                bytes: receipt.bytes,
+                sha256: receipt.sha256,
+            }),
+        )
     };
     if let Some(metrics) = store_metrics {
         record_store_metrics(&mut timings, metrics);
@@ -1812,6 +1949,9 @@ fn build_graph_inner(
     if program.is_none() {
         program = join_program_worker(program_handle.take(), &mut timings)?;
     }
+    if let Some(program) = program.as_mut() {
+        program.finish_pending_seal(&mut timings)?;
+    }
     publish_build_state(
         options,
         &output_dir,
@@ -1822,6 +1962,7 @@ fn build_graph_inner(
         communities.len(),
         omissions,
         program.as_ref(),
+        graph_seal,
         store_metrics.is_some(),
         &mut timings,
     )?;
@@ -1831,6 +1972,7 @@ fn build_graph_inner(
         &output_container,
         options.graph_storage,
         true,
+        !options.graph_storage.publishes_store(),
         &mut timings,
     )?;
     timings.publish = publish_started.elapsed();
@@ -1904,8 +2046,11 @@ fn oversized_source_extraction(
     Ok(extraction)
 }
 
+type ProgramWriteHandle = JoinHandle<Result<(ArtifactSeal, Duration), CoreError>>;
+
 struct ProgramBuildSummary {
-    seal: ArtifactSeal,
+    seal: Option<ArtifactSeal>,
+    pending_seal: Option<ProgramWriteHandle>,
     modules: usize,
     summaries: usize,
     providers: usize,
@@ -1922,36 +2067,47 @@ struct ProgramBuildSummary {
 
 impl ProgramBuildSummary {
     fn from_program(program: ProgramBuild, retain_analysis: bool) -> Self {
-        Self::from_program_with_canonical_bytes(program, retain_analysis).0
+        let seal = ArtifactSeal::from_bytes(&program.canonical_bytes);
+        Self::from_program_with_seal(program, retain_analysis, seal)
     }
 
-    fn from_program_with_canonical_bytes(
-        mut program: ProgramBuild,
+    fn from_program_with_seal(
+        program: ProgramBuild,
         retain_analysis: bool,
-    ) -> (Self, Vec<u8>) {
-        let canonical_bytes = std::mem::take(&mut program.canonical_bytes);
+        seal: ArtifactSeal,
+    ) -> Self {
         let modules = program.analysis.program.modules.len();
         let summaries = program.analysis.summaries.len();
         let providers = program.analysis.program.providers.len();
         let analysis = retain_analysis.then_some(program.analysis);
-        (
-            Self {
-                seal: ArtifactSeal::from_bytes(&canonical_bytes),
-                modules,
-                summaries,
-                providers,
-                syntax_analyzed: program.syntax_analyzed,
-                syntax_reused: program.syntax_reused,
-                artifacts_loaded: program.artifacts_loaded,
-                artifacts_reused: program.artifacts_reused,
-                artifact_documents_analyzed: program.artifact_documents_analyzed,
-                artifact_documents_reused: program.artifact_documents_reused,
-                conflicts: program.conflicts,
-                compiler_projection: Some(program.compiler_projection),
-                analysis,
-            },
-            canonical_bytes,
-        )
+        Self {
+            seal: Some(seal),
+            pending_seal: None,
+            modules,
+            summaries,
+            providers,
+            syntax_analyzed: program.syntax_analyzed,
+            syntax_reused: program.syntax_reused,
+            artifacts_loaded: program.artifacts_loaded,
+            artifacts_reused: program.artifacts_reused,
+            artifact_documents_analyzed: program.artifact_documents_analyzed,
+            artifact_documents_reused: program.artifact_documents_reused,
+            conflicts: program.conflicts,
+            compiler_projection: Some(program.compiler_projection),
+            analysis,
+        }
+    }
+
+    fn finish_pending_seal(&mut self, timings: &mut BuildTimings) -> Result<(), CoreError> {
+        let Some(handle) = self.pending_seal.take() else {
+            return Ok(());
+        };
+        let (seal, elapsed) = handle
+            .join()
+            .map_err(|_| CoreError::WorkerPanic("Program artifact publication".to_owned()))??;
+        self.seal = Some(seal);
+        timings.program_analysis = timings.program_analysis.saturating_add(elapsed);
+        Ok(())
     }
 }
 
@@ -1978,6 +2134,7 @@ fn build_profile(options: &BuildOptions) -> BuildProfile {
         no_viz: options.no_viz,
         resolution: options.resolution,
         exclude_hubs: options.exclude_hubs,
+        code_only: options.code_only,
         program_analysis: options.program_analysis,
         graph_storage: match options.graph_storage {
             GraphStorage::Json => "json",
@@ -1999,6 +2156,7 @@ fn publish_build_state(
     communities: usize,
     omissions: PublicationOmissions,
     program: Option<&ProgramBuildSummary>,
+    graph_seal: Option<ArtifactSeal>,
     store_ready: bool,
     timings: &mut BuildTimings,
 ) -> Result<(), CoreError> {
@@ -2037,7 +2195,8 @@ fn publish_build_state(
         output_dir,
         build_profile(options),
         manifest_path,
-        program.map(|program| program.seal.clone()),
+        graph_seal,
+        program.and_then(|program| program.seal.clone()),
         &required,
         SavedStats {
             files,
@@ -2061,6 +2220,7 @@ fn commit_generation(
     output_container: &Path,
     graph_storage: GraphStorage,
     store_ready: bool,
+    presealed_artifacts: bool,
     timings: &mut BuildTimings,
 ) -> Result<PathBuf, CoreError> {
     let publish_store = graph_storage.publishes_store();
@@ -2094,7 +2254,11 @@ fn commit_generation(
             .store_write_transactions
             .saturating_add(gc.delete_transactions);
     }
-    guard.commit_with_artifacts(&artifacts)?;
+    if presealed_artifacts && !publish_store {
+        guard.commit_with_presealed_artifacts(&artifacts)?;
+    } else {
+        guard.commit_with_artifacts(&artifacts)?;
+    }
     Ok(BuildGuard::resolve_active_directory(output_container)?)
 }
 
@@ -2201,7 +2365,7 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<StorePublishMetrics, CoreE
 fn publish_graph_and_store_from_canonical(
     output_dir: &Path,
     graph: &V1GraphDocument,
-) -> Result<StorePublishMetrics, CoreError> {
+) -> Result<(StorePublishMetrics, ArtifactSeal), CoreError> {
     if graph.graph.schema != GRAPH_SCHEMA_V1 {
         return Err(CoreError::InvalidBuildState(format!(
             "graph has unsupported schema {}; expected {GRAPH_SCHEMA_V1}",
@@ -2211,15 +2375,20 @@ fn publish_graph_and_store_from_canonical(
     let graph_path = output_dir.join("graph.json");
     let store = SqliteStore::open(local_sqlite_store_path(&graph_path))?;
     let builder = GraphSnapshotBuilder::new();
-    let canonical = canonical_graph_document(graph);
+    let canonical = canonical_graph_document_presorted(graph);
     let (graph_receipt, content) = rayon::join(
         || write_json_atomic_with_digest(&graph_path, &canonical),
         || builder.prepare_content(&store, graph),
     );
     let graph_receipt = graph_receipt?;
+    let graph_seal = ArtifactSeal {
+        bytes: graph_receipt.bytes,
+        sha256: graph_receipt.sha256.clone(),
+    };
     let prepared =
         builder.finish_content(&store, content?, graph_receipt.sha256, graph_receipt.bytes)?;
-    finish_store_snapshot(output_dir, &store, &builder, prepared)
+    let metrics = finish_store_snapshot(output_dir, &store, &builder, prepared)?;
+    Ok((metrics, graph_seal))
 }
 
 fn finish_store_snapshot(
@@ -2404,32 +2573,9 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
         return;
     };
     let portable = relative.to_string_lossy().replace('\\', "/");
-    let normalize_path = |value: &str| {
-        let path = Path::new(value);
-        let canonical = if path.is_absolute() {
-            canonicalize_allow_missing(path)
-        } else {
-            canonicalize_allow_missing(&root.join(path))
-        };
-        canonical.strip_prefix(root).map_or_else(
-            |_| portable_out_of_root_source(&canonical, root),
-            |relative| relative.to_string_lossy().replace('\\', "/"),
-        )
-    };
-    let normalize_origin_path = |value: &str| {
-        let path = Path::new(value);
-        let canonical_value = if path.is_absolute() {
-            canonicalize_allow_missing(path)
-        } else {
-            canonicalize_allow_missing(&root.join(path))
-        };
-        if path == source || canonical_value == canonical {
-            portable.clone()
-        } else {
-            normalize_path(value)
-        }
-    };
-    let set_portable = |attributes: &mut serde_json::Map<String, serde_json::Value>| {
+    let mut normalized_paths = HashMap::<String, String>::new();
+    let mut normalized_origin_paths = HashMap::<String, String>::new();
+    let mut set_portable = |attributes: &mut serde_json::Map<String, serde_json::Value>| {
         for key in ["source_file", "origin_file"] {
             let Some(value) = attributes
                 .get(key)
@@ -2438,7 +2584,15 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
             else {
                 continue;
             };
-            let normalized = normalize_origin_path(value);
+            let normalized = normalize_portable_origin_path(
+                value,
+                source,
+                &canonical,
+                &portable,
+                root,
+                &mut normalized_origin_paths,
+                &mut normalized_paths,
+            );
             if normalized != value {
                 attributes.insert(key.to_owned(), serde_json::Value::String(normalized));
             }
@@ -2453,7 +2607,15 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
         {
             anchor.insert(
                 "file".to_owned(),
-                serde_json::Value::String(normalize_origin_path(&value)),
+                serde_json::Value::String(normalize_portable_origin_path(
+                    &value,
+                    source,
+                    &canonical,
+                    &portable,
+                    root,
+                    &mut normalized_origin_paths,
+                    &mut normalized_paths,
+                )),
             );
         }
         if let Some(target) = attributes
@@ -2461,7 +2623,7 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
         {
-            let normalized = normalize_path(&target);
+            let normalized = normalize_portable_path(&target, root, &mut normalized_paths);
             attributes.insert(
                 "target_file".to_owned(),
                 serde_json::Value::String(normalized),
@@ -2485,7 +2647,15 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
             RawFrameworkFact::Domain(domain) => &mut domain.anchor.source_file,
             RawFrameworkFact::Annotation(annotation) => &mut annotation.anchor.source_file,
         };
-        *source_file = normalize_origin_path(source_file);
+        *source_file = normalize_portable_origin_path(
+            source_file,
+            source,
+            &canonical,
+            &portable,
+            root,
+            &mut normalized_origin_paths,
+            &mut normalized_paths,
+        );
     }
     if let Some(calls) = extraction.raw_calls.as_mut() {
         for call in calls {
@@ -2516,6 +2686,59 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
             }
         }
     }
+}
+
+fn normalize_portable_path(
+    value: &str,
+    root: &Path,
+    cache: &mut HashMap<String, String>,
+) -> String {
+    if let Some(normalized) = cache.get(value) {
+        return normalized.clone();
+    }
+    let path = Path::new(value);
+    let canonical = if path.is_absolute() {
+        canonicalize_allow_missing(path)
+    } else {
+        canonicalize_allow_missing(&root.join(path))
+    };
+    let normalized = canonical.strip_prefix(root).map_or_else(
+        |_| portable_out_of_root_source(&canonical, root),
+        |relative| relative.to_string_lossy().replace('\\', "/"),
+    );
+    cache.insert(value.to_owned(), normalized.clone());
+    normalized
+}
+
+fn normalize_portable_origin_path(
+    value: &str,
+    source: &Path,
+    canonical: &Path,
+    portable: &str,
+    root: &Path,
+    origin_cache: &mut HashMap<String, String>,
+    path_cache: &mut HashMap<String, String>,
+) -> String {
+    if let Some(normalized) = origin_cache.get(value) {
+        return normalized.clone();
+    }
+    let path = Path::new(value);
+    let normalized = if path == source {
+        portable.to_owned()
+    } else {
+        let canonical_value = if path.is_absolute() {
+            canonicalize_allow_missing(path)
+        } else {
+            canonicalize_allow_missing(&root.join(path))
+        };
+        if canonical_value == canonical {
+            portable.to_owned()
+        } else {
+            normalize_portable_path(value, root, path_cache)
+        }
+    };
+    origin_cache.insert(value.to_owned(), normalized.clone());
+    normalized
 }
 
 fn normalize_source_attribute_cached(
@@ -4411,24 +4634,41 @@ fn canonical_hyperedges(document: &GraphDocument) -> Vec<String> {
     values
 }
 
+#[derive(Debug, Deserialize)]
+struct CommunityScanDocument {
+    #[serde(default)]
+    nodes: Vec<CommunityScanNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CommunityScanNode {
+    id: String,
+    #[serde(default)]
+    community: Option<Value>,
+}
+
 fn previous_communities(path: &Path) -> HashMap<String, usize> {
-    GraphDocument::load(path)
-        .ok()
-        .map(|document| {
-            document
-                .nodes
-                .into_iter()
-                .filter_map(|node| {
-                    let community = node
-                        .attributes
-                        .get("community")?
-                        .as_u64()
-                        .and_then(|value| usize::try_from(value).ok())?;
-                    Some((node.id, community))
-                })
-                .collect()
+    if V1GraphDocument::size_cap_exceeded(path).is_some() {
+        return HashMap::new();
+    }
+    let Ok(file) = fs::File::open(path) else {
+        return HashMap::new();
+    };
+    let Ok(document) = serde_json::from_reader::<_, CommunityScanDocument>(BufReader::new(file))
+    else {
+        return HashMap::new();
+    };
+    document
+        .nodes
+        .into_iter()
+        .filter_map(|node| {
+            let value = node.community?;
+            let community = value
+                .as_u64()
+                .or_else(|| value.get("id").and_then(Value::as_u64))?;
+            Some((node.id, usize::try_from(community).ok()?))
         })
-        .unwrap_or_default()
+        .collect()
 }
 
 pub(crate) fn remove_if_exists(path: &Path) -> Result<(), CoreError> {
@@ -4596,6 +4836,33 @@ mod tests {
         assert!(cache_reuse_enabled(true, true));
         assert!(prior_published_graph_input_enabled(false));
         assert!(!prior_published_graph_input_enabled(true));
+    }
+
+    #[test]
+    fn previous_communities_scans_typed_and_legacy_nodes_without_loading_edges()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let graph_path = directory.path().join("graph.json");
+        fs::write(
+            &graph_path,
+            serde_json::to_vec(&json!({
+                "directed": true,
+                "multigraph": true,
+                "graph": {},
+                "nodes": [
+                    {"id": "typed", "community": {"id": 4, "label": "typed"}},
+                    {"id": "legacy", "community": 9},
+                    {"id": "unclustered", "name": "No community"}
+                ],
+                "links": [{"id": "ignored-edge", "source": "typed", "target": "legacy"}]
+            }))?,
+        )?;
+
+        let communities = previous_communities(&graph_path);
+        assert_eq!(communities.get("typed"), Some(&4));
+        assert_eq!(communities.get("legacy"), Some(&9));
+        assert!(!communities.contains_key("unclustered"));
+        Ok(())
     }
 
     #[test]

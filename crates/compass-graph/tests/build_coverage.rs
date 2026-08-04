@@ -743,6 +743,11 @@ fn opposite_direction_relations_are_preserved_in_undirected_documents() -> Resul
         true_directions,
         [(Some("a"), Some("b")), (Some("b"), Some("a"))]
     );
+
+    let directed = build_from_extraction(&extraction, true, None);
+    assert!(directed.links.iter().all(|edge| {
+        !edge.attributes.contains_key("_src") && !edge.attributes.contains_key("_tgt")
+    }));
     Ok(())
 }
 

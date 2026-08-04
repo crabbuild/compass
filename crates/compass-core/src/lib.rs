@@ -159,13 +159,13 @@ impl LoadedGraph {
     }
 
     pub fn load(path: &Path) -> Result<Self, GraphError> {
-        let graph = Graph::load(path)?;
+        let graph = Graph::load_for_traversal(path)?;
         let overlay = load_learning_overlay(path);
         Ok(Self { graph, overlay })
     }
 
     pub fn load_directed(path: &Path) -> Result<Self, GraphError> {
-        let graph = Graph::load_directed(path)?;
+        let graph = Graph::load_traversal_directed(path)?;
         let overlay = load_learning_overlay(path);
         Ok(Self { graph, overlay })
     }

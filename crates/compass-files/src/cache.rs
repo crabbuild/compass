@@ -329,6 +329,54 @@ impl Cache {
         }
     }
 
+    /// Hash source bytes that the caller has already read for extraction.
+    ///
+    /// The cache key uses the same path salt as [`Self::content_hash`], but
+    /// this method does not touch the filesystem. Callers can therefore avoid
+    /// rereading a cold source file merely to prepare its cache destination.
+    #[must_use]
+    pub fn content_hash_from_bytes(&self, path: &Path, bytes: &[u8]) -> String {
+        let resolved = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let salt = resolved
+            .strip_prefix(&self.root)
+            .unwrap_or(&resolved)
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_lowercase();
+        let mut digest = Sha256::new();
+        digest.update(bytes);
+        digest.update([0]);
+        digest.update(salt.as_bytes());
+        format!("{:x}", digest.finalize())
+    }
+
+    /// Seed a session hash when the source bytes were read by the extractor.
+    ///
+    /// Current size and modification-time checks prevent a stale seed from
+    /// being used when a file changed while the build was running. A changed
+    /// file simply falls back to the ordinary bounded read in
+    /// [`Self::content_hash`].
+    pub fn seed_content_hash(
+        &mut self,
+        path: &Path,
+        hash: String,
+        size: u64,
+        modified: Option<SystemTime>,
+    ) -> Result<(), FileError> {
+        let metadata = fs::metadata(path).map_err(|source| io_error(path, source))?;
+        if metadata.is_file() && metadata.len() == size && metadata.modified().ok() == modified {
+            self.session_hashes.insert(
+                path.to_path_buf(),
+                SessionHash {
+                    size,
+                    modified,
+                    value: hash,
+                },
+            );
+        }
+        Ok(())
+    }
+
     /// Prepare portable AST entries in parallel without retaining cloned typed
     /// values after each entry has been compressed.
     pub fn encode_portable_ast_batch<T, F>(
@@ -361,8 +409,38 @@ impl Cache {
             .collect()
     }
 
+    /// Encode already-normalized portable AST values without cloning them.
+    ///
+    /// Callers that need a project-specific normalization pass can mutate
+    /// their owned values before invoking this method. Keeping the encoder
+    /// borrow-only avoids a second full extraction clone on cold builds while
+    /// preserving the same compressed cache payload and atomic publication
+    /// boundary as encode_portable_ast_batch.
+    pub fn encode_portable_ast_batch_ref<T: Serialize + Sync>(
+        &mut self,
+        entries: &[(&PathBuf, &T)],
+    ) -> Result<Vec<EncodedCacheWrite>, FileError> {
+        let directory = self.directory(&CacheKind::Ast, None);
+        fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
+        let mut jobs = Vec::with_capacity(entries.len());
+        for &(path, value) in entries {
+            let hash = self.content_hash(path)?;
+            let key = self.source_cache_key(path, &hash);
+            jobs.push((
+                directory.join(format!("{key}.{MESSAGEPACK_EXTENSION}")),
+                value,
+            ));
+        }
+        jobs.into_par_iter()
+            .map(|(destination, value)| {
+                let bytes = encode_messagepack(value, &destination)?;
+                Ok(EncodedCacheWrite { destination, bytes })
+            })
+            .collect()
+    }
+
     /// Atomically publish cache payloads prepared by
-    /// [`Self::encode_portable_ast_batch`].
+    /// encode_portable_ast_batch or encode_portable_ast_batch_ref.
     pub fn write_encoded_batch(entries: &[EncodedCacheWrite]) -> Result<(), FileError> {
         entries
             .par_iter()
@@ -708,14 +786,15 @@ fn clear_cache_entries(directory: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{error::Error, fs, path::Path};
 
     use serde_json::json;
 
     use super::{
-        COMPRESSED_MESSAGEPACK_HEADER_BYTES, COMPRESSED_MESSAGEPACK_MAGIC,
+        COMPRESSED_MESSAGEPACK_HEADER_BYTES, COMPRESSED_MESSAGEPACK_MAGIC, Cache, CacheOptions,
         MAX_DECOMPRESSED_CACHE_ENTRY_BYTES, decode_messagepack, encode_messagepack,
     };
+    use crate::file_hash;
 
     #[test]
     fn compressed_messagepack_round_trips_and_rejects_invalid_envelopes() {
@@ -741,6 +820,29 @@ mod tests {
             .to_le_bytes(),
         );
         assert_eq!(decode_messagepack::<serde_json::Value>(&oversized), None);
+    }
+
+    #[test]
+    fn seeded_hash_reuses_the_extracted_bytes_for_the_same_file_stat() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("source.rs");
+        let bytes = b"fn source() {}\n";
+        fs::write(&source, bytes)?;
+        let modified = fs::metadata(&source)?.modified().ok();
+        let expected = file_hash(&source, directory.path())?;
+        let mut cache = Cache::open(&directory, CacheOptions::output_directory(None))?;
+        let extracted_hash = cache.content_hash_from_bytes(&source, bytes);
+
+        assert_eq!(extracted_hash, expected);
+        cache.seed_content_hash(
+            &source,
+            extracted_hash.clone(),
+            bytes.len() as u64,
+            modified,
+        )?;
+        assert_eq!(cache.content_hash(&source)?, extracted_hash);
+        Ok(())
     }
 }
 

@@ -92,3 +92,33 @@ fn cold_and_warm_in_process_builds_stay_within_enterprise_ceiling() -> Result<()
     );
     Ok(())
 }
+
+#[test]
+fn code_only_build_excludes_structural_documents() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    fs::write(
+        directory.path().join("service.rs"),
+        "pub fn service() -> u64 { 1 }\n",
+    )?;
+    fs::write(
+        directory.path().join("README.md"),
+        "# Service\n\nThis document is outside the code-only profile.\n",
+    )?;
+
+    let mut options = BuildOptions::new(directory.path());
+    options.code_only = true;
+    options.no_cluster = true;
+    options.no_viz = true;
+    let result = build_local_graph(&options)?;
+    let graph = GraphDocument::load(&result.output_dir.join("graph.json"))?;
+
+    assert_eq!(result.files_considered, 1);
+    assert_eq!(result.files_extracted, 1);
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .all(|node| node.source_file() != Some("README.md"))
+    );
+    Ok(())
+}

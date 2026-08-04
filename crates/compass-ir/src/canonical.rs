@@ -5,7 +5,14 @@ use crate::{CoverageState, FunctionIr, IrError, ModuleIr, OperationKind, Program
 
 impl ProgramBundle {
     pub fn canonicalized(&self) -> Self {
-        let mut bundle = self.clone();
+        self.clone().into_canonicalized()
+    }
+
+    /// Canonicalize an owned Program IR bundle without cloning its complete
+    /// module and function inventory.
+    #[must_use]
+    pub fn into_canonicalized(mut self) -> Self {
+        let bundle = &mut self;
         bundle.providers.sort();
         bundle.evidence.sort();
         for record in &mut bundle.evidence {
@@ -22,7 +29,7 @@ impl ProgramBundle {
                 .cmp(right.source_file.as_bytes())
                 .then_with(|| left.language.as_bytes().cmp(right.language.as_bytes()))
         });
-        bundle
+        self
     }
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, IrError> {
@@ -57,6 +64,44 @@ pub fn hex_sha256(bytes: &[u8]) -> String {
         let _ = write!(output, "{byte:02x}");
     }
     output
+}
+
+fn write_value(value: &Value, output: &mut Vec<u8>) -> Result<(), IrError> {
+    match value {
+        Value::Null => output.extend_from_slice(b"null"),
+        Value::Bool(true) => output.extend_from_slice(b"true"),
+        Value::Bool(false) => output.extend_from_slice(b"false"),
+        Value::Number(number) => output.extend_from_slice(number.to_string().as_bytes()),
+        Value::String(text) => serde_json::to_writer(output, text)?,
+        Value::Array(values) => {
+            output.push(b'[');
+            for (index, item) in values.iter().enumerate() {
+                if index != 0 {
+                    output.push(b',');
+                }
+                write_value(item, output)?;
+            }
+            output.push(b']');
+        }
+        Value::Object(values) => {
+            output.push(b'{');
+            let mut keys = values.keys().collect::<Vec<_>>();
+            keys.sort_unstable_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+            for (index, key) in keys.into_iter().enumerate() {
+                if index != 0 {
+                    output.push(b',');
+                }
+                serde_json::to_writer(&mut *output, key)?;
+                output.push(b':');
+                let item = values
+                    .get(key)
+                    .ok_or_else(|| IrError::Canonical("object key disappeared".to_owned()))?;
+                write_value(item, output)?;
+            }
+            output.push(b'}');
+        }
+    }
+    Ok(())
 }
 
 fn canonicalize_module(module: &mut ModuleIr) {
@@ -137,42 +182,4 @@ fn canonicalize_coverage(coverage: &mut crate::Coverage) {
 fn sort_dedup<T: Ord>(items: &mut Vec<T>) {
     items.sort();
     items.dedup();
-}
-
-fn write_value(value: &Value, output: &mut Vec<u8>) -> Result<(), IrError> {
-    match value {
-        Value::Null => output.extend_from_slice(b"null"),
-        Value::Bool(true) => output.extend_from_slice(b"true"),
-        Value::Bool(false) => output.extend_from_slice(b"false"),
-        Value::Number(number) => output.extend_from_slice(number.to_string().as_bytes()),
-        Value::String(text) => serde_json::to_writer(output, text)?,
-        Value::Array(values) => {
-            output.push(b'[');
-            for (index, item) in values.iter().enumerate() {
-                if index != 0 {
-                    output.push(b',');
-                }
-                write_value(item, output)?;
-            }
-            output.push(b']');
-        }
-        Value::Object(values) => {
-            output.push(b'{');
-            let mut keys = values.keys().collect::<Vec<_>>();
-            keys.sort_unstable_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
-            for (index, key) in keys.into_iter().enumerate() {
-                if index != 0 {
-                    output.push(b',');
-                }
-                serde_json::to_writer(&mut *output, key)?;
-                output.push(b':');
-                let item = values
-                    .get(key)
-                    .ok_or_else(|| IrError::Canonical("object key disappeared".to_owned()))?;
-                write_value(item, output)?;
-            }
-            output.push(b'}');
-        }
-    }
-    Ok(())
 }

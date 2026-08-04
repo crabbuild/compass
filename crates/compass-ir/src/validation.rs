@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path};
 
 use crate::{
@@ -52,7 +52,7 @@ impl ProgramBundle {
         if self.schema != crate::PROGRAM_SCHEMA {
             return Err(IrError::Schema(self.schema.clone()));
         }
-        let mut provider_ids = BTreeSet::new();
+        let mut provider_ids = HashSet::with_capacity(self.providers.len());
         for provider in &self.providers {
             if provider.id.is_empty()
                 || provider.version.is_empty()
@@ -70,8 +70,8 @@ impl ProgramBundle {
             }
         }
 
-        let mut evidence_ids = BTreeSet::new();
-        let mut evidence_capabilities = BTreeMap::new();
+        let mut evidence_ids = HashSet::with_capacity(self.evidence.len());
+        let mut evidence_capabilities = HashMap::with_capacity(self.evidence.len());
         for evidence in &self.evidence {
             if !provider_ids.contains(&evidence.provider_id) {
                 return Err(IrError::UnknownProvider(evidence.provider_id.clone()));
@@ -91,8 +91,8 @@ impl ProgramBundle {
             evidence_capabilities.insert(evidence.id.clone(), evidence.capability.clone());
         }
 
-        let mut modules = BTreeSet::new();
-        let mut functions = BTreeSet::new();
+        let mut modules = HashSet::with_capacity(self.modules.len());
+        let mut functions = HashSet::new();
         for module in &self.modules {
             if !modules.insert(module.source_file.clone()) {
                 return Err(IrError::DuplicateModule(module.source_file.clone()));
@@ -105,8 +105,8 @@ impl ProgramBundle {
 
 fn validate_module(
     module: &ModuleIr,
-    evidence: &BTreeMap<String, Capability>,
-    functions: &mut BTreeSet<String>,
+    evidence: &HashMap<String, Capability>,
+    functions: &mut HashSet<String>,
 ) -> Result<(), IrError> {
     validate_path(&module.source_file)?;
     if module.language.is_empty() || !is_lower_hex_digest(&module.source_digest) {
@@ -129,7 +129,7 @@ fn validate_module(
 fn validate_function(
     function: &FunctionIr,
     source_file: &str,
-    evidence: &BTreeMap<String, Capability>,
+    evidence: &HashMap<String, Capability>,
 ) -> Result<(), IrError> {
     if function.symbol_id.is_empty()
         || function.name.is_empty()
@@ -159,7 +159,7 @@ fn validate_function(
         .blocks
         .iter()
         .map(|block| block.id)
-        .collect::<BTreeSet<_>>();
+        .collect::<HashSet<_>>();
     if block_ids.len() != function.blocks.len() {
         let duplicate = function
             .blocks
@@ -178,7 +178,13 @@ fn validate_function(
             block: duplicate,
         });
     }
-    let mut ordinals = BTreeSet::new();
+    let mut ordinals = HashSet::with_capacity(
+        function
+            .blocks
+            .iter()
+            .map(|block| block.operations.len())
+            .sum(),
+    );
     for block in &function.blocks {
         validate_evidence(&block.evidence, evidence)?;
         for operation in &block.operations {
@@ -274,7 +280,7 @@ fn validate_coverage(coverage: &Coverage) -> Result<(), IrError> {
 
 fn validate_evidence(
     ids: &[String],
-    evidence: &BTreeMap<String, Capability>,
+    evidence: &HashMap<String, Capability>,
 ) -> Result<(), IrError> {
     for id in ids {
         if !evidence.contains_key(id) {

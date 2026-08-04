@@ -47,9 +47,19 @@ pub(crate) fn collect_language_call_facts_owned(
 }
 
 pub(crate) fn resolve_language_call_facts(facts: LanguageCallFacts, merged: &mut Extraction) {
+    let (external_nodes, edges) = resolve_language_call_facts_additions(&facts, merged);
+    merged.edges.extend(edges);
+    merged.nodes.extend(external_nodes);
+}
+
+pub(crate) fn resolve_language_call_facts_additions(
+    facts: &LanguageCallFacts,
+    merged: &Extraction,
+) -> (Vec<NodeRecord>, Vec<EdgeRecord>) {
     if facts.calls.is_empty() {
-        return;
+        return (Vec::new(), Vec::new());
     }
+    let mut edges = Vec::new();
     let external_nodes = {
         let (indexed_families, has_unscoped_calls) = indexed_families(&facts.calls, &facts.tables);
         let indexes = Indexes::new(
@@ -79,21 +89,21 @@ pub(crate) fn resolve_language_call_facts(facts: LanguageCallFacts, merged: &mut
             &indexes,
             &facts.tables,
             &mut existing,
-            &mut merged.edges,
+            &mut edges,
         );
         resolve_typed_members(
             &facts.calls,
             &indexes,
             &facts.tables,
             &mut existing,
-            &mut merged.edges,
+            &mut edges,
         );
-        resolve_python_members(&facts.calls, &indexes, &mut existing, &mut merged.edges);
-        resolve_ruby_members(&facts.calls, &indexes, &mut existing, &mut merged.edges);
-        resolve_pascal_inherited(&facts.calls, &indexes, &mut existing, &mut merged.edges);
-        retain_qualified_python_external_calls(&facts.calls, &mut existing, &mut merged.edges)
+        resolve_python_members(&facts.calls, &indexes, &mut existing, &mut edges);
+        resolve_ruby_members(&facts.calls, &indexes, &mut existing, &mut edges);
+        resolve_pascal_inherited(&facts.calls, &indexes, &mut existing, &mut edges);
+        retain_qualified_python_external_calls(&facts.calls, &mut existing, &mut edges)
     };
-    merged.nodes.extend(external_nodes);
+    (external_nodes, edges)
 }
 
 /// Preserve Compass's resolver-registry ordering for strict external parity.

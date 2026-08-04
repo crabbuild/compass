@@ -1118,6 +1118,7 @@ impl NativeCompleteGraphBuilder {
             .profile
             .value("exclude_hubs")
             .and_then(|value| value.parse().ok());
+        options.code_only = true;
         options.program_analysis = true;
         options.purpose = BuildPurpose::Extract;
         let repository = compass_history::Repository::discover(checkout)?;

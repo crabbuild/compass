@@ -53,6 +53,27 @@ fn init_persists_scope_and_builds_only_matching_files() -> Result<(), Box<dyn Er
 }
 
 #[test]
+fn init_can_opt_into_program_ir() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    fs::write(root.path().join("sample.rs"), "fn sample() {}\n")?;
+    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["init", ".", "--yes", "--program"])
+        .current_dir(root.path())
+        .env_remove("COMPASS_OUT")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        BuildGuard::resolve_artifact(&root.path().join("compass-out"), "program.json")?.is_file()
+    );
+    Ok(())
+}
+
+#[test]
 fn sqlite_store_option_publishes_a_durable_snapshot_alongside_json() -> Result<(), Box<dyn Error>> {
     let root = tempfile::tempdir()?;
     fs::create_dir(root.path().join("src"))?;

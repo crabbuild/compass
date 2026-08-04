@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::Write;
 
 use compass_ir::{
     Coverage, ExceptionEffect, IrError, OperationKind, ProgramBundle, SymbolId,
@@ -6,6 +7,9 @@ use compass_ir::{
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+
+const STREAM_CANONICAL_ELEMENT_CHUNK: usize = 16_384;
+const STREAM_CANONICAL_CHUNKS_IN_FLIGHT: usize = 4;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct FunctionSummary {
@@ -40,10 +44,12 @@ pub enum AnalysisError {
     DuplicateFunction(String),
     #[error("analysis version mismatch")]
     VersionMismatch,
+    #[error("canonical analysis output write failed: {0}")]
+    Output(#[from] std::io::Error),
 }
 
 pub fn analyze(program: ProgramBundle) -> Result<AnalysisBundle, AnalysisError> {
-    let program = program.canonicalized();
+    let program = program.into_canonicalized();
     program.validate()?;
     analyze_prevalidated(program)
 }
@@ -197,6 +203,36 @@ impl AnalysisBundle {
         Ok(output)
     }
 
+    /// Stream the canonical representation without retaining the complete
+    /// JSON document or all serialized array chunks in memory at once.
+    ///
+    /// The in-process builder has already canonicalized and validated this
+    /// bundle, so the bounded writer path preserves the same bytes as
+    /// [`Self::canonical_bytes_prevalidated`].
+    pub fn write_canonical_prevalidated<W: Write>(
+        &self,
+        mut output: W,
+    ) -> Result<(), AnalysisError> {
+        output.write_all(b"{\"analysis_schema_version\":")?;
+        output.write_all(self.analysis_schema_version.to_string().as_bytes())?;
+        output.write_all(b",\"analyzer_version\":")?;
+        output.write_all(self.analyzer_version.to_string().as_bytes())?;
+        output.write_all(b",\"program\":{\"evidence\":")?;
+        write_canonical_array(&mut output, &self.program.evidence)?;
+        output.write_all(b",\"modules\":")?;
+        write_canonical_array(&mut output, &self.program.modules)?;
+        output.write_all(b",\"providers\":")?;
+        write_canonical_array(&mut output, &self.program.providers)?;
+        output.write_all(b",\"schema\":")?;
+        output.write_all(&canonical_fragment(&self.program.schema)?)?;
+        output.write_all(b"},\"reverse_calls\":")?;
+        output.write_all(&canonical_fragment(&self.reverse_calls)?)?;
+        output.write_all(b",\"summaries\":")?;
+        write_canonical_array(&mut output, &self.summaries)?;
+        output.write_all(b"}\n")?;
+        Ok(())
+    }
+
     pub fn digest(&self) -> Result<String, AnalysisError> {
         Ok(hex_sha256(&self.canonical_bytes()?))
     }
@@ -236,6 +272,37 @@ fn append_canonical_array(output: &mut Vec<u8>, chunks: Vec<Vec<u8>>) {
         output.extend_from_slice(&chunk[1..chunk.len() - 2]);
     }
     output.push(b']');
+}
+
+fn write_canonical_array<W: Write, T: Serialize + Sync>(
+    output: &mut W,
+    values: &[T],
+) -> Result<(), AnalysisError> {
+    output.write_all(b"[")?;
+    let mut first = true;
+    let mut chunks = values.chunks(STREAM_CANONICAL_ELEMENT_CHUNK);
+    loop {
+        let batch = (0..STREAM_CANONICAL_CHUNKS_IN_FLIGHT)
+            .filter_map(|_| chunks.next())
+            .collect::<Vec<_>>();
+        if batch.is_empty() {
+            break;
+        }
+        let encoded = batch
+            .par_iter()
+            .map(canonical_json_bytes)
+            .collect::<Result<Vec<_>, _>>()?;
+        for bytes in encoded {
+            debug_assert!(bytes.starts_with(b"[") && bytes.ends_with(b"]\n"));
+            if !first {
+                output.write_all(b",")?;
+            }
+            output.write_all(&bytes[1..bytes.len().saturating_sub(2)])?;
+            first = false;
+        }
+    }
+    output.write_all(b"]")?;
+    Ok(())
 }
 
 pub(crate) fn summarize(
