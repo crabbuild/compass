@@ -47,6 +47,10 @@ const FIXED_CONFIGURATION_NAMES: &[&str] = &[
     "next.config.ts",
     "nuxt.config.js",
     "nuxt.config.ts",
+    "remix.config.js",
+    "remix.config.cjs",
+    "remix.config.mjs",
+    "remix.config.ts",
     "svelte.config.js",
     "svelte.config.ts",
     "tsconfig.json",
@@ -990,6 +994,14 @@ fn route_root_for_source(
     let next_configured = ["next.config.js", "next.config.mjs", "next.config.ts"]
         .iter()
         .any(|name| configured(name));
+    let remix_configured = [
+        "remix.config.cjs",
+        "remix.config.js",
+        "remix.config.mjs",
+        "remix.config.ts",
+    ]
+    .iter()
+    .any(|name| configured(name));
     if (has("next") || next_configured)
         && (components.first() == Some(&"app") || components.first() == Some(&"pages"))
     {
@@ -1000,6 +1012,51 @@ fn route_root_for_source(
         && matches!(components.get(1), Some(&"app" | &"pages"))
     {
         return Some(("next".to_owned(), format!("src/{}", components[1])));
+    }
+    if (remix_configured
+        || has_any_dependency(
+            builder,
+            &[
+                "@remix-run/dev",
+                "@remix-run/node",
+                "@remix-run/react",
+                "@remix-run/router",
+                "@remix-run/serve",
+            ],
+        ))
+        && components.starts_with(&["app", "routes"])
+    {
+        return Some(("remix".to_owned(), "app/routes".to_owned()));
+    }
+    if (remix_configured
+        || has_any_dependency(
+            builder,
+            &[
+                "@remix-run/dev",
+                "@remix-run/node",
+                "@remix-run/react",
+                "@remix-run/router",
+                "@remix-run/serve",
+            ],
+        ))
+        && components.starts_with(&["routes"])
+    {
+        return Some(("remix".to_owned(), "routes".to_owned()));
+    }
+    if (remix_configured
+        || has_any_dependency(
+            builder,
+            &[
+                "@remix-run/dev",
+                "@remix-run/node",
+                "@remix-run/react",
+                "@remix-run/router",
+                "@remix-run/serve",
+            ],
+        ))
+        && components.starts_with(&["src", "routes"])
+    {
+        return Some(("remix".to_owned(), "src/routes".to_owned()));
     }
     if has("nuxt") && components.first() == Some(&"pages") {
         return Some(("nuxt".to_owned(), "pages".to_owned()));
@@ -1014,6 +1071,14 @@ fn route_root_for_source(
         return Some(("sveltekit".to_owned(), "src/routes".to_owned()));
     }
     None
+}
+
+fn has_any_dependency(builder: &ProjectBuilder, dependencies: &[&str]) -> bool {
+    dependencies.iter().any(|dependency| {
+        builder
+            .dependencies
+            .contains(&normalize_dependency(dependency))
+    })
 }
 
 fn normalize_dependency(value: &str) -> String {
@@ -1211,6 +1276,45 @@ mod tests {
         assert!(evidence.has_plugin("@vitejs/plugin-react"));
         assert!(evidence.has_plugin("next-plugin-intl"));
         assert!(evidence.has_route_root("next", "src/app"));
+        Ok(())
+    }
+
+    #[test]
+    fn remix_route_roots_accept_dependency_or_config_evidence() -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        let route = root.join("app/routes/users.$id.tsx");
+        fs::create_dir_all(route.parent().ok_or("route has no parent")?)?;
+        fs::write(&route, "export default function User() { return null }")?;
+        fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@remix-run/dev":"2.10.0"}}"#,
+        )?;
+        let dependency_index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&route));
+        assert!(
+            dependency_index
+                .evidence_for(&route)
+                .has_route_root("remix", "app/routes")
+        );
+
+        let config_only = tempdir()?;
+        let config_route = config_only.path().join("routes/_index.tsx");
+        fs::create_dir_all(config_route.parent().ok_or("config route has no parent")?)?;
+        fs::write(
+            &config_route,
+            "export default function Home() { return null }",
+        )?;
+        fs::write(
+            config_only.path().join("remix.config.ts"),
+            "export default { appDirectory: 'app' }",
+        )?;
+        let config_index =
+            ProjectEvidenceIndex::build(config_only.path(), std::slice::from_ref(&config_route));
+        assert!(
+            config_index
+                .evidence_for(&config_route)
+                .has_route_root("remix", "routes")
+        );
         Ok(())
     }
 

@@ -3,8 +3,10 @@ mod csharp;
 mod enterprise;
 mod evidence;
 mod express;
+mod fastify;
 mod file_routes;
 mod go;
+mod hono;
 mod java;
 mod model;
 mod next;
@@ -12,6 +14,7 @@ mod pack;
 mod php;
 mod play;
 mod python;
+mod remix;
 mod ruby;
 mod rust;
 mod spring;
@@ -309,6 +312,18 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
         detect_express,
     ),
     FrameworkPack::source(
+        "fastify-web",
+        &["javascript", "typescript", "tsx"],
+        &["fastify"],
+        detect_fastify,
+    ),
+    FrameworkPack::source(
+        "hono-web",
+        &["javascript", "typescript", "tsx"],
+        &["hono"],
+        detect_hono,
+    ),
+    FrameworkPack::source(
         "typescript-web",
         &["javascript", "typescript", "tsx"],
         &[
@@ -325,6 +340,24 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
         &["next"],
         &["next.config.js", "next.config.mjs", "next.config.ts"],
         detect_next,
+    ),
+    FrameworkPack::source_required(
+        "remix-routes",
+        &["javascript", "typescript", "tsx"],
+        &[
+            "@remix-run/dev",
+            "@remix-run/node",
+            "@remix-run/react",
+            "@remix-run/router",
+            "@remix-run/serve",
+        ],
+        &[
+            "remix.config.cjs",
+            "remix.config.js",
+            "remix.config.mjs",
+            "remix.config.ts",
+        ],
+        detect_remix,
     ),
     FrameworkPack::source_required(
         "vite-config",
@@ -573,11 +606,32 @@ fn detect_express(
     express::detect(context.path, context.source, context.root, extraction)
 }
 
+fn detect_fastify(
+    context: &DetectionContext<'_, '_>,
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    fastify::detect(context.path, context.source, context.root, extraction)
+}
+
+fn detect_hono(
+    context: &DetectionContext<'_, '_>,
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    hono::detect(context.path, context.source, context.root, extraction)
+}
+
 fn detect_next(
     context: &DetectionContext<'_, '_>,
     extraction: &mut Extraction,
 ) -> Vec<RawFrameworkFact> {
     next::detect(context.path, context.source, context.project, extraction)
+}
+
+fn detect_remix(
+    context: &DetectionContext<'_, '_>,
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    remix::detect(context.path, context.source, context.project, extraction)
 }
 
 fn detect_vite(
@@ -652,8 +706,11 @@ mod tests {
             "aspnet-web",
             "vapor-routes",
             "express-web",
+            "fastify-web",
+            "hono-web",
             "typescript-web",
             "nextjs-routes",
+            "remix-routes",
             "vite-config",
             "filesystem-routes",
             "enterprise-domain-facts",

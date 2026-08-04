@@ -7,6 +7,10 @@
   aliases, plugins, and file-route roots; Vite configuration nodes and a
   reusable exact-route qualification API are available to graph consumers.
   Extraction semantics advance to version 7 so cached source facts refresh.
+- Add focused Fastify, Hono, and Remix adapters. Fastify and Hono reuse the
+  bounded TypeScript route primitives for hooks, method arrays, mounts, and
+  literal route objects; Remix publishes nested file routes with `PAGE`,
+  `LOADER`, and `ACTION` operations and dependency/configuration activation.
 - Preserve JavaScript and TypeScript workspace import and re-export resolution
   across fully cached edit/restore builds, and improve canonical graph JSON
   publication parallelism for medium and large structural graphs without

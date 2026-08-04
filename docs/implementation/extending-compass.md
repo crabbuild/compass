@@ -89,8 +89,9 @@ For repeatable framework qualification, use
 expectations as `(framework, operation, normalized_path)` values and may pin a
 handler reference. Qualification requires one exact route per expectation;
 missing, ambiguous, duplicate, or mismatched handlers fail explicitly. This
-keeps fixture checks reusable across Express, Next.js, Axum, Spring, and new
-adapters without coupling the harness to one detector implementation.
+keeps fixture checks reusable across Express, Fastify, Hono, Remix, Next.js,
+Axum, Spring, and new adapters without coupling the harness to one detector
+implementation.
 
 ## Add a relation
 
