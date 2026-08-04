@@ -611,6 +611,10 @@ fn endpoint_matrix_accepts_nested_dynamic_and_database_producer_shapes() {
         (EdgeKind::References, NodeKind::Module, NodeKind::Macro),
         (EdgeKind::References, NodeKind::Macro, NodeKind::Macro),
         (EdgeKind::Imports, NodeKind::File, NodeKind::Variable),
+        (EdgeKind::Imports, NodeKind::File, NodeKind::Macro),
+        (EdgeKind::Imports, NodeKind::Module, NodeKind::Macro),
+        (EdgeKind::Imports, NodeKind::Function, NodeKind::Macro),
+        (EdgeKind::Exports, NodeKind::File, NodeKind::Macro),
         (
             EdgeKind::Triggers,
             NodeKind::DatabaseTrigger,

@@ -29,7 +29,7 @@ fn publish_phase2_snapshot(
 }
 
 #[test]
-fn default_query_open_uses_json_and_explicit_store_matches_results()
+fn default_query_open_prefers_published_store_and_matches_json()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
@@ -37,10 +37,12 @@ fn default_query_open_uses_json_and_explicit_store_matches_results()
     publish_phase2_snapshot(directory.path(), &graph_path)?;
 
     let cache = directory.path().join("cache");
-    let json_engine = open(&graph_path, None, &cache)?;
-    assert_eq!(json_engine.engine_kind(), QueryEngineKind::Json);
+    let default_engine = open(&graph_path, None, &cache)?;
+    assert_eq!(default_engine.engine_kind(), QueryEngineKind::Store);
     let store_engine = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
     assert_eq!(store_engine.engine_kind(), QueryEngineKind::Store);
+    let json_engine = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
+    assert_eq!(json_engine.engine_kind(), QueryEngineKind::Json);
 
     let request = SearchRequest {
         query: "UserService.list".to_owned(),
@@ -48,7 +50,14 @@ fn default_query_open_uses_json_and_explicit_store_matches_results()
     };
     assert_eq!(
         serde_json::to_value(store_engine.search(request.clone())?)?,
-        serde_json::to_value(json_engine.search(request)?)?,
+        serde_json::to_value(default_engine.search(request.clone())?)?,
+    );
+    assert_eq!(
+        serde_json::to_value(store_engine.search(request)?)?,
+        serde_json::to_value(json_engine.search(SearchRequest {
+            query: "UserService.list".to_owned(),
+            limits: CodeQueryLimits::default(),
+        })?)?,
     );
     assert_ne!(store_engine.index_path(), json_engine.index_path());
     assert_eq!(
@@ -129,6 +138,7 @@ fn store_engine_reads_the_immutable_phase2_snapshot_for_all_code_queries()
     );
     let callers = CallRequest {
         symbol: "UserService.list".to_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits::default(),
     };
     assert_eq!(
@@ -137,6 +147,7 @@ fn store_engine_reads_the_immutable_phase2_snapshot_for_all_code_queries()
     );
     let callees = CallRequest {
         symbol: "Api.caller".to_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits::default(),
     };
     assert_eq!(
@@ -155,6 +166,7 @@ fn store_engine_reads_the_immutable_phase2_snapshot_for_all_code_queries()
     let explore = ExploreRequest {
         symbols: vec!["Api.caller".to_owned(), "Store.callee".to_owned()],
         root: directory.path().to_string_lossy().into_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits::default(),
     };
     assert_eq!(
@@ -208,6 +220,7 @@ fn redb_store_runs_the_same_typed_queries_as_json() -> Result<(), Box<dyn std::e
     );
     let callers = CallRequest {
         symbol: "UserService.list".to_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits::default(),
     };
     assert_eq!(
@@ -216,6 +229,7 @@ fn redb_store_runs_the_same_typed_queries_as_json() -> Result<(), Box<dyn std::e
     );
     let callees = CallRequest {
         symbol: "Api.caller".to_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits::default(),
     };
     assert_eq!(
@@ -234,6 +248,7 @@ fn redb_store_runs_the_same_typed_queries_as_json() -> Result<(), Box<dyn std::e
     let explore = ExploreRequest {
         symbols: vec!["Api.caller".to_owned(), "Store.callee".to_owned()],
         root: directory.path().to_string_lossy().into_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits::default(),
     };
     assert_eq!(
@@ -400,7 +415,7 @@ fn explicit_json_selection_survives_a_corrupt_store_sidecar()
         b"not a compass sqlite database",
     )?;
     let cache = directory.path().join("cache");
-    let json_engine = open(&graph_path, None, &cache)?;
+    let json_engine = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
     assert_eq!(json_engine.engine_kind(), QueryEngineKind::Json);
     let result = open_with_engine(&graph_path, None, &cache, EngineSelection::Store);
     let error = match result {
@@ -419,10 +434,11 @@ fn a_present_malformed_store_reference_fails_closed() -> Result<(), Box<dyn std:
     publish_phase2_snapshot(directory.path(), &graph_path)?;
     fs::write(directory.path().join(STORE_REF_FILE_NAME), b"{}")?;
     let cache = directory.path().join("cache");
-    assert_eq!(
-        open(&graph_path, None, &cache)?.engine_kind(),
-        QueryEngineKind::Json
-    );
+    let error = match open(&graph_path, None, &cache) {
+        Ok(_) => return Err("default selection ignored a malformed store reference".into()),
+        Err(error) => error,
+    };
+    assert_eq!(error.code(), "store_ref_decode_failed");
     let error = match open_with_engine(&graph_path, None, &cache, EngineSelection::Store) {
         Ok(_) => return Err("explicit store selection accepted a malformed reference".into()),
         Err(error) => error,

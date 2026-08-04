@@ -73,6 +73,7 @@ fn enterprise_queries_stay_within_in_process_ceiling() -> Result<(), Box<dyn std
     let callers_started = Instant::now();
     let callers = engine.callers(CallRequest {
         symbol: format!("scale::f{:05}", SCALE_NODES - 1),
+        include_heuristic: false,
         limits: limits.clone(),
     })?;
     assert!(

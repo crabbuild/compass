@@ -989,6 +989,7 @@ const fn is_import_target(kind: NodeKind) -> bool {
                 | NodeKind::Constant
                 | NodeKind::EnumMember
                 | NodeKind::Annotation
+                | NodeKind::Macro
                 | NodeKind::Resource
                 | NodeKind::ConfigKey
         )
@@ -1005,6 +1006,7 @@ const fn is_export_target(kind: NodeKind) -> bool {
                 | NodeKind::TypeAlias
                 | NodeKind::Variable
                 | NodeKind::Constant
+                | NodeKind::Macro
         )
 }
 

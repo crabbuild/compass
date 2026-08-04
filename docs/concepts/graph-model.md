@@ -52,6 +52,15 @@ The exact ID construction is an implementation and compatibility concern.
 Consumers should treat IDs as opaque strings, not parse undocumented segments
 out of them.
 
+The canonical `compass.graph/1` artifact stores a typed `kind`, `source`
+anchor, community object, and evidence array. CompassQL presents stable
+logical aliases over that nested representation: `label`/`name`,
+`qualified_name`, `kind` (with `file_type` retained for compatibility),
+`source_file`, `source_location`, `line_start`, `line_end`, `_origin`, and the
+effective `confidence`. `properties(n)` returns this same projection, so
+agents can use one query against either the typed artifact or a legacy
+node-link fixture.
+
 ### ID versus label
 
 - `id` is the stable graph identity used by edges and exact consumers.
@@ -109,7 +118,7 @@ Do not assume every relation implies runtime execution. `imports_from` and
 
 ## Attributes
 
-Nodes and edges retain open-ended JSON attributes. Common attributes include:
+Nodes and edges retain open-ended JSON attributes. Common logical attributes include:
 
 - `label`;
 - `file_type`;
@@ -120,6 +129,11 @@ Nodes and edges retain open-ended JSON attributes. Common attributes include:
 - `context`;
 - `community`;
 - language or extractor-specific metadata.
+
+For typed records, `kind` is authoritative and `file_type` is a compatibility
+alias. Relationship `relation` is authoritative (typed records call it
+`kind` on the wire). When evidence records disagree, consumers must honour
+the most conservative confidence rather than the first serialized entry.
 
 Unknown attributes are retained by the graph document loader. This supports
 compatible extensions without forcing every consumer to understand every

@@ -240,9 +240,11 @@ returns successfully.
 
 ## Stage 6: loading and querying
 
-Read commands load `compass-out/graph.json` by default. The graph layer:
+Read commands resolve `compass-out/graph.json` by default. When the published
+generation has a validated SQLite sidecar, typed code queries use that indexed
+snapshot; explicit `--engine json` forces the portable reader. The graph layer:
 
-- validates the JSON extension and size guard;
+- validates the JSON extension and size guard when the portable reader is used;
 - decodes the node-link document;
 - preserves directed and multigraph semantics;
 - indexes stable node IDs;

@@ -15,6 +15,7 @@ fn explore_connects_symbols_and_groups_digest_verified_source()
     let request = ExploreRequest {
         symbols: vec!["Api.caller".to_owned(), "Store.callee".to_owned()],
         root: directory.path().to_string_lossy().into_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits::default(),
     };
     let response = engine.explore(request.clone())?;
@@ -53,6 +54,7 @@ fn explore_derives_repository_root_from_a_generation_graph()
     let response = engine.explore(ExploreRequest {
         symbols: vec!["Api.caller".to_owned(), "Store.callee".to_owned()],
         root: String::new(),
+        include_heuristic: false,
         limits: CodeQueryLimits::default(),
     })?;
     assert_eq!(response.files[0].source.as_deref(), Some("code"));
@@ -73,6 +75,7 @@ fn explore_applies_one_aggregate_graph_budget() -> Result<(), Box<dyn std::error
             "GET /users".to_owned(),
         ],
         root: directory.path().to_string_lossy().into_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits {
             max_edges: 1,
             max_nodes: 4,
@@ -106,6 +109,7 @@ fn explore_rejects_more_symbols_than_the_candidate_budget() -> Result<(), Box<dy
             "UserService.list".to_owned(),
         ],
         root: directory.path().to_string_lossy().into_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits {
             max_candidates: 2,
             ..CodeQueryLimits::default()
@@ -127,6 +131,7 @@ fn code_query_limits_have_a_hard_candidate_ceiling() -> Result<(), Box<dyn std::
     let Err(error) = engine.explore(ExploreRequest {
         symbols: vec!["Api.caller".to_owned()],
         root: directory.path().to_string_lossy().into_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits {
             max_candidates: 10_000,
             ..CodeQueryLimits::default()
@@ -152,6 +157,7 @@ fn explore_rejects_source_files_above_the_hard_io_cap() -> Result<(), Box<dyn st
     let Err(error) = engine.explore(ExploreRequest {
         symbols: vec!["Api.caller".to_owned(), "Store.callee".to_owned()],
         root: directory.path().to_string_lossy().into_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits::default(),
     }) else {
         return Err("oversized source must fail before hashing to EOF".into());
@@ -194,6 +200,7 @@ fn explore_rejects_a_source_symlink_that_escapes_the_repository()
     let result = engine.explore(ExploreRequest {
         symbols: vec!["Api.caller".to_owned(), "Store.callee".to_owned()],
         root: directory.path().to_string_lossy().into_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits::default(),
     });
     assert!(result.is_err());
@@ -216,6 +223,7 @@ fn explore_rejects_a_symlink_as_the_repository_root() -> Result<(), Box<dyn std:
     let Err(error) = engine.explore(ExploreRequest {
         symbols: vec!["Api.caller".to_owned(), "Store.callee".to_owned()],
         root: linked_root.to_string_lossy().into_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits::default(),
     }) else {
         return Err("repository roots must be opened without following links".into());

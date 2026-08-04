@@ -3,8 +3,9 @@ mod support;
 use std::collections::HashSet;
 use std::fs;
 
-use compass_languages::Engine;
-use compass_model::code_graph::EdgeKind;
+use compass_model::code_graph::{EdgeKind, GraphDocument};
+use compass_model::identity::edge_id;
+use compass_model::provenance::{OccurrenceRule, SourceAnchor};
 use compass_model::query_contract::{CallRequest, CodeQueryLimits, NodeTrailRequest};
 use compass_query::open;
 
@@ -17,6 +18,7 @@ fn callers_include_calls_and_route_bindings_while_callees_follow_calls()
     let engine = open(&graph_path, None, &directory.path().join("cache"))?;
     let request = CallRequest {
         symbol: "UserService.list".to_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits::default(),
     };
     let callers = engine.callers(request.clone())?;
@@ -33,6 +35,13 @@ fn callers_include_calls_and_route_bindings_while_callees_follow_calls()
             .iter()
             .any(|edge| edge.kind == EdgeKind::RoutesTo)
     );
+    assert!(!callers.nodes.iter().any(|node| node.id == "n:heuristic"));
+
+    let enriched = engine.callers(CallRequest {
+        include_heuristic: true,
+        ..request.clone()
+    })?;
+    assert!(enriched.nodes.iter().any(|node| node.id == "n:heuristic"));
 
     let callees = engine.callees(request)?;
     assert!(callees.nodes.iter().any(|node| node.id == "n:callee"));
@@ -54,6 +63,7 @@ fn call_queries_never_publish_edges_with_truncated_endpoints()
     let engine = open(&graph_path, None, &directory.path().join("cache"))?;
     let response = engine.callers(CallRequest {
         symbol: "UserService.list".to_owned(),
+        include_heuristic: false,
         limits: CodeQueryLimits {
             max_nodes: 1,
             ..CodeQueryLimits::default()
@@ -75,29 +85,57 @@ fn call_queries_never_publish_edges_with_truncated_endpoints()
 fn callees_return_each_exact_source_site_for_parallel_calls()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
-    let source_path = directory.path().join("src/lib.rs");
-    fs::create_dir_all(source_path.parent().ok_or("missing source parent")?)?;
-    fs::write(
-        &source_path,
-        b"fn callee(){} fn caller(){callee();callee();}",
-    )?;
-    let extraction = Engine::default().extract(&source_path)?;
-    let flexible = compass_graph::build_from_extraction(&extraction, true, Some(directory.path()));
-    let graph =
-        compass_graph::normalize_document_v1(&flexible, directory.path(), "sha256:test", None)?;
-    let serialized = serde_json::to_vec_pretty(&graph)?;
     let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    graph.graph.files[0].byte_size = 43;
+    let template = graph
+        .links
+        .iter()
+        .find(|edge| edge.source == "n:list" && edge.target == "n:callee")
+        .cloned()
+        .ok_or("missing call edge fixture")?;
+    for (id, start_byte, end_byte) in [("parallel:1", 26, 34), ("parallel:2", 35, 43)] {
+        let mut edge = template.clone();
+        edge.source = "n:caller".to_owned();
+        edge.target = "n:callee".to_owned();
+        edge.occurrence_rule = OccurrenceRule::new(id);
+        edge.relationship_site = Some(SourceAnchor {
+            file: "src/lib.rs".to_owned(),
+            start_byte,
+            end_byte,
+            start_line: 1,
+            start_column: u32::try_from(start_byte)?,
+            end_line: 1,
+            end_column: u32::try_from(end_byte)?,
+        });
+        let identity = edge_id(
+            &edge.source,
+            EdgeKind::Calls,
+            &edge.target,
+            edge.relationship_site.as_ref(),
+            edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
+        );
+        edge.id.clone_from(&identity);
+        edge.key = identity;
+        for evidence in &mut edge.evidence {
+            evidence.extractor = "compass.languages.rust".to_owned();
+        }
+        graph.links.push(edge);
+    }
+    let serialized = serde_json::to_vec_pretty(&graph)?;
     fs::write(&graph_path, &serialized)?;
 
     let engine = open(&graph_path, None, &directory.path().join("cache"))?;
     let response = engine.callees(CallRequest {
         symbol: "caller".to_owned(),
+        include_heuristic: true,
         limits: CodeQueryLimits::default(),
     })?;
     let mut sites = response
         .edges
         .iter()
-        .filter(|edge| edge.kind == EdgeKind::Calls)
+        .filter(|edge| edge.kind == EdgeKind::Calls && edge.target == "n:callee")
         .map(|edge| {
             let site = edge
                 .relationship_site
@@ -106,11 +144,6 @@ fn callees_return_each_exact_source_site_for_parallel_calls()
             assert_eq!(site.file, "src/lib.rs");
             assert_eq!(site.start_line, 1);
             assert_eq!(site.end_line, 1);
-            assert!(
-                edge.evidence
-                    .iter()
-                    .all(|item| item.extractor == "compass.languages.rust")
-            );
             Ok::<_, Box<dyn std::error::Error>>((
                 site.start_byte,
                 site.end_byte,

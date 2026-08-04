@@ -15,12 +15,11 @@ use compass_files::{
 use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
     GRAPH_SNAPSHOT_MAX_OBJECTS, GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder,
-    GraphSnapshotGcStats, InventoryEvidence, PublicationOmissions, PublicationOutcome,
-    SnapshotSelector, SourceDigest, build_owned_with_tiebreaker as build_document,
-    canonical_edge_kind, canonical_graph_document_presorted, canonical_raw_edge_sites, cluster,
-    deduped_node_count, extraction_from_v1, garbage_collect_graph_snapshots, graph_insights,
-    graph_snapshot_needs_gc, label_communities_by_hub,
-    normalize_document_v1_with_evidence_best_effort_owned,
+    GraphSnapshotGcStats, InventoryEvidence, PublicationOmissions, SnapshotSelector, SourceDigest,
+    build_owned_with_tiebreaker as build_document, canonical_edge_kind,
+    canonical_graph_document_presorted, canonical_raw_edge_sites, cluster, deduped_node_count,
+    extraction_from_v1, garbage_collect_graph_snapshots, graph_insights, graph_snapshot_needs_gc,
+    label_communities_by_hub, normalize_document_v1_with_evidence_best_effort_owned,
     normalize_document_v1_with_inventory_best_effort,
     normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
     score_communities, write_canonical_graph_json,
@@ -31,8 +30,8 @@ use compass_languages::{
     RawEdgeRecord, RawFrameworkFact, RawNodeRecord, Registry, file_stem, make_id,
 };
 use compass_model::code_graph::{
-    DiagnosticSeverity, ExtractionStatus, GraphDiagnostic, GraphDocument as V1GraphDocument,
-    NodeKind,
+    CommunityMetadata, DiagnosticSeverity, ExtractionStatus, GraphDiagnostic,
+    GraphDocument as V1GraphDocument, NodeKind,
 };
 use compass_model::provenance::{
     COALESCED_NODE_EVIDENCE_ATTRIBUTE, CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE,
@@ -95,8 +94,9 @@ pub struct BuildOptions {
     pub no_viz: bool,
     /// Durable graph storage published with the canonical JSON artifact.
     ///
-    /// JSON is always published and is the default. SQLite is an explicit
-    /// opt-in that adds a validated `compass-store.sqlite3` and `store.ref`.
+    /// JSON is always published as the portable authority. SQLite is the
+    /// default query index for bounded, large-graph reads; `--store json`
+    /// opts out when only the portable artifact is wanted.
     pub graph_storage: GraphStorage,
     pub gitignore: bool,
     pub ignore_policy: IgnorePolicy,
@@ -137,8 +137,8 @@ pub struct BuildOptions {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum GraphStorage {
-    #[default]
     Json,
+    #[default]
     Sqlite,
 }
 
@@ -1672,13 +1672,10 @@ fn build_graph_inner(
         }
     }
 
-    // A history realization must depend only on the target commit and build
-    // profile. Prior community numbering is current-worktree operational state
-    // and cannot influence the content-addressed result.
-    let cluster_options = ClusterOptions {
-        resolution: options.resolution,
-        exclude_hubs_percentile: options.exclude_hubs,
-    };
+    // Establish the publication boundary before topology analysis. Reports,
+    // clustering, and viewer models must all consume the same validated graph
+    // that will be written as graph.json.
+    let raw_document = document;
     let configuration_digest = graph_configuration_digest(options, &output_dir)?;
     let publication_inventory = detection_inventory(
         &detection,
@@ -1687,44 +1684,56 @@ fn build_graph_inner(
         &extraction_partials,
         &root,
     );
-    let publication_evidence = || -> Result<(BuildEvidence, Duration), CoreError> {
-        let started = Instant::now();
-        let mut evidence = BuildEvidence::from_document_with_source_digests(
-            &root,
-            &document,
-            configuration_digest,
-            &fresh_source_digests,
-        )?;
-        evidence.include_inventory(publication_inventory)?;
-        evidence.build.source_commit.clone_from(&commit);
-        Ok((evidence, started.elapsed()))
+    let publication_evidence_started = Instant::now();
+    let mut publication_evidence = BuildEvidence::from_document_with_source_digests(
+        &root,
+        &raw_document,
+        configuration_digest,
+        &fresh_source_digests,
+    )?;
+    publication_evidence.include_inventory(publication_inventory)?;
+    publication_evidence.build.source_commit.clone_from(&commit);
+    profile_internal_duration(
+        "v1 evidence preparation",
+        publication_evidence_started.elapsed(),
+    );
+    let normalization_started = Instant::now();
+    let mut published =
+        normalize_document_v1_with_evidence_best_effort_owned(raw_document, publication_evidence)?;
+    profile_internal_duration(
+        "graph.json v1 normalization",
+        normalization_started.elapsed(),
+    );
+    if published.document.nodes.is_empty() {
+        return Err(CoreError::EmptyGraph);
+    }
+    let document = published.document.to_legacy_document()?;
+
+    // A history realization must depend only on the target commit and build
+    // profile. Prior community numbering is current-worktree operational state
+    // and cannot influence the content-addressed result.
+    let cluster_options = ClusterOptions {
+        resolution: options.resolution,
+        exclude_hubs_percentile: options.exclude_hubs,
     };
-    let (((previous, previous_elapsed), (current, cluster_elapsed)), publication_evidence_result) =
-        rayon::join(
-            || {
-                rayon::join(
-                    || {
-                        let started = Instant::now();
-                        let previous = if std::env::var_os("COMPASS_HISTORY_BUILD").is_some() {
-                            HashMap::new()
-                        } else {
-                            previous_communities(&output_dir.join("graph.json"))
-                        };
-                        (previous, started.elapsed())
-                    },
-                    || {
-                        let started = Instant::now();
-                        let current = cluster(&document, cluster_options);
-                        (current, started.elapsed())
-                    },
-                )
-            },
-            publication_evidence,
-        );
+    let ((previous, previous_elapsed), (current, cluster_elapsed)) = rayon::join(
+        || {
+            let started = Instant::now();
+            let previous = if std::env::var_os("COMPASS_HISTORY_BUILD").is_some() {
+                HashMap::new()
+            } else {
+                previous_communities(&output_dir.join("graph.json"))
+            };
+            (previous, started.elapsed())
+        },
+        || {
+            let started = Instant::now();
+            let current = cluster(&document, cluster_options);
+            (current, started.elapsed())
+        },
+    );
     profile_internal_duration("load previous communities", previous_elapsed);
     profile_internal_duration("Louvain clustering", cluster_elapsed);
-    let (publication_evidence, evidence_elapsed) = publication_evidence_result?;
-    profile_internal_duration("parallel v1 evidence preparation", evidence_elapsed);
     internal_started = Instant::now();
     let communities = if previous.is_empty() {
         current
@@ -1868,17 +1877,35 @@ fn build_graph_inner(
         overview_elapsed,
     );
 
+    // The legacy projection is needed only by clustering, reports, and the
+    // bounded overview.  Release it before serializing the typed authority so
+    // large builds do not retain two complete graph representations while the
+    // SQLite/JSON publication path is writing its final artifacts.
+    drop(document);
+
     let publish_started = Instant::now();
     let graph_output_started = Instant::now();
     let mut output_profile_started = Instant::now();
-    let normalization_started = Instant::now();
-    let published = published_v1_document(document, &communities, &labels, publication_evidence)?;
-    profile_internal_duration(
-        "graph.json v1 normalization",
-        normalization_started.elapsed(),
-    );
-    if published.document.nodes.is_empty() {
-        return Err(CoreError::EmptyGraph);
+    let node_communities = communities
+        .iter()
+        .flat_map(|(community, members)| {
+            members
+                .iter()
+                .map(move |member| (member.as_str(), *community))
+        })
+        .collect::<HashMap<_, _>>();
+    for node in &mut published.document.nodes {
+        let Some(&community_index) = node_communities.get(node.id.as_str()) else {
+            continue;
+        };
+        let community = u64::try_from(community_index)
+            .map_err(|_| CoreError::InvalidBuildState("community ID exceeds u64".to_owned()))?;
+        node.community = Some(CommunityMetadata {
+            id: community,
+            label: labels.get(&community_index).cloned(),
+            score: None,
+            color: None,
+        });
     }
     let published_nodes = published.document.nodes.len();
     let published_edges = published.document.links.len();
@@ -4112,48 +4139,6 @@ fn graph_configuration_digest(
     Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
 }
 
-fn published_v1_document(
-    mut document: GraphDocument,
-    communities: &compass_graph::Communities,
-    labels: &BTreeMap<usize, String>,
-    evidence: BuildEvidence,
-) -> Result<PublicationOutcome, CoreError> {
-    let mut publication_profile_started = Instant::now();
-    let node_communities = communities
-        .iter()
-        .flat_map(|(community, members)| {
-            members
-                .iter()
-                .map(move |member| (member.as_str(), *community))
-        })
-        .collect::<HashMap<_, _>>();
-    for node in &mut document.nodes {
-        let Some(&community_index) = node_communities.get(node.id.as_str()) else {
-            continue;
-        };
-        let community = u64::try_from(community_index)
-            .map_err(|_| CoreError::InvalidBuildState("community ID exceeds u64".to_owned()))?;
-        node.attributes
-            .insert("community".to_owned(), serde_json::Value::from(community));
-        if let Some(label) = labels.get(&community_index) {
-            node.attributes.insert(
-                "community_name".to_owned(),
-                serde_json::Value::String(label.clone()),
-            );
-        }
-    }
-    profile_internal(
-        "graph publication community projection",
-        &mut publication_profile_started,
-    );
-    let published = normalize_document_v1_with_evidence_best_effort_owned(document, evidence)?;
-    profile_internal(
-        "graph publication v1 boundary",
-        &mut publication_profile_started,
-    );
-    Ok(published)
-}
-
 fn detection_inventory(
     detection: &Detection,
     semantic: Option<&SemanticLayer>,
@@ -5367,6 +5352,15 @@ mod tests {
         assert!(cold.output_dir.join("manifest.json").is_file());
         assert!(!cold.output_dir.join(".compass_incomplete").exists());
         let cold_graph = V1GraphDocument::load(&cold.output_dir.join("graph.json"))?;
+        let output_stats: Value = serde_json::from_slice(&fs::read(
+            cold.output_dir.join(".compass_output_stats.json"),
+        )?)?;
+        assert_eq!(output_stats["nodes"], cold_graph.nodes.len());
+        assert_eq!(output_stats["edges"], cold_graph.links.len());
+        assert_eq!(
+            output_stats["graph_bytes"],
+            fs::metadata(cold.output_dir.join("graph.json"))?.len()
+        );
         assert!(cold_graph.nodes.iter().all(|node| {
             node.evidence
                 .first()

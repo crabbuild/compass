@@ -55,11 +55,21 @@ impl Graph {
 
     /// Load the compact projection used by affected-impact traversal.
     pub fn load_for_affected(path: &Path) -> Result<Self, GraphError> {
-        Self::from_document(GraphDocument::load_for_affected(path)?)
+        match crate::code_graph::GraphDocument::load_for_affected(path) {
+            Ok(typed) => Self::from_document(typed.into_legacy_document()?.compact_for_affected()),
+            Err(GraphError::UnsupportedGraphSchema { found: None }) => {
+                Self::from_document(GraphDocument::load_for_affected(path)?)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn load_with_direction(path: &Path, force_directed: bool) -> Result<Self, GraphError> {
-        let mut document = GraphDocument::load(path)?;
+        let mut document = match crate::code_graph::GraphDocument::load(path) {
+            Ok(typed) => typed.into_legacy_document()?,
+            Err(GraphError::UnsupportedGraphSchema { found: None }) => GraphDocument::load(path)?,
+            Err(error) => return Err(error),
+        };
         if force_directed {
             document.directed = true;
         }

@@ -2,6 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+use compass_model::code_graph::{DiagnosticSeverity, GraphDocument};
+use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, effective_confidence};
+use serde::Deserialize;
+use serde::de::IgnoredAny;
 use serde_json::{Value, json};
 
 use crate::CoreError;
@@ -122,6 +126,570 @@ pub fn diagnose_graph_file(
         "post_build_error":"","producer_suppression":producer_suppression,
         "examples":examples,"input_path":path.to_string_lossy(),"effective_directed":effective_directed
     }))
+}
+
+/// Inspect the published typed graph and report the evidence and artifact
+/// qualities that matter to agents and CI. This intentionally reads the
+/// canonical `compass.graph/1` document rather than a legacy projection so
+/// every count is tied to the artifact other commands consume.
+pub fn diagnose_graph_quality(path: &Path) -> Result<Value, CoreError> {
+    if let Some((size, cap)) = GraphDocument::size_cap_exceeded(path) {
+        return diagnose_oversized_graph(path, size, cap);
+    }
+    let document = GraphDocument::load(path).map_err(|error| {
+        CoreError::DiagnosticFile(format!(
+            "Cannot load typed graph {}: {error}",
+            path.display()
+        ))
+    })?;
+    let file_size = fs::metadata(path).map_or(0, |metadata| metadata.len());
+    let mut node_confidence = BTreeMap::<&str, usize>::new();
+    let mut edge_confidence = BTreeMap::<&str, usize>::new();
+    let mut node_kinds = BTreeMap::<&str, usize>::new();
+    let mut edge_kinds = BTreeMap::<&str, usize>::new();
+    let mut diagnostic_codes = BTreeMap::<String, usize>::new();
+    let mut diagnostic_severity = BTreeMap::<&str, usize>::new();
+    let mut ids = BTreeSet::new();
+    let mut duplicate_node_ids = 0_usize;
+    let mut source_backed_nodes = 0_usize;
+    let mut valid_node_anchors = 0_usize;
+    let mut external_placeholders = 0_usize;
+    let mut heuristic_nodes = 0_usize;
+    for node in &document.nodes {
+        if !ids.insert(node.id.as_str()) {
+            duplicate_node_ids = duplicate_node_ids.saturating_add(1);
+        }
+        *node_kinds.entry(node.kind.as_str()).or_default() += 1;
+        let confidence = confidence_name(&node.evidence);
+        *node_confidence.entry(confidence).or_default() += 1;
+        if node.source.is_some() {
+            source_backed_nodes = source_backed_nodes.saturating_add(1);
+        }
+        if node.source.as_ref().is_some_and(|anchor| anchor.is_valid()) {
+            valid_node_anchors = valid_node_anchors.saturating_add(1);
+        }
+        if node
+            .evidence
+            .iter()
+            .any(|evidence| evidence.rule.as_deref() == Some("external-symbol-placeholder"))
+        {
+            external_placeholders = external_placeholders.saturating_add(1);
+        }
+        if node
+            .evidence
+            .iter()
+            .any(|evidence| evidence.origin == EvidenceOrigin::Heuristic)
+        {
+            heuristic_nodes = heuristic_nodes.saturating_add(1);
+        }
+        collect_diagnostic_counts(
+            &node.diagnostics,
+            &mut diagnostic_codes,
+            &mut diagnostic_severity,
+        );
+    }
+
+    let node_ids = document
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut source_backed_edges = 0_usize;
+    let mut valid_edge_anchors = 0_usize;
+    let mut heuristic_edges = 0_usize;
+    let mut dangling_edges = 0_usize;
+    for edge in &document.links {
+        *edge_kinds.entry(edge.kind.as_str()).or_default() += 1;
+        let confidence = confidence_name(&edge.evidence);
+        *edge_confidence.entry(confidence).or_default() += 1;
+        if edge.relationship_site.is_some() {
+            source_backed_edges = source_backed_edges.saturating_add(1);
+        }
+        if edge
+            .relationship_site
+            .as_ref()
+            .is_some_and(|anchor| anchor.is_valid())
+        {
+            valid_edge_anchors = valid_edge_anchors.saturating_add(1);
+        }
+        if edge
+            .evidence
+            .iter()
+            .any(|evidence| evidence.origin == EvidenceOrigin::Heuristic)
+        {
+            heuristic_edges = heuristic_edges.saturating_add(1);
+        }
+        if !node_ids.contains(edge.source.as_str()) || !node_ids.contains(edge.target.as_str()) {
+            dangling_edges = dangling_edges.saturating_add(1);
+        }
+        collect_diagnostic_counts(
+            &edge.diagnostics,
+            &mut diagnostic_codes,
+            &mut diagnostic_severity,
+        );
+    }
+    collect_diagnostic_counts(
+        &document.graph.diagnostics,
+        &mut diagnostic_codes,
+        &mut diagnostic_severity,
+    );
+
+    let output_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let output_stats = read_json_object(&output_dir.join(".compass_output_stats.json"));
+    let overview = read_json_object(&output_dir.join("graph-overview.json"));
+    let stats_nodes = output_stats
+        .as_ref()
+        .and_then(|stats| stats.get("nodes"))
+        .and_then(Value::as_u64);
+    let stats_edges = output_stats
+        .as_ref()
+        .and_then(|stats| stats.get("edges"))
+        .and_then(Value::as_u64);
+    let stats_match = output_stats.as_ref().map(|_| {
+        stats_nodes == Some(document.nodes.len() as u64)
+            && stats_edges == Some(document.links.len() as u64)
+    });
+    let overview_nodes = overview_node_count(overview.as_ref()).unwrap_or_default();
+    let publication_omitted_nodes = output_stats
+        .as_ref()
+        .and_then(|stats| stats.get("omitted_nodes"))
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or_else(|| {
+            diagnostic_codes
+                .get("publication_omitted_node")
+                .copied()
+                .unwrap_or_default()
+        });
+    let publication_omitted_edges = output_stats
+        .as_ref()
+        .and_then(|stats| stats.get("omitted_edges"))
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or_else(|| {
+            diagnostic_codes
+                .get("publication_omitted_edge")
+                .copied()
+                .unwrap_or_default()
+        });
+    let identity_collisions = output_stats
+        .as_ref()
+        .and_then(|stats| stats.get("identity_collisions"))
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or_else(|| {
+            diagnostic_codes
+                .get("publication_identity_collision")
+                .copied()
+                .unwrap_or_default()
+        });
+    let mut recommendations = Vec::new();
+    if identity_collisions > 0 {
+        recommendations.push(
+            "Resolve publication_identity_collision diagnostics before using the graph for automation."
+                .to_owned(),
+        );
+    }
+    if publication_omitted_nodes > 0 || publication_omitted_edges > 0 {
+        recommendations.push(
+            "Re-run extraction with the reported source files and inspect publication omissions; this graph is partial."
+                .to_owned(),
+        );
+    }
+    if !document.links.is_empty()
+        && edge_confidence.get("inferred").copied().unwrap_or_default() * 2 > document.links.len()
+    {
+        recommendations.push(
+            "Most relationships are inferred; use exact-first query mode for agent decisions and inspect anchors before editing."
+                .to_owned(),
+        );
+    }
+    if external_placeholders > document.nodes.len() / 5 {
+        recommendations.push(
+            "External placeholders are a large share of nodes; enable Cargo/package metadata or constrain external resolution."
+                .to_owned(),
+        );
+    }
+    if !document.links.is_empty() && source_backed_edges * 2 < document.links.len() {
+        recommendations.push(
+            "Many relationships lack relationship-site anchors; improve extractor anchors before relying on line-level navigation."
+                .to_owned(),
+        );
+    }
+    if recommendations.is_empty() {
+        recommendations.push("No blocking graph-quality findings detected.".to_owned());
+    }
+
+    Ok(json!({
+        "schema": "compass.graph-quality/1",
+        "quality_scope": "full",
+        "input_path": path.to_string_lossy(),
+        "graph_schema": document.graph.schema,
+        "file_size_bytes": file_size,
+        "node_count": document.nodes.len(),
+        "edge_count": document.links.len(),
+        "node_confidence": node_confidence,
+        "edge_confidence": edge_confidence,
+        "node_kinds": node_kinds,
+        "edge_kinds": edge_kinds,
+        "source_backed_nodes": source_backed_nodes,
+        "source_backed_edges": source_backed_edges,
+        "valid_node_anchors": valid_node_anchors,
+        "valid_edge_anchors": valid_edge_anchors,
+        "external_placeholder_nodes": external_placeholders,
+        "heuristic_nodes": heuristic_nodes,
+        "heuristic_edges": heuristic_edges,
+        "dangling_edges": dangling_edges,
+        "duplicate_node_ids": duplicate_node_ids,
+        "graph_diagnostics": {
+            "total": diagnostic_codes.values().sum::<usize>(),
+            "by_code": diagnostic_codes,
+            "by_severity": diagnostic_severity,
+            "publication_omitted_nodes": publication_omitted_nodes,
+            "publication_omitted_edges": publication_omitted_edges,
+            "identity_collisions": identity_collisions,
+        },
+        "output_consistency": {
+            "stats_file_present": output_stats.is_some(),
+            "stats_match_graph": stats_match,
+            "stats_bytes_match_graph": output_stats.as_ref().map(|stats| {
+                stats
+                    .get("graph_bytes")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|recorded| recorded == file_size)
+            }),
+            "stats_nodes": stats_nodes,
+            "stats_edges": stats_edges,
+            "overview_file_present": overview.is_some(),
+            "overview_node_count": overview_nodes,
+        },
+        "ratios": {
+            "exact_edge_ratio": ratio(edge_confidence.get("exact").copied().unwrap_or_default(), document.links.len()),
+            "inferred_edge_ratio": ratio(edge_confidence.get("inferred").copied().unwrap_or_default(), document.links.len()),
+            "anchored_edge_ratio": ratio(source_backed_edges, document.links.len()),
+            "anchored_node_ratio": ratio(source_backed_nodes, document.nodes.len()),
+            "external_placeholder_ratio": ratio(external_placeholders, document.nodes.len()),
+        },
+        "recommendations": recommendations,
+    }))
+}
+
+/// Produce a bounded quality report for a graph that is intentionally larger
+/// than the normal in-memory query cap. The publisher stats are authoritative
+/// for counts and omissions; the header scan validates the schema and collects
+/// durable graph diagnostics without materializing hundreds of thousands of
+/// records just to explain why the full graph was not opened.
+fn diagnose_oversized_graph(path: &Path, size: u64, cap: u64) -> Result<Value, CoreError> {
+    const MAX_STREAM_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+    if size > MAX_STREAM_BYTES {
+        return Err(CoreError::DiagnosticFile(format!(
+            "graph file {} is {} bytes, exceeds the {}-byte diagnostic stream cap",
+            path.display(),
+            grouped(u128::from(size)),
+            grouped(u128::from(MAX_STREAM_BYTES)),
+        )));
+    }
+    let header = read_graph_header(path).map_err(|error| {
+        CoreError::DiagnosticFile(format!(
+            "Cannot inspect oversized graph {}: {error}",
+            path.display()
+        ))
+    })?;
+    let output_stats = read_json_object(
+        &path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(".compass_output_stats.json"),
+    )
+    .ok_or_else(|| {
+        CoreError::DiagnosticFile(format!(
+            "graph file {} exceeds the {}-byte cap and has no .compass_output_stats.json; set COMPASS_MAX_GRAPH_BYTES to inspect it",
+            path.display(),
+            grouped(u128::from(cap)),
+        ))
+    })?;
+    let overview = read_json_object(
+        &path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("graph-overview.json"),
+    );
+    let node_count = output_stats
+        .get("nodes")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let edge_count = output_stats
+        .get("edges")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let omitted_nodes = output_stats
+        .get("omitted_nodes")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let omitted_edges = output_stats
+        .get("omitted_edges")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let identity_collisions = output_stats
+        .get("identity_collisions")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let stats_bytes_match_graph = output_stats
+        .get("graph_bytes")
+        .and_then(Value::as_u64)
+        .is_some_and(|recorded| recorded == size);
+    let mut codes = BTreeMap::<String, usize>::new();
+    let mut severities = BTreeMap::<&str, usize>::new();
+    for diagnostic in &header.diagnostics {
+        *codes.entry(diagnostic.code.clone()).or_default() += 1;
+        let severity = match diagnostic.severity {
+            DiagnosticSeverity::Info => "info",
+            DiagnosticSeverity::Warning => "warning",
+            DiagnosticSeverity::Error => "error",
+        };
+        *severities.entry(severity).or_default() += 1;
+    }
+    let mut recommendations = vec![format!(
+        "Graph exceeds the default {}-byte in-memory cap; use the prepared store/overview or set COMPASS_MAX_GRAPH_BYTES only for bounded investigations.",
+        grouped(u128::from(cap))
+    )];
+    if omitted_nodes > 0 || omitted_edges > 0 || identity_collisions > 0 {
+        recommendations.push(
+            "This publication is partial; fix omissions and identity collisions before automation."
+                .to_owned(),
+        );
+    }
+    Ok(json!({
+        "schema": "compass.graph-quality/1",
+        "quality_scope": "publisher-stats-only",
+        "input_path": path.to_string_lossy(),
+        "graph_schema": header.schema,
+        "file_size_bytes": size,
+        "node_count": node_count,
+        "edge_count": edge_count,
+        "node_confidence": {"unavailable": "graph exceeds the in-memory quality reader cap"},
+        "edge_confidence": {"unavailable": "graph exceeds the in-memory quality reader cap"},
+        "node_kinds": {},
+        "edge_kinds": {},
+        "source_backed_nodes": Value::Null,
+        "source_backed_edges": Value::Null,
+        "valid_node_anchors": Value::Null,
+        "valid_edge_anchors": Value::Null,
+        "external_placeholder_nodes": Value::Null,
+        "heuristic_nodes": Value::Null,
+        "heuristic_edges": Value::Null,
+        "dangling_edges": Value::Null,
+        "duplicate_node_ids": Value::Null,
+        "graph_diagnostics": {
+            "total": header.diagnostics.len(),
+            "by_code": codes,
+            "by_severity": severities,
+            "publication_omitted_nodes": omitted_nodes,
+            "publication_omitted_edges": omitted_edges,
+            "identity_collisions": identity_collisions,
+        },
+        "output_consistency": {
+            "stats_file_present": true,
+            "stats_match_graph": Value::Null,
+            "stats_bytes_match_graph": stats_bytes_match_graph,
+            "stats_nodes": node_count,
+            "stats_edges": edge_count,
+            "overview_file_present": overview.is_some(),
+            "overview_node_count": overview_node_count(overview.as_ref()),
+        },
+        "ratios": {
+            "exact_edge_ratio": Value::Null,
+            "inferred_edge_ratio": Value::Null,
+            "anchored_edge_ratio": Value::Null,
+            "anchored_node_ratio": Value::Null,
+            "external_placeholder_ratio": Value::Null,
+        },
+        "recommendations": recommendations,
+    }))
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+struct GraphHeaderEnvelope {
+    #[serde(default)]
+    graph: Option<GraphHeader>,
+    #[serde(default)]
+    nodes: Option<IgnoredAny>,
+    #[serde(default)]
+    links: Option<IgnoredAny>,
+    #[serde(default)]
+    edges: Option<IgnoredAny>,
+}
+
+#[derive(Deserialize)]
+struct GraphHeader {
+    #[serde(default)]
+    schema: Option<String>,
+    #[serde(default)]
+    diagnostics: Vec<compass_model::code_graph::GraphDiagnostic>,
+}
+
+struct ReadGraphHeaderError(String);
+
+impl std::fmt::Display for ReadGraphHeaderError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+fn read_graph_header(path: &Path) -> Result<GraphHeader, ReadGraphHeaderError> {
+    let file = fs::File::open(path).map_err(|error| ReadGraphHeaderError(error.to_string()))?;
+    let envelope = serde_json::from_reader::<_, GraphHeaderEnvelope>(std::io::BufReader::new(file))
+        .map_err(|error| ReadGraphHeaderError(error.to_string()))?;
+    envelope
+        .graph
+        .ok_or_else(|| ReadGraphHeaderError("graph metadata is missing".to_owned()))
+}
+
+fn confidence_name(evidence: &[compass_model::provenance::Provenance]) -> &'static str {
+    match effective_confidence(evidence) {
+        Some(EvidenceConfidence::Exact) => "exact",
+        Some(EvidenceConfidence::Inferred) => "inferred",
+        Some(EvidenceConfidence::Ambiguous) => "ambiguous",
+        None => "none",
+    }
+}
+
+fn collect_diagnostic_counts(
+    diagnostics: &[compass_model::code_graph::GraphDiagnostic],
+    codes: &mut BTreeMap<String, usize>,
+    severities: &mut BTreeMap<&'static str, usize>,
+) {
+    for diagnostic in diagnostics {
+        *codes.entry(diagnostic.code.clone()).or_default() += 1;
+        let severity = match diagnostic.severity {
+            DiagnosticSeverity::Info => "info",
+            DiagnosticSeverity::Warning => "warning",
+            DiagnosticSeverity::Error => "error",
+        };
+        *severities.entry(severity).or_default() += 1;
+    }
+}
+
+fn read_json_object(path: &Path) -> Option<serde_json::Map<String, Value>> {
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|value| value.as_object().cloned())
+}
+
+fn overview_node_count(value: Option<&serde_json::Map<String, Value>>) -> Option<usize> {
+    value
+        .and_then(|value| value.get("nodes"))
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .or_else(|| {
+            value
+                .and_then(|value| value.get("model"))
+                .and_then(|model| model.get("stats"))
+                .and_then(|stats| stats.get("nodes"))
+                .and_then(Value::as_u64)
+                .and_then(|nodes| usize::try_from(nodes).ok())
+        })
+}
+
+fn ratio(count: usize, total: usize) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        count as f64 / total as f64
+    }
+}
+
+#[must_use]
+pub fn format_quality_json(summary: &Value) -> Value {
+    summary.clone()
+}
+
+#[must_use]
+pub fn format_quality_report(summary: &Value) -> String {
+    let get_u64 = |key: &str| summary.get(key).and_then(Value::as_u64).unwrap_or_default();
+    let diagnostics = summary.get("graph_diagnostics").unwrap_or(&Value::Null);
+    let consistency = summary.get("output_consistency").unwrap_or(&Value::Null);
+    let ratios = summary.get("ratios").unwrap_or(&Value::Null);
+    let mut lines = vec![
+        "[compass] Typed graph quality diagnostic".to_owned(),
+        format!(
+            "input: {}",
+            text(summary.get("input_path").unwrap_or(&Value::Null))
+        ),
+        format!(
+            "scope: {}",
+            text(
+                summary
+                    .get("quality_scope")
+                    .unwrap_or(&Value::String("full".to_owned()))
+            )
+        ),
+        format!(
+            "schema: {}",
+            text(summary.get("graph_schema").unwrap_or(&Value::Null))
+        ),
+        format!("nodes: {}", get_u64("node_count")),
+        format!("edges: {}", get_u64("edge_count")),
+        format!(
+            "exact_edge_ratio: {}",
+            ratio_text(ratios, "exact_edge_ratio")
+        ),
+        format!(
+            "inferred_edge_ratio: {}",
+            ratio_text(ratios, "inferred_edge_ratio")
+        ),
+        format!(
+            "anchored_edge_ratio: {}",
+            ratio_text(ratios, "anchored_edge_ratio")
+        ),
+        format!(
+            "external_placeholder_nodes: {}",
+            get_u64("external_placeholder_nodes")
+        ),
+        format!(
+            "publication_omitted_nodes: {}",
+            value_u64(diagnostics, "publication_omitted_nodes")
+        ),
+        format!(
+            "publication_omitted_edges: {}",
+            value_u64(diagnostics, "publication_omitted_edges")
+        ),
+        format!(
+            "identity_collisions: {}",
+            value_u64(diagnostics, "identity_collisions")
+        ),
+        format!(
+            "output_stats_match_graph: {}",
+            consistency
+                .get("stats_match_graph")
+                .filter(|value| !value.is_null())
+                .map(text)
+                .unwrap_or_else(|| "publisher-recorded".to_owned())
+        ),
+    ];
+    if let Some(recommendations) = summary.get("recommendations").and_then(Value::as_array) {
+        lines.push("recommendations:".to_owned());
+        lines.extend(
+            recommendations
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|recommendation| format!("  - {recommendation}")),
+        );
+    }
+    lines.join("\n")
+}
+
+fn value_u64(value: &Value, key: &str) -> u64 {
+    value.get(key).and_then(Value::as_u64).unwrap_or_default()
+}
+
+fn ratio_text(value: &Value, key: &str) -> String {
+    value.get(key).and_then(Value::as_f64).map_or_else(
+        || "unavailable".to_owned(),
+        |ratio| format!("{:.1}%", ratio * 100.0),
+    )
 }
 
 fn enforce_graph_size_cap(path: &Path) -> Result<(), CoreError> {
@@ -528,4 +1096,86 @@ fn list(v: &Value) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{diagnose_graph_quality, format_quality_report};
+    use compass_model::code_graph::{
+        BuildMetadata, ExtractionStatus, FileRecord, GraphDocument, NodeKind, NodeRecord,
+    };
+    use compass_model::identity::file_id;
+    use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
+    use serde_json::Value;
+
+    #[test]
+    fn quality_diagnostic_reads_the_typed_contract() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("graph.json");
+        let mut document = GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "test".to_owned(),
+            schema_fingerprint: "sha256:schema".to_owned(),
+            source_tree_digest: "sha256:tree".to_owned(),
+            configuration_digest: "sha256:config".to_owned(),
+            generation_id: "sha256:generation".to_owned(),
+            source_commit: None,
+        });
+        let anchor = SourceAnchor {
+            file: "src/lib.rs".to_owned(),
+            start_byte: 0,
+            end_byte: 1,
+            start_line: 1,
+            start_column: 1,
+            end_line: 1,
+            end_column: 2,
+        };
+        document.graph.files.push(FileRecord {
+            id: file_id("src/lib.rs"),
+            path: "src/lib.rs".to_owned(),
+            language: Some("rust".to_owned()),
+            content_digest: "sha256:test".to_owned(),
+            byte_size: 1,
+            generated: false,
+            extraction_status: ExtractionStatus::Extracted,
+            extractor_versions: vec!["test".to_owned()],
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+        });
+        document.nodes.push(NodeRecord {
+            id: "node:test".to_owned(),
+            kind: NodeKind::Function,
+            roles: Vec::new(),
+            name: "test".to_owned(),
+            qualified_name: "crate::test".to_owned(),
+            language: Some("rust".to_owned()),
+            framework: None,
+            source: Some(anchor.clone()),
+            details: None,
+            evidence: vec![Provenance {
+                origin: EvidenceOrigin::Ast,
+                extractor: "test".to_owned(),
+                confidence: EvidenceConfidence::Exact,
+                rule: None,
+                anchors: vec![anchor],
+                wiring_site: None,
+                score: None,
+                candidates: Vec::new(),
+            }],
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+            community: None,
+        });
+        std::fs::write(&path, serde_json::to_vec(&document)?)?;
+        let summary = diagnose_graph_quality(&path)?;
+        assert_eq!(summary["schema"], "compass.graph-quality/1");
+        assert_eq!(summary["node_count"], 1);
+        assert_eq!(summary["node_confidence"]["exact"], 1);
+        assert_eq!(summary["output_consistency"]["stats_file_present"], false);
+        assert_eq!(
+            summary["output_consistency"]["stats_match_graph"],
+            Value::Null
+        );
+        assert!(format_quality_report(&summary).contains("Typed graph quality diagnostic"));
+        Ok(())
+    }
 }

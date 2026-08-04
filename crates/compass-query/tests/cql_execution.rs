@@ -30,6 +30,26 @@ fn graph() -> Result<Graph, Box<dyn Error>> {
     Ok(Graph::from_document(document)?)
 }
 
+fn typed_graph() -> Result<Graph, Box<dyn Error>> {
+    let document = serde_json::from_str::<GraphDocument>(
+        r#"{
+          "directed": true,
+          "multigraph": true,
+          "graph": {"schema":"compass.graph/1"},
+          "nodes": [
+            {"id":"a","kind":"function","name":"a","qualifiedName":"crate::a",
+             "source":{"file":"src/a.rs","startByte":0,"endByte":1,"startLine":1,"startColumn":1,"endLine":1,"endColumn":2}},
+            {"id":"b","kind":"function","name":"b","qualifiedName":"crate::b",
+             "source":{"file":"src/b.rs","startByte":0,"endByte":1,"startLine":1,"startColumn":1,"endLine":1,"endColumn":2}}
+          ],
+          "links": [{"id":"edge","key":"edge","source":"a","target":"b","kind":"calls",
+             "relationshipSite":{"file":"src/a.rs","startByte":5,"endByte":10,"startLine":2,"startColumn":1,"endLine":2,"endColumn":6},
+             "evidence":[{"origin":"heuristic","extractor":"test","confidence":"inferred"}]}]
+        }"#,
+    )?;
+    Ok(Graph::from_document(document)?)
+}
+
 fn run(source: &str) -> Result<compass_query::QueryResult, Box<dyn Error>> {
     run_with_memory_limit(source, 16 * 1024 * 1024)
 }
@@ -73,6 +93,40 @@ fn executes_indexed_fixed_patterns_and_properties() -> Result<(), Box<dyn Error>
     assert_eq!(result.rows.len(), 2);
     assert_eq!(result.rows[0][0], CompassValue::String("a".into()));
     assert_eq!(result.rows[1][1], CompassValue::String("c".into()));
+    Ok(())
+}
+
+#[test]
+fn typed_graph_projects_labels_anchors_and_effective_confidence() -> Result<(), Box<dyn Error>> {
+    let graph = typed_graph()?;
+    let parameters = Parameters::new();
+    let parameter_types = ParameterTypes::new();
+    let schema = graph.schema_fingerprint();
+    let compiled = compile(CompileRequest {
+        source_name: "typed.cypher",
+        source: "MATCH (a:Function)-[r:CALLS]->(b:Function) WHERE r.confidence = 'INFERRED' RETURN a.source_file AS file, r.source_location AS site, properties(a).source_file AS mapped",
+        parameter_types: &parameter_types,
+        schema: &schema,
+        limits: CompileLimits::default(),
+    })?;
+    let cancellation = AtomicBool::new(false);
+    let result = execute(QueryRequest {
+        compiled: &compiled,
+        graph: &graph,
+        parameters: &parameters,
+        limits: QueryLimits {
+            deadline: Instant::now() + Duration::from_secs(2),
+            max_rows: 100,
+            max_path_depth: 32,
+            max_expanded_relationships: 1_000,
+            max_memory_bytes: 16 * 1024 * 1024,
+        },
+        cancellation: &cancellation,
+    })?;
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0][0], CompassValue::String("src/a.rs".into()));
+    assert_eq!(result.rows[0][1], CompassValue::String("L2:1-L2:6".into()));
+    assert_eq!(result.rows[0][2], CompassValue::String("src/a.rs".into()));
     Ok(())
 }
 

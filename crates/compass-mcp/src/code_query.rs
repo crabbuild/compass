@@ -66,10 +66,12 @@ pub(super) fn invoke(
         }),
         "get_callers" => engine.callers(CallRequest {
             symbol: required_string(arguments, "symbol")?,
+            include_heuristic: boolean(arguments, "include_heuristic"),
             limits,
         }),
         "get_callees" => engine.callees(CallRequest {
             symbol: required_string(arguments, "symbol")?,
+            include_heuristic: boolean(arguments, "include_heuristic"),
             limits,
         }),
         "get_impact" => engine.impact(ImpactRequest {
@@ -95,6 +97,7 @@ pub(super) fn invoke(
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_owned(),
+            include_heuristic: boolean(arguments, "include_heuristic"),
             limits,
         }),
         "get_node" => engine.node_trail(NodeTrailRequest {

@@ -15,7 +15,7 @@ use compass_model::identity::edge_id;
 use compass_model::provenance::{
     EndpointRewriteEvidence, EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin,
     NODE_PROVENANCE_ANCHOR_ATTRIBUTE, SEMANTIC_LAYER_EXTRACTOR, TRUSTED_EDGE_RECORD_ATTRIBUTE,
-    append_endpoint_rewrite_evidence,
+    TRUSTED_NODE_RECORD_ATTRIBUTE, append_endpoint_rewrite_evidence,
 };
 use compass_model::validate_code_graph;
 use serde_json::{Map, Value, json};
@@ -191,6 +191,101 @@ fn node_navigation_extent_preserves_and_contains_exact_provenance()
         Err(error) => error,
     };
     assert!(error.to_string().contains("not contained"));
+    Ok(())
+}
+
+#[test]
+fn repeated_document_blocks_use_occurrence_stable_identity()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut first = RawNodeRecord {
+        id: "raw:first".to_owned(),
+        attributes: Map::from_iter([
+            ("label".to_owned(), json!("same block")),
+            ("qualified_name".to_owned(), json!("same block")),
+            ("symbol_kind".to_owned(), json!("markdown_block")),
+            ("file_type".to_owned(), json!("document")),
+            ("document_kind".to_owned(), json!("paragraph")),
+            ("block_index".to_owned(), json!(0)),
+            ("language".to_owned(), json!("markdown")),
+            ("extractor".to_owned(), json!("compass.markdown")),
+            ("source_file".to_owned(), json!("src/lib.rs")),
+            ("source_anchor".to_owned(), anchor(root, 10)),
+        ]),
+    };
+    let mut second = first.clone();
+    first.id = "raw:first".to_owned();
+    second.id = "raw:second".to_owned();
+    second.attributes.insert("block_index".to_owned(), json!(1));
+    second
+        .attributes
+        .insert("source_anchor".to_owned(), anchor(root, 30));
+    let outcome = normalize_v1_best_effort(
+        Extraction {
+            nodes: vec![first, second],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+    assert_eq!(outcome.document.nodes.len(), 2);
+    assert_eq!(outcome.omissions.identity_collisions, 0);
+    Ok(())
+}
+
+#[test]
+fn trusted_document_blocks_repair_legacy_global_identity() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut first = RawNodeRecord {
+        id: "raw:first".to_owned(),
+        attributes: Map::from_iter([
+            ("label".to_owned(), json!("same block")),
+            ("qualified_name".to_owned(), json!("same block")),
+            ("symbol_kind".to_owned(), json!("markdown_block")),
+            ("file_type".to_owned(), json!("document")),
+            ("document_kind".to_owned(), json!("paragraph")),
+            ("language".to_owned(), json!("markdown")),
+            ("extractor".to_owned(), json!("compass.markdown")),
+            ("source_file".to_owned(), json!("src/lib.rs")),
+            ("source_anchor".to_owned(), anchor(root, 10)),
+        ]),
+    };
+    let mut second = first.clone();
+    first.id = "raw:first".to_owned();
+    second.id = "raw:second".to_owned();
+    second
+        .attributes
+        .insert("source_anchor".to_owned(), anchor(root, 30));
+    let baseline = normalize_v1(
+        Extraction {
+            nodes: vec![first, second],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+    let mut trusted = extraction_from_v1(&baseline);
+    for node in &mut trusted.nodes {
+        let record = node
+            .attributes
+            .get_mut(TRUSTED_NODE_RECORD_ATTRIBUTE)
+            .ok_or("missing trusted node record")?;
+        let object = record
+            .as_object_mut()
+            .ok_or("trusted node is not an object")?;
+        // Simulate the legacy producer identity that treated every document
+        // block with the same qualified name as one global node.
+        object.insert("id".to_owned(), json!("legacy:document:same block"));
+    }
+    let repaired = normalize_v1_best_effort(trusted, build_evidence(root)?)?;
+    assert_eq!(repaired.document.nodes.len(), 2);
+    assert_eq!(repaired.omissions.identity_collisions, 0);
+    assert!(repaired.document.nodes.iter().all(|node| {
+        node.source
+            .as_ref()
+            .is_some_and(|source| source.start_byte != source.end_byte)
+    }));
     Ok(())
 }
 
@@ -1230,6 +1325,60 @@ fn best_effort_stable_identity_collision_is_order_independent()
     assert_eq!(left.omissions.nodes, 1);
     assert_eq!(left.omissions.identity_collisions, 1);
     assert!(validate_code_graph(&left.document).is_ok());
+    Ok(())
+}
+
+#[test]
+fn equivalent_external_labels_merge_without_quarantining_wiring()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut first = raw_external_node("raw:first", "chrono::DateTime::parse_from_rfc3339");
+    first
+        .attributes
+        .insert("label".to_owned(), json!("parse_from_rfc3339"));
+    let second = raw_external_node("raw:second", "chrono::DateTime::parse_from_rfc3339");
+    let outcome = normalize_v1_best_effort(
+        Extraction {
+            nodes: vec![raw_node(root, "raw:caller", "caller", 10), first, second],
+            edges: vec![
+                RawEdgeRecord {
+                    source: "raw:caller".to_owned(),
+                    target: "raw:first".to_owned(),
+                    attributes: Map::from_iter([
+                        ("relation".to_owned(), json!("calls")),
+                        ("source_anchor".to_owned(), anchor(root, 50)),
+                    ]),
+                },
+                RawEdgeRecord {
+                    source: "raw:caller".to_owned(),
+                    target: "raw:second".to_owned(),
+                    attributes: Map::from_iter([
+                        ("relation".to_owned(), json!("calls")),
+                        ("source_anchor".to_owned(), anchor(root, 70)),
+                    ]),
+                },
+            ],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+    assert_eq!(outcome.omissions.identity_collisions, 0);
+    let external = outcome
+        .document
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "chrono::DateTime::parse_from_rfc3339")
+        .ok_or("missing merged external function")?;
+    assert_eq!(external.kind, NodeKind::Function);
+    assert_eq!(outcome.document.links.len(), 2);
+    assert!(
+        outcome
+            .document
+            .links
+            .iter()
+            .all(|edge| edge.target == external.id)
+    );
     Ok(())
 }
 

@@ -39,7 +39,7 @@ run the rebuild procedure, and retain the unchanged `graph.json`.
 
 | Backend | Local CLI | Credentials/network | Platforms | Status |
 | --- | --- | --- | --- | --- |
-| SQLite | Opt-in sidecar `compass-store.sqlite3` via `--store sqlite` | None; local file only | macOS, Linux, Windows | Released local adapter |
+| SQLite | Default sidecar `compass-store.sqlite3` (use `--store json` to opt out) | None; local file only | macOS, Linux, Windows | Released local adapter |
 | redb | Explicit Rust adapter `compass-store-redb` | None; local file only | CI-supported native platforms | Library/conformance adapter; not selected by the CLI |
 | PostgreSQL | No released CLI adapter | Would require an explicit endpoint, credentials, TLS, and bounded client | Future service profile | Deferred |
 | DynamoDB | No released CLI adapter | Would require an explicit AWS boundary, credentials, TLS, retries, and quotas | Future service profile | Deferred |
@@ -55,11 +55,11 @@ For an output root `DIR` the published set is:
 ```text
 DIR/.compass-active-generation # BuildGuard publication pointer, when used
 DIR/.compass-generations/<generation>/graph.json
-DIR/.compass-generations/<generation>/store.ref  # with --store sqlite
+DIR/.compass-generations/<generation>/store.ref  # with default storage or --store sqlite
 DIR/.compass-store/compass-store.sqlite3          # shared by store generations
 ```
 
-`graph.json` is the default generation. When `--store sqlite` is selected,
+`graph.json` is the portable authority. When SQLite is selected (the default),
 the canonical JSON artifact and a small digest-bound `store.ref` are published
 as one generation. The SQLite database has one stable location outside the
 generation directories; it is never copied into each generation. Immutable
@@ -72,7 +72,7 @@ root is disposable and may be deleted at any time.
 
 New stores contain projected immutable graph indexes and their manifest; they
 do not duplicate the complete graph as a legacy chunked payload. `graph.json`
-remains complete, default, and independently queryable. The projected roots
+remains complete, portable, and independently queryable. The projected roots
 cover metadata/files, nodes, edges, names, terms, outgoing and incoming
 adjacency, communities, and diagnostics. Tree objects use bounded compact
 MessagePack with deterministic zstd compression when it reduces size.
@@ -126,8 +126,9 @@ compass store validate /recovered/compass-out --format json
 
 Restore validates every digest and snapshot before publication. It removes an
 incomplete destination on failure and never overwrites an existing output.
-After restore, typed queries still use JSON by default. Pass `--engine store`
-to select and validate the restored database.
+After restore, typed queries use the restored SQLite snapshot by default. Pass
+`--engine json` to force the portable reader or `--engine store` to require and
+validate the restored database.
 
 ## Rebuild and upgrade policy
 

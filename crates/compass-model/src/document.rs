@@ -143,9 +143,83 @@ impl NodeRecord {
 
     #[must_use]
     pub fn property(&self, key: &str) -> Option<Value> {
-        (key == "id")
-            .then(|| Value::String(self.id.clone()))
-            .or_else(|| self.attributes.get(key).cloned())
+        self.logical_property(key)
+    }
+
+    /// Return the logical CompassQL property for this node.
+    ///
+    /// The published `compass.graph/1` representation is intentionally typed
+    /// and nested (`source`, `community`, and `evidence`).  CompassQL exposes
+    /// stable logical aliases so callers do not need to know that wire layout.
+    /// Keep this projection in the model layer and use it for direct access,
+    /// property maps, and indexes alike.
+    #[must_use]
+    pub fn logical_property(&self, key: &str) -> Option<Value> {
+        if key == "id" {
+            return Some(Value::String(self.id.clone()));
+        }
+        if let Some(value) = self.attributes.get(key) {
+            return Some(value.clone());
+        }
+        match key {
+            "label" => self
+                .attributes
+                .get("name")
+                .and_then(Value::as_str)
+                .map(|value| Value::String(value.to_owned())),
+            "qualified_name" => self
+                .attributes
+                .get("qualifiedName")
+                .or_else(|| self.attributes.get("qualified_name"))
+                .cloned(),
+            "kind" | "type" | "symbol_kind" | "node_type" => self
+                .attributes
+                .get("kind")
+                .and_then(Value::as_str)
+                .map(|value| Value::String(value.to_owned())),
+            "file_type" => self
+                .attributes
+                .get("kind")
+                .and_then(Value::as_str)
+                .map(|kind| Value::String(node_file_type(kind).to_owned())),
+            "source_file" => self
+                .attributes
+                .get("source")
+                .and_then(Value::as_object)
+                .and_then(|source| source.get("file"))
+                .and_then(Value::as_str)
+                .map(|value| Value::String(value.to_owned())),
+            "source_location" => self
+                .attributes
+                .get("source")
+                .and_then(Value::as_object)
+                .and_then(source_anchor_location)
+                .map(Value::String),
+            "line_start" | "line_end" => self
+                .attributes
+                .get("source")
+                .and_then(Value::as_object)
+                .and_then(|source| {
+                    source
+                        .get(if key == "line_start" {
+                            "startLine"
+                        } else {
+                            "endLine"
+                        })
+                        .and_then(Value::as_u64)
+                })
+                .map(Value::from),
+            "community_name" => self
+                .attributes
+                .get("community")
+                .and_then(Value::as_object)
+                .and_then(|community| community.get("label"))
+                .and_then(Value::as_str)
+                .map(|value| Value::String(value.to_owned())),
+            "_origin" => first_evidence_string(&self.attributes, "origin"),
+            "confidence" => effective_confidence(&self.attributes),
+            _ => None,
+        }
     }
 
     pub fn properties(&self) -> impl Iterator<Item = (&str, Value)> {
@@ -154,6 +228,39 @@ impl NodeRecord {
                 .iter()
                 .map(|(key, value)| (key.as_str(), value.clone())),
         )
+    }
+
+    pub fn logical_properties(&self) -> impl Iterator<Item = (String, Value)> {
+        let mut properties = self
+            .attributes
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        properties.push(("id".to_owned(), Value::String(self.id.clone())));
+        for key in [
+            "label",
+            "qualified_name",
+            "kind",
+            "type",
+            "symbol_kind",
+            "node_type",
+            "file_type",
+            "source_file",
+            "source_location",
+            "line_start",
+            "line_end",
+            "community_name",
+            "_origin",
+            "confidence",
+        ] {
+            if !properties.iter().any(|(name, _)| name == key)
+                && let Some(value) = self.logical_property(key)
+            {
+                properties.push((key.to_owned(), value));
+            }
+        }
+        properties.sort_by(|left, right| left.0.cmp(&right.0));
+        properties.into_iter()
     }
 }
 
@@ -275,9 +382,49 @@ impl EdgeRecord {
 
     #[must_use]
     pub fn property(&self, key: &str) -> Option<Value> {
+        self.logical_property(key)
+    }
+
+    /// Return the logical CompassQL property for this relationship.
+    #[must_use]
+    pub fn logical_property(&self, key: &str) -> Option<Value> {
         match key {
-            "source" => Some(Value::String(self.source.clone())),
-            "target" => Some(Value::String(self.target.clone())),
+            "source" | "_src" => Some(Value::String(self.source.clone())),
+            "target" | "_tgt" => Some(Value::String(self.target.clone())),
+            "relation" | "type" => self
+                .attributes
+                .get("relation")
+                .or_else(|| self.attributes.get("kind"))
+                .and_then(Value::as_str)
+                .map(|value| Value::String(value.to_owned())),
+            "source_file" => self
+                .attributes
+                .get("relationshipSite")
+                .and_then(Value::as_object)
+                .and_then(|site| site.get("file"))
+                .and_then(Value::as_str)
+                .map(|value| Value::String(value.to_owned())),
+            "source_location" => self
+                .attributes
+                .get("relationshipSite")
+                .and_then(Value::as_object)
+                .and_then(source_anchor_location)
+                .map(Value::String),
+            "line_start" | "line_end" => self
+                .attributes
+                .get("relationshipSite")
+                .and_then(Value::as_object)
+                .and_then(|site| {
+                    site.get(if key == "line_start" {
+                        "startLine"
+                    } else {
+                        "endLine"
+                    })
+                    .and_then(Value::as_u64)
+                })
+                .map(Value::from),
+            "_origin" => first_evidence_string(&self.attributes, "origin"),
+            "confidence" => effective_confidence(&self.attributes),
             _ => self.attributes.get(key).cloned(),
         }
     }
@@ -293,6 +440,94 @@ impl EdgeRecord {
                 .iter()
                 .map(|(key, value)| (key.as_str(), value.clone())),
         )
+    }
+
+    pub fn logical_properties(&self) -> impl Iterator<Item = (String, Value)> {
+        let mut properties = self
+            .attributes
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        properties.push(("source".to_owned(), Value::String(self.source.clone())));
+        properties.push(("target".to_owned(), Value::String(self.target.clone())));
+        for key in [
+            "_src",
+            "_tgt",
+            "relation",
+            "type",
+            "source_file",
+            "source_location",
+            "line_start",
+            "line_end",
+            "_origin",
+            "confidence",
+        ] {
+            if !properties.iter().any(|(name, _)| name == key)
+                && let Some(value) = self.logical_property(key)
+            {
+                properties.push((key.to_owned(), value));
+            }
+        }
+        properties.sort_by(|left, right| left.0.cmp(&right.0));
+        properties.into_iter()
+    }
+}
+
+fn node_file_type(kind: &str) -> &'static str {
+    if matches!(
+        kind,
+        "resource" | "document" | "paper" | "image" | "concept" | "rationale"
+    ) {
+        return "document";
+    }
+    "code"
+}
+
+fn first_evidence_string(attributes: &Map<String, Value>, key: &str) -> Option<Value> {
+    attributes
+        .get("evidence")
+        .and_then(Value::as_array)
+        .and_then(|evidence| evidence.iter().find_map(Value::as_object))
+        .and_then(|evidence| evidence.get(key))
+        .and_then(Value::as_str)
+        .map(|value| Value::String(value.to_owned()))
+}
+
+fn effective_confidence(attributes: &Map<String, Value>) -> Option<Value> {
+    let mut best = attributes
+        .get("confidence")
+        .and_then(Value::as_str)
+        .map(normalize_confidence);
+    if let Some(evidence) = attributes.get("evidence").and_then(Value::as_array) {
+        for value in evidence
+            .iter()
+            .filter_map(Value::as_object)
+            .filter_map(|entry| entry.get("confidence").and_then(Value::as_str))
+        {
+            let candidate = normalize_confidence(value);
+            if best.is_none_or(|current| confidence_rank(candidate) > confidence_rank(current)) {
+                best = Some(candidate);
+            }
+        }
+    }
+    best.map(|value| Value::String(value.to_owned()))
+}
+
+fn normalize_confidence(value: &str) -> &'static str {
+    match value.to_ascii_lowercase().as_str() {
+        "ambiguous" => "AMBIGUOUS",
+        "inferred" => "INFERRED",
+        "unresolved" => "UNRESOLVED",
+        _ => "EXTRACTED",
+    }
+}
+
+fn confidence_rank(value: &str) -> u8 {
+    match value {
+        "AMBIGUOUS" => 3,
+        "UNRESOLVED" => 3,
+        "INFERRED" => 2,
+        _ => 1,
     }
 }
 
@@ -476,20 +711,27 @@ impl GraphDocument {
         (size > cap).then_some((size, cap))
     }
 
-    fn compact_for_affected(&self) -> Self {
+    pub(crate) fn compact_for_affected(&self) -> Self {
         let nodes = self
             .nodes
             .iter()
             .map(|node| {
-                let attributes = ["label", "source_file", "source_location"]
-                    .into_iter()
-                    .filter_map(|key| {
-                        node.attributes
-                            .get(key)
-                            .cloned()
-                            .map(|value| (key.to_owned(), value))
-                    })
-                    .collect();
+                let attributes = [
+                    "label",
+                    "name",
+                    "kind",
+                    "file_type",
+                    "source_file",
+                    "source_location",
+                    "line_start",
+                    "line_end",
+                ]
+                .into_iter()
+                .filter_map(|key| {
+                    node.logical_property(key)
+                        .map(|value| (key.to_owned(), value))
+                })
+                .collect();
                 NodeRecord {
                     id: node.id.clone(),
                     attributes,
@@ -500,12 +742,19 @@ impl GraphDocument {
             .links
             .iter()
             .map(|edge| {
-                let attributes = edge
-                    .attributes
-                    .get("relation")
-                    .cloned()
-                    .map(|value| [("relation".to_owned(), value)].into_iter().collect())
-                    .unwrap_or_default();
+                let attributes = [
+                    "relation",
+                    "source_file",
+                    "source_location",
+                    "line_start",
+                    "line_end",
+                ]
+                .into_iter()
+                .filter_map(|key| {
+                    edge.logical_property(key)
+                        .map(|value| (key.to_owned(), value))
+                })
+                .collect();
                 EdgeRecord {
                     source: edge.source.clone(),
                     target: edge.target.clone(),
@@ -525,7 +774,7 @@ impl GraphDocument {
 }
 
 const QUERY_CACHE_MAGIC: &[u8; 8] = b"TRAILG01";
-const AFFECTED_CACHE_MAGIC: &[u8; 8] = b"TRAILA01";
+const AFFECTED_CACHE_MAGIC: &[u8; 8] = b"TRAILA02";
 const TRAVERSAL_CACHE_MAGIC: &[u8; 8] = b"TRAILT03";
 const QUERY_CACHE_HEADER_LEN: usize = 28;
 static QUERY_CACHE_SEQUENCE: AtomicU64 = AtomicU64::new(0);

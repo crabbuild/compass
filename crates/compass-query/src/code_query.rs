@@ -662,9 +662,13 @@ impl CodeQueryEngine {
             &[EdgeKind::Calls]
         };
         let max_edges = usize::try_from(request.limits.max_edges).unwrap_or(usize::MAX);
-        let (selected_edges, truncated) = self
-            .backend
-            .matching_bounded(&seed, inbound, kinds, true, max_edges)?;
+        let (selected_edges, truncated) = self.backend.matching_bounded(
+            &seed,
+            inbound,
+            kinds,
+            request.include_heuristic,
+            max_edges,
+        )?;
         response.truncated |= truncated;
         let mut ids = HashSet::from([seed.clone()]);
         for edge in &selected_edges {
@@ -773,8 +777,13 @@ impl CodeQueryEngine {
                 break;
             }
             if let [source, target] = pair
-                && let (Some((nodes, edges)), truncated) =
-                    self.shortest_path(source, target, true, &request.limits, &mut budget)?
+                && let (Some((nodes, edges)), truncated) = self.shortest_path(
+                    source,
+                    target,
+                    request.include_heuristic,
+                    &request.limits,
+                    &mut budget,
+                )?
             {
                 response.truncated |= truncated;
                 ids.extend(nodes.iter().cloned());
