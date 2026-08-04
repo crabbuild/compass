@@ -82,6 +82,53 @@ class CorrectnessTests(unittest.TestCase):
             second = index_graph("compass", reordered, database)
         self.assertEqual(first.digest, second.digest)
 
+    def test_anchor_distinct_same_line_edges_are_retained(self) -> None:
+        database = self.database()
+        with tempfile.TemporaryDirectory() as directory:
+            graph = Path(directory) / "graph.json"
+            graph.write_text(
+                '{"graph":{"diagnostics":[]},"nodes":['
+                '{"id":"source","label":"run()","kind":"function",'
+                '"source_file":"main.py","source_location":"L1"},'
+                '{"id":"target","label":"target()","kind":"function",'
+                '"source_file":"main.py","source_location":"L1"}],"links":['
+                '{"source":"source","target":"target","relation":"calls",'
+                '"relationshipSite":{"file":"main.py","startLine":1,'
+                '"startByte":0,"endByte":8}},'
+                '{"source":"source","target":"target","relation":"calls",'
+                '"relationshipSite":{"file":"main.py","startLine":1,'
+                '"startByte":10,"endByte":18}}]}',
+                encoding="utf-8",
+            )
+            summary = index_graph("compass", graph, database)
+
+        self.assertEqual(summary.edges, 2)
+        self.assertEqual(
+            database.execute(
+                "SELECT occurrence_start_byte,occurrence_end_byte FROM edges "
+                "WHERE tool = 'compass' ORDER BY occurrence_start_byte"
+            ).fetchall(),
+            [(0, 8), (10, 18)],
+        )
+
+    def test_source_oracle_rejects_escaped_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "corpus"
+            outside = Path(directory) / "outside.py"
+            root.mkdir()
+            outside.write_text("target()\n", encoding="utf-8")
+            escaped = root / "escaped.py"
+            try:
+                escaped.symlink_to(outside)
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"symlinks unavailable: {error}")
+
+            inventory = independent_source_inventory(root, "python")
+
+        self.assertEqual(inventory.scanned_files, 0)
+        self.assertEqual(inventory.parsed_files, 0)
+        self.assertEqual(inventory.rejected_files, ("escaped.py",))
+
     def test_missing_shared_node_fails(self) -> None:
         database = self.database()
         with tempfile.TemporaryDirectory() as directory:

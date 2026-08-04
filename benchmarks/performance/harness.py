@@ -8,6 +8,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
+import multiprocessing
 import os
 from pathlib import Path
 import platform
@@ -304,22 +306,76 @@ def _merge_gates(*reports: GateReport) -> GateReport:
     return GateReport(not issues, issues, ratios)
 
 
+def _shared_graph_gate_child(
+    connection,
+    compass_graph: Path,
+    graphify_graph: Path,
+    source_root: Path,
+) -> None:
+    try:
+        database = sqlite3.connect(":memory:")
+        try:
+            index_graph("compass", compass_graph, database)
+            index_graph("graphify", graphify_graph, database)
+            comparison = compare_graphs(database, source_root)
+        finally:
+            database.close()
+        connection.send({"passed": comparison.passed, "failures": comparison.failures})
+    except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+        connection.send({"error": str(error)})
+    finally:
+        connection.close()
+
+
 def _shared_graph_gate(
     compass_graph: Path,
     graphify_graph: Path,
     repository: str,
     source_root: Path,
+    timeout_seconds: float,
 ) -> GateReport:
-    database = sqlite3.connect(":memory:")
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("graph comparison timeout must be finite and positive")
+    context = multiprocessing.get_context("spawn")
+    parent, child = context.Pipe(duplex=False)
+    process = context.Process(
+        target=_shared_graph_gate_child,
+        args=(child, compass_graph, graphify_graph, source_root),
+    )
+    process.start()
+    child.close()
     try:
-        index_graph("compass", compass_graph, database)
-        index_graph("graphify", graphify_graph, database)
-        comparison = compare_graphs(database, source_root)
+        if not parent.poll(timeout_seconds):
+            process.terminate()
+            process.join()
+            issues = (
+                GateIssue(
+                    "graph-comparison-timeout",
+                    repository,
+                    "cold",
+                    f"graph comparator exceeded {timeout_seconds:g}s",
+                ),
+            )
+            return GateReport(False, issues)
+        payload = parent.recv()
     finally:
-        database.close()
+        parent.close()
+        if process.is_alive():
+            process.terminate()
+        process.join()
+    if "error" in payload:
+        issues = (
+            GateIssue(
+                "graph-comparison-failure",
+                repository,
+                "cold",
+                str(payload["error"]),
+            ),
+        )
+        return GateReport(False, issues)
     issues = tuple(
         GateIssue("graph-quality", repository, "cold", failure)
-        for failure in comparison.failures
+        for failure in payload.get("failures", ())
     )
     return GateReport(not issues, issues)
 
@@ -427,6 +483,7 @@ def qualify(args: argparse.Namespace, *, comparison: bool) -> int:
                         graphify_graph,
                         repository.name,
                         checkout,
+                        args.graph_comparison_timeout,
                     )
                 )
     tools = (compass.revision,) if graphify is None else (compass.revision, graphify.revision)
@@ -530,6 +587,7 @@ def _common(parser: argparse.ArgumentParser, *, execution: bool = False) -> None
         parser.add_argument("--build-repeats", type=int, default=3)
         parser.add_argument("--query-batches", type=int, default=10)
         parser.add_argument("--build-timeout", type=float, default=1800)
+        parser.add_argument("--graph-comparison-timeout", type=float, default=600)
         parser.add_argument("--query-timeout", type=float, default=120)
         parser.add_argument("--baseline", type=Path)
         parser.add_argument(
