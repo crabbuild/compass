@@ -1216,13 +1216,19 @@ fn build_graph_inner(
     profile_internal("declaration merge", &mut internal_started);
     let read_source = |path: &PathBuf| read_source_text_with_limit(path, options.max_source_bytes);
     let read_cached_source = |path: &PathBuf| {
-        (!fresh_paths.contains(path))
-            .then(|| read_source(path))
-            .flatten()
+        if fresh_paths.contains(path) {
+            None
+        } else if needs_resolver_source_text {
+            read_source(path)
+        } else {
+            // Cross-file resolution uses the keys as the complete language
+            // inventory even when a language does not need decoded source
+            // text. Preserve that inventory across partial and fully cached
+            // rebuilds without retaining duplicate source contents.
+            Some((path.to_string_lossy().into_owned(), String::new()))
+        }
     };
-    let cached_source_text: HashMap<_, _> = if !needs_resolver_source_text {
-        HashMap::new()
-    } else if sources.len() < 256 {
+    let cached_source_text: HashMap<_, _> = if sources.len() < 256 {
         sources.iter().filter_map(read_cached_source).collect()
     } else if let Some(pool) = &worker_pool {
         pool.install(|| sources.par_iter().filter_map(read_cached_source).collect())

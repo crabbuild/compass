@@ -424,8 +424,6 @@ impl<'a, S: Store + ?Sized> ObjectWriter<'a, S> {
     }
 }
 
-type SnapshotIndexes = BTreeMap<IndexKind, BTreeMap<Vec<u8>, Vec<u8>>>;
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MetadataRecord {
@@ -521,21 +519,22 @@ impl GraphSnapshotBuilder {
     ) -> Result<PreparedGraphSnapshotContent, SnapshotError> {
         validate_code_graph(canonical)
             .map_err(|error| SnapshotError::Corrupt(format!("graph validation failed: {error}")))?;
-        let (snapshot_id, indexes) =
-            rayon::join(|| snapshot_identity(canonical), || build_indexes(canonical));
-        let snapshot_id = snapshot_id?;
-        let indexes = indexes?;
+        let snapshot_id = snapshot_identity(canonical)?;
         let mut writer = ObjectWriter::new(store)?;
         let mut roots = Vec::with_capacity(IndexKind::ALL.len());
         for index in IndexKind::ALL {
-            let entries = indexes.get(&index).ok_or_else(|| {
-                SnapshotError::Corrupt(format!("missing {} index", index.as_str()))
-            })?;
+            // Keep only one encoded index in memory at a time. The previous
+            // implementation retained all node, edge, and secondary-index
+            // values until every tree had been written, making publication
+            // peak several times larger than the canonical graph artifact.
+            let term_postings = (index == IndexKind::Terms).then(|| build_term_postings(canonical));
+            let entries = build_index(canonical, index, term_postings.as_ref())?;
+            let entry_count = entries.len() as u64;
             let digest = build_index_tree(&mut writer, index, entries)?;
             roots.push(SnapshotRoot {
                 index,
                 digest,
-                entry_count: entries.len() as u64,
+                entry_count,
             });
         }
         let stats = writer.finish()?;
@@ -565,7 +564,7 @@ impl GraphSnapshotBuilder {
         let reader = GraphSnapshotReader::open_active(store)?.ok_or_else(|| {
             SnapshotError::Unsupported("file-node delta requires an active snapshot".to_owned())
         })?;
-        let (previous_snapshot_id, _) = digest_canonical_graph(previous, true)?;
+        let previous_snapshot_id = snapshot_identity(previous)?;
         if reader.selector().snapshot_id != previous_snapshot_id
             || reader.manifest().node_count != previous.nodes.len() as u64
             || reader.manifest().edge_count != previous.links.len() as u64
@@ -599,12 +598,14 @@ impl GraphSnapshotBuilder {
         }
 
         let mut writer = ObjectWriter::new(store)?;
-        let metadata_entries = build_metadata_index(current)?;
+        let metadata_entries = build_index(current, IndexKind::Metadata, None)?;
+        let metadata_entry_count = metadata_entries.len() as u64;
+        let metadata_digest = build_index_tree(&mut writer, IndexKind::Metadata, metadata_entries)?;
         let mut roots = reader.manifest().roots.clone();
         for root in &mut roots {
             if root.index == IndexKind::Metadata {
-                root.entry_count = metadata_entries.len() as u64;
-                root.digest = build_index_tree(&mut writer, root.index, &metadata_entries)?;
+                root.entry_count = metadata_entry_count;
+                root.digest = metadata_digest.clone();
             } else if root.index == IndexKind::Nodes {
                 root.digest = update_index_tree(
                     store,
@@ -617,9 +618,8 @@ impl GraphSnapshotBuilder {
             }
         }
         let stats = writer.finish()?;
-        let (snapshot_id, _) = digest_canonical_graph(current, true)?;
         Ok(PreparedGraphSnapshotContent {
-            snapshot_id,
+            snapshot_id: snapshot_identity(current)?,
             node_count: current.nodes.len() as u64,
             edge_count: current.links.len() as u64,
             roots,
@@ -728,7 +728,12 @@ pub fn canonical_graph_document_presorted(graph: &GraphDocument) -> CanonicalGra
     }
 }
 
-const CANONICAL_RECORD_CHUNK: usize = 16_384;
+// Keep enough independent work for modest real-repository graphs while
+// bounding each temporary JSON buffer. At 16K records, a 10K-node/27K-edge
+// graph exposed only three serialization tasks and retained multi-megabyte
+// chunks; 8K preserves amortized encoding while allowing the in-flight bound
+// to control both parallelism and peak memory.
+const CANONICAL_RECORD_CHUNK: usize = 8_192;
 const CANONICAL_RECORD_IN_FLIGHT: usize = 4;
 
 /// Stream the canonical graph JSON while serializing record chunks in
@@ -1550,6 +1555,63 @@ pub fn encode_graph_index_key(
     encode_key_segments(&all).map_err(SnapshotError::from)
 }
 
+/// Keep normal names ordered and readable while giving graph-valid, deeply
+/// qualified names a deterministic portable representation. The extra marker
+/// segment prevents a digest key from colliding with the raw two-segment form.
+fn encode_name_index_key(name: &str, node_id: &str) -> Result<Vec<u8>, SnapshotError> {
+    let name = normalize_symbol(name);
+    if name.is_empty() {
+        return encode_graph_index_key(IndexKind::Names, &[b"empty", node_id.as_bytes()]);
+    }
+    match encode_graph_index_key(
+        IndexKind::Names,
+        &[b"value", name.as_bytes(), node_id.as_bytes()],
+    ) {
+        Ok(key) => Ok(key),
+        Err(SnapshotError::Store(StoreError::ComponentTooLarge { .. })) => {
+            let digest = hex_digest(name.as_bytes());
+            encode_graph_index_key(
+                IndexKind::Names,
+                &[b"sha256", digest.as_bytes(), node_id.as_bytes()],
+            )
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn encode_name_prefix(name: &str) -> Result<Vec<u8>, SnapshotError> {
+    if name.is_empty() {
+        return encode_graph_index_key(IndexKind::Names, &[b"empty"]);
+    }
+    match encode_graph_index_key(IndexKind::Names, &[b"value", name.as_bytes()]) {
+        Ok(key) => Ok(key),
+        Err(SnapshotError::Store(StoreError::ComponentTooLarge { .. })) => {
+            let digest = hex_digest(name.as_bytes());
+            encode_graph_index_key(IndexKind::Names, &[b"sha256", digest.as_bytes()])
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn encode_file_path_key(path: &str) -> Result<Vec<u8>, SnapshotError> {
+    match encode_graph_index_key(IndexKind::Files, &[b"path", path.as_bytes()]) {
+        Ok(key) => Ok(key),
+        Err(SnapshotError::Store(StoreError::ComponentTooLarge { .. })) => {
+            let digest = hex_digest(path.as_bytes());
+            encode_graph_index_key(IndexKind::Files, &[b"path-sha256", digest.as_bytes()])
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn normalize_symbol(value: &str) -> String {
+    value
+        .trim()
+        .trim_end_matches("()")
+        .trim_start_matches('.')
+        .to_lowercase()
+}
+
 fn snapshot_identity(graph: &GraphDocument) -> Result<String, SnapshotError> {
     digest_canonical_graph(graph, true).map(|(digest, _)| digest)
 }
@@ -1592,13 +1654,7 @@ fn canonical_graph_document_with_generation(
     }
 }
 
-fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError> {
-    let mut indexes = IndexKind::ALL
-        .into_iter()
-        .map(|index| (index, BTreeMap::new()))
-        .collect::<BTreeMap<_, _>>();
-    indexes.insert(IndexKind::Metadata, build_metadata_index(graph)?);
-
+fn build_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
     let node_by_id = graph
         .nodes
         .iter()
@@ -1618,26 +1674,6 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
 
     let mut term_postings = BTreeMap::<String, Vec<String>>::new();
     for node in &graph.nodes {
-        insert_json(
-            &mut indexes,
-            IndexKind::Nodes,
-            encode_graph_index_key(IndexKind::Nodes, &[node.id.as_bytes()])?,
-            node,
-        )?;
-        insert_json(
-            &mut indexes,
-            IndexKind::Names,
-            encode_name_index_key(&node.name, &node.id)?,
-            &(),
-        )?;
-        if node.qualified_name != node.name {
-            insert_json(
-                &mut indexes,
-                IndexKind::Names,
-                encode_name_index_key(&node.qualified_name, &node.id)?,
-                &(),
-            )?;
-        }
         let mut terms = BTreeSet::new();
         terms.extend(search_terms(&node.name));
         terms.extend(search_terms(&node.qualified_name));
@@ -1676,145 +1712,198 @@ fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError
         for term in terms {
             term_postings.entry(term).or_default().push(node.id.clone());
         }
-        if let Some(community) = &node.community {
-            let community_id = community.id.to_string();
-            insert_json(
-                &mut indexes,
-                IndexKind::Communities,
-                encode_graph_index_key(
-                    IndexKind::Communities,
-                    &[community_id.as_bytes(), node.id.as_bytes()],
-                )?,
-                &node.id,
-            )?;
-        }
     }
-    for (term, mut node_ids) in term_postings {
+    for node_ids in term_postings.values_mut() {
         node_ids.sort();
         node_ids.dedup();
-        let prefix_length = term.len().min(3);
-        let prefix = term.get(..prefix_length).unwrap_or(term.as_str());
-        for (chunk_index, chunk) in node_ids.chunks(TERM_POSTING_CHUNK_ITEMS).enumerate() {
-            let chunk_index = format!("{chunk_index:08}");
-            insert_json(
-                &mut indexes,
-                IndexKind::Terms,
-                encode_graph_index_key(
-                    IndexKind::Terms,
-                    &[
-                        prefix.as_bytes(),
-                        b"node_prefix",
-                        term.as_bytes(),
-                        chunk_index.as_bytes(),
-                    ],
-                )?,
-                &TermPostingChunk {
-                    term: term.clone(),
-                    node_ids: chunk.to_vec(),
-                },
-            )?;
-        }
     }
-    for file in &graph.graph.files {
-        insert_json(
-            &mut indexes,
-            IndexKind::Files,
-            encode_file_path_key(&file.path)?,
-            &file.id,
-        )?;
-    }
-    for edge in &graph.links {
-        insert_json(
-            &mut indexes,
-            IndexKind::Edges,
-            encode_graph_index_key(IndexKind::Edges, &[edge.id.as_bytes()])?,
-            edge,
-        )?;
-        let kind = edge.kind.as_str().as_bytes();
-        insert_json(
-            &mut indexes,
-            IndexKind::Outgoing,
-            encode_graph_index_key(
-                IndexKind::Outgoing,
-                &[
-                    edge.source.as_bytes(),
-                    kind,
-                    edge.target.as_bytes(),
-                    edge.id.as_bytes(),
-                ],
-            )?,
-            &(),
-        )?;
-        insert_json(
-            &mut indexes,
-            IndexKind::Incoming,
-            encode_graph_index_key(
-                IndexKind::Incoming,
-                &[
-                    edge.target.as_bytes(),
-                    kind,
-                    edge.source.as_bytes(),
-                    edge.id.as_bytes(),
-                ],
-            )?,
-            &(),
-        )?;
-    }
-    Ok(indexes)
+    term_postings
 }
 
-fn build_metadata_index(
+fn build_index(
     graph: &GraphDocument,
+    index: IndexKind,
+    term_postings: Option<&BTreeMap<String, Vec<String>>>,
 ) -> Result<BTreeMap<Vec<u8>, Vec<u8>>, SnapshotError> {
-    let mut metadata = BTreeMap::new();
-    let mut metadata_graph = graph.graph.clone();
-    metadata_graph.files.clear();
-    metadata_graph.coverage.clear();
-    metadata_graph.diagnostics.clear();
-    metadata.insert(
-        encode_graph_index_key(IndexKind::Metadata, &[])?,
-        encode_json(&MetadataRecord {
-            directed: graph.directed,
-            multigraph: graph.multigraph,
-            graph: metadata_graph,
-        })?,
-    );
-    for file in &graph.graph.files {
-        metadata.insert(
-            encode_graph_index_key(IndexKind::Metadata, &[b"file", file.id.as_bytes()])?,
-            encode_json(file)?,
-        );
-    }
-    for (ordinal, coverage) in graph.graph.coverage.iter().enumerate() {
-        let ordinal = format!("{ordinal:08}");
-        metadata.insert(
-            encode_graph_index_key(IndexKind::Metadata, &[b"coverage", ordinal.as_bytes()])?,
-            encode_json(coverage)?,
-        );
-    }
-    for (ordinal, diagnostic) in graph.graph.diagnostics.iter().enumerate() {
-        let ordinal = format!("{ordinal:08}");
-        metadata.insert(
-            encode_graph_index_key(
-                IndexKind::Metadata,
-                &[
-                    b"diagnostic",
-                    ordinal.as_bytes(),
-                    diagnostic.code.as_bytes(),
-                ],
-            )?,
-            encode_json(diagnostic)?,
-        );
-        if diagnostic.code == "publication_omission_summary" {
-            metadata
-                .entry(encode_graph_index_key(
-                    IndexKind::Metadata,
-                    &[b"diagnostic-code", diagnostic.code.as_bytes()],
-                )?)
-                .or_insert(encode_json(diagnostic)?);
+    let mut entries = BTreeMap::new();
+    match index {
+        IndexKind::Metadata => {
+            let mut metadata_graph = graph.graph.clone();
+            metadata_graph.files.clear();
+            metadata_graph.coverage.clear();
+            metadata_graph.diagnostics.clear();
+            let metadata = MetadataRecord {
+                directed: graph.directed,
+                multigraph: graph.multigraph,
+                graph: metadata_graph,
+            };
+            insert_json(
+                &mut entries,
+                encode_graph_index_key(IndexKind::Metadata, &[])?,
+                &metadata,
+            )?;
+            for file in &graph.graph.files {
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(IndexKind::Metadata, &[b"file", file.id.as_bytes()])?,
+                    file,
+                )?;
+            }
+            for (ordinal, coverage) in graph.graph.coverage.iter().enumerate() {
+                let ordinal = format!("{ordinal:08}");
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(
+                        IndexKind::Metadata,
+                        &[b"coverage", ordinal.as_bytes()],
+                    )?,
+                    coverage,
+                )?;
+            }
+            for (ordinal, diagnostic) in graph.graph.diagnostics.iter().enumerate() {
+                let ordinal = format!("{ordinal:08}");
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(
+                        IndexKind::Metadata,
+                        &[
+                            b"diagnostic",
+                            ordinal.as_bytes(),
+                            diagnostic.code.as_bytes(),
+                        ],
+                    )?,
+                    diagnostic,
+                )?;
+                if diagnostic.code == "publication_omission_summary" {
+                    let key = encode_graph_index_key(
+                        IndexKind::Metadata,
+                        &[b"diagnostic-code", diagnostic.code.as_bytes()],
+                    )?;
+                    let value = encode_json(diagnostic)?;
+                    entries.entry(key).or_insert(value);
+                }
+            }
         }
+        IndexKind::Nodes => {
+            for node in &graph.nodes {
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(IndexKind::Nodes, &[node.id.as_bytes()])?,
+                    node,
+                )?;
+            }
+        }
+        IndexKind::Names => {
+            for node in &graph.nodes {
+                insert_json(
+                    &mut entries,
+                    encode_name_index_key(&node.name, &node.id)?,
+                    &(),
+                )?;
+                if node.qualified_name != node.name {
+                    insert_json(
+                        &mut entries,
+                        encode_name_index_key(&node.qualified_name, &node.id)?,
+                        &(),
+                    )?;
+                }
+            }
+        }
+        IndexKind::Terms => {
+            let term_postings = term_postings
+                .ok_or_else(|| SnapshotError::Corrupt("term postings are missing".to_owned()))?;
+            for (term, node_ids) in term_postings {
+                let prefix_length = term.len().min(3);
+                let prefix = term.get(..prefix_length).unwrap_or(term.as_str());
+                for (chunk_index, chunk) in node_ids.chunks(TERM_POSTING_CHUNK_ITEMS).enumerate() {
+                    let chunk_index = format!("{chunk_index:08}");
+                    insert_json(
+                        &mut entries,
+                        encode_graph_index_key(
+                            IndexKind::Terms,
+                            &[
+                                prefix.as_bytes(),
+                                b"node_prefix",
+                                term.as_bytes(),
+                                chunk_index.as_bytes(),
+                            ],
+                        )?,
+                        &TermPostingChunk {
+                            term: term.clone(),
+                            node_ids: chunk.to_vec(),
+                        },
+                    )?;
+                }
+            }
+        }
+        IndexKind::Communities => {
+            for node in &graph.nodes {
+                if let Some(community) = &node.community {
+                    let community_id = community.id.to_string();
+                    insert_json(
+                        &mut entries,
+                        encode_graph_index_key(
+                            IndexKind::Communities,
+                            &[community_id.as_bytes(), node.id.as_bytes()],
+                        )?,
+                        &node.id,
+                    )?;
+                }
+            }
+        }
+        IndexKind::Files => {
+            for file in &graph.graph.files {
+                insert_json(&mut entries, encode_file_path_key(&file.path)?, &file.id)?;
+            }
+        }
+        IndexKind::Edges => {
+            for edge in &graph.links {
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(IndexKind::Edges, &[edge.id.as_bytes()])?,
+                    edge,
+                )?;
+            }
+        }
+        IndexKind::Outgoing => {
+            for edge in &graph.links {
+                let kind = edge.kind.as_str().as_bytes();
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(
+                        IndexKind::Outgoing,
+                        &[
+                            edge.source.as_bytes(),
+                            kind,
+                            edge.target.as_bytes(),
+                            edge.id.as_bytes(),
+                        ],
+                    )?,
+                    &(),
+                )?;
+            }
+        }
+        IndexKind::Incoming => {
+            for edge in &graph.links {
+                let kind = edge.kind.as_str().as_bytes();
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(
+                        IndexKind::Incoming,
+                        &[
+                            edge.target.as_bytes(),
+                            kind,
+                            edge.source.as_bytes(),
+                            edge.id.as_bytes(),
+                        ],
+                    )?,
+                    &(),
+                )?;
+            }
+        }
+        IndexKind::Diagnostics => {}
     }
-    Ok(metadata)
+    Ok(entries)
 }
 
 fn validate_file_node_delta(
@@ -1961,7 +2050,7 @@ fn update_index_tree<S: Store + ?Sized>(
                     }
                 }
             }
-            build_index_tree(writer, index, &values)
+            build_index_tree(writer, index, values)
         }
         TreeObject::Branch { children, .. } => {
             let mut changed = false;
@@ -2014,79 +2103,17 @@ fn update_index_tree<S: Store + ?Sized>(
     }
 }
 
-/// Keep normal names ordered and readable while giving graph-valid, deeply
-/// qualified names a deterministic portable representation. The extra marker
-/// segment prevents a digest key from colliding with the raw two-segment form.
-fn encode_name_index_key(name: &str, node_id: &str) -> Result<Vec<u8>, SnapshotError> {
-    let name = normalize_symbol(name);
-    if name.is_empty() {
-        return encode_graph_index_key(IndexKind::Names, &[b"empty", node_id.as_bytes()]);
-    }
-    match encode_graph_index_key(
-        IndexKind::Names,
-        &[b"value", name.as_bytes(), node_id.as_bytes()],
-    ) {
-        Ok(key) => Ok(key),
-        Err(SnapshotError::Store(StoreError::ComponentTooLarge { .. })) => {
-            let digest = hex_digest(name.as_bytes());
-            encode_graph_index_key(
-                IndexKind::Names,
-                &[b"sha256", digest.as_bytes(), node_id.as_bytes()],
-            )
-        }
-        Err(error) => Err(error),
-    }
-}
-
-fn encode_name_prefix(name: &str) -> Result<Vec<u8>, SnapshotError> {
-    if name.is_empty() {
-        return encode_graph_index_key(IndexKind::Names, &[b"empty"]);
-    }
-    match encode_graph_index_key(IndexKind::Names, &[b"value", name.as_bytes()]) {
-        Ok(key) => Ok(key),
-        Err(SnapshotError::Store(StoreError::ComponentTooLarge { .. })) => {
-            let digest = hex_digest(name.as_bytes());
-            encode_graph_index_key(IndexKind::Names, &[b"sha256", digest.as_bytes()])
-        }
-        Err(error) => Err(error),
-    }
-}
-
-fn encode_file_path_key(path: &str) -> Result<Vec<u8>, SnapshotError> {
-    match encode_graph_index_key(IndexKind::Files, &[b"path", path.as_bytes()]) {
-        Ok(key) => Ok(key),
-        Err(SnapshotError::Store(StoreError::ComponentTooLarge { .. })) => {
-            let digest = hex_digest(path.as_bytes());
-            encode_graph_index_key(IndexKind::Files, &[b"path-sha256", digest.as_bytes()])
-        }
-        Err(error) => Err(error),
-    }
-}
-
-fn normalize_symbol(value: &str) -> String {
-    value
-        .trim()
-        .trim_end_matches("()")
-        .trim_start_matches('.')
-        .to_lowercase()
-}
-
 fn insert_json<T: Serialize>(
-    indexes: &mut SnapshotIndexes,
-    index: IndexKind,
+    entries: &mut BTreeMap<Vec<u8>, Vec<u8>>,
     key: Vec<u8>,
     value: &T,
 ) -> Result<(), SnapshotError> {
     let value = encode_json(value)?;
-    let entries = indexes
-        .get_mut(&index)
-        .ok_or_else(|| SnapshotError::Corrupt(format!("{} index is missing", index.as_str())))?;
     if let Some(previous) = entries.get(&key) {
         if previous != &value {
-            return Err(SnapshotError::Corrupt(format!(
-                "duplicate {} index key with different values",
-                index.as_str()
-            )));
+            return Err(SnapshotError::Corrupt(
+                "duplicate index key with different values".to_owned(),
+            ));
         }
         return Ok(());
     }
@@ -2097,15 +2124,12 @@ fn insert_json<T: Serialize>(
 fn build_index_tree<S: Store + ?Sized>(
     writer: &mut ObjectWriter<'_, S>,
     index: IndexKind,
-    entries: &BTreeMap<Vec<u8>, Vec<u8>>,
+    entries: BTreeMap<Vec<u8>, Vec<u8>>,
 ) -> Result<String, SnapshotError> {
     let mut leaves = Vec::new();
     let mut current = Vec::with_capacity(GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES);
     for (key, value) in entries {
-        current.push(TreeEntry {
-            key: key.clone(),
-            value: value.clone(),
-        });
+        current.push(TreeEntry { key, value });
         if current.len() == GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES {
             put_leaf_entries(writer, index, std::mem::take(&mut current), &mut leaves)?;
         }
