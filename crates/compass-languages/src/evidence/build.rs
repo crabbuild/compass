@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 use tree_sitter::Node;
@@ -562,6 +562,12 @@ struct RustImplContext {
     owner_declaration_id: Option<String>,
 }
 
+#[derive(Clone)]
+struct RustValueTypeVersion {
+    raw: Option<String>,
+    active_from: usize,
+}
+
 struct DirectAdapterState<'source> {
     path: &'source Path,
     source_file: &'source str,
@@ -584,6 +590,8 @@ struct DirectAdapterState<'source> {
     rust_impls: HashMap<usize, RustImplContext>,
     rust_types_by_qualified_name: HashMap<String, DeclarationContext>,
     rust_types_by_name: HashMap<String, Vec<DeclarationContext>>,
+    rust_field_types: HashMap<String, HashMap<String, String>>,
+    rust_value_types: HashMap<String, HashMap<String, Vec<RustValueTypeVersion>>>,
     rust_import_nodes: HashSet<usize>,
     rust_test_declarations: HashSet<String>,
     go_lexical_bindings: HashMap<usize, Vec<GoLexicalBinding>>,
@@ -650,6 +658,8 @@ impl<'source> DirectAdapterState<'source> {
             rust_impls: HashMap::new(),
             rust_types_by_qualified_name: HashMap::new(),
             rust_types_by_name: HashMap::new(),
+            rust_field_types: HashMap::new(),
+            rust_value_types: HashMap::new(),
             rust_import_nodes: HashSet::new(),
             rust_test_declarations: HashSet::new(),
             go_lexical_bindings: HashMap::new(),
@@ -2771,6 +2781,7 @@ impl<'source> DirectAdapterState<'source> {
                 .map(|implementation| implementation.type_qualified_name.clone())
                 .or_else(|| owner.enclosing_type_qualified_name.clone()),
         };
+        self.collect_rust_value_types(node, &context);
         if let Some(implementation) = active_impl {
             if let Some(type_owner) = implementation
                 .owner_declaration_id
@@ -2891,6 +2902,201 @@ impl<'source> DirectAdapterState<'source> {
             })
     }
 
+    fn record_rust_value_type(
+        &mut self,
+        scope_id: &str,
+        name: &str,
+        raw: Option<String>,
+        active_from: usize,
+    ) {
+        if name.is_empty() || name == "_" || name == "self" {
+            return;
+        }
+        self.rust_value_types
+            .entry(scope_id.to_owned())
+            .or_default()
+            .entry(name.to_owned())
+            .or_default()
+            .push(RustValueTypeVersion { raw, active_from });
+    }
+
+    fn rust_value_type_for<'a>(
+        &'a self,
+        owner: &DeclarationContext,
+        name: &str,
+        use_start: usize,
+        use_node: Option<Node<'_>>,
+    ) -> Option<&'a str> {
+        let mut node = use_node;
+        while let Some(current) = node {
+            if rust_is_lexical_scope_node(current.kind()) {
+                let scope_id = format!("rust-lexical:{}", current.id());
+                if let Some(raw) = self.rust_value_type_in_scope(&scope_id, name, use_start) {
+                    return Some(raw);
+                }
+            }
+            node = current.parent();
+        }
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let current = scope_id?;
+            if let Some(raw) = self.rust_value_type_in_scope(current, name, use_start) {
+                return Some(raw);
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        None
+    }
+
+    fn rust_value_type_in_scope<'a>(
+        &'a self,
+        scope_id: &str,
+        name: &str,
+        use_start: usize,
+    ) -> Option<&'a str> {
+        self.rust_value_types
+            .get(scope_id)
+            .and_then(|values| values.get(name))
+            .and_then(|versions| {
+                versions
+                    .iter()
+                    .filter(|version| version.active_from <= use_start)
+                    .max_by_key(|version| version.active_from)
+            })
+            .and_then(|version| version.raw.as_deref())
+    }
+
+    fn ensure_rust_lexical_scope(&mut self, node: Node<'_>, parent: &str) -> String {
+        let scope_id = format!("rust-lexical:{}", node.id());
+        self.scope_parents
+            .entry(scope_id.clone())
+            .or_insert_with(|| parent.to_owned());
+        scope_id
+    }
+
+    fn rust_field_receiver_type(
+        &self,
+        owner: &DeclarationContext,
+        qualifier: &str,
+        use_start: usize,
+        use_node: Node<'_>,
+    ) -> Option<String> {
+        let mut fields = qualifier.split('.');
+        let first = fields.next()?.trim();
+        let mut current = if first == "self" {
+            rust_callable_owner(owner)?.to_owned()
+        } else {
+            let raw = self.rust_value_type_for(owner, first, use_start, Some(use_node))?;
+            let nominal = rust_nominal_type_path(raw)?;
+            rust_qualify_evidence_path(self, owner, &nominal, use_start)?
+        };
+        for field in fields.map(str::trim).filter(|field| !field.is_empty()) {
+            let raw = self.rust_field_types.get(&current)?.get(field)?;
+            let nominal = rust_nominal_type_path(raw)?;
+            current = rust_qualify_evidence_path(self, owner, &nominal, use_start)?;
+        }
+        Some(current)
+    }
+
+    fn collect_rust_parameter_value_types(&mut self, parameters: Node<'_>, scope_id: &str) {
+        let mut cursor = parameters.walk();
+        for parameter in parameters
+            .children(&mut cursor)
+            .filter(|child| child.is_named())
+        {
+            let Some(pattern) = parameter.child_by_field_name("pattern") else {
+                continue;
+            };
+            let raw = parameter
+                .child_by_field_name("type")
+                .map(|type_node| self.text(type_node));
+            let mut names = Vec::new();
+            collect_rust_pattern_names(pattern, &mut names, self.source);
+            for name in names {
+                self.record_rust_value_type(scope_id, &name, raw.clone(), parameter.start_byte());
+            }
+        }
+    }
+
+    fn collect_rust_value_types(&mut self, callable: Node<'_>, owner: &DeclarationContext) {
+        let scope_id = owner.scope_id.clone();
+        if let Some(parameters) = callable.child_by_field_name("parameters") {
+            self.collect_rust_parameter_value_types(parameters, &scope_id);
+        }
+        let Some(body) = callable.child_by_field_name("body") else {
+            return;
+        };
+        self.collect_rust_value_types_in_body(body, owner, &scope_id, true);
+    }
+
+    fn collect_rust_value_types_in_body(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        parent_scope: &str,
+        root: bool,
+    ) {
+        if matches!(node.kind(), "function_item" | "function_signature_item") {
+            return;
+        }
+        let scope_id = if !root && rust_is_lexical_scope_node(node.kind()) {
+            self.ensure_rust_lexical_scope(node, parent_scope)
+        } else {
+            parent_scope.to_owned()
+        };
+        if node.kind() == "closure_expression"
+            && let Some(parameters) = node.child_by_field_name("parameters")
+        {
+            self.collect_rust_parameter_value_types(parameters, &scope_id);
+        }
+        if node.kind() == "let_declaration"
+            && let Some(pattern) = node.child_by_field_name("pattern")
+        {
+            let raw = node
+                .child_by_field_name("type")
+                .map(|type_node| self.text(type_node))
+                .or_else(|| {
+                    node.child_by_field_name("value")
+                        .and_then(|value| self.rust_inferred_value_type(value, owner))
+                });
+            let mut names = Vec::new();
+            collect_rust_pattern_names(pattern, &mut names, self.source);
+            for name in names {
+                self.record_rust_value_type(&scope_id, &name, raw.clone(), pattern.start_byte());
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_rust_value_types_in_body(child, owner, &scope_id, false);
+        }
+    }
+
+    fn rust_inferred_value_type(
+        &self,
+        value: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Option<String> {
+        match value.kind() {
+            "call_expression" => {
+                let function = value.child_by_field_name("function")?;
+                let function = if function.kind() == "generic_function" {
+                    function.child_by_field_name("function").unwrap_or(function)
+                } else {
+                    function
+                };
+                let raw = self.text(function);
+                split_qualified(&raw).0.map(str::to_owned)
+            }
+            "struct_expression" => value
+                .child_by_field_name("name")
+                .map(|name| self.text(name)),
+            "identifier" => self
+                .rust_value_type_for(owner, &self.text(value), value.start_byte(), Some(value))
+                .map(str::to_owned),
+            _ => None,
+        }
+    }
+
     fn rust_enclosing_module(&self, owner: &DeclarationContext) -> String {
         if matches!(owner.kind.as_str(), "file" | "module") {
             return owner.qualified_name.clone();
@@ -2921,6 +3127,20 @@ impl<'source> DirectAdapterState<'source> {
         canonical.replacen(first, mapped, 1)
     }
 
+    /// Resolve a path rooted at a local module before treating it as an
+    /// external crate path. Rust 2018 permits `pub use api::Thing` at the
+    /// crate root; the parser gives us no `crate::` prefix, but the container
+    /// inventory already proves that `api` is local.
+    fn rust_import_target(&self, owner: &DeclarationContext, raw: &str) -> String {
+        let (qualifier, spelling) = split_qualified(raw);
+        if let Some(qualifier) = qualifier
+            && let Some(target) = self.local_target_for(owner, qualified_binding_head(qualifier))
+        {
+            return rust_join_qualified(target, spelling);
+        }
+        self.rust_canonical_import_target(&self.rust_enclosing_module(owner), raw)
+    }
+
     fn add_rust_struct_fields(
         &mut self,
         node: Node<'_>,
@@ -2933,13 +3153,41 @@ impl<'source> DirectAdapterState<'source> {
         let mut tuple_index = 0usize;
         for field in body.children(&mut cursor).filter(|child| child.is_named()) {
             if field.kind() == "field_declaration" {
+                self.record_rust_field_type(field, owner, None);
                 self.add_rust_field(field, owner, None)?;
             } else if rust_is_type_node(field.kind()) {
+                self.record_rust_field_type(field, owner, Some(tuple_index));
                 self.add_rust_field(field, owner, Some(tuple_index))?;
                 tuple_index = tuple_index.saturating_add(1);
             }
         }
         Ok(())
+    }
+
+    fn record_rust_field_type(
+        &mut self,
+        field: Node<'_>,
+        owner: &DeclarationContext,
+        tuple_index: Option<usize>,
+    ) {
+        let name = field
+            .child_by_field_name("name")
+            .map(|node| self.text(node))
+            .unwrap_or_else(|| tuple_index.unwrap_or_default().to_string());
+        let type_node = field
+            .child_by_field_name("type")
+            .or_else(|| (field.kind() != "field_declaration").then_some(field));
+        let Some(type_node) = type_node else {
+            return;
+        };
+        let raw = self.text(type_node);
+        if name.is_empty() || raw.is_empty() {
+            return;
+        }
+        self.rust_field_types
+            .entry(owner.qualified_name.clone())
+            .or_default()
+            .insert(name, raw);
     }
 
     fn add_rust_enum_members(
@@ -3077,8 +3325,7 @@ impl<'source> DirectAdapterState<'source> {
         let mut flattened = Vec::new();
         expand_rust_use_tree(&raw, "", &mut flattened);
         for (raw_target, alias, glob) in flattened {
-            let target =
-                self.rust_canonical_import_target(&self.rust_enclosing_module(owner), &raw_target);
+            let target = self.rust_import_target(owner, &raw_target);
             if target.is_empty() {
                 continue;
             }
@@ -3295,7 +3542,7 @@ impl<'source> DirectAdapterState<'source> {
             .flatten()
             .cloned();
         let qualified_name = self
-            .rust_call_qualified_name(owner, qualifier, spelling)
+            .rust_call_qualified_name(owner, qualifier, spelling, function.start_byte(), function)
             .or_else(|| {
                 wildcard_binding.is_some().then(|| {
                     qualifier.map_or_else(
@@ -3363,6 +3610,8 @@ impl<'source> DirectAdapterState<'source> {
         owner: &DeclarationContext,
         qualifier: Option<&str>,
         spelling: &str,
+        use_start: usize,
+        use_node: Node<'_>,
     ) -> Option<String> {
         let Some(qualifier) = qualifier else {
             return self
@@ -3373,6 +3622,22 @@ impl<'source> DirectAdapterState<'source> {
             && let Some(enclosing) = rust_callable_owner(owner)
         {
             return Some(rust_join_qualified(enclosing, spelling));
+        }
+        if let Some(receiver_type) =
+            self.rust_field_receiver_type(owner, qualifier, use_start, use_node)
+        {
+            return Some(rust_join_qualified(&receiver_type, spelling));
+        }
+        if let Some(raw_type) = self.rust_value_type_for(
+            owner,
+            qualified_binding_head(qualifier),
+            use_start,
+            Some(use_node),
+        ) && let Some(nominal_type) = rust_nominal_type_path(raw_type)
+            && let Some(receiver_type) =
+                rust_qualify_evidence_path(self, owner, &nominal_type, use_start)
+        {
+            return Some(rust_join_qualified(&receiver_type, spelling));
         }
         if let Some(target) = self.local_target_for(owner, qualifier) {
             return Some(rust_join_qualified(target, spelling));
@@ -5559,6 +5824,152 @@ fn rust_qualified_parent(path: &str) -> Option<&str> {
     path.rsplit_once("::").map(|(parent, _)| parent)
 }
 
+const RUST_MANIFEST_MAX_BYTES: u64 = 2 * 1024 * 1024;
+const RUST_MANIFEST_ANCESTOR_LIMIT: usize = 64;
+
+/// Read one local Cargo manifest without following an unbounded dependency
+/// graph.  Manifest metadata is optional enrichment: malformed, oversized, or
+/// symlinked files simply leave the ordinary source-derived namespace intact.
+fn read_rust_manifest(path: &Path) -> Option<toml::Value> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > RUST_MANIFEST_MAX_BYTES
+    {
+        return None;
+    }
+    let source = fs::read_to_string(path).ok()?;
+    toml::from_str(&source).ok()
+}
+
+fn rust_package_manifest(path: &Path) -> Option<(PathBuf, toml::Value)> {
+    // A virtual source path must not accidentally resolve against the
+    // extractor process's own Cargo workspace.  An absolute path is enough to
+    // anchor manifest discovery; the caller may legitimately provide source
+    // bytes before creating the corresponding file.
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut directory = path.parent();
+    for _ in 0..RUST_MANIFEST_ANCESTOR_LIMIT {
+        let Some(current) = directory else {
+            break;
+        };
+        let manifest = current.join("Cargo.toml");
+        if let Some(value) = read_rust_manifest(&manifest)
+            && value
+                .get("package")
+                .and_then(toml::Value::as_table)
+                .is_some()
+        {
+            return Some((manifest, value));
+        }
+        directory = current.parent();
+    }
+    None
+}
+
+fn rust_workspace_manifest(package_manifest: &Path) -> Option<(PathBuf, toml::Value)> {
+    let mut directory = package_manifest.parent();
+    for _ in 0..RUST_MANIFEST_ANCESTOR_LIMIT {
+        let Some(current) = directory else {
+            break;
+        };
+        let manifest = current.join("Cargo.toml");
+        if let Some(value) = read_rust_manifest(&manifest)
+            && value
+                .get("workspace")
+                .and_then(toml::Value::as_table)
+                .is_some()
+        {
+            return Some((manifest, value));
+        }
+        directory = current.parent();
+    }
+    None
+}
+
+fn rust_dependency_manifest(manifest_dir: &Path, dependency_path: &str) -> Option<PathBuf> {
+    let path = Path::new(dependency_path);
+    if path.is_absolute() || dependency_path.is_empty() {
+        return None;
+    }
+    let candidate = manifest_dir.join(path);
+    if candidate
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("Cargo.toml"))
+    {
+        Some(candidate)
+    } else {
+        Some(candidate.join("Cargo.toml"))
+    }
+}
+
+fn rust_workspace_dependency<'a>(
+    workspace: Option<&'a toml::Value>,
+    alias: &str,
+) -> Option<&'a toml::Value> {
+    let dependencies = workspace?
+        .get("workspace")
+        .and_then(toml::Value::as_table)?
+        .get("dependencies")
+        .and_then(toml::Value::as_table)?;
+    dependencies.get(alias).or_else(|| {
+        dependencies.iter().find_map(|(name, value)| {
+            (name.replace('-', "_") == alias.replace('-', "_")).then_some(value)
+        })
+    })
+}
+
+fn rust_dependency_target(
+    alias: &str,
+    specification: &toml::Value,
+    manifest_dir: &Path,
+    workspace: Option<&(PathBuf, toml::Value)>,
+) -> String {
+    let table = specification.as_table();
+    let inherited = table
+        .and_then(|table| table.get("workspace"))
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(false);
+    let workspace_specification = inherited
+        .then(|| rust_workspace_dependency(workspace.map(|(_, value)| value), alias))
+        .flatten();
+    let target = workspace_specification
+        .and_then(|value| value.as_table())
+        .and_then(|table| table.get("package"))
+        .and_then(toml::Value::as_str)
+        .or_else(|| {
+            table
+                .and_then(|table| table.get("package"))
+                .and_then(toml::Value::as_str)
+        })
+        .unwrap_or(alias);
+    let dependency_path = workspace_specification
+        .and_then(|value| value.as_table())
+        .and_then(|table| table.get("path"))
+        .and_then(toml::Value::as_str)
+        .or_else(|| {
+            table
+                .and_then(|table| table.get("path"))
+                .and_then(toml::Value::as_str)
+        });
+    if let Some(dependency_path) = dependency_path
+        && let Some(manifest) = rust_dependency_manifest(
+            workspace
+                .map(|(path, _)| path.parent().unwrap_or(manifest_dir))
+                .unwrap_or(manifest_dir),
+            dependency_path,
+        )
+        && let Some(value) = read_rust_manifest(&manifest)
+        && let Some(name) = rust_manifest_crate_name_value(&value)
+    {
+        return name;
+    }
+    target.replace('-', "_")
+}
+
 fn rust_module_identity(path: &Path, source_file: &str) -> String {
     let portable = Path::new(source_file);
     let portable_components = portable
@@ -5580,18 +5991,49 @@ fn rust_module_identity(path: &Path, source_file: &str) -> String {
             workspace_crate_root.and_then(|index| portable_components.get(index - 1).copied())
         })
         .unwrap_or("crate");
-    let crate_name =
-        rust_manifest_crate_name(path).unwrap_or_else(|| fallback_crate_name.replace('-', "_"));
-    let relative = if let Some(index) = source_root {
-        portable_components[index.saturating_add(1)..].to_vec()
+    let manifest_context = rust_package_manifest(path);
+    let crate_name = manifest_context
+        .as_ref()
+        .and_then(|(_, value)| rust_manifest_crate_name_value(value))
+        .unwrap_or_else(|| fallback_crate_name.replace('-', "_"));
+    let manifest_relative = manifest_context.as_ref().and_then(|(manifest, value)| {
+        let library_path = value
+            .get("lib")
+            .and_then(toml::Value::as_table)
+            .and_then(|lib| lib.get("path"))
+            .and_then(toml::Value::as_str)
+            .unwrap_or("src/lib.rs");
+        let library = manifest.parent()?.join(library_path);
+        let module_root = library.parent()?;
+        path.strip_prefix(module_root).ok().map(|relative| {
+            if path == library {
+                return Vec::new();
+            }
+            relative
+                .components()
+                .filter_map(|component| component.as_os_str().to_str())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+    });
+    let relative = if let Some(relative) = manifest_relative {
+        relative
+    } else if let Some(index) = source_root {
+        portable_components[index.saturating_add(1)..]
+            .iter()
+            .map(|component| (*component).to_owned())
+            .collect()
     } else if let Some(index) = workspace_crate_root {
-        portable_components[index..].to_vec()
+        portable_components[index..]
+            .iter()
+            .map(|component| (*component).to_owned())
+            .collect()
     } else {
         path.file_name()
             .and_then(|value| value.to_str())
-            .map_or_else(Vec::new, |value| vec![value])
+            .map_or_else(Vec::new, |value| vec![value.to_owned()])
     };
-    let mut components = relative.into_iter().map(str::to_owned).collect::<Vec<_>>();
+    let mut components = relative;
     if let Some(file) = components.pop() {
         let stem = Path::new(&file)
             .file_stem()
@@ -5606,27 +6048,6 @@ fn rust_module_identity(path: &Path, source_file: &str) -> String {
     } else {
         format!("{crate_name}::{}", components.join("::"))
     }
-}
-
-/// Resolve the Rust namespace from the nearest manifest that owns the source.
-///
-/// Directory names are not Rust crate identities: Cargo normalizes package
-/// hyphens and permits an explicit `[lib].name`.  Reading only bounded local
-/// manifests keeps the extractor offline and deterministic while fixing the
-/// common workspace case where `foo-bar` is imported as `foo_bar`.
-fn rust_manifest_crate_name(path: &Path) -> Option<String> {
-    let mut directory = path.parent();
-    while let Some(current) = directory {
-        let manifest = current.join("Cargo.toml");
-        if let Ok(text) = fs::read_to_string(&manifest)
-            && let Ok(value) = toml::from_str::<toml::Value>(&text)
-            && let Some(name) = rust_manifest_crate_name_value(&value)
-        {
-            return Some(name);
-        }
-        directory = current.parent();
-    }
-    None
 }
 
 fn rust_manifest_crate_name_value(value: &toml::Value) -> Option<String> {
@@ -5649,53 +6070,24 @@ fn rust_manifest_crate_name_value(value: &toml::Value) -> Option<String> {
 }
 
 fn rust_manifest_dependency_aliases(path: &Path) -> HashMap<String, String> {
-    let mut directory = path.parent();
-    while let Some(current) = directory {
-        let manifest = current.join("Cargo.toml");
-        let Ok(text) = fs::read_to_string(&manifest) else {
-            directory = current.parent();
+    let Some((manifest, value)) = rust_package_manifest(path) else {
+        return HashMap::new();
+    };
+    let workspace = rust_workspace_manifest(&manifest);
+    let manifest_dir = manifest.parent().unwrap_or_else(|| Path::new("."));
+    let mut aliases = HashMap::new();
+    for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
+        let Some(table) = value.get(section).and_then(toml::Value::as_table) else {
             continue;
         };
-        let Ok(value) = toml::from_str::<toml::Value>(&text) else {
-            directory = current.parent();
-            continue;
-        };
-        if rust_manifest_crate_name_value(&value).is_none() {
-            directory = current.parent();
-            continue;
+        for (alias, specification) in table {
+            aliases.insert(
+                alias.replace('-', "_"),
+                rust_dependency_target(alias, specification, manifest_dir, workspace.as_ref()),
+            );
         }
-        let mut aliases = HashMap::new();
-        for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
-            let Some(table) = value.get(section).and_then(toml::Value::as_table) else {
-                continue;
-            };
-            for (alias, specification) in table {
-                let mut target = specification
-                    .as_table()
-                    .and_then(|entry| entry.get("package"))
-                    .and_then(toml::Value::as_str)
-                    .unwrap_or(alias)
-                    .replace('-', "_");
-                if let Some(path_value) = specification
-                    .as_table()
-                    .and_then(|entry| entry.get("path"))
-                    .and_then(toml::Value::as_str)
-                {
-                    let dependency_manifest = current.join(path_value).join("Cargo.toml");
-                    if let Ok(dependency_text) = fs::read_to_string(dependency_manifest)
-                        && let Ok(dependency_value) =
-                            toml::from_str::<toml::Value>(&dependency_text)
-                        && let Some(name) = rust_manifest_crate_name_value(&dependency_value)
-                    {
-                        target = name;
-                    }
-                }
-                aliases.insert(alias.replace('-', "_"), target);
-            }
-        }
-        return aliases;
     }
-    HashMap::new()
+    aliases
 }
 
 fn rust_qualify_local_path(module: &str, raw: &str) -> String {
@@ -6944,6 +7336,31 @@ fn is_go_predeclared_type(name: &str) -> bool {
 
 fn qualified_binding_head(qualifier: &str) -> &str {
     split_qualified_head(qualifier).0
+}
+
+fn collect_rust_pattern_names(node: Node<'_>, names: &mut Vec<String>, source: &[u8]) {
+    if node.kind() == "identifier" {
+        let name = source
+            .get(node.start_byte()..node.end_byte())
+            .map_or_else(String::new, |bytes| {
+                String::from_utf8_lossy(bytes).into_owned()
+            });
+        if !name.is_empty() && name != "_" {
+            names.push(name);
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_rust_pattern_names(child, names, source);
+    }
+}
+
+fn rust_is_lexical_scope_node(kind: &str) -> bool {
+    matches!(
+        kind,
+        "block" | "match_block" | "unsafe_block" | "closure_expression"
+    )
 }
 
 fn target_kinds_for_relation(relation: CandidateRelation) -> Vec<String> {

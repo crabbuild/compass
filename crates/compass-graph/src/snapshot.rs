@@ -424,8 +424,6 @@ impl<'a, S: Store + ?Sized> ObjectWriter<'a, S> {
     }
 }
 
-type SnapshotIndexes = BTreeMap<IndexKind, BTreeMap<Vec<u8>, Vec<u8>>>;
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MetadataRecord {
@@ -521,21 +519,22 @@ impl GraphSnapshotBuilder {
     ) -> Result<PreparedGraphSnapshotContent, SnapshotError> {
         validate_code_graph(canonical)
             .map_err(|error| SnapshotError::Corrupt(format!("graph validation failed: {error}")))?;
-        let (snapshot_id, indexes) =
-            rayon::join(|| snapshot_identity(canonical), || build_indexes(canonical));
-        let snapshot_id = snapshot_id?;
-        let indexes = indexes?;
+        let snapshot_id = snapshot_identity(canonical)?;
         let mut writer = ObjectWriter::new(store)?;
         let mut roots = Vec::with_capacity(IndexKind::ALL.len());
         for index in IndexKind::ALL {
-            let entries = indexes.get(&index).ok_or_else(|| {
-                SnapshotError::Corrupt(format!("missing {} index", index.as_str()))
-            })?;
+            // Keep only one encoded index in memory at a time. The previous
+            // implementation retained all node, edge, and secondary-index
+            // values until every tree had been written, making publication
+            // peak several times larger than the canonical graph artifact.
+            let term_postings = (index == IndexKind::Terms).then(|| build_term_postings(canonical));
+            let entries = build_index(canonical, index, term_postings.as_ref())?;
+            let entry_count = entries.len() as u64;
             let digest = build_index_tree(&mut writer, index, entries)?;
             roots.push(SnapshotRoot {
                 index,
                 digest,
-                entry_count: entries.len() as u64,
+                entry_count,
             });
         }
         let stats = writer.finish()?;
@@ -1471,278 +1470,6 @@ pub fn encode_graph_index_key(
     encode_key_segments(&all).map_err(SnapshotError::from)
 }
 
-fn snapshot_identity(graph: &GraphDocument) -> Result<String, SnapshotError> {
-    digest_canonical_graph(graph, true).map(|(digest, _)| digest)
-}
-
-fn digest_canonical_graph(
-    graph: &GraphDocument,
-    clear_generation: bool,
-) -> Result<(String, u64), SnapshotError> {
-    digest_json(
-        &canonical_graph_document_with_generation(graph, clear_generation),
-        MAX_GRAPH_BYTES,
-    )
-}
-
-fn canonical_graph_document_with_generation(
-    graph: &GraphDocument,
-    clear_generation: bool,
-) -> CanonicalGraphDocument<'_> {
-    let mut metadata = graph.graph.clone();
-    metadata.files.sort_by(|left, right| left.id.cmp(&right.id));
-    if clear_generation {
-        metadata.build.generation_id.clear();
-    }
-    let mut nodes = graph.nodes.iter().collect::<Vec<_>>();
-    nodes.sort_by(|left, right| left.id.cmp(&right.id));
-    let mut links = graph.links.iter().collect::<Vec<_>>();
-    links.sort_by(|left, right| {
-        left.id
-            .cmp(&right.id)
-            .then_with(|| left.source.cmp(&right.source))
-            .then_with(|| left.target.cmp(&right.target))
-            .then_with(|| left.kind.as_str().cmp(right.kind.as_str()))
-    });
-    CanonicalGraphDocument {
-        directed: graph.directed,
-        multigraph: graph.multigraph,
-        graph: metadata,
-        nodes,
-        links,
-    }
-}
-
-fn build_indexes(graph: &GraphDocument) -> Result<SnapshotIndexes, SnapshotError> {
-    let mut indexes = IndexKind::ALL
-        .into_iter()
-        .map(|index| (index, BTreeMap::new()))
-        .collect::<BTreeMap<_, _>>();
-    let mut metadata_graph = graph.graph.clone();
-    metadata_graph.files.clear();
-    metadata_graph.coverage.clear();
-    metadata_graph.diagnostics.clear();
-    let metadata = MetadataRecord {
-        directed: graph.directed,
-        multigraph: graph.multigraph,
-        graph: metadata_graph,
-    };
-    insert_json(
-        &mut indexes,
-        IndexKind::Metadata,
-        encode_graph_index_key(IndexKind::Metadata, &[])?,
-        &metadata,
-    )?;
-    for file in &graph.graph.files {
-        insert_json(
-            &mut indexes,
-            IndexKind::Metadata,
-            encode_graph_index_key(IndexKind::Metadata, &[b"file", file.id.as_bytes()])?,
-            file,
-        )?;
-    }
-    for (ordinal, coverage) in graph.graph.coverage.iter().enumerate() {
-        let ordinal = format!("{ordinal:08}");
-        insert_json(
-            &mut indexes,
-            IndexKind::Metadata,
-            encode_graph_index_key(IndexKind::Metadata, &[b"coverage", ordinal.as_bytes()])?,
-            coverage,
-        )?;
-    }
-    for (ordinal, diagnostic) in graph.graph.diagnostics.iter().enumerate() {
-        let ordinal = format!("{ordinal:08}");
-        insert_json(
-            &mut indexes,
-            IndexKind::Metadata,
-            encode_graph_index_key(
-                IndexKind::Metadata,
-                &[
-                    b"diagnostic",
-                    ordinal.as_bytes(),
-                    diagnostic.code.as_bytes(),
-                ],
-            )?,
-            diagnostic,
-        )?;
-        if diagnostic.code == "publication_omission_summary" {
-            let key = encode_graph_index_key(
-                IndexKind::Metadata,
-                &[b"diagnostic-code", diagnostic.code.as_bytes()],
-            )?;
-            let value = encode_json(diagnostic)?;
-            indexes
-                .get_mut(&IndexKind::Metadata)
-                .ok_or_else(|| SnapshotError::Corrupt("metadata index is missing".to_owned()))?
-                .entry(key)
-                .or_insert(value);
-        }
-    }
-
-    let node_by_id = graph
-        .nodes
-        .iter()
-        .map(|node| (node.id.as_str(), node))
-        .collect::<BTreeMap<_, _>>();
-    let mut aliases_by_target = BTreeMap::<&str, BTreeSet<&str>>::new();
-    for edge in &graph.links {
-        if edge.kind == compass_model::code_graph::EdgeKind::Aliases
-            && let Some(alias) = node_by_id.get(edge.source.as_str())
-        {
-            aliases_by_target
-                .entry(edge.target.as_str())
-                .or_default()
-                .insert(alias.name.as_str());
-        }
-    }
-
-    let mut term_postings = BTreeMap::<String, Vec<String>>::new();
-    for node in &graph.nodes {
-        insert_json(
-            &mut indexes,
-            IndexKind::Nodes,
-            encode_graph_index_key(IndexKind::Nodes, &[node.id.as_bytes()])?,
-            node,
-        )?;
-        insert_json(
-            &mut indexes,
-            IndexKind::Names,
-            encode_name_index_key(&node.name, &node.id)?,
-            &(),
-        )?;
-        if node.qualified_name != node.name {
-            insert_json(
-                &mut indexes,
-                IndexKind::Names,
-                encode_name_index_key(&node.qualified_name, &node.id)?,
-                &(),
-            )?;
-        }
-        let mut terms = BTreeSet::new();
-        terms.extend(search_terms(&node.name));
-        terms.extend(search_terms(&node.qualified_name));
-        terms.extend(search_terms(node.kind.as_str()));
-        for role in &node.roles {
-            let role = format!("{role:?}");
-            terms.extend(search_terms(&role));
-        }
-        if let Some(language) = &node.language {
-            terms.extend(search_terms(language));
-        }
-        if let Some(framework) = &node.framework {
-            terms.extend(search_terms(framework));
-        }
-        if let Some(path) = node
-            .details
-            .as_ref()
-            .and_then(|details| serde_json::to_value(details).ok())
-            .and_then(|value| {
-                value
-                    .get("data")
-                    .and_then(|data| data.get("path"))
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned)
-            })
-        {
-            terms.extend(search_terms(&path));
-        }
-        for alias in aliases_by_target
-            .get(node.id.as_str())
-            .into_iter()
-            .flat_map(|aliases| aliases.iter())
-        {
-            terms.extend(search_terms(alias));
-        }
-        for term in terms {
-            term_postings.entry(term).or_default().push(node.id.clone());
-        }
-        if let Some(community) = &node.community {
-            let community_id = community.id.to_string();
-            insert_json(
-                &mut indexes,
-                IndexKind::Communities,
-                encode_graph_index_key(
-                    IndexKind::Communities,
-                    &[community_id.as_bytes(), node.id.as_bytes()],
-                )?,
-                &node.id,
-            )?;
-        }
-    }
-    for (term, mut node_ids) in term_postings {
-        node_ids.sort();
-        node_ids.dedup();
-        let prefix_length = term.len().min(3);
-        let prefix = term.get(..prefix_length).unwrap_or(term.as_str());
-        for (chunk_index, chunk) in node_ids.chunks(TERM_POSTING_CHUNK_ITEMS).enumerate() {
-            let chunk_index = format!("{chunk_index:08}");
-            insert_json(
-                &mut indexes,
-                IndexKind::Terms,
-                encode_graph_index_key(
-                    IndexKind::Terms,
-                    &[
-                        prefix.as_bytes(),
-                        b"node_prefix",
-                        term.as_bytes(),
-                        chunk_index.as_bytes(),
-                    ],
-                )?,
-                &TermPostingChunk {
-                    term: term.clone(),
-                    node_ids: chunk.to_vec(),
-                },
-            )?;
-        }
-    }
-    for file in &graph.graph.files {
-        insert_json(
-            &mut indexes,
-            IndexKind::Files,
-            encode_file_path_key(&file.path)?,
-            &file.id,
-        )?;
-    }
-    for edge in &graph.links {
-        insert_json(
-            &mut indexes,
-            IndexKind::Edges,
-            encode_graph_index_key(IndexKind::Edges, &[edge.id.as_bytes()])?,
-            edge,
-        )?;
-        let kind = edge.kind.as_str().as_bytes();
-        insert_json(
-            &mut indexes,
-            IndexKind::Outgoing,
-            encode_graph_index_key(
-                IndexKind::Outgoing,
-                &[
-                    edge.source.as_bytes(),
-                    kind,
-                    edge.target.as_bytes(),
-                    edge.id.as_bytes(),
-                ],
-            )?,
-            &(),
-        )?;
-        insert_json(
-            &mut indexes,
-            IndexKind::Incoming,
-            encode_graph_index_key(
-                IndexKind::Incoming,
-                &[
-                    edge.target.as_bytes(),
-                    kind,
-                    edge.source.as_bytes(),
-                    edge.id.as_bytes(),
-                ],
-            )?,
-            &(),
-        )?;
-    }
-    Ok(indexes)
-}
-
 /// Keep normal names ordered and readable while giving graph-valid, deeply
 /// qualified names a deterministic portable representation. The extra marker
 /// segment prevents a digest key from colliding with the raw two-segment form.
@@ -1800,22 +1527,310 @@ fn normalize_symbol(value: &str) -> String {
         .to_lowercase()
 }
 
-fn insert_json<T: Serialize>(
-    indexes: &mut SnapshotIndexes,
+fn snapshot_identity(graph: &GraphDocument) -> Result<String, SnapshotError> {
+    digest_canonical_graph(graph, true).map(|(digest, _)| digest)
+}
+
+fn digest_canonical_graph(
+    graph: &GraphDocument,
+    clear_generation: bool,
+) -> Result<(String, u64), SnapshotError> {
+    digest_json(
+        &canonical_graph_document_with_generation(graph, clear_generation),
+        MAX_GRAPH_BYTES,
+    )
+}
+
+fn canonical_graph_document_with_generation(
+    graph: &GraphDocument,
+    clear_generation: bool,
+) -> CanonicalGraphDocument<'_> {
+    let mut metadata = graph.graph.clone();
+    metadata.files.sort_by(|left, right| left.id.cmp(&right.id));
+    if clear_generation {
+        metadata.build.generation_id.clear();
+    }
+    let mut nodes = graph.nodes.iter().collect::<Vec<_>>();
+    nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut links = graph.links.iter().collect::<Vec<_>>();
+    links.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.target.cmp(&right.target))
+            .then_with(|| left.kind.as_str().cmp(right.kind.as_str()))
+    });
+    CanonicalGraphDocument {
+        directed: graph.directed,
+        multigraph: graph.multigraph,
+        graph: metadata,
+        nodes,
+        links,
+    }
+}
+
+fn build_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
+    let node_by_id = graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let mut aliases_by_target = BTreeMap::<&str, BTreeSet<&str>>::new();
+    for edge in &graph.links {
+        if edge.kind == compass_model::code_graph::EdgeKind::Aliases
+            && let Some(alias) = node_by_id.get(edge.source.as_str())
+        {
+            aliases_by_target
+                .entry(edge.target.as_str())
+                .or_default()
+                .insert(alias.name.as_str());
+        }
+    }
+
+    let mut term_postings = BTreeMap::<String, Vec<String>>::new();
+    for node in &graph.nodes {
+        let mut terms = BTreeSet::new();
+        terms.extend(search_terms(&node.name));
+        terms.extend(search_terms(&node.qualified_name));
+        terms.extend(search_terms(node.kind.as_str()));
+        for role in &node.roles {
+            let role = format!("{role:?}");
+            terms.extend(search_terms(&role));
+        }
+        if let Some(language) = &node.language {
+            terms.extend(search_terms(language));
+        }
+        if let Some(framework) = &node.framework {
+            terms.extend(search_terms(framework));
+        }
+        if let Some(path) = node
+            .details
+            .as_ref()
+            .and_then(|details| serde_json::to_value(details).ok())
+            .and_then(|value| {
+                value
+                    .get("data")
+                    .and_then(|data| data.get("path"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })
+        {
+            terms.extend(search_terms(&path));
+        }
+        for alias in aliases_by_target
+            .get(node.id.as_str())
+            .into_iter()
+            .flat_map(|aliases| aliases.iter())
+        {
+            terms.extend(search_terms(alias));
+        }
+        for term in terms {
+            term_postings.entry(term).or_default().push(node.id.clone());
+        }
+    }
+    for node_ids in term_postings.values_mut() {
+        node_ids.sort();
+        node_ids.dedup();
+    }
+    term_postings
+}
+
+fn build_index(
+    graph: &GraphDocument,
     index: IndexKind,
+    term_postings: Option<&BTreeMap<String, Vec<String>>>,
+) -> Result<BTreeMap<Vec<u8>, Vec<u8>>, SnapshotError> {
+    let mut entries = BTreeMap::new();
+    match index {
+        IndexKind::Metadata => {
+            let mut metadata_graph = graph.graph.clone();
+            metadata_graph.files.clear();
+            metadata_graph.coverage.clear();
+            metadata_graph.diagnostics.clear();
+            let metadata = MetadataRecord {
+                directed: graph.directed,
+                multigraph: graph.multigraph,
+                graph: metadata_graph,
+            };
+            insert_json(
+                &mut entries,
+                encode_graph_index_key(IndexKind::Metadata, &[])?,
+                &metadata,
+            )?;
+            for file in &graph.graph.files {
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(IndexKind::Metadata, &[b"file", file.id.as_bytes()])?,
+                    file,
+                )?;
+            }
+            for (ordinal, coverage) in graph.graph.coverage.iter().enumerate() {
+                let ordinal = format!("{ordinal:08}");
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(
+                        IndexKind::Metadata,
+                        &[b"coverage", ordinal.as_bytes()],
+                    )?,
+                    coverage,
+                )?;
+            }
+            for (ordinal, diagnostic) in graph.graph.diagnostics.iter().enumerate() {
+                let ordinal = format!("{ordinal:08}");
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(
+                        IndexKind::Metadata,
+                        &[
+                            b"diagnostic",
+                            ordinal.as_bytes(),
+                            diagnostic.code.as_bytes(),
+                        ],
+                    )?,
+                    diagnostic,
+                )?;
+                if diagnostic.code == "publication_omission_summary" {
+                    let key = encode_graph_index_key(
+                        IndexKind::Metadata,
+                        &[b"diagnostic-code", diagnostic.code.as_bytes()],
+                    )?;
+                    let value = encode_json(diagnostic)?;
+                    entries.entry(key).or_insert(value);
+                }
+            }
+        }
+        IndexKind::Nodes => {
+            for node in &graph.nodes {
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(IndexKind::Nodes, &[node.id.as_bytes()])?,
+                    node,
+                )?;
+            }
+        }
+        IndexKind::Names => {
+            for node in &graph.nodes {
+                insert_json(
+                    &mut entries,
+                    encode_name_index_key(&node.name, &node.id)?,
+                    &(),
+                )?;
+                if node.qualified_name != node.name {
+                    insert_json(
+                        &mut entries,
+                        encode_name_index_key(&node.qualified_name, &node.id)?,
+                        &(),
+                    )?;
+                }
+            }
+        }
+        IndexKind::Terms => {
+            let term_postings = term_postings
+                .ok_or_else(|| SnapshotError::Corrupt("term postings are missing".to_owned()))?;
+            for (term, node_ids) in term_postings {
+                let prefix_length = term.len().min(3);
+                let prefix = term.get(..prefix_length).unwrap_or(term.as_str());
+                for (chunk_index, chunk) in node_ids.chunks(TERM_POSTING_CHUNK_ITEMS).enumerate() {
+                    let chunk_index = format!("{chunk_index:08}");
+                    insert_json(
+                        &mut entries,
+                        encode_graph_index_key(
+                            IndexKind::Terms,
+                            &[
+                                prefix.as_bytes(),
+                                b"node_prefix",
+                                term.as_bytes(),
+                                chunk_index.as_bytes(),
+                            ],
+                        )?,
+                        &TermPostingChunk {
+                            term: term.clone(),
+                            node_ids: chunk.to_vec(),
+                        },
+                    )?;
+                }
+            }
+        }
+        IndexKind::Communities => {
+            for node in &graph.nodes {
+                if let Some(community) = &node.community {
+                    let community_id = community.id.to_string();
+                    insert_json(
+                        &mut entries,
+                        encode_graph_index_key(
+                            IndexKind::Communities,
+                            &[community_id.as_bytes(), node.id.as_bytes()],
+                        )?,
+                        &node.id,
+                    )?;
+                }
+            }
+        }
+        IndexKind::Files => {
+            for file in &graph.graph.files {
+                insert_json(&mut entries, encode_file_path_key(&file.path)?, &file.id)?;
+            }
+        }
+        IndexKind::Edges => {
+            for edge in &graph.links {
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(IndexKind::Edges, &[edge.id.as_bytes()])?,
+                    edge,
+                )?;
+            }
+        }
+        IndexKind::Outgoing => {
+            for edge in &graph.links {
+                let kind = edge.kind.as_str().as_bytes();
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(
+                        IndexKind::Outgoing,
+                        &[
+                            edge.source.as_bytes(),
+                            kind,
+                            edge.target.as_bytes(),
+                            edge.id.as_bytes(),
+                        ],
+                    )?,
+                    &(),
+                )?;
+            }
+        }
+        IndexKind::Incoming => {
+            for edge in &graph.links {
+                let kind = edge.kind.as_str().as_bytes();
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(
+                        IndexKind::Incoming,
+                        &[
+                            edge.target.as_bytes(),
+                            kind,
+                            edge.source.as_bytes(),
+                            edge.id.as_bytes(),
+                        ],
+                    )?,
+                    &(),
+                )?;
+            }
+        }
+        IndexKind::Diagnostics => {}
+    }
+    Ok(entries)
+}
+fn insert_json<T: Serialize>(
+    entries: &mut BTreeMap<Vec<u8>, Vec<u8>>,
     key: Vec<u8>,
     value: &T,
 ) -> Result<(), SnapshotError> {
     let value = encode_json(value)?;
-    let entries = indexes
-        .get_mut(&index)
-        .ok_or_else(|| SnapshotError::Corrupt(format!("{} index is missing", index.as_str())))?;
     if let Some(previous) = entries.get(&key) {
         if previous != &value {
-            return Err(SnapshotError::Corrupt(format!(
-                "duplicate {} index key with different values",
-                index.as_str()
-            )));
+            return Err(SnapshotError::Corrupt(
+                "duplicate index key with different values".to_owned(),
+            ));
         }
         return Ok(());
     }
@@ -1826,15 +1841,12 @@ fn insert_json<T: Serialize>(
 fn build_index_tree<S: Store + ?Sized>(
     writer: &mut ObjectWriter<'_, S>,
     index: IndexKind,
-    entries: &BTreeMap<Vec<u8>, Vec<u8>>,
+    entries: BTreeMap<Vec<u8>, Vec<u8>>,
 ) -> Result<String, SnapshotError> {
     let mut leaves = Vec::new();
     let mut current = Vec::with_capacity(GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES);
     for (key, value) in entries {
-        current.push(TreeEntry {
-            key: key.clone(),
-            value: value.clone(),
-        });
+        current.push(TreeEntry { key, value });
         if current.len() == GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES {
             put_leaf_entries(writer, index, std::mem::take(&mut current), &mut leaves)?;
         }
