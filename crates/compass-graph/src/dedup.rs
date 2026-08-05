@@ -408,6 +408,8 @@ fn fuzzy_merge(
 fn rewire_edges(edges: Vec<EdgeRecord>, remap: &HashMap<String, String>) -> Vec<EdgeRecord> {
     let mut output = Vec::new();
     for mut rewritten in edges {
+        let recursive_call = rewritten.source == rewritten.target
+            && rewritten.attributes.get("relation").and_then(Value::as_str) == Some("calls");
         if let Some(source) = remap.get(&rewritten.source) {
             rewritten.source.clone_from(source);
         }
@@ -416,7 +418,7 @@ fn rewire_edges(edges: Vec<EdgeRecord>, remap: &HashMap<String, String>) -> Vec<
         }
         rewritten.attributes.remove("from");
         rewritten.attributes.remove("to");
-        if rewritten.source != rewritten.target {
+        if rewritten.source != rewritten.target || recursive_call {
             output.push(rewritten);
         }
     }
@@ -798,6 +800,38 @@ mod tests {
         assert_eq!(result.stats.exact_merges, 1);
         assert_eq!(result.stats.fuzzy_merges, 1);
         assert_eq!(result.edges[0].source, "graphextractor");
+        Ok(())
+    }
+
+    #[test]
+    fn rewiring_preserves_only_original_recursive_call_self_loops() -> Result<(), DedupError> {
+        let mut recursive = node("recursive", "recursive()", "recursive.py");
+        recursive
+            .attributes
+            .insert("file_type".to_owned(), json!("code"));
+        let nodes = vec![
+            recursive,
+            node("user_service", "User Service", "a.md"),
+            node("user_service_c1", "user_service", "a.md"),
+        ];
+        let edge = |source: &str, target: &str, relation: &str| EdgeRecord {
+            source: source.to_owned(),
+            target: target.to_owned(),
+            attributes: Map::from_iter([("relation".to_owned(), json!(relation))]),
+        };
+        let edges = vec![
+            edge("recursive", "recursive", "calls"),
+            edge("recursive", "recursive", "references"),
+            edge("user_service", "user_service_c1", "calls"),
+        ];
+
+        let result = deduplicate_entities(&nodes, &edges, &HashMap::new())?;
+
+        assert_eq!(result.nodes.len(), 2);
+        assert_eq!(result.edges.len(), 1);
+        assert_eq!(result.edges[0].source, "recursive");
+        assert_eq!(result.edges[0].target, "recursive");
+        assert_eq!(result.edges[0].string("relation"), "calls");
         Ok(())
     }
 

@@ -2,6 +2,193 @@
 
 ## Unreleased
 
+- Respect Rust's separate value and type/module namespaces when extracting
+  scoped associated calls. A `module::Type::function()` path now retains its
+  visible import binding even when a same-named value is in lexical scope;
+  ordinary `value.method()` dispatch remains value-bound, and competing
+  imports fail closed. Rust structural facts advance to adapter version 15.
+
+- Follow a unique source-present Rust named reexport when resolving an
+  associated callable reached through a glob facade. Receiver-prefix alias
+  expansion is depth-bounded; competing aliases and reexport cycles remain
+  unresolved.
+
+- Resolve Rust associated calls imported from a source-present sibling-crate
+  glob, including chained calls whose receiver type comes from that callable's
+  published return evidence. One-component crate names retain Rust `::`
+  qualification; competing or unknown glob targets continue to fail closed.
+
+- Resolve published return candidates before using their types as chained-call
+  receivers, and require Rust field receiver types to be source-local or
+  explicitly imported before qualification. Unresolved prelude types such as
+  `Result` and `Option` now use their canonical standard-library ownership
+  instead of becoming fabricated crate-local types or methods, while exact
+  source-local and explicitly qualified external types remain resolvable.
+  Rust structural facts advance to adapter version 14.
+
+- Resolve bounded, multi-stage Rust method-result chains across files. Each
+  stage records its receiver call-result evidence, exact outer nominal return
+  types are selected ahead of nested generic arguments, and incomplete
+  project-wide evidence preserves the prior source-proven binding. Missing,
+  ambiguous, cyclic, raw-pointer, and over-depth chains fail closed. Trait
+  default dispatch is accepted only through a unique source-proven
+  implementation. Rust structural facts advance to adapter version 13.
+
+- Resolve Rust calls chained from a same-file, source-proven method result by
+  preserving the exact outer nominal result type. Generic results such as
+  `ThreadPoolBuilder<CustomSpawn<F>>` now resolve the next member against
+  `ThreadPoolBuilder`, replacing malformed inferred placeholders with exact
+  call edges; unknown, ambiguous, or non-local result/member evidence still
+  fails closed. Rust structural facts advance to adapter version 12.
+
+- Resolve Rust calls chained from a source-proven associated-function result,
+  including uniquely aliased receiver owners such as
+  `super::DrainGuard::new(...).par_drain(...)`. Concrete implementation
+  methods returning `Self` now publish exact return evidence, mixed `::` and
+  `.` call syntax is parsed structurally, and ambiguous return or member sets
+  fail closed. Rust structural facts advance to adapter version 11.
+
+- Fail closed for Rust `self.method(...)` calls when the indexed receiver has
+  multiple repository-local trait method declarations and available evidence
+  cannot select one. Such calls no longer become fabricated external or
+  deferred method placeholders; a unique local method and a genuinely
+  external inherent method remain resolvable. Rust structural facts advance
+  to adapter version 10 so cached evidence refreshes.
+
+- Correct the diagnostic Graphify comparator when Graphify projects a Rust
+  return-type reference onto its callable's declaration line while Compass
+  preserves the exact returned-symbol occurrence. Dominance requires exact
+  source and target identities, a return-type context, and one Compass
+  `returns` fact; unrelated references and competing returns still fail
+  closed.
+
+- Preserve every source-valid call target behind mutually exclusive Rust
+  `#[cfg(unix)]` and `#[cfg(windows)]` reexports, including a lexical fallback
+  for other platforms. Ordinary duplicate reexports and feature flags that can
+  overlap still fail closed. Rust structural facts advance to adapter version
+  9 so cached evidence refreshes.
+
+- Publish Rust blanket trait implementations from the exact impl-scoped
+  generic parameter declaration. The trait occurrence remains source-anchored;
+  competing wildcard imports and parser-recovered implementation headers fail
+  closed. Code Graph v1 accepts this Rust-specific `parameter -> trait`
+  implementation shape while retaining the closed endpoint matrix for other
+  languages. Rust structural facts advance to adapter version 8 so cached
+  evidence refreshes.
+
+- Publish source-anchored Rust references from an implementer declaration
+  proven in the current source evidence to every non-primitive nested type
+  used as a trait implementation argument. The occurrence remains in the
+  implementation's lexical scope, so imported types and scoped implementation
+  parameters resolve exactly while competing wildcard imports remain unresolved. Rust
+  structural facts advance to adapter version 7 so cached evidence refreshes.
+
+- Treat a Rust wildcard target in another crate as repository-local only when
+  that exact file, module, or enum declaration is present in the indexed
+  source. This lets multi-crate workspaces resolve unique grouped reexports and
+  local calls across sibling crate globs while unknown external globs still
+  make the search fail closed. It also removes misleading placeholders such as
+  `rayon::prelude::Vec` that assigned standard-prelude names to an unrelated
+  explicit wildcard.
+
+- Resolve Rust `Self::Type` through a complete source-proven supertrait
+  hierarchy and the associated-type realization owned by the exact receiver
+  declaration. Parent-module glob imports, including private imports exposed
+  through `use super::*`, participate only when their bounded local search has
+  one compatible target. Competing traits, repeated local receiver names,
+  external branches, and incomplete searches fail closed. Rust structural
+  facts advance to adapter version 6 so cached evidence refreshes.
+
+- Resolve an unqualified Rust symbol across multiple visible glob imports when
+  their bounded, repository-local union contains exactly one compatible
+  declaration. Competing declarations, excessive glob/search sets, and
+  unproven external lowercase symbols remain unresolved instead of selecting
+  an arbitrary import.
+
+- Preserve Rust associated types as trait- or implementation-scoped type
+  aliases and resolve `Self::Type` returns to the exact lexical declaration.
+  Each associated alias separately references its concrete realization;
+  duplicate declarations remain unresolved. Rust structural facts advance to
+  adapter version 5 so cached evidence refreshes.
+
+- Resolve repository-local Rust imports and reexports to the unique semantic
+  module when file and module realizations share the same qualified identity.
+  Resolution still fails closed when another declaration kind participates or
+  more than one semantic module remains. The Graphify comparison now recognizes
+  an occurrence-matched semantic module as a stronger realization of its
+  physical source file.
+
+- Publish Rust type, lifetime, and const generic parameters as distinct,
+  owner-scoped parameter nodes. Exact field, signature, return, and bound uses
+  resolve to the lexical parameter without leaking across declarations or
+  implementation scopes. Rust structural facts advance to adapter version 4
+  so cached evidence refreshes.
+
+- Preserve Rust declarations nested inside function bodies and resolve their
+  source-anchored lexical calls. Repository-local wildcard imports now resolve
+  lowercase calls after lexical and module candidates, while unproven external
+  wildcard calls continue to fail closed. Rust structural facts advance to
+  adapter version 3 so cached evidence refreshes.
+
+- Preserve exact TypeScript and TSX extraction for valid `in`/`out` generic
+  variance modifiers even though the pinned grammar reports those tokens as
+  recoverable errors. Compass reparses only parser-identified variance tokens
+  under type-parameter lists, preserving byte/line anchors, mapped-type `in`,
+  identifiers named `out`, and genuine malformed-input diagnostics. TypeScript
+  runtime variables now also receive identities distinct from same-named type
+  and interface declarations, so constructor calls resolve to the value
+  namespace and ambiguous runtime bindings fail closed. Extraction semantics
+  advance to version 8 so cached TypeScript facts refresh.
+
+- Resolve Python `self` and `cls` calls through source-proven inheritance,
+  including a later direct base when every preceding base is a known leaf and
+  class members that directly alias an earlier module-level callable. Rebound
+  and static-method receiver names and overwritten aliases continue to fail
+  closed. When a source-defined concrete descendant proves a different runtime
+  target, or unknown earlier ancestry makes a later direct member possible,
+  publish every bounded hierarchy-proven alternative as `INFERRED` without
+  weakening the exact target. A descendant with external ancestry may retain
+  a direct first-base member as possible dispatch, while unrelated same-name
+  members, fully known inconsistent C3 hierarchies, ambiguous members, and
+  bound overflows remain unpublished.
+
+- Resolve calls through source-proven inheritance when a Python function-local
+  class is used as the qualified receiver, while failing closed after a local
+  rebinding of that class name.
+
+- Harden Python value-reference resolution so argument, collection, assignment,
+  and return references cannot fabricate function calls. Function-valued uses
+  remain references unless future evidence proves an invocation contract.
+- Preserve source-anchored Python wildcard imports and package re-exports, and
+  resolve uniquely proven repository-local symbols through bounded wildcard
+  facade chains. Multiple wildcard sources remain ambiguous and fail closed.
+- Classify Python call syntax from resolved declaration kinds rather than name
+  capitalization, so lowercase classes resolve as constructions, uppercase
+  functions remain calls, and unresolved names do not invent class identity.
+- Preserve statically proven module-level Python callables created with
+  `functools.partial`, including package re-exports, while dynamic, shadowed,
+  conditional, and ambiguous factories fail closed. Python structural facts
+  advance to adapter version 6 so cached evidence is refreshed.
+- Publish uniquely bound, unconditional Python module variables as exact
+  declarations and connect direct constructor initializers to one proven local
+  class. Imports and value references can resolve those variables, while
+  competing, conditional, deleted, shadowed, and ambiguous bindings fail
+  closed. Explicit receiver calls no longer fall back to a same-named
+  unqualified import. Python structural facts advance to adapter version 7.
+- Resolve zero-argument Python `super()` calls through complete source-backed
+  C3 hierarchies instead of requiring the method on the immediate base.
+  Unknown hierarchy prefixes may expose a later member only as an explicitly
+  inferred possible dispatch; ambiguous members still fail closed. Python
+  structural facts advance to adapter version 8.
+- Preserve source-proven recursive Python calls, including distinct occurrence
+  anchors for repeated recursion. Parameters, assignment targets, closure
+  bindings, and unknown receivers cannot fall through to a same-named
+  declaration; `global` and `nonlocal` directives retain Python lexical
+  semantics. Entity deduplication retains only recursive call loops that were
+  already self-edges before rewiring; non-call loops and loops created by
+  merging distinct endpoints remain suppressed. Python structural facts
+  advance to adapter version 9.
+
 - Split framework extraction into focused Spring, Express, Axum, Next.js, and
   Vite adapters. Project evidence now indexes framework configuration files,
   aliases, plugins, and file-route roots; Vite configuration nodes and a

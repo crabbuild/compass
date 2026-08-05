@@ -24,9 +24,19 @@ the adapter actually emits. The batch contains six bounded collections:
   call-result, or package binding. Its target is qualified; a proven local
   declaration may also be named directly. A call-result binding names the
   exact callable that initialized a receiver and may record the zero-based
-  output selected by a destructuring assignment. Resolution requires a unique
+  output selected by a destructuring assignment. It may preserve an exact
+  nominal result type proven in the same file, reference an earlier
+  call-result binding to represent a bounded receiver chain, and retain one
+  non-call-result fallback binding for incomplete project-wide evidence. Chain
+  references must exist, remain acyclic, and stay within the evidence depth
+  limit. Resolution otherwise requires a unique
   callable and either one published return type or an in-range exact output
-  position; unpositioned multi-result calls remain unresolved.
+  position; unpositioned multi-result calls remain unresolved. A return
+  candidate's proposed qualified name is not authoritative receiver evidence:
+  downstream call-result resolution may use it only after the candidate
+  resolves to an exact source declaration or an explicitly qualified external
+  identity. An unresolved prelude or imported spelling must not be
+  reinterpreted as a repository-local type.
 - `OccurrenceFact` records one exact use site and its role, owner, spelling,
   optional qualifier, lexical scope, and range. Repeated uses are separate
   occurrences.
@@ -50,6 +60,37 @@ Every fact ID is a deterministic SHA-256 identity over length-prefixed inputs:
 the unchanged extraction-semantics identity, language, producer, source path,
 fact category, semantic role, relevant names, and source range. Builders sort
 and deduplicate typed facts before validation.
+
+Rust generic parameters are source-backed `parameter` declarations. Type,
+lifetime, and const parameters receive owner-qualified identities and lexical
+scope; repeated spellings in a type, implementation, and method remain
+distinct. Proven signature, field, return, and bound occurrences target the
+parameter declaration rather than an unrelated same-named type.
+
+Rust associated types are source-backed `type_alias` declarations scoped to
+their trait or exact implementation. A `Self::Type` occurrence retains the
+exact receiver declaration and implemented trait. The resolver may follow a
+complete, bounded source-proven supertrait hierarchy and select the one
+associated realization declared by that exact receiver. Competing traits,
+duplicate realizations, incomplete or external hierarchy branches, and missing
+declarations remain unresolved. The associated type's value is represented
+separately by its source-anchored reference, preserving the distinction between
+the contract and its concrete realization.
+
+Rust `self.method(...)` calls use the complete method declarations collected
+for the source receiver. A unique declaration may resolve exactly. When more
+than one local trait or implementation method has the same spelling and the
+available argument evidence cannot choose among them, the call remains
+unresolved; it must not fall through to an external or deferred placeholder.
+The absence of a local method with that spelling does not suppress a genuinely
+external inherent method on an external receiver.
+
+Rust typed receivers follow the same provenance rule across parameters,
+locals, fields, and callable results. An unqualified prelude spelling is not a
+repository-local receiver unless a source declaration or explicit import
+proves that ownership. Unshadowed `Option` and `Result` use their canonical
+standard-library identities; other unproven spellings remain unresolved
+rather than becoming crate-qualified placeholders.
 
 ### Required invariants
 
@@ -198,7 +239,8 @@ sorts candidate identities, and applies this order:
 1. typed hierarchy policy for direct bases and receiver dispatch;
 2. explicit import, alias, or re-export binding attached to the occurrence;
 3. exact declaration in the lexical scope or a parent scope;
-4. exact qualified identity;
+4. exact qualified identity, explicit member binding, or bounded wildcard
+   re-export chain;
 5. unique same-module or same-package declaration;
 6. source-scoped qualified external endpoint when explicitly allowed;
 7. ambiguous or unresolved.
@@ -212,11 +254,90 @@ publication. An identity alias such as `pkg.signals -> pkg.signals` is a
 terminal mapping; a multi-node alias cycle remains ambiguous and fails
 closed.
 
+Rust glob imports are collective search scopes rather than ordered aliases.
+When more than one glob is visible at a lexical use site, the resolver unions
+the bounded repository-local declarations exposed by that scope and its
+bounded re-export chains. It publishes a relationship only when one compatible
+declaration remains. Two different eligible declarations, an incomplete
+scope/module search, or an unproven external lowercase symbol remains
+ambiguous or unresolved; source order never breaks the tie.
+
+For a Rust child module, `use super::*` also exposes the bounded names imported
+by its source-proven parent module, including a private parent glob import.
+That parent scope is traversed only when it is an ancestor of the use site;
+external, truncated, or competing glob scopes still fail closed.
+
+Wildcard completeness may cross a Rust crate boundary only when the exact
+target has a file, module, or enum declaration in the indexed source set. A
+source-present sibling crate therefore participates in the bounded union of
+visible glob scopes, while an unknown dependency keeps that union incomplete.
+The resolver never assumes that a different crate root is external or that a
+named dependency is local solely from its spelling.
+
+An associated callable reached through such a source-present glob may provide
+receiver evidence for a chained call. The resolver reuses the retained glob
+binding or bounded visible-glob scope only to select one compatible source
+declaration, then resolves that declaration's published return candidate
+before selecting the next member. Competing callable declarations, incomplete
+glob evidence, or an unresolved return candidate leave the chain unresolved.
+When the glob module exposes the receiver through a named reexport, associated
+lookup may expand that source-proven receiver prefix before selecting the
+callable. Expansion requires one alias at every step and is depth-bounded;
+competing aliases, incomplete evidence, and cycles fail closed.
+
+For `impl Trait<Argument> for Implementer`, an implementer declaration proven
+in the current source evidence owns an exact type-reference occurrence for
+every non-primitive nested trait argument. Lookup uses the implementation
+scope rather than the implementer's declaration scope, preserving imported
+types and implementation-local type parameters. The outer trait remains represented
+only by the `implements` candidate, so the same source token is not also
+published as a generic reference. If the adapter cannot prove the implementer
+declaration, the parser recovered through an error, or an argument has
+competing bindings, Compass does not invent a reference endpoint.
+
+When the implementer is an impl-scoped generic parameter, as in
+`impl<T> Trait for T`, the exact scoped parameter declaration owns the
+`implements` occurrence. Compass does not collapse that declaration into a
+same-named type elsewhere in the repository. Ambiguous trait imports and
+parser recovery overlapping either side of the implementation header fail
+closed.
+
 Python file imports are visible at module scope. Function- and class-local
 imports are indexed only in their owning lexical scope, so they cannot leak to
 sibling functions or become file-owned facts. Each imported item retains its
 own parser range. Python source is not reparsed by the collection resolver,
-and there is no legacy import projection.
+and there is no legacy import projection. A static `from package import *`
+statement emits one source-anchored wildcard binding. Package `__init__.py`
+wildcards can expose a uniquely declared repository-local symbol through a
+bounded re-export chain; multiple wildcard sources or multiple eligible
+declarations remain ambiguous rather than selecting an arbitrary target.
+An unconditional module-level alias created by an imported
+`functools.partial` is callable evidence only when its first argument is one
+unique module-level function declaration and neither name was rebound before
+the assignment. Compass publishes the alias as a source-backed function and
+an exact reference to the wrapped function. Dynamic targets, conditional
+assignments, shadowed factories, and ambiguous declarations fail closed.
+One unconditional module-level assignment to an identifier publishes an exact
+Python variable declaration when the name has no competing module binding,
+deletion, import shadow, parser recovery, or proven callable-alias kind. A
+direct initializer call adds `type_of` evidence only when its target resolves
+to one source-backed class; functions and unresolved external factories do not
+invent a type. Function- and class-local shadows do not invalidate the module
+declaration. Explicit receiver calls such as `self.settings()` never borrow a
+same-named unqualified import as their target.
+Zero-argument Python `super()` calls use source-proven C3 dispatch after the
+enclosing class. Compass may cross multiple source-backed bases only when the
+required base sets are complete and uniquely resolved for an exact target. A
+known later member behind unknown preceding ancestry may be published only as
+an `INFERRED` possible dispatch. Cycles and ambiguous members fail closed.
+Exact Python calls may form self-loops when the occurrence resolves to its
+owning function or method, so direct recursion remains visible in the graph.
+Python's statically local parameters and assignment targets shadow module and
+enclosing declarations even when the assignment follows the use. `global` and
+`nonlocal` directives alter that lookup as defined by the source; unresolved
+local callable values remain unpublished rather than becoming false recursive
+calls. Graph entity deduplication preserves an original `calls` self-edge but
+does not turn two distinct pre-deduplication endpoints into recursion.
 
 Language and allowed target kinds are filtered before uniqueness is decided.
 Case-insensitive or terminal-name equality cannot select a target. Cross-
@@ -227,6 +348,21 @@ Materialization preserves the occurrence range and resolution rule. Exact
 local targets remain extracted evidence. Qualified external targets are
 source-scoped and inferred; they never substitute a same-named repository
 node.
+
+Python callable-value occurrences publish a reference candidate for the exact
+value use. They do not publish an indirect call merely because that value
+resolves to a function or method: target identity and callability do not prove
+invocation. An indirect call requires separate source or contract evidence that
+the receiving API invokes the value. The current Python adapter does not infer
+such contracts, so uninvoked argument, collection, assignment, and return uses
+remain references.
+
+Python call syntax does not prove whether its target is a function or class,
+and capitalization is not semantic evidence. The adapter therefore emits a
+call candidate that permits either callable declaration kind. Publication
+normalizes a uniquely resolved class target to `instantiates`; an unresolved
+target remains a call-shaped external or unresolved endpoint rather than an
+invented constructor.
 
 The following resolution behavior is forbidden:
 
@@ -271,14 +407,33 @@ uses the complete C3 linearization while skipping the receiver. Full C3
 resolution requires every base to resolve uniquely, an acyclic and
 C3-consistent hierarchy, a bounded traversal, and one unique selected member.
 
+Receiver dispatch also preserves bounded runtime alternatives without
+relabeling them as exact. The resolver builds a deterministic reverse-subtype
+index. For each source-defined descendant with a complete valid C3 order, it
+selects the runtime member for `self`/`cls`, or the first member after the
+defining receiver for zero-argument `super()`. Every distinct proven target is
+published with `INFERRED` confidence and the
+`closed-world-receiver-dispatch` rule. If earlier ancestry is unknown but a
+later direct base uniquely declares the member, that target may be published
+with `INFERRED` confidence and the
+`incomplete-hierarchy-receiver-dispatch` rule. These edges mean "possible for
+this proven hierarchy," not "the only runtime target." An existing exact edge
+is retained separately. The same inferred rule applies when a source-defined
+descendant has unresolved external ancestry but a direct member on its first
+source base is ordered before the defining mixin whenever that descendant can
+be linearized. A fully source-known C3 inconsistency is invalid, not
+incomplete, and publishes no possible edge.
+
 The old single-direct-base and terminal-name shortcuts have been removed.
 Multiple inheritance and methods inherited beyond the direct base use the same
 shared C3 implementation.
-Dynamic receiver bases, incomplete receiver base lists, explicit-argument
-`super`, inconsistent hierarchies, ambiguous members, and bound overflows
-remain unresolved. An unresolved or external later ancestor blocks full C3
+Dynamic receiver bases and incomplete receiver base lists cannot produce an
+exact target. Explicit-argument `super`, inconsistent hierarchies, ambiguous
+members, and bound overflows remain unresolved and cannot produce possible
+dispatch edges. An unresolved or external later ancestor blocks full C3
 recovery but does not invalidate a unique member declared directly on the
-exact first base. Nested sibling bases use their enclosing class identity. A
+exact first base. Repository-wide name equality is never evidence for a
+possible target. Nested sibling bases use their enclosing class identity. A
 receiver-dispatch candidate cannot also carry a qualified target and cannot
 fall through to a same-named local or imported symbol.
 

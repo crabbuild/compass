@@ -773,6 +773,290 @@ fn universal_python_decorators_resolve_through_package_reexports() -> Result<(),
 }
 
 #[test]
+fn universal_python_qualified_calls_resolve_through_package_wildcard_reexports()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "app.py",
+            "from django.db import models\n\ndef build():\n    return models.CharField(max_length=255)\n",
+        ),
+        (
+            "direct.py",
+            "from django.db.models.fields import *\n\ndef build_direct():\n    return CharField(max_length=255)\n",
+        ),
+        (
+            "ambiguous.py",
+            "from django.db.models.fields import *\nfrom other.fields import *\n\ndef build_ambiguous():\n    return CharField(max_length=255)\n",
+        ),
+        ("django/__init__.py", ""),
+        ("django/db/__init__.py", ""),
+        (
+            "django/db/models/__init__.py",
+            "from django.db.models.fields import *\n",
+        ),
+        (
+            "django/db/models/fields.py",
+            "class CharField:\n    def __init__(self, max_length):\n        self.max_length = max_length\n",
+        ),
+        ("other/__init__.py", ""),
+        (
+            "other/fields.py",
+            "class CharField:\n    def __init__(self, max_length):\n        self.max_length = max_length\n",
+        ),
+    ];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    assert_no_retired_python_projection(&resolved);
+
+    let target = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.label() == "CharField"
+                && node
+                    .string("source_file")
+                    .ends_with("django/db/models/fields.py")
+        })
+        .ok_or("missing CharField declaration")?;
+    let build = resolved
+        .nodes
+        .iter()
+        .find(|node| node.label() == "build()")
+        .ok_or("missing build declaration")?;
+    let constructions = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.source == build.id
+                && edge.target == target.id
+                && edge.string("relation") == "calls"
+                && edge.string("rule").starts_with("universal-call-")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(constructions.len(), 1, "edges={:#?}", resolved.edges);
+    assert_eq!(
+        constructions[0].string("resolution_rule"),
+        "wildcard-binding"
+    );
+    let build_direct = resolved
+        .nodes
+        .iter()
+        .find(|node| node.label() == "build_direct()")
+        .ok_or("missing build_direct declaration")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == build_direct.id
+            && edge.target == target.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "wildcard-binding"
+    }));
+    let build_ambiguous = resolved
+        .nodes
+        .iter()
+        .find(|node| node.label() == "build_ambiguous()")
+        .ok_or("missing build_ambiguous declaration")?;
+    assert!(
+        resolved.edges.iter().all(|edge| {
+            edge.source != build_ambiguous.id || edge.string("relation") != "calls"
+        })
+    );
+    assert!(resolved.nodes.iter().all(|node| {
+        node.string("qualified_name") != "django.db.models.CharField"
+            || !node
+                .attributes
+                .get("external")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+    }));
+    Ok(())
+}
+
+#[test]
+fn python_call_targets_use_declaration_kind_instead_of_name_capitalization()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "app.py",
+            "from pkg import Factory, override_settings\n\ndef build():\n    Factory()\n    override_settings(DEBUG=True)\n",
+        ),
+        (
+            "pkg/__init__.py",
+            "from .api import Factory, override_settings\n",
+        ),
+        (
+            "pkg/api.py",
+            "def Factory():\n    return None\n\nclass override_settings:\n    pass\n",
+        ),
+    ];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    let build = resolved
+        .nodes
+        .iter()
+        .find(|node| node.label() == "build()")
+        .ok_or("missing build declaration")?;
+    let factory = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.api.Factory")
+        .ok_or("missing Factory declaration")?;
+    let settings = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.api.override_settings")
+        .ok_or("missing override_settings declaration")?;
+
+    for target in [factory, settings] {
+        assert!(resolved.edges.iter().any(|edge| {
+            edge.source == build.id
+                && edge.target == target.id
+                && edge.string("relation") == "calls"
+                && edge.string("rule").starts_with("universal-call-")
+        }));
+    }
+    assert!(resolved.nodes.iter().all(|node| {
+        !matches!(
+            node.string("qualified_name").as_str(),
+            "pkg.Factory" | "pkg.override_settings"
+        ) || node
+            .attributes
+            .get("external")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+    }));
+    Ok(())
+}
+
+#[test]
+fn python_partial_callable_aliases_are_source_backed_through_package_reexports()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "caller.py",
+            "from pkg import route\n\ndef build():\n    return route('home/')\n",
+        ),
+        ("pkg/__init__.py", "from .routes import route\n"),
+        (
+            "pkg/routes.py",
+            "from functools import partial\n\ndef _route(value, *, Pattern):\n    return Pattern(value)\n\nroute = partial(_route, Pattern=str)\n",
+        ),
+    ];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    let build = resolved
+        .nodes
+        .iter()
+        .find(|node| node.label() == "build()")
+        .ok_or("missing build declaration")?;
+    let route = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.routes.route")
+        .ok_or("missing source-backed route callable alias")?;
+    let underlying = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.routes._route")
+        .ok_or("missing underlying route function")?;
+
+    assert_eq!(route.string("symbol_kind"), "function");
+    assert!(route.string("source_file").ends_with("pkg/routes.py"));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == build.id
+            && edge.target == route.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "explicit-binding"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == route.id
+            && edge.target == underlying.id
+            && edge.string("relation") == "references"
+    }));
+    assert!(resolved.nodes.iter().all(|node| {
+        node.string("qualified_name") != "pkg.route"
+            || node
+                .attributes
+                .get("external")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+    }));
+    Ok(())
+}
+
+#[test]
+fn python_module_singletons_are_source_backed_with_exact_initializer_types()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "caller.py",
+            "from pkg.state import singleton\n\ndef use():\n    return singleton\n",
+        ),
+        (
+            "pkg/state.py",
+            "class Service:\n    pass\n\nsingleton = Service()\n",
+        ),
+    ];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    let singleton = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.state.singleton")
+        .ok_or("missing source-backed singleton")?;
+    let service = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.state.Service")
+        .ok_or("missing singleton initializer type")?;
+    let use_function = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "caller.use")
+        .ok_or("missing singleton consumer")?;
+
+    assert_eq!(singleton.string("symbol_kind"), "variable");
+    assert!(singleton.string("source_file").ends_with("pkg/state.py"));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == singleton.id
+            && edge.target == service.id
+            && edge.string("relation") == "type_of"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == use_function.id
+            && edge.target == singleton.id
+            && edge.string("relation") == "references"
+            && edge.string("resolution_rule") == "explicit-binding"
+    }));
+    assert!(resolved.nodes.iter().all(|node| {
+        node.string("qualified_name") != "pkg.state.singleton"
+            || node
+                .attributes
+                .get("external")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+    }));
+    Ok(())
+}
+
+#[test]
+fn python_receiver_methods_never_rebind_to_same_named_imports() -> Result<(), Box<dyn Error>> {
+    let files = [(
+        "case.py",
+        "from django.conf import settings\n\nclass Case:\n    def test(self):\n        return self.settings(DEBUG=True)\n",
+    )];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    let test_method = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "case.Case::test")
+        .ok_or("missing test method")?;
+
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.source != test_method.id
+            || edge.string("relation") != "calls"
+            || resolved.nodes.iter().all(|node| {
+                node.id != edge.target || node.string("qualified_name") != "django.conf.settings"
+            })
+    }));
+    Ok(())
+}
+
+#[test]
 fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -1282,7 +1566,7 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
         "from pkg importWidget",
         "from pkg import helper as recovered",
     ];
-    let valid_statements = [statements[0], statements[1], statements[10]];
+    let valid_statements = [statements[0], statements[1], statements[2], statements[10]];
     let mut newline_snapshots = Vec::new();
 
     for newline in ["\n", "\r\n"] {
@@ -1318,7 +1602,7 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
         assert_eq!(
             resolver_edges.len(),
             valid_statements.len(),
-            "wildcards, keyword-prefix near matches, and malformed statements must not emit exact partial facts"
+            "valid wildcards must be exact while keyword-prefix near matches and malformed statements emit no partial facts: {resolver_edges:#?}"
         );
 
         let mut expected_spans = valid_statements

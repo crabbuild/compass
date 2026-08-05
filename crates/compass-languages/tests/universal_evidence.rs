@@ -74,6 +74,9 @@ fn valid_batch() -> SemanticEvidenceBatch {
             target_declaration_id: None,
             scope_id: Some("scope:caller".to_owned()),
             output_index: None,
+            result_type_qualified_name: None,
+            receiver_binding_id: None,
+            fallback_binding_id: None,
             range: range(7, 13),
         }],
         occurrences: vec![OccurrenceFact {
@@ -162,6 +165,47 @@ fn output_positions_are_reserved_for_call_result_bindings() {
     let mut batch = valid_batch();
     batch.bindings[0].output_index = Some(0);
     assert_code(&batch, EvidenceErrorCode::InvalidFact);
+}
+
+#[test]
+fn exact_result_types_are_reserved_for_call_result_bindings() {
+    let mut batch = valid_batch();
+    batch.bindings[0].result_type_qualified_name = Some("example.Result".to_owned());
+    assert_code(&batch, EvidenceErrorCode::InvalidFact);
+}
+
+#[test]
+fn call_result_chain_references_are_typed_and_acyclic() {
+    let mut reserved = valid_batch();
+    reserved.bindings[0].receiver_binding_id = Some("binding:helper".to_owned());
+    assert_code(&reserved, EvidenceErrorCode::InvalidFact);
+
+    let mut missing = valid_batch();
+    missing
+        .adapter
+        .capabilities
+        .push(LanguageCapability::TypeReferences);
+    missing.bindings[0].kind = BindingKind::CallResult;
+    missing.bindings[0].receiver_binding_id = Some("binding:missing".to_owned());
+    assert_code(&missing, EvidenceErrorCode::MissingReference);
+
+    let mut receiver_cycle = valid_batch();
+    receiver_cycle
+        .adapter
+        .capabilities
+        .push(LanguageCapability::TypeReferences);
+    receiver_cycle.bindings[0].kind = BindingKind::CallResult;
+    receiver_cycle.bindings[0].receiver_binding_id = Some("binding:helper".to_owned());
+    assert_code(&receiver_cycle, EvidenceErrorCode::InvalidFact);
+
+    let mut call_result_fallback = valid_batch();
+    call_result_fallback
+        .adapter
+        .capabilities
+        .push(LanguageCapability::TypeReferences);
+    call_result_fallback.bindings[0].kind = BindingKind::CallResult;
+    call_result_fallback.bindings[0].fallback_binding_id = Some("binding:helper".to_owned());
+    assert_code(&call_result_fallback, EvidenceErrorCode::InvalidFact);
 }
 
 #[test]
@@ -317,10 +361,58 @@ fn callable_type_vectors_must_match_their_source_arity() {
 }
 
 #[test]
-fn complete_direct_base_sets_are_reserved_for_java_types() {
+fn complete_direct_base_sets_reject_unsupported_declaration_kinds() {
     let mut batch = valid_batch();
     batch.declarations[0].direct_bases_complete = true;
     assert_code(&batch, EvidenceErrorCode::InvalidFact);
+}
+
+#[test]
+fn rust_associated_type_constraints_require_an_exact_receiver_identity() {
+    let mut batch = valid_batch();
+    batch.adapter.id = "compass.rust".to_owned();
+    batch.adapter.language = "rust".to_owned();
+    batch.adapter.version = 6;
+    batch.adapter.capabilities.extend([
+        LanguageCapability::TypeReferences,
+        LanguageCapability::HierarchyDispatch,
+    ]);
+    batch.declarations[0].language = "rust".to_owned();
+    batch.declarations[0].kind = "struct".to_owned();
+    batch.scopes[0].language = "rust".to_owned();
+    batch.bindings.clear();
+    batch.occurrences[0].language = "rust".to_owned();
+    batch.occurrences[0].role = SemanticRole::TypeReference;
+    batch.occurrences[0].qualifier = Some("Self".to_owned());
+    batch.candidates[0].language = "rust".to_owned();
+    batch.candidates[0].relation = CandidateRelation::References;
+    batch.candidates[0].binding_id = None;
+    batch.candidates[0].target_spelling = "Output".to_owned();
+    batch.candidates[0].constraints.exact_language = Some("rust".to_owned());
+    batch.candidates[0].constraints.qualified_name = None;
+    batch.candidates[0].constraints.hierarchy = Some(HierarchyConstraint::RustAssociatedType {
+        receiver_declaration_id: "decl:caller".to_owned(),
+        receiver_qualified_name: "example.caller".to_owned(),
+        trait_qualified_name: "example.Produce".to_owned(),
+    });
+    validate_evidence(&batch, EvidenceLimits::default()).expect("valid Rust associated type");
+
+    let mut missing = batch.clone();
+    missing.candidates[0].constraints.hierarchy = Some(HierarchyConstraint::RustAssociatedType {
+        receiver_declaration_id: "decl:missing".to_owned(),
+        receiver_qualified_name: "example.caller".to_owned(),
+        trait_qualified_name: "example.Produce".to_owned(),
+    });
+    assert_code(&missing, EvidenceErrorCode::MissingReference);
+
+    let mut mismatched = batch;
+    mismatched.candidates[0].constraints.hierarchy =
+        Some(HierarchyConstraint::RustAssociatedType {
+            receiver_declaration_id: "decl:caller".to_owned(),
+            receiver_qualified_name: "example.Other".to_owned(),
+            trait_qualified_name: "example.Produce".to_owned(),
+        });
+    assert_code(&mismatched, EvidenceErrorCode::InvalidFact);
 }
 
 #[test]
@@ -392,7 +484,7 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
     );
     assert_eq!(
         AdapterRegistry::universal_profile("rust").map(|profile| profile.version),
-        Some(2)
+        Some(15)
     );
 }
 
@@ -485,6 +577,158 @@ class Derived(Base):
         let end = usize::try_from(occurrence.range.end_byte).expect("fixture offset");
         assert_eq!(&source[start..end], b"run");
     }
+}
+
+#[test]
+fn python_local_class_receivers_emit_bounded_hierarchy_dispatch() {
+    fn call_candidate(source: &[u8]) -> RelationshipCandidate {
+        let mut engine = Engine::default();
+        engine
+            .extract_source_combined(
+                std::path::Path::new("/repo/pkg/checks.py"),
+                "pkg/checks.py",
+                source,
+            )
+            .expect("extract python")
+            .graph
+            .semantic_evidence
+            .expect("python universal evidence")
+            .candidates
+            .into_iter()
+            .find(|candidate| {
+                candidate.relation == CandidateRelation::Calls
+                    && candidate.target_spelling == "check"
+            })
+            .expect("Model.check call candidate")
+    }
+
+    let candidate = call_candidate(
+        b"class Base:\n    @classmethod\n    def check(cls):\n        return []\ndef verify():\n    class Model(Base):\n        pass\n    return Model.check()\n",
+    );
+    assert_eq!(
+        candidate.constraints.hierarchy,
+        Some(HierarchyConstraint::ReceiverDispatch {
+            receiver_qualified_name: "pkg.checks.verify::Model".to_owned(),
+            strategy: ReceiverDispatchStrategy::C3FromReceiver,
+        })
+    );
+
+    let rebound = call_candidate(
+        b"class Base:\n    @classmethod\n    def check(cls):\n        return []\ndef verify(replacement):\n    class Model(Base):\n        pass\n    Model = replacement\n    return Model.check()\n",
+    );
+    assert_eq!(rebound.constraints.hierarchy, None);
+}
+
+#[test]
+fn python_bound_method_receivers_emit_hierarchy_dispatch_unless_rebound() {
+    fn call_candidate(source: &[u8]) -> RelationshipCandidate {
+        let mut engine = Engine::default();
+        engine
+            .extract_source_combined(
+                std::path::Path::new("/repo/pkg/models.py"),
+                "pkg/models.py",
+                source,
+            )
+            .expect("extract python")
+            .graph
+            .semantic_evidence
+            .expect("python universal evidence")
+            .candidates
+            .into_iter()
+            .find(|candidate| {
+                candidate.relation == CandidateRelation::Calls
+                    && candidate.target_spelling == "check"
+            })
+            .expect("self.check call candidate")
+    }
+
+    let candidate =
+        call_candidate(b"class Model:\n    def verify(self):\n        return self.check()\n");
+    assert_eq!(
+        candidate.constraints.hierarchy,
+        Some(HierarchyConstraint::ReceiverDispatch {
+            receiver_qualified_name: "pkg.models.Model".to_owned(),
+            strategy: ReceiverDispatchStrategy::C3FromReceiver,
+        })
+    );
+
+    let captured = call_candidate(
+        b"class Model:\n    def verify(self, values):\n        return [self.check() for value in values]\n",
+    );
+    assert_eq!(
+        captured.constraints.hierarchy,
+        Some(HierarchyConstraint::ReceiverDispatch {
+            receiver_qualified_name: "pkg.models.Model".to_owned(),
+            strategy: ReceiverDispatchStrategy::C3FromReceiver,
+        })
+    );
+
+    let mut engine = Engine::default();
+    let rebound = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/pkg/models.py"),
+            "pkg/models.py",
+        b"class Model:\n    def verify(self, replacement):\n        self = replacement\n        return self.check()\n",
+        )
+        .expect("extract rebound receiver")
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    assert!(rebound.candidates.iter().all(|candidate| {
+        candidate.relation != CandidateRelation::Calls || candidate.target_spelling != "check"
+    }));
+
+    let mut engine = Engine::default();
+    let shadowed = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/pkg/models.py"),
+            "pkg/models.py",
+            b"class Model:\n    def verify(self, replacements):\n        return [self.check() for self in replacements]\n",
+        )
+        .expect("extract shadowed comprehension receiver")
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    assert!(shadowed.candidates.iter().all(|candidate| {
+        candidate.relation != CandidateRelation::Calls || candidate.target_spelling != "check"
+    }));
+}
+
+#[test]
+fn python_class_callable_aliases_emit_source_proven_member_bindings() {
+    let source = b"def helper():\n    return None\n\nclass UsesHelper:\n    helper_alias = helper\n\n    def run(self):\n        return self.helper_alias()\n\nclass ReboundAlias:\n    helper_alias = helper\n    helper_alias = object()\n\nclass ShadowedTarget:\n    helper = object()\n    helper_alias = helper\n\nhelper = replacement\n\nclass ReboundTarget:\n    helper_alias = helper\n";
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/pkg/models.py"),
+            "pkg/models.py",
+            source,
+        )
+        .expect("extract python")
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+
+    let aliases = evidence
+        .bindings
+        .iter()
+        .filter(|binding| binding.kind == BindingKind::Member && binding.spelling == "helper_alias")
+        .collect::<Vec<_>>();
+    assert_eq!(aliases.len(), 1);
+    assert_eq!(aliases[0].qualified_target, "pkg.models.helper");
+    let owner = aliases[0]
+        .scope_id
+        .as_deref()
+        .and_then(|scope_id| evidence.scopes.iter().find(|scope| scope.id == scope_id))
+        .and_then(|scope| scope.owner_declaration_id.as_deref())
+        .and_then(|owner_id| {
+            evidence
+                .declarations
+                .iter()
+                .find(|declaration| declaration.id == owner_id)
+        })
+        .expect("member binding owner");
+    assert_eq!(owner.qualified_name, "pkg.models.UsesHelper");
 }
 
 #[test]
@@ -634,6 +878,274 @@ import tools.runner as runner
 }
 
 #[test]
+fn python_package_wildcard_reexports_emit_bounded_source_evidence() {
+    let source = b"from django.db.models.fields import *  # public facade\n";
+    let mut engine = Engine::default();
+    let extraction = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/django/db/models/__init__.py"),
+            "django/db/models/__init__.py",
+            source,
+        )
+        .expect("extract python");
+    let evidence = extraction
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid python evidence");
+
+    let binding = evidence
+        .bindings
+        .iter()
+        .find(|binding| binding.spelling == "*")
+        .expect("wildcard reexport binding");
+    assert_eq!(binding.kind, BindingKind::Reexport);
+    assert_eq!(binding.qualified_target, "django.db.models.fields");
+    assert_eq!(binding.range.start_byte, 36);
+    assert_eq!(binding.range.end_byte, 37);
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Reexports
+            && candidate.binding_id.as_deref() == Some(binding.id.as_str())
+            && candidate.constraints.qualified_name.as_deref() == Some("django.db.models.fields")
+    }));
+}
+
+#[test]
+fn python_partial_aliases_emit_exact_callable_declarations_and_references() {
+    let source = br#"from functools import partial
+
+def _route(value, *, Pattern):
+    return Pattern(value)
+
+route = partial(_route, Pattern=str)
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/pkg/routes.py"),
+            "pkg/routes.py",
+            source,
+        )
+        .expect("extract python")
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid python evidence");
+
+    let alias = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "pkg.routes.route")
+        .expect("partial alias declaration");
+    assert_eq!(alias.kind, "function");
+    let target = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "pkg.routes._route")
+        .expect("underlying function declaration");
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::References
+            && candidate.source_declaration_id == alias.id
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(target.id.as_str())
+            && !candidate.constraints.allow_external
+    }));
+}
+
+#[test]
+fn python_partial_aliases_fail_closed_for_dynamic_or_shadowed_factories() {
+    for source in [
+        br#"from functools import partial
+def _route(value):
+    return value
+route = partial(factory(), Pattern=str)
+"#
+        .as_slice(),
+        br#"from functools import partial
+def _route(value):
+    return value
+partial = factory
+route = partial(_route, Pattern=str)
+"#
+        .as_slice(),
+        br#"from functools import partial
+def _route(value):
+    return value
+if enabled:
+    route = partial(_route, Pattern=str)
+"#
+        .as_slice(),
+        br#"from functools import partial
+def _route(value):
+    return value
+def _route(value, extra):
+    return value, extra
+route = partial(_route, Pattern=str)
+"#
+        .as_slice(),
+    ] {
+        let mut engine = Engine::default();
+        let evidence = engine
+            .extract_source_combined(
+                std::path::Path::new("/repo/pkg/routes.py"),
+                "pkg/routes.py",
+                source,
+            )
+            .expect("extract python")
+            .graph
+            .semantic_evidence
+            .expect("python universal evidence");
+        validate_evidence(&evidence, EvidenceLimits::default()).expect("valid python evidence");
+        assert!(
+            evidence
+                .declarations
+                .iter()
+                .all(
+                    |declaration| declaration.qualified_name != "pkg.routes.route"
+                        || declaration.kind != "function"
+                )
+        );
+    }
+}
+
+#[test]
+fn python_unique_module_variables_emit_exact_identity_and_initializer_type() {
+    let source = br#"class Service:
+    pass
+
+singleton = Service()
+constant = 7
+
+def factory():
+    return Service()
+
+product = factory()
+
+def local_shadow():
+    singleton = object()
+    return singleton
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/pkg/state.py"),
+            "pkg/state.py",
+            source,
+        )
+        .expect("extract python")
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid python evidence");
+
+    let singleton = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "pkg.state.singleton")
+        .expect("module singleton declaration");
+    let constant = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "pkg.state.constant")
+        .expect("module constant declaration");
+    let product = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "pkg.state.product")
+        .expect("module product declaration");
+    let service = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "pkg.state.Service")
+        .expect("initializer class declaration");
+    assert_eq!(singleton.kind, "variable");
+    assert_eq!(constant.kind, "variable");
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::TypeOf
+            && candidate.source_declaration_id == singleton.id
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(service.id.as_str())
+            && !candidate.constraints.allow_external
+    }));
+    assert!(evidence.candidates.iter().all(|candidate| {
+        candidate.relation != CandidateRelation::TypeOf
+            || candidate.source_declaration_id != constant.id
+    }));
+    assert!(evidence.candidates.iter().all(|candidate| {
+        candidate.relation != CandidateRelation::TypeOf
+            || candidate.source_declaration_id != product.id
+    }));
+}
+
+#[test]
+fn python_module_variables_fail_closed_for_competing_or_conditional_bindings() {
+    for source in [
+        br#"class Service:
+    pass
+singleton = Service()
+singleton = Service()
+"#
+        .as_slice(),
+        br#"class Service:
+    pass
+if enabled:
+    singleton = Service()
+"#
+        .as_slice(),
+        br#"class Service:
+    pass
+singleton = Service()
+singleton += replacement
+"#
+        .as_slice(),
+        br#"class Service:
+    pass
+singleton = Service()
+del singleton
+"#
+        .as_slice(),
+        br#"class Service:
+    pass
+singleton = Service()
+del singleton, other
+"#
+        .as_slice(),
+        br#"class Service:
+    pass
+singleton = Service()
+def configure(default=(singleton := replacement)):
+    return default
+"#
+        .as_slice(),
+        br#"from other import singleton
+class Service:
+    pass
+singleton = Service()
+"#
+        .as_slice(),
+    ] {
+        let mut engine = Engine::default();
+        let evidence = engine
+            .extract_source_combined(
+                std::path::Path::new("/repo/pkg/state.py"),
+                "pkg/state.py",
+                source,
+            )
+            .expect("extract python")
+            .graph
+            .semantic_evidence
+            .expect("python universal evidence");
+        validate_evidence(&evidence, EvidenceLimits::default()).expect("valid python evidence");
+        assert!(
+            evidence
+                .declarations
+                .iter()
+                .all(|declaration| declaration.qualified_name != "pkg.state.singleton")
+        );
+    }
+}
+
+#[test]
 fn python_dynamic_bases_and_nested_initializer_imports_fail_closed() {
     let source = br#"from framework import factory
 
@@ -748,6 +1260,22 @@ def dotted():
             .collect::<std::collections::BTreeSet<_>>(),
         std::collections::BTreeSet::from([Some("collection"), Some("return")])
     );
+    for reference in callback_references {
+        let candidates = evidence
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.occurrence_id.as_deref() == Some(&reference.id))
+            .collect::<Vec<_>>();
+        assert!(candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::References
+                && candidate.constraints.allow_external
+        }));
+        assert!(
+            candidates
+                .iter()
+                .all(|candidate| candidate.relation != CandidateRelation::IndirectCalls)
+        );
+    }
 }
 
 #[test]

@@ -343,6 +343,47 @@ class CorrectnessTests(unittest.TestCase):
         )
         self.assertEqual(result.metrics["missing_graphify_edges"], 1)
 
+    def test_python_source_inventory_includes_definition_time_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "sample.py"
+            source.write_text(
+                """
+@class_decorator(class_option())
+class Widget(base_factory(), metaclass=meta_factory()):
+    @method_decorator(method_option())
+    def run(
+        self,
+        value: annotation_factory() = default_factory(),
+    ) -> return_factory():
+        body_call()
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            constructs = independent_source_constructs(root, "python")
+
+        calls = {
+            (construct.owner_qualified_name, construct.target_spelling)
+            for construct in constructs
+            if construct.relation == "calls"
+        }
+        self.assertEqual(
+            calls,
+            {
+                ("sample", "base_factory"),
+                ("sample", "class_decorator"),
+                ("sample", "class_option"),
+                ("sample", "meta_factory"),
+                ("sample.Widget", "annotation_factory"),
+                ("sample.Widget", "default_factory"),
+                ("sample.Widget", "method_decorator"),
+                ("sample.Widget", "method_option"),
+                ("sample.Widget", "return_factory"),
+                ("sample.Widget.run", "body_call"),
+            },
+        )
+
     def test_rationale_facts_match_by_source_anchor_across_schema_names(self) -> None:
         database = self.database()
         with tempfile.TemporaryDirectory() as directory:
@@ -454,6 +495,31 @@ class CorrectnessTests(unittest.TestCase):
             result.metrics["graphify_nodes_coverage_reasons"],
         )
 
+    def test_unqualified_placeholder_cannot_bind_to_a_value_or_module(self) -> None:
+        for kind in ("field", "module"):
+            with self.subTest(kind=kind):
+                result = compare_documents(
+                    f"""
+                    {{"graph":{{"diagnostics":[]}},"nodes":[
+                      {{"id":"result","label":"result","kind":"{kind}",
+                       "source_file":"src/lib.rs","source_location":"L8",
+                       "language":"rust"}}
+                    ],"links":[]}}
+                    """,
+                    """
+                    {"nodes":[
+                      {"id":"src_build_rs_result","label":"Result"}
+                    ],"links":[]}
+                    """,
+                )
+                self.assertTrue(result.passed, result.failures)
+                self.assertEqual(result.metrics["rejected_graphify_nodes"], 1)
+                self.assertEqual(result.metrics["dominated_graphify_nodes"], 0)
+                self.assertIn(
+                    "rejected:unverifiable_placeholder",
+                    result.metrics["graphify_nodes_coverage_reasons"],
+                )
+
     def test_case_exact_generated_owner_disambiguates_case_distinct_types(self) -> None:
         result = compare_documents(
             """
@@ -479,6 +545,83 @@ class CorrectnessTests(unittest.TestCase):
         self.assertIn(
             "dominated:case_exact_owner",
             result.metrics["graphify_nodes_coverage_reasons"],
+        )
+
+    def test_rust_generic_parameter_remains_missing_instead_of_binding_an_unrelated_alias(
+        self,
+    ) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"field","label":"i","kind":"field",
+               "source_file":"src/iter/chunks.rs","source_location":"L12",
+               "language":"rust"},
+              {"id":"alias","label":"I","kind":"type_alias",
+               "source_file":"src/iter/test.rs","source_location":"L1918",
+               "language":"rust"}
+            ],"links":[]}
+            """,
+            """
+            {"nodes":[
+              {"id":"src_iter_mod_i","label":"I",
+               "source_file":"src/iter/mod.rs","source_location":"L290",
+               "language":"rust"}
+            ],"links":[]}
+            """,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.metrics["missing_graphify_nodes"], 1)
+        self.assertEqual(result.metrics["dominated_graphify_nodes"], 0)
+        self.assertIn(
+            "missing:no_compatible_anchored_definition",
+            result.metrics["graphify_nodes_coverage_reasons"],
+        )
+
+    def test_rust_blanket_impl_uses_the_occurrence_scoped_parameter_owner(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"first_i","label":"I","kind":"parameter",
+               "qualified_name":"<impl First for I>::<I>",
+               "source_file":"src/iter.rs","source_location":"L10","language":"rust"},
+              {"id":"second_i","label":"I","kind":"parameter",
+               "qualified_name":"<impl Second for I>::<I>",
+               "source_file":"src/iter.rs","source_location":"L20","language":"rust"},
+              {"id":"first","label":"First","kind":"trait",
+               "qualified_name":"crate::First",
+               "source_file":"src/iter.rs","source_location":"L1","language":"rust"},
+              {"id":"second","label":"Second","kind":"trait",
+               "qualified_name":"crate::Second",
+               "source_file":"src/iter.rs","source_location":"L2","language":"rust"}
+            ],"links":[
+              {"source":"first_i","target":"first","relation":"implements",
+               "source_file":"src/iter.rs","source_location":"L10"},
+              {"source":"second_i","target":"second","relation":"implements",
+               "source_file":"src/iter.rs","source_location":"L20"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"merged_i","label":"I","kind":"parameter",
+               "source_file":"src/iter.rs","source_location":"L10","language":"rust"},
+              {"id":"first","label":"First","kind":"trait",
+               "source_file":"src/iter.rs","source_location":"L1","language":"rust"},
+              {"id":"second","label":"Second","kind":"trait",
+               "source_file":"src/iter.rs","source_location":"L2","language":"rust"}
+            ],"links":[
+              {"source":"merged_i","target":"first","relation":"implements",
+               "source_file":"src/iter.rs","source_location":"L10"},
+              {"source":"merged_i","target":"second","relation":"implements",
+               "source_file":"src/iter.rs","source_location":"L20"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["exact_graphify_edges"], 1)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "dominated:precise_rust_blanket_impl_owner",
+            result.metrics["graphify_edges_coverage_reasons"],
         )
 
     def test_embedding_relation_requires_first_class_compass_embedding(self) -> None:
@@ -758,6 +901,89 @@ class CorrectnessTests(unittest.TestCase):
             result.metrics["graphify_edges_coverage_reasons"],
         )
 
+    def test_associated_return_alias_dominates_its_concrete_realization(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"method","label":"iter","kind":"method",
+               "qualified_name":"<crate::Collection as crate::Iterate>::iter",
+               "source_file":"src/lib.rs","source_location":"L10","language":"rust"},
+              {"id":"associated","label":"Iter","kind":"type_alias",
+               "qualified_name":"<impl Iterate for Collection>::Iter",
+               "source_file":"src/lib.rs","source_location":"L9","language":"rust"},
+              {"id":"concrete","label":"Iter","kind":"struct",
+               "qualified_name":"crate::Iter","source_file":"src/lib.rs",
+               "source_location":"L3","language":"rust"}
+            ],"links":[
+              {"source":"method","target":"associated","relation":"returns",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"source":"associated","target":"concrete","relation":"references",
+               "source_file":"src/lib.rs","source_location":"L9"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"method","label":"iter()","source_file":"src/lib.rs",
+               "source_location":"L10"},
+              {"id":"concrete","label":"Iter","source_file":"src/lib.rs",
+               "source_location":"L3"}
+            ],"links":[
+              {"source":"method","target":"concrete","relation":"references",
+               "context":"return_type","source_file":"src/lib.rs",
+               "source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertIn(
+            "dominated:associated_return_realization",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_associated_return_rejects_a_terminal_name_trait_projection(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"method","label":"folder","kind":"method",
+               "qualified_name":"<crate::Consumer as crate::Consume>::folder",
+               "source_file":"src/lib.rs","source_location":"L10","language":"rust"},
+              {"id":"associated","label":"Folder","kind":"type_alias",
+               "qualified_name":"<impl Consume for Consumer>::Folder",
+               "source_file":"src/lib.rs","source_location":"L9","language":"rust"},
+              {"id":"concrete","label":"LocalFolder","kind":"struct",
+               "qualified_name":"crate::LocalFolder","source_file":"src/lib.rs",
+               "source_location":"L3","language":"rust"},
+              {"id":"wrong","label":"Folder","kind":"trait",
+               "qualified_name":"crate::Folder","source_file":"src/api.rs",
+               "source_location":"L2","language":"rust"}
+            ],"links":[
+              {"source":"method","target":"associated","relation":"returns",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"source":"associated","target":"concrete","relation":"references",
+               "source_file":"src/lib.rs","source_location":"L9"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"method","label":"folder()","source_file":"src/lib.rs",
+               "source_location":"L10"},
+              {"id":"wrong","label":"Folder","source_file":"src/api.rs",
+               "source_location":"L2"}
+            ],"links":[
+              {"source":"method","target":"wrong","relation":"references",
+               "context":"return_type","source_file":"src/lib.rs",
+               "source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:associated_return_target_conflict",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
     def test_rust_generic_impl_owner_is_dominated_by_exact_type_ownership(self) -> None:
         result = compare_documents(
             """
@@ -825,6 +1051,236 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["missing_graphify_edges"], 0)
         self.assertIn(
             "dominated:precise_field_type",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_field_generic_argument_dominates_flat_owner_reference(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"JobFifo","kind":"struct",
+               "source_file":"src/job.rs","source_location":"L1","language":"rust"},
+              {"id":"field","label":"inner","kind":"field",
+               "source_file":"src/job.rs","source_location":"L2","language":"rust"},
+              {"id":"target","label":"JobRef","kind":"struct",
+               "source_file":"src/job.rs","source_location":"L10","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"field","relation":"contains",
+               "source_file":"src/job.rs","source_location":"L2"},
+              {"source":"field","target":"target","relation":"type_of",
+               "source_file":"src/job.rs","source_location":"L2"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_owner","label":"JobFifo",
+               "source_file":"src/job.rs","source_location":"L1"},
+              {"id":"legacy_target","label":"JobRef",
+               "source_file":"src/job.rs","source_location":"L10"}
+            ],"links":[
+              {"source":"legacy_owner","target":"legacy_target","relation":"references",
+               "context":"generic_arg","source_file":"src/job.rs","source_location":"L2"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "dominated:precise_field_type",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_scoped_field_type_rejects_wrong_same_named_parameter(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"Chunks","kind":"struct",
+               "source_file":"src/chunks.rs","source_location":"L10","language":"rust"},
+              {"id":"field","label":"i","kind":"field",
+               "source_file":"src/chunks.rs","source_location":"L12","language":"rust"},
+              {"id":"exact","label":"I","kind":"parameter",
+               "qualified_name":"crate::chunks::Chunks::<I>",
+               "source_file":"src/chunks.rs","source_location":"L10","language":"rust"},
+              {"id":"wrong","label":"I","kind":"parameter",
+               "qualified_name":"crate::iter::I",
+               "source_file":"src/iter.rs","source_location":"L290","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"field","relation":"contains",
+               "source_file":"src/chunks.rs","source_location":"L12"},
+              {"source":"field","target":"exact","relation":"type_of",
+               "source_file":"src/chunks.rs","source_location":"L12"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_owner","label":"Chunks",
+               "source_file":"src/chunks.rs","source_location":"L10"},
+              {"id":"legacy_wrong","label":"I",
+               "source_file":"src/iter.rs","source_location":"L290"}
+            ],"links":[
+              {"source":"legacy_owner","target":"legacy_wrong","relation":"references",
+               "context":"field","source_file":"src/chunks.rs","source_location":"L12"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:exact_typed_child_target_conflict",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_scoped_parameter_type_rejects_wrong_same_named_parameter(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"extend()","kind":"method",
+               "source_file":"src/extend.rs","source_location":"L10","language":"rust"},
+              {"id":"parameter","label":"values","kind":"parameter",
+               "source_file":"src/extend.rs","source_location":"L12","language":"rust"},
+              {"id":"exact","label":"I","kind":"parameter",
+               "qualified_name":"crate::Extend::extend::<I>",
+               "source_file":"src/extend.rs","source_location":"L10","language":"rust"},
+              {"id":"wrong","label":"I","kind":"parameter",
+               "qualified_name":"crate::iter::I",
+               "source_file":"src/iter.rs","source_location":"L290","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"parameter","relation":"contains",
+               "source_file":"src/extend.rs","source_location":"L12"},
+              {"source":"parameter","target":"exact","relation":"type_of",
+               "source_file":"src/extend.rs","source_location":"L12"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_owner","label":"extend()",
+               "source_file":"src/extend.rs","source_location":"L10"},
+              {"id":"legacy_wrong","label":"I",
+               "source_file":"src/iter.rs","source_location":"L290"}
+            ],"links":[
+              {"source":"legacy_owner","target":"legacy_wrong","relation":"references",
+               "context":"parameter_type","source_file":"src/extend.rs","source_location":"L12"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:exact_typed_child_target_conflict",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_signature_occurrence_rejects_wrong_owner_and_parameter(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"first","label":"extend()","kind":"method",
+               "source_file":"src/extend.rs","source_location":"L10","language":"rust"},
+              {"id":"exact_owner","label":"extend()","kind":"method",
+               "source_file":"src/extend.rs","source_location":"L12","language":"rust"},
+              {"id":"exact_target","label":"I","kind":"parameter",
+               "qualified_name":"crate::Second::extend::<I>",
+               "source_file":"src/extend.rs","source_location":"L12","language":"rust"},
+              {"id":"wrong_target","label":"I","kind":"parameter",
+               "qualified_name":"crate::iter::I",
+               "source_file":"src/iter.rs","source_location":"L290","language":"rust"}
+            ],"links":[
+              {"source":"exact_owner","target":"exact_target","relation":"references",
+               "context":"type_reference","source_file":"src/extend.rs","source_location":"L12"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_first","label":"extend()",
+               "source_file":"src/extend.rs","source_location":"L10"},
+              {"id":"legacy_wrong","label":"I",
+               "source_file":"src/iter.rs","source_location":"L290"}
+            ],"links":[
+              {"source":"legacy_first","target":"legacy_wrong","relation":"references",
+               "context":"parameter_type","source_file":"src/extend.rs","source_location":"L12"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:exact_typed_occurrence_conflict",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_multiple_signature_occurrences_remain_ambiguous(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"extend()","kind":"method",
+               "source_file":"src/extend.rs","source_location":"L12","language":"rust"},
+              {"id":"first","label":"I","kind":"parameter",
+               "qualified_name":"crate::First::<I>",
+               "source_file":"src/first.rs","source_location":"L1","language":"rust"},
+              {"id":"second","label":"I","kind":"parameter",
+               "qualified_name":"crate::Second::<I>",
+               "source_file":"src/second.rs","source_location":"L1","language":"rust"},
+              {"id":"wrong","label":"I","kind":"parameter",
+               "qualified_name":"crate::Wrong::<I>",
+               "source_file":"src/wrong.rs","source_location":"L1","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"first","relation":"references",
+               "source_file":"src/extend.rs","source_location":"L12"},
+              {"source":"owner","target":"second","relation":"references",
+               "source_file":"src/extend.rs","source_location":"L12"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_owner","label":"extend()",
+               "source_file":"src/extend.rs","source_location":"L12"},
+              {"id":"legacy_wrong","label":"I",
+               "source_file":"src/wrong.rs","source_location":"L1"}
+            ],"links":[
+              {"source":"legacy_owner","target":"legacy_wrong","relation":"references",
+               "context":"parameter_type","source_file":"src/extend.rs","source_location":"L12"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["ambiguous_graphify_edges"], 1)
+        self.assertIn(
+            "ambiguous:multiple_typed_occurrences",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_return_occurrence_rejects_wrong_overload_owner(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"first","label":"generate()","kind":"function",
+               "source_file":"src/generate.rs","source_location":"L10","language":"rust"},
+              {"id":"exact_owner","label":"generate()","kind":"function",
+               "source_file":"src/generate.rs","source_location":"L20","language":"rust"},
+              {"id":"return_target","label":"ParallelIterator","kind":"trait",
+               "source_file":"src/iter.rs","source_location":"L100","language":"rust"}
+            ],"links":[
+              {"source":"exact_owner","target":"return_target","relation":"returns",
+               "source_file":"src/generate.rs","source_location":"L20"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_first","label":"generate()",
+               "source_file":"src/generate.rs","source_location":"L10"},
+              {"id":"legacy_target","label":"ParallelIterator",
+               "source_file":"src/iter.rs","source_location":"L100"}
+            ],"links":[
+              {"source":"legacy_first","target":"legacy_target","relation":"references",
+               "context":"return_type","source_file":"src/generate.rs","source_location":"L20"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:exact_return_occurrence_conflict",
             result.metrics["graphify_edges_coverage_reasons"],
         )
 
@@ -1032,6 +1488,132 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
         self.assertIn(
             "dominated:precise_declaration_reference_occurrence",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_precise_return_type_dominates_a_declaration_line_projection(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"build","kind":"function",
+               "source_file":"src/lib.rs","source_location":"L10","language":"rust"},
+              {"id":"target","label":"BuildError","kind":"struct",
+               "source_file":"src/error.rs","source_location":"L2","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"target","relation":"returns",
+               "source_file":"src/lib.rs","source_location":"L12"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"owner","label":"build()",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"id":"target","label":"BuildError",
+               "source_file":"src/error.rs","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"target","relation":"references",
+               "context":"generic_arg","source_file":"src/lib.rs","source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertIn(
+            "dominated:precise_return_type_declaration_projection",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_return_projection_requires_exact_endpoint_and_type_context(self) -> None:
+        compass = """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"build","kind":"function",
+               "source_file":"src/lib.rs","source_location":"L10","language":"rust"},
+              {"id":"returned","label":"BuildError","kind":"struct",
+               "source_file":"src/error.rs","source_location":"L2","language":"rust"},
+              {"id":"other","label":"OtherError","kind":"struct",
+               "source_file":"src/other.rs","source_location":"L3","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"returned","relation":"returns",
+               "source_file":"src/lib.rs","source_location":"L12"}
+            ]}
+        """
+        wrong_endpoint = compare_documents(
+            compass,
+            """
+            {"nodes":[
+              {"id":"owner","label":"build()",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"id":"other","label":"OtherError",
+               "source_file":"src/other.rs","source_location":"L3"}
+            ],"links":[
+              {"source":"owner","target":"other","relation":"references",
+               "context":"return_type","source_file":"src/lib.rs","source_location":"L10"}
+            ]}
+            """,
+        )
+        value_reference = compare_documents(
+            compass,
+            """
+            {"nodes":[
+              {"id":"owner","label":"build()",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"id":"returned","label":"BuildError",
+               "source_file":"src/error.rs","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"returned","relation":"references",
+               "context":"value","source_file":"src/lib.rs","source_location":"L10"}
+            ]}
+            """,
+        )
+        wrong_occurrence = compare_documents(
+            compass,
+            """
+            {"nodes":[
+              {"id":"owner","label":"build()",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"id":"returned","label":"BuildError",
+               "source_file":"src/error.rs","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"returned","relation":"references",
+               "context":"return_type","source_file":"src/lib.rs","source_location":"L11"}
+            ]}
+            """,
+        )
+        for result in (wrong_endpoint, value_reference, wrong_occurrence):
+            self.assertFalse(result.passed)
+            self.assertEqual(result.metrics["missing_graphify_edges"], 1)
+
+    def test_multiple_projected_return_occurrences_remain_ambiguous(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"build","kind":"function",
+               "source_file":"src/lib.rs","source_location":"L10","language":"rust"},
+              {"id":"target","label":"BuildError","kind":"struct",
+               "source_file":"src/error.rs","source_location":"L2","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"target","relation":"returns",
+               "source_file":"src/lib.rs","source_location":"L12"},
+              {"source":"owner","target":"target","relation":"returns",
+               "source_file":"src/lib.rs","source_location":"L13"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"owner","label":"build()",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"id":"target","label":"BuildError",
+               "source_file":"src/error.rs","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"target","relation":"references",
+               "context":"return_type","source_file":"src/lib.rs","source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.metrics["ambiguous_graphify_edges"], 1)
+        self.assertIn(
+            "ambiguous:multiple_projected_return_types",
             result.metrics["graphify_edges_coverage_reasons"],
         )
 
@@ -1317,6 +1899,48 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["missing_graphify_edges"], 0)
         self.assertIn(
             "dominated:imported_symbol_definition",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_semantic_module_import_dominates_its_file_realization(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"consumer","label":"job.rs","kind":"file",
+               "qualified_name":"crate::job","source_file":"src/job.rs",
+               "source_location":"L1","language":"rust"},
+              {"id":"module_file","label":"unwind.rs","kind":"file",
+               "qualified_name":"crate::unwind","source_file":"src/unwind.rs",
+               "source_location":"L1","language":"rust"},
+              {"id":"import_owner","label":"job_impl","kind":"module",
+               "qualified_name":"crate::job::job_impl","source_file":"src/job.rs",
+               "source_location":"L1","language":"rust"},
+              {"id":"module","label":"unwind","kind":"module",
+               "qualified_name":"crate::unwind","source_file":"src/lib.rs",
+               "source_location":"L1","language":"rust"}
+            ],"links":[
+              {"source":"import_owner","target":"module","relation":"imports",
+               "source_file":"src/job.rs","source_location":"L1"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"consumer","label":"src/job.rs","kind":"file",
+               "source_file":"src/job.rs","source_location":"L1",
+               "language":"rust"},
+              {"id":"module_file","label":"src/unwind.rs","kind":"file",
+               "source_file":"src/unwind.rs","source_location":"L1",
+               "language":"rust"}
+            ],"links":[
+              {"source":"consumer","target":"module_file","relation":"imports",
+               "source_file":"src/job.rs","source_location":"L1"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertIn(
+            "dominated:semantic_module_realization",
             result.metrics["graphify_edges_coverage_reasons"],
         )
 

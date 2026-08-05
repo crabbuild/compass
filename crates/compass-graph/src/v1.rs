@@ -90,6 +90,7 @@ struct PreparedNodeFailure {
 
 struct EdgeNodeFacts {
     kind: NodeKind,
+    rust_type_parameter: bool,
     rust_enum_member: bool,
     unresolved_wiring_site: Option<SourceAnchor>,
 }
@@ -860,6 +861,9 @@ fn finalize_prepared_edge(
     let target_is_constructible = edge_node_facts
         .get(edge.target.as_str())
         .is_some_and(|facts| facts.kind.is_constructible() || facts.rust_enum_member);
+    let source_is_rust_type_parameter = edge_node_facts
+        .get(edge.source.as_str())
+        .is_some_and(|facts| facts.rust_type_parameter);
     let unresolved_wiring_site = [edge.source.as_str(), edge.target.as_str()]
         .into_iter()
         .filter_map(|id| edge_node_facts.get(id))
@@ -952,21 +956,23 @@ fn finalize_prepared_edge(
         edge.kind,
         EdgeKind::Embeds | EdgeKind::Extends | EdgeKind::Implements
     ) {
-        let valid = source_kind.is_type()
-            && match edge.kind {
-                EdgeKind::Embeds | EdgeKind::Extends => target_kind.is_type(),
-                EdgeKind::Implements => matches!(
-                    target_kind,
-                    NodeKind::Interface
-                        | NodeKind::Trait
-                        | NodeKind::Protocol
-                        // TypeScript permits a class to implement a
-                        // structural object type declared through a type
-                        // alias.
-                        | NodeKind::TypeAlias
-                ),
-                _ => false,
-            };
+        let valid = match edge.kind {
+            EdgeKind::Embeds | EdgeKind::Extends => source_kind.is_type() && target_kind.is_type(),
+            EdgeKind::Implements => {
+                (source_kind.is_type() || source_is_rust_type_parameter)
+                    && matches!(
+                        target_kind,
+                        NodeKind::Interface
+                            | NodeKind::Trait
+                            | NodeKind::Protocol
+                            // TypeScript permits a class to implement a
+                            // structural object type declared through a type
+                            // alias.
+                            | NodeKind::TypeAlias
+                    )
+            }
+            _ => false,
+        };
         if !valid {
             let reason = format!(
                 "invalid {} endpoints {} -> {}",
@@ -1210,6 +1216,8 @@ fn normalize_v1_with_mode(
                 id.as_str(),
                 EdgeNodeFacts {
                     kind: node.kind,
+                    rust_type_parameter: node.kind == NodeKind::Parameter
+                        && node.language.as_deref() == Some("rust"),
                     rust_enum_member: node.kind == NodeKind::EnumMember
                         && node.language.as_deref() == Some("rust"),
                     unresolved_wiring_site,

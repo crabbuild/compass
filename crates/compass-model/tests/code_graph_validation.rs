@@ -407,6 +407,20 @@ fn language_specific_declarations_use_supported_endpoint_shapes() {
             NodeKind::Annotation,
         ),
         (EdgeKind::References, NodeKind::Struct, NodeKind::Parameter),
+        (
+            EdgeKind::References,
+            NodeKind::Parameter,
+            NodeKind::Parameter,
+        ),
+        (EdgeKind::References, NodeKind::Parameter, NodeKind::Trait),
+        (
+            EdgeKind::References,
+            NodeKind::Parameter,
+            NodeKind::Interface,
+        ),
+        (EdgeKind::TypeOf, NodeKind::Field, NodeKind::Parameter),
+        (EdgeKind::Returns, NodeKind::Function, NodeKind::Parameter),
+        (EdgeKind::Implements, NodeKind::Parameter, NodeKind::Trait),
         (EdgeKind::Imports, NodeKind::File, NodeKind::Annotation),
         (EdgeKind::Imports, NodeKind::File, NodeKind::Field),
         (EdgeKind::Contains, NodeKind::EnumMember, NodeKind::Method),
@@ -429,6 +443,26 @@ fn language_specific_declarations_use_supported_endpoint_shapes() {
             "rejected Rust {kind:?} {source_kind:?} -> {target_kind:?}"
         );
     }
+}
+
+#[test]
+fn only_rust_type_parameters_can_own_blanket_implementations() {
+    let mut graph = document();
+    graph.nodes[0].kind = NodeKind::Parameter;
+    graph.nodes[0].language = Some("python".to_owned());
+    graph.nodes[1].kind = NodeKind::Trait;
+    graph.links[0].kind = EdgeKind::Implements;
+    let id = edge_id(
+        "route",
+        EdgeKind::Implements,
+        "handler",
+        Some(&anchor()),
+        None,
+    );
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+
+    assert!(validate_code_graph(&graph).is_err());
 }
 
 #[test]

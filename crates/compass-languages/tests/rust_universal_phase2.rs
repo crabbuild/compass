@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::error::Error;
 use std::path::Path;
 
@@ -222,6 +222,341 @@ fn rust_phase2_distinguishes_same_named_module_and_function_candidates()
             .collect::<HashSet<_>>(),
         HashSet::from(["function".to_owned(), "module".to_owned()])
     );
+    Ok(())
+}
+
+#[test]
+fn rust_phase2_preserves_nested_function_declarations_and_calls() -> Result<(), Box<dyn Error>> {
+    let extraction = Engine::default().extract_source(
+        Path::new("src/lib.rs"),
+        b"fn join() { fn call() {} call(); call(); }\n",
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+
+    let outer = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "crate::join")
+        .ok_or("missing outer function")?;
+    let nested = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "crate::join::call")
+        .ok_or("missing nested function")?;
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Contains
+            && candidate.source_declaration_id == outer.id
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(nested.id.as_str())
+    }));
+    assert_eq!(
+        evidence
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.relation == CandidateRelation::Calls
+                    && candidate.source_declaration_id == outer.id
+                    && candidate.target_spelling == "call"
+            })
+            .count(),
+        2
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_phase2_attaches_local_wildcards_to_lowercase_call_candidates() -> Result<(), Box<dyn Error>>
+{
+    let extraction = Engine::default().extract_source(
+        Path::new("src/join/test.rs"),
+        b"use super::*;\nfn invokes() { join(); }\n",
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+
+    let call = evidence
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "join"
+        })
+        .ok_or("missing lowercase call candidate")?;
+    let binding = call
+        .binding_id
+        .as_deref()
+        .and_then(|binding_id| {
+            evidence
+                .bindings
+                .iter()
+                .find(|binding| binding.id == binding_id)
+        })
+        .ok_or("lowercase call has no wildcard binding")?;
+    assert_eq!(binding.spelling, "*");
+    assert_eq!(binding.qualified_target, "crate::join");
+    Ok(())
+}
+
+#[test]
+fn rust_phase2_declares_scoped_type_parameters_and_targets_their_uses() -> Result<(), Box<dyn Error>>
+{
+    let extraction = Engine::default().extract_source(
+        Path::new("src/lib.rs"),
+        br#"struct Wrapper<T: Clone> { value: T }
+fn identity<T: Send>(value: T) -> T { value }
+"#,
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+
+    let wrapper = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "crate::Wrapper")
+        .ok_or("missing Wrapper")?;
+    let identity = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "crate::identity")
+        .ok_or("missing identity")?;
+    let parameters = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.kind == "parameter" && declaration.name == "T")
+        .collect::<Vec<_>>();
+    assert_eq!(parameters.len(), 2);
+    assert_ne!(parameters[0].qualified_name, parameters[1].qualified_name);
+    for (owner, expected_prefix) in [(wrapper, "crate::Wrapper"), (identity, "crate::identity")] {
+        let parameter = parameters
+            .iter()
+            .copied()
+            .find(|parameter| parameter.qualified_name.starts_with(expected_prefix))
+            .ok_or("missing owner-scoped type parameter")?;
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::Contains
+                && candidate.source_declaration_id == owner.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(parameter.id.as_str())
+        }));
+        assert!(evidence.candidates.iter().any(|candidate| {
+            matches!(
+                candidate.relation,
+                CandidateRelation::References
+                    | CandidateRelation::TypeOf
+                    | CandidateRelation::Returns
+            ) && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(parameter.id.as_str())
+        }));
+    }
+    Ok(())
+}
+
+#[test]
+fn rust_phase2_keeps_impl_and_method_type_parameters_lexically_distinct()
+-> Result<(), Box<dyn Error>> {
+    let extraction = Engine::default().extract_source(
+        Path::new("src/lib.rs"),
+        br#"trait Marker {}
+struct Wrapper<T> { value: T }
+impl<T: Marker> Wrapper<T> {
+    fn convert<U: Marker>(&self, value: U) -> T { self.value }
+}
+"#,
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+
+    let type_parameters = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.kind == "parameter")
+        .collect::<Vec<_>>();
+    assert_eq!(type_parameters.len(), 3);
+    assert_eq!(
+        type_parameters
+            .iter()
+            .map(|parameter| parameter.qualified_name.as_str())
+            .collect::<BTreeSet<_>>()
+            .len(),
+        3
+    );
+    let implementation_parameter = type_parameters
+        .iter()
+        .copied()
+        .find(|parameter| {
+            parameter.name == "T" && parameter.qualified_name.contains("<impl<T: Marker>")
+        })
+        .ok_or("missing implementation type parameter")?;
+    let method_parameter = type_parameters
+        .iter()
+        .copied()
+        .find(|parameter| parameter.name == "U")
+        .ok_or("missing method type parameter")?;
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Returns
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(implementation_parameter.id.as_str())
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::References
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(method_parameter.id.as_str())
+    }));
+    Ok(())
+}
+
+#[test]
+fn rust_phase2_scopes_associated_types_and_resolves_self_returns_exactly()
+-> Result<(), Box<dyn Error>> {
+    let extraction = Engine::default().extract_source(
+        Path::new("src/lib.rs"),
+        br#"trait Produce {
+    type Output;
+    fn produce() -> Self::Output;
+}
+struct Alpha;
+struct Beta;
+struct AlphaOutput;
+struct BetaOutput;
+struct Iter;
+impl Produce for Alpha {
+    type Output = AlphaOutput;
+    fn produce() -> Self::Output { AlphaOutput }
+}
+impl Produce for Beta {
+    type Output = BetaOutput;
+    fn produce() -> Self::Output { BetaOutput }
+}
+trait Iterate { type Iter; fn iter() -> Self::Iter; }
+impl Iterate for Alpha { type Iter = Iter; fn iter() -> Self::Iter { Iter } }
+"#,
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+
+    let associated_types = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.kind == "type_alias" && declaration.name == "Output")
+        .collect::<Vec<_>>();
+    assert_eq!(associated_types.len(), 3);
+    assert_eq!(
+        associated_types
+            .iter()
+            .map(|declaration| declaration.qualified_name.as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "<impl Produce for Alpha>::Output",
+            "<impl Produce for Beta>::Output",
+            "crate::Produce::Output",
+        ])
+    );
+
+    for (owner, concrete) in [("Alpha", "AlphaOutput"), ("Beta", "BetaOutput")] {
+        let associated = associated_types
+            .iter()
+            .copied()
+            .find(|declaration| {
+                declaration
+                    .qualified_name
+                    .contains(&format!("for {owner}>"))
+            })
+            .ok_or("missing impl-scoped associated type")?;
+        let method = evidence
+            .declarations
+            .iter()
+            .find(|declaration| {
+                declaration.kind == "method"
+                    && declaration
+                        .qualified_name
+                        .starts_with(&format!("<crate::{owner} as crate::Produce>"))
+            })
+            .ok_or("missing impl method")?;
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.source_declaration_id == method.id
+                && candidate.relation == CandidateRelation::Returns
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(associated.id.as_str())
+        }));
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.source_declaration_id == associated.id
+                && candidate.relation == CandidateRelation::References
+                && candidate.constraints.qualified_name.as_deref()
+                    == Some(format!("crate::{concrete}").as_str())
+        }));
+    }
+    let iteration_alias = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "<impl Iterate for Alpha>::Iter")
+        .ok_or("missing same-named associated type")?;
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.source_declaration_id == iteration_alias.id
+            && candidate.relation == CandidateRelation::References
+            && candidate.constraints.qualified_name.as_deref() == Some("crate::Iter")
+    }));
+    Ok(())
+}
+
+#[test]
+fn rust_phase2_publishes_type_lifetime_and_const_generic_parameters() -> Result<(), Box<dyn Error>>
+{
+    let extraction = Engine::default().extract_source(
+        Path::new("src/lib.rs"),
+        b"struct Buffer<'a, T, const N: usize> { value: &'a [T; N] }\n",
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+    let buffer = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "crate::Buffer")
+        .ok_or("missing Buffer")?;
+    let parameters = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.kind == "parameter")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        parameters
+            .iter()
+            .map(|parameter| parameter.name.as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["'a", "N", "T"])
+    );
+    for parameter in parameters {
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::Contains
+                && candidate.source_declaration_id == buffer.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(parameter.id.as_str())
+        }));
+        assert!(evidence.candidates.iter().any(|candidate| {
+            matches!(
+                candidate.relation,
+                CandidateRelation::References | CandidateRelation::TypeOf
+            ) && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(parameter.id.as_str())
+        }));
+    }
     Ok(())
 }
 

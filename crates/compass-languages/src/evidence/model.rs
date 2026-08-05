@@ -250,6 +250,15 @@ pub struct BindingFact {
     /// Zero-based result selected by a source-level destructuring assignment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_index: Option<u32>,
+    /// Exact nominal result type proven by the adapter for this call result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_type_qualified_name: Option<String>,
+    /// Earlier call result whose nominal type receives this method call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_binding_id: Option<String>,
+    /// Prior binding retained when project-wide call-result evidence is absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_binding_id: Option<String>,
     pub range: EvidenceRange,
 }
 
@@ -311,6 +320,13 @@ pub enum HierarchyConstraint {
     ReceiverDispatch {
         receiver_qualified_name: String,
         strategy: ReceiverDispatchStrategy,
+    },
+    /// Resolve `Self::Type` through one exact Rust trait hierarchy and the
+    /// corresponding associated-type realization for the concrete receiver.
+    RustAssociatedType {
+        receiver_declaration_id: String,
+        receiver_qualified_name: String,
+        trait_qualified_name: String,
     },
 }
 

@@ -631,6 +631,16 @@ def _rust_generic_owner_name(node: NodeFact) -> str | None:
     return _terminal_symbol(normalized) or None
 
 
+def _rust_generic_parameter_placeholder(node: NodeFact) -> bool:
+    return bool(
+        node.language == "rust"
+        and node.placeholder
+        and not node.kind
+        and node.source_file
+        and re.fullmatch(r"[A-Z]", node.label)
+    )
+
+
 def _qualified_name_has_owner(qualified_name: str) -> bool:
     return "." in qualified_name or "::" in qualified_name
 
@@ -745,6 +755,11 @@ def _classify_nodes(
                 "exact", "source_fact", exact_compatible[0].identifier
             )
             mapping[identifier] = exact_compatible[0].identifier
+            continue
+        if _rust_generic_parameter_placeholder(graphify):
+            coverage[identifier] = Coverage(
+                "missing", "no_compatible_anchored_definition", None
+            )
             continue
         if (
             graphify.source_file
@@ -931,6 +946,7 @@ def _classify_nodes(
                 candidate
                 for candidate in compass_by_label.get(graphify.normalized_label, [])
                 if _compatible_definition(graphify, candidate)
+                and candidate.kind in CODE_TYPE_KINDS
                 and candidate.module
                 and _identifier_carries_module(graphify.identifier, candidate.module)
             ]
@@ -1132,6 +1148,7 @@ def _classify_edges(
     qualified_external_targets: dict[tuple[str, str, str, str], set[str]] = {}
     qualified_external_imports: dict[tuple[str, str], set[str]] = {}
     imported_symbol_targets: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
+    semantic_module_imports: dict[tuple[str, str, str], list[EdgeFact]] = {}
     reexport_occurrence_targets: dict[
         tuple[str, str, str, str], list[EdgeFact]
     ] = {}
@@ -1139,12 +1156,24 @@ def _classify_edges(
     exact_occurrence_targets: dict[
         tuple[str, str, str, str, str], set[str]
     ] = {}
+    typed_occurrence_pairs: dict[
+        tuple[str, str, str], dict[tuple[str, str], str]
+    ] = {}
+    return_occurrence_pairs: dict[
+        tuple[str, str, str], dict[tuple[str, str], str]
+    ] = {}
     inheritance_occurrence_targets: dict[
         tuple[str, str, str, str], set[str]
     ] = {}
+    rust_blanket_implementations: dict[
+        tuple[str, str, str, str], list[EdgeFact]
+    ] = {}
     typed_reference_index: dict[tuple[str, str], list[EdgeFact]] = {}
     typed_references_by_source: dict[str, list[tuple[str, EdgeFact]]] = {}
+    return_references_by_source: dict[str, list[tuple[str, EdgeFact]]] = {}
+    type_alias_realizations: dict[str, set[str]] = {}
     field_type_references: dict[tuple[str, str], list[EdgeFact]] = {}
+    field_type_references_by_source: dict[str, list[tuple[str, EdgeFact]]] = {}
     value_references: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
     containment: dict[str, set[str]] = {}
     containment_parents: dict[str, set[str]] = {}
@@ -1174,8 +1203,14 @@ def _classify_edges(
         direct_index.setdefault((edge.relation, source, target), []).append(edge)
         if edge.relation in {"returns", "type_of"}:
             typed_reference_index.setdefault((source, target), []).append(edge)
+        if edge.relation == "returns":
+            return_references_by_source.setdefault(source, []).append((target, edge))
         if edge.relation == "type_of":
             typed_references_by_source.setdefault(source, []).append((target, edge))
+        if edge.relation == "references":
+            source_node = compass_nodes.get(edge.source)
+            if source_node is not None and source_node.kind == "type_alias":
+                type_alias_realizations.setdefault(source, set()).add(target)
         if (
             edge.relation == "references"
             and edge.context in {"argument", "collection"}
@@ -1187,6 +1222,23 @@ def _classify_edges(
                 [],
             ).append(edge)
         source_node = compass_nodes.get(edge.source)
+        if (
+            edge.relation == "implements"
+            and source_node is not None
+            and source_node.kind == "parameter"
+            and source_node.language == "rust"
+            and edge.occurrence_file
+            and edge.occurrence_location
+        ):
+            rust_blanket_implementations.setdefault(
+                (
+                    target,
+                    edge.occurrence_file,
+                    edge.occurrence_location,
+                    source_node.normalized_label,
+                ),
+                [],
+            ).append(edge)
         if (
             edge.relation in {"extends", "implements"}
             and source_node is not None
@@ -1246,6 +1298,32 @@ def _classify_edges(
                     ),
                     set(),
                 ).add(target)
+            if (
+                edge.relation == "references"
+                and target_node is not None
+                and target_node.anchored_definition
+            ):
+                typed_occurrence_pairs.setdefault(
+                    (
+                        edge.occurrence_file,
+                        edge.occurrence_location,
+                        _terminal_symbol(target_node.normalized_label),
+                    ),
+                    {},
+                ).setdefault((source, target), edge.payload_sha256)
+            if (
+                edge.relation == "returns"
+                and target_node is not None
+                and target_node.anchored_definition
+            ):
+                return_occurrence_pairs.setdefault(
+                    (
+                        edge.occurrence_file,
+                        edge.occurrence_location,
+                        _terminal_symbol(target_node.normalized_label),
+                    ),
+                    {},
+                ).setdefault((source, target), edge.payload_sha256)
             if (
                 edge.relation == "imports"
                 and target_node is not None
@@ -1307,11 +1385,29 @@ def _classify_edges(
                     ),
                     [],
                 ).append(edge)
+            if (
+                target_node is not None
+                and target_node.kind == "module"
+                and target_node.qualified_name
+                and edge.occurrence_file
+                and edge.occurrence_location
+            ):
+                semantic_module_imports.setdefault(
+                    (
+                        target_node.qualified_name,
+                        edge.occurrence_file,
+                        edge.occurrence_location,
+                    ),
+                    [],
+                ).append(edge)
 
     for owner, children in containment.items():
         for child in children:
             for target, edge in typed_references_by_source.get(child, []):
                 field_type_references.setdefault((owner, target), []).append(edge)
+                field_type_references_by_source.setdefault(owner, []).append(
+                    (target, edge)
+                )
 
     output: list[Coverage] = []
     for graphify in graphify_edges:
@@ -1435,8 +1531,110 @@ def _classify_edges(
         compass_source = compass_nodes.get(source) if source is not None else None
         compass_target = compass_nodes.get(target) if target is not None else None
         if (
+            graphify.relation == "implements"
+            and target is not None
+            and graphify_source is not None
+            and graphify_source.language == "rust"
+            and compass_source is not None
+            and compass_source.kind == "parameter"
+            and compass_source.language == "rust"
+            and graphify_source.normalized_label == compass_source.normalized_label
+        ):
+            scoped_implementations = rust_blanket_implementations.get(
+                (
+                    target,
+                    graphify.occurrence_file,
+                    graphify.occurrence_location,
+                    graphify_source.normalized_label,
+                ),
+                [],
+            )
+            if (
+                len(scoped_implementations) == 1
+                and scoped_implementations[0].source != source
+            ):
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "precise_rust_blanket_impl_owner",
+                        scoped_implementations[0].payload_sha256,
+                    )
+                )
+                continue
+        if (
+            graphify.relation == "imports"
+            and source is not None
+            and compass_target is not None
+            and compass_target.kind == "file"
+            and compass_target.qualified_name
+        ):
+            module_imports = semantic_module_imports.get(
+                (
+                    compass_target.qualified_name,
+                    graphify.occurrence_file,
+                    graphify.occurrence_location,
+                ),
+                [],
+            )
+            module_imports = [
+                edge
+                for edge in module_imports
+                if (
+                    canonical_endpoints.get(edge.source, edge.source) == source
+                    or (
+                        compass_source is not None
+                        and (owner := compass_nodes.get(edge.source)) is not None
+                        and owner.source_file == compass_source.source_file
+                        and owner.source_file == graphify.occurrence_file
+                    )
+                )
+            ]
+            if len(module_imports) == 1:
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "semantic_module_realization",
+                        module_imports[0].payload_sha256,
+                    )
+                )
+                continue
+            if len(module_imports) > 1:
+                output.append(
+                    Coverage("ambiguous", "multiple_semantic_module_imports", None)
+                )
+                continue
+        if (
             graphify.relation == "references"
-            and graphify.context == "field"
+            and graphify.context == "parameter_type"
+            and source is not None
+            and target is not None
+            and graphify_target is not None
+        ):
+            signature_pairs = typed_occurrence_pairs.get(
+                (
+                    graphify.occurrence_file,
+                    graphify.occurrence_location,
+                    _terminal_symbol(graphify_target.normalized_label),
+                ),
+                {},
+            )
+            if len(signature_pairs) == 1 and (source, target) not in signature_pairs:
+                output.append(
+                    Coverage(
+                        "rejected",
+                        "exact_typed_occurrence_conflict",
+                        next(iter(signature_pairs.values())),
+                    )
+                )
+                continue
+            if len(signature_pairs) > 1 and (source, target) not in signature_pairs:
+                output.append(
+                    Coverage("ambiguous", "multiple_typed_occurrences", None)
+                )
+                continue
+        if (
+            graphify.relation == "references"
+            and graphify.context in {"field", "generic_arg", "parameter_type"}
             and source is not None
             and target is not None
         ):
@@ -1455,6 +1653,27 @@ def _classify_edges(
                 )
                 continue
             if len(precise_field_types) > 1:
+                output.append(Coverage("ambiguous", "multiple_field_types", None))
+                continue
+            occurrence_field_types = [
+                (field_type, edge)
+                for field_type, edge in field_type_references_by_source.get(source, [])
+                if _occurrence_match(graphify, edge, occurrence_oracle) is not None
+            ]
+            corrected_targets = {
+                canonical_endpoints.get(field_type, field_type)
+                for field_type, _ in occurrence_field_types
+            }
+            if len(corrected_targets) == 1 and target not in corrected_targets:
+                output.append(
+                    Coverage(
+                        "rejected",
+                        "exact_typed_child_target_conflict",
+                        occurrence_field_types[0][1].payload_sha256,
+                    )
+                )
+                continue
+            if len(corrected_targets) > 1:
                 output.append(Coverage("ambiguous", "multiple_field_types", None))
                 continue
         if (
@@ -1701,6 +1920,61 @@ def _classify_edges(
                 continue
 
         if graphify.relation == "references":
+            associated_returns = [
+                (associated_type, edge)
+                for associated_type, edge in return_references_by_source.get(source, [])
+                if (associated_node := compass_nodes.get(associated_type)) is not None
+                and associated_node.kind == "type_alias"
+                and associated_node.qualified_name.startswith("<impl")
+                and _occurrence_match(graphify, edge, occurrence_oracle) is not None
+            ]
+            if len(associated_returns) == 1:
+                associated_type, edge = associated_returns[0]
+                realizations = type_alias_realizations.get(associated_type, set())
+                status = (
+                    "dominated"
+                    if target == associated_type or target in realizations
+                    else "rejected"
+                )
+                reason = (
+                    "associated_return_realization"
+                    if status == "dominated"
+                    else "associated_return_target_conflict"
+                )
+                output.append(Coverage(status, reason, edge.payload_sha256))
+                continue
+            if len(associated_returns) > 1:
+                output.append(
+                    Coverage("ambiguous", "multiple_associated_return_types", None)
+                )
+                continue
+            declaration_projected_returns = [
+                edge
+                for returned_type, edge in return_references_by_source.get(source, [])
+                if returned_type == target
+                and not direct_index.get(("references", source, target))
+                and graphify.context in {"generic_arg", "return_type"}
+                and graphify_source is not None
+                and graphify_source.callable
+                and graphify.occurrence_file == graphify_source.source_file
+                and graphify.occurrence_location == graphify_source.source_location
+                and edge.occurrence_file == graphify.occurrence_file
+                and edge.occurrence_location != graphify.occurrence_location
+            ]
+            if len(declaration_projected_returns) == 1:
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "precise_return_type_declaration_projection",
+                        declaration_projected_returns[0].payload_sha256,
+                    )
+                )
+                continue
+            if len(declaration_projected_returns) > 1:
+                output.append(
+                    Coverage("ambiguous", "multiple_projected_return_types", None)
+                )
+                continue
             typed_references = [
                 edge
                 for edge in typed_reference_index.get((source, target), [])
@@ -1720,6 +1994,29 @@ def _classify_edges(
                     Coverage("ambiguous", "multiple_typed_reference_facts", None)
                 )
                 continue
+            if graphify.context == "return_type" and graphify_target is not None:
+                return_pairs = return_occurrence_pairs.get(
+                    (
+                        graphify.occurrence_file,
+                        graphify.occurrence_location,
+                        _terminal_symbol(graphify_target.normalized_label),
+                    ),
+                    {},
+                )
+                if len(return_pairs) == 1 and (source, target) not in return_pairs:
+                    output.append(
+                        Coverage(
+                            "rejected",
+                            "exact_return_occurrence_conflict",
+                            next(iter(return_pairs.values())),
+                        )
+                    )
+                    continue
+                if len(return_pairs) > 1 and (source, target) not in return_pairs:
+                    output.append(
+                        Coverage("ambiguous", "multiple_return_occurrences", None)
+                    )
+                    continue
 
         direct = direct_index.get((graphify.relation, source, target), [])
         if graphify.relation in {"extends", "implements"}:

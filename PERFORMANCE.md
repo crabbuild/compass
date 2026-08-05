@@ -253,6 +253,374 @@ same filtered Graphify Go comparison, exact comparable edges improved from
 1,469 to 1,492 and missing edges fell from 38 to 15. These quality numbers are
 diagnostic and do not imply that all Graphify gaps are closed.
 
+A 2026-08-05 TypeScript follow-up used the same pinned 444-file Zod checkout,
+fresh JSON output roots, and the retained Graphify 0.9.32 artifact. Three fresh
+Compass processes produced byte-identical graphs with 11,322 nodes and 14,921
+occurrence-backed relationships. External wall times were 6.95, 1.47, and
+1.41 seconds (1.47-second median); the first run was a host cold-launch outlier
+and is retained rather than discarded. The retained 4.918-second Graphify
+sample is therefore 3.35× the Compass median, while Compass used 339--350 MB
+peak RSS versus Graphify's 250 MB.
+
+The TypeScript variance and value-namespace correction removed all four valid
+syntax parser-recovery quarantines. One source-invalid inheritance edge remains
+explicitly omitted. Against 5,928 Graphify edge hypotheses, exact matches rose
+from 3,482 to 4,195, semantically dominated matches rose from 292 to 547, and
+missing hypotheses fell from 2,127 to 1,073. Seventy-seven formerly missing
+hypotheses are now rejected by stronger exact source facts: Graphify attributes
+methods declared by `_ZodBigInt` to `ZodBigInt`, for example, and attributes
+`ZodAny extends _ZodType` to `ZodType`. Nine former exact agreements are also
+correctly rejected: type-only imports of `ZodParsedType` and `ZodIssueCode`
+target their type aliases, while Graphify targets the same-named runtime values.
+The 92 missing Graphify node hypotheses are unchanged. These comparator
+classifications and targeted source checks are diagnostic, not a statistical
+precision or recall claim.
+
+A 2026-08-05 Rust follow-up used the pinned 191-file Rayon checkout and fresh
+JSON output roots. Three release-binary Compass processes produced
+byte-identical graphs (SHA-256 `11d35db33a3ac2ad1c6914cd59b53ec6b5fbe637046c04307aad57978edb91fb`)
+with 8,828 nodes and 18,422 occurrence-backed relationships. Wall times were
+2.24, 2.14, and 2.30 seconds (2.24-second median), with a 326.7 MB maximum peak
+RSS. The retained Graphify 0.9.32 sample took 1.947 seconds and 84.6 MB, so this
+small-repository sample is not a Compass performance win; Compass publishes
+2.39× as many relationships.
+
+Preserving nested Rust declarations added 261 nodes and 501 relationships over
+the preceding Compass artifact. Resolving repository-local wildcard calls
+then made eight additional Graphify call hypotheses exact without redirecting
+same-module calls through the wildcard. In the final comparison, 2,159 of
+7,701 Graphify relationship hypotheses matched exactly, 1,795 were
+semantically dominated, 2,965 were rejected as unsafe projections, and 782
+remained missing. Of 4,197 node hypotheses, 2,754 matched exactly, 271 were
+dominated, 1,083 unverifiable placeholders were rejected, and 89 remained
+missing. These classifications use source-compatible endpoints and occurrence
+anchors; they are diagnostic hypotheses, not precision or recall percentages.
+
+A second 2026-08-05 Rayon run qualified scoped Rust type, lifetime, and const
+generic parameters. Three fresh outputs were byte-identical (SHA-256
+`2b9111ed6f21748749c8046c8c3f8730c9991ab9b218be63d5e60c4a6f9eab80`)
+at 11,963 nodes and 24,929 occurrence-backed relationships. External wall
+times were 7.94, 2.01, and 2.04 seconds; the first copied-binary launch is
+retained as a host cold-launch outlier, and the 2.04-second median remains
+slightly slower than the retained 1.947-second Graphify sample. Peak RSS was
+377,454,592 bytes. Four pre-existing unrelated edges were omitted; no generic
+parameter or bound relationship was omitted.
+
+The source-compatible comparison improved to 2,160 exact and 2,349 dominated
+Graphify edge hypotheses, with 2,520 rejected and 672 missing. Four formerly
+missing Graphify node hypotheses now match exact scoped parameters, leaving 85
+missing nodes. Of the 110-edge reduction in missing hypotheses, one is a newly
+covered typed reference and 109 are now rejected because Graphify targets a
+same-named generic parameter from the wrong lexical owner. Another 599
+previously unverifiable generic edges are dominated by Compass's exact
+occurrence targets. The remaining missing-node set consists almost entirely
+of Graphify's synthetic Rust impl-receiver spellings such as `Vec<T>` and
+`&'a [T]`; Compass graph schema version 1 has no first-class impl-block node.
+That representation gap and the remaining exact-endpoint call, type, and
+import hypotheses require separate source audits rather than synthetic count
+inflation.
+
+A third 2026-08-05 Rayon run resolved repository-local Rust imports to their
+unique semantic module instead of dropping the relationship when the module's
+physical file had the same qualified identity. Three fresh graphs were
+byte-identical (SHA-256
+`21711c58282858cf0fc6873ac538ea88445f6a0718159ee776397eb359aa4af4`)
+at 11,963 nodes and 25,095 occurrence-backed relationships. Wall times were
+7.47, 1.96, and 2.45 seconds in the committed-revision rerun; the copied-binary
+cold-launch outlier is retained and the median was 2.45 seconds. Maximum peak
+RSS was 380,092,416 bytes. Four
+pre-existing unrelated edges were omitted.
+
+The source-compatible comparison now reports 2,160 exact, 2,408 dominated,
+2,512 rejected, and 621 missing Graphify edge hypotheses. It recognizes 52
+exact-occurrence imports where Graphify names the physical Rust file and
+Compass names the same qualified semantic module, including imports owned by a
+more precise nested source scope. The comparison requires a mapped file target,
+identical qualified module identity, exact occurrence file and line, and one
+compatible Compass import; ambiguity still fails closed. Relative to the
+scoped-generic run, the resolver moved eight unsafe projections to dominated
+evidence and the representation-aware comparison reduced missing hypotheses by
+51. Node classifications remain 2,758 exact, 271 dominated, 1,083 rejected,
+and 85 missing. These counts remain diagnostic hypotheses, not precision or
+recall percentages.
+
+A fourth 2026-08-05 Rayon run preserved Rust associated types as exact
+trait- or implementation-scoped aliases and resolved `Self::Type` returns to
+the unique lexical declaration. Three forced, fresh-output graphs from Compass
+revision `5d414b11c710` were byte-identical (SHA-256
+`aeb329d04c758d275d06456188722e048afc55525e9a62485e39aa88eefee09e`)
+at 12,144 nodes and 26,378 occurrence-backed relationships. External wall
+times were 7.31, 1.56, and 1.42 seconds; the first host cold-launch outlier is
+retained and the median was 1.56 seconds. Maximum peak RSS was 392,937,472
+bytes. The retained Graphify 0.9.32 sample took 1.947 seconds and 84,639,744
+bytes, so Compass was 1.25x faster at the median while publishing 3.43x as many
+raw relationships. This is a single small-repository diagnostic comparison,
+not a promoted performance baseline.
+
+The source-compatible comparison reports 2,160 exact, 2,421 dominated, 2,612
+rejected, and 508 missing Graphify edge hypotheses; node classifications stay
+at 2,758 exact, 271 dominated, 1,083 rejected, and 85 missing. Exact return
+occurrences now distinguish the associated alias from its concrete realization:
+one Graphify concrete-return hypothesis is dominated by the stronger two-edge
+representation, and 110 terminal-name projections are rejected because they
+target an unrelated same-named trait or type. The targeted return-type subset
+fell from 128 missing hypotheses to 17. Those 17 consist of multiline or
+duplicated source-owner mapping cases, cross-impl associated types inherited
+through a related trait, and two Graphify synthetic slice endpoints; they
+remain open for separate source audits rather than being guessed. Overall
+missing edge hypotheses fell by 113 from the module-import run. These are
+comparator classifications with source and occurrence constraints, not a
+statistical precision or recall claim.
+
+A fifth 2026-08-05 Rayon run resolved unqualified Rust symbols across multiple
+visible repository-local glob imports. Three forced, fresh-output graphs from
+Compass revision `acc1f7992f85` were byte-identical (SHA-256
+`4b0d37f89ab94df99164d8511daf69ab58c81a6ed4761d8c1875841b619c5a15`)
+at 12,111 nodes and 26,537 occurrence-backed relationships. External wall
+times were 7.43, 1.51, and 1.38 seconds; the first host cold-launch outlier is
+retained and the median was 1.51 seconds. Maximum peak RSS was 382,681,088
+bytes. Against the retained 1.947-second Graphify sample, Compass was 1.29x
+faster at the median while publishing 3.45x as many raw relationships. Four
+pre-existing unrelated edges were omitted.
+
+The source-compatible comparison reports 2,209 exact, 2,495 dominated, 2,542
+rejected, and 455 missing Graphify edge hypotheses; node classifications stay
+at 2,758 exact, 271 dominated, 1,083 rejected, and 85 missing. Forty-nine
+previously missing `bridge` or `bridge_unindexed` calls now match exactly at
+their source occurrences. Another 74 Graphify hypotheses are dominated by
+source-backed implementation owners, inheritance occurrences, field types, or
+typed references after the same glob resolution rewired 84 implementation
+relationships away from placeholders. The resolver unions only bounded local
+glob scopes with one compatible declaration. Competing local declarations,
+mixed local/external glob sets, and truncated scope or re-export searches fail
+closed. Missing edge hypotheses fell by 53 from the associated-type run; the
+remaining set contains 53 calls, 111 type/signature references, nine
+implementation relationships, 170 containment relationships, and 112
+hypotheses with uncovered non-containment endpoints. These diagnostic
+classifications are not statistical precision or recall measurements.
+
+A source-audited comparator follow-up at Compass revision `34e23ca7bd38`
+kept the graph digest, counts, and timing evidence unchanged while separating
+additional Graphify projection errors from native Compass gaps. Exact scoped
+child types reject 46 Graphify field or signature targets that bind to an
+unrelated same-named parameter; 19 multi-component field types remain
+ambiguous instead of selecting one constituent. Exact anchored signature
+occurrences reject 11 edges that Graphify assigns to an earlier same-named
+Rust impl method, and exact return occurrences reject two edges assigned to an
+earlier same-named function. Placeholder targets are not accepted as
+disproof, and multiple occurrence candidates fail closed as ambiguous. The
+updated comparison reports 2,209 exact, 2,495 dominated, 2,601 rejected, 19
+ambiguous, and 377 missing Graphify edge hypotheses. The residual set contains
+53 calls, 51 type/signature references, 103 implementation relationships, and
+170 containment relationships. Node classifications remain 2,758 exact, 271
+dominated, 1,083 rejected, and 85 missing. These are source-constrained
+comparator classifications, not statistical precision or recall measurements.
+
+A subsequent 2026-08-05 Rayon qualification added exact receiver identity,
+complete Rust supertrait traversal, and bounded parent-module glob visibility.
+The fresh graph contains 12,091 nodes and 26,790 relationships. Relative to the
+preceding 12,111-node, 26,537-relationship graph, 22 repeated external
+`Producer`/`UnindexedProducer` relationships retarget to their exact local
+traits, eliminating 20 duplicate placeholder nodes; all nine previously
+missing inherited `Self::Reducer` returns resolve;
+and inherited `ParallelIterator::Item` uses resolve across exact
+`IndexedParallelIterator` implementations. The only two old non-placeholder
+relationships removed were source-invalid bindings from `Add<Output = T>` to
+unrelated `ProducerCallback::Output` aliases. The comparator reports 2,242
+exact, 2,518 dominated, 2,588 rejected, 19 ambiguous, and 334 missing Graphify
+edge hypotheses, reducing the missing set by 43 from the preceding audited
+run. Node classifications remain 2,758 exact, 271 dominated, 1,083 rejected,
+and 85 missing. These are source-constrained comparator classifications, not
+statistical precision or recall measurements.
+
+A further 2026-08-05 Rayon qualification made Rust wildcard completeness aware
+of exact source-present sibling crates. Three clean release builds were byte
+identical at 12,060 nodes, 26,675 relationships, and graph SHA-256
+`52df1abb0e84468f165b1e1066a254b45b1d8dafb200b83519d38c767a17e99b`.
+Relative to the preceding graph, 34 call and 20 test occurrences were added,
+including exact `empty`, `once`, `repeat_n`, `scope`, and `Board::random`
+targets. The graph removed 177 placeholder relationships whose targets were
+not declarations in the indexed wildcard modules, including false
+`rayon::prelude::Vec`, `rayon::prelude::Send`, and
+`rayon::prelude::FnOnce` identities. The comparator reports 2,251 exact, 2,516
+dominated, 2,585 rejected, 19 ambiguous, and 330 missing Graphify edge
+hypotheses: nine more exact matches and four fewer missing hypotheses than the
+preceding run. Node classifications remain 2,758 exact, 271 dominated, 1,083
+rejected, and 85 missing. These are source-constrained comparator
+classifications, not statistical precision or recall measurements.
+
+The next 2026-08-05 Rayon qualification added exact Rust implementation-header
+type references. Three clean release builds were byte-identical at 12,060
+nodes, 26,809 relationships, and graph SHA-256
+`91b5e3c97c926d08a576341ef2fff991acac519a2791bf60fc628d7aa30550da`.
+All 134 added relationships are exact source occurrences: 131 target scoped
+implementation parameters, two target source structs, and one targets an
+explicitly imported type alias. A targeted source audit confirmed
+`WorkerThread -> ThreadBuilder`, `CollectReducer -> CollectResult`,
+`ListReducer -> LinkedList`, and tuple-parameter references on `Unzip` against
+their implementation headers. No node identities, node counts, or preceding
+relationships changed; Rust adapter metadata advances to version 7. The
+comparator reports 2,253 exact, 2,604 dominated, 2,497 rejected, 19
+ambiguous, and 328 missing Graphify edge hypotheses. Two formerly missing
+references are now exact, while 88 unverifiable generic placeholders are
+dominated by Compass's exact implementation-scoped parameter identities. Node
+classifications remain 2,758 exact, 271 dominated, 1,083 rejected, and 85
+missing. These are source-constrained comparator classifications, not
+statistical precision or recall measurements.
+
+The following 2026-08-05 Rayon qualification published Rust blanket trait
+implementations from their exact impl-scoped generic parameter declarations.
+Three clean release-binary builds were byte-identical at 12,060 nodes, 26,814
+relationships, and graph SHA-256
+`e073a4d8f83ade7b9fd01cc6ebcd09903e6f115c3191c48a78acc16238314f2c`.
+The five added `implements` relationships are source-anchored at the blanket
+implementation headers for `IntoParallelRefIterator`,
+`IntoParallelRefMutIterator`, `IntoParallelIterator`, `ParallelBridge`, and
+`Pattern`; no preceding node or relationship was removed. Publication still
+omits only the four pre-existing invalid macro-containment relationships. The
+comparator reports 2,257 exact, 2,605 dominated, 2,497 rejected, 19 ambiguous,
+and 323 missing Graphify edge hypotheses: four formerly missing blanket
+implementations are exact, while Graphify's single node for two distinct `I`
+parameters is dominated by Compass's occurrence-scoped owners. Node
+classifications remain 2,758 exact, 271 dominated, 1,083 rejected, and 85
+missing. Rust adapter metadata advances to version 8. These are
+source-constrained comparator classifications, not statistical precision or
+recall measurements.
+
+The following 2026-08-05 Rayon qualification preserved calls through the
+mutually exclusive `#[cfg(unix)]` and `#[cfg(windows)]` reexports of
+`get_cpu_time`, together with the source-declared fallback for other targets.
+Three clean release-binary builds were byte-identical at 12,060 nodes, 26,820
+relationships, and graph SHA-256
+`08e304704903ecaf5df14cfa8f828c0563cf7df255833c5a5bd8a818c953f73b`.
+The only graph delta was six exact, source-anchored `calls` relationships: each
+of the two call sites in `rayon-demo/src/cpu_time/mod.rs` targets the Unix,
+Windows, and fallback declarations. No node or preceding relationship changed.
+Against the same pinned Graphify artifact used by the preceding qualification,
+the comparator reports 2,258 exact, 2,605 dominated, 2,497 rejected, 19
+ambiguous, and 322 missing Graphify edge hypotheses; the line-33
+`get_cpu_time` hypothesis moved from missing to exact. Rust adapter metadata
+advances to version 9. A separate fresh Graphify run was excluded from change
+attribution because it produced 4,185 nodes, 8,183 relationships, and 497
+dangling relationships, rather than the pinned artifact's 4,197 nodes, 7,701
+relationships, and zero dangling relationships. These are source-constrained
+comparator classifications, not statistical precision or recall measurements.
+
+A comparator-only follow-up reused those byte-identical Compass and pinned
+Graphify artifacts. Graphify places some multiline Rust return-type references
+on the callable declaration line, while Compass preserves the exact returned
+symbol on a later line. The comparator now treats that projection as dominated
+only when the mapped callable and returned type are exact, the Graphify context
+is `return_type` or `generic_arg`, the Graphify occurrence is the callable
+declaration, and exactly one Compass `returns` fact supports the pair. Eight
+Rayon hypotheses moved from `missing:no_matching_relationship_occurrence` to
+`dominated:precise_return_type_declaration_projection`: returns from
+`init_global_registry`, `Registry::new`, `get_in_place_thread_registry`,
+`Counters::increment_jobs_event_counter_if`, `ThreadPool::build`, and
+`Board::new_with_custom_rules`. Exact, rejected, ambiguous, and all other
+reason counts were unchanged. The resulting edge classifications are 2,258
+exact, 2,613 dominated, 2,497 rejected, 19 ambiguous, and 314 missing. This
+changes no Compass graph node, relationship, identity, or digest.
+
+The next 2026-08-05 Rayon qualification removed fabricated external fallbacks
+for ambiguous Rust `self.par_extend(...)` dispatch. When the indexed receiver
+already has multiple local trait-method declarations, Compass now leaves the
+call unresolved instead of publishing a same-named external or deferred
+placeholder. Three clean release builds were byte-identical at 12,057 nodes,
+26,817 relationships, and graph SHA-256
+`623b619089b6391f6eaabf112e57e143f1c2d2516d009c07aa635a158beb715c`.
+The exact delta removed only the `LinkedList::par_extend`,
+`String::par_extend`, and `Vec::par_extend` placeholder nodes and their three
+source-anchored calls in `src/iter/extend.rs`; no retained record changed and
+no record was added. The regression fixture also proves that a genuine
+external inherent call such as `String::push_str` remains published. Against
+the same pinned Graphify artifact, every node and edge classification stayed
+unchanged at 2,758 exact, 271 dominated, 1,083 rejected, and 85 missing nodes,
+plus 2,258 exact, 2,613 dominated, 2,497 rejected, 19 ambiguous, and 314
+missing edges. This is expected: Graphify assigned the three forwarding calls
+to an unrelated unit implementation, so the removed Compass placeholders had
+not supported those hypotheses. Rust adapter metadata advances to version 10.
+The first timing sample was a mounted-volume outlier; the other clean process
+times were 2.40 and 2.13 seconds, so no timing claim is made from this run.
+
+Rust adapter version 11 was then qualified on the same pinned Rayon checkout
+after adding source-proven associated-function result dispatch. Three clean
+release builds were byte-identical at 11,859 nodes, 26,604 relationships, and
+graph SHA-256
+`b99fda44928991ec8ef5265b7fa869541cfb75ff24e8f2fe393a0c1de7287b53`.
+Both `DrainGuard::new(...).par_drain(...)` occurrences resolve exactly to the
+single local `ParallelDrainRange` implementation. Relative to version 10, the
+graph removes 296 inferred external function placeholders, adds 98 corrected
+placeholders, and adds 233 exact concrete-`Self` return relationships; no
+source-backed declaration node is removed. The Graphify comparator records
+2,258 exact, 2,613 dominated, 2,493 rejected, 19 ambiguous, and 318 missing
+edge hypotheses. The four-net increase in `missing` is a comparator-label
+effect: two incorrect Graphify `par_drain` targets move from missing to
+rejected, while six formerly rejected hypotheses become missing after the
+malformed Compass placeholders that contradicted them are removed. These
+counts are diagnostic classifications, not a precision or recall claim. The
+three process times were 3.39, 2.99, and 2.92 seconds on a nearly full mounted
+workspace, so no performance claim is made from this run.
+
+Rust adapter version 12 was qualified on that pinned Rayon checkout after
+adding exact same-file method-result receiver evidence. Three clean release
+builds were byte-identical at 11,858 nodes, 26,604 relationships, and graph
+SHA-256
+`f8afecf1b1c51cf8c1621fe8eab4641ad8857650182dc4181fddbe0616724900`.
+At `rayon-core/src/lib.rs:324`, the chained result of
+`ThreadPoolBuilder::spawn_handler(...)` now targets the source-backed
+`ThreadPoolBuilder::build` method with exact evidence. This replaces one
+inferred edge to a multiline expression-text placeholder and removes that
+placeholder node; every other node and relationship is unchanged. The
+Graphify comparator classifications remain 2,258 exact, 2,613 dominated,
+2,493 rejected, 19 ambiguous, and 318 missing edge hypotheses because the
+pinned Graphify graph does not represent this corrected call. Process times
+were 7.94, 2.10, and 2.08 seconds; the first was a mounted-volume startup
+outlier, so no performance claim is made from this run.
+
+Rust adapter version 13 was qualified on the same pinned Rayon checkout after
+adding bounded cross-file and trait-default method-result chains. Three fresh
+release builds were byte-identical at 11,998 nodes, 27,090 relationships, and
+graph SHA-256
+`e7179312b42de8dcadcfc85b728b78625460f651438956e57ebf508320422aae`.
+Relative to version 12, 169 new relationship occurrences are exact and 13
+formerly inferred occurrences become exact, with no exact occurrence lost.
+This includes the complete `par_split -> filter -> drive_unindexed` chains in
+`src/str.rs` and repeated `ThreadPoolBuilder` builder chains. The graph has no
+dangling or duplicate edges, every relationship has a source occurrence, and
+publication reports zero omitted nodes, four omitted edges, and zero identity
+collisions.
+
+The retained Graphify 0.9.32 comparison contains 7,701 relationships versus
+Compass's 27,090. Its classifications are 2,258 exact, 2,613 dominated, 2,498
+rejected, 19 ambiguous, and 313 missing. Six formerly missing Graphify call
+hypotheses are now rejected by exact source-occurrence targets; one formerly
+rejected hypothesis becomes missing because Compass no longer treats a
+`*const WorkerThread` return as a `WorkerThread` method receiver. These are
+quality classifications, not precision or recall. The inferred surface also
+remains a gap: 199 inferred placeholder identities were added and 59 removed
+relative to version 12, for a net increase of 140. They remain occurrence
+anchored but require further language-aware return modeling before their raw
+count can be treated as useful graph coverage. Process times were 3.51, 3.30,
+and 3.38 seconds versus the retained 1.947-second Graphify sample, so this
+small-repository run makes no performance-win claim.
+
+A later current-branch Rayon qualification followed the source-present named
+reexport behind `use rayon::*` before resolving the associated
+`ThreadPoolBuilder` chain in `tests/named-threads.rs`. Relative to the preceding
+deterministic graph, exactly eight `calls`/`tests` occurrences changed:
+`new`, `thread_name`, and `build_global` now target their source-backed
+`rayon_core::ThreadPoolBuilder` declarations, while `unwrap` targets the
+canonical `std::result::Result` endpoint. Four malformed expression
+placeholders were removed and one canonical external endpoint was added, for
+a net change from 12,069 to 12,066 nodes; the 27,367 relationship count is
+unchanged. No unrelated occurrence changed. Two clean release builds were
+byte-identical at graph SHA-256
+`c77d3f0edf3170a39efc01ab78a946bbcafcac7855fbd10cd9d3e6a73dc240e1`.
+Competing named reexports, cycles, lowercase local receivers, and direct-path
+collisions remain fail-closed. A mounted-volume startup delay affected one
+process sample, so this qualification makes no timing claim.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and

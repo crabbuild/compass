@@ -536,9 +536,18 @@ impl Engine {
             .then(|| mask_typescript_parser_gaps(source))
             .flatten();
         let parser_source = masked.as_deref().unwrap_or(source);
-        let tree = parser
+        let mut tree = parser
             .parse(parser_source, None)
             .ok_or_else(|| ExtractError::ParseCancelled(path.to_path_buf()))?;
+        if matches!(spec.name, "typescript" | "tsx")
+            && tree.root_node().has_error()
+            && let Some(variance_masked) =
+                mask_typescript_variance_errors(parser_source, tree.root_node())
+        {
+            tree = parser
+                .parse(&variance_masked, None)
+                .ok_or_else(|| ExtractError::ParseCancelled(path.to_path_buf()))?;
+        }
         Ok(tree)
     }
 }
@@ -628,6 +637,76 @@ fn mask_typescript_parser_gaps(source: &[u8]) -> Option<Vec<u8>> {
     masked
 }
 
+fn mask_typescript_variance_errors(source: &[u8], root: Node<'_>) -> Option<Vec<u8>> {
+    // The pinned upstream grammar reports valid TypeScript `in`/`out`
+    // variance modifiers as either direct ERROR children of `type_parameters`
+    // or as the immediately preceding token of an errored `type_parameter`.
+    // Restrict the second parse to those parser-proven positions so mapped-
+    // type `in`, identifiers named `out`, and unrelated malformed input retain
+    // their original meaning and recovery status. The replacement is byte-
+    // preserving, so the reparsed tree still addresses the original source.
+    const MAX_VARIANCE_MODIFIERS: usize = 256;
+
+    let mut ranges = Vec::new();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.is_error()
+            && let Some(range) = typescript_variance_error_range(source, node)
+        {
+            if ranges.len() == MAX_VARIANCE_MODIFIERS {
+                return None;
+            }
+            ranges.push(range);
+        }
+        let mut cursor = node.walk();
+        stack.extend(node.children(&mut cursor));
+    }
+    if ranges.is_empty() {
+        return None;
+    }
+    ranges.sort_unstable_by_key(|range| (range.start, range.end));
+    ranges.dedup();
+    let mut masked = source.to_vec();
+    for range in ranges {
+        masked[range].fill(b' ');
+    }
+    Some(masked)
+}
+
+fn typescript_variance_error_range(
+    source: &[u8],
+    node: Node<'_>,
+) -> Option<std::ops::Range<usize>> {
+    let parent = node.parent()?;
+    if parent.kind() == "type_parameters"
+        && source
+            .get(node.start_byte()..node.end_byte())
+            .is_some_and(|text| matches!(text, b"in" | b"out"))
+    {
+        return Some(node.start_byte()..node.end_byte());
+    }
+    if parent.kind() != "type_parameter"
+        || !parent
+            .parent()
+            .is_some_and(|grandparent| grandparent.kind() == "type_parameters")
+    {
+        return None;
+    }
+    let prefix = source.get(parent.start_byte()..node.start_byte())?;
+    let modifier_end = prefix
+        .iter()
+        .rposition(|byte| !byte.is_ascii_whitespace())?
+        .saturating_add(1);
+    let modifier_start = prefix[..modifier_end]
+        .iter()
+        .rposition(|byte| byte.is_ascii_whitespace())
+        .map_or(0, |index| index.saturating_add(1));
+    matches!(&prefix[modifier_start..modifier_end], b"in" | b"out").then(|| {
+        parent.start_byte().saturating_add(modifier_start)
+            ..parent.start_byte().saturating_add(modifier_end)
+    })
+}
+
 fn project_universal_declaration_sources(extraction: &mut Extraction) {
     let Some(evidence) = extraction.semantic_evidence.as_ref() else {
         return;
@@ -696,6 +775,8 @@ struct ExtractState<'source, 'tree> {
     seen_resolved_calls: HashSet<(String, String, usize, usize)>,
     seen_dynamic_imports: HashSet<(String, String)>,
     js_import_targets: HashMap<String, JsImportTarget>,
+    js_type_namespace_names: HashSet<String>,
+    js_value_bindings: HashMap<String, Vec<String>>,
     python_import_aliases: HashMap<String, String>,
     python_import_targets: HashMap<String, String>,
 }
@@ -716,6 +797,11 @@ fn extract_tree(
     } else {
         (HashMap::new(), HashMap::new())
     };
+    let js_type_namespace_names = if matches!(language, "javascript" | "typescript" | "tsx") {
+        js_top_level_type_names(root, config, source)
+    } else {
+        HashSet::new()
+    };
     let mut state = ExtractState {
         source,
         source_file,
@@ -731,6 +817,8 @@ fn extract_tree(
         seen_resolved_calls: HashSet::new(),
         seen_dynamic_imports: HashSet::new(),
         js_import_targets: HashMap::new(),
+        js_type_namespace_names,
+        js_value_bindings: HashMap::new(),
         python_import_aliases,
         python_import_targets,
     };
@@ -1357,6 +1445,36 @@ fn collect_js_binding_names(node: Node<'_>, source: &[u8], output: &mut Vec<Stri
     }
 }
 
+fn js_top_level_type_names(
+    root: Node<'_>,
+    config: &GenericConfig,
+    source: &[u8],
+) -> HashSet<String> {
+    let mut names = HashSet::new();
+    let mut cursor = root.walk();
+    for child in root.named_children(&mut cursor) {
+        if config.class_types.contains(&child.kind()) {
+            if let Some(name) = child.child_by_field_name("name") {
+                names.insert(clean_name(source_node_text(name, source)));
+            }
+            continue;
+        }
+        if child.kind() != "export_statement" {
+            continue;
+        }
+        let mut export_cursor = child.walk();
+        for declaration in child.named_children(&mut export_cursor) {
+            if config.class_types.contains(&declaration.kind())
+                && let Some(name) = declaration.child_by_field_name("name")
+            {
+                names.insert(clean_name(source_node_text(name, source)));
+            }
+        }
+    }
+    names.remove("");
+    names
+}
+
 impl<'source, 'tree> ExtractState<'source, 'tree> {
     fn walk_declarations(
         &mut self,
@@ -1866,19 +1984,30 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             && let Some(call) = self.call_name(node)
         {
             let candidates = self.callables.get(&call.name).cloned().unwrap_or_default();
+            let value_candidates = (!call.member)
+                .then(|| self.js_value_bindings.get(&call.name))
+                .flatten();
+            let value_target = value_candidates
+                .filter(|candidates| candidates.len() == 1)
+                .and_then(|candidates| candidates.first())
+                .cloned();
+            let value_is_ambiguous =
+                value_candidates.is_some_and(|candidates| candidates.len() > 1);
             let defer_member = call.member
                 && call
                     .receiver
                     .as_deref()
                     .is_some_and(|receiver| receiver.starts_with(char::is_uppercase));
-            let target = (!defer_member)
-                .then(|| candidates.last().cloned())
-                .flatten()
-                .or_else(|| {
-                    (!call.member || self.language == "python")
-                        .then(|| self.types.get(&call.name).cloned())
-                        .flatten()
-                });
+            let target = value_target.or_else(|| {
+                (!value_is_ambiguous && !defer_member)
+                    .then(|| candidates.last().cloned())
+                    .flatten()
+                    .or_else(|| {
+                        (!value_is_ambiguous && (!call.member || self.language == "python"))
+                            .then(|| self.types.get(&call.name).cloned())
+                            .flatten()
+                    })
+            });
             if let Some(target) = target.as_ref().filter(|target| {
                 target.as_str() != caller
                     && self.seen_resolved_calls.insert((
@@ -2442,7 +2571,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 )
             {
                 let name = &names[0];
-                let id = make_id(&[&self.stem, name]);
+                let id = self.js_value_binding_id(name, line(declaration));
                 self.add_node(&id, &format!("{name}()"), line(declaration), true, None);
                 self.add_edge(
                     &self.file_id.clone(),
@@ -2452,6 +2581,10 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     None,
                 );
                 self.callables
+                    .entry(name.clone())
+                    .or_default()
+                    .push(id.clone());
+                self.js_value_bindings
                     .entry(name.clone())
                     .or_default()
                     .push(id.clone());
@@ -2465,7 +2598,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 "object" | "array" | "as_expression" | "call_expression" | "new_expression"
             ) {
                 for name in names {
-                    let id = make_id(&[&self.stem, &name]);
+                    let id = self.js_value_binding_id(&name, line(declaration));
                     self.add_node(&id, &name, line(declaration), false, None);
                     if let Some(binding) = self
                         .extraction
@@ -2485,8 +2618,22 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                         line(declaration),
                         None,
                     );
+                    self.js_value_bindings.entry(name).or_default().push(id);
                 }
             }
+        }
+    }
+
+    fn js_value_binding_id(&self, name: &str, at: usize) -> String {
+        let ordinary = make_id(&[&self.stem, name]);
+        if !self.js_type_namespace_names.contains(name) && !self.seen_nodes.contains(&ordinary) {
+            return ordinary;
+        }
+        let value = make_id(&[&self.stem, name, "value"]);
+        if !self.seen_nodes.contains(&value) {
+            value
+        } else {
+            make_id(&[&value, "overload", &at.to_string()])
         }
     }
 
@@ -3618,7 +3765,11 @@ pub(crate) fn python_bound_names(node: Node<'_>, source: &[u8], module: bool) ->
             return;
         }
         match node.kind() {
-            "assignment" | "for_statement" | "for_in_clause" => {
+            "assignment"
+            | "annotated_assignment"
+            | "augmented_assignment"
+            | "for_statement"
+            | "for_in_clause" => {
                 collect_python_assignment_targets(node.child_by_field_name("left"), source, output);
             }
             "with_statement" => {
@@ -4269,6 +4420,205 @@ mod rationale_tests {
     }
 
     #[test]
+    fn typescript_variance_modifiers_parse_without_recovery()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("schemas.ts");
+        let fixture = "export interface ZodType<out Output = unknown, in Input = unknown> {}\n\
+                       export interface _ZodType<out Internals extends ZodType = ZodType>\n\
+                         extends ZodType<unknown, unknown> {}\n\
+                       export interface ZodAny extends _ZodType<ZodType> {}\n\
+                       export const ZodAny: Constructor<ZodAny> = factory();\n\
+                       export function create(): ZodAny { return new ZodAny(); }\n\
+                       export type Keys<T> = { [K in keyof T]: T[K] };\n\
+                       export const out = 1;\n\
+                       export interface $ZodCheck<in T = never> {}\n\
+                       export interface ZodEnum<\n\
+                         /** @ts-ignore Cast variance */\n\
+                         out T extends Record<string, string> = Record<string, string>,\n\
+                       > {}\n\
+                       export const First: Constructor<First> = factory();\n\
+                       export interface First extends _ZodType<ZodType> {}\n\
+                       export function createFirst(): First { return new First(); }\n";
+        let control = fixture
+            .replace("out Output", "    Output")
+            .replace("in Input", "   Input")
+            .replace("out Internals", "    Internals")
+            .replace("<in T", "<   T")
+            .replace("out T extends", "    T extends");
+        fs::write(&source, control)?;
+        let control_extraction = Engine::default().extract(&source)?;
+        assert_ne!(
+            control_extraction
+                .extensions
+                .get(EXTRACTION_QUALITY_EXTENSION)
+                .and_then(Value::as_str),
+            Some(EXTRACTION_QUALITY_PARTIAL),
+            "the byte-preserving control must parse exactly"
+        );
+
+        fs::write(&source, fixture)?;
+        let extraction = Engine::default().extract(&source)?;
+        assert_ne!(
+            extraction
+                .extensions
+                .get(EXTRACTION_QUALITY_EXTENSION)
+                .and_then(Value::as_str),
+            Some(EXTRACTION_QUALITY_PARTIAL),
+            "valid TypeScript variance syntax must not trigger parser recovery"
+        );
+        let zod_any = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "ZodAny" && node.string("symbol_kind") == "interface")
+            .ok_or("missing ZodAny interface")?;
+        let private_zod_type = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "_ZodType")
+            .ok_or("missing _ZodType interface")?;
+        let zod_any_value = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "ZodAny" && node.string("symbol_kind") == "variable")
+            .ok_or("missing ZodAny runtime value")?;
+        let create = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "create()")
+            .ok_or("missing create function")?;
+        let first_type = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "First" && node.string("symbol_kind") == "interface")
+            .ok_or("missing reverse-order First interface")?;
+        let first_value = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "First" && node.string("symbol_kind") == "variable")
+            .ok_or("missing reverse-order First runtime value")?;
+        let create_first = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "createFirst()")
+            .ok_or("missing createFirst function")?;
+        let keys = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "Keys")
+            .ok_or("mapped-type `in` must remain a Keys declaration")?;
+        let file = extraction
+            .nodes
+            .iter()
+            .find(|node| node.string("symbol_kind") == "file")
+            .ok_or("missing source file")?;
+        assert_eq!(zod_any.string("source_location"), "L4");
+        assert_eq!(zod_any_value.string("source_location"), "L5");
+        assert_eq!(keys.string("source_location"), "L7");
+        assert!(extraction.edges.iter().any(|edge| {
+            edge.source == file.id
+                && edge.target == zod_any.id
+                && edge.string("relation") == "contains"
+        }));
+        assert!(extraction.edges.iter().any(|edge| {
+            edge.source == zod_any.id
+                && edge.target == private_zod_type.id
+                && edge.string("relation") == "inherits"
+                && edge.string("context") == "extends"
+        }));
+        assert!(extraction.edges.iter().any(|edge| {
+            edge.source == create.id
+                && edge.target == zod_any_value.id
+                && edge.string("relation") == "calls"
+                && edge.string("source_location") == "L6"
+        }));
+        assert!(!extraction.edges.iter().any(|edge| {
+            edge.source == create.id
+                && edge.target == zod_any.id
+                && edge.string("relation") == "calls"
+        }));
+        assert_ne!(first_type.id, first_value.id);
+        assert!(extraction.edges.iter().any(|edge| {
+            edge.source == create_first.id
+                && edge.target == first_value.id
+                && edge.string("relation") == "calls"
+        }));
+        assert!(!extraction.edges.iter().any(|edge| {
+            edge.source == create_first.id
+                && edge.target == first_type.id
+                && edge.string("relation") == "calls"
+        }));
+
+        fs::write(&source, "export interface Broken<out T extends> {}\n")?;
+        let malformed = Engine::default().extract(&source)?;
+        assert_eq!(
+            malformed
+                .extensions
+                .get(EXTRACTION_QUALITY_EXTENSION)
+                .and_then(Value::as_str),
+            Some(EXTRACTION_QUALITY_PARTIAL),
+            "variance recovery must not hide genuinely malformed source"
+        );
+
+        let tsx = directory.path().join("component.tsx");
+        fs::write(
+            &tsx,
+            "export interface Props<out Value> { value: Value }\n\
+             export const Component = <Value,>(props: Props<Value>) => <div>{props.value}</div>;\n",
+        )?;
+        let tsx_extraction = Engine::default().extract(&tsx)?;
+        assert_ne!(
+            tsx_extraction
+                .extensions
+                .get(EXTRACTION_QUALITY_EXTENSION)
+                .and_then(Value::as_str),
+            Some(EXTRACTION_QUALITY_PARTIAL),
+            "valid TSX variance syntax must not trigger parser recovery"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn typescript_duplicate_runtime_values_fail_closed() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("ambiguous.ts");
+        fs::write(
+            &source,
+            "const Widget = factory();\n\
+             const Widget = replacement();\n\
+             export function create() { return new Widget(); }\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let create = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "create()")
+            .ok_or("missing create function")?;
+        let widget_values = extraction
+            .nodes
+            .iter()
+            .filter(|node| node.label() == "Widget" && node.string("symbol_kind") == "variable")
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(widget_values.len(), 2);
+        assert!(!extraction.edges.iter().any(|edge| {
+            edge.source == create.id
+                && edge.string("relation") == "calls"
+                && widget_values.contains(&edge.target.as_str())
+        }));
+        assert!(
+            extraction
+                .raw_calls
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .any(|call| call.caller_nid == create.id && call.callee == "Widget")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn python_parenthesized_imports_qualify_inherited_types()
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
@@ -4511,6 +4861,118 @@ mod rationale_tests {
         assert!(extraction.nodes.is_empty());
         assert!(extraction.edges.is_empty());
         assert!(extraction.raw_calls.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn rust_scoped_calls_use_type_namespace_imports_over_values()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("namespace.rs");
+        fs::write(
+            &source,
+            "use std::thread;\n\
+             struct ThreadBuilder;\n\
+             impl ThreadBuilder { fn name(&self) -> Option<&str> { None } }\n\
+             fn spawn(thread: ThreadBuilder) {\n\
+                 let _builder = thread::Builder::new();\n\
+                 let _name = thread.name();\n\
+             }\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing Rust semantic evidence")?;
+        let associated_call = evidence
+            .candidates
+            .iter()
+            .find(|candidate| {
+                candidate.relation == crate::CandidateRelation::Calls
+                    && candidate.target_spelling == "new"
+            })
+            .ok_or("missing scoped associated call")?;
+        assert_eq!(
+            associated_call.constraints.qualified_name.as_deref(),
+            Some("std::thread::Builder::new")
+        );
+        assert!(associated_call.constraints.allow_external);
+        let associated_binding = associated_call
+            .binding_id
+            .as_deref()
+            .and_then(|binding_id| {
+                evidence
+                    .bindings
+                    .iter()
+                    .find(|binding| binding.id == binding_id)
+            })
+            .ok_or("missing associated-call binding")?;
+        assert_eq!(associated_binding.kind, crate::BindingKind::Import);
+        assert_eq!(associated_binding.qualified_target, "std::thread");
+
+        let value_call = evidence
+            .candidates
+            .iter()
+            .find(|candidate| {
+                candidate.relation == crate::CandidateRelation::Calls
+                    && candidate.target_spelling == "name"
+            })
+            .ok_or("missing value receiver call")?;
+        assert_eq!(
+            value_call.constraints.qualified_name.as_deref(),
+            Some("crate::namespace::ThreadBuilder::name")
+        );
+        let value_binding = value_call
+            .binding_id
+            .as_deref()
+            .and_then(|binding_id| {
+                evidence
+                    .bindings
+                    .iter()
+                    .find(|binding| binding.id == binding_id)
+            })
+            .ok_or("missing value-call binding")?;
+        assert_eq!(value_binding.kind, crate::BindingKind::LocalAlias);
+        assert_eq!(
+            value_binding.qualified_target,
+            "crate::namespace::ThreadBuilder"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rust_ambiguous_type_namespace_imports_fail_closed_over_values()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("ambiguous_namespace.rs");
+        fs::write(
+            &source,
+            "use first::thread;\n\
+             use second::thread;\n\
+             struct ThreadBuilder;\n\
+             impl ThreadBuilder { fn name(&self) -> Option<&str> { None } }\n\
+             fn spawn(thread: ThreadBuilder) {\n\
+                 let _builder = thread::Builder::new();\n\
+                 let _name = thread.name();\n\
+             }\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing Rust semantic evidence")?;
+        assert!(evidence.candidates.iter().all(|candidate| {
+            candidate.relation != crate::CandidateRelation::Calls
+                || candidate.target_spelling != "new"
+        }));
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Calls
+                && candidate.target_spelling == "name"
+                && candidate.constraints.qualified_name.as_deref()
+                    == Some("crate::ambiguous_namespace::ThreadBuilder::name")
+        }));
         Ok(())
     }
 

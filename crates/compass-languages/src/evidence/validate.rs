@@ -191,6 +191,7 @@ pub fn validate_evidence(
             limits,
         )?;
     }
+    validate_binding_chains(&bindings)?;
 
     let mut diagnostics: Vec<_> = batch.diagnostics.iter().collect();
     diagnostics.sort_unstable_by(|left, right| {
@@ -318,15 +319,17 @@ fn validate_fact(
                 limits,
             )?;
             if fact.direct_bases_complete
-                && (fact.language != "java"
-                    || !matches!(
-                        fact.kind.as_str(),
+                && !matches!(
+                    (fact.language.as_str(), fact.kind.as_str()),
+                    (
+                        "java",
                         "class" | "interface" | "enum" | "record" | "annotation_type"
-                    ))
+                    ) | ("rust", "trait")
+                )
             {
                 return Err(invalid_fact(
                     &fact.id,
-                    "complete direct-base evidence requires a Java type declaration",
+                    "complete direct-base evidence requires a Java type or Rust trait declaration",
                 ));
             }
         }
@@ -367,6 +370,61 @@ fn validate_fact(
                 return Err(invalid_fact(
                     &fact.id,
                     "only call-result bindings may select an output index",
+                ));
+            }
+            if fact.result_type_qualified_name.is_some()
+                && fact.kind != crate::BindingKind::CallResult
+            {
+                return Err(invalid_fact(
+                    &fact.id,
+                    "only call-result bindings may carry an exact result type",
+                ));
+            }
+            if fact
+                .result_type_qualified_name
+                .as_deref()
+                .is_some_and(str::is_empty)
+            {
+                return Err(invalid_fact(&fact.id, "call-result type is empty"));
+            }
+            if (fact.receiver_binding_id.is_some() || fact.fallback_binding_id.is_some())
+                && fact.kind != crate::BindingKind::CallResult
+            {
+                return Err(invalid_fact(
+                    &fact.id,
+                    "only call-result bindings may reference receiver or fallback bindings",
+                ));
+            }
+            require_optional_reference(
+                &fact.id,
+                "receiver binding",
+                fact.receiver_binding_id.as_deref(),
+                bindings,
+            )?;
+            require_optional_reference(
+                &fact.id,
+                "fallback binding",
+                fact.fallback_binding_id.as_deref(),
+                bindings,
+            )?;
+            if let Some(receiver_id) = fact.receiver_binding_id.as_deref()
+                && bindings
+                    .get(receiver_id)
+                    .is_some_and(|receiver| receiver.kind != crate::BindingKind::CallResult)
+            {
+                return Err(invalid_fact(
+                    &fact.id,
+                    "call-result receiver must reference another call-result binding",
+                ));
+            }
+            if let Some(fallback_id) = fact.fallback_binding_id.as_deref()
+                && bindings
+                    .get(fallback_id)
+                    .is_some_and(|fallback| fallback.kind == crate::BindingKind::CallResult)
+            {
+                return Err(invalid_fact(
+                    &fact.id,
+                    "call-result fallback must reference a non-call-result binding",
                 ));
             }
             require_optional_reference(
@@ -476,8 +534,11 @@ fn validate_fact(
                 match hierarchy {
                     HierarchyConstraint::DirectBase { .. }
                         if fact.relation != CandidateRelation::Extends
-                            || occurrence
-                                .is_none_or(|fact| fact.role != SemanticRole::BaseType) =>
+                            || occurrence.is_none_or(|occurrence| {
+                                occurrence.role != SemanticRole::BaseType
+                                    && !(fact.language == "rust"
+                                        && occurrence.role == SemanticRole::TraitBound)
+                            }) =>
                     {
                         return Err(invalid_fact(
                             &fact.id,
@@ -512,6 +573,60 @@ fn validate_fact(
                             ));
                         }
                     }
+                    HierarchyConstraint::RustAssociatedType {
+                        receiver_declaration_id,
+                        receiver_qualified_name,
+                        trait_qualified_name,
+                    } => {
+                        if fact.language != "rust"
+                            || !matches!(
+                                fact.relation,
+                                CandidateRelation::References
+                                    | CandidateRelation::TypeOf
+                                    | CandidateRelation::Returns
+                            )
+                            || occurrence
+                                .is_none_or(|fact| fact.qualifier.as_deref() != Some("Self"))
+                        {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "Rust associated-type hierarchy evidence requires a Self-qualified type occurrence",
+                            ));
+                        }
+                        if receiver_declaration_id.is_empty()
+                            || receiver_qualified_name.is_empty()
+                            || trait_qualified_name.is_empty()
+                        {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "Rust associated-type hierarchy identity is empty",
+                            ));
+                        }
+                        require_reference(
+                            &fact.id,
+                            "Rust associated-type receiver declaration",
+                            receiver_declaration_id,
+                            declarations,
+                        )?;
+                        let receiver = declarations[receiver_declaration_id.as_str()];
+                        if receiver.language != "rust"
+                            || receiver.qualified_name != *receiver_qualified_name
+                            || !matches!(receiver.kind.as_str(), "struct" | "enum" | "type_alias")
+                        {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "Rust associated-type receiver identity does not match its declaration",
+                            ));
+                        }
+                        if fact.constraints.qualified_name.is_some()
+                            || fact.constraints.exact_target_declaration_id.is_some()
+                        {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "Rust associated-type hierarchy evidence cannot also select an exact target",
+                            ));
+                        }
+                    }
                     HierarchyConstraint::DirectBase { .. } => {}
                 }
             }
@@ -538,6 +653,56 @@ fn validate_fact(
                 ));
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_binding_chains(bindings: &AHashMap<&str, &BindingFact>) -> Result<(), EvidenceError> {
+    const MAX_BINDING_CHAIN_DEPTH: usize = 64;
+
+    fn visit<'a>(
+        id: &'a str,
+        bindings: &AHashMap<&'a str, &'a BindingFact>,
+        visiting: &mut BTreeSet<&'a str>,
+        visited: &mut BTreeSet<&'a str>,
+        depth: usize,
+    ) -> Result<(), EvidenceError> {
+        if visited.contains(id) {
+            return Ok(());
+        }
+        if depth >= MAX_BINDING_CHAIN_DEPTH {
+            return Err(EvidenceError::new(
+                EvidenceErrorCode::ResourceLimit,
+                format!("binding chain rooted at {id:?} exceeds depth limit"),
+            ));
+        }
+        if !visiting.insert(id) {
+            return Err(EvidenceError::new(
+                EvidenceErrorCode::InvalidFact,
+                format!("binding chain contains a cycle at {id:?}"),
+            ));
+        }
+        if let Some(binding) = bindings.get(id) {
+            for next in [
+                binding.receiver_binding_id.as_deref(),
+                binding.fallback_binding_id.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                visit(next, bindings, visiting, visited, depth.saturating_add(1))?;
+            }
+        }
+        visiting.remove(id);
+        visited.insert(id);
+        Ok(())
+    }
+
+    let mut visited = BTreeSet::new();
+    let mut ids = bindings.keys().copied().collect::<Vec<_>>();
+    ids.sort_unstable();
+    for id in ids {
+        visit(id, bindings, &mut BTreeSet::new(), &mut visited, 0)?;
     }
     Ok(())
 }

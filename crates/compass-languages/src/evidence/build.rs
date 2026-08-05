@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -192,6 +192,34 @@ impl EvidenceBuilder {
             target_declaration_id,
             scope_id,
             None,
+            None,
+            None,
+            None,
+            range,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bind_chained_call_result(
+        &mut self,
+        spelling: &str,
+        qualified_target: &str,
+        result_type_qualified_name: Option<&str>,
+        receiver_binding_id: Option<&str>,
+        fallback_binding_id: Option<&str>,
+        scope_id: Option<&str>,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
+        self.bind_with_output_index(
+            BindingKind::CallResult,
+            spelling,
+            qualified_target,
+            None,
+            scope_id,
+            None,
+            result_type_qualified_name,
+            receiver_binding_id,
+            fallback_binding_id,
             range,
         )
     }
@@ -205,6 +233,9 @@ impl EvidenceBuilder {
         target_declaration_id: Option<&str>,
         scope_id: Option<&str>,
         output_index: Option<u32>,
+        result_type_qualified_name: Option<&str>,
+        receiver_binding_id: Option<&str>,
+        fallback_binding_id: Option<&str>,
         range: EvidenceRange,
     ) -> Result<String, EvidenceError> {
         ensure_capacity("bindings", self.batch.bindings.len(), self.limits.bindings)?;
@@ -218,6 +249,9 @@ impl EvidenceBuilder {
                 target_declaration_id.unwrap_or_default(),
                 scope_id.unwrap_or_default(),
                 output_index_text.as_deref().unwrap_or_default(),
+                result_type_qualified_name.unwrap_or_default(),
+                receiver_binding_id.unwrap_or_default(),
+                fallback_binding_id.unwrap_or_default(),
                 &range.start_byte.to_string(),
                 &range.end_byte.to_string(),
             ],
@@ -231,6 +265,9 @@ impl EvidenceBuilder {
             target_declaration_id: target_declaration_id.map(str::to_owned),
             scope_id: scope_id.map(str::to_owned),
             output_index,
+            result_type_qualified_name: result_type_qualified_name.map(str::to_owned),
+            receiver_binding_id: receiver_binding_id.map(str::to_owned),
+            fallback_binding_id: fallback_binding_id.map(str::to_owned),
             range,
         });
         Ok(id)
@@ -345,6 +382,13 @@ impl EvidenceBuilder {
                     ReceiverDispatchStrategy::C3FromReceiver => "c3_from_receiver",
                     ReceiverDispatchStrategy::C3AfterReceiver => "c3_after_receiver",
                 }
+            ),
+            Some(HierarchyConstraint::RustAssociatedType {
+                receiver_declaration_id,
+                receiver_qualified_name,
+                trait_qualified_name,
+            }) => format!(
+                "rust_associated_type:{receiver_declaration_id}:{receiver_qualified_name}:{trait_qualified_name}"
             ),
         };
         let mut identity = vec![
@@ -576,6 +620,13 @@ struct RustValueTypeVersion {
     active_from: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum RustPlatformCfg {
+    Fallback,
+    Unix,
+    Windows,
+}
+
 struct DirectAdapterState<'source> {
     path: &'source Path,
     source_file: &'source str,
@@ -593,18 +644,28 @@ struct DirectAdapterState<'source> {
     scope_parents: HashMap<String, String>,
     ambiguous_bindings: HashSet<(String, String)>,
     python_module_bound_names: HashSet<String>,
+    python_local_bound_names: HashMap<String, HashSet<String>>,
+    python_global_names: HashMap<String, HashSet<String>>,
     python_type_bases: HashMap<String, PythonTypeBases>,
     rust_containers: HashMap<usize, DeclarationContext>,
     rust_impls: HashMap<usize, RustImplContext>,
     rust_types_by_qualified_name: HashMap<String, DeclarationContext>,
     rust_types_by_name: HashMap<String, Vec<DeclarationContext>>,
+    rust_type_parameters_by_qualified_name: HashMap<String, DeclarationContext>,
+    rust_associated_types_by_scope: HashMap<String, HashMap<String, Vec<DeclarationContext>>>,
+    rust_associated_types_by_qualified_name: HashMap<String, Vec<DeclarationContext>>,
     rust_trait_methods: HashMap<(String, String), Vec<String>>,
     rust_generic_bounds: HashMap<String, HashMap<String, Vec<String>>>,
     rust_receiver_methods: HashMap<(String, String), Vec<String>>,
+    rust_receiver_traits: HashMap<String, Vec<String>>,
     rust_typed_receivers: HashSet<(String, String)>,
     rust_imported_typed_receivers: HashSet<(String, String)>,
+    rust_platform_reexport_bindings: HashMap<String, RustPlatformCfg>,
+    rust_platform_fallbacks: HashSet<(String, String)>,
     rust_field_types: HashMap<String, HashMap<String, String>>,
     rust_value_types: HashMap<String, HashMap<String, Vec<RustValueTypeVersion>>>,
+    rust_callable_return_types: HashMap<String, Vec<String>>,
+    rust_call_result_bindings: HashMap<(String, String, usize), String>,
     rust_import_nodes: HashSet<usize>,
     rust_test_declarations: HashSet<String>,
     go_lexical_bindings: HashMap<usize, Vec<GoLexicalBinding>>,
@@ -667,18 +728,28 @@ impl<'source> DirectAdapterState<'source> {
             scope_parents: HashMap::new(),
             ambiguous_bindings: HashSet::new(),
             python_module_bound_names: HashSet::new(),
+            python_local_bound_names: HashMap::new(),
+            python_global_names: HashMap::new(),
             python_type_bases: HashMap::new(),
             rust_containers: HashMap::new(),
             rust_impls: HashMap::new(),
             rust_types_by_qualified_name: HashMap::new(),
             rust_types_by_name: HashMap::new(),
+            rust_type_parameters_by_qualified_name: HashMap::new(),
+            rust_associated_types_by_scope: HashMap::new(),
+            rust_associated_types_by_qualified_name: HashMap::new(),
             rust_trait_methods: HashMap::new(),
             rust_generic_bounds: HashMap::new(),
             rust_receiver_methods: HashMap::new(),
+            rust_receiver_traits: HashMap::new(),
             rust_typed_receivers: HashSet::new(),
             rust_imported_typed_receivers: HashSet::new(),
+            rust_platform_reexport_bindings: HashMap::new(),
+            rust_platform_fallbacks: HashSet::new(),
             rust_field_types: HashMap::new(),
             rust_value_types: HashMap::new(),
+            rust_callable_return_types: HashMap::new(),
+            rust_call_result_bindings: HashMap::new(),
             rust_import_nodes: HashSet::new(),
             rust_test_declarations: HashSet::new(),
             go_lexical_bindings: HashMap::new(),
@@ -734,6 +805,18 @@ impl<'source> DirectAdapterState<'source> {
             .map_or(0, |position| position.saturating_add(1));
         std::str::from_utf8(&self.source[line_start..start])
             .is_ok_and(|prefix| !valid_python_import_whitespace(prefix))
+    }
+
+    fn has_invalid_python_import_suffix(&self, node: Node<'_>) -> bool {
+        let end = node.end_byte();
+        let line_end = self.source[end..]
+            .iter()
+            .position(|byte| matches!(*byte, b'\n' | b'\r'))
+            .map_or(self.source.len(), |offset| end.saturating_add(offset));
+        std::str::from_utf8(&self.source[end..line_end]).is_ok_and(|suffix| {
+            let suffix = suffix.trim_start();
+            !suffix.is_empty() && !suffix.starts_with('#') && !suffix.starts_with(';')
+        })
     }
 
     fn declaration_metadata(&self, node: Node<'_>) -> DeclarationMetadata {
@@ -799,10 +882,345 @@ impl<'source> DirectAdapterState<'source> {
         })?;
         self.collect_python_declarations(root, &file)?;
         self.collect_python_imports(root, &file)?;
+        self.collect_python_partial_aliases(root, &file)?;
+        self.collect_python_module_variables(root, &file)?;
         let module_bound = crate::engine::python_bound_names(root, self.source, true);
         self.python_module_bound_names.clone_from(&module_bound);
-        self.walk_python_indirect(root, &file, true, &module_bound)?;
+        self.walk_python_value_references(root, &file, true, &module_bound)?;
         self.walk_python_evidence(root, &file, true)
+    }
+
+    fn collect_python_partial_aliases(
+        &mut self,
+        root: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let mut cursor = root.walk();
+        for assignment in root
+            .children(&mut cursor)
+            .filter(|child| child.is_named() && child.kind() == "assignment")
+        {
+            let (Some(alias_node), Some(call)) = (
+                assignment.child_by_field_name("left"),
+                assignment.child_by_field_name("right"),
+            ) else {
+                continue;
+            };
+            if alias_node.kind() != "identifier" || call.kind() != "call" {
+                continue;
+            }
+            let Some(function) = call.child_by_field_name("function") else {
+                continue;
+            };
+            let partial_name = self.text(function);
+            if function.kind() != "identifier"
+                || self
+                    .imported_target_for_occurrence(
+                        owner,
+                        &partial_name,
+                        function.start_byte(),
+                        false,
+                    )
+                    .map(String::as_str)
+                    != Some("functools.partial")
+                || self.python_name_rebound_between(root, 0, assignment.start_byte(), &partial_name)
+            {
+                continue;
+            }
+            let Some(arguments) = call.child_by_field_name("arguments") else {
+                continue;
+            };
+            let mut arguments_cursor = arguments.walk();
+            let Some(target_node) = arguments
+                .named_children(&mut arguments_cursor)
+                .next()
+                .filter(|node| node.kind() == "identifier")
+            else {
+                continue;
+            };
+            let target_name = self.text(target_node);
+            let target_qualified_name = format!("{}.{}", self.module_or_package, target_name);
+            let matching_targets = self
+                .declarations
+                .values()
+                .filter(|context| {
+                    context.kind == "function"
+                        && context.qualified_name == target_qualified_name
+                        && context.scope_id != owner.scope_id
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let [target] = matching_targets.as_slice() else {
+                continue;
+            };
+            let Some(target_definition) = direct_python_function(root, &target_name, self.source)
+            else {
+                continue;
+            };
+            if target_definition.end_byte() > assignment.start_byte()
+                || self.python_name_rebound_between(
+                    root,
+                    target_definition.end_byte(),
+                    assignment.start_byte(),
+                    &target_name,
+                )
+            {
+                continue;
+            }
+
+            let alias = self.text(alias_node);
+            let qualified_name = format!("{}.{}", self.module_or_package, alias);
+            let graph_node_id = self.unique_graph_id(make_id(&[&self.stem, &alias]), assignment);
+            let fact_id = self.builder.declare(
+                "function",
+                &graph_node_id,
+                &alias,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, alias_node),
+            )?;
+            let alias_context = DeclarationContext {
+                fact_id: fact_id.clone(),
+                scope_id: owner.scope_id.clone(),
+                graph_node_id,
+                name: alias,
+                qualified_name,
+                kind: "function".to_owned(),
+                enclosing_type_qualified_name: None,
+            };
+            self.add_ownership(owner, &alias_context)?;
+            let occurrence_id = self.builder.occur_with_context(
+                SemanticRole::CallableReference,
+                &fact_id,
+                &target_name,
+                None,
+                Some(&owner.scope_id),
+                Some("partial_target"),
+                range_for_node(self.source_file, target_node),
+            )?;
+            self.builder.relate(
+                CandidateRelation::References,
+                &fact_id,
+                Some(&occurrence_id),
+                None,
+                &target_name,
+                ResolutionConstraint {
+                    exact_target_declaration_id: Some(target.fact_id.clone()),
+                    exact_language: Some(self.language.to_owned()),
+                    module_or_package: Some(self.module_or_package.clone()),
+                    scope_id: Some(owner.scope_id.clone()),
+                    qualified_name: Some(target.qualified_name.clone()),
+                    argument_count: None,
+                    argument_types: Vec::new(),
+                    allowed_target_kinds: vec!["function".to_owned()],
+                    hierarchy: None,
+                    allow_external: false,
+                },
+            )?;
+            self.declarations.insert(assignment.id(), alias_context);
+        }
+        Ok(())
+    }
+
+    fn collect_python_module_variables(
+        &mut self,
+        root: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let mut binding_statements = HashMap::<String, HashSet<usize>>::new();
+        let mut deleted_names = HashSet::<String>::new();
+        let mut cursor = root.walk();
+        for statement in root.children(&mut cursor).filter(|child| child.is_named()) {
+            let statement_id = statement.id();
+            if !matches!(
+                statement.kind(),
+                "function_definition" | "class_definition" | "decorated_definition"
+            ) {
+                for name in crate::engine::python_bound_names(statement, self.source, true) {
+                    binding_statements
+                        .entry(name)
+                        .or_default()
+                        .insert(statement_id);
+                }
+            }
+            let mut declaration_names = HashSet::new();
+            collect_python_module_declaration_names(statement, self.source, &mut declaration_names);
+            collect_python_module_mutations(
+                statement,
+                self.source,
+                &mut binding_statements,
+                &mut deleted_names,
+                statement_id,
+            );
+            for name in declaration_names {
+                binding_statements
+                    .entry(name)
+                    .or_default()
+                    .insert(statement_id);
+            }
+        }
+
+        let mut cursor = root.walk();
+        for assignment in root
+            .children(&mut cursor)
+            .filter(|child| child.is_named() && child.kind() == "assignment")
+        {
+            if self.declarations.contains_key(&assignment.id())
+                || self.overlaps_parser_error(assignment)
+            {
+                continue;
+            }
+            let Some(name_node) = assignment
+                .child_by_field_name("left")
+                .filter(|node| node.kind() == "identifier")
+            else {
+                continue;
+            };
+            let name = self.text(name_node);
+            if !valid_python_identifier(&name)
+                || deleted_names.contains(&name)
+                || binding_statements.get(&name).is_none_or(|statements| {
+                    statements.len() != 1 || !statements.contains(&assignment.id())
+                })
+                || self
+                    .import_bindings
+                    .get(&owner.scope_id)
+                    .is_some_and(|bindings| bindings.contains_key(&name))
+                || assignment
+                    .child_by_field_name("right")
+                    .is_some_and(|right| {
+                        crate::engine::python_bound_names(right, self.source, true).contains(&name)
+                    })
+            {
+                continue;
+            }
+
+            let qualified_name = format!("{}.{}", self.module_or_package, name);
+            let graph_node_id = self.unique_graph_id(make_id(&[&self.stem, &name]), assignment);
+            let fact_id = self.builder.declare(
+                "variable",
+                &graph_node_id,
+                &name,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, name_node),
+            )?;
+            let context = DeclarationContext {
+                fact_id: fact_id.clone(),
+                scope_id: owner.scope_id.clone(),
+                graph_node_id,
+                name,
+                qualified_name,
+                kind: "variable".to_owned(),
+                enclosing_type_qualified_name: None,
+            };
+            self.add_ownership(owner, &context)?;
+            self.add_python_module_variable_type(root, assignment, &context)?;
+            self.declarations.insert(assignment.id(), context);
+        }
+        Ok(())
+    }
+
+    fn add_python_module_variable_type(
+        &mut self,
+        root: Node<'_>,
+        assignment: Node<'_>,
+        variable: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(call) = assignment
+            .child_by_field_name("right")
+            .filter(|node| node.kind() == "call")
+        else {
+            return Ok(());
+        };
+        let Some(function) = call
+            .child_by_field_name("function")
+            .filter(|node| node.kind() == "identifier")
+        else {
+            return Ok(());
+        };
+        let spelling = self.text(function);
+        let imported_target = self
+            .imported_target_for_occurrence(variable, &spelling, function.start_byte(), false)
+            .cloned();
+        let local_qualified_name = format!("{}.{}", self.module_or_package, spelling);
+        let local_targets = self
+            .declarations
+            .values()
+            .filter(|context| {
+                context.kind == "class" && context.qualified_name == local_qualified_name
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let local_target = match local_targets.as_slice() {
+            [target]
+                if direct_python_definition(root, &spelling, "class_definition", self.source)
+                    .is_some_and(|definition| definition.end_byte() <= assignment.start_byte()) =>
+            {
+                Some(target)
+            }
+            _ => None,
+        };
+        let qualified_name = imported_target
+            .clone()
+            .or_else(|| local_target.map(|target| target.qualified_name.clone()));
+        let Some(qualified_name) = qualified_name else {
+            return Ok(());
+        };
+        let binding_id = self
+            .binding_for_occurrence(variable, &spelling, function.start_byte(), false)
+            .cloned();
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::TypeReference,
+            &variable.fact_id,
+            &spelling,
+            None,
+            Some(&variable.scope_id),
+            Some("initializer_type"),
+            range_for_node(self.source_file, function),
+        )?;
+        self.builder.relate(
+            CandidateRelation::TypeOf,
+            &variable.fact_id,
+            Some(&occurrence_id),
+            binding_id.as_deref(),
+            &spelling,
+            ResolutionConstraint {
+                exact_target_declaration_id: local_target.map(|target| target.fact_id.clone()),
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: qualified_name
+                    .rsplit_once('.')
+                    .map(|(module, _)| module.to_owned()),
+                scope_id: Some(variable.scope_id.clone()),
+                qualified_name: Some(qualified_name),
+                argument_count: None,
+                argument_types: Vec::new(),
+                allowed_target_kinds: vec!["class".to_owned()],
+                hierarchy: None,
+                allow_external: false,
+            },
+        )?;
+        Ok(())
+    }
+
+    fn python_name_rebound_between(
+        &self,
+        root: Node<'_>,
+        start: usize,
+        end: usize,
+        name: &str,
+    ) -> bool {
+        let mut cursor = root.walk();
+        root.children(&mut cursor)
+            .filter(|child| child.is_named())
+            .any(|child| {
+                child.start_byte() >= start
+                    && child.end_byte() <= end
+                    && !matches!(child.kind(), "import_statement" | "import_from_statement")
+                    && crate::engine::python_bound_names(child, self.source, true).contains(name)
+            })
     }
 
     fn collect_python_imports(
@@ -927,12 +1345,20 @@ impl<'source> DirectAdapterState<'source> {
             self.add_python_decorators(node, &active)?;
             if node.kind() == "class_definition" {
                 self.add_python_bases(node, &active)?;
+                self.add_python_class_member_aliases(node, &active)?;
             }
             self.add_python_annotations(node, &active)?;
             if node.kind() == "function_definition" {
                 let body = node.child_by_field_name("body").unwrap_or(node);
-                let bound = crate::engine::python_bound_names(node, self.source, false);
-                self.walk_python_indirect(body, &active, true, &bound)?;
+                let mut bound = crate::engine::python_bound_names(node, self.source, false);
+                let (global_names, nonlocal_names) =
+                    python_scope_directive_names(node, self.source);
+                bound.retain(|name| !global_names.contains(name) && !nonlocal_names.contains(name));
+                self.python_local_bound_names
+                    .insert(active.scope_id.clone(), bound.clone());
+                self.python_global_names
+                    .insert(active.scope_id.clone(), global_names);
+                self.walk_python_value_references(body, &active, true, &bound)?;
             }
         }
         match node.kind() {
@@ -953,7 +1379,97 @@ impl<'source> DirectAdapterState<'source> {
         Ok(())
     }
 
-    fn walk_python_indirect(
+    fn add_python_class_member_aliases(
+        &mut self,
+        class: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(body) = class.child_by_field_name("body") else {
+            return Ok(());
+        };
+        let mut cursor = body.walk();
+        let statements = body
+            .children(&mut cursor)
+            .filter(|child| child.is_named())
+            .collect::<Vec<_>>();
+        let mut root = class;
+        while let Some(parent) = root.parent() {
+            root = parent;
+        }
+        for (index, statement) in statements.iter().enumerate() {
+            let assignment = if statement.kind() == "assignment" {
+                *statement
+            } else if statement.kind() == "expression_statement" {
+                let Some(assignment) = statement.named_child(0) else {
+                    continue;
+                };
+                if assignment.kind() != "assignment" {
+                    continue;
+                }
+                assignment
+            } else {
+                continue;
+            };
+            let (Some(left), Some(right)) = (
+                assignment.child_by_field_name("left"),
+                assignment.child_by_field_name("right"),
+            ) else {
+                continue;
+            };
+            if left.kind() != "identifier" || right.kind() != "identifier" {
+                continue;
+            }
+            let spelling = self.text(left);
+            let target_name = self.text(right);
+            if !valid_python_identifier(&spelling) || !valid_python_identifier(&target_name) {
+                continue;
+            }
+            if statements[..index].iter().any(|earlier| {
+                let bound = crate::engine::python_bound_names(*earlier, self.source, true);
+                bound.contains(&spelling) || bound.contains(&target_name)
+            }) || statements[index.saturating_add(1)..].iter().any(|later| {
+                crate::engine::python_bound_names(*later, self.source, true).contains(&spelling)
+            }) {
+                continue;
+            }
+            let target =
+                direct_python_definition(root, &target_name, "function_definition", self.source)
+                    .or_else(|| {
+                        direct_python_definition(
+                            root,
+                            &target_name,
+                            "class_definition",
+                            self.source,
+                        )
+                    });
+            let Some(target) = target.filter(|target| target.end_byte() <= class.start_byte())
+            else {
+                continue;
+            };
+            if self.python_name_rebound_between(
+                root,
+                target.end_byte(),
+                class.start_byte(),
+                &target_name,
+            ) {
+                continue;
+            }
+            let Some(target) = self.declarations.get(&target.id()) else {
+                continue;
+            };
+            self.builder.bind(
+                BindingKind::Member,
+                &spelling,
+                &target.qualified_name,
+                Some(&target.fact_id),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, left),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn walk_python_value_references(
         &mut self,
         node: Node<'_>,
         owner: &DeclarationContext,
@@ -977,7 +1493,7 @@ impl<'source> DirectAdapterState<'source> {
                     None
                 };
                 if candidate.is_some_and(|candidate| candidate.kind() == "identifier") {
-                    self.add_python_callable_reference(owner, candidate, "argument", bound)?;
+                    self.add_python_value_reference(owner, candidate, "argument", bound)?;
                 }
             }
         }
@@ -985,7 +1501,7 @@ impl<'source> DirectAdapterState<'source> {
             let mut identifiers = Vec::new();
             crate::engine::collect_python_collection_values(node, &mut identifiers);
             for identifier in identifiers {
-                self.add_python_callable_reference(owner, Some(identifier), "collection", bound)?;
+                self.add_python_value_reference(owner, Some(identifier), "collection", bound)?;
             }
         } else if node.kind() == "assignment"
             && let Some(value) = node.child_by_field_name("right")
@@ -993,7 +1509,7 @@ impl<'source> DirectAdapterState<'source> {
             let mut identifiers = Vec::new();
             crate::engine::collect_python_reference_values(value, &mut identifiers);
             for identifier in identifiers {
-                self.add_python_callable_reference(owner, Some(identifier), "assignment", bound)?;
+                self.add_python_value_reference(owner, Some(identifier), "assignment", bound)?;
             }
         } else if node.kind() == "return_statement" {
             let mut cursor = node.walk();
@@ -1001,18 +1517,18 @@ impl<'source> DirectAdapterState<'source> {
                 let mut identifiers = Vec::new();
                 crate::engine::collect_python_reference_values(value, &mut identifiers);
                 for identifier in identifiers {
-                    self.add_python_callable_reference(owner, Some(identifier), "return", bound)?;
+                    self.add_python_value_reference(owner, Some(identifier), "return", bound)?;
                 }
             }
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            self.walk_python_indirect(child, owner, false, bound)?;
+            self.walk_python_value_references(child, owner, false, bound)?;
         }
         Ok(())
     }
 
-    fn add_python_callable_reference(
+    fn add_python_value_reference(
         &mut self,
         owner: &DeclarationContext,
         node: Option<Node<'_>>,
@@ -1046,6 +1562,9 @@ impl<'source> DirectAdapterState<'source> {
                 node.start_byte(),
                 allow_later_file_binding,
             )
+            .or_else(|| {
+                self.python_wildcard_binding(owner, node.start_byte(), allow_later_file_binding)
+            })
             .cloned();
         let qualified_name = self
             .imported_target_for_occurrence(
@@ -1065,7 +1584,7 @@ impl<'source> DirectAdapterState<'source> {
             range_for_node(self.source_file, node),
         )?;
         self.builder.relate(
-            CandidateRelation::IndirectCalls,
+            CandidateRelation::References,
             &owner.fact_id,
             Some(&occurrence_id),
             binding.as_deref(),
@@ -1082,7 +1601,12 @@ impl<'source> DirectAdapterState<'source> {
                 qualified_name: qualified_name.clone(),
                 argument_count: None,
                 argument_types: Vec::new(),
-                allowed_target_kinds: vec!["function".to_owned(), "method".to_owned()],
+                allowed_target_kinds: vec![
+                    "class".to_owned(),
+                    "function".to_owned(),
+                    "method".to_owned(),
+                    "variable".to_owned(),
+                ],
                 hierarchy: None,
                 allow_external: qualified_name.is_some(),
             },
@@ -1101,7 +1625,6 @@ impl<'source> DirectAdapterState<'source> {
         let statement = self.text(node);
         if !valid_python_import_whitespace(&statement)
             || !valid_python_line_continuations(&statement)
-            || python_import_contains_wildcard(&statement)
         {
             return Ok(());
         }
@@ -1112,6 +1635,21 @@ impl<'source> DirectAdapterState<'source> {
                 self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py"),
             )
         });
+        if python_import_contains_wildcard(&statement) {
+            if !self.has_invalid_python_import_suffix(node)
+                && let (Some(module), Some((start, end))) =
+                    (module.as_deref(), python_wildcard_import_span(&statement))
+            {
+                let range = range_for_byte_span(
+                    self.source_file,
+                    self.source,
+                    node.start_byte().saturating_add(start),
+                    node.start_byte().saturating_add(end),
+                );
+                self.add_python_wildcard_import(owner, module, range)?;
+            }
+            return Ok(());
+        }
         let mut cursor = node.walk();
         let imported_names = node
             .children_by_field_name("name", &mut cursor)
@@ -1186,6 +1724,81 @@ impl<'source> DirectAdapterState<'source> {
                 alias_node,
             )?;
         }
+        Ok(())
+    }
+
+    fn add_python_wildcard_import(
+        &mut self,
+        owner: &DeclarationContext,
+        module: &str,
+        range: EvidenceRange,
+    ) -> Result<(), EvidenceError> {
+        if module.is_empty() {
+            return Ok(());
+        }
+        let is_reexport = owner.kind == "file"
+            && self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py");
+        let kind = if is_reexport {
+            BindingKind::Reexport
+        } else {
+            BindingKind::Import
+        };
+        let binding_id = self.builder.bind(
+            kind,
+            "*",
+            module,
+            None,
+            Some(&owner.scope_id),
+            range.clone(),
+        )?;
+        self.record_import_binding(
+            owner,
+            "*",
+            module,
+            &binding_id,
+            usize::try_from(range.end_byte).unwrap_or(usize::MAX),
+        );
+        let occurrence_id = self.builder.occur(
+            if is_reexport {
+                SemanticRole::Reexport
+            } else {
+                SemanticRole::Import
+            },
+            &owner.fact_id,
+            "*",
+            None,
+            Some(&owner.scope_id),
+            range,
+        )?;
+        self.builder.relate(
+            if is_reexport {
+                CandidateRelation::Reexports
+            } else {
+                CandidateRelation::Imports
+            },
+            &owner.fact_id,
+            Some(&occurrence_id),
+            Some(&binding_id),
+            module.rsplit('.').next().unwrap_or(module),
+            ResolutionConstraint {
+                exact_target_declaration_id: None,
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: module
+                    .rsplit_once('.')
+                    .map(|(package, _)| package.to_owned()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: Some(module.to_owned()),
+                argument_count: None,
+                argument_types: Vec::new(),
+                allowed_target_kinds: vec![
+                    "file".to_owned(),
+                    "module".to_owned(),
+                    "package".to_owned(),
+                ],
+                hierarchy: None,
+                allow_external: true,
+            },
+        )?;
         Ok(())
     }
 
@@ -1264,6 +1877,7 @@ impl<'source> DirectAdapterState<'source> {
                     "module".to_owned(),
                     "class".to_owned(),
                     "function".to_owned(),
+                    "variable".to_owned(),
                 ],
                 hierarchy: None,
                 allow_external: true,
@@ -2518,8 +3132,35 @@ impl<'source> DirectAdapterState<'source> {
         self.collect_rust_module_imports(root, &file)?;
         self.collect_rust_declarations(root, &file, None)?;
         self.collect_rust_imports(root, &file)?;
+        self.collect_rust_callable_return_types(root);
         self.collect_rust_parameter_bindings(root, &file)?;
         self.walk_rust_evidence(root, &file, true)
+    }
+
+    fn collect_rust_callable_return_types(&mut self, node: Node<'_>) {
+        if let Some(owner) = self.declarations.get(&node.id()).cloned()
+            && matches!(owner.kind.as_str(), "function" | "method")
+            && let Some(return_type) = node.child_by_field_name("return_type")
+        {
+            let raw = self.text(return_type);
+            let qualified = if raw.trim() == "Self" {
+                self.rust_concrete_callable_receiver(&owner)
+            } else {
+                rust_return_receiver_type_path(&raw).and_then(|nominal| {
+                    rust_qualify_evidence_path(self, &owner, &nominal, return_type.start_byte())
+                })
+            };
+            if let Some(qualified) = qualified {
+                self.rust_callable_return_types
+                    .entry(owner.qualified_name)
+                    .or_default()
+                    .push(qualified);
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_rust_callable_return_types(child);
+        }
     }
 
     fn collect_rust_module_imports(
@@ -2571,7 +3212,10 @@ impl<'source> DirectAdapterState<'source> {
             let qualified_name = rust_join_qualified(&owner.qualified_name, &name);
             let graph_node_id =
                 self.unique_graph_id(make_id(&[&self.module_or_package, &qualified_name]), node);
-            let metadata = self.declaration_metadata(node);
+            let mut metadata = self.declaration_metadata(node);
+            if kind == "trait" {
+                metadata.direct_bases_complete = !self.overlaps_parser_error(node);
+            }
             let fact_id = self.builder.declare_with_metadata(
                 kind,
                 &graph_node_id,
@@ -2608,6 +3252,7 @@ impl<'source> DirectAdapterState<'source> {
                 .insert(name.clone(), qualified_name.clone());
             self.rust_containers.insert(node.id(), context.clone());
             self.declarations.insert(node.id(), context.clone());
+            self.add_rust_type_parameters(node, &context)?;
             if matches!(kind, "trait" | "struct" | "enum") {
                 self.rust_types_by_qualified_name
                     .insert(qualified_name, context.clone());
@@ -2662,10 +3307,26 @@ impl<'source> DirectAdapterState<'source> {
             }
             "function_item" | "function_signature_item" => {
                 self.add_rust_callable(node, owner, active_impl)?;
+                if let (Some(callable), Some(body)) = (
+                    self.declarations.get(&node.id()).cloned(),
+                    node.child_by_field_name("body"),
+                ) {
+                    let mut cursor = body.walk();
+                    for child in body.children(&mut cursor).filter(|child| child.is_named()) {
+                        self.collect_rust_declarations(child, &callable, None)?;
+                    }
+                }
                 return Ok(());
             }
-            "type_item" => {
-                self.add_rust_named_declaration(node, owner, "type_alias")?;
+            "type_item" | "associated_type" => {
+                if active_impl.is_some()
+                    || owner.kind == "trait"
+                    || node.kind() == "associated_type"
+                {
+                    self.add_rust_associated_type(node, owner, active_impl.is_some())?;
+                } else {
+                    self.add_rust_named_declaration(node, owner, "type_alias")?;
+                }
                 return Ok(());
             }
             "const_item" | "static_item" => {
@@ -2712,9 +3373,13 @@ impl<'source> DirectAdapterState<'source> {
             range_for_node(self.source_file, name_node),
             metadata,
         )?;
-        let scope_id = if matches!(kind, "function" | "method") {
+        let scope_id = if matches!(kind, "function" | "method" | "type_alias") {
             let scope_id = self.builder.open_scope(
-                "callable",
+                if kind == "type_alias" {
+                    "type_alias"
+                } else {
+                    "callable"
+                },
                 Some(&fact_id),
                 Some(&owner.scope_id),
                 range_for_node(self.source_file, node),
@@ -2740,7 +3405,36 @@ impl<'source> DirectAdapterState<'source> {
             .or_default()
             .insert(name, qualified_name);
         self.declarations.insert(node.id(), context.clone());
+        self.add_rust_type_parameters(node, &context)?;
         Ok(Some(context))
+    }
+
+    fn add_rust_associated_type(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        implementation_scoped: bool,
+    ) -> Result<(), EvidenceError> {
+        let Some(context) = self.add_rust_named_declaration(node, owner, "type_alias")? else {
+            return Ok(());
+        };
+        if implementation_scoped
+            && let Some(targets) = self.local_targets.get_mut(&owner.scope_id)
+            && targets.get(&context.name) == Some(&context.qualified_name)
+        {
+            targets.remove(&context.name);
+        }
+        self.rust_associated_types_by_scope
+            .entry(owner.scope_id.clone())
+            .or_default()
+            .entry(context.name.clone())
+            .or_default()
+            .push(context.clone());
+        self.rust_associated_types_by_qualified_name
+            .entry(context.qualified_name.clone())
+            .or_default()
+            .push(context);
+        Ok(())
     }
 
     fn add_rust_callable(
@@ -2837,16 +3531,92 @@ impl<'source> DirectAdapterState<'source> {
             .entry(parent_scope.to_owned())
             .or_default()
             .insert(name.clone(), qualified_name.clone());
+        if !method && rust_platform_cfg(node, self.source) == Some(RustPlatformCfg::Fallback) {
+            self.rust_platform_fallbacks
+                .insert((parent_scope.to_owned(), name.clone()));
+        }
         if let Some(implementation) = active_impl {
             self.rust_receiver_methods
                 .entry((implementation.type_qualified_name.clone(), name))
+                .or_default()
+                .push(qualified_name);
+        } else if owner.kind == "trait" {
+            self.rust_receiver_methods
+                .entry((owner.qualified_name.clone(), name))
                 .or_default()
                 .push(qualified_name);
         }
         if rust_has_test_attribute(node, self.source) {
             self.rust_test_declarations.insert(context.fact_id.clone());
         }
-        self.declarations.insert(node.id(), context);
+        self.declarations.insert(node.id(), context.clone());
+        self.add_rust_type_parameters(node, &context)?;
+        Ok(())
+    }
+
+    fn add_rust_type_parameters(
+        &mut self,
+        declaration: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(parameters) = declaration
+            .child_by_field_name("type_parameters")
+            .or_else(|| {
+                let mut cursor = declaration.walk();
+                declaration
+                    .children(&mut cursor)
+                    .find(|child| child.kind() == "type_parameters")
+            })
+        else {
+            return Ok(());
+        };
+        let mut cursor = parameters.walk();
+        for parameter in parameters.children(&mut cursor).filter(|child| {
+            matches!(
+                child.kind(),
+                "type_parameter" | "lifetime_parameter" | "const_parameter"
+            )
+        }) {
+            let Some(name_node) = rust_generic_parameter_name(parameter) else {
+                continue;
+            };
+            let name = self.text(name_node);
+            if name.is_empty() {
+                continue;
+            }
+            let qualified_name = format!("{}::<{name}>", owner.qualified_name);
+            let graph_node_id = self.unique_graph_id(
+                make_id(&[&self.module_or_package, &qualified_name]),
+                parameter,
+            );
+            let fact_id = self.builder.declare_with_metadata(
+                "parameter",
+                &graph_node_id,
+                &name,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, name_node),
+                self.declaration_metadata(parameter),
+            )?;
+            let context = DeclarationContext {
+                fact_id,
+                scope_id: owner.scope_id.clone(),
+                graph_node_id,
+                name: name.clone(),
+                qualified_name: qualified_name.clone(),
+                kind: "parameter".to_owned(),
+                enclosing_type_qualified_name: owner.enclosing_type_qualified_name.clone(),
+            };
+            self.add_ownership(owner, &context)?;
+            self.local_targets
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .insert(name, qualified_name.clone());
+            self.rust_type_parameters_by_qualified_name
+                .insert(qualified_name, context.clone());
+            self.declarations.insert(parameter.id(), context);
+        }
         Ok(())
     }
 
@@ -3053,6 +3823,40 @@ impl<'source> DirectAdapterState<'source> {
             .find(|context| context.fact_id == fact_id)
     }
 
+    fn rust_associated_type_for(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+    ) -> Option<&DeclarationContext> {
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let current = scope_id?;
+            if let Some(candidates) = self
+                .rust_associated_types_by_scope
+                .get(current)
+                .and_then(|types| types.get(name))
+            {
+                let [candidate] = candidates.as_slice() else {
+                    return None;
+                };
+                return Some(candidate);
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        None
+    }
+
+    fn rust_impl_for_node(&self, node: Node<'_>) -> Option<&RustImplContext> {
+        let mut current = Some(node);
+        while let Some(candidate) = current {
+            if candidate.kind() == "impl_item" {
+                return self.rust_impls.get(&candidate.id());
+            }
+            current = candidate.parent();
+        }
+        None
+    }
+
     fn add_rust_impl(
         &mut self,
         node: Node<'_>,
@@ -3102,26 +3906,103 @@ impl<'source> DirectAdapterState<'source> {
                 self.record_rust_generic_bounds(&implementation.scope_id, &name, bounds);
             }
         }
-        if let (Some(type_context), Some(trait_node), Some(trait_qualified_name)) = (
-            type_context.as_ref(),
+        if let Some(trait_qualified_name) = trait_qualified_name.as_ref() {
+            let receiver = type_context.as_ref().map_or_else(
+                || {
+                    rust_nominal_type_path(&type_name)
+                        .filter(|name| rust_primitive_type(name))
+                        .unwrap_or_else(|| implementation.type_qualified_name.clone())
+                },
+                |context| context.qualified_name.clone(),
+            );
+            let traits = self.rust_receiver_traits.entry(receiver).or_default();
+            traits.push(trait_qualified_name.clone());
+            traits.sort_unstable();
+            traits.dedup();
+        }
+        let implementation_qualified_name = self
+            .declaration_metadata(node)
+            .signature
+            .unwrap_or_else(|| format!("impl {}", implementation.type_qualified_name));
+        let implementation_owner = DeclarationContext {
+            fact_id: type_context
+                .as_ref()
+                .map_or_else(|| owner.fact_id.clone(), |context| context.fact_id.clone()),
+            scope_id: implementation.scope_id.clone(),
+            graph_node_id: type_context.as_ref().map_or_else(
+                || owner.graph_node_id.clone(),
+                |context| context.graph_node_id.clone(),
+            ),
+            name: type_name.clone(),
+            qualified_name: format!("<{implementation_qualified_name}>"),
+            kind: type_context
+                .as_ref()
+                .map_or_else(|| owner.kind.clone(), |context| context.kind.clone()),
+            enclosing_type_qualified_name: Some(implementation.type_qualified_name.clone()),
+        };
+        self.add_rust_type_parameters(node, &implementation_owner)?;
+        let generic_type_qualified_name = rust_nominal_type_path(&type_name)
+            .map(|name| format!("{}::<{name}>", implementation_owner.qualified_name));
+        let generic_type_context = generic_type_qualified_name
+            .as_ref()
+            .and_then(|qualified_name| {
+                self.rust_type_parameters_by_qualified_name
+                    .get(qualified_name)
+            })
+            .cloned();
+        if type_context.is_some()
+            && let Some(type_arguments) =
+                trait_node.and_then(|trait_node| trait_node.child_by_field_name("type_arguments"))
+            && !self.overlaps_parser_error(type_arguments)
+        {
+            let mut targets = Vec::new();
+            collect_rust_type_nodes(
+                type_arguments,
+                type_arguments.end_byte(),
+                None,
+                &mut targets,
+            );
+            for target in targets {
+                let raw = self.text(target);
+                if raw.is_empty() || rust_primitive_type(&raw) {
+                    continue;
+                }
+                self.add_rust_path_candidate(
+                    SemanticRole::TypeReference,
+                    CandidateRelation::References,
+                    &implementation_owner,
+                    target,
+                    None,
+                )?;
+            }
+        }
+        if let (Some(implementer), Some(trait_node), Some(trait_qualified_name)) = (
+            type_context.as_ref().or(generic_type_context.as_ref()),
             trait_node,
             trait_qualified_name.as_ref(),
-        ) {
+        ) && !self.overlaps_parser_error(type_node)
+            && !self.overlaps_parser_error(trait_node)
+        {
             self.add_rust_occurrence_candidate(
                 SemanticRole::TraitBound,
                 CandidateRelation::Implements,
-                type_context,
+                implementer,
                 trait_node,
                 Some(trait_qualified_name),
                 vec!["trait".to_owned()],
                 !rust_identity_is_internal(&self.module_or_package, trait_qualified_name),
+                None,
             )?;
         }
         self.rust_impls.insert(node.id(), implementation.clone());
         if let Some(body) = node.child_by_field_name("body") {
             let mut cursor = body.walk();
             for child in body.children(&mut cursor).filter(|child| child.is_named()) {
-                self.collect_rust_declarations(child, owner, Some(&implementation))?;
+                self.collect_rust_declarations(
+                    child,
+                    &implementation_owner,
+                    Some(&implementation),
+                )?;
             }
         }
         Ok(())
@@ -3231,12 +4112,20 @@ impl<'source> DirectAdapterState<'source> {
         } else {
             let raw = self.rust_value_type_for(owner, first, use_start, Some(use_node))?;
             let nominal = rust_nominal_type_path(raw)?;
-            rust_qualify_evidence_path(self, owner, &nominal, use_start)?
+            if rust_primitive_type(&nominal) {
+                nominal
+            } else {
+                rust_qualify_evidence_path(self, owner, &nominal, use_start)?
+            }
         };
         for field in fields.map(str::trim).filter(|field| !field.is_empty()) {
             let raw = self.rust_field_types.get(&current)?.get(field)?;
             let nominal = rust_nominal_type_path(raw)?;
-            current = rust_qualify_evidence_path(self, owner, &nominal, use_start)?;
+            current = if rust_primitive_type(&nominal) {
+                nominal
+            } else {
+                rust_qualify_evidence_path(self, owner, &nominal, use_start)?
+            };
         }
         Some(current)
     }
@@ -3625,6 +4514,13 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&owner.scope_id),
                 range.clone(),
             )?;
+            if reexport
+                && let Some(platform @ (RustPlatformCfg::Unix | RustPlatformCfg::Windows)) =
+                    rust_platform_cfg(node, self.source)
+            {
+                self.rust_platform_reexport_bindings
+                    .insert(binding_id.clone(), platform);
+            }
             self.record_import_binding(owner, &local, &target, &binding_id, 0);
             let occurrence_id = self.builder.occur(
                 SemanticRole::Import,
@@ -3723,15 +4619,35 @@ impl<'source> DirectAdapterState<'source> {
             node.end_byte()
         };
         let name_id = node.child_by_field_name("name").map(|name| name.id());
+        if let Some(return_type) = node.child_by_field_name("return_type")
+            && self.text(return_type).trim() == "Self"
+            && let Some(receiver) = self.rust_concrete_callable_receiver(owner)
+        {
+            self.add_rust_occurrence_candidate(
+                SemanticRole::TypeReference,
+                CandidateRelation::Returns,
+                owner,
+                return_type,
+                Some(&receiver),
+                vec!["struct".to_owned(), "enum".to_owned()],
+                false,
+                Some("rust-outer-nominal-return"),
+            )?;
+        }
+        let outer_return_id = node
+            .child_by_field_name("return_type")
+            .and_then(rust_outer_nominal_return_node)
+            .map(|target| target.id());
         let mut targets = Vec::new();
         collect_rust_type_nodes(node, body_start, name_id, &mut targets);
         for target in targets {
             let raw = self.text(target);
-            if raw.is_empty() || rust_primitive_type(&raw) || raw == owner.name {
+            if raw.is_empty() || rust_primitive_type(&raw) {
                 continue;
             }
             let relation = if node.kind() == "trait_item"
                 && rust_node_has_ancestor_before(target, node, "trait_bounds")
+                && !rust_node_has_ancestor_before(target, node, "type_arguments")
             {
                 CandidateRelation::Extends
             } else if node
@@ -3755,7 +4671,43 @@ impl<'source> DirectAdapterState<'source> {
             } else {
                 SemanticRole::TypeReference
             };
-            self.add_rust_path_candidate(role, relation, owner, target, None)?;
+            let allowed_target_kinds = (owner.kind == "parameter"
+                && rust_node_has_ancestor_before(target, node, "trait_bounds"))
+            .then(|| {
+                vec![
+                    "trait".to_owned(),
+                    "interface".to_owned(),
+                    "parameter".to_owned(),
+                ]
+            });
+            self.add_rust_path_candidate_with_context(
+                role,
+                relation,
+                owner,
+                target,
+                allowed_target_kinds,
+                (relation == CandidateRelation::Returns && outer_return_id == Some(target.id()))
+                    .then_some("rust-outer-nominal-return"),
+            )?;
+        }
+        let mut generic_uses = Vec::new();
+        collect_rust_generic_use_nodes(node, body_start, name_id, &mut generic_uses);
+        for target in generic_uses {
+            let raw = self.text(target);
+            let qualified = rust_qualify_evidence_path(self, owner, &raw, target.start_byte());
+            if !qualified.is_some_and(|qualified| {
+                self.rust_type_parameters_by_qualified_name
+                    .contains_key(&qualified)
+            }) {
+                continue;
+            }
+            self.add_rust_path_candidate(
+                SemanticRole::TypeReference,
+                CandidateRelation::References,
+                owner,
+                target,
+                Some(vec!["parameter".to_owned()]),
+            )?;
         }
         Ok(())
     }
@@ -3780,35 +4732,84 @@ impl<'source> DirectAdapterState<'source> {
             return Ok(());
         }
         let raw = self.text(function);
-        let (qualifier, spelling) = split_qualified(&raw);
+        let (qualifier, spelling) = if function.kind() == "field_expression" {
+            let qualifier = function
+                .child_by_field_name("value")
+                .map(|value| self.text(value));
+            let spelling = function
+                .child_by_field_name("field")
+                .map_or_else(String::new, |field| self.text(field));
+            (qualifier, spelling)
+        } else {
+            let (qualifier, spelling) = split_qualified(&raw);
+            (qualifier.map(str::to_owned), spelling.to_owned())
+        };
+        let qualifier = qualifier.as_deref();
+        let spelling = spelling.as_str();
         if spelling.is_empty() {
             return Ok(());
         }
         let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
-        if self.import_binding_is_ambiguous(owner, binding_name) {
+        let uses_type_namespace = function.kind() == "scoped_identifier";
+        let import_binding_is_ambiguous = if uses_type_namespace {
+            self.visible_import_binding_is_ambiguous(owner, binding_name)
+        } else {
+            self.import_binding_is_ambiguous(owner, binding_name)
+        };
+        let platform_reexport_bindings = import_binding_is_ambiguous
+            .then(|| self.rust_platform_reexport_bindings(owner, binding_name))
+            .flatten();
+        if import_binding_is_ambiguous && platform_reexport_bindings.is_none() {
             return Ok(());
         }
-        let direct_binding = self
-            .binding_for_occurrence(owner, binding_name, function.start_byte(), true)
-            .cloned();
-        let wildcard_binding = direct_binding
+        let direct_binding = platform_reexport_bindings
             .is_none()
             .then(|| {
-                let wildcard_eligible = qualifier.is_some_and(|value| {
-                    qualified_binding_head(value)
-                        .chars()
-                        .next()
-                        .is_some_and(char::is_uppercase)
-                }) || (qualifier.is_none()
-                    && spelling.chars().next().is_some_and(char::is_uppercase));
-                wildcard_eligible
-                    .then(|| self.rust_wildcard_binding(owner, function.start_byte()))
-                    .flatten()
+                if uses_type_namespace {
+                    self.import_binding_version_at(owner, binding_name, function.start_byte(), true)
+                        .map(|binding| binding.binding_id.clone())
+                        .or_else(|| self.local_binding_for(owner, binding_name).cloned())
+                } else {
+                    self.binding_for_occurrence(owner, binding_name, function.start_byte(), true)
+                        .cloned()
+                }
             })
+            .flatten();
+        let wildcard_lookup_eligible = qualifier.is_none()
+            || qualifier.is_some_and(|value| {
+                qualified_binding_head(value)
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_uppercase)
+            });
+        let wildcard_binding = (direct_binding.is_none() && wildcard_lookup_eligible)
+            .then(|| self.rust_wildcard_binding(owner, function.start_byte()))
             .flatten()
             .cloned();
-        let qualified_name = self
-            .rust_call_qualified_name(owner, qualifier, spelling, function.start_byte(), function)
+        let fallback_binding = direct_binding.clone().or_else(|| wildcard_binding.clone());
+        let call_result_binding = if platform_reexport_bindings.is_none() {
+            self.rust_call_result_binding_for_occurrence(
+                owner,
+                function,
+                fallback_binding.as_deref(),
+            )?
+        } else {
+            None
+        };
+        let qualified_name = platform_reexport_bindings
+            .as_ref()
+            .map_or_else(
+                || {
+                    self.rust_call_qualified_name(
+                        owner,
+                        qualifier,
+                        spelling,
+                        function.start_byte(),
+                        function,
+                    )
+                },
+                |_| None,
+            )
             .or_else(|| {
                 wildcard_binding.is_some().then(|| {
                     qualifier.map_or_else(
@@ -3818,13 +4819,34 @@ impl<'source> DirectAdapterState<'source> {
                 })
             });
         let wildcard_bound = wildcard_binding.is_some();
-        let binding = direct_binding.or(wildcard_binding);
-        let occurrence_id = self.builder.occur(
+        let wildcard_external_target_is_explicit = qualifier.is_some_and(|value| {
+            qualified_binding_head(value)
+                .chars()
+                .next()
+                .is_some_and(char::is_uppercase)
+        }) || (qualifier.is_none()
+            && spelling.chars().next().is_some_and(char::is_uppercase));
+        let has_ambiguous_local_self_methods = qualifier.is_some_and(rust_receiver_is_self)
+            && rust_callable_owner(owner).is_some_and(|receiver| {
+                self.rust_receiver_methods
+                    .get(&(receiver.to_owned(), spelling.to_owned()))
+                    .is_some_and(|methods| methods.len() > 1)
+            });
+        let qualified_name = if has_ambiguous_local_self_methods {
+            None
+        } else {
+            qualified_name
+        };
+        let binding = call_result_binding.or(fallback_binding);
+        let occurrence_id = self.builder.occur_with_context(
             SemanticRole::Call,
             &owner.fact_id,
             spelling,
             qualifier,
             Some(&owner.scope_id),
+            platform_reexport_bindings
+                .as_ref()
+                .map(|_| "rust-platform-cfg-reexport"),
             range_for_node(self.source_file, function),
         )?;
         let constraints = ResolutionConstraint {
@@ -3846,27 +4868,43 @@ impl<'source> DirectAdapterState<'source> {
             ],
             hierarchy: None,
             allow_external: qualified_name.as_deref().is_some_and(|qualified| {
-                (wildcard_bound || !qualifier.is_some_and(rust_deferred_owner))
+                ((wildcard_bound && wildcard_external_target_is_explicit)
+                    || (!wildcard_bound && !qualifier.is_some_and(rust_deferred_owner)))
+                    && !has_ambiguous_local_self_methods
                     && !rust_identity_is_internal(&self.module_or_package, qualified)
             }),
         };
-        self.builder.relate(
-            CandidateRelation::Calls,
-            &owner.fact_id,
-            Some(&occurrence_id),
-            binding.as_deref(),
-            spelling,
-            constraints.clone(),
-        )?;
-        if self.rust_test_declarations.contains(&owner.fact_id) {
+        let candidate_bindings = platform_reexport_bindings.as_ref().map_or_else(
+            || vec![binding],
+            |(bindings, has_fallback)| {
+                let mut candidates = bindings.iter().cloned().map(Some).collect::<Vec<_>>();
+                if *has_fallback {
+                    // The source-proven fallback is a lexical declaration,
+                    // not an import binding.
+                    candidates.push(None);
+                }
+                candidates
+            },
+        );
+        for candidate_binding in candidate_bindings {
             self.builder.relate(
-                CandidateRelation::Tests,
+                CandidateRelation::Calls,
                 &owner.fact_id,
                 Some(&occurrence_id),
-                binding.as_deref(),
+                candidate_binding.as_deref(),
                 spelling,
-                constraints,
+                constraints.clone(),
             )?;
+            if self.rust_test_declarations.contains(&owner.fact_id) {
+                self.builder.relate(
+                    CandidateRelation::Tests,
+                    &owner.fact_id,
+                    Some(&occurrence_id),
+                    candidate_binding.as_deref(),
+                    spelling,
+                    constraints.clone(),
+                )?;
+            }
         }
         Ok(())
     }
@@ -3902,6 +4940,12 @@ impl<'source> DirectAdapterState<'source> {
                 .rust_receiver_method_target(enclosing, spelling)
                 .or_else(|| Some(rust_join_qualified(enclosing, spelling)));
         }
+        if use_node.kind() == "scoped_identifier"
+            && let Some(target) =
+                self.imported_qualified_target_for(owner, qualifier, use_start, true)
+        {
+            return Some(rust_join_qualified(&target, spelling));
+        }
         let generic_receiver_type = self
             .rust_value_type_for(
                 owner,
@@ -3926,7 +4970,9 @@ impl<'source> DirectAdapterState<'source> {
         if let Some(receiver_type) =
             self.rust_field_receiver_type(owner, qualifier, use_start, use_node)
         {
-            return Some(rust_join_qualified(&receiver_type, spelling));
+            return self
+                .rust_receiver_method_target(&receiver_type, spelling)
+                .or_else(|| Some(rust_join_qualified(&receiver_type, spelling)));
         }
         if let Some(nominal_type) = generic_receiver_type
             && let Some(receiver_type) =
@@ -3957,6 +5003,167 @@ impl<'source> DirectAdapterState<'source> {
             ));
         }
         Some(rust_join_qualified(qualifier, spelling))
+    }
+
+    fn rust_concrete_callable_receiver(&self, owner: &DeclarationContext) -> Option<String> {
+        let receiver = owner.enclosing_type_qualified_name.as_ref()?;
+        self.rust_receiver_methods
+            .get(&(receiver.clone(), owner.name.clone()))
+            .is_some_and(|methods| methods.iter().any(|method| method == &owner.qualified_name))
+            .then(|| receiver.clone())
+    }
+
+    fn rust_call_result_binding_for_occurrence(
+        &mut self,
+        owner: &DeclarationContext,
+        function: Node<'_>,
+        fallback_binding_id: Option<&str>,
+    ) -> Result<Option<String>, EvidenceError> {
+        if function.kind() != "field_expression" {
+            return Ok(None);
+        }
+        let Some(result_call) = function
+            .child_by_field_name("value")
+            .filter(|value| value.kind() == "call_expression")
+        else {
+            return Ok(None);
+        };
+        let Some(result_member) = function
+            .child_by_field_name("field")
+            .map(|field| self.text(field))
+        else {
+            return Ok(None);
+        };
+        self.rust_call_result_binding_for_call(
+            owner,
+            result_call,
+            &result_member,
+            fallback_binding_id,
+            0,
+        )
+    }
+
+    fn rust_call_result_binding_for_call(
+        &mut self,
+        owner: &DeclarationContext,
+        result_call: Node<'_>,
+        result_member: &str,
+        fallback_binding_id: Option<&str>,
+        depth: usize,
+    ) -> Result<Option<String>, EvidenceError> {
+        if depth >= 64 {
+            return Err(EvidenceError::new(
+                EvidenceErrorCode::ResourceLimit,
+                "Rust call-result chain exceeds depth limit",
+            ));
+        }
+        let Some(called) = result_call.child_by_field_name("function") else {
+            return Ok(None);
+        };
+        let called = if called.kind() == "generic_function" {
+            called.child_by_field_name("function").unwrap_or(called)
+        } else {
+            called
+        };
+        if !matches!(
+            called.kind(),
+            "identifier" | "scoped_identifier" | "field_expression"
+        ) {
+            return Ok(None);
+        }
+        let nested_receiver_call = (called.kind() == "field_expression")
+            .then(|| called.child_by_field_name("value"))
+            .flatten()
+            .filter(|value| value.kind() == "call_expression");
+        let (qualified_callable, receiver_binding_id, result_type_qualified_name) =
+            if let Some(receiver_call) = nested_receiver_call {
+                let Some(called_member) = called
+                    .child_by_field_name("field")
+                    .map(|field| self.text(field))
+                else {
+                    return Ok(None);
+                };
+                let Some(receiver_binding_id) = self.rust_call_result_binding_for_call(
+                    owner,
+                    receiver_call,
+                    &called_member,
+                    fallback_binding_id,
+                    depth.saturating_add(1),
+                )?
+                else {
+                    return Ok(None);
+                };
+                let receiver_result_type = self
+                    .builder
+                    .batch
+                    .bindings
+                    .iter()
+                    .find(|binding| binding.id == receiver_binding_id)
+                    .and_then(|binding| binding.result_type_qualified_name.as_ref());
+                let qualified_callable = receiver_result_type
+                    .and_then(|receiver_type| {
+                        self.rust_receiver_method_target(receiver_type, &called_member)
+                    })
+                    .unwrap_or(called_member);
+                let result_type_qualified_name = self
+                    .rust_callable_return_types
+                    .get(&qualified_callable)
+                    .filter(|return_types| return_types.len() == 1)
+                    .and_then(|return_types| {
+                        self.rust_receiver_method_target(&return_types[0], result_member)
+                            .map(|_| return_types[0].clone())
+                    });
+                (
+                    qualified_callable,
+                    Some(receiver_binding_id),
+                    result_type_qualified_name,
+                )
+            } else {
+                let raw_called = self.text(called);
+                let (qualifier, called_spelling) = split_qualified(&raw_called);
+                let Some(qualified_callable) = self.rust_call_qualified_name(
+                    owner,
+                    qualifier,
+                    called_spelling,
+                    called.start_byte(),
+                    called,
+                ) else {
+                    return Ok(None);
+                };
+                let result_type_qualified_name = if !raw_called.contains("::") {
+                    self.rust_callable_return_types
+                        .get(&qualified_callable)
+                        .filter(|return_types| return_types.len() == 1)
+                        .and_then(|return_types| {
+                            self.rust_receiver_method_target(&return_types[0], result_member)
+                                .map(|_| return_types[0].clone())
+                        })
+                } else {
+                    None
+                };
+                (qualified_callable, None, result_type_qualified_name)
+            };
+        let receiver = self.text(result_call);
+        let key = (
+            owner.scope_id.clone(),
+            qualified_callable.clone(),
+            result_call.start_byte(),
+        );
+        if let Some(binding) = self.rust_call_result_bindings.get(&key) {
+            return Ok(Some(binding.clone()));
+        }
+        let range = range_for_node(self.source_file, result_call);
+        let binding = self.builder.bind_chained_call_result(
+            &receiver,
+            &qualified_callable,
+            result_type_qualified_name.as_deref(),
+            receiver_binding_id.as_deref(),
+            fallback_binding_id,
+            Some(&owner.scope_id),
+            range,
+        )?;
+        self.rust_call_result_bindings.insert(key, binding.clone());
+        Ok(Some(binding))
     }
 
     fn rust_generic_receiver_method_target(
@@ -4017,9 +5224,29 @@ impl<'source> DirectAdapterState<'source> {
     }
 
     fn rust_receiver_method_target(&self, receiver: &str, method: &str) -> Option<String> {
-        let targets = self
-            .rust_receiver_methods
-            .get(&(receiver.to_owned(), method.to_owned()))?;
+        let key = (receiver.to_owned(), method.to_owned());
+        if let Some(targets) = self.rust_receiver_methods.get(&key) {
+            let [target] = targets.as_slice() else {
+                return None;
+            };
+            return Some(target.clone());
+        }
+        let mut targets = self
+            .rust_receiver_traits
+            .get(receiver)?
+            .iter()
+            .filter_map(|trait_name| {
+                let targets = self
+                    .rust_receiver_methods
+                    .get(&(trait_name.clone(), method.to_owned()))?;
+                let [target] = targets.as_slice() else {
+                    return None;
+                };
+                Some(target.clone())
+            })
+            .collect::<Vec<_>>();
+        targets.sort_unstable();
+        targets.dedup();
         let [target] = targets.as_slice() else {
             return None;
         };
@@ -4139,6 +5366,26 @@ impl<'source> DirectAdapterState<'source> {
         node: Node<'_>,
         allowed_target_kinds: Option<Vec<String>>,
     ) -> Result<(), EvidenceError> {
+        self.add_rust_path_candidate_with_context(
+            role,
+            relation,
+            owner,
+            node,
+            allowed_target_kinds,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_rust_path_candidate_with_context(
+        &mut self,
+        role: SemanticRole,
+        relation: CandidateRelation,
+        owner: &DeclarationContext,
+        node: Node<'_>,
+        allowed_target_kinds: Option<Vec<String>>,
+        context: Option<&str>,
+    ) -> Result<(), EvidenceError> {
         let raw = self.text(node);
         let (qualifier, spelling) = split_qualified(&raw);
         let qualified_name = rust_qualify_evidence_path(self, owner, &raw, node.start_byte());
@@ -4152,6 +5399,7 @@ impl<'source> DirectAdapterState<'source> {
             qualified_name.as_deref().is_some_and(|qualified| {
                 !rust_identity_is_internal(&self.module_or_package, qualified)
             }),
+            context,
         )?;
         let _ = (qualifier, spelling);
         Ok(())
@@ -4167,6 +5415,7 @@ impl<'source> DirectAdapterState<'source> {
         qualified_name: Option<&str>,
         allowed_target_kinds: Vec<String>,
         allow_external: bool,
+        context: Option<&str>,
     ) -> Result<(), EvidenceError> {
         let raw = self.text(node);
         let (qualifier, spelling) = split_qualified(&raw);
@@ -4178,12 +5427,49 @@ impl<'source> DirectAdapterState<'source> {
             .binding_for_occurrence(owner, binding_name, node.start_byte(), true)
             .or_else(|| self.rust_wildcard_binding(owner, node.start_byte()))
             .cloned();
-        let occurrence_id = self.builder.occur(
+        let exact_type_parameter = qualified_name
+            .and_then(|qualified| self.rust_type_parameters_by_qualified_name.get(qualified))
+            .map(|parameter| parameter.fact_id.clone());
+        let exact_associated_type = qualified_name
+            .and_then(|qualified| self.rust_associated_types_by_qualified_name.get(qualified))
+            .and_then(|types| {
+                let [associated_type] = types.as_slice() else {
+                    return None;
+                };
+                Some(associated_type.fact_id.clone())
+            });
+        let hierarchy = if relation == CandidateRelation::Extends && owner.kind == "trait" {
+            let complete = rust_ancestor_of_kind(node, "trait_item")
+                .is_some_and(|declaration| !self.overlaps_parser_error(declaration));
+            Some(HierarchyConstraint::DirectBase {
+                base_set_complete: complete,
+            })
+        } else if qualifier == Some("Self") && qualified_name.is_none() {
+            self.rust_impl_for_node(node).and_then(|implementation| {
+                implementation
+                    .owner_declaration_id
+                    .as_ref()
+                    .and_then(|receiver_id| {
+                        implementation
+                            .trait_qualified_name
+                            .as_ref()
+                            .map(|trait_name| HierarchyConstraint::RustAssociatedType {
+                                receiver_declaration_id: receiver_id.clone(),
+                                receiver_qualified_name: implementation.type_qualified_name.clone(),
+                                trait_qualified_name: trait_name.clone(),
+                            })
+                    })
+            })
+        } else {
+            None
+        };
+        let occurrence_id = self.builder.occur_with_context(
             role,
             &owner.fact_id,
             spelling,
             qualifier,
             Some(&owner.scope_id),
+            context,
             range_for_node(self.source_file, node),
         )?;
         self.builder.relate(
@@ -4193,7 +5479,7 @@ impl<'source> DirectAdapterState<'source> {
             binding.as_deref(),
             spelling,
             ResolutionConstraint {
-                exact_target_declaration_id: None,
+                exact_target_declaration_id: exact_type_parameter.or(exact_associated_type),
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: qualified_name
                     .and_then(|qualified| rust_qualified_parent(qualified).map(str::to_owned))
@@ -4203,7 +5489,7 @@ impl<'source> DirectAdapterState<'source> {
                 argument_count: None,
                 argument_types: Vec::new(),
                 allowed_target_kinds,
-                hierarchy: None,
+                hierarchy,
                 allow_external,
             },
         )?;
@@ -4988,19 +6274,21 @@ impl<'source> DirectAdapterState<'source> {
         let python_super_receiver = (self.language == "python")
             .then(|| python_super_receiver(function, self.source))
             .flatten();
-        let exact_super_target = if let Some(receiver) = python_super_receiver {
+        let super_dispatch = if let Some(receiver) = python_super_receiver {
             if !python_super_call_is_builtin(receiver, call, owner, self) {
                 return Ok(());
             }
-            let Some(target) = self.direct_python_super_target(owner, spelling) else {
+            let Some(receiver_qualified_name) = owner.enclosing_type_qualified_name.clone() else {
                 return Ok(());
             };
-            Some(target)
+            Some(HierarchyConstraint::ReceiverDispatch {
+                receiver_qualified_name,
+                strategy: ReceiverDispatchStrategy::C3AfterReceiver,
+            })
         } else {
             None
         };
-        let python_bound_receiver = if python_super_receiver.is_none() && self.language == "python"
-        {
+        let python_bound_receiver = if super_dispatch.is_none() && self.language == "python" {
             qualifier
                 .filter(|qualifier| matches!(*qualifier, "self" | "cls"))
                 .map(|qualifier| {
@@ -5017,6 +6305,32 @@ impl<'source> DirectAdapterState<'source> {
         {
             return Ok(());
         }
+        let local_python_receiver = if super_dispatch.is_none() && self.language == "python" {
+            qualifier.and_then(|qualifier| {
+                self.python_local_class_receiver(owner, qualifier, function.start_byte(), call)
+            })
+        } else {
+            None
+        };
+        let receiver_dispatch = super_dispatch
+            .or_else(|| {
+                python_bound_receiver.map(|receiver_qualified_name| {
+                    HierarchyConstraint::ReceiverDispatch {
+                        receiver_qualified_name,
+                        strategy: ReceiverDispatchStrategy::C3FromReceiver,
+                    }
+                })
+            })
+            .or_else(|| {
+                local_python_receiver
+                    .as_ref()
+                    .map(
+                        |receiver_qualified_name| HierarchyConstraint::ReceiverDispatch {
+                            receiver_qualified_name: receiver_qualified_name.clone(),
+                            strategy: ReceiverDispatchStrategy::C3FromReceiver,
+                        },
+                    )
+            });
         let lookup_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
         let allow_later_file_binding =
             self.language == "python" && matches!(owner.kind.as_str(), "function" | "method");
@@ -5037,13 +6351,13 @@ impl<'source> DirectAdapterState<'source> {
         {
             return Ok(());
         }
-        let construction =
-            self.language == "python" && spelling.chars().next().is_some_and(char::is_uppercase);
-        let (role, relation) = if construction {
-            (SemanticRole::Construction, CandidateRelation::Constructs)
-        } else {
-            (SemanticRole::Call, CandidateRelation::Calls)
-        };
+        if self.language == "python"
+            && qualifier.is_none()
+            && self.python_name_is_statically_local(owner, spelling)
+        {
+            return Ok(());
+        }
+        let (role, relation) = (SemanticRole::Call, CandidateRelation::Calls);
         let argument_count = (self.language == "go")
             .then(|| call.child_by_field_name("arguments"))
             .flatten()
@@ -5066,39 +6380,39 @@ impl<'source> DirectAdapterState<'source> {
                 function.start_byte(),
                 allow_later_file_binding,
             )
+            .or_else(|| {
+                self.python_wildcard_binding(owner, function.start_byte(), allow_later_file_binding)
+            })
             .cloned()
         });
-        let qualified_name = if python_bound_receiver.is_some() {
-            // Receiver dispatch is the complete target-selection constraint.
-            // Keeping an imported or local spelling beside it would make the
-            // candidate contradictory and is rejected by evidence validation.
+        let qualified_name = if receiver_dispatch.is_some() {
             None
         } else {
-            exact_super_target.or_else(|| {
-                qualifier
-                    .and_then(|qualifier| {
-                        self.local_target_for(owner, qualifier)
-                            .map(|target| format!("{target}::{spelling}"))
-                    })
-                    .or_else(|| {
-                        (self.language == "go")
-                            .then(|| self.go_selector_receiver_type(owner, function))
-                            .flatten()
-                            .map(|target| format!("{target}::{spelling}"))
-                    })
-                    .or_else(|| {
-                        qualifier
-                            .and_then(|qualifier| {
-                                self.imported_qualified_target_for(
-                                    owner,
-                                    qualifier,
-                                    function.start_byte(),
-                                    allow_later_file_binding,
-                                )
-                            })
-                            .map(|target| format!("{target}.{spelling}"))
-                    })
-                    .or_else(|| {
+            qualifier
+                .and_then(|qualifier| {
+                    self.local_target_for(owner, qualifier)
+                        .map(|target| format!("{target}::{spelling}"))
+                })
+                .or_else(|| {
+                    (self.language == "go")
+                        .then(|| self.go_selector_receiver_type(owner, function))
+                        .flatten()
+                        .map(|target| format!("{target}::{spelling}"))
+                })
+                .or_else(|| {
+                    qualifier
+                        .and_then(|qualifier| {
+                            self.imported_qualified_target_for(
+                                owner,
+                                qualifier,
+                                function.start_byte(),
+                                allow_later_file_binding,
+                            )
+                        })
+                        .map(|target| format!("{target}.{spelling}"))
+                })
+                .or_else(|| {
+                    qualifier.is_none().then(|| {
                         self.imported_target_for_occurrence(
                             owner,
                             spelling,
@@ -5106,8 +6420,8 @@ impl<'source> DirectAdapterState<'source> {
                             allow_later_file_binding,
                         )
                         .cloned()
-                    })
-            })
+                    })?
+                })
         };
         let occurrence_id = self.builder.occur(
             role,
@@ -5138,10 +6452,11 @@ impl<'source> DirectAdapterState<'source> {
                 qualified_name: qualified_name.clone(),
                 argument_count,
                 argument_types: Vec::new(),
-                allowed_target_kinds: if construction {
+                allowed_target_kinds: if self.language == "python" {
                     vec![
+                        "function".to_owned(),
+                        "method".to_owned(),
                         "class".to_owned(),
-                        "struct".to_owned(),
                         "type_alias".to_owned(),
                     ]
                 } else if self.language == "go" {
@@ -5155,12 +6470,7 @@ impl<'source> DirectAdapterState<'source> {
                 } else {
                     vec!["function".to_owned(), "method".to_owned()]
                 },
-                hierarchy: python_bound_receiver.map(|receiver_qualified_name| {
-                    HierarchyConstraint::ReceiverDispatch {
-                        receiver_qualified_name,
-                        strategy: ReceiverDispatchStrategy::C3FromReceiver,
-                    }
-                }),
+                hierarchy: receiver_dispatch,
                 allow_external: qualified_name.is_some() && python_super_receiver.is_none(),
             },
         )?;
@@ -5168,22 +6478,61 @@ impl<'source> DirectAdapterState<'source> {
         Ok(())
     }
 
-    fn python_name_rebound_between(
+    fn python_local_class_receiver(
         &self,
-        root: Node<'_>,
-        start: usize,
-        end: usize,
-        name: &str,
-    ) -> bool {
-        let mut cursor = root.walk();
-        root.children(&mut cursor)
-            .filter(|child| child.is_named())
-            .any(|child| {
-                child.start_byte() >= start
-                    && child.end_byte() <= end
-                    && !matches!(child.kind(), "import_statement" | "import_from_statement")
-                    && crate::engine::python_bound_names(child, self.source, true).contains(name)
-            })
+        owner: &DeclarationContext,
+        receiver: &str,
+        use_start: usize,
+        call: Node<'_>,
+    ) -> Option<String> {
+        let use_start_u64 = u64::try_from(use_start).ok()?;
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let current = scope_id?;
+            let mut matches = self
+                .builder
+                .batch
+                .declarations
+                .iter()
+                .filter(|declaration| {
+                    declaration.kind == "class"
+                        && declaration.name == receiver
+                        && declaration.scope_id.as_deref() == Some(current)
+                        && declaration.range.end_byte <= use_start_u64
+                })
+                .take(2);
+            let declaration = matches.next();
+            if matches.next().is_some() {
+                return None;
+            }
+            if let Some(declaration) = declaration {
+                let declaration_end = usize::try_from(declaration.range.end_byte).ok()?;
+                let mut syntax_scope = Some(call);
+                while let Some(node) = syntax_scope {
+                    if matches!(node.kind(), "function_definition" | "class_definition")
+                        && self
+                            .declarations
+                            .get(&node.id())
+                            .is_some_and(|context| context.fact_id == owner.fact_id)
+                    {
+                        let body = node.child_by_field_name("body").unwrap_or(node);
+                        if self.python_name_rebound_between(
+                            body,
+                            declaration_end,
+                            use_start,
+                            receiver,
+                        ) {
+                            return None;
+                        }
+                        return Some(declaration.qualified_name.clone());
+                    }
+                    syntax_scope = node.parent();
+                }
+                return None;
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        None
     }
 
     fn python_bound_method_receiver(
@@ -5316,6 +6665,9 @@ impl<'source> DirectAdapterState<'source> {
             None,
             Some(&owner.scope_id),
             output_index,
+            None,
+            None,
+            None,
             range_for_node(self.source_file, result_call),
         )?;
         self.go_call_result_bindings.insert(key, binding.clone());
@@ -5611,19 +6963,6 @@ impl<'source> DirectAdapterState<'source> {
         }
     }
 
-    fn direct_python_super_target(
-        &self,
-        owner: &DeclarationContext,
-        spelling: &str,
-    ) -> Option<String> {
-        let enclosing_type = owner.enclosing_type_qualified_name.as_deref()?;
-        let bases = self.python_type_bases.get(enclosing_type)?;
-        let [base] = bases.qualified_names.as_slice() else {
-            return None;
-        };
-        bases.complete.then(|| format!("{base}::{spelling}"))
-    }
-
     fn python_base_qualified_name(
         &self,
         owner: &DeclarationContext,
@@ -5694,6 +7033,9 @@ impl<'source> DirectAdapterState<'source> {
                 node.start_byte(),
                 allow_later_file_binding,
             )
+            .or_else(|| {
+                self.python_wildcard_binding(owner, node.start_byte(), allow_later_file_binding)
+            })
             .cloned();
         let qualified_name = qualified_name_override
             .or_else(|| {
@@ -5776,6 +7118,31 @@ impl<'source> DirectAdapterState<'source> {
             })
     }
 
+    fn python_name_is_statically_local(&self, owner: &DeclarationContext, spelling: &str) -> bool {
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let Some(current) = scope_id else {
+                break;
+            };
+            if self
+                .python_global_names
+                .get(current)
+                .is_some_and(|names| names.contains(spelling))
+            {
+                return false;
+            }
+            if self
+                .python_local_bound_names
+                .get(current)
+                .is_some_and(|names| names.contains(spelling))
+            {
+                return true;
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        false
+    }
+
     fn record_import_binding(
         &mut self,
         owner: &DeclarationContext,
@@ -5804,7 +7171,8 @@ impl<'source> DirectAdapterState<'source> {
             existing_root == new_root
         });
 
-        if (self.language != "python" && !versions.is_empty())
+        if (local == "*" && !versions.is_empty())
+            || (self.language != "python" && !versions.is_empty())
             || (self.language == "python"
                 && same_package
                 && versions.iter().any(|version| version.target != target))
@@ -5837,6 +7205,47 @@ impl<'source> DirectAdapterState<'source> {
             scope_id = self.scope_parents.get(current).map(String::as_str);
         }
         None
+    }
+
+    fn rust_platform_reexport_bindings(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+    ) -> Option<(Vec<String>, bool)> {
+        let scope_id = self.import_binding_scope(owner, name)?;
+        let versions = self.import_bindings.get(scope_id)?.get(name)?;
+        if versions.len() != 2 {
+            return None;
+        }
+        let mut platforms = BTreeSet::new();
+        let mut targets = BTreeSet::new();
+        let mut bindings = Vec::with_capacity(versions.len());
+        for version in versions {
+            platforms.insert(
+                *self
+                    .rust_platform_reexport_bindings
+                    .get(&version.binding_id)?,
+            );
+            targets.insert(version.target.as_str());
+            bindings.push(version.binding_id.clone());
+        }
+        if platforms != BTreeSet::from([RustPlatformCfg::Unix, RustPlatformCfg::Windows])
+            || targets.len() != 2
+        {
+            return None;
+        }
+        let has_local_target = self
+            .local_targets
+            .get(scope_id)
+            .is_some_and(|targets| targets.contains_key(name));
+        let has_fallback = self
+            .rust_platform_fallbacks
+            .contains(&(scope_id.to_owned(), name.to_owned()));
+        if has_local_target && !has_fallback {
+            return None;
+        }
+        bindings.sort_unstable();
+        Some((bindings, has_fallback))
     }
 
     fn import_binding_version_at(
@@ -5883,6 +7292,19 @@ impl<'source> DirectAdapterState<'source> {
         })
     }
 
+    fn python_wildcard_binding(
+        &self,
+        owner: &DeclarationContext,
+        use_start: usize,
+        allow_later_file_binding: bool,
+    ) -> Option<&String> {
+        if self.language != "python" || self.import_binding_is_ambiguous(owner, "*") {
+            return None;
+        }
+        self.import_binding_version_at(owner, "*", use_start, allow_later_file_binding)
+            .map(|binding| &binding.binding_id)
+    }
+
     fn imported_target_for_occurrence(
         &self,
         owner: &DeclarationContext,
@@ -5916,6 +7338,10 @@ impl<'source> DirectAdapterState<'source> {
         if self.local_binding_for(owner, name).is_some() {
             return false;
         }
+        self.visible_import_binding_is_ambiguous(owner, name)
+    }
+
+    fn visible_import_binding_is_ambiguous(&self, owner: &DeclarationContext, name: &str) -> bool {
         let mut scope_id = Some(owner.scope_id.as_str());
         for _ in 0..64 {
             let Some(current) = scope_id else {
@@ -6468,6 +7894,27 @@ fn rust_nominal_type_path(raw: &str) -> Option<String> {
     .then_some(nominal)
 }
 
+fn rust_return_receiver_type_path(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.starts_with("*mut ") || raw.starts_with("*const ") {
+        return None;
+    }
+    rust_nominal_type_path(raw)
+}
+
+fn rust_outer_nominal_return_node(mut node: Node<'_>) -> Option<Node<'_>> {
+    for _ in 0..16 {
+        match node.kind() {
+            "type_identifier" | "scoped_type_identifier" => return Some(node),
+            "generic_type" | "reference_type" | "parenthesized_type" => {
+                node = node.child_by_field_name("type")?;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
 fn rust_trait_bound_path(raw: &str) -> Option<String> {
     let raw = raw.trim().trim_start_matches('?').trim();
     let raw = raw
@@ -6791,6 +8238,11 @@ fn rust_qualify_evidence_path(
         return None;
     }
     let (qualifier, spelling) = split_qualified(&raw);
+    if qualifier == Some("Self") {
+        return state
+            .rust_associated_type_for(owner, spelling)
+            .map(|associated_type| associated_type.qualified_name.clone());
+    }
     let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
     if let Some(target) = state.imported_target_for_occurrence(owner, binding_name, use_start, true)
     {
@@ -6806,6 +8258,16 @@ fn rust_qualify_evidence_path(
         } else {
             target.clone()
         });
+    }
+    if qualifier.is_none() {
+        let prelude_type = match binding_name {
+            "Option" => Some("std::option::Option"),
+            "Result" => Some("std::result::Result"),
+            _ => None,
+        };
+        if let Some(prelude_type) = prelude_type {
+            return Some(prelude_type.to_owned());
+        }
     }
     if matches!(binding_name, "crate" | "self" | "super") {
         return Some(state.rust_canonical_import_target(&state.rust_enclosing_module(owner), &raw));
@@ -7048,6 +8510,14 @@ fn collect_rust_type_nodes<'tree>(
     if node.start_byte() >= body_start || declaration_name == Some(node.id()) {
         return;
     }
+    if matches!(
+        node.kind(),
+        "type_parameter" | "lifetime_parameter" | "const_parameter"
+    ) && rust_generic_parameter_name(node)
+        .is_some_and(|name| declaration_name != Some(name.id()))
+    {
+        return;
+    }
     match node.kind() {
         "scoped_type_identifier" => {
             output.push(node);
@@ -7066,6 +8536,33 @@ fn collect_rust_type_nodes<'tree>(
     }
 }
 
+fn collect_rust_generic_use_nodes<'tree>(
+    node: Node<'tree>,
+    body_start: usize,
+    declaration_name: Option<usize>,
+    output: &mut Vec<Node<'tree>>,
+) {
+    if node.start_byte() >= body_start || declaration_name == Some(node.id()) {
+        return;
+    }
+    if matches!(
+        node.kind(),
+        "type_parameter" | "lifetime_parameter" | "const_parameter"
+    ) && rust_generic_parameter_name(node)
+        .is_some_and(|name| declaration_name != Some(name.id()))
+    {
+        return;
+    }
+    if matches!(node.kind(), "identifier" | "lifetime") {
+        output.push(node);
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_rust_generic_use_nodes(child, body_start, declaration_name, output);
+    }
+}
+
 fn rust_node_has_ancestor_before(node: Node<'_>, boundary: Node<'_>, kind: &str) -> bool {
     let mut parent = node.parent();
     while let Some(current) = parent {
@@ -7078,6 +8575,17 @@ fn rust_node_has_ancestor_before(node: Node<'_>, boundary: Node<'_>, kind: &str)
         parent = current.parent();
     }
     false
+}
+
+fn rust_ancestor_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    let mut current = Some(node);
+    while let Some(candidate) = current {
+        if candidate.kind() == kind {
+            return Some(candidate);
+        }
+        current = candidate.parent();
+    }
+    None
 }
 
 fn rust_primitive_type(raw: &str) -> bool {
@@ -7191,6 +8699,24 @@ fn rust_is_type_node(kind: &str) -> bool {
             | "tuple_type"
             | "array_type"
     )
+}
+
+fn first_named_child_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .find(|child| child.is_named() && child.kind() == kind)
+}
+
+fn rust_generic_parameter_name(parameter: Node<'_>) -> Option<Node<'_>> {
+    parameter.child_by_field_name("name").or_else(|| {
+        let kind = match parameter.kind() {
+            "type_parameter" => "type_identifier",
+            "lifetime_parameter" => "lifetime",
+            "const_parameter" => "identifier",
+            _ => return None,
+        };
+        first_named_child_of_kind(parameter, kind)
+    })
 }
 
 fn split_qualified(raw: &str) -> (Option<&str>, &str) {
@@ -7439,6 +8965,208 @@ fn valid_python_identifier(identifier: &str) -> bool {
         && !is_python_hard_keyword(identifier)
 }
 
+fn direct_python_function<'tree>(
+    root: Node<'tree>,
+    name: &str,
+    source: &[u8],
+) -> Option<Node<'tree>> {
+    direct_python_definition(root, name, "function_definition", source)
+}
+
+fn direct_python_definition<'tree>(
+    root: Node<'tree>,
+    name: &str,
+    kind: &str,
+    source: &[u8],
+) -> Option<Node<'tree>> {
+    let mut cursor = root.walk();
+    let mut matches = root.children(&mut cursor).filter_map(|child| {
+        let definition = if child.kind() == kind {
+            Some(child)
+        } else if child.kind() == "decorated_definition" {
+            let mut nested = child.walk();
+            child
+                .children(&mut nested)
+                .find(|candidate| candidate.kind() == kind)
+        } else {
+            None
+        }?;
+        definition
+            .child_by_field_name("name")
+            .and_then(|name_node| source.get(name_node.start_byte()..name_node.end_byte()))
+            .is_some_and(|spelling| spelling == name.as_bytes())
+            .then_some(definition)
+    });
+    let found = matches.next()?;
+    matches.next().is_none().then_some(found)
+}
+
+fn python_scope_directive_names(
+    function: Node<'_>,
+    source: &[u8],
+) -> (HashSet<String>, HashSet<String>) {
+    fn walk(
+        node: Node<'_>,
+        source: &[u8],
+        root: bool,
+        global_names: &mut HashSet<String>,
+        nonlocal_names: &mut HashSet<String>,
+    ) {
+        if !root && matches!(node.kind(), "function_definition" | "class_definition") {
+            return;
+        }
+        let output = match node.kind() {
+            "global_statement" => Some(&mut *global_names),
+            "nonlocal_statement" => Some(&mut *nonlocal_names),
+            _ => None,
+        };
+        if let Some(output) = output {
+            let mut cursor = node.walk();
+            for child in node
+                .children(&mut cursor)
+                .filter(|child| child.kind() == "identifier")
+            {
+                if let Ok(name) = child.utf8_text(source) {
+                    output.insert(name.to_owned());
+                }
+            }
+            return;
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            walk(child, source, false, global_names, nonlocal_names);
+        }
+    }
+
+    let mut global_names = HashSet::new();
+    let mut nonlocal_names = HashSet::new();
+    if let Some(body) = function.child_by_field_name("body") {
+        walk(body, source, true, &mut global_names, &mut nonlocal_names);
+    }
+    (global_names, nonlocal_names)
+}
+
+fn collect_python_module_declaration_names(
+    node: Node<'_>,
+    source: &[u8],
+    output: &mut HashSet<String>,
+) {
+    if matches!(node.kind(), "function_definition" | "class_definition") {
+        if let Some(name) = node
+            .child_by_field_name("name")
+            .and_then(|name_node| source.get(name_node.start_byte()..name_node.end_byte()))
+            .and_then(|name| std::str::from_utf8(name).ok())
+            .filter(|name| valid_python_identifier(name))
+        {
+            output.insert(name.to_owned());
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_python_module_declaration_names(child, source, output);
+    }
+}
+
+fn collect_python_module_mutations(
+    node: Node<'_>,
+    source: &[u8],
+    binding_statements: &mut HashMap<String, HashSet<usize>>,
+    deleted_names: &mut HashSet<String>,
+    statement_id: usize,
+) {
+    if matches!(
+        node.kind(),
+        "function_definition" | "class_definition" | "decorated_definition"
+    ) {
+        collect_python_definition_time_bindings(node, source, binding_statements, statement_id);
+        return;
+    }
+    if matches!(node.kind(), "annotated_assignment" | "augmented_assignment") {
+        let mut names = HashSet::new();
+        collect_python_binding_target_names(node.child_by_field_name("left"), source, &mut names);
+        for name in names {
+            binding_statements
+                .entry(name)
+                .or_default()
+                .insert(statement_id);
+        }
+    } else if node.kind() == "delete_statement" {
+        let mut cursor = node.walk();
+        for target in node.children(&mut cursor).filter(|child| child.is_named()) {
+            collect_python_binding_target_names(Some(target), source, deleted_names);
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_python_module_mutations(
+            child,
+            source,
+            binding_statements,
+            deleted_names,
+            statement_id,
+        );
+    }
+}
+
+fn collect_python_definition_time_bindings(
+    node: Node<'_>,
+    source: &[u8],
+    binding_statements: &mut HashMap<String, HashSet<usize>>,
+    statement_id: usize,
+) {
+    if node.kind() == "named_expression" {
+        let mut names = HashSet::new();
+        collect_python_binding_target_names(node.child_by_field_name("name"), source, &mut names);
+        for name in names {
+            binding_statements
+                .entry(name)
+                .or_default()
+                .insert(statement_id);
+        }
+        return;
+    }
+    let body_id = node.child_by_field_name("body").map(|body| body.id());
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        if Some(child.id()) != body_id {
+            collect_python_definition_time_bindings(
+                child,
+                source,
+                binding_statements,
+                statement_id,
+            );
+        }
+    }
+}
+
+fn collect_python_binding_target_names(
+    node: Option<Node<'_>>,
+    source: &[u8],
+    output: &mut HashSet<String>,
+) {
+    let Some(node) = node else {
+        return;
+    };
+    if node.kind() == "identifier" {
+        if let Some(name) = source
+            .get(node.start_byte()..node.end_byte())
+            .and_then(|name| std::str::from_utf8(name).ok())
+            .filter(|name| valid_python_identifier(name))
+        {
+            output.insert(name.to_owned());
+        }
+    } else if matches!(
+        node.kind(),
+        "expression_list" | "pattern_list" | "tuple_pattern" | "list_pattern"
+    ) {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            collect_python_binding_target_names(Some(child), source, output);
+        }
+    }
+}
+
 fn is_python_hard_keyword(identifier: &str) -> bool {
     matches!(
         identifier,
@@ -7517,6 +9245,20 @@ fn python_import_contains_wildcard(statement: &str) -> bool {
         }
     }
     false
+}
+
+fn python_wildcard_import_span(statement: &str) -> Option<(usize, usize)> {
+    let uncommented_end = statement.find('#').unwrap_or(statement.len());
+    let uncommented = statement.get(..uncommented_end)?;
+    let star = uncommented.find('*')?;
+    if uncommented.get(star.saturating_add(1)..)?.trim().is_empty()
+        && uncommented.get(..star)?.trim_end().ends_with("import")
+        && !uncommented.get(..star)?.contains('*')
+    {
+        Some((star, star.saturating_add(1)))
+    } else {
+        None
+    }
 }
 
 fn collect_nodes<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tree>>) {
@@ -8109,9 +9851,6 @@ fn target_kinds_for_relation(relation: CandidateRelation) -> Vec<String> {
         CandidateRelation::Annotates
         | CandidateRelation::Extends
         | CandidateRelation::Implements
-        | CandidateRelation::References
-        | CandidateRelation::TypeOf
-        | CandidateRelation::Returns
         | CandidateRelation::Embeds => vec![
             "class".to_owned(),
             "struct".to_owned(),
@@ -8120,6 +9859,17 @@ fn target_kinds_for_relation(relation: CandidateRelation) -> Vec<String> {
             "trait".to_owned(),
             "type_alias".to_owned(),
         ],
+        CandidateRelation::References | CandidateRelation::TypeOf | CandidateRelation::Returns => {
+            vec![
+                "class".to_owned(),
+                "struct".to_owned(),
+                "enum".to_owned(),
+                "interface".to_owned(),
+                "trait".to_owned(),
+                "type_alias".to_owned(),
+                "parameter".to_owned(),
+            ]
+        }
         CandidateRelation::AccessesMember => vec!["field".to_owned(), "method".to_owned()],
         CandidateRelation::InvokesMacro => vec!["macro".to_owned()],
         CandidateRelation::Contains | CandidateRelation::Owns => Vec::new(),
@@ -8289,6 +10039,49 @@ const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::InvokesMacro => "invokes_macro",
         CandidateRelation::Tests => "tests",
     }
+}
+
+fn rust_platform_cfg(node: Node<'_>, source: &[u8]) -> Option<RustPlatformCfg> {
+    let parse = |attribute: Node<'_>| {
+        let compact =
+            String::from_utf8_lossy(&source[attribute.start_byte()..attribute.end_byte()])
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect::<String>();
+        match compact.as_str() {
+            "#[cfg(not(any(unix,windows)))]" | "#[cfg(not(any(windows,unix)))]" => {
+                Some(RustPlatformCfg::Fallback)
+            }
+            "#[cfg(unix)]" => Some(RustPlatformCfg::Unix),
+            "#[cfg(windows)]" => Some(RustPlatformCfg::Windows),
+            _ => None,
+        }
+    };
+    let mut platforms = BTreeSet::new();
+    let mut sibling = node.prev_named_sibling();
+    while let Some(attribute) = sibling {
+        if attribute.kind() != "attribute_item" {
+            break;
+        }
+        if let Some(platform) = parse(attribute) {
+            platforms.insert(platform);
+        }
+        sibling = attribute.prev_named_sibling();
+    }
+    let mut cursor = node.walk();
+    for attribute in node
+        .children(&mut cursor)
+        .filter(|child| child.kind() == "attribute_item")
+    {
+        if let Some(platform) = parse(attribute) {
+            platforms.insert(platform);
+        }
+    }
+    let platforms = platforms.into_iter().collect::<Vec<_>>();
+    let [platform] = platforms.as_slice() else {
+        return None;
+    };
+    Some(*platform)
 }
 
 fn rust_has_test_attribute(node: Node<'_>, source: &[u8]) -> bool {
