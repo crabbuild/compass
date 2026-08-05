@@ -306,6 +306,14 @@ impl UniversalResolutionIndex {
                             let mut index =
                                 AHashMap::<(String, String, String), Vec<DeclarationSlot>>::new();
                             for declaration in declarations.values() {
+                                // Go methods live in the receiver method set, not in
+                                // the package block. Keeping them in the package-name
+                                // index makes an unqualified call ambiguous whenever a
+                                // package function shares the method name (for example,
+                                // a method forwarding to its package-level helper).
+                                if declaration.language == "go" && declaration.kind == "method" {
+                                    continue;
+                                }
                                 let Some(slot) =
                                     declaration_slot(&declaration_ids, &declaration.id)
                                 else {
@@ -338,6 +346,14 @@ impl UniversalResolutionIndex {
                                         Vec<DeclarationSlot>,
                                     >::new();
                                     for declaration in declarations.values() {
+                                        // Go methods are selected through a receiver or
+                                        // method expression; they are not lexical names
+                                        // in the package/file scope.
+                                        if declaration.language == "go"
+                                            && declaration.kind == "method"
+                                        {
+                                            continue;
+                                        }
                                         let Some(slot) =
                                             declaration_slot(&declaration_ids, &declaration.id)
                                         else {
@@ -755,12 +771,20 @@ impl UniversalResolutionIndex {
             strategy,
         }) = candidate.constraints.hierarchy.as_ref()
         {
-            return self.resolve_c3_receiver_dispatch(
+            let receiver_decision = self.resolve_c3_receiver_dispatch(
                 language,
                 receiver_qualified_name,
                 *strategy,
                 candidate,
             );
+            // Receiver dispatch is the strongest source-grounded route, but
+            // an unresolved hierarchy must not erase an independently exact
+            // qualified binding. This is important for generic or recovered
+            // Python bases whose inherited method remains identifiable even
+            // when C3 cannot be constructed from the emitted base facts.
+            if !matches!(&receiver_decision, ResolutionDecision::Unresolved) {
+                return receiver_decision;
+            }
         }
         let occurrence = self.occurrence(candidate);
         let qualifier = occurrence.and_then(|occurrence| occurrence.qualifier.as_deref());

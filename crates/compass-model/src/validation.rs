@@ -866,6 +866,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
             NodeKind::Resource,
             NodeKind::File | NodeKind::Resource | NodeKind::ConfigKey
         ) | (NodeKind::Schema, NodeKind::ConfigKey)
+            | (NodeKind::ConfigKey, NodeKind::ConfigKey)
     ) || database_contains(source, target)
 }
 

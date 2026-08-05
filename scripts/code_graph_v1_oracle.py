@@ -341,6 +341,7 @@ def endpoint_allowed(source: dict[str, Any], edge: dict[str, Any], target: dict[
     if kind == "contains":
         return (
             (s == "schema" and t == "config_key")
+            or (s == "config_key" and t == "config_key")
             or (s == "file" and t in CONTAINS_FILE_TARGETS)
             or (s in {"module", "package", "namespace"} and t in CONTAINS_SCOPE_TARGETS)
             or (s in TYPE_KINDS | {"component", "schema"} and t in CONTAINS_TYPE_TARGETS)

@@ -598,6 +598,51 @@ func invoke(value uint64) uint64 {
 }
 
 #[test]
+fn go_method_forwarding_call_resolves_same_named_package_function() -> Result<(), Box<dyn Error>> {
+    let path = Path::new("command/forwarding.go");
+    let source = br#"package command
+
+type FlagSet struct{}
+func (*FlagSet) Set(string, string) error { return nil }
+
+type Command struct{}
+func (*Command) Flags() *FlagSet { return nil }
+func (c *Command) MarkFlagFilename(name string, extensions ...string) error {
+    return MarkFlagFilename(c.Flags(), name, extensions...)
+}
+func MarkFlagFilename(flags *FlagSet, name string, extensions ...string) error {
+    return flags.Set(name, extensions[0])
+}
+"#;
+    let extracted = Engine::default().extract_source(path, source)?;
+    let resolved = compass_resolve::resolve_with_root(
+        &[extracted],
+        &HashMap::from([(
+            path.to_string_lossy().into_owned(),
+            String::from_utf8(source.to_vec())?,
+        )]),
+        Path::new("."),
+    );
+    let method = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "command.Command::MarkFlagFilename")
+        .ok_or("missing forwarding method")?;
+    let function = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "command.MarkFlagFilename")
+        .ok_or("missing package function")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == method.id
+            && edge.target == function.id
+            && edge.string("relation") == "calls"
+            && edge.string("source_location") == "L9"
+    }));
+    Ok(())
+}
+
+#[test]
 fn go_interface_methods_keep_exact_interface_ownership_and_source_sites()
 -> Result<(), Box<dyn Error>> {
     let path = Path::new("storage/store.go");

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::{BufReader, Write};
@@ -13,8 +15,9 @@ use compass_files::{
 };
 use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
-    GRAPH_SNAPSHOT_MAX_OBJECTS, GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder,
-    GraphSnapshotGcStats, InventoryEvidence, PublicationOmissions, SnapshotSelector, SourceDigest,
+    GRAPH_JSON_DELTA_MAX_SOURCE_BYTES, GRAPH_SNAPSHOT_MAX_OBJECTS,
+    GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder, GraphSnapshotGcStats,
+    InventoryEvidence, PublicationOmissions, SnapshotSelector, SourceDigest,
     build_owned_with_tiebreaker as build_document, canonical_edge_kind, canonical_raw_edge_sites,
     cluster, deduped_node_count, extraction_from_v1, garbage_collect_graph_snapshots,
     graph_insights, graph_snapshot_needs_gc, label_communities_by_hub,
@@ -22,16 +25,18 @@ use compass_graph::{
     normalize_document_v1_with_inventory_best_effort,
     normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
     score_communities, write_canonical_graph_json,
+    write_fact_neutral_graph_json_delta_prevalidated,
 };
 use compass_languages::{
-    DeclarationFact, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL,
+    BindingFact, DeclarationFact, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL,
     EXTRACTION_QUALITY_REASON_EXTENSION, Engine, Extraction, ExtractorKind,
-    FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, ProjectEvidenceIndex, RawEdgeRecord, RawFrameworkFact,
-    RawNodeRecord, Registry, SemanticEvidenceBatch, file_stem, make_id,
+    FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, OccurrenceFact, ProjectEvidenceIndex, RawCall,
+    RawEdgeRecord, RawFrameworkFact, RawNodeRecord, Registry, RelationshipCandidate,
+    ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, file_stem, make_id,
 };
 use compass_model::code_graph::{
-    CommunityMetadata, DiagnosticSeverity, ExtractionStatus, FileNodeDetails, GraphDiagnostic,
-    GraphDocument as V1GraphDocument, NodeDetails, NodeKind,
+    CommunityMetadata, CoverageRecord, DiagnosticSeverity, ExtractionStatus, FileNodeDetails,
+    GraphDiagnostic, GraphDocument as V1GraphDocument, NodeDetails, NodeKind,
 };
 use compass_model::provenance::{
     COALESCED_NODE_EVIDENCE_ATTRIBUTE, CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE,
@@ -53,9 +58,9 @@ use compass_store::{
     local_sqlite_store_path,
 };
 use rayon::prelude::*;
-use serde::ser::{SerializeMap, SerializeSeq, Serializer};
+use serde::ser::{Error as SerdeError, SerializeMap, SerializeSeq, Serializer};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::build_state::{
@@ -159,7 +164,7 @@ pub enum BuildPurpose {
 
 const OUTPUT_STATS_FILE: &str = ".compass_output_stats.json";
 const AST_FACT_DIGESTS_FILE: &str = ".compass_ast_fact_digests.json";
-const AST_FACT_DIGESTS_SCHEMA: &str = "compass.ast-fact-digests/1";
+const AST_FACT_DIGESTS_SCHEMA: &str = "compass.ast-fact-digests/3";
 const MAX_AST_FACT_DIGEST_ENTRIES: usize = 100_000;
 const MAX_AST_FACT_DIGEST_FILE_BYTES: usize = 16 * 1024 * 1024;
 const GRAPH_OVERVIEW_FILE: &str = "graph-overview.json";
@@ -399,7 +404,7 @@ fn build_profile_digest(profile: &BuildProfile, output_dir: &Path) -> Result<Str
         source,
     })?;
     let mut digest = Sha256::new();
-    digest.update(b"compass.ast-fact-digests/profile/2");
+    digest.update(b"compass.ast-fact-digests/profile/3");
     digest.update([0]);
     for component in [
         compass_model::code_graph::CODE_GRAPH_SCHEMA_V1,
@@ -467,6 +472,98 @@ impl Write for ExtractionDigestWriter {
     }
 }
 
+/// Serialize JSON object keys in lexical order for digesting.
+///
+/// `serde_json` is configured with `preserve_order` in this workspace. That
+/// is useful when round-tripping user-facing JSON, but it means an equivalent
+/// map can acquire a different byte representation after a cache load. Fact
+/// digests describe semantic extraction, so map insertion order must not be
+/// part of their identity.
+fn compare_fact_values(left: &Value, right: &Value) -> Ordering {
+    fn kind(value: &Value) -> u8 {
+        match value {
+            Value::Null => 0,
+            Value::Bool(_) => 1,
+            Value::Number(_) => 2,
+            Value::String(_) => 3,
+            Value::Array(_) => 4,
+            Value::Object(_) => 5,
+        }
+    }
+
+    let kind_order = kind(left).cmp(&kind(right));
+    if kind_order != Ordering::Equal {
+        return kind_order;
+    }
+    match (left, right) {
+        (Value::Null, Value::Null) => Ordering::Equal,
+        (Value::Bool(left), Value::Bool(right)) => left.cmp(right),
+        (Value::Number(left), Value::Number(right)) => left.to_string().cmp(&right.to_string()),
+        (Value::String(left), Value::String(right)) => left.cmp(right),
+        (Value::Array(left), Value::Array(right)) => left
+            .iter()
+            .zip(right)
+            .map(|(left, right)| compare_fact_values(left, right))
+            .find(|order| *order != Ordering::Equal)
+            .unwrap_or_else(|| left.len().cmp(&right.len())),
+        (Value::Object(left), Value::Object(right)) => compare_fact_maps(left, right),
+        _ => Ordering::Equal,
+    }
+}
+
+fn compare_fact_maps(left: &Map<String, Value>, right: &Map<String, Value>) -> Ordering {
+    let mut left_entries = left.iter().collect::<Vec<_>>();
+    let mut right_entries = right.iter().collect::<Vec<_>>();
+    left_entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+    right_entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+    left_entries
+        .iter()
+        .zip(&right_entries)
+        .map(|((left_key, left_value), (right_key, right_value))| {
+            left_key
+                .cmp(right_key)
+                .then_with(|| compare_fact_values(left_value, right_value))
+        })
+        .find(|order| *order != Ordering::Equal)
+        .unwrap_or_else(|| left_entries.len().cmp(&right_entries.len()))
+}
+
+fn normalized_call_text(value: &Option<Option<String>>) -> Option<&str> {
+    value.as_ref().and_then(|value| value.as_deref())
+}
+
+struct FactDigestValue<'a>(&'a Value);
+
+impl Serialize for FactDigestValue<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self.0 {
+            Value::Null => serializer.serialize_unit(),
+            Value::Bool(value) => serializer.serialize_bool(*value),
+            Value::Number(value) => value.serialize(serializer),
+            Value::String(value) => serializer.serialize_str(value),
+            Value::Array(values) => {
+                let mut sequence = serializer.serialize_seq(Some(values.len()))?;
+                for value in values {
+                    sequence.serialize_element(&Self(value))?;
+                }
+                sequence.end()
+            }
+            Value::Object(values) => {
+                let mut entries = values.iter().collect::<Vec<_>>();
+                entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+                let mut map = serializer.serialize_map(Some(entries.len()))?;
+                for (key, value) in entries {
+                    map.serialize_entry(key, &Self(value))?;
+                }
+                map.end()
+            }
+        }
+    }
+}
+
 struct FactDigestNode<'a> {
     node: &'a RawNodeRecord,
 }
@@ -477,13 +574,17 @@ impl Serialize for FactDigestNode<'_> {
         S: Serializer,
     {
         let is_file = self.node.string("symbol_kind") == "file";
-        let mut map = serializer.serialize_map(Some(self.node.attributes.len() + 1))?;
+        let mut attributes = self
+            .node
+            .attributes
+            .iter()
+            .filter(|(key, _)| !(is_file && FILE_ENVELOPE_ATTRIBUTES.contains(&key.as_str())))
+            .collect::<Vec<_>>();
+        attributes.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        let mut map = serializer.serialize_map(Some(attributes.len() + 1))?;
         map.serialize_entry("id", &self.node.id)?;
-        for (key, value) in &self.node.attributes {
-            if is_file && FILE_ENVELOPE_ATTRIBUTES.contains(&key.as_str()) {
-                continue;
-            }
-            map.serialize_entry(key, value)?;
+        for (key, value) in attributes {
+            map.serialize_entry(key, &FactDigestValue(value))?;
         }
         map.end()
     }
@@ -498,27 +599,272 @@ impl Serialize for FactDigestNodes<'_> {
     where
         S: Serializer,
     {
+        let mut nodes = self.nodes.iter().collect::<Vec<_>>();
+        nodes.sort_unstable_by(|left, right| left.id.cmp(&right.id));
         let mut sequence = serializer.serialize_seq(Some(self.nodes.len()))?;
-        for node in self.nodes {
+        for node in nodes {
             sequence.serialize_element(&FactDigestNode { node })?;
         }
         sequence.end()
     }
 }
 
-struct FactDigestDeclaration<'a> {
-    declaration: &'a DeclarationFact,
-    is_file: bool,
+struct FactDigestEdge<'a> {
+    edge: &'a RawEdgeRecord,
 }
 
-impl Serialize for FactDigestDeclaration<'_> {
+impl Serialize for FactDigestEdge<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut attributes = self.edge.attributes.iter().collect::<Vec<_>>();
+        attributes.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        let mut map = serializer.serialize_map(Some(attributes.len() + 2))?;
+        map.serialize_entry("source", &self.edge.source)?;
+        map.serialize_entry("target", &self.edge.target)?;
+        for (key, value) in attributes {
+            map.serialize_entry(key, &FactDigestValue(value))?;
+        }
+        map.end()
+    }
+}
+
+struct FactDigestEdges<'a> {
+    edges: &'a [RawEdgeRecord],
+}
+
+impl Serialize for FactDigestEdges<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut edges = self.edges.iter().collect::<Vec<_>>();
+        edges.sort_unstable_by(|left, right| {
+            left.source
+                .cmp(&right.source)
+                .then_with(|| left.target.cmp(&right.target))
+                .then_with(|| compare_fact_maps(&left.attributes, &right.attributes))
+        });
+        let mut sequence = serializer.serialize_seq(Some(self.edges.len()))?;
+        for edge in edges {
+            sequence.serialize_element(&FactDigestEdge { edge })?;
+        }
+        sequence.end()
+    }
+}
+
+struct FactDigestCall<'a> {
+    call: &'a RawCall,
+}
+
+impl Serialize for FactDigestCall<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let call = self.call;
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("caller_nid", &call.caller_nid)?;
+        map.serialize_entry("callee", &call.callee)?;
+        if let Some(value) = call.is_member_call {
+            map.serialize_entry("is_member_call", &value)?;
+        }
+        map.serialize_entry("source_file", &call.source_file)?;
+        map.serialize_entry("source_location", &call.source_location)?;
+        if let Some(Some(value)) = call.receiver.as_ref() {
+            map.serialize_entry("receiver", value)?;
+        }
+        if let Some(Some(value)) = call.receiver_type.as_ref() {
+            map.serialize_entry("receiver_type", value)?;
+        }
+        if let Some(value) = &call.lang {
+            map.serialize_entry("lang", value)?;
+        }
+        let mut extensions = call.extensions.iter().collect::<Vec<_>>();
+        extensions.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        for (key, value) in extensions {
+            map.serialize_entry(key, &FactDigestValue(value))?;
+        }
+        map.end()
+    }
+}
+
+struct FactDigestCalls<'a> {
+    calls: &'a [RawCall],
+}
+
+impl Serialize for FactDigestCalls<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut calls = self.calls.iter().collect::<Vec<_>>();
+        calls.sort_unstable_by(|left, right| {
+            left.caller_nid
+                .cmp(&right.caller_nid)
+                .then_with(|| left.callee.cmp(&right.callee))
+                .then_with(|| left.is_member_call.cmp(&right.is_member_call))
+                .then_with(|| left.source_file.cmp(&right.source_file))
+                .then_with(|| left.source_location.cmp(&right.source_location))
+                .then_with(|| {
+                    normalized_call_text(&left.receiver).cmp(&normalized_call_text(&right.receiver))
+                })
+                .then_with(|| {
+                    normalized_call_text(&left.receiver_type)
+                        .cmp(&normalized_call_text(&right.receiver_type))
+                })
+                .then_with(|| left.lang.cmp(&right.lang))
+                .then_with(|| compare_fact_maps(&left.extensions, &right.extensions))
+        });
+        let mut sequence = serializer.serialize_seq(Some(self.calls.len()))?;
+        for call in calls {
+            sequence.serialize_element(&FactDigestCall { call })?;
+        }
+        sequence.end()
+    }
+}
+
+struct FactDigestFrameworkFacts<'a> {
+    facts: &'a [RawFrameworkFact],
+}
+
+impl Serialize for FactDigestFrameworkFacts<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut facts = self
+            .facts
+            .iter()
+            .map(|fact| {
+                serde_json::to_value(fact)
+                    .map(|value| (value, fact))
+                    .map_err(S::Error::custom)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        facts.sort_unstable_by(|left, right| compare_fact_values(&left.0, &right.0));
+        let mut sequence = serializer.serialize_seq(Some(self.facts.len()))?;
+        for (value, _) in facts {
+            sequence.serialize_element(&FactDigestValue(&value))?;
+        }
+        sequence.end()
+    }
+}
+
+struct FactDigestEvidenceContext<'a> {
+    declaration_keys: BTreeMap<&'a str, &'a str>,
+    file_declarations: BTreeSet<&'a str>,
+    scope_keys: BTreeMap<&'a str, String>,
+}
+
+impl<'a> FactDigestEvidenceContext<'a> {
+    fn new(batch: &'a SemanticEvidenceBatch, file_ids: &'a BTreeSet<&'a str>) -> Self {
+        let declaration_keys = batch
+            .declarations
+            .iter()
+            .map(|declaration| (declaration.id.as_str(), declaration.graph_node_id.as_str()))
+            .collect::<BTreeMap<_, _>>();
+        let file_declarations = batch
+            .declarations
+            .iter()
+            .filter(|declaration| {
+                declaration.kind == "file" || file_ids.contains(declaration.graph_node_id.as_str())
+            })
+            .map(|declaration| declaration.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let scope_bases = batch
+            .scopes
+            .iter()
+            .map(|scope| {
+                let owner = scope
+                    .owner_declaration_id
+                    .as_deref()
+                    .map(|id| {
+                        declaration_keys
+                            .get(id)
+                            .map_or_else(|| format!("raw:{id}"), |key| (*key).to_owned())
+                    })
+                    .unwrap_or_else(|| "none".to_owned());
+                (
+                    scope.id.as_str(),
+                    format!("scope|{}|{}|owner={owner}", scope.language, scope.kind),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut scope_keys = scope_bases.clone();
+
+        // Scope IDs are derived from source ranges. Rebuild them from the
+        // stable owner/kind/parent shape so a file-level range change does not
+        // invalidate the semantic fact digest. The fixed point is bounded by
+        // the number of scopes and falls back to raw parent IDs when a
+        // malformed batch references an unknown scope.
+        for _ in 0..=batch.scopes.len().min(1_024) {
+            let previous = scope_keys.clone();
+            let mut changed = false;
+            for scope in &batch.scopes {
+                let parent = scope.parent_scope_id.as_deref().map_or_else(
+                    || "none".to_owned(),
+                    |id| {
+                        previous
+                            .get(id)
+                            .cloned()
+                            .unwrap_or_else(|| format!("raw:{id}"))
+                    },
+                );
+                let Some(base) = scope_bases.get(scope.id.as_str()) else {
+                    continue;
+                };
+                let next = format!("{base}|parent={parent}");
+                if base != &next {
+                    changed = true;
+                }
+                scope_keys.insert(scope.id.as_str(), next);
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        Self {
+            declaration_keys,
+            file_declarations,
+            scope_keys,
+        }
+    }
+
+    fn declaration_key(&self, id: &str) -> Cow<'_, str> {
+        self.declaration_keys.get(id).map_or_else(
+            || Cow::Owned(format!("raw:{id}")),
+            |key| Cow::Borrowed(*key),
+        )
+    }
+
+    fn declaration_is_file(&self, id: &str) -> bool {
+        self.file_declarations.contains(id)
+    }
+
+    fn scope_key(&self, id: &str) -> Cow<'_, str> {
+        self.scope_keys.get(id).map_or_else(
+            || Cow::Owned(format!("raw:{id}")),
+            |key| Cow::Borrowed(key.as_str()),
+        )
+    }
+}
+
+struct FactDigestDeclaration<'a, 'context> {
+    declaration: &'a DeclarationFact,
+    context: &'context FactDigestEvidenceContext<'a>,
+}
+
+impl Serialize for FactDigestDeclaration<'_, '_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         let declaration = self.declaration;
         let mut map = serializer.serialize_map(None)?;
-        map.serialize_entry("id", &declaration.id)?;
+        map.serialize_entry("id", &self.context.declaration_key(&declaration.id))?;
         map.serialize_entry("language", &declaration.language)?;
         map.serialize_entry("graphNodeId", &declaration.graph_node_id)?;
         map.serialize_entry("kind", &declaration.kind)?;
@@ -528,7 +874,7 @@ impl Serialize for FactDigestDeclaration<'_> {
             map.serialize_entry("moduleOrPackage", value)?;
         }
         if let Some(value) = &declaration.scope_id {
-            map.serialize_entry("scopeId", value)?;
+            map.serialize_entry("scopeId", &self.context.scope_key(value))?;
         }
         if let Some(value) = &declaration.signature {
             map.serialize_entry("signature", value)?;
@@ -552,31 +898,217 @@ impl Serialize for FactDigestDeclaration<'_> {
         if let Some(value) = &declaration.source_hash {
             map.serialize_entry("sourceHash", value)?;
         }
-        if !self.is_file {
+        if !self.context.declaration_is_file(&declaration.id) {
             map.serialize_entry("range", &declaration.range)?;
         }
         map.end()
     }
 }
 
-struct FactDigestDeclarations<'a> {
+struct FactDigestDeclarations<'a, 'context> {
     declarations: &'a [DeclarationFact],
-    file_ids: &'a BTreeSet<&'a str>,
+    context: &'context FactDigestEvidenceContext<'a>,
 }
 
-impl Serialize for FactDigestDeclarations<'_> {
+impl Serialize for FactDigestDeclarations<'_, '_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut sequence = serializer.serialize_seq(Some(self.declarations.len()))?;
-        for declaration in self.declarations {
+        let mut declarations = self.declarations.iter().collect::<Vec<_>>();
+        declarations.sort_by(|left, right| {
+            self.context
+                .declaration_key(&left.id)
+                .cmp(&self.context.declaration_key(&right.id))
+                .then_with(|| left.kind.cmp(&right.kind))
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.range.start_byte.cmp(&right.range.start_byte))
+                .then_with(|| left.range.end_byte.cmp(&right.range.end_byte))
+        });
+        let mut sequence = serializer.serialize_seq(Some(declarations.len()))?;
+        for declaration in declarations {
             sequence.serialize_element(&FactDigestDeclaration {
                 declaration,
-                is_file: self.file_ids.contains(declaration.graph_node_id.as_str()),
+                context: self.context,
             })?;
         }
         sequence.end()
+    }
+}
+
+struct FactDigestScope<'a, 'context> {
+    scope: &'a ScopeFact,
+    context: &'context FactDigestEvidenceContext<'a>,
+}
+
+impl Serialize for FactDigestScope<'_, '_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("id", &self.context.scope_key(&self.scope.id))?;
+        map.serialize_entry("language", &self.scope.language)?;
+        map.serialize_entry("kind", &self.scope.kind)?;
+        if let Some(owner) = &self.scope.owner_declaration_id {
+            map.serialize_entry("ownerDeclarationId", &self.context.declaration_key(owner))?;
+        }
+        if let Some(parent) = &self.scope.parent_scope_id {
+            map.serialize_entry("parentScopeId", &self.context.scope_key(parent))?;
+        }
+        let file_scope = self
+            .scope
+            .owner_declaration_id
+            .as_deref()
+            .is_some_and(|owner| self.context.declaration_is_file(owner));
+        if !file_scope {
+            map.serialize_entry("range", &self.scope.range)?;
+        }
+        map.end()
+    }
+}
+
+struct FactDigestBinding<'a, 'context> {
+    binding: &'a BindingFact,
+    context: &'context FactDigestEvidenceContext<'a>,
+}
+
+impl Serialize for FactDigestBinding<'_, '_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let binding = self.binding;
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("language", &binding.language)?;
+        map.serialize_entry("kind", &binding.kind)?;
+        map.serialize_entry("spelling", &binding.spelling)?;
+        map.serialize_entry("qualifiedTarget", &binding.qualified_target)?;
+        if let Some(target) = &binding.target_declaration_id {
+            map.serialize_entry("targetDeclarationId", &self.context.declaration_key(target))?;
+        }
+        if let Some(scope) = &binding.scope_id {
+            map.serialize_entry("scopeId", &self.context.scope_key(scope))?;
+        }
+        if let Some(output_index) = binding.output_index {
+            map.serialize_entry("outputIndex", &output_index)?;
+        }
+        map.serialize_entry("range", &binding.range)?;
+        map.end()
+    }
+}
+
+struct FactDigestOccurrence<'a, 'context> {
+    occurrence: &'a OccurrenceFact,
+    context: &'context FactDigestEvidenceContext<'a>,
+}
+
+impl Serialize for FactDigestOccurrence<'_, '_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let occurrence = self.occurrence;
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("language", &occurrence.language)?;
+        map.serialize_entry("role", &occurrence.role)?;
+        map.serialize_entry(
+            "ownerDeclarationId",
+            &self
+                .context
+                .declaration_key(&occurrence.owner_declaration_id),
+        )?;
+        map.serialize_entry("spelling", &occurrence.spelling)?;
+        if let Some(value) = &occurrence.qualifier {
+            map.serialize_entry("qualifier", value)?;
+        }
+        if let Some(value) = &occurrence.context {
+            map.serialize_entry("context", value)?;
+        }
+        if let Some(scope) = &occurrence.scope_id {
+            map.serialize_entry("scopeId", &self.context.scope_key(scope))?;
+        }
+        map.serialize_entry("range", &occurrence.range)?;
+        map.end()
+    }
+}
+
+struct FactDigestResolutionConstraint<'a, 'context> {
+    constraint: &'a ResolutionConstraint,
+    context: &'context FactDigestEvidenceContext<'a>,
+}
+
+impl Serialize for FactDigestResolutionConstraint<'_, '_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let constraint = self.constraint;
+        let mut map = serializer.serialize_map(None)?;
+        if let Some(value) = &constraint.exact_target_declaration_id {
+            map.serialize_entry(
+                "exactTargetDeclarationId",
+                &self.context.declaration_key(value),
+            )?;
+        }
+        if let Some(value) = &constraint.exact_language {
+            map.serialize_entry("exactLanguage", value)?;
+        }
+        if let Some(value) = &constraint.module_or_package {
+            map.serialize_entry("moduleOrPackage", value)?;
+        }
+        if let Some(value) = &constraint.scope_id {
+            map.serialize_entry("scopeId", &self.context.scope_key(value))?;
+        }
+        if let Some(value) = &constraint.qualified_name {
+            map.serialize_entry("qualifiedName", value)?;
+        }
+        if let Some(value) = constraint.argument_count {
+            map.serialize_entry("argumentCount", &value)?;
+        }
+        if !constraint.argument_types.is_empty() {
+            map.serialize_entry("argumentTypes", &constraint.argument_types)?;
+        }
+        if !constraint.allowed_target_kinds.is_empty() {
+            map.serialize_entry("allowedTargetKinds", &constraint.allowed_target_kinds)?;
+        }
+        if let Some(value) = &constraint.hierarchy {
+            map.serialize_entry("hierarchy", value)?;
+        }
+        map.serialize_entry("allowExternal", &constraint.allow_external)?;
+        map.end()
+    }
+}
+
+struct FactDigestCandidate<'a, 'context> {
+    candidate: &'a RelationshipCandidate,
+    context: &'context FactDigestEvidenceContext<'a>,
+}
+
+impl Serialize for FactDigestCandidate<'_, '_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let candidate = self.candidate;
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("language", &candidate.language)?;
+        map.serialize_entry("relation", &candidate.relation)?;
+        map.serialize_entry(
+            "sourceDeclarationId",
+            &self
+                .context
+                .declaration_key(&candidate.source_declaration_id),
+        )?;
+        map.serialize_entry("targetSpelling", &candidate.target_spelling)?;
+        map.serialize_entry(
+            "constraints",
+            &FactDigestResolutionConstraint {
+                constraint: &candidate.constraints,
+                context: self.context,
+            },
+        )?;
+        map.end()
     }
 }
 
@@ -590,19 +1122,134 @@ impl Serialize for FactDigestSemanticEvidence<'_> {
     where
         S: Serializer,
     {
+        let context = FactDigestEvidenceContext::new(self.batch, self.file_ids);
+        let mut scopes = self.batch.scopes.iter().collect::<Vec<_>>();
+        scopes.sort_by(|left, right| {
+            context
+                .scope_key(&left.id)
+                .cmp(&context.scope_key(&right.id))
+                .then_with(|| left.range.start_byte.cmp(&right.range.start_byte))
+                .then_with(|| left.range.end_byte.cmp(&right.range.end_byte))
+        });
+        let mut bindings = self.batch.bindings.iter().collect::<Vec<_>>();
+        bindings.sort_by(|left, right| {
+            left.range
+                .source_file
+                .cmp(&right.range.source_file)
+                .then_with(|| left.range.start_byte.cmp(&right.range.start_byte))
+                .then_with(|| left.range.end_byte.cmp(&right.range.end_byte))
+                .then_with(|| left.spelling.cmp(&right.spelling))
+                .then_with(|| left.qualified_target.cmp(&right.qualified_target))
+                .then_with(|| left.kind.cmp(&right.kind))
+        });
+        let mut occurrences = self.batch.occurrences.iter().collect::<Vec<_>>();
+        occurrences.sort_by(|left, right| {
+            left.range
+                .source_file
+                .cmp(&right.range.source_file)
+                .then_with(|| left.range.start_byte.cmp(&right.range.start_byte))
+                .then_with(|| left.range.end_byte.cmp(&right.range.end_byte))
+                .then_with(|| left.spelling.cmp(&right.spelling))
+                .then_with(|| left.role.cmp(&right.role))
+        });
+        let mut candidates = self.batch.candidates.iter().collect::<Vec<_>>();
+        candidates.sort_by(|left, right| {
+            context
+                .declaration_key(&left.source_declaration_id)
+                .cmp(&context.declaration_key(&right.source_declaration_id))
+                .then_with(|| left.relation.cmp(&right.relation))
+                .then_with(|| left.target_spelling.cmp(&right.target_spelling))
+                .then_with(|| {
+                    left.constraints
+                        .qualified_name
+                        .cmp(&right.constraints.qualified_name)
+                })
+                .then_with(|| {
+                    let left_target = left
+                        .constraints
+                        .exact_target_declaration_id
+                        .as_deref()
+                        .map_or(Cow::Borrowed(""), |id| context.declaration_key(id));
+                    let right_target = right
+                        .constraints
+                        .exact_target_declaration_id
+                        .as_deref()
+                        .map_or(Cow::Borrowed(""), |id| context.declaration_key(id));
+                    left_target.cmp(&right_target)
+                })
+                .then_with(|| {
+                    let left_scope = left
+                        .constraints
+                        .scope_id
+                        .as_deref()
+                        .map_or(Cow::Borrowed(""), |id| context.scope_key(id));
+                    let right_scope = right
+                        .constraints
+                        .scope_id
+                        .as_deref()
+                        .map_or(Cow::Borrowed(""), |id| context.scope_key(id));
+                    left_scope.cmp(&right_scope)
+                })
+                .then_with(|| {
+                    left.constraints
+                        .argument_count
+                        .cmp(&right.constraints.argument_count)
+                })
+                .then_with(|| {
+                    left.constraints
+                        .allowed_target_kinds
+                        .cmp(&right.constraints.allowed_target_kinds)
+                })
+        });
         let mut map = serializer.serialize_map(Some(7))?;
         map.serialize_entry("adapter", &self.batch.adapter)?;
         map.serialize_entry(
             "declarations",
             &FactDigestDeclarations {
                 declarations: &self.batch.declarations,
-                file_ids: self.file_ids,
+                context: &context,
             },
         )?;
-        map.serialize_entry("scopes", &self.batch.scopes)?;
-        map.serialize_entry("bindings", &self.batch.bindings)?;
-        map.serialize_entry("occurrences", &self.batch.occurrences)?;
-        map.serialize_entry("candidates", &self.batch.candidates)?;
+        map.serialize_entry(
+            "scopes",
+            &scopes
+                .iter()
+                .map(|scope| FactDigestScope {
+                    scope,
+                    context: &context,
+                })
+                .collect::<Vec<_>>(),
+        )?;
+        map.serialize_entry(
+            "bindings",
+            &bindings
+                .iter()
+                .map(|binding| FactDigestBinding {
+                    binding,
+                    context: &context,
+                })
+                .collect::<Vec<_>>(),
+        )?;
+        map.serialize_entry(
+            "occurrences",
+            &occurrences
+                .iter()
+                .map(|occurrence| FactDigestOccurrence {
+                    occurrence,
+                    context: &context,
+                })
+                .collect::<Vec<_>>(),
+        )?;
+        map.serialize_entry(
+            "candidates",
+            &candidates
+                .iter()
+                .map(|candidate| FactDigestCandidate {
+                    candidate,
+                    context: &context,
+                })
+                .collect::<Vec<_>>(),
+        )?;
         if !self.batch.diagnostics.is_empty() {
             map.serialize_entry("diagnostics", &self.batch.diagnostics)?;
         }
@@ -633,15 +1280,31 @@ impl Serialize for FactDigestExtraction<'_> {
                 nodes: &self.extraction.nodes,
             },
         )?;
-        map.serialize_entry("edges", &self.extraction.edges)?;
+        map.serialize_entry(
+            "edges",
+            &FactDigestEdges {
+                edges: &self.extraction.edges,
+            },
+        )?;
         if !self.extraction.hyperedges.is_empty() {
-            map.serialize_entry("hyperedges", &self.extraction.hyperedges)?;
+            let hyperedges = self
+                .extraction
+                .hyperedges
+                .iter()
+                .map(FactDigestValue)
+                .collect::<Vec<_>>();
+            map.serialize_entry("hyperedges", &hyperedges)?;
         }
         if let Some(raw_calls) = &self.extraction.raw_calls {
-            map.serialize_entry("raw_calls", raw_calls)?;
+            map.serialize_entry("raw_calls", &FactDigestCalls { calls: raw_calls })?;
         }
         if !self.extraction.framework_facts.is_empty() {
-            map.serialize_entry("framework_facts", &self.extraction.framework_facts)?;
+            map.serialize_entry(
+                "framework_facts",
+                &FactDigestFrameworkFacts {
+                    facts: &self.extraction.framework_facts,
+                },
+            )?;
         }
         if let Some(batch) = &self.extraction.semantic_evidence {
             map.serialize_entry(
@@ -655,8 +1318,10 @@ impl Serialize for FactDigestExtraction<'_> {
         if let Some(error) = &self.extraction.error {
             map.serialize_entry("error", error)?;
         }
-        for (key, value) in &self.extraction.extensions {
-            map.serialize_entry(key, value)?;
+        let mut extensions = self.extraction.extensions.iter().collect::<Vec<_>>();
+        extensions.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        for (key, value) in extensions {
+            map.serialize_entry(key, &FactDigestValue(value))?;
         }
         map.end()
     }
@@ -703,6 +1368,7 @@ fn detected_file_sets_match(manifest: &Manifest, files: &BTreeMap<String, Vec<St
         .entries()
         .keys()
         .map(PathBuf::from)
+        .map(|path| canonical_identity(&path))
         .collect::<BTreeSet<_>>();
     current == previous
 }
@@ -738,11 +1404,12 @@ fn fact_neutral_pre_cache_sources(
     preserve_prior_semantic: bool,
     root: &Path,
 ) -> Option<Vec<PathBuf>> {
+    let has_nonempty_semantic = semantic.is_some_and(|layer| !semantic_layer_is_empty(layer));
     if options.force
         || options.purpose != BuildPurpose::Extract
         || !options.no_cluster
         || options.program_analysis
-        || semantic.is_some()
+        || has_nonempty_semantic
         || !supplemental.is_empty()
         || retain_artifacts
         || preserve_prior_semantic
@@ -856,11 +1523,12 @@ fn fact_neutral_incremental_candidate(
     source_removed: bool,
     root: &Path,
 ) -> bool {
+    let has_nonempty_semantic = semantic.is_some_and(|layer| !semantic_layer_is_empty(layer));
     if options.force
         || options.purpose != BuildPurpose::Extract
         || !options.no_cluster
         || options.program_analysis
-        || semantic.is_some()
+        || has_nonempty_semantic
         || !supplemental.is_empty()
         || retain_artifacts
         || missing.is_empty()
@@ -931,6 +1599,55 @@ fn full_file_source_anchor(
     })
 }
 
+type FactNeutralDocument = (Option<V1GraphDocument>, V1GraphDocument, BTreeSet<String>);
+
+fn sort_dedup_serialized<T: Serialize>(values: &mut Vec<T>) {
+    if values.len() < 2 {
+        return;
+    }
+    let mut keyed = values
+        .drain(..)
+        .map(|value| (serde_json::to_vec(&value).unwrap_or_default(), value))
+        .collect::<Vec<_>>();
+    keyed.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    let mut previous = None;
+    for (key, value) in keyed {
+        if previous.as_ref() == Some(&key) {
+            continue;
+        }
+        previous = Some(key);
+        values.push(value);
+    }
+}
+
+fn canonicalize_fact_neutral_metadata(
+    coverage: &mut Vec<CoverageRecord>,
+    diagnostics: &mut Vec<GraphDiagnostic>,
+) {
+    // Fact-neutral publication bypasses the normal v1 normalization pass, so
+    // preserve the same metadata ordering and duplicate policy here. Without
+    // this, appending the refreshed file inventory to the prior graph changes
+    // coverage order even when the semantic graph is unchanged.
+    sort_dedup_serialized(coverage);
+    coverage.sort_by(|left, right| {
+        (
+            left.capability.as_str(),
+            left.producer.as_str(),
+            left.file_id.as_deref(),
+        )
+            .cmp(&(
+                right.capability.as_str(),
+                right.producer.as_str(),
+                right.file_id.as_deref(),
+            ))
+    });
+    sort_dedup_serialized(diagnostics);
+    diagnostics.sort_by(|left, right| {
+        (left.code.as_str(), left.message.as_str())
+            .cmp(&(right.code.as_str(), right.message.as_str()))
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 fn prepare_fact_neutral_document(
     output_dir: &Path,
@@ -941,7 +1658,7 @@ fn prepare_fact_neutral_document(
     configuration_digest: String,
     max_source_bytes: u64,
     retain_previous: bool,
-) -> Result<Option<(Option<V1GraphDocument>, V1GraphDocument)>, CoreError> {
+) -> Result<Option<FactNeutralDocument>, CoreError> {
     let graph_path = output_dir.join("graph.json");
     let Ok(previous) = V1GraphDocument::load(&graph_path) else {
         return Ok(None);
@@ -955,6 +1672,7 @@ fn prepare_fact_neutral_document(
     } else {
         (None, previous)
     };
+    let mut changed_file_node_ids = BTreeSet::new();
     let mut evidence = BuildEvidence::new(root.to_path_buf(), current.graph.build.clone());
     evidence.files = current.graph.files.clone();
     evidence.coverage = current
@@ -990,6 +1708,7 @@ fn prepare_fact_neutral_document(
     }
     evidence.build.configuration_digest = configuration_digest;
     evidence.include_inventory(inventory)?;
+    canonicalize_fact_neutral_metadata(&mut evidence.coverage, &mut evidence.diagnostics);
 
     let anchors = extraction_file_anchors(extractions, root);
     current.graph.build = evidence.build;
@@ -1006,6 +1725,7 @@ fn prepare_fact_neutral_document(
         if node.kind != NodeKind::File {
             continue;
         }
+        let before = node.clone();
         let Some(source) = node.source_file() else {
             continue;
         };
@@ -1018,11 +1738,13 @@ fn prepare_fact_neutral_document(
             byte_size: file.byte_size,
             generated: file.generated,
         }));
-        if let Some(anchor) = anchors
-            .get(&source)
-            .cloned()
-            .or_else(|| full_file_source_anchor(&root.join(&source), &source, max_source_bytes))
-        {
+        let anchor = source_digests.contains_key(&source).then(|| {
+            anchors
+                .get(&source)
+                .cloned()
+                .or_else(|| full_file_source_anchor(&root.join(&source), &source, max_source_bytes))
+        });
+        if let Some(anchor) = anchor.flatten() {
             node.source = Some(anchor.clone());
             for provenance in &mut node.evidence {
                 for candidate in &mut provenance.anchors {
@@ -1039,13 +1761,27 @@ fn prepare_fact_neutral_document(
                 }
             }
         }
+        if *node != before {
+            changed_file_node_ids.insert(node.id.clone());
+        }
     }
     compass_model::validate_code_graph(&current).map_err(|error| {
         CoreError::InvalidBuildState(format!(
             "fact-neutral incremental graph failed validation: {error}"
         ))
     })?;
-    Ok(Some((previous_for_delta, current)))
+    Ok(Some((previous_for_delta, current, changed_file_node_ids)))
+}
+
+/// Keep the byte-preserving JSON delta bounded independently from the graph
+/// reader cap. Large graphs fall back to the existing streaming serializer so
+/// an incremental edit never adds another large resident byte buffer.
+fn read_fact_neutral_delta_source(path: &Path) -> Option<Vec<u8>> {
+    let metadata = fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > GRAPH_JSON_DELTA_MAX_SOURCE_BYTES as u64 {
+        return None;
+    }
+    fs::read(path).ok()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1063,6 +1799,7 @@ fn publish_fact_neutral_incremental(
     empty_files: Vec<PathBuf>,
     previous: Option<&V1GraphDocument>,
     current: &V1GraphDocument,
+    changed_file_node_ids: &BTreeSet<String>,
     fact_state: &AstFactDigestState,
     timings: &mut BuildTimings,
 ) -> Result<BuildResult, CoreError> {
@@ -1080,13 +1817,41 @@ fn publish_fact_neutral_incremental(
         let (metrics, seal) = publish_graph_and_store_delta(&output_dir, previous, current)?;
         (Some(metrics), Some(seal))
     } else {
+        let previous_bytes = read_fact_neutral_delta_source(&graph_path);
         let receipt = write_atomic_with_digest(&graph_path, |writer| {
-            write_canonical_graph_json(current, writer).map_err(|source| {
-                compass_files::FileError::Io {
+            let delta_started = Instant::now();
+            let used_delta = if let Some(bytes) = previous_bytes.as_deref() {
+                write_fact_neutral_graph_json_delta_prevalidated(
+                    bytes,
+                    current,
+                    changed_file_node_ids,
+                    writer,
+                )
+                .map_err(|source| compass_files::FileError::Io {
                     path: graph_path.clone(),
                     source,
-                }
-            })
+                })?
+            } else {
+                false
+            };
+            profile_internal_duration(
+                if used_delta {
+                    "fact-neutral graph JSON delta"
+                } else {
+                    "fact-neutral graph JSON delta fallback"
+                },
+                delta_started.elapsed(),
+            );
+            if used_delta {
+                Ok(())
+            } else {
+                write_canonical_graph_json(current, writer).map_err(|source| {
+                    compass_files::FileError::Io {
+                        path: graph_path.clone(),
+                        source,
+                    }
+                })
+            }
         })?;
         (
             None,
@@ -1765,7 +2530,7 @@ fn build_graph_inner(
                 &root,
             );
             let configuration_digest = graph_configuration_digest(options, &output_dir)?;
-            if let Some((previous, current)) = prepare_fact_neutral_document(
+            if let Some((previous, current, changed_file_node_ids)) = prepare_fact_neutral_document(
                 &output_dir,
                 &root,
                 &early_source_digests,
@@ -1797,6 +2562,7 @@ fn build_graph_inner(
                     early_empty_files,
                     previous.as_ref(),
                     &current,
+                    &changed_file_node_ids,
                     &current_fact_state,
                     &mut timings,
                 )?;
@@ -2282,7 +3048,7 @@ fn build_graph_inner(
             &root,
         );
         let configuration_digest = graph_configuration_digest(options, &output_dir)?;
-        if let Some((previous, current)) = prepare_fact_neutral_document(
+        if let Some((previous, current, changed_file_node_ids)) = prepare_fact_neutral_document(
             &output_dir,
             &root,
             &fresh_source_digests,
@@ -2307,6 +3073,7 @@ fn build_graph_inner(
                 empty_files,
                 previous.as_ref(),
                 &current,
+                &changed_file_node_ids,
                 &current_fact_state,
                 &mut timings,
             )?;
@@ -2498,6 +3265,7 @@ fn build_graph_inner(
         ));
     }
     if options.no_cluster {
+        let no_cluster_graph_started = Instant::now();
         enforce_incomplete_raw_guard(
             semantic,
             &output_dir.join("graph.json"),
@@ -2505,11 +3273,16 @@ fn build_graph_inner(
             deduped_node_count(&resolved.nodes),
         )?;
         let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
+        profile_internal_duration(
+            "no-cluster graph document build",
+            no_cluster_graph_started.elapsed(),
+        );
         let configuration_digest = graph_configuration_digest(options, &output_dir)?;
         let source_commit = options
             .built_at_commit
             .clone()
             .or_else(|| git_commit(&root));
+        let no_cluster_normalization_started = Instant::now();
         let published = normalize_document_v1_with_inventory_best_effort_owned(
             document,
             &root,
@@ -2523,12 +3296,17 @@ fn build_graph_inner(
                 &root,
             ),
         )?;
+        profile_internal_duration(
+            "no-cluster v1 normalization",
+            no_cluster_normalization_started.elapsed(),
+        );
         if published.document.nodes.is_empty() {
             return Err(CoreError::EmptyGraph);
         }
         let omissions = published.omissions;
         let published_nodes = published.document.nodes.len();
         let published_edges = published.document.links.len();
+        let no_cluster_graph_write_started = Instant::now();
         let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
             let (metrics, seal) =
                 if let Some(previous) = load_graph_delta_base(&output_dir, &published.document) {
@@ -2555,6 +3333,10 @@ fn build_graph_inner(
                 }),
             )
         };
+        profile_internal_duration(
+            "no-cluster graph and store publication",
+            no_cluster_graph_write_started.elapsed(),
+        );
         if let Some(metrics) = store_metrics {
             record_store_metrics(&mut timings, metrics);
         }
@@ -2576,6 +3358,7 @@ fn build_graph_inner(
             )?;
         }
         let mut manifest = prior_manifest;
+        let no_cluster_manifest_started = Instant::now();
         save_build_manifest(
             &mut manifest,
             &detection.files,
@@ -2583,10 +3366,15 @@ fn build_graph_inner(
             &root,
             semantic,
         )?;
+        profile_internal_duration(
+            "no-cluster manifest publication",
+            no_cluster_manifest_started.elapsed(),
+        );
         remove_if_exists(&output_dir.join("needs_update"))?;
         if let Some(program) = program.as_mut() {
             program.finish_pending_seal(&mut timings)?;
         }
+        let no_cluster_state_started = Instant::now();
         publish_build_state(
             options,
             &output_dir,
@@ -2601,6 +3389,11 @@ fn build_graph_inner(
             store_metrics.is_some(),
             &mut timings,
         )?;
+        profile_internal_duration(
+            "no-cluster build-state publication",
+            no_cluster_state_started.elapsed(),
+        );
+        let no_cluster_commit_started = Instant::now();
         let published_output_dir = commit_generation(
             guard,
             &output_container,
@@ -2609,6 +3402,10 @@ fn build_graph_inner(
             !options.graph_storage.publishes_store(),
             &mut timings,
         )?;
+        profile_internal_duration(
+            "no-cluster generation commit",
+            no_cluster_commit_started.elapsed(),
+        );
         timings.publish = stage_started.elapsed();
         return Ok((
             BuildResult {
@@ -6098,6 +6895,37 @@ mod tests {
         assert!(default_ast_workers() <= DEFAULT_AST_WORKER_CAP);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn detected_file_sets_match_canonicalizes_manifest_symlink_aliases()
+    -> Result<(), Box<dyn Error>> {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir()?;
+        let source_directory = directory.path().join("src");
+        fs::create_dir_all(&source_directory)?;
+        let source = source_directory.join("main.py");
+        fs::write(&source, "def main():\n    return 1\n")?;
+        let alias = source_directory.join("main-alias.py");
+        symlink("main.py", &alias)?;
+        let manifest_path = directory.path().join("manifest.json");
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec(&json!({
+                "src/main.py": {"mtime": 1.0, "ast_hash": "hash"},
+                "src/main-alias.py": {"mtime": 1.0, "ast_hash": "hash"}
+            }))?,
+        )?;
+        let manifest = Manifest::load(&manifest_path, Some(directory.path()));
+        let files = BTreeMap::from([(
+            "code".to_owned(),
+            vec![source.to_string_lossy().into_owned()],
+        )]);
+
+        assert!(detected_file_sets_match(&manifest, &files));
+        Ok(())
+    }
+
     #[test]
     fn resolver_source_text_is_scoped_to_php_files() {
         assert!(is_php_source_path(Path::new("src/controller.PHP")));
@@ -6138,6 +6966,125 @@ mod tests {
         compact_extraction(&mut extraction);
 
         assert_eq!(before, serde_json::to_value(extraction)?);
+        Ok(())
+    }
+
+    #[test]
+    fn ast_fact_digest_is_independent_of_map_insertion_order() -> Result<(), Box<dyn Error>> {
+        let mut first_attributes = Map::new();
+        first_attributes.insert("zeta".to_owned(), json!({"b": 2, "a": 1}));
+        first_attributes.insert("alpha".to_owned(), json!(true));
+        let mut second_attributes = Map::new();
+        second_attributes.insert("alpha".to_owned(), json!(true));
+        second_attributes.insert("zeta".to_owned(), json!({"a": 1, "b": 2}));
+        let first = Extraction {
+            nodes: vec![RawNodeRecord {
+                id: "node".to_owned(),
+                attributes: first_attributes,
+            }],
+            edges: vec![RawEdgeRecord {
+                source: "node".to_owned(),
+                target: "target".to_owned(),
+                attributes: Map::from_iter([
+                    ("zeta".to_owned(), json!({"b": 2, "a": 1})),
+                    ("alpha".to_owned(), json!(true)),
+                ]),
+            }],
+            ..Extraction::default()
+        };
+        let second = Extraction {
+            nodes: vec![RawNodeRecord {
+                id: "node".to_owned(),
+                attributes: second_attributes,
+            }],
+            edges: vec![RawEdgeRecord {
+                source: "node".to_owned(),
+                target: "target".to_owned(),
+                attributes: Map::from_iter([
+                    ("alpha".to_owned(), json!(true)),
+                    ("zeta".to_owned(), json!({"a": 1, "b": 2})),
+                ]),
+            }],
+            ..Extraction::default()
+        };
+
+        assert_ne!(serde_json::to_vec(&first)?, serde_json::to_vec(&second)?);
+        assert_eq!(
+            extraction_fact_digest(&first)?,
+            extraction_fact_digest(&second)?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn ast_fact_digest_is_independent_of_fact_sequence_order() -> Result<(), Box<dyn Error>> {
+        let first = Extraction {
+            nodes: vec![
+                RawNodeRecord {
+                    id: "node-a".to_owned(),
+                    attributes: Map::from_iter([("symbol_kind".to_owned(), json!("function"))]),
+                },
+                RawNodeRecord {
+                    id: "node-b".to_owned(),
+                    attributes: Map::from_iter([("symbol_kind".to_owned(), json!("class"))]),
+                },
+            ],
+            edges: vec![
+                RawEdgeRecord {
+                    source: "node-a".to_owned(),
+                    target: "node-b".to_owned(),
+                    attributes: Map::from_iter([("kind".to_owned(), json!("calls"))]),
+                },
+                RawEdgeRecord {
+                    source: "node-b".to_owned(),
+                    target: "node-a".to_owned(),
+                    attributes: Map::from_iter([("kind".to_owned(), json!("references"))]),
+                },
+            ],
+            ..Extraction::default()
+        };
+        let mut second = first.clone();
+        second.nodes.reverse();
+        second.edges.reverse();
+
+        assert_ne!(serde_json::to_vec(&first)?, serde_json::to_vec(&second)?);
+        assert_eq!(
+            extraction_fact_digest(&first)?,
+            extraction_fact_digest(&second)?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn ast_fact_digest_normalizes_cache_null_call_fields() -> Result<(), Box<dyn Error>> {
+        let call = RawCall {
+            caller_nid: "caller".to_owned(),
+            callee: "callee".to_owned(),
+            is_member_call: Some(false),
+            source_file: "main.js".to_owned(),
+            source_location: "L1".to_owned(),
+            receiver: None,
+            receiver_type: None,
+            lang: Some("javascript".to_owned()),
+            extensions: Map::new(),
+        };
+        let mut explicit_null = call.clone();
+        explicit_null.receiver = Some(None);
+        explicit_null.receiver_type = Some(None);
+        let first = Extraction {
+            raw_calls: Some(vec![call]),
+            ..Extraction::default()
+        };
+        let second = Extraction {
+            raw_calls: Some(vec![explicit_null]),
+            ..Extraction::default()
+        };
+
+        assert_ne!(serde_json::to_vec(&first)?, serde_json::to_vec(&second)?);
+        assert_eq!(
+            extraction_fact_digest(&first)?,
+            extraction_fact_digest(&second)?
+        );
         Ok(())
     }
 
@@ -6860,30 +7807,51 @@ mod tests {
         let root = directory.path();
         let source = root.join("main.py");
         fs::write(&source, "def main():\n    return 1\n")?;
+        fs::create_dir_all(root.join("src"))?;
+        let javascript = root.join("src/static.js");
+        fs::write(
+            &javascript,
+            "function show(value) { return value; }\nmodule.exports = { show };\n",
+        )?;
         let mut options = BuildOptions::new(root);
         options.no_cluster = true;
         options.no_viz = true;
         options.purpose = BuildPurpose::Extract;
+        options.graph_storage = GraphStorage::Json;
+        let empty_semantic = SemanticLayer {
+            fragment: json!({"nodes": [], "edges": [], "hyperedges": []}),
+            refreshed_files: Vec::new(),
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
 
-        let cold = build_local_graph(&options)?;
+        let cold = build_graph_with_semantic(&options, &empty_semantic)?;
         assert!(cold.output_dir.join(AST_FACT_DIGESTS_FILE).is_file());
         let cold_graph = V1GraphDocument::load(&cold.output_dir.join("graph.json"))?;
         let cold_fact_state: AstFactDigestState =
             serde_json::from_slice(&fs::read(cold.output_dir.join(AST_FACT_DIGESTS_FILE))?)?;
         assert_eq!(cold_fact_state.schema, AST_FACT_DIGESTS_SCHEMA);
-        assert_eq!(cold_fact_state.entries.len(), 1);
+        assert_eq!(cold_fact_state.entries.len(), 2);
 
         fs::write(
             &source,
             "def main():\n    return 1\n\n# metadata-only edit\n",
         )?;
-        let changed = build_local_graph(&options)?;
+        let changed = build_graph_with_semantic(&options, &empty_semantic)?;
         assert_eq!(changed.files_extracted, 1);
+        assert_eq!(changed.files_cached, 1);
         assert_eq!(changed.nodes, cold.nodes);
         assert_eq!(changed.edges, cold.edges);
         assert_eq!(changed.timings.graph_assembly, Duration::ZERO);
 
         let changed_graph = V1GraphDocument::load(&changed.output_dir.join("graph.json"))?;
+        let mut canonical_changed = Vec::new();
+        write_canonical_graph_json(&changed_graph, &mut canonical_changed)?;
+        assert_eq!(
+            fs::read(changed.output_dir.join("graph.json"))?,
+            canonical_changed,
+            "fact-neutral publication must remain byte-identical to canonical JSON"
+        );
         let semantic_nodes = |graph: &V1GraphDocument| {
             graph
                 .nodes
@@ -6897,20 +7865,31 @@ mod tests {
         let cold_file = cold_graph
             .nodes
             .iter()
-            .find(|node| node.kind == NodeKind::File)
+            .find(|node| node.kind == NodeKind::File && node.source_file() == Some("main.py"))
             .ok_or("cold file node missing")?;
+        let cold_static_file = cold_graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::File && node.source_file() == Some("src/static.js"))
+            .ok_or("cold static file node missing")?;
         let changed_file = changed_graph
             .nodes
             .iter()
-            .find(|node| node.kind == NodeKind::File)
+            .find(|node| node.kind == NodeKind::File && node.source_file() == Some("main.py"))
             .ok_or("changed file node missing")?;
+        let changed_static_file = changed_graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::File && node.source_file() == Some("src/static.js"))
+            .ok_or("changed static file node missing")?;
         assert_eq!(changed_file.id, cold_file.id);
         assert_ne!(changed_file, cold_file);
         assert_ne!(changed_file.source, cold_file.source);
+        assert_eq!(changed_static_file, cold_static_file);
         assert_ne!(changed_graph.graph.files, cold_graph.graph.files);
 
         fs::write(&source, "def main():\n    return 2\n\n# semantic edit\n")?;
-        let semantic_change = build_local_graph(&options)?;
+        let semantic_change = build_graph_with_semantic(&options, &empty_semantic)?;
         let semantic_graph = V1GraphDocument::load(&semantic_change.output_dir.join("graph.json"))?;
         let implementation_hash = |graph: &V1GraphDocument| {
             graph
@@ -6924,6 +7903,33 @@ mod tests {
             implementation_hash(&semantic_graph),
             implementation_hash(&changed_graph)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn fact_digest_ignores_python_file_envelope_edits() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("main.py");
+        let initial_source = "def main():\n    return 1\n";
+        let changed_source = "def main():\n    return 1\n\n# metadata-only edit\n";
+        fs::write(&source, initial_source)?;
+        let evidence = Arc::new(ProjectEvidenceIndex::build(
+            directory.path(),
+            std::slice::from_ref(&source),
+        ));
+        let mut engine = Engine::with_project_evidence(evidence);
+        let initial =
+            engine.extract_source_graph_only(&source, "main.py", initial_source.as_bytes())?;
+        fs::write(&source, changed_source)?;
+        let changed =
+            engine.extract_source_graph_only(&source, "main.py", changed_source.as_bytes())?;
+        let initial_digest = serde_json::to_value(FactDigestExtraction {
+            extraction: &initial,
+        })?;
+        let changed_digest = serde_json::to_value(FactDigestExtraction {
+            extraction: &changed,
+        })?;
+        assert_eq!(initial_digest, changed_digest);
         Ok(())
     }
 

@@ -183,7 +183,16 @@ impl State<'_> {
             let key_id = make_id(&["config-key", &self.source_file, &key_path]);
             let line = pair.start_position().row + 1;
             self.add_config_key(&key_id, &key, &key_path, line);
-            self.add_edge(&self.owner_id.clone(), &key_id, "contains", line, None);
+            // Keep schema/file ownership for root keys, but preserve the JSON
+            // object hierarchy for nested keys. The secondary reference edge
+            // below retains the existing config-child provenance without
+            // weakening structural navigation.
+            let containment_parent = if parent_id == self.file_id {
+                self.owner_id.clone()
+            } else {
+                parent_id.to_owned()
+            };
+            self.add_edge(&containment_parent, &key_id, "contains", line, None);
             if parent_id != self.file_id {
                 self.add_edge(parent_id, &key_id, "references", line, Some("config-child"));
             }

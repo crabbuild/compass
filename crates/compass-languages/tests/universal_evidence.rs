@@ -488,6 +488,69 @@ class Derived(Base):
 }
 
 #[test]
+fn python_bound_method_receivers_emit_dispatch_and_fail_closed_on_rebinding() {
+    let source = br#"from pkg.helpers import check
+
+class Model:
+    def check(self):
+        return None
+
+    def verify(self):
+        return self.check()
+
+    @classmethod
+    def verify_class(cls):
+        return cls.check()
+
+    def ambiguous_cls(cls):
+        return cls.check()
+
+    @staticmethod
+    def static_check(self):
+        return self.check()
+
+    def rebound(self, replacement):
+        self = replacement
+        return self.check()
+
+    def shadowed(self, items):
+        return [self.check() for self in items]
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/pkg/models.py"),
+            "pkg/models.py",
+            source,
+        )
+        .expect("extract Python")
+        .graph
+        .semantic_evidence
+        .expect("Python universal evidence");
+
+    let checks = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "check"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(checks.len(), 2);
+    assert!(checks.iter().all(|candidate| {
+        candidate.constraints.hierarchy
+            == Some(HierarchyConstraint::ReceiverDispatch {
+                receiver_qualified_name: "pkg.models.Model".to_owned(),
+                strategy: ReceiverDispatchStrategy::C3FromReceiver,
+            })
+    }));
+    assert!(
+        checks
+            .iter()
+            .all(|candidate| candidate.constraints.qualified_name.is_none())
+    );
+}
+
+#[test]
 fn universal_declarations_preserve_signature_and_implementation_change_metadata() {
     fn function_declaration(source: &[u8]) -> DeclarationFact {
         let mut engine = Engine::default();

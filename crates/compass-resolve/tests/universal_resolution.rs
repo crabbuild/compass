@@ -826,6 +826,36 @@ fn python_super_call_resolves_only_the_exact_direct_base_method() {
 }
 
 #[test]
+fn python_bound_method_receiver_resolves_exact_class_method() {
+    let source = b"class Model:\n    def check(self):\n        return None\n\n    def verify(self):\n        return self.check()\n";
+    let extracted = extract("pkg/models.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/models.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let check = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.models.Model::check")
+        .unwrap_or_else(|| panic!("check method; nodes={:#?}", resolved.nodes));
+
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == check.id)
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].string("source_location"), "L6");
+    assert_eq!(
+        calls[0].string("resolution_rule"),
+        "linearized-receiver-dispatch"
+    );
+}
+
+#[test]
 fn python_super_call_with_multiple_bases_cannot_terminal_match_an_unrelated_method() {
     let source = b"class Unrelated:\n    def run(self):\n        return None\nclass Left:\n    pass\nclass Right:\n    pass\nclass Child(Left, Right):\n    def run(self):\n        super().run()\n";
     let extracted = extract("pkg/models.py", source);
