@@ -4,14 +4,20 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Circle,
+  File,
   FileCode2,
+  Folder,
   FolderTree,
   Gauge,
   GitBranch,
   LoaderCircle,
+  Search,
   Settings2,
   SquareTerminal,
+  X,
   XCircle
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -47,34 +53,45 @@ type Props = {
   repositoryName: string;
   repositoryRoot: string;
   configurationExists?: boolean;
+  scopeFiles?: string[];
+  scopeFilesTruncated?: boolean;
   host: InitializationHost;
   status?: InitializationStatus;
 };
 
 const steps = [
   { label: "Repository scope", icon: FolderTree },
-  { label: "Index rules", icon: Settings2 },
+  { label: "Glob rules", icon: Settings2 },
   { label: "Review and build", icon: Gauge }
 ];
+
+const MAX_SCOPE_RULES = 256;
 
 export function InitializationWizard({
   repositoryName,
   repositoryRoot,
   configurationExists = false,
+  scopeFiles = [],
+  scopeFilesTruncated = false,
   host,
   status
 }: Props) {
   const [step, setStep] = useState(0);
   const [scope, setScope] = useState<"all" | "custom">("all");
-  const [includeText, setIncludeText] = useState("");
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [includeGlobText, setIncludeGlobText] = useState("");
   const [excludeText, setExcludeText] = useState("");
   const [replaceExisting, setReplaceExisting] = useState(false);
   const includes = useMemo(
-    () => scope === "custom" ? splitRules(includeText) : [],
-    [includeText, scope]
+    () => scope === "custom"
+      ? mergeRules(selectedPaths, splitRules(includeGlobText))
+      : [],
+    [includeGlobText, scope, selectedPaths]
   );
   const excludes = useMemo(() => splitRules(excludeText), [excludeText]);
   const customScopeMissing = scope === "custom" && includes.length === 0;
+  const tooManyRules = includes.length > MAX_SCOPE_RULES
+    || excludes.length > MAX_SCOPE_RULES;
   const request = {
     includes,
     excludes,
@@ -239,7 +256,7 @@ export function InitializationWizard({
               <StageHeading
                 step="01"
                 title="What should Compass index?"
-                copy="Start with the whole repository or narrow the initial graph to specific paths."
+                copy="Index the full repository or choose folders and files from the workspace tree."
               />
               <div className="init-scope-grid">
                 <label className="init-choice" data-selected={scope === "all"}>
@@ -269,12 +286,19 @@ export function InitializationWizard({
                   <span>
                     <strong>Custom scope</strong>
                     <small>
-                      Focus the graph on selected packages, services, folders, files, or glob
-                      patterns.
+                      Select packages, services, folders, or individual files from the repository.
                     </small>
                   </span>
                 </label>
               </div>
+              {scope === "custom" && (
+                <ScopeTree
+                  files={scopeFiles}
+                  truncated={scopeFilesTruncated}
+                  selected={selectedPaths}
+                  onChange={setSelectedPaths}
+                />
+              )}
               <RepositoryFacts root={repositoryRoot} />
               <StageActions>
                 <span />
@@ -290,21 +314,25 @@ export function InitializationWizard({
             <>
               <StageHeading
                 step="02"
-                title="Set the index rules"
-                copy="Use project-relative paths or globs. Put one rule on each line."
+                title="Refine with glob rules"
+                copy="Keep the tree selection as-is or add project-relative globs for precise inclusion and exclusion."
               />
               <div className="init-fields">
                 <label>
                   <span>
-                    <strong>Include paths and globs</strong>
-                    <small>{scope === "all" ? "The full eligible repository is included." : "At least one include rule is required."}</small>
+                    <strong>Additional include globs</strong>
+                    <small>
+                      {scope === "all"
+                        ? "Optional only when using a custom scope."
+                        : `${selectedPaths.length} tree selection${selectedPaths.length === 1 ? "" : "s"}; add patterns if needed.`}
+                    </small>
                   </span>
                   <textarea
-                    aria-label="Include paths and globs"
-                    value={includeText}
+                    aria-label="Additional include globs"
+                    value={includeGlobText}
                     disabled={scope === "all"}
-                    onChange={(event) => setIncludeText(event.target.value)}
-                    placeholder={"src\npackages/api/**"}
+                    onChange={(event) => setIncludeGlobText(event.target.value)}
+                    placeholder={"packages/*/src/**\napps/**/routes/**"}
                     rows={5}
                   />
                 </label>
@@ -322,9 +350,11 @@ export function InitializationWizard({
                   />
                 </label>
               </div>
-              {customScopeMissing && (
+              {(customScopeMissing || tooManyRules) && (
                 <p className="init-validation" role="alert">
-                  Add at least one path or glob for a custom scope.
+                  {tooManyRules
+                    ? "Use no more than 256 include rules and 256 exclude rules."
+                    : "Select a folder or file from the tree, or add an include glob."}
                 </p>
               )}
               <StageActions>
@@ -334,7 +364,7 @@ export function InitializationWizard({
                 </button>
                 <button
                   className="init-button init-button-primary"
-                  disabled={customScopeMissing}
+                  disabled={customScopeMissing || tooManyRules}
                   onClick={() => setStep(2)}
                 >
                   Review configuration
@@ -572,6 +602,233 @@ function RepositoryFacts({ root }: { root: string }) {
   );
 }
 
+type ScopeNode = {
+  name: string;
+  path: string;
+  kind: "folder" | "file";
+  children: ScopeNode[];
+};
+
+function ScopeTree({
+  files,
+  truncated,
+  selected,
+  onChange
+}: {
+  files: string[];
+  truncated: boolean;
+  selected: string[];
+  onChange(paths: string[]): void;
+}) {
+  const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const nodes = useMemo(() => buildScopeTree(files), [files]);
+  const visible = useMemo(() => filterScopeTree(nodes, query), [nodes, query]);
+  const toggleSelected = (path: string) => {
+    if (selected.includes(path)) {
+      onChange(selected.filter((candidate) => candidate !== path));
+    } else if (selected.length < MAX_SCOPE_RULES) {
+      onChange([...selected, path].sort());
+    }
+  };
+  const toggleExpanded = (path: string) => {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  return (
+    <section className="init-scope-browser" aria-labelledby="init-scope-browser-title">
+      <header>
+        <div>
+          <strong id="init-scope-browser-title">Repository files</strong>
+          <small>Selecting a folder includes every eligible file beneath it.</small>
+        </div>
+        <span>
+          {selected.length} selected{selected.length === MAX_SCOPE_RULES ? " · limit" : ""}
+        </span>
+      </header>
+      <div className="init-scope-toolbar">
+        <Search aria-hidden="true" />
+        <input
+          type="search"
+          aria-label="Filter repository files"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Filter folders and files"
+        />
+        {query && (
+          <button type="button" aria-label="Clear file filter" onClick={() => setQuery("")}>
+            <X aria-hidden="true" />
+          </button>
+        )}
+      </div>
+      <div className="init-scope-body">
+        <div className="init-scope-tree" role="tree" aria-label="Repository scope">
+          {visible.length > 0 ? visible.map((node) => (
+            <ScopeTreeNode
+              key={node.path}
+              node={node}
+              depth={0}
+              expanded={expanded}
+              forceExpanded={Boolean(query)}
+              selected={selected}
+              onToggleExpanded={toggleExpanded}
+              onToggleSelected={toggleSelected}
+            />
+          )) : (
+            <p className="init-scope-empty">
+              {files.length === 0
+                ? "No workspace files are available. Use an include glob in the next step."
+                : "No folders or files match this filter."}
+            </p>
+          )}
+        </div>
+        <aside className="init-scope-ledger" aria-label="Selected repository paths">
+          <div>
+            <strong>Included from tree</strong>
+            <small>Project-relative paths</small>
+          </div>
+          {selected.length > 0 ? (
+            <ul>
+              {selected.map((path) => (
+                <li key={path}>
+                  <code>{path}</code>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${path}`}
+                    onClick={() => toggleSelected(path)}
+                  >
+                    <X aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>Choose a folder or file to begin a focused scope.</p>
+          )}
+        </aside>
+      </div>
+      {truncated && (
+        <p className="init-scope-notice">
+          Showing the first 5,000 workspace files. Use glob rules for paths not shown.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ScopeTreeNode({
+  node,
+  depth,
+  expanded,
+  forceExpanded,
+  selected,
+  onToggleExpanded,
+  onToggleSelected
+}: {
+  node: ScopeNode;
+  depth: number;
+  expanded: Set<string>;
+  forceExpanded: boolean;
+  selected: string[];
+  onToggleExpanded(path: string): void;
+  onToggleSelected(path: string): void;
+}) {
+  const isFolder = node.kind === "folder";
+  const isExpanded = forceExpanded || expanded.has(node.path);
+  return (
+    <div
+      role="treeitem"
+      aria-label={node.path}
+      aria-expanded={isFolder ? isExpanded : undefined}
+    >
+      <div className="init-scope-row" style={{ paddingLeft: `${depth * 18 + 7}px` }}>
+        {isFolder ? (
+          <button
+            type="button"
+            className="init-scope-disclosure"
+            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${node.path}`}
+            onClick={() => onToggleExpanded(node.path)}
+          >
+            {isExpanded
+              ? <ChevronDown aria-hidden="true" />
+              : <ChevronRight aria-hidden="true" />}
+          </button>
+        ) : <span className="init-scope-disclosure" />}
+        <label title={node.path}>
+          <input
+            type="checkbox"
+            checked={selected.includes(node.path)}
+            onChange={() => onToggleSelected(node.path)}
+          />
+          {isFolder ? <Folder aria-hidden="true" /> : <File aria-hidden="true" />}
+          <span>{node.name}</span>
+        </label>
+      </div>
+      {isFolder && isExpanded && (
+        <div role="group">
+          {node.children.map((child) => (
+            <ScopeTreeNode
+              key={child.path}
+              node={child}
+              depth={depth + 1}
+              expanded={expanded}
+              forceExpanded={forceExpanded}
+              selected={selected}
+              onToggleExpanded={onToggleExpanded}
+              onToggleSelected={onToggleSelected}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function buildScopeTree(files: string[]): ScopeNode[] {
+  const root: ScopeNode = { name: "", path: "", kind: "folder", children: [] };
+  for (const file of files) {
+    const parts = file.split("/").filter(Boolean);
+    let parent = root;
+    parts.forEach((part, index) => {
+      const path = parts.slice(0, index + 1).join("/");
+      const kind = index === parts.length - 1 ? "file" : "folder";
+      let child = parent.children.find((candidate) => candidate.name === part);
+      if (!child) {
+        child = { name: part, path, kind, children: [] };
+        parent.children.push(child);
+      }
+      parent = child;
+    });
+  }
+  sortScopeNodes(root.children);
+  return root.children;
+}
+
+function sortScopeNodes(nodes: ScopeNode[]): void {
+  nodes.sort((left, right) => {
+    if (left.kind !== right.kind) return left.kind === "folder" ? -1 : 1;
+    return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+  });
+  nodes.forEach((node) => sortScopeNodes(node.children));
+}
+
+function filterScopeTree(nodes: ScopeNode[], rawQuery: string): ScopeNode[] {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) return nodes;
+  return nodes.flatMap((node) => {
+    const children = filterScopeTree(node.children, query);
+    if (node.path.toLowerCase().includes(query) || children.length > 0) {
+      return [{ ...node, children }];
+    }
+    return [];
+  });
+}
+
 function ReviewRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="init-review-row">
@@ -596,4 +853,8 @@ function splitRules(value: string): string[] {
       .map((rule) => rule.trim())
       .filter(Boolean)
   ));
+}
+
+function mergeRules(...groups: string[][]): string[] {
+  return Array.from(new Set(groups.flat()));
 }

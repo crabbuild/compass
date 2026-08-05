@@ -64,8 +64,9 @@ repeating workflow actions under every folder.
   current workspace state requires them.
 
 Choosing **Initialize repository** opens a dedicated setup wizard. Review the
-repository scope, add include or exclude rules when needed, and start the first
-index from the final review step. While Compass builds, the page shows the
+repository scope by selecting folders and files from the workspace tree, add
+include or exclude glob rules when needed, and start the first index from the
+final review step. While Compass builds, the page shows the
 completed and total file count plus the file currently being indexed.
 
 **Refresh Compass Status** in the Workspace title reads repository state again.

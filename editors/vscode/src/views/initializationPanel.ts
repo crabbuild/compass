@@ -4,6 +4,7 @@ import { stat } from "node:fs/promises";
 import * as vscode from "vscode";
 import { buildInitArgs } from "../commands/buildArguments";
 import { parseInitializationRequest } from "../initialize/panelMessages";
+import { discoverScopeFiles } from "../initialize/scopeFiles";
 import type { RepositorySession } from "../workspace/repositorySession";
 
 export async function openInitializationPanel(
@@ -33,12 +34,23 @@ export async function openInitializationPanel(
   const post = (message: unknown): Thenable<boolean> =>
     disposed ? Promise.resolve(false) : panel.webview.postMessage(message);
   const configPath = path.join(session.root, ".compass", "config.toml");
-  const hydrate = async () => post({
-    type: "hydrate",
-    repositoryName: path.basename(session.root),
-    repositoryRoot: session.root,
-    configurationExists: await isFile(configPath)
+  let scopeFiles = discoverScopeFiles(session.root).catch((error) => {
+    output.appendLine(
+      `[init:scope] Could not enumerate repository files: ${firstLine(String(error))}`
+    );
+    return { files: [], truncated: false };
   });
+  const hydrate = async () => {
+    const discovered = await scopeFiles;
+    return post({
+      type: "hydrate",
+      repositoryName: path.basename(session.root),
+      repositoryRoot: session.root,
+      configurationExists: await isFile(configPath),
+      scopeFiles: discovered.files,
+      scopeFilesTruncated: discovered.truncated
+    });
+  };
 
   panel.onDidDispose(() => {
     disposed = true;
@@ -46,6 +58,12 @@ export async function openInitializationPanel(
   panel.webview.html = html(context, panel.webview);
   panel.webview.onDidReceiveMessage(async (message) => {
     if (message?.type === "ready" || message?.type === "reset") {
+      if (message.type === "reset") {
+        scopeFiles = discoverScopeFiles(session.root).catch(() => ({
+          files: [],
+          truncated: false
+        }));
+      }
       await hydrate();
       return;
     }
