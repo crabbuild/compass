@@ -4595,20 +4595,29 @@ impl<'source> DirectAdapterState<'source> {
             return Ok(());
         }
         let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
-        let platform_reexport_bindings = self
-            .import_binding_is_ambiguous(owner, binding_name)
+        let uses_type_namespace = function.kind() == "scoped_identifier";
+        let import_binding_is_ambiguous = if uses_type_namespace {
+            self.visible_import_binding_is_ambiguous(owner, binding_name)
+        } else {
+            self.import_binding_is_ambiguous(owner, binding_name)
+        };
+        let platform_reexport_bindings = import_binding_is_ambiguous
             .then(|| self.rust_platform_reexport_bindings(owner, binding_name))
             .flatten();
-        if self.import_binding_is_ambiguous(owner, binding_name)
-            && platform_reexport_bindings.is_none()
-        {
+        if import_binding_is_ambiguous && platform_reexport_bindings.is_none() {
             return Ok(());
         }
         let direct_binding = platform_reexport_bindings
             .is_none()
             .then(|| {
-                self.binding_for_occurrence(owner, binding_name, function.start_byte(), true)
-                    .cloned()
+                if uses_type_namespace {
+                    self.import_binding_version_at(owner, binding_name, function.start_byte(), true)
+                        .map(|binding| binding.binding_id.clone())
+                        .or_else(|| self.local_binding_for(owner, binding_name).cloned())
+                } else {
+                    self.binding_for_occurrence(owner, binding_name, function.start_byte(), true)
+                        .cloned()
+                }
             })
             .flatten();
         let wildcard_lookup_eligible = qualifier.is_none()
@@ -4775,6 +4784,12 @@ impl<'source> DirectAdapterState<'source> {
             return self
                 .rust_receiver_method_target(enclosing, spelling)
                 .or_else(|| Some(rust_join_qualified(enclosing, spelling)));
+        }
+        if use_node.kind() == "scoped_identifier"
+            && let Some(target) =
+                self.imported_qualified_target_for(owner, qualifier, use_start, true)
+        {
+            return Some(rust_join_qualified(&target, spelling));
         }
         if let Some(receiver_type) =
             self.rust_field_receiver_type(owner, qualifier, use_start, use_node)
@@ -7045,6 +7060,10 @@ impl<'source> DirectAdapterState<'source> {
         if self.local_binding_for(owner, name).is_some() {
             return false;
         }
+        self.visible_import_binding_is_ambiguous(owner, name)
+    }
+
+    fn visible_import_binding_is_ambiguous(&self, owner: &DeclarationContext, name: &str) -> bool {
         let mut scope_id = Some(owner.scope_id.as_str());
         for _ in 0..64 {
             let Some(current) = scope_id else {

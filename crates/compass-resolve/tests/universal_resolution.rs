@@ -3746,6 +3746,47 @@ fn rust_import_binding_resolves_the_qualified_associated_function() {
 }
 
 #[test]
+fn rust_module_path_uses_import_namespace_over_same_named_value() {
+    let source = br#"use std::io;
+use std::thread;
+struct ThreadBuilder;
+impl ThreadBuilder {
+    fn name(&self) -> Option<&str> { None }
+    fn run(self) {}
+}
+trait ThreadSpawn { fn spawn(&mut self, thread: ThreadBuilder) -> io::Result<()>; }
+struct DefaultSpawn;
+impl ThreadSpawn for DefaultSpawn {
+    fn spawn(&mut self, thread: ThreadBuilder) -> io::Result<()> {
+        let builder = thread::Builder::new();
+        if let Some(name) = thread.name() { let _ = name; }
+        builder.spawn(|| thread.run())?;
+        Ok(())
+    }
+}
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let constructor = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "std::thread::Builder::new")
+        .unwrap_or_else(|| panic!("external Builder.new target; nodes={:#?}", resolved.nodes));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.target == constructor.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "qualified-external"
+            && edge.string("source_location") == "L12"
+    }));
+}
+
+#[test]
 fn rust_cross_file_generic_receiver_parameters_resolve_through_imported_impls() {
     let provider = extract(
         "src/api.rs",

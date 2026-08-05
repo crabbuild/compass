@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Respect Rust's separate value and type/module namespaces when extracting
+  scoped associated calls. A `module::Type::function()` path now retains its
+  visible import binding even when a same-named value is in lexical scope;
+  ordinary `value.method()` dispatch remains value-bound, and competing
+  imports fail closed. Rust structural facts advance to adapter version 15.
+
 - Follow a unique source-present Rust named reexport when resolving an
   associated callable reached through a glob facade. Receiver-prefix alias
   expansion is depth-bounded; competing aliases and reexport cycles remain

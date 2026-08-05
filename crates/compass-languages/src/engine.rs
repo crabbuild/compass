@@ -4865,6 +4865,118 @@ mod rationale_tests {
     }
 
     #[test]
+    fn rust_scoped_calls_use_type_namespace_imports_over_values()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("namespace.rs");
+        fs::write(
+            &source,
+            "use std::thread;\n\
+             struct ThreadBuilder;\n\
+             impl ThreadBuilder { fn name(&self) -> Option<&str> { None } }\n\
+             fn spawn(thread: ThreadBuilder) {\n\
+                 let _builder = thread::Builder::new();\n\
+                 let _name = thread.name();\n\
+             }\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing Rust semantic evidence")?;
+        let associated_call = evidence
+            .candidates
+            .iter()
+            .find(|candidate| {
+                candidate.relation == crate::CandidateRelation::Calls
+                    && candidate.target_spelling == "new"
+            })
+            .ok_or("missing scoped associated call")?;
+        assert_eq!(
+            associated_call.constraints.qualified_name.as_deref(),
+            Some("std::thread::Builder::new")
+        );
+        assert!(associated_call.constraints.allow_external);
+        let associated_binding = associated_call
+            .binding_id
+            .as_deref()
+            .and_then(|binding_id| {
+                evidence
+                    .bindings
+                    .iter()
+                    .find(|binding| binding.id == binding_id)
+            })
+            .ok_or("missing associated-call binding")?;
+        assert_eq!(associated_binding.kind, crate::BindingKind::Import);
+        assert_eq!(associated_binding.qualified_target, "std::thread");
+
+        let value_call = evidence
+            .candidates
+            .iter()
+            .find(|candidate| {
+                candidate.relation == crate::CandidateRelation::Calls
+                    && candidate.target_spelling == "name"
+            })
+            .ok_or("missing value receiver call")?;
+        assert_eq!(
+            value_call.constraints.qualified_name.as_deref(),
+            Some("crate::namespace::ThreadBuilder::name")
+        );
+        let value_binding = value_call
+            .binding_id
+            .as_deref()
+            .and_then(|binding_id| {
+                evidence
+                    .bindings
+                    .iter()
+                    .find(|binding| binding.id == binding_id)
+            })
+            .ok_or("missing value-call binding")?;
+        assert_eq!(value_binding.kind, crate::BindingKind::LocalAlias);
+        assert_eq!(
+            value_binding.qualified_target,
+            "crate::namespace::ThreadBuilder"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rust_ambiguous_type_namespace_imports_fail_closed_over_values()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("ambiguous_namespace.rs");
+        fs::write(
+            &source,
+            "use first::thread;\n\
+             use second::thread;\n\
+             struct ThreadBuilder;\n\
+             impl ThreadBuilder { fn name(&self) -> Option<&str> { None } }\n\
+             fn spawn(thread: ThreadBuilder) {\n\
+                 let _builder = thread::Builder::new();\n\
+                 let _name = thread.name();\n\
+             }\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing Rust semantic evidence")?;
+        assert!(evidence.candidates.iter().all(|candidate| {
+            candidate.relation != crate::CandidateRelation::Calls
+                || candidate.target_spelling != "new"
+        }));
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Calls
+                && candidate.target_spelling == "name"
+                && candidate.constraints.qualified_name.as_deref()
+                    == Some("crate::ambiguous_namespace::ThreadBuilder::name")
+        }));
+        Ok(())
+    }
+
+    #[test]
     fn python_imported_module_member_calls_are_deferred_as_resolvable_symbols()
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
