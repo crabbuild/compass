@@ -238,12 +238,12 @@ fn compact_extraction(extraction: &mut Extraction) {
         for call in &mut *calls {
             compact_json_map(&mut call.extensions);
         }
-        calls.shrink_to_fit();
+        compact_vec(calls);
     }
     for fact in &mut extraction.framework_facts {
         match fact {
             compass_languages::RawFrameworkFact::Route(route) => {
-                route.middleware_references.shrink_to_fit();
+                compact_vec(&mut route.middleware_references);
                 compact_json_map(&mut route.detail);
             }
             compass_languages::RawFrameworkFact::Domain(domain) => {
@@ -256,19 +256,36 @@ fn compact_extraction(extraction: &mut Extraction) {
         }
     }
     if let Some(evidence) = extraction.semantic_evidence.as_mut() {
-        evidence.adapter.capabilities.shrink_to_fit();
-        evidence.declarations.shrink_to_fit();
-        evidence.scopes.shrink_to_fit();
-        evidence.bindings.shrink_to_fit();
-        evidence.occurrences.shrink_to_fit();
-        evidence.candidates.shrink_to_fit();
-        evidence.diagnostics.shrink_to_fit();
+        compact_vec(&mut evidence.adapter.capabilities);
+        compact_vec(&mut evidence.declarations);
+        compact_vec(&mut evidence.scopes);
+        compact_vec(&mut evidence.bindings);
+        compact_vec(&mut evidence.occurrences);
+        compact_vec(&mut evidence.candidates);
+        compact_vec(&mut evidence.diagnostics);
     }
     compact_json_map(&mut extraction.extensions);
-    extraction.nodes.shrink_to_fit();
-    extraction.edges.shrink_to_fit();
-    extraction.hyperedges.shrink_to_fit();
-    extraction.framework_facts.shrink_to_fit();
+    compact_vec(&mut extraction.nodes);
+    compact_vec(&mut extraction.edges);
+    compact_vec(&mut extraction.hyperedges);
+    compact_vec(&mut extraction.framework_facts);
+}
+
+/// Shrink a vector only when it retained a meaningful amount of growth slack.
+///
+/// Extractors commonly reserve a small amount beyond the final length while
+/// parsing a file. Reallocating those tight buffers costs CPU without making a
+/// useful difference to the project-wide working set. A 25% slack threshold
+/// preserves the memory reduction for vectors that grew substantially while
+/// making the per-file compaction pass cheap for ordinary source files.
+fn compact_vec<T>(values: &mut Vec<T>) {
+    let useful_capacity = values
+        .len()
+        .saturating_add(values.len() / 4)
+        .saturating_add(1);
+    if values.capacity() > useful_capacity {
+        values.shrink_to_fit();
+    }
 }
 
 fn compact_json_map(map: &mut serde_json::Map<String, Value>) {
@@ -296,7 +313,7 @@ fn compact_json_value(value: &mut Value) {
             for value in values.iter_mut() {
                 compact_json_value(value);
             }
-            values.shrink_to_fit();
+            compact_vec(values);
         }
         Value::Object(map) => compact_json_map(map),
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
@@ -6998,6 +7015,51 @@ mod tests {
 
         assert_eq!(before, serde_json::to_value(extraction)?);
         Ok(())
+    }
+
+    #[test]
+    fn compact_extraction_shrinks_only_materially_overallocated_vectors() {
+        let mut overallocated_calls = Vec::with_capacity(64);
+        overallocated_calls.push(compass_languages::RawCall {
+            caller_nid: "node".to_owned(),
+            callee: "callee".to_owned(),
+            is_member_call: None,
+            source_file: "source.go".to_owned(),
+            source_location: "1:1".to_owned(),
+            receiver: None,
+            receiver_type: None,
+            lang: Some("go".to_owned()),
+            extensions: Map::new(),
+        });
+        let overallocated_capacity = overallocated_calls.capacity();
+
+        let mut tight_nodes = Vec::with_capacity(2);
+        tight_nodes.extend([
+            RawNodeRecord {
+                id: "node-1".to_owned(),
+                attributes: Map::new(),
+            },
+            RawNodeRecord {
+                id: "node-2".to_owned(),
+                attributes: Map::new(),
+            },
+        ]);
+        let tight_capacity = tight_nodes.capacity();
+
+        let mut extraction = Extraction {
+            nodes: tight_nodes,
+            raw_calls: Some(overallocated_calls),
+            ..Extraction::default()
+        };
+        compact_extraction(&mut extraction);
+
+        assert!(
+            extraction
+                .raw_calls
+                .as_ref()
+                .is_some_and(|calls| calls.capacity() < overallocated_capacity)
+        );
+        assert_eq!(extraction.nodes.capacity(), tight_capacity);
     }
 
     #[test]
