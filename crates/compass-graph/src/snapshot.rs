@@ -834,6 +834,17 @@ where
     W: Write + ?Sized,
     T: Serialize + Sync,
 {
+    // Most small and medium repositories fit in one bounded chunk. Avoid
+    // dispatching a one-chunk array through Rayon: that path cannot overlap
+    // useful work and otherwise pays the global-pool scheduling cost during
+    // the latency-sensitive final publication step.
+    if records.len() <= CANONICAL_RECORD_CHUNK {
+        writer.write_all(b"[")?;
+        if !records.is_empty() {
+            writer.write_all(&encode_canonical_record_chunk(records)?)?;
+        }
+        return writer.write_all(b"]");
+    }
     writer.write_all(b"[")?;
     let mut chunks = records.chunks(CANONICAL_RECORD_CHUNK);
     let mut first = true;

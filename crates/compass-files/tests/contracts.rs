@@ -474,6 +474,10 @@ fn streaming_portable_ast_batch_round_trips() -> Result<(), Box<dyn Error>> {
     });
 
     cache.write_portable_ast_batch_ref(&[(&source, &portable)])?;
+    assert_eq!(
+        cache.load_portable_ast(&source, false)?,
+        Some(portable.clone())
+    );
     let mut expected = portable;
     expected["nodes"][0]["source_file"] = json!(fs::canonicalize(&source)?.to_string_lossy());
     assert_eq!(

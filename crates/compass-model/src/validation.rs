@@ -609,7 +609,13 @@ fn endpoint_kinds_are_valid(
             source.kind.is_type()
                 && matches!(
                     target.kind,
-                    NodeKind::Interface | NodeKind::Trait | NodeKind::Protocol
+                    NodeKind::Interface
+                        | NodeKind::Trait
+                        | NodeKind::Protocol
+                        // TypeScript permits a class to implement a
+                        // structural object type declared through a type
+                        // alias.
+                        | NodeKind::TypeAlias
                 )
         }
         EdgeKind::TypeOf => is_typed_value(source.kind) && target.kind.is_type(),
