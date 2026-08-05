@@ -771,12 +771,20 @@ impl UniversalResolutionIndex {
             strategy,
         }) = candidate.constraints.hierarchy.as_ref()
         {
-            return self.resolve_c3_receiver_dispatch(
+            let receiver_decision = self.resolve_c3_receiver_dispatch(
                 language,
                 receiver_qualified_name,
                 *strategy,
                 candidate,
             );
+            // Receiver dispatch is the strongest source-grounded route, but
+            // an unresolved hierarchy must not erase an independently exact
+            // qualified binding. This is important for generic or recovered
+            // Python bases whose inherited method remains identifiable even
+            // when C3 cannot be constructed from the emitted base facts.
+            if !matches!(&receiver_decision, ResolutionDecision::Unresolved) {
+                return receiver_decision;
+            }
         }
         let occurrence = self.occurrence(candidate);
         let qualifier = occurrence.and_then(|occurrence| occurrence.qualifier.as_deref());

@@ -193,7 +193,7 @@ const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
     AdapterProfile {
         id: "compass.python",
         language: "python",
-        version: 1,
+        version: 2,
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         profile: UniversalAdapterProfile::UniversalCandidate,
         capabilities: PYTHON_CAPABILITIES,

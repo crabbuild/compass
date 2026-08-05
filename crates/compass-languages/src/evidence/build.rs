@@ -4999,6 +4999,24 @@ impl<'source> DirectAdapterState<'source> {
         } else {
             None
         };
+        let python_bound_receiver = if python_super_receiver.is_none() && self.language == "python"
+        {
+            qualifier
+                .filter(|qualifier| matches!(*qualifier, "self" | "cls"))
+                .map(|qualifier| {
+                    self.python_bound_method_receiver(call, qualifier, function.start_byte())
+                })
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
+        if self.language == "python"
+            && qualifier.is_some_and(|qualifier| matches!(qualifier, "self" | "cls"))
+            && python_bound_receiver.is_none()
+        {
+            return Ok(());
+        }
         let lookup_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
         let allow_later_file_binding =
             self.language == "python" && matches!(owner.kind.as_str(), "function" | "method");
@@ -5130,12 +5148,108 @@ impl<'source> DirectAdapterState<'source> {
                 } else {
                     vec!["function".to_owned(), "method".to_owned()]
                 },
-                hierarchy: None,
+                hierarchy: python_bound_receiver.map(|receiver_qualified_name| {
+                    HierarchyConstraint::ReceiverDispatch {
+                        receiver_qualified_name,
+                        strategy: ReceiverDispatchStrategy::C3FromReceiver,
+                    }
+                }),
                 allow_external: qualified_name.is_some() && python_super_receiver.is_none(),
             },
         )?;
         let _ = call_kind;
         Ok(())
+    }
+
+    fn python_name_rebound_between(
+        &self,
+        root: Node<'_>,
+        start: usize,
+        end: usize,
+        name: &str,
+    ) -> bool {
+        let mut cursor = root.walk();
+        root.children(&mut cursor)
+            .filter(|child| child.is_named())
+            .any(|child| {
+                child.start_byte() >= start
+                    && child.end_byte() <= end
+                    && !matches!(child.kind(), "import_statement" | "import_from_statement")
+                    && crate::engine::python_bound_names(child, self.source, true).contains(name)
+            })
+    }
+
+    fn python_bound_method_receiver(
+        &self,
+        call: Node<'_>,
+        receiver: &str,
+        use_start: usize,
+    ) -> Result<Option<String>, EvidenceError> {
+        let mut ancestor = Some(call);
+        while let Some(node) = ancestor {
+            if node.kind() == "lambda"
+                && crate::engine::python_bound_names(node, self.source, false).contains(receiver)
+            {
+                return Ok(None);
+            }
+            if matches!(
+                node.kind(),
+                "list_comprehension"
+                    | "dictionary_comprehension"
+                    | "set_comprehension"
+                    | "generator_expression"
+            ) && crate::engine::python_bound_names(node, self.source, true).contains(receiver)
+            {
+                return Ok(None);
+            }
+            if node.kind() == "function_definition" {
+                let Some(context) = self.declarations.get(&node.id()) else {
+                    return Ok(None);
+                };
+                if context.kind == "method" {
+                    let Some(parameters) = node.child_by_field_name("parameters") else {
+                        return Ok(None);
+                    };
+                    let Some(parameter) = parameters.named_child(0) else {
+                        return Ok(None);
+                    };
+                    let name = if parameter.kind() == "identifier" {
+                        Some(parameter)
+                    } else {
+                        parameter.child_by_field_name("name").or_else(|| {
+                            let mut cursor = parameter.walk();
+                            parameter
+                                .children(&mut cursor)
+                                .find(|child| child.kind() == "identifier")
+                        })
+                    };
+                    let Some(name) = name.filter(|name| self.text(*name) == receiver) else {
+                        return Ok(None);
+                    };
+                    if python_has_decorator(node, self.source, "staticmethod") {
+                        return Ok(None);
+                    }
+                    if receiver == "cls" && !python_has_decorator(node, self.source, "classmethod")
+                    {
+                        return Ok(None);
+                    }
+                    let body = node.child_by_field_name("body").unwrap_or(node);
+                    if self.python_name_rebound_between(body, name.end_byte(), use_start, receiver)
+                    {
+                        return Ok(None);
+                    }
+                    return Ok(context.enclosing_type_qualified_name.clone());
+                }
+                if crate::engine::python_bound_names(node, self.source, false).contains(receiver) {
+                    return Ok(None);
+                }
+            }
+            if node.kind() == "class_definition" {
+                return Ok(None);
+            }
+            ancestor = node.parent();
+        }
+        Ok(None)
     }
 
     fn go_selector_receiver_type(
@@ -7099,6 +7213,32 @@ fn python_super_receiver<'tree>(function: Node<'tree>, source: &[u8]) -> Option<
     (callable.kind() == "identifier"
         && callable.utf8_text(source).ok().map(str::trim) == Some("super"))
     .then_some(receiver)
+}
+
+fn python_has_decorator(definition: Node<'_>, source: &[u8], expected: &str) -> bool {
+    let Some(decorated) = definition
+        .parent()
+        .filter(|node| node.kind() == "decorated_definition")
+    else {
+        return false;
+    };
+    let mut cursor = decorated.walk();
+    decorated
+        .children(&mut cursor)
+        .filter(|child| child.kind() == "decorator")
+        .filter_map(|decorator| decorator.utf8_text(source).ok())
+        .map(|decorator| {
+            decorator
+                .trim()
+                .trim_start_matches('@')
+                .trim()
+                .split_once('(')
+                .map_or_else(
+                    || decorator.trim().trim_start_matches('@').trim(),
+                    |(name, _)| name.trim(),
+                )
+        })
+        .any(|decorator| decorator == expected || decorator.ends_with(&format!(".{expected}")))
 }
 
 fn python_super_call_is_builtin(
