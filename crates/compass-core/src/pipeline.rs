@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::{BufReader, Write};
@@ -28,13 +29,13 @@ use compass_graph::{
 use compass_languages::{
     BindingFact, DeclarationFact, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL,
     EXTRACTION_QUALITY_REASON_EXTENSION, Engine, Extraction, ExtractorKind,
-    FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, OccurrenceFact, ProjectEvidenceIndex, RawEdgeRecord,
-    RawFrameworkFact, RawNodeRecord, Registry, RelationshipCandidate, ResolutionConstraint,
-    ScopeFact, SemanticEvidenceBatch, file_stem, make_id,
+    FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, OccurrenceFact, ProjectEvidenceIndex, RawCall,
+    RawEdgeRecord, RawFrameworkFact, RawNodeRecord, Registry, RelationshipCandidate,
+    ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, file_stem, make_id,
 };
 use compass_model::code_graph::{
-    CommunityMetadata, DiagnosticSeverity, ExtractionStatus, FileNodeDetails, GraphDiagnostic,
-    GraphDocument as V1GraphDocument, NodeDetails, NodeKind,
+    CommunityMetadata, CoverageRecord, DiagnosticSeverity, ExtractionStatus, FileNodeDetails,
+    GraphDiagnostic, GraphDocument as V1GraphDocument, NodeDetails, NodeKind,
 };
 use compass_model::provenance::{
     COALESCED_NODE_EVIDENCE_ATTRIBUTE, CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE,
@@ -56,9 +57,9 @@ use compass_store::{
     local_sqlite_store_path,
 };
 use rayon::prelude::*;
-use serde::ser::{SerializeMap, SerializeSeq, Serializer};
+use serde::ser::{Error as SerdeError, SerializeMap, SerializeSeq, Serializer};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::build_state::{
@@ -162,7 +163,7 @@ pub enum BuildPurpose {
 
 const OUTPUT_STATS_FILE: &str = ".compass_output_stats.json";
 const AST_FACT_DIGESTS_FILE: &str = ".compass_ast_fact_digests.json";
-const AST_FACT_DIGESTS_SCHEMA: &str = "compass.ast-fact-digests/2";
+const AST_FACT_DIGESTS_SCHEMA: &str = "compass.ast-fact-digests/3";
 const MAX_AST_FACT_DIGEST_ENTRIES: usize = 100_000;
 const MAX_AST_FACT_DIGEST_FILE_BYTES: usize = 16 * 1024 * 1024;
 const GRAPH_OVERVIEW_FILE: &str = "graph-overview.json";
@@ -402,7 +403,7 @@ fn build_profile_digest(profile: &BuildProfile, output_dir: &Path) -> Result<Str
         source,
     })?;
     let mut digest = Sha256::new();
-    digest.update(b"compass.ast-fact-digests/profile/2");
+    digest.update(b"compass.ast-fact-digests/profile/3");
     digest.update([0]);
     for component in [
         compass_model::code_graph::CODE_GRAPH_SCHEMA_V1,
@@ -470,6 +471,98 @@ impl Write for ExtractionDigestWriter {
     }
 }
 
+/// Serialize JSON object keys in lexical order for digesting.
+///
+/// `serde_json` is configured with `preserve_order` in this workspace. That
+/// is useful when round-tripping user-facing JSON, but it means an equivalent
+/// map can acquire a different byte representation after a cache load. Fact
+/// digests describe semantic extraction, so map insertion order must not be
+/// part of their identity.
+fn compare_fact_values(left: &Value, right: &Value) -> Ordering {
+    fn kind(value: &Value) -> u8 {
+        match value {
+            Value::Null => 0,
+            Value::Bool(_) => 1,
+            Value::Number(_) => 2,
+            Value::String(_) => 3,
+            Value::Array(_) => 4,
+            Value::Object(_) => 5,
+        }
+    }
+
+    let kind_order = kind(left).cmp(&kind(right));
+    if kind_order != Ordering::Equal {
+        return kind_order;
+    }
+    match (left, right) {
+        (Value::Null, Value::Null) => Ordering::Equal,
+        (Value::Bool(left), Value::Bool(right)) => left.cmp(right),
+        (Value::Number(left), Value::Number(right)) => left.to_string().cmp(&right.to_string()),
+        (Value::String(left), Value::String(right)) => left.cmp(right),
+        (Value::Array(left), Value::Array(right)) => left
+            .iter()
+            .zip(right)
+            .map(|(left, right)| compare_fact_values(left, right))
+            .find(|order| *order != Ordering::Equal)
+            .unwrap_or_else(|| left.len().cmp(&right.len())),
+        (Value::Object(left), Value::Object(right)) => compare_fact_maps(left, right),
+        _ => Ordering::Equal,
+    }
+}
+
+fn compare_fact_maps(left: &Map<String, Value>, right: &Map<String, Value>) -> Ordering {
+    let mut left_entries = left.iter().collect::<Vec<_>>();
+    let mut right_entries = right.iter().collect::<Vec<_>>();
+    left_entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+    right_entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+    left_entries
+        .iter()
+        .zip(&right_entries)
+        .map(|((left_key, left_value), (right_key, right_value))| {
+            left_key
+                .cmp(right_key)
+                .then_with(|| compare_fact_values(left_value, right_value))
+        })
+        .find(|order| *order != Ordering::Equal)
+        .unwrap_or_else(|| left_entries.len().cmp(&right_entries.len()))
+}
+
+fn normalized_call_text(value: &Option<Option<String>>) -> Option<&str> {
+    value.as_ref().and_then(|value| value.as_deref())
+}
+
+struct FactDigestValue<'a>(&'a Value);
+
+impl Serialize for FactDigestValue<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self.0 {
+            Value::Null => serializer.serialize_unit(),
+            Value::Bool(value) => serializer.serialize_bool(*value),
+            Value::Number(value) => value.serialize(serializer),
+            Value::String(value) => serializer.serialize_str(value),
+            Value::Array(values) => {
+                let mut sequence = serializer.serialize_seq(Some(values.len()))?;
+                for value in values {
+                    sequence.serialize_element(&Self(value))?;
+                }
+                sequence.end()
+            }
+            Value::Object(values) => {
+                let mut entries = values.iter().collect::<Vec<_>>();
+                entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+                let mut map = serializer.serialize_map(Some(entries.len()))?;
+                for (key, value) in entries {
+                    map.serialize_entry(key, &Self(value))?;
+                }
+                map.end()
+            }
+        }
+    }
+}
+
 struct FactDigestNode<'a> {
     node: &'a RawNodeRecord,
 }
@@ -480,13 +573,17 @@ impl Serialize for FactDigestNode<'_> {
         S: Serializer,
     {
         let is_file = self.node.string("symbol_kind") == "file";
-        let mut map = serializer.serialize_map(Some(self.node.attributes.len() + 1))?;
+        let mut attributes = self
+            .node
+            .attributes
+            .iter()
+            .filter(|(key, _)| !(is_file && FILE_ENVELOPE_ATTRIBUTES.contains(&key.as_str())))
+            .collect::<Vec<_>>();
+        attributes.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        let mut map = serializer.serialize_map(Some(attributes.len() + 1))?;
         map.serialize_entry("id", &self.node.id)?;
-        for (key, value) in &self.node.attributes {
-            if is_file && FILE_ENVELOPE_ATTRIBUTES.contains(&key.as_str()) {
-                continue;
-            }
-            map.serialize_entry(key, value)?;
+        for (key, value) in attributes {
+            map.serialize_entry(key, &FactDigestValue(value))?;
         }
         map.end()
     }
@@ -501,9 +598,154 @@ impl Serialize for FactDigestNodes<'_> {
     where
         S: Serializer,
     {
+        let mut nodes = self.nodes.iter().collect::<Vec<_>>();
+        nodes.sort_unstable_by(|left, right| left.id.cmp(&right.id));
         let mut sequence = serializer.serialize_seq(Some(self.nodes.len()))?;
-        for node in self.nodes {
+        for node in nodes {
             sequence.serialize_element(&FactDigestNode { node })?;
+        }
+        sequence.end()
+    }
+}
+
+struct FactDigestEdge<'a> {
+    edge: &'a RawEdgeRecord,
+}
+
+impl Serialize for FactDigestEdge<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut attributes = self.edge.attributes.iter().collect::<Vec<_>>();
+        attributes.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        let mut map = serializer.serialize_map(Some(attributes.len() + 2))?;
+        map.serialize_entry("source", &self.edge.source)?;
+        map.serialize_entry("target", &self.edge.target)?;
+        for (key, value) in attributes {
+            map.serialize_entry(key, &FactDigestValue(value))?;
+        }
+        map.end()
+    }
+}
+
+struct FactDigestEdges<'a> {
+    edges: &'a [RawEdgeRecord],
+}
+
+impl Serialize for FactDigestEdges<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut edges = self.edges.iter().collect::<Vec<_>>();
+        edges.sort_unstable_by(|left, right| {
+            left.source
+                .cmp(&right.source)
+                .then_with(|| left.target.cmp(&right.target))
+                .then_with(|| compare_fact_maps(&left.attributes, &right.attributes))
+        });
+        let mut sequence = serializer.serialize_seq(Some(self.edges.len()))?;
+        for edge in edges {
+            sequence.serialize_element(&FactDigestEdge { edge })?;
+        }
+        sequence.end()
+    }
+}
+
+struct FactDigestCall<'a> {
+    call: &'a RawCall,
+}
+
+impl Serialize for FactDigestCall<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let call = self.call;
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("caller_nid", &call.caller_nid)?;
+        map.serialize_entry("callee", &call.callee)?;
+        if let Some(value) = call.is_member_call {
+            map.serialize_entry("is_member_call", &value)?;
+        }
+        map.serialize_entry("source_file", &call.source_file)?;
+        map.serialize_entry("source_location", &call.source_location)?;
+        if let Some(Some(value)) = call.receiver.as_ref() {
+            map.serialize_entry("receiver", value)?;
+        }
+        if let Some(Some(value)) = call.receiver_type.as_ref() {
+            map.serialize_entry("receiver_type", value)?;
+        }
+        if let Some(value) = &call.lang {
+            map.serialize_entry("lang", value)?;
+        }
+        let mut extensions = call.extensions.iter().collect::<Vec<_>>();
+        extensions.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        for (key, value) in extensions {
+            map.serialize_entry(key, &FactDigestValue(value))?;
+        }
+        map.end()
+    }
+}
+
+struct FactDigestCalls<'a> {
+    calls: &'a [RawCall],
+}
+
+impl Serialize for FactDigestCalls<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut calls = self.calls.iter().collect::<Vec<_>>();
+        calls.sort_unstable_by(|left, right| {
+            left.caller_nid
+                .cmp(&right.caller_nid)
+                .then_with(|| left.callee.cmp(&right.callee))
+                .then_with(|| left.is_member_call.cmp(&right.is_member_call))
+                .then_with(|| left.source_file.cmp(&right.source_file))
+                .then_with(|| left.source_location.cmp(&right.source_location))
+                .then_with(|| {
+                    normalized_call_text(&left.receiver).cmp(&normalized_call_text(&right.receiver))
+                })
+                .then_with(|| {
+                    normalized_call_text(&left.receiver_type)
+                        .cmp(&normalized_call_text(&right.receiver_type))
+                })
+                .then_with(|| left.lang.cmp(&right.lang))
+                .then_with(|| compare_fact_maps(&left.extensions, &right.extensions))
+        });
+        let mut sequence = serializer.serialize_seq(Some(self.calls.len()))?;
+        for call in calls {
+            sequence.serialize_element(&FactDigestCall { call })?;
+        }
+        sequence.end()
+    }
+}
+
+struct FactDigestFrameworkFacts<'a> {
+    facts: &'a [RawFrameworkFact],
+}
+
+impl Serialize for FactDigestFrameworkFacts<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut facts = self
+            .facts
+            .iter()
+            .map(|fact| {
+                serde_json::to_value(fact)
+                    .map(|value| (value, fact))
+                    .map_err(S::Error::custom)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        facts.sort_unstable_by(|left, right| compare_fact_values(&left.0, &right.0));
+        let mut sequence = serializer.serialize_seq(Some(self.facts.len()))?;
+        for (value, _) in facts {
+            sequence.serialize_element(&FactDigestValue(&value))?;
         }
         sequence.end()
     }
@@ -1037,15 +1279,31 @@ impl Serialize for FactDigestExtraction<'_> {
                 nodes: &self.extraction.nodes,
             },
         )?;
-        map.serialize_entry("edges", &self.extraction.edges)?;
+        map.serialize_entry(
+            "edges",
+            &FactDigestEdges {
+                edges: &self.extraction.edges,
+            },
+        )?;
         if !self.extraction.hyperedges.is_empty() {
-            map.serialize_entry("hyperedges", &self.extraction.hyperedges)?;
+            let hyperedges = self
+                .extraction
+                .hyperedges
+                .iter()
+                .map(FactDigestValue)
+                .collect::<Vec<_>>();
+            map.serialize_entry("hyperedges", &hyperedges)?;
         }
         if let Some(raw_calls) = &self.extraction.raw_calls {
-            map.serialize_entry("raw_calls", raw_calls)?;
+            map.serialize_entry("raw_calls", &FactDigestCalls { calls: raw_calls })?;
         }
         if !self.extraction.framework_facts.is_empty() {
-            map.serialize_entry("framework_facts", &self.extraction.framework_facts)?;
+            map.serialize_entry(
+                "framework_facts",
+                &FactDigestFrameworkFacts {
+                    facts: &self.extraction.framework_facts,
+                },
+            )?;
         }
         if let Some(batch) = &self.extraction.semantic_evidence {
             map.serialize_entry(
@@ -1059,8 +1317,10 @@ impl Serialize for FactDigestExtraction<'_> {
         if let Some(error) = &self.extraction.error {
             map.serialize_entry("error", error)?;
         }
-        for (key, value) in &self.extraction.extensions {
-            map.serialize_entry(key, value)?;
+        let mut extensions = self.extraction.extensions.iter().collect::<Vec<_>>();
+        extensions.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        for (key, value) in extensions {
+            map.serialize_entry(key, &FactDigestValue(value))?;
         }
         map.end()
     }
@@ -1107,6 +1367,7 @@ fn detected_file_sets_match(manifest: &Manifest, files: &BTreeMap<String, Vec<St
         .entries()
         .keys()
         .map(PathBuf::from)
+        .map(|path| canonical_identity(&path))
         .collect::<BTreeSet<_>>();
     current == previous
 }
@@ -1339,6 +1600,53 @@ fn full_file_source_anchor(
 
 type FactNeutralDocument = (Option<V1GraphDocument>, V1GraphDocument, BTreeSet<String>);
 
+fn sort_dedup_serialized<T: Serialize>(values: &mut Vec<T>) {
+    if values.len() < 2 {
+        return;
+    }
+    let mut keyed = values
+        .drain(..)
+        .map(|value| (serde_json::to_vec(&value).unwrap_or_default(), value))
+        .collect::<Vec<_>>();
+    keyed.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    let mut previous = None;
+    for (key, value) in keyed {
+        if previous.as_ref() == Some(&key) {
+            continue;
+        }
+        previous = Some(key);
+        values.push(value);
+    }
+}
+
+fn canonicalize_fact_neutral_metadata(
+    coverage: &mut Vec<CoverageRecord>,
+    diagnostics: &mut Vec<GraphDiagnostic>,
+) {
+    // Fact-neutral publication bypasses the normal v1 normalization pass, so
+    // preserve the same metadata ordering and duplicate policy here. Without
+    // this, appending the refreshed file inventory to the prior graph changes
+    // coverage order even when the semantic graph is unchanged.
+    sort_dedup_serialized(coverage);
+    coverage.sort_by(|left, right| {
+        (
+            left.capability.as_str(),
+            left.producer.as_str(),
+            left.file_id.as_deref(),
+        )
+            .cmp(&(
+                right.capability.as_str(),
+                right.producer.as_str(),
+                right.file_id.as_deref(),
+            ))
+    });
+    sort_dedup_serialized(diagnostics);
+    diagnostics.sort_by(|left, right| {
+        (left.code.as_str(), left.message.as_str())
+            .cmp(&(right.code.as_str(), right.message.as_str()))
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 fn prepare_fact_neutral_document(
     output_dir: &Path,
@@ -1399,6 +1707,7 @@ fn prepare_fact_neutral_document(
     }
     evidence.build.configuration_digest = configuration_digest;
     evidence.include_inventory(inventory)?;
+    canonicalize_fact_neutral_metadata(&mut evidence.coverage, &mut evidence.diagnostics);
 
     let anchors = extraction_file_anchors(extractions, root);
     current.graph.build = evidence.build;
@@ -1428,11 +1737,13 @@ fn prepare_fact_neutral_document(
             byte_size: file.byte_size,
             generated: file.generated,
         }));
-        if let Some(anchor) = anchors
-            .get(&source)
-            .cloned()
-            .or_else(|| full_file_source_anchor(&root.join(&source), &source, max_source_bytes))
-        {
+        let anchor = source_digests.contains_key(&source).then(|| {
+            anchors
+                .get(&source)
+                .cloned()
+                .or_else(|| full_file_source_anchor(&root.join(&source), &source, max_source_bytes))
+        });
+        if let Some(anchor) = anchor.flatten() {
             node.source = Some(anchor.clone());
             for provenance in &mut node.evidence {
                 for candidate in &mut provenance.anchors {
@@ -6578,6 +6889,37 @@ mod tests {
         assert!(default_ast_workers() <= DEFAULT_AST_WORKER_CAP);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn detected_file_sets_match_canonicalizes_manifest_symlink_aliases()
+    -> Result<(), Box<dyn Error>> {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir()?;
+        let source_directory = directory.path().join("src");
+        fs::create_dir_all(&source_directory)?;
+        let source = source_directory.join("main.py");
+        fs::write(&source, "def main():\n    return 1\n")?;
+        let alias = source_directory.join("main-alias.py");
+        symlink("main.py", &alias)?;
+        let manifest_path = directory.path().join("manifest.json");
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec(&json!({
+                "src/main.py": {"mtime": 1.0, "ast_hash": "hash"},
+                "src/main-alias.py": {"mtime": 1.0, "ast_hash": "hash"}
+            }))?,
+        )?;
+        let manifest = Manifest::load(&manifest_path, Some(directory.path()));
+        let files = BTreeMap::from([(
+            "code".to_owned(),
+            vec![source.to_string_lossy().into_owned()],
+        )]);
+
+        assert!(detected_file_sets_match(&manifest, &files));
+        Ok(())
+    }
+
     #[test]
     fn resolver_source_text_is_scoped_to_php_files() {
         assert!(is_php_source_path(Path::new("src/controller.PHP")));
@@ -6618,6 +6960,125 @@ mod tests {
         compact_extraction(&mut extraction);
 
         assert_eq!(before, serde_json::to_value(extraction)?);
+        Ok(())
+    }
+
+    #[test]
+    fn ast_fact_digest_is_independent_of_map_insertion_order() -> Result<(), Box<dyn Error>> {
+        let mut first_attributes = Map::new();
+        first_attributes.insert("zeta".to_owned(), json!({"b": 2, "a": 1}));
+        first_attributes.insert("alpha".to_owned(), json!(true));
+        let mut second_attributes = Map::new();
+        second_attributes.insert("alpha".to_owned(), json!(true));
+        second_attributes.insert("zeta".to_owned(), json!({"a": 1, "b": 2}));
+        let first = Extraction {
+            nodes: vec![RawNodeRecord {
+                id: "node".to_owned(),
+                attributes: first_attributes,
+            }],
+            edges: vec![RawEdgeRecord {
+                source: "node".to_owned(),
+                target: "target".to_owned(),
+                attributes: Map::from_iter([
+                    ("zeta".to_owned(), json!({"b": 2, "a": 1})),
+                    ("alpha".to_owned(), json!(true)),
+                ]),
+            }],
+            ..Extraction::default()
+        };
+        let second = Extraction {
+            nodes: vec![RawNodeRecord {
+                id: "node".to_owned(),
+                attributes: second_attributes,
+            }],
+            edges: vec![RawEdgeRecord {
+                source: "node".to_owned(),
+                target: "target".to_owned(),
+                attributes: Map::from_iter([
+                    ("alpha".to_owned(), json!(true)),
+                    ("zeta".to_owned(), json!({"a": 1, "b": 2})),
+                ]),
+            }],
+            ..Extraction::default()
+        };
+
+        assert_ne!(serde_json::to_vec(&first)?, serde_json::to_vec(&second)?);
+        assert_eq!(
+            extraction_fact_digest(&first)?,
+            extraction_fact_digest(&second)?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn ast_fact_digest_is_independent_of_fact_sequence_order() -> Result<(), Box<dyn Error>> {
+        let first = Extraction {
+            nodes: vec![
+                RawNodeRecord {
+                    id: "node-a".to_owned(),
+                    attributes: Map::from_iter([("symbol_kind".to_owned(), json!("function"))]),
+                },
+                RawNodeRecord {
+                    id: "node-b".to_owned(),
+                    attributes: Map::from_iter([("symbol_kind".to_owned(), json!("class"))]),
+                },
+            ],
+            edges: vec![
+                RawEdgeRecord {
+                    source: "node-a".to_owned(),
+                    target: "node-b".to_owned(),
+                    attributes: Map::from_iter([("kind".to_owned(), json!("calls"))]),
+                },
+                RawEdgeRecord {
+                    source: "node-b".to_owned(),
+                    target: "node-a".to_owned(),
+                    attributes: Map::from_iter([("kind".to_owned(), json!("references"))]),
+                },
+            ],
+            ..Extraction::default()
+        };
+        let mut second = first.clone();
+        second.nodes.reverse();
+        second.edges.reverse();
+
+        assert_ne!(serde_json::to_vec(&first)?, serde_json::to_vec(&second)?);
+        assert_eq!(
+            extraction_fact_digest(&first)?,
+            extraction_fact_digest(&second)?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn ast_fact_digest_normalizes_cache_null_call_fields() -> Result<(), Box<dyn Error>> {
+        let call = RawCall {
+            caller_nid: "caller".to_owned(),
+            callee: "callee".to_owned(),
+            is_member_call: Some(false),
+            source_file: "main.js".to_owned(),
+            source_location: "L1".to_owned(),
+            receiver: None,
+            receiver_type: None,
+            lang: Some("javascript".to_owned()),
+            extensions: Map::new(),
+        };
+        let mut explicit_null = call.clone();
+        explicit_null.receiver = Some(None);
+        explicit_null.receiver_type = Some(None);
+        let first = Extraction {
+            raw_calls: Some(vec![call]),
+            ..Extraction::default()
+        };
+        let second = Extraction {
+            raw_calls: Some(vec![explicit_null]),
+            ..Extraction::default()
+        };
+
+        assert_ne!(serde_json::to_vec(&first)?, serde_json::to_vec(&second)?);
+        assert_eq!(
+            extraction_fact_digest(&first)?,
+            extraction_fact_digest(&second)?
+        );
         Ok(())
     }
 
@@ -7340,6 +7801,12 @@ mod tests {
         let root = directory.path();
         let source = root.join("main.py");
         fs::write(&source, "def main():\n    return 1\n")?;
+        fs::create_dir_all(root.join("src"))?;
+        let javascript = root.join("src/static.js");
+        fs::write(
+            &javascript,
+            "function show(value) { return value; }\nmodule.exports = { show };\n",
+        )?;
         let mut options = BuildOptions::new(root);
         options.no_cluster = true;
         options.no_viz = true;
@@ -7358,7 +7825,7 @@ mod tests {
         let cold_fact_state: AstFactDigestState =
             serde_json::from_slice(&fs::read(cold.output_dir.join(AST_FACT_DIGESTS_FILE))?)?;
         assert_eq!(cold_fact_state.schema, AST_FACT_DIGESTS_SCHEMA);
-        assert_eq!(cold_fact_state.entries.len(), 1);
+        assert_eq!(cold_fact_state.entries.len(), 2);
 
         fs::write(
             &source,
@@ -7366,6 +7833,7 @@ mod tests {
         )?;
         let changed = build_graph_with_semantic(&options, &empty_semantic)?;
         assert_eq!(changed.files_extracted, 1);
+        assert_eq!(changed.files_cached, 1);
         assert_eq!(changed.nodes, cold.nodes);
         assert_eq!(changed.edges, cold.edges);
         assert_eq!(changed.timings.graph_assembly, Duration::ZERO);
@@ -7391,16 +7859,27 @@ mod tests {
         let cold_file = cold_graph
             .nodes
             .iter()
-            .find(|node| node.kind == NodeKind::File)
+            .find(|node| node.kind == NodeKind::File && node.source_file() == Some("main.py"))
             .ok_or("cold file node missing")?;
+        let cold_static_file = cold_graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::File && node.source_file() == Some("src/static.js"))
+            .ok_or("cold static file node missing")?;
         let changed_file = changed_graph
             .nodes
             .iter()
-            .find(|node| node.kind == NodeKind::File)
+            .find(|node| node.kind == NodeKind::File && node.source_file() == Some("main.py"))
             .ok_or("changed file node missing")?;
+        let changed_static_file = changed_graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::File && node.source_file() == Some("src/static.js"))
+            .ok_or("changed static file node missing")?;
         assert_eq!(changed_file.id, cold_file.id);
         assert_ne!(changed_file, cold_file);
         assert_ne!(changed_file.source, cold_file.source);
+        assert_eq!(changed_static_file, cold_static_file);
         assert_ne!(changed_graph.graph.files, cold_graph.graph.files);
 
         fs::write(&source, "def main():\n    return 2\n\n# semantic edit\n")?;

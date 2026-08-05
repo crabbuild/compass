@@ -40,7 +40,7 @@ pub const GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES: usize = 128;
 /// Maximum previous JSON artifact retained while attempting a byte-preserving
 /// fact-neutral publication. Larger artifacts use the bounded streaming
 /// serializer instead of adding another resident graph-sized buffer.
-pub const GRAPH_JSON_DELTA_MAX_SOURCE_BYTES: usize = 128 * 1024 * 1024;
+pub const GRAPH_JSON_DELTA_MAX_SOURCE_BYTES: usize = 512 * 1024 * 1024;
 const TREE_ZSTD_MAGIC: &[u8; 5] = b"CSTZ1";
 const TREE_ZSTD_HEADER_BYTES: usize = TREE_ZSTD_MAGIC.len() + std::mem::size_of::<u32>();
 
