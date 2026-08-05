@@ -264,14 +264,31 @@ was 103, 168, 270, and 309 MiB respectively. These are single-run diagnostic
 measurements, not a promoted memory baseline.
 
 The automatic AST pool now uses the default cap of 8 workers below 1,024
-missing files and 4 workers at or above that repository-size boundary. An
-explicit `--max-workers` value continues to override the automatic cap. On a
-fresh 3,096-file Django extraction from the pinned 2026-08-05 qualification
-corpus, the adaptive path reported 11.75 seconds internally and measured
-18.07 seconds with `/usr/bin/time -l`, with 2.17 GiB peak RSS and the same
-80,976-node/195,164-edge graph. This is a single mounted-volume observation;
-the pinned three-sample Graphify comparison remains 40.76 seconds p50, so the
-universal 4× target is not established by this change.
+missing files and a host-aware, bounded cap of up to 12 workers at or above
+that repository-size boundary. The build-wide Rayon pool uses the same
+host-aware ceiling; an explicit `--max-workers` value continues to override
+both automatic choices. The cap is deliberately finite rather than an
+unbounded host-sized pool, because parser and graph-publication working sets
+scale with concurrency.
+
+A clean three-sample follow-up on the pinned 2026-08-05 qualification corpora
+measured the release binary with JSON output and fresh output directories on
+each run. Graphify values are the paired three-sample p50 baselines:
+
+| Repository | Compass p50 | Graphify p50 | Graphify / Compass | Compass RSS p50 |
+| --- | ---: | ---: | ---: | ---: |
+| Cobra (Go) | 0.30 s | 0.95 s | 3.17× | 123.5 MiB |
+| Click (Python) | 0.50 s | 1.94 s | 3.88× | 180.7 MiB |
+| Rayon (Rust) | 0.80 s | 1.90 s | 2.38× | 284.5 MiB |
+| Zod (TypeScript) | 1.00 s | 4.80 s | 4.80× | 284.8 MiB |
+| Django (Python) | 10.80 s | 40.76 s | 3.77× | 2,248 MiB |
+
+The Django graph remained 80,976 nodes / 195,164 edges with zero validation
+errors, and the four small-corpus graph populations and normalized digests
+remained unchanged. The host-aware default therefore improves the large
+repository path, but these measurements still do not establish the requested
+universal 4× target; the higher Compass RSS is also an explicit tradeoff to
+monitor in future qualification.
 
 The default SQLite publication path now uses the same bounded canonical graph
 stream as JSON-only publication while the immutable snapshot indexes are built

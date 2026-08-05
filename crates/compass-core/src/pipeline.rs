@@ -79,7 +79,7 @@ use crate::raw_guard::enforce_incomplete_raw_guard;
 /// repositories with intentionally large generated sources.
 pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const SEMANTIC_MARKER_FILE: &str = ".compass_semantic_marker";
-const DEFAULT_PIPELINE_RAYON_WORKERS: usize = 4;
+const PIPELINE_RAYON_WORKER_CAP: usize = 12;
 const STORE_GENERATION_EXCLUSIONS: [&str; 3] = [
     STORE_FILE_NAME,
     "compass-store.sqlite3-wal",
@@ -2223,8 +2223,12 @@ fn build_graph_inner(
 fn pipeline_rayon_workers(options: &BuildOptions) -> usize {
     options
         .max_workers
-        .unwrap_or(DEFAULT_PIPELINE_RAYON_WORKERS)
+        .unwrap_or_else(default_pipeline_rayon_workers)
         .max(1)
+}
+
+fn default_pipeline_rayon_workers() -> usize {
+    available_worker_count().clamp(1, PIPELINE_RAYON_WORKER_CAP)
 }
 
 fn build_graph_inner_unscoped(
@@ -4563,22 +4567,34 @@ fn write_store_ref(output_dir: &Path, reference: &StoreRef) -> Result<(), CoreEr
 
 #[cfg(target_os = "macos")]
 fn default_ast_workers(missing: usize) -> usize {
-    num_cpus::get()
-        .max(num_cpus::get_physical())
+    available_worker_count()
         .min(default_ast_worker_cap(missing))
+        .max(1)
 }
 
 #[cfg(not(target_os = "macos"))]
 fn default_ast_workers(missing: usize) -> usize {
-    num_cpus::get().min(default_ast_worker_cap(missing))
+    available_worker_count()
+        .min(default_ast_worker_cap(missing))
+        .max(1)
 }
 
 const DEFAULT_AST_WORKER_CAP: usize = 8;
+#[cfg(target_os = "macos")]
+fn available_worker_count() -> usize {
+    num_cpus::get().max(num_cpus::get_physical())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn available_worker_count() -> usize {
+    num_cpus::get()
+}
+
 // Large cold repositories retain enough per-file parser state for worker
-// parallelism to dominate peak RSS. Keep the automatic path conservative at
-// this measured crossover; callers that have a known memory budget can still
-// opt into a different count through BuildOptions::max_workers.
-const LARGE_REPOSITORY_AST_WORKER_CAP: usize = 4;
+// parallelism to dominate peak RSS. Keep the automatic path bounded by the
+// host-aware pipeline ceiling; callers that have a known memory budget can
+// still opt into a different count through BuildOptions::max_workers.
+const LARGE_REPOSITORY_AST_WORKER_CAP: usize = PIPELINE_RAYON_WORKER_CAP;
 const LARGE_REPOSITORY_AST_WORKER_MIN_FILES: usize = 1_024;
 const AUTOMATIC_PARALLEL_EXTRACT_MIN_FILES: usize = 32;
 
@@ -6980,10 +6996,10 @@ mod tests {
     #[test]
     fn pipeline_rayon_workers_use_a_bounded_default_and_explicit_override() {
         let mut options = BuildOptions::new(".");
-        assert_eq!(
-            pipeline_rayon_workers(&options),
-            DEFAULT_PIPELINE_RAYON_WORKERS
-        );
+        let default_workers = pipeline_rayon_workers(&options);
+        assert_eq!(default_workers, default_pipeline_rayon_workers());
+        assert!(default_workers > 0);
+        assert!(default_workers <= PIPELINE_RAYON_WORKER_CAP);
 
         options.max_workers = Some(2);
         assert_eq!(pipeline_rayon_workers(&options), 2);
