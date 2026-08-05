@@ -240,6 +240,29 @@ same filtered Graphify Go comparison, exact comparable edges improved from
 1,469 to 1,492 and missing edges fell from 38 to 15. These quality numbers are
 diagnostic and do not imply that all Graphify gaps are closed.
 
+A 2026-08-05 TypeScript follow-up used the same pinned 444-file Zod checkout,
+fresh JSON output roots, and the retained Graphify 0.9.32 artifact. Three fresh
+Compass processes produced byte-identical graphs with 11,322 nodes and 14,921
+occurrence-backed relationships. External wall times were 6.95, 1.47, and
+1.41 seconds (1.47-second median); the first run was a host cold-launch outlier
+and is retained rather than discarded. The retained 4.918-second Graphify
+sample is therefore 3.35× the Compass median, while Compass used 339--350 MB
+peak RSS versus Graphify's 250 MB.
+
+The TypeScript variance and value-namespace correction removed all four valid
+syntax parser-recovery quarantines. One source-invalid inheritance edge remains
+explicitly omitted. Against 5,928 Graphify edge hypotheses, exact matches rose
+from 3,482 to 4,195, semantically dominated matches rose from 292 to 547, and
+missing hypotheses fell from 2,127 to 1,073. Seventy-seven formerly missing
+hypotheses are now rejected by stronger exact source facts: Graphify attributes
+methods declared by `_ZodBigInt` to `ZodBigInt`, for example, and attributes
+`ZodAny extends _ZodType` to `ZodType`. Nine former exact agreements are also
+correctly rejected: type-only imports of `ZodParsedType` and `ZodIssueCode`
+target their type aliases, while Graphify targets the same-named runtime values.
+The 92 missing Graphify node hypotheses are unchanged. These comparator
+classifications and targeted source checks are diagnostic, not a statistical
+precision or recall claim.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and

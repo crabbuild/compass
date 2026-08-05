@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Preserve exact TypeScript and TSX extraction for valid `in`/`out` generic
+  variance modifiers even though the pinned grammar reports those tokens as
+  recoverable errors. Compass reparses only parser-identified variance tokens
+  under type-parameter lists, preserving byte/line anchors, mapped-type `in`,
+  identifiers named `out`, and genuine malformed-input diagnostics. TypeScript
+  runtime variables now also receive identities distinct from same-named type
+  and interface declarations, so constructor calls resolve to the value
+  namespace and ambiguous runtime bindings fail closed. Extraction semantics
+  advance to version 8 so cached TypeScript facts refresh.
+
 - Resolve Python `self` and `cls` calls through source-proven inheritance,
   including a later direct base when every preceding base is a known leaf and
   class members that directly alias an earlier module-level callable. Rebound
