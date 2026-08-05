@@ -307,6 +307,29 @@ That representation gap and the remaining exact-endpoint call, type, and
 import hypotheses require separate source audits rather than synthetic count
 inflation.
 
+A third 2026-08-05 Rayon run resolved repository-local Rust imports to their
+unique semantic module instead of dropping the relationship when the module's
+physical file had the same qualified identity. Three fresh graphs were
+byte-identical (SHA-256
+`21711c58282858cf0fc6873ac538ea88445f6a0718159ee776397eb359aa4af4`)
+at 11,963 nodes and 25,095 occurrence-backed relationships. Wall times were
+11.60, 2.24, and 1.88 seconds; the copied-binary cold-launch outlier is retained
+and the median was 2.24 seconds. Maximum peak RSS was 384,450,560 bytes. Four
+pre-existing unrelated edges were omitted.
+
+The source-compatible comparison now reports 2,160 exact, 2,408 dominated,
+2,512 rejected, and 621 missing Graphify edge hypotheses. It recognizes 52
+exact-occurrence imports where Graphify names the physical Rust file and
+Compass names the same qualified semantic module, including imports owned by a
+more precise nested source scope. The comparison requires a mapped file target,
+identical qualified module identity, exact occurrence file and line, and one
+compatible Compass import; ambiguity still fails closed. Relative to the
+scoped-generic run, the resolver moved eight unsafe projections to dominated
+evidence and the representation-aware comparison reduced missing hypotheses by
+51. Node classifications remain 2,758 exact, 271 dominated, 1,083 rejected,
+and 85 missing. These counts remain diagnostic hypotheses, not precision or
+recall percentages.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and

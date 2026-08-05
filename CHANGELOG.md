@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Resolve repository-local Rust imports and reexports to the unique semantic
+  module when file and module realizations share the same qualified identity.
+  Resolution still fails closed when another declaration kind participates or
+  more than one semantic module remains. The Graphify comparison now recognizes
+  an occurrence-matched semantic module as a stronger realization of its
+  physical source file.
+
 - Publish Rust type, lifetime, and const generic parameters as distinct,
   owner-scoped parameter nodes. Exact field, signature, return, and bound uses
   resolve to the lexical parameter without leaking across declarations or

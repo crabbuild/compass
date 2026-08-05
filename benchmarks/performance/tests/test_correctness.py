@@ -1406,6 +1406,48 @@ class Widget(base_factory(), metaclass=meta_factory()):
             result.metrics["graphify_edges_coverage_reasons"],
         )
 
+    def test_semantic_module_import_dominates_its_file_realization(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"consumer","label":"job.rs","kind":"file",
+               "qualified_name":"crate::job","source_file":"src/job.rs",
+               "source_location":"L1","language":"rust"},
+              {"id":"module_file","label":"unwind.rs","kind":"file",
+               "qualified_name":"crate::unwind","source_file":"src/unwind.rs",
+               "source_location":"L1","language":"rust"},
+              {"id":"import_owner","label":"job_impl","kind":"module",
+               "qualified_name":"crate::job::job_impl","source_file":"src/job.rs",
+               "source_location":"L1","language":"rust"},
+              {"id":"module","label":"unwind","kind":"module",
+               "qualified_name":"crate::unwind","source_file":"src/lib.rs",
+               "source_location":"L1","language":"rust"}
+            ],"links":[
+              {"source":"import_owner","target":"module","relation":"imports",
+               "source_file":"src/job.rs","source_location":"L1"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"consumer","label":"src/job.rs","kind":"file",
+               "source_file":"src/job.rs","source_location":"L1",
+               "language":"rust"},
+              {"id":"module_file","label":"src/unwind.rs","kind":"file",
+               "source_file":"src/unwind.rs","source_location":"L1",
+               "language":"rust"}
+            ],"links":[
+              {"source":"consumer","target":"module_file","relation":"imports",
+               "source_file":"src/job.rs","source_location":"L1"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertIn(
+            "dominated:semantic_module_realization",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
     def test_precise_function_import_owner_dominates_a_file_owner(self) -> None:
         result = compare_documents(
             """

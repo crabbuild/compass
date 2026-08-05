@@ -1125,6 +1125,7 @@ def _classify_edges(
     qualified_external_targets: dict[tuple[str, str, str, str], set[str]] = {}
     qualified_external_imports: dict[tuple[str, str], set[str]] = {}
     imported_symbol_targets: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
+    semantic_module_imports: dict[tuple[str, str, str], list[EdgeFact]] = {}
     reexport_occurrence_targets: dict[
         tuple[str, str, str, str], list[EdgeFact]
     ] = {}
@@ -1300,6 +1301,21 @@ def _classify_edges(
                     ),
                     [],
                 ).append(edge)
+            if (
+                target_node is not None
+                and target_node.kind == "module"
+                and target_node.qualified_name
+                and edge.occurrence_file
+                and edge.occurrence_location
+            ):
+                semantic_module_imports.setdefault(
+                    (
+                        target_node.qualified_name,
+                        edge.occurrence_file,
+                        edge.occurrence_location,
+                    ),
+                    [],
+                ).append(edge)
 
     for owner, children in containment.items():
         for child in children:
@@ -1427,6 +1443,48 @@ def _classify_edges(
         graphify_source = graphify_nodes.get(graphify.source)
         compass_source = compass_nodes.get(source) if source is not None else None
         compass_target = compass_nodes.get(target) if target is not None else None
+        if (
+            graphify.relation == "imports"
+            and source is not None
+            and compass_target is not None
+            and compass_target.kind == "file"
+            and compass_target.qualified_name
+        ):
+            module_imports = semantic_module_imports.get(
+                (
+                    compass_target.qualified_name,
+                    graphify.occurrence_file,
+                    graphify.occurrence_location,
+                ),
+                [],
+            )
+            module_imports = [
+                edge
+                for edge in module_imports
+                if (
+                    canonical_endpoints.get(edge.source, edge.source) == source
+                    or (
+                        compass_source is not None
+                        and (owner := compass_nodes.get(edge.source)) is not None
+                        and owner.source_file == compass_source.source_file
+                        and owner.source_file == graphify.occurrence_file
+                    )
+                )
+            ]
+            if len(module_imports) == 1:
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "semantic_module_realization",
+                        module_imports[0].payload_sha256,
+                    )
+                )
+                continue
+            if len(module_imports) > 1:
+                output.append(
+                    Coverage("ambiguous", "multiple_semantic_module_imports", None)
+                )
+                continue
         if (
             graphify.relation == "references"
             and graphify.context in {"field", "generic_arg"}

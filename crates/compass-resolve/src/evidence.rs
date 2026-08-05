@@ -2112,6 +2112,37 @@ impl UniversalResolutionIndex {
             .take(self.limits.candidates_per_lookup.saturating_add(1))
             .copied()
             .collect::<Vec<_>>();
+        if candidate.language == "rust"
+            && matches!(
+                candidate.relation,
+                CandidateRelation::Imports | CandidateRelation::Reexports
+            )
+        {
+            let modules = eligible
+                .iter()
+                .filter(|slot| {
+                    self.declaration(**slot)
+                        .is_some_and(|declaration| declaration.kind == "module")
+                })
+                .copied()
+                .collect::<Vec<_>>();
+            let only_module_realizations = eligible.iter().all(|slot| {
+                self.declaration(*slot).is_some_and(|declaration| {
+                    matches!(declaration.kind.as_str(), "file" | "module")
+                })
+            });
+            if let [module] = modules.as_slice()
+                && only_module_realizations
+            {
+                return Some(ResolutionDecision::Resolved {
+                    declaration_id: self.declaration_id(*module)?.to_owned(),
+                    evidence: ResolutionEvidence {
+                        rule,
+                        candidate_count: 1,
+                    },
+                });
+            }
+        }
         match eligible.as_slice() {
             [only] => Some(ResolutionDecision::Resolved {
                 declaration_id: self.declaration_id(*only)?.to_owned(),

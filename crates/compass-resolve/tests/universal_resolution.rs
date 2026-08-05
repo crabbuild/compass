@@ -673,6 +673,99 @@ fn rust_local_module_reexports_resolve_without_external_placeholders() {
 }
 
 #[test]
+fn rust_importing_a_local_module_targets_its_module_declaration() {
+    let root_source = b"mod unwind;\nmod job;\n";
+    let unwind_source = b"pub fn halt() {}\n";
+    let job_source = b"use crate::unwind;\nfn run() { unwind::halt(); }\n";
+    let resolved = compass_resolve::resolve(
+        &[
+            extract("src/lib.rs", root_source),
+            extract("src/unwind.rs", unwind_source),
+            extract("src/job.rs", job_source),
+        ],
+        &HashMap::from([
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(root_source.to_vec()).expect("root source"),
+            ),
+            (
+                "src/unwind.rs".to_owned(),
+                String::from_utf8(unwind_source.to_vec()).expect("unwind source"),
+            ),
+            (
+                "src/job.rs".to_owned(),
+                String::from_utf8(job_source.to_vec()).expect("job source"),
+            ),
+        ]),
+    );
+    let job_file = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "file" && node.string("source_file") == "src/job.rs"
+        })
+        .expect("job file");
+    let unwind_module = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "module"
+                && node.string("qualified_name") == "crate::unwind"
+        })
+        .unwrap_or_else(|| panic!("unwind module; nodes={:#?}", resolved.nodes));
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.source == job_file.id
+                && edge.target == unwind_module.id
+                && edge.string("relation") == "imports_from"
+                && edge.string("source_location") == "L1"
+        }),
+        "edges={:#?}",
+        resolved.edges
+    );
+}
+
+#[test]
+fn rust_local_module_imports_fail_closed_with_a_competing_declaration_kind() {
+    let root_source = b"mod unwind;\nstruct unwind;\nmod job;\n";
+    let unwind_source = b"pub fn halt() {}\n";
+    let job_source = b"use crate::unwind;\n";
+    let resolved = compass_resolve::resolve(
+        &[
+            extract("src/lib.rs", root_source),
+            extract("src/unwind.rs", unwind_source),
+            extract("src/job.rs", job_source),
+        ],
+        &HashMap::from([
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(root_source.to_vec()).expect("root source"),
+            ),
+            (
+                "src/unwind.rs".to_owned(),
+                String::from_utf8(unwind_source.to_vec()).expect("unwind source"),
+            ),
+            (
+                "src/job.rs".to_owned(),
+                String::from_utf8(job_source.to_vec()).expect("job source"),
+            ),
+        ]),
+    );
+    let job_file = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "file" && node.string("source_file") == "src/job.rs"
+        })
+        .expect("job file");
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.source != job_file.id
+            || edge.string("relation") != "imports_from"
+            || edge.string("source_location") != "L1"
+    }));
+}
+
+#[test]
 fn rust_generic_impl_preserves_exact_type_ownership() {
     let source = br#"trait Render {}
 struct Container<T>(T);
