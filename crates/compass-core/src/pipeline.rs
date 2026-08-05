@@ -79,6 +79,7 @@ use crate::raw_guard::enforce_incomplete_raw_guard;
 /// repositories with intentionally large generated sources.
 pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const SEMANTIC_MARKER_FILE: &str = ".compass_semantic_marker";
+const DEFAULT_PIPELINE_RAYON_WORKERS: usize = 4;
 const STORE_GENERATION_EXCLUSIONS: [&str; 3] = [
     STORE_FILE_NAME,
     "compass-store.sqlite3-wal",
@@ -2194,6 +2195,39 @@ fn build_graph(
 }
 
 fn build_graph_inner(
+    options: &BuildOptions,
+    semantic: Option<&SemanticLayer>,
+    supplemental: &[Extraction],
+    tiebreaker: Option<&mut dyn EntityTiebreaker>,
+    progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
+    retain_artifacts: bool,
+) -> Result<(BuildResult, Option<RetainedBuildArtifacts>), CoreError> {
+    let worker_count = pipeline_rayon_workers(options);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(worker_count)
+        .thread_name(|index| format!("compass-pipeline-{index}"))
+        .build()
+        .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
+    pool.install(move || {
+        build_graph_inner_unscoped(
+            options,
+            semantic,
+            supplemental,
+            tiebreaker,
+            progress,
+            retain_artifacts,
+        )
+    })
+}
+
+fn pipeline_rayon_workers(options: &BuildOptions) -> usize {
+    options
+        .max_workers
+        .unwrap_or(DEFAULT_PIPELINE_RAYON_WORKERS)
+        .max(1)
+}
+
+fn build_graph_inner_unscoped(
     options: &BuildOptions,
     semantic: Option<&SemanticLayer>,
     supplemental: &[Extraction],
@@ -6941,6 +6975,21 @@ mod tests {
             default_ast_workers(LARGE_REPOSITORY_AST_WORKER_MIN_FILES)
                 <= LARGE_REPOSITORY_AST_WORKER_CAP
         );
+    }
+
+    #[test]
+    fn pipeline_rayon_workers_use_a_bounded_default_and_explicit_override() {
+        let mut options = BuildOptions::new(".");
+        assert_eq!(
+            pipeline_rayon_workers(&options),
+            DEFAULT_PIPELINE_RAYON_WORKERS
+        );
+
+        options.max_workers = Some(2);
+        assert_eq!(pipeline_rayon_workers(&options), 2);
+
+        options.max_workers = Some(0);
+        assert_eq!(pipeline_rayon_workers(&options), 1);
     }
 
     #[cfg(unix)]
