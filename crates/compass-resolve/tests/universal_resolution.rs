@@ -440,6 +440,130 @@ fn invokes() { helper(); join(); }
 }
 
 #[test]
+fn rust_multiple_wildcards_resolve_one_unique_call_and_fail_closed_on_collision() {
+    let first_source = b"pub fn bridge() {}\npub trait Work {}\npub struct Item;\n";
+    let second_source = b"pub fn helper() {}\n";
+    let caller_source = b"use crate::first::*;\nuse crate::second::*;\nstruct Local { item: Item }\nimpl Work for Local {}\nfn drive() { bridge(); }\n";
+    let resolved = compass_resolve::resolve(
+        &[
+            extract("src/first.rs", first_source),
+            extract("src/second.rs", second_source),
+            extract("src/lib.rs", caller_source),
+        ],
+        &HashMap::from([
+            (
+                "src/first.rs".to_owned(),
+                String::from_utf8(first_source.to_vec()).expect("first source"),
+            ),
+            (
+                "src/second.rs".to_owned(),
+                String::from_utf8(second_source.to_vec()).expect("second source"),
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(caller_source.to_vec()).expect("caller source"),
+            ),
+        ]),
+    );
+    let bridge = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::first::bridge")
+        .expect("bridge declaration");
+    let work = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::first::Work")
+        .expect("Work declaration");
+    let item = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::first::Item")
+        .expect("Item declaration");
+    let local = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Local")
+        .expect("Local declaration");
+    let field = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Local::item")
+        .expect("Local.item declaration");
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.target == bridge.id
+            && edge.string("relation") == "calls"
+            && edge.string("source_location") == "L5"
+            && edge.string("resolution_rule") == "wildcard-binding"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == local.id
+            && edge.target == work.id
+            && edge.string("relation") == "implements"
+            && edge.string("resolution_rule") == "wildcard-binding"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == field.id
+            && edge.target == item.id
+            && edge.string("relation") == "type_of"
+            && edge.string("resolution_rule") == "wildcard-binding"
+    }));
+
+    let competing_source = b"pub fn bridge() {}\npub trait Work {}\npub struct Item;\n";
+    let ambiguous = compass_resolve::resolve(
+        &[
+            extract("src/first.rs", first_source),
+            extract("src/second.rs", competing_source),
+            extract("src/lib.rs", caller_source),
+        ],
+        &HashMap::from([
+            (
+                "src/first.rs".to_owned(),
+                String::from_utf8(first_source.to_vec()).expect("first source"),
+            ),
+            (
+                "src/second.rs".to_owned(),
+                String::from_utf8(competing_source.to_vec()).expect("competing source"),
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(caller_source.to_vec()).expect("caller source"),
+            ),
+        ]),
+    );
+    assert!(ambiguous.edges.iter().all(|edge| {
+        !matches!(
+            edge.string("relation").as_str(),
+            "calls" | "implements" | "type_of"
+        ) || !matches!(edge.string("source_location").as_str(), "L3" | "L4" | "L5")
+    }));
+
+    let incomplete_source = b"use crate::first::*;\nuse external::prelude::*;\nstruct Local { item: Item }\nimpl Work for Local {}\nfn drive() { bridge(); }\n";
+    let incomplete = compass_resolve::resolve(
+        &[
+            extract("src/first.rs", first_source),
+            extract("src/lib.rs", incomplete_source),
+        ],
+        &HashMap::from([
+            (
+                "src/first.rs".to_owned(),
+                String::from_utf8(first_source.to_vec()).expect("first source"),
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(incomplete_source.to_vec()).expect("incomplete source"),
+            ),
+        ]),
+    );
+    assert!(incomplete.edges.iter().all(|edge| {
+        !matches!(
+            edge.string("relation").as_str(),
+            "calls" | "implements" | "type_of"
+        ) || !matches!(edge.string("source_location").as_str(), "L3" | "L4" | "L5")
+    }));
+}
+
+#[test]
 fn rust_type_parameters_are_distinct_scoped_nodes_with_exact_type_relationships() {
     let source = br#"struct Wrapper<T: Clone> { value: T }
 fn identity<T: Send>(value: T) -> T { value }

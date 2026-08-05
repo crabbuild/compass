@@ -226,6 +226,14 @@ publication. An identity alias such as `pkg.signals -> pkg.signals` is a
 terminal mapping; a multi-node alias cycle remains ambiguous and fails
 closed.
 
+Rust glob imports are collective search scopes rather than ordered aliases.
+When more than one glob is visible at a lexical use site, the resolver unions
+the bounded repository-local declarations exposed by that scope and its
+bounded re-export chains. It publishes a relationship only when one compatible
+declaration remains. Two different eligible declarations, an incomplete
+scope/module search, or an unproven external lowercase symbol remains
+ambiguous or unresolved; source order never breaks the tie.
+
 Python file imports are visible at module scope. Function- and class-local
 imports are indexed only in their owning lexical scope, so they cannot leak to
 sibling functions or become file-owned facts. Each imported item retains its

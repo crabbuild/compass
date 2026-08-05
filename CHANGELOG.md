@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Resolve an unqualified Rust symbol across multiple visible glob imports when
+  their bounded, repository-local union contains exactly one compatible
+  declaration. Competing declarations, excessive glob/search sets, and
+  unproven external lowercase symbols remain unresolved instead of selecting
+  an arbitrary import.
+
 - Preserve Rust associated types as trait- or implementation-scoped type
   aliases and resolve `Self::Type` returns to the exact lexical declaration.
   Each associated alias separately references its concrete realization;

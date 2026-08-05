@@ -76,6 +76,12 @@ struct DirectSubtypeSet {
     complete: bool,
 }
 
+#[derive(Clone, Debug)]
+struct WildcardModuleSet {
+    modules: Vec<String>,
+    complete: bool,
+}
+
 /// Compact slot into the declaration table used by secondary indexes.
 ///
 /// Declaration IDs are long, repeated strings on corpus-scale Java and
@@ -131,7 +137,8 @@ pub struct UniversalResolutionIndex {
     members_by_owner: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
     inventory_by_qualified: AHashMap<(String, String), Vec<String>>,
     aliases: AHashMap<(String, String), Vec<String>>,
-    wildcard_reexports_by_module: AHashMap<(String, String), Vec<String>>,
+    wildcard_bindings_by_scope: AHashMap<(String, String), WildcardModuleSet>,
+    wildcard_reexports_by_module: AHashMap<(String, String), WildcardModuleSet>,
     members: AHashMap<(String, String, String), Vec<String>>,
     returns_by_callable: AHashMap<(String, String), Vec<String>>,
     go_module_path: Option<String>,
@@ -562,11 +569,29 @@ impl UniversalResolutionIndex {
             }
         }
         profile_internal("universal hierarchy indices", &mut profile_started);
-        let mut wildcard_reexports_by_module = AHashMap::<_, Vec<_>>::new();
+        let mut wildcard_bindings_by_scope = AHashMap::<(String, String), WildcardModuleSet>::new();
+        let mut wildcard_reexports_by_module =
+            AHashMap::<(String, String), WildcardModuleSet>::new();
         for binding in bindings.values().filter(|binding| binding.spelling == "*") {
             let Some(scope_id) = binding.scope_id.as_ref() else {
                 continue;
             };
+            let entry = wildcard_bindings_by_scope
+                .entry((binding.language.clone(), scope_id.clone()))
+                .or_insert_with(|| WildcardModuleSet {
+                    modules: Vec::new(),
+                    complete: true,
+                });
+            let target_is_internal = scopes
+                .get(scope_id)
+                .and_then(|scope| scope.owner_declaration_id.as_deref())
+                .and_then(|id| declarations.get(id))
+                .is_some_and(|owner| {
+                    qualified_root(&owner.qualified_name)
+                        == qualified_root(&binding.qualified_target)
+                });
+            entry.complete &= target_is_internal;
+            entry.modules.push(binding.qualified_target.clone());
             if binding.kind == compass_languages::BindingKind::Reexport
                 && let Some(owner) = scopes
                     .get(scope_id)
@@ -575,15 +600,28 @@ impl UniversalResolutionIndex {
             {
                 wildcard_reexports_by_module
                     .entry((binding.language.clone(), owner.qualified_name.clone()))
-                    .or_default()
+                    .or_insert_with(|| WildcardModuleSet {
+                        modules: Vec::new(),
+                        complete: true,
+                    })
+                    .modules
                     .push(binding.qualified_target.clone());
             }
         }
-        for values in wildcard_reexports_by_module.values_mut() {
-            values.sort_unstable();
-            values.dedup();
-            if values.len() > limits.candidates_per_lookup {
-                values.truncate(limits.candidates_per_lookup);
+        for bindings in wildcard_bindings_by_scope.values_mut() {
+            bindings.modules.sort_unstable();
+            bindings.modules.dedup();
+            if bindings.modules.len() > limits.candidates_per_lookup {
+                bindings.complete = false;
+                bindings.modules.truncate(limits.candidates_per_lookup);
+            }
+        }
+        for reexports in wildcard_reexports_by_module.values_mut() {
+            reexports.modules.sort_unstable();
+            reexports.modules.dedup();
+            if reexports.modules.len() > limits.candidates_per_lookup {
+                reexports.complete = false;
+                reexports.modules.truncate(limits.candidates_per_lookup);
             }
         }
         profile_internal("universal wildcard index", &mut profile_started);
@@ -664,6 +702,7 @@ impl UniversalResolutionIndex {
             members_by_owner,
             inventory_by_qualified,
             aliases,
+            wildcard_bindings_by_scope,
             wildcard_reexports_by_module,
             members,
             returns_by_callable,
@@ -882,6 +921,9 @@ impl UniversalResolutionIndex {
         if let Some(decision) = self.resolve_wildcard_binding(language, candidate) {
             return decision;
         }
+        if let Some(decision) = self.resolve_visible_wildcard_bindings(language, candidate) {
+            return decision;
+        }
 
         if candidate.constraints.allow_external
             && let Some(qualified_name) = candidate.constraints.qualified_name.clone()
@@ -930,64 +972,17 @@ impl UniversalResolutionIndex {
         let qualifier = self
             .occurrence(candidate)
             .and_then(|occurrence| occurrence.qualifier.as_deref());
-        let mut modules = vec![binding.qualified_target.clone()];
-        let mut visited = BTreeSet::new();
-        let mut declarations = BTreeSet::<DeclarationSlot>::new();
-        for _ in 0..64 {
-            let Some(module) = modules.pop() else {
-                break;
-            };
-            if !visited.insert(module.clone()) {
-                continue;
+        let declarations = match self.wildcard_declarations(
+            language,
+            std::slice::from_ref(&binding.qualified_target),
+            qualifier,
+            candidate,
+        ) {
+            Ok(declarations) => declarations,
+            Err(candidate_count) => {
+                return Some(ResolutionDecision::Ambiguous { candidate_count });
             }
-            if qualifier.is_none()
-                && let Some(ids) = self.by_module_name.get(&(
-                    language.to_owned(),
-                    module.clone(),
-                    candidate.target_spelling.clone(),
-                ))
-            {
-                declarations.extend(
-                    ids.iter()
-                        .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
-                        .cloned(),
-                );
-            }
-            for qualified in
-                wildcard_qualified_names(&module, qualifier, &candidate.target_spelling)
-            {
-                let qualified = match self.follow_alias(language, &qualified) {
-                    Ok(qualified) => qualified,
-                    Err(candidate_count) => {
-                        return Some(ResolutionDecision::Ambiguous { candidate_count });
-                    }
-                };
-                if let Some(ids) = self
-                    .by_qualified
-                    .get(&(language.to_owned(), qualified.clone()))
-                {
-                    declarations.extend(
-                        ids.iter()
-                            .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
-                            .cloned(),
-                    );
-                }
-                if let Some(ids) = self.member_declarations(language, &qualified, candidate) {
-                    declarations.extend(ids);
-                }
-            }
-            if declarations.len() > self.limits.candidates_per_lookup {
-                return Some(ResolutionDecision::Ambiguous {
-                    candidate_count: declarations.len(),
-                });
-            }
-            if let Some(reexports) = self
-                .wildcard_reexports_by_module
-                .get(&(language.to_owned(), module))
-            {
-                modules.extend(reexports.iter().cloned());
-            }
-        }
+        };
         match declarations.into_iter().collect::<Vec<_>>().as_slice() {
             [only] => Some(ResolutionDecision::Resolved {
                 declaration_id: self.declaration_id(*only)?.to_owned(),
@@ -1020,6 +1015,141 @@ impl UniversalResolutionIndex {
                 candidate_count: many.len(),
             }),
         }
+    }
+
+    fn resolve_visible_wildcard_bindings(
+        &self,
+        language: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        if language != "rust"
+            || candidate.binding_id.is_some()
+            || matches!(
+                candidate.relation,
+                CandidateRelation::Imports | CandidateRelation::Reexports
+            )
+            || self
+                .occurrence(candidate)
+                .is_none_or(|occurrence| occurrence.qualifier.is_some())
+        {
+            return None;
+        }
+        let mut scope_id = candidate.constraints.scope_id.as_deref();
+        let mut visited_scopes = BTreeSet::new();
+        while let Some(current) = scope_id.filter(|scope| visited_scopes.insert(*scope)) {
+            if visited_scopes.len() > self.limits.candidates_per_lookup {
+                return Some(ResolutionDecision::Ambiguous {
+                    candidate_count: visited_scopes.len(),
+                });
+            }
+            if let Some(bindings) = self
+                .wildcard_bindings_by_scope
+                .get(&(language.to_owned(), current.to_owned()))
+            {
+                if !bindings.complete {
+                    return Some(ResolutionDecision::Ambiguous {
+                        candidate_count: bindings.modules.len().saturating_add(1),
+                    });
+                }
+                let declarations = match self.wildcard_declarations(
+                    language,
+                    &bindings.modules,
+                    None,
+                    candidate,
+                ) {
+                    Ok(declarations) => declarations,
+                    Err(candidate_count) => {
+                        return Some(ResolutionDecision::Ambiguous { candidate_count });
+                    }
+                };
+                match declarations.into_iter().collect::<Vec<_>>().as_slice() {
+                    [only] => {
+                        return Some(ResolutionDecision::Resolved {
+                            declaration_id: self.declaration_id(*only)?.to_owned(),
+                            evidence: ResolutionEvidence {
+                                rule: ResolutionRule::WildcardBinding,
+                                candidate_count: 1,
+                            },
+                        });
+                    }
+                    [] => {}
+                    many => {
+                        return Some(ResolutionDecision::Ambiguous {
+                            candidate_count: many.len(),
+                        });
+                    }
+                }
+            }
+            scope_id = self
+                .scopes
+                .get(current)
+                .and_then(|scope| scope.parent_scope_id.as_deref());
+        }
+        None
+    }
+
+    fn wildcard_declarations(
+        &self,
+        language: &str,
+        initial_modules: &[String],
+        qualifier: Option<&str>,
+        candidate: &RelationshipCandidate,
+    ) -> Result<BTreeSet<DeclarationSlot>, usize> {
+        let mut modules = initial_modules.to_vec();
+        let mut visited = BTreeSet::new();
+        let mut declarations = BTreeSet::<DeclarationSlot>::new();
+        while let Some(module) = modules.pop() {
+            if !visited.insert(module.clone()) {
+                continue;
+            }
+            if visited.len() > self.limits.candidates_per_lookup {
+                return Err(visited.len());
+            }
+            if qualifier.is_none()
+                && let Some(ids) = self.by_module_name.get(&(
+                    language.to_owned(),
+                    module.clone(),
+                    candidate.target_spelling.clone(),
+                ))
+            {
+                declarations.extend(
+                    ids.iter()
+                        .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
+                        .cloned(),
+                );
+            }
+            for qualified in
+                wildcard_qualified_names(&module, qualifier, &candidate.target_spelling)
+            {
+                let qualified = self.follow_alias(language, &qualified)?;
+                if let Some(ids) = self
+                    .by_qualified
+                    .get(&(language.to_owned(), qualified.clone()))
+                {
+                    declarations.extend(
+                        ids.iter()
+                            .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
+                            .cloned(),
+                    );
+                }
+                if let Some(ids) = self.member_declarations(language, &qualified, candidate) {
+                    declarations.extend(ids);
+                }
+            }
+            if declarations.len() > self.limits.candidates_per_lookup {
+                return Err(declarations.len());
+            }
+            if let Some(reexports) = self
+                .wildcard_reexports_by_module
+                .get(&(language.to_owned(), module))
+            {
+                if !reexports.complete {
+                    return Err(reexports.modules.len().saturating_add(1));
+                }
+                modules.extend(reexports.modules.iter().cloned());
+            }
+        }
+        Ok(declarations)
     }
 
     fn binding_target_is_internal(&self, binding: &BindingFact) -> bool {
@@ -2443,7 +2573,12 @@ impl UniversalResolutionIndex {
             else {
                 continue;
             };
-            for reexport in reexports {
+            if !reexports.complete {
+                return Some(ResolutionDecision::Ambiguous {
+                    candidate_count: reexports.modules.len().saturating_add(1),
+                });
+            }
+            for reexport in &reexports.modules {
                 let reexported = format!("{reexport}.{spelling}");
                 let canonical = match self.follow_alias(language, &reexported) {
                     Ok(canonical) => canonical,
