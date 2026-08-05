@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Resolve Python `self` and `cls` calls through source-proven inheritance,
+  including a later direct base when every preceding base is a known leaf and
+  class members that directly alias an earlier module-level callable. Rebound
+  and static-method receiver names, overwritten aliases, unknown preceding
+  bases, and incomplete C3 order continue to fail closed.
+
 - Resolve calls through source-proven inheritance when a Python function-local
   class is used as the qualified receiver, while failing closed after a local
   rebinding of that class name.

@@ -528,6 +528,118 @@ fn python_local_class_receivers_emit_bounded_hierarchy_dispatch() {
 }
 
 #[test]
+fn python_bound_method_receivers_emit_hierarchy_dispatch_unless_rebound() {
+    fn call_candidate(source: &[u8]) -> RelationshipCandidate {
+        let mut engine = Engine::default();
+        engine
+            .extract_source_combined(
+                std::path::Path::new("/repo/pkg/models.py"),
+                "pkg/models.py",
+                source,
+            )
+            .expect("extract python")
+            .graph
+            .semantic_evidence
+            .expect("python universal evidence")
+            .candidates
+            .into_iter()
+            .find(|candidate| {
+                candidate.relation == CandidateRelation::Calls
+                    && candidate.target_spelling == "check"
+            })
+            .expect("self.check call candidate")
+    }
+
+    let candidate =
+        call_candidate(b"class Model:\n    def verify(self):\n        return self.check()\n");
+    assert_eq!(
+        candidate.constraints.hierarchy,
+        Some(HierarchyConstraint::ReceiverDispatch {
+            receiver_qualified_name: "pkg.models.Model".to_owned(),
+            strategy: ReceiverDispatchStrategy::C3FromReceiver,
+        })
+    );
+
+    let captured = call_candidate(
+        b"class Model:\n    def verify(self, values):\n        return [self.check() for value in values]\n",
+    );
+    assert_eq!(
+        captured.constraints.hierarchy,
+        Some(HierarchyConstraint::ReceiverDispatch {
+            receiver_qualified_name: "pkg.models.Model".to_owned(),
+            strategy: ReceiverDispatchStrategy::C3FromReceiver,
+        })
+    );
+
+    let mut engine = Engine::default();
+    let rebound = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/pkg/models.py"),
+            "pkg/models.py",
+        b"class Model:\n    def verify(self, replacement):\n        self = replacement\n        return self.check()\n",
+        )
+        .expect("extract rebound receiver")
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    assert!(rebound.candidates.iter().all(|candidate| {
+        candidate.relation != CandidateRelation::Calls || candidate.target_spelling != "check"
+    }));
+
+    let mut engine = Engine::default();
+    let shadowed = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/pkg/models.py"),
+            "pkg/models.py",
+            b"class Model:\n    def verify(self, replacements):\n        return [self.check() for self in replacements]\n",
+        )
+        .expect("extract shadowed comprehension receiver")
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    assert!(shadowed.candidates.iter().all(|candidate| {
+        candidate.relation != CandidateRelation::Calls || candidate.target_spelling != "check"
+    }));
+}
+
+#[test]
+fn python_class_callable_aliases_emit_source_proven_member_bindings() {
+    let source = b"def helper():\n    return None\n\nclass UsesHelper:\n    helper_alias = helper\n\n    def run(self):\n        return self.helper_alias()\n\nclass ReboundAlias:\n    helper_alias = helper\n    helper_alias = object()\n\nclass ShadowedTarget:\n    helper = object()\n    helper_alias = helper\n\nhelper = replacement\n\nclass ReboundTarget:\n    helper_alias = helper\n";
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/pkg/models.py"),
+            "pkg/models.py",
+            source,
+        )
+        .expect("extract python")
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+
+    let aliases = evidence
+        .bindings
+        .iter()
+        .filter(|binding| binding.kind == BindingKind::Member && binding.spelling == "helper_alias")
+        .collect::<Vec<_>>();
+    assert_eq!(aliases.len(), 1);
+    assert_eq!(aliases[0].qualified_target, "pkg.models.helper");
+    let owner = aliases[0]
+        .scope_id
+        .as_deref()
+        .and_then(|scope_id| evidence.scopes.iter().find(|scope| scope.id == scope_id))
+        .and_then(|scope| scope.owner_declaration_id.as_deref())
+        .and_then(|owner_id| {
+            evidence
+                .declarations
+                .iter()
+                .find(|declaration| declaration.id == owner_id)
+        })
+        .expect("member binding owner");
+    assert_eq!(owner.qualified_name, "pkg.models.UsesHelper");
+}
+
+#[test]
 fn universal_declarations_preserve_signature_and_implementation_change_metadata() {
     fn function_declaration(source: &[u8]) -> DeclarationFact {
         let mut engine = Engine::default();

@@ -811,6 +811,73 @@ fn python_super_call_with_multiple_bases_cannot_terminal_match_an_unrelated_meth
 }
 
 #[test]
+fn python_bound_receiver_reaches_a_later_leaf_separated_base() {
+    let source = b"from external import Unknown\nclass Leaf:\n    pass\nclass Branch(Unknown):\n    def run(self):\n        return None\nclass Child(Leaf, Branch):\n    def call(self):\n        return self.run()\n";
+    let extracted = extract("pkg/models.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/models.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let branch_run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.models.Branch::run")
+        .unwrap_or_else(|| panic!("branch method; nodes={:#?}", resolved.nodes));
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == branch_run.id
+            && edge.string("source_location") == "L9"
+            && edge.string("resolution_rule") == "linearized-receiver-dispatch"
+    }));
+}
+
+#[test]
+fn python_bound_receiver_stops_at_an_unknown_preceding_base() {
+    let source = b"from external import Unknown\nclass Known:\n    def run(self):\n        return None\nclass Child(Unknown, Known):\n    def call(self):\n        return self.run()\n";
+    let extracted = extract("pkg/models.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/models.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "calls" || edge.string("source_location") != "L7"
+    }));
+}
+
+#[test]
+fn python_bound_receiver_resolves_a_source_proven_class_callable_alias() {
+    let source = b"def helper():\n    return None\n\nclass UsesHelper:\n    helper_alias = helper\n\n    def run(self):\n        return self.helper_alias()\n";
+    let extracted = extract("pkg/models.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/models.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let helper = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.models.helper")
+        .unwrap_or_else(|| panic!("helper function; nodes={:#?}", resolved.nodes));
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == helper.id
+            && edge.string("source_location") == "L8"
+            && edge.string("resolution_rule") == "linearized-receiver-dispatch"
+    }));
+}
+
+#[test]
 fn python_shadowed_super_call_does_not_bind_the_builtin_hierarchy() {
     let source = b"class Base:\n    def run(self):\n        return None\nclass Child(Base):\n    def run(self, super):\n        super().run()\n";
     let extracted = extract("pkg/models.py", source);

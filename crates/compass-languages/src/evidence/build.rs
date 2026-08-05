@@ -1266,6 +1266,7 @@ impl<'source> DirectAdapterState<'source> {
             self.add_python_decorators(node, &active)?;
             if node.kind() == "class_definition" {
                 self.add_python_bases(node, &active)?;
+                self.add_python_class_member_aliases(node, &active)?;
             }
             self.add_python_annotations(node, &active)?;
             if node.kind() == "function_definition" {
@@ -1295,6 +1296,96 @@ impl<'source> DirectAdapterState<'source> {
                 continue;
             }
             self.walk_python_evidence(child, &active, false)?;
+        }
+        Ok(())
+    }
+
+    fn add_python_class_member_aliases(
+        &mut self,
+        class: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(body) = class.child_by_field_name("body") else {
+            return Ok(());
+        };
+        let mut cursor = body.walk();
+        let statements = body
+            .children(&mut cursor)
+            .filter(|child| child.is_named())
+            .collect::<Vec<_>>();
+        let mut root = class;
+        while let Some(parent) = root.parent() {
+            root = parent;
+        }
+        for (index, statement) in statements.iter().enumerate() {
+            let assignment = if statement.kind() == "assignment" {
+                *statement
+            } else if statement.kind() == "expression_statement" {
+                let Some(assignment) = statement.named_child(0) else {
+                    continue;
+                };
+                if assignment.kind() != "assignment" {
+                    continue;
+                }
+                assignment
+            } else {
+                continue;
+            };
+            let (Some(left), Some(right)) = (
+                assignment.child_by_field_name("left"),
+                assignment.child_by_field_name("right"),
+            ) else {
+                continue;
+            };
+            if left.kind() != "identifier" || right.kind() != "identifier" {
+                continue;
+            }
+            let spelling = self.text(left);
+            let target_name = self.text(right);
+            if !valid_python_identifier(&spelling) || !valid_python_identifier(&target_name) {
+                continue;
+            }
+            if statements[..index].iter().any(|earlier| {
+                let bound = crate::engine::python_bound_names(*earlier, self.source, true);
+                bound.contains(&spelling) || bound.contains(&target_name)
+            }) || statements[index.saturating_add(1)..].iter().any(|later| {
+                crate::engine::python_bound_names(*later, self.source, true).contains(&spelling)
+            }) {
+                continue;
+            }
+            let target =
+                direct_python_definition(root, &target_name, "function_definition", self.source)
+                    .or_else(|| {
+                        direct_python_definition(
+                            root,
+                            &target_name,
+                            "class_definition",
+                            self.source,
+                        )
+                    });
+            let Some(target) = target.filter(|target| target.end_byte() <= class.start_byte())
+            else {
+                continue;
+            };
+            if self.python_name_rebound_between(
+                root,
+                target.end_byte(),
+                class.start_byte(),
+                &target_name,
+            ) {
+                continue;
+            }
+            let Some(target) = self.declarations.get(&target.id()) else {
+                continue;
+            };
+            self.builder.bind(
+                BindingKind::Member,
+                &spelling,
+                &target.qualified_name,
+                Some(&target.fact_id),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, left),
+            )?;
         }
         Ok(())
     }
@@ -5217,6 +5308,23 @@ impl<'source> DirectAdapterState<'source> {
         } else {
             None
         };
+        let python_bound_receiver = if super_dispatch.is_none() && self.language == "python" {
+            qualifier
+                .filter(|qualifier| matches!(*qualifier, "self" | "cls"))
+                .map(|qualifier| {
+                    self.python_bound_method_receiver(call, qualifier, function.start_byte())
+                })
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
+        if self.language == "python"
+            && qualifier.is_some_and(|qualifier| matches!(qualifier, "self" | "cls"))
+            && python_bound_receiver.is_none()
+        {
+            return Ok(());
+        }
         let local_python_receiver = if super_dispatch.is_none() && self.language == "python" {
             qualifier.and_then(|qualifier| {
                 self.python_local_class_receiver(owner, qualifier, function.start_byte(), call)
@@ -5224,16 +5332,25 @@ impl<'source> DirectAdapterState<'source> {
         } else {
             None
         };
-        let receiver_dispatch = super_dispatch.or_else(|| {
-            local_python_receiver
-                .as_ref()
-                .map(
-                    |receiver_qualified_name| HierarchyConstraint::ReceiverDispatch {
-                        receiver_qualified_name: receiver_qualified_name.clone(),
+        let receiver_dispatch = super_dispatch
+            .or_else(|| {
+                python_bound_receiver.map(|receiver_qualified_name| {
+                    HierarchyConstraint::ReceiverDispatch {
+                        receiver_qualified_name,
                         strategy: ReceiverDispatchStrategy::C3FromReceiver,
-                    },
-                )
-        });
+                    }
+                })
+            })
+            .or_else(|| {
+                local_python_receiver
+                    .as_ref()
+                    .map(
+                        |receiver_qualified_name| HierarchyConstraint::ReceiverDispatch {
+                            receiver_qualified_name: receiver_qualified_name.clone(),
+                            strategy: ReceiverDispatchStrategy::C3FromReceiver,
+                        },
+                    )
+            });
         let lookup_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
         let allow_later_file_binding =
             self.language == "python" && matches!(owner.kind.as_str(), "function" | "method");
@@ -5436,6 +5553,75 @@ impl<'source> DirectAdapterState<'source> {
             scope_id = self.scope_parents.get(current).map(String::as_str);
         }
         None
+    }
+
+    fn python_bound_method_receiver(
+        &self,
+        call: Node<'_>,
+        receiver: &str,
+        use_start: usize,
+    ) -> Result<Option<String>, EvidenceError> {
+        let mut ancestor = Some(call);
+        while let Some(node) = ancestor {
+            if node.kind() == "lambda"
+                && crate::engine::python_bound_names(node, self.source, false).contains(receiver)
+            {
+                return Ok(None);
+            }
+            if matches!(
+                node.kind(),
+                "list_comprehension"
+                    | "dictionary_comprehension"
+                    | "set_comprehension"
+                    | "generator_expression"
+            ) && crate::engine::python_bound_names(node, self.source, true).contains(receiver)
+            {
+                return Ok(None);
+            }
+            if node.kind() == "function_definition" {
+                let Some(context) = self.declarations.get(&node.id()) else {
+                    return Ok(None);
+                };
+                if context.kind == "method" {
+                    let Some(parameters) = node.child_by_field_name("parameters") else {
+                        return Ok(None);
+                    };
+                    let Some(parameter) = parameters.named_child(0) else {
+                        return Ok(None);
+                    };
+                    let name = if parameter.kind() == "identifier" {
+                        Some(parameter)
+                    } else {
+                        parameter.child_by_field_name("name").or_else(|| {
+                            let mut cursor = parameter.walk();
+                            parameter
+                                .children(&mut cursor)
+                                .find(|child| child.kind() == "identifier")
+                        })
+                    };
+                    let Some(name) = name.filter(|name| self.text(*name) == receiver) else {
+                        return Ok(None);
+                    };
+                    if python_has_decorator(node, self.source, "staticmethod") {
+                        return Ok(None);
+                    }
+                    let body = node.child_by_field_name("body").unwrap_or(node);
+                    if self.python_name_rebound_between(body, name.end_byte(), use_start, receiver)
+                    {
+                        return Ok(None);
+                    }
+                    return Ok(context.enclosing_type_qualified_name.clone());
+                }
+                if crate::engine::python_bound_names(node, self.source, false).contains(receiver) {
+                    return Ok(None);
+                }
+            }
+            if node.kind() == "class_definition" {
+                return Ok(None);
+            }
+            ancestor = node.parent();
+        }
+        Ok(None)
     }
 
     fn go_selector_receiver_type(
@@ -7386,6 +7572,22 @@ fn python_super_receiver<'tree>(function: Node<'tree>, source: &[u8]) -> Option<
     (callable.kind() == "identifier"
         && callable.utf8_text(source).ok().map(str::trim) == Some("super"))
     .then_some(receiver)
+}
+
+fn python_has_decorator(definition: Node<'_>, source: &[u8], expected: &str) -> bool {
+    let Some(decorated) = definition
+        .parent()
+        .filter(|node| node.kind() == "decorated_definition")
+    else {
+        return false;
+    };
+    let mut cursor = decorated.walk();
+    decorated
+        .children(&mut cursor)
+        .filter(|child| child.kind() == "decorator")
+        .filter_map(|decorator| decorator.utf8_text(source).ok())
+        .map(|decorator| decorator.trim().trim_start_matches('@').trim())
+        .any(|decorator| decorator == expected || decorator.ends_with(&format!(".{expected}")))
 }
 
 fn python_super_call_is_builtin(

@@ -1413,9 +1413,23 @@ impl UniversalResolutionIndex {
                 ) {
                     return decision;
                 }
+                if let Some(decision) = self.resolve_source_proven_later_direct_base(
+                    language,
+                    receiver_qualified_name,
+                    candidate,
+                ) {
+                    return decision;
+                }
             }
             ReceiverDispatchStrategy::C3AfterReceiver => {
                 if let Some(decision) = self.resolve_direct_receiver_successor(
+                    language,
+                    receiver_qualified_name,
+                    candidate,
+                ) {
+                    return decision;
+                }
+                if let Some(decision) = self.resolve_source_proven_later_direct_base(
                     language,
                     receiver_qualified_name,
                     candidate,
@@ -1522,16 +1536,39 @@ impl UniversalResolutionIndex {
         candidate: &RelationshipCandidate,
     ) -> Option<ResolutionDecision> {
         let receiver = self.exact_hierarchy_type(language, receiver_qualified_name)?;
-        let members = self.members_by_owner.get(&(
+        let key = (
             language.to_owned(),
             receiver,
             candidate.target_spelling.clone(),
-        ))?;
-        let eligible = members
-            .iter()
-            .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
+        );
+        let mut eligible = BTreeSet::new();
+        if let Some(members) = self.members_by_owner.get(&key) {
+            eligible.extend(
+                members
+                    .iter()
+                    .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
+                    .copied(),
+            );
+        }
+        if let Some(targets) = self.members.get(&key) {
+            for target in targets {
+                let Some(declarations) = self
+                    .by_qualified
+                    .get(&(language.to_owned(), target.clone()))
+                else {
+                    continue;
+                };
+                eligible.extend(
+                    declarations
+                        .iter()
+                        .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
+                        .copied(),
+                );
+            }
+        }
+        let eligible = eligible
+            .into_iter()
             .take(self.limits.candidates_per_lookup.saturating_add(1))
-            .cloned()
             .collect::<Vec<_>>();
         match eligible.as_slice() {
             [only] => Some(ResolutionDecision::Resolved {
@@ -1546,6 +1583,43 @@ impl UniversalResolutionIndex {
                 candidate_count: many.len(),
             }),
         }
+    }
+
+    fn resolve_source_proven_later_direct_base(
+        &self,
+        language: &str,
+        receiver_qualified_name: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        let receiver = self.exact_hierarchy_type(language, receiver_qualified_name)?;
+        let base_set = self.direct_bases.get(&(language.to_owned(), receiver))?;
+        if !base_set.complete
+            || base_set.links.len() < 2
+            || base_set.links.len() > self.limits.candidates_per_lookup
+        {
+            return None;
+        }
+        for (index, link) in base_set.links.iter().enumerate() {
+            let base = link
+                .qualified_name
+                .as_deref()
+                .and_then(|name| self.exact_hierarchy_type(language, name))?;
+            if index > 0
+                && let Some(decision) =
+                    self.resolve_exact_receiver_member(language, &base, candidate)
+            {
+                return Some(decision);
+            }
+            let mut memo = BTreeMap::new();
+            let mut visiting = BTreeSet::new();
+            let linearization = self
+                .c3_linearization(language, &base, &mut memo, &mut visiting, 0)
+                .ok()?;
+            if linearization.as_slice() != [base.as_str()] {
+                return None;
+            }
+        }
+        None
     }
 
     fn resolve_direct_base(
