@@ -997,6 +997,199 @@ class Widget(base_factory(), metaclass=meta_factory()):
             result.metrics["graphify_edges_coverage_reasons"],
         )
 
+    def test_exact_scoped_field_type_rejects_wrong_same_named_parameter(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"Chunks","kind":"struct",
+               "source_file":"src/chunks.rs","source_location":"L10","language":"rust"},
+              {"id":"field","label":"i","kind":"field",
+               "source_file":"src/chunks.rs","source_location":"L12","language":"rust"},
+              {"id":"exact","label":"I","kind":"parameter",
+               "qualified_name":"crate::chunks::Chunks::<I>",
+               "source_file":"src/chunks.rs","source_location":"L10","language":"rust"},
+              {"id":"wrong","label":"I","kind":"parameter",
+               "qualified_name":"crate::iter::I",
+               "source_file":"src/iter.rs","source_location":"L290","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"field","relation":"contains",
+               "source_file":"src/chunks.rs","source_location":"L12"},
+              {"source":"field","target":"exact","relation":"type_of",
+               "source_file":"src/chunks.rs","source_location":"L12"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_owner","label":"Chunks",
+               "source_file":"src/chunks.rs","source_location":"L10"},
+              {"id":"legacy_wrong","label":"I",
+               "source_file":"src/iter.rs","source_location":"L290"}
+            ],"links":[
+              {"source":"legacy_owner","target":"legacy_wrong","relation":"references",
+               "context":"field","source_file":"src/chunks.rs","source_location":"L12"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:exact_typed_child_target_conflict",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_scoped_parameter_type_rejects_wrong_same_named_parameter(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"extend()","kind":"method",
+               "source_file":"src/extend.rs","source_location":"L10","language":"rust"},
+              {"id":"parameter","label":"values","kind":"parameter",
+               "source_file":"src/extend.rs","source_location":"L12","language":"rust"},
+              {"id":"exact","label":"I","kind":"parameter",
+               "qualified_name":"crate::Extend::extend::<I>",
+               "source_file":"src/extend.rs","source_location":"L10","language":"rust"},
+              {"id":"wrong","label":"I","kind":"parameter",
+               "qualified_name":"crate::iter::I",
+               "source_file":"src/iter.rs","source_location":"L290","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"parameter","relation":"contains",
+               "source_file":"src/extend.rs","source_location":"L12"},
+              {"source":"parameter","target":"exact","relation":"type_of",
+               "source_file":"src/extend.rs","source_location":"L12"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_owner","label":"extend()",
+               "source_file":"src/extend.rs","source_location":"L10"},
+              {"id":"legacy_wrong","label":"I",
+               "source_file":"src/iter.rs","source_location":"L290"}
+            ],"links":[
+              {"source":"legacy_owner","target":"legacy_wrong","relation":"references",
+               "context":"parameter_type","source_file":"src/extend.rs","source_location":"L12"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:exact_typed_child_target_conflict",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_signature_occurrence_rejects_wrong_owner_and_parameter(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"first","label":"extend()","kind":"method",
+               "source_file":"src/extend.rs","source_location":"L10","language":"rust"},
+              {"id":"exact_owner","label":"extend()","kind":"method",
+               "source_file":"src/extend.rs","source_location":"L12","language":"rust"},
+              {"id":"exact_target","label":"I","kind":"parameter",
+               "qualified_name":"crate::Second::extend::<I>",
+               "source_file":"src/extend.rs","source_location":"L12","language":"rust"},
+              {"id":"wrong_target","label":"I","kind":"parameter",
+               "qualified_name":"crate::iter::I",
+               "source_file":"src/iter.rs","source_location":"L290","language":"rust"}
+            ],"links":[
+              {"source":"exact_owner","target":"exact_target","relation":"references",
+               "context":"type_reference","source_file":"src/extend.rs","source_location":"L12"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_first","label":"extend()",
+               "source_file":"src/extend.rs","source_location":"L10"},
+              {"id":"legacy_wrong","label":"I",
+               "source_file":"src/iter.rs","source_location":"L290"}
+            ],"links":[
+              {"source":"legacy_first","target":"legacy_wrong","relation":"references",
+               "context":"parameter_type","source_file":"src/extend.rs","source_location":"L12"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:exact_typed_occurrence_conflict",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_multiple_signature_occurrences_remain_ambiguous(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"extend()","kind":"method",
+               "source_file":"src/extend.rs","source_location":"L12","language":"rust"},
+              {"id":"first","label":"I","kind":"parameter",
+               "qualified_name":"crate::First::<I>",
+               "source_file":"src/first.rs","source_location":"L1","language":"rust"},
+              {"id":"second","label":"I","kind":"parameter",
+               "qualified_name":"crate::Second::<I>",
+               "source_file":"src/second.rs","source_location":"L1","language":"rust"},
+              {"id":"wrong","label":"I","kind":"parameter",
+               "qualified_name":"crate::Wrong::<I>",
+               "source_file":"src/wrong.rs","source_location":"L1","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"first","relation":"references",
+               "source_file":"src/extend.rs","source_location":"L12"},
+              {"source":"owner","target":"second","relation":"references",
+               "source_file":"src/extend.rs","source_location":"L12"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_owner","label":"extend()",
+               "source_file":"src/extend.rs","source_location":"L12"},
+              {"id":"legacy_wrong","label":"I",
+               "source_file":"src/wrong.rs","source_location":"L1"}
+            ],"links":[
+              {"source":"legacy_owner","target":"legacy_wrong","relation":"references",
+               "context":"parameter_type","source_file":"src/extend.rs","source_location":"L12"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["ambiguous_graphify_edges"], 1)
+        self.assertIn(
+            "ambiguous:multiple_typed_occurrences",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_return_occurrence_rejects_wrong_overload_owner(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"first","label":"generate()","kind":"function",
+               "source_file":"src/generate.rs","source_location":"L10","language":"rust"},
+              {"id":"exact_owner","label":"generate()","kind":"function",
+               "source_file":"src/generate.rs","source_location":"L20","language":"rust"},
+              {"id":"return_target","label":"ParallelIterator","kind":"trait",
+               "source_file":"src/iter.rs","source_location":"L100","language":"rust"}
+            ],"links":[
+              {"source":"exact_owner","target":"return_target","relation":"returns",
+               "source_file":"src/generate.rs","source_location":"L20"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_first","label":"generate()",
+               "source_file":"src/generate.rs","source_location":"L10"},
+              {"id":"legacy_target","label":"ParallelIterator",
+               "source_file":"src/iter.rs","source_location":"L100"}
+            ],"links":[
+              {"source":"legacy_first","target":"legacy_target","relation":"references",
+               "context":"return_type","source_file":"src/generate.rs","source_location":"L20"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:exact_return_occurrence_conflict",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
     def test_unique_three_hop_containment_dominates_flat_graphify_ownership(self) -> None:
         containment = compare_documents(
             """

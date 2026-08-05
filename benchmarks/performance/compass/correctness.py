@@ -1133,6 +1133,12 @@ def _classify_edges(
     exact_occurrence_targets: dict[
         tuple[str, str, str, str, str], set[str]
     ] = {}
+    typed_occurrence_pairs: dict[
+        tuple[str, str, str], dict[tuple[str, str], str]
+    ] = {}
+    return_occurrence_pairs: dict[
+        tuple[str, str, str], dict[tuple[str, str], str]
+    ] = {}
     inheritance_occurrence_targets: dict[
         tuple[str, str, str, str], set[str]
     ] = {}
@@ -1141,6 +1147,7 @@ def _classify_edges(
     return_references_by_source: dict[str, list[tuple[str, EdgeFact]]] = {}
     type_alias_realizations: dict[str, set[str]] = {}
     field_type_references: dict[tuple[str, str], list[EdgeFact]] = {}
+    field_type_references_by_source: dict[str, list[tuple[str, EdgeFact]]] = {}
     value_references: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
     containment: dict[str, set[str]] = {}
     containment_parents: dict[str, set[str]] = {}
@@ -1249,6 +1256,32 @@ def _classify_edges(
                     set(),
                 ).add(target)
             if (
+                edge.relation == "references"
+                and target_node is not None
+                and target_node.anchored_definition
+            ):
+                typed_occurrence_pairs.setdefault(
+                    (
+                        edge.occurrence_file,
+                        edge.occurrence_location,
+                        _terminal_symbol(target_node.normalized_label),
+                    ),
+                    {},
+                ).setdefault((source, target), edge.payload_sha256)
+            if (
+                edge.relation == "returns"
+                and target_node is not None
+                and target_node.anchored_definition
+            ):
+                return_occurrence_pairs.setdefault(
+                    (
+                        edge.occurrence_file,
+                        edge.occurrence_location,
+                        _terminal_symbol(target_node.normalized_label),
+                    ),
+                    {},
+                ).setdefault((source, target), edge.payload_sha256)
+            if (
                 edge.relation == "imports"
                 and target_node is not None
                 and target_node.placeholder
@@ -1329,6 +1362,9 @@ def _classify_edges(
         for child in children:
             for target, edge in typed_references_by_source.get(child, []):
                 field_type_references.setdefault((owner, target), []).append(edge)
+                field_type_references_by_source.setdefault(owner, []).append(
+                    (target, edge)
+                )
 
     output: list[Coverage] = []
     for graphify in graphify_edges:
@@ -1495,7 +1531,36 @@ def _classify_edges(
                 continue
         if (
             graphify.relation == "references"
-            and graphify.context in {"field", "generic_arg"}
+            and graphify.context == "parameter_type"
+            and source is not None
+            and target is not None
+            and graphify_target is not None
+        ):
+            signature_pairs = typed_occurrence_pairs.get(
+                (
+                    graphify.occurrence_file,
+                    graphify.occurrence_location,
+                    _terminal_symbol(graphify_target.normalized_label),
+                ),
+                {},
+            )
+            if len(signature_pairs) == 1 and (source, target) not in signature_pairs:
+                output.append(
+                    Coverage(
+                        "rejected",
+                        "exact_typed_occurrence_conflict",
+                        next(iter(signature_pairs.values())),
+                    )
+                )
+                continue
+            if len(signature_pairs) > 1 and (source, target) not in signature_pairs:
+                output.append(
+                    Coverage("ambiguous", "multiple_typed_occurrences", None)
+                )
+                continue
+        if (
+            graphify.relation == "references"
+            and graphify.context in {"field", "generic_arg", "parameter_type"}
             and source is not None
             and target is not None
         ):
@@ -1514,6 +1579,27 @@ def _classify_edges(
                 )
                 continue
             if len(precise_field_types) > 1:
+                output.append(Coverage("ambiguous", "multiple_field_types", None))
+                continue
+            occurrence_field_types = [
+                (field_type, edge)
+                for field_type, edge in field_type_references_by_source.get(source, [])
+                if _occurrence_match(graphify, edge, occurrence_oracle) is not None
+            ]
+            corrected_targets = {
+                canonical_endpoints.get(field_type, field_type)
+                for field_type, _ in occurrence_field_types
+            }
+            if len(corrected_targets) == 1 and target not in corrected_targets:
+                output.append(
+                    Coverage(
+                        "rejected",
+                        "exact_typed_child_target_conflict",
+                        occurrence_field_types[0][1].payload_sha256,
+                    )
+                )
+                continue
+            if len(corrected_targets) > 1:
                 output.append(Coverage("ambiguous", "multiple_field_types", None))
                 continue
         if (
@@ -1807,6 +1893,29 @@ def _classify_edges(
                     Coverage("ambiguous", "multiple_typed_reference_facts", None)
                 )
                 continue
+            if graphify.context == "return_type" and graphify_target is not None:
+                return_pairs = return_occurrence_pairs.get(
+                    (
+                        graphify.occurrence_file,
+                        graphify.occurrence_location,
+                        _terminal_symbol(graphify_target.normalized_label),
+                    ),
+                    {},
+                )
+                if len(return_pairs) == 1 and (source, target) not in return_pairs:
+                    output.append(
+                        Coverage(
+                            "rejected",
+                            "exact_return_occurrence_conflict",
+                            next(iter(return_pairs.values())),
+                        )
+                    )
+                    continue
+                if len(return_pairs) > 1 and (source, target) not in return_pairs:
+                    output.append(
+                        Coverage("ambiguous", "multiple_return_occurrences", None)
+                    )
+                    continue
 
         direct = direct_index.get((graphify.relation, source, target), [])
         if graphify.relation in {"extends", "implements"}:
