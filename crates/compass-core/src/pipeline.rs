@@ -1077,8 +1077,7 @@ fn publish_fact_neutral_incremental(
                 "fact-neutral SQLite publication is missing its prior graph".to_owned(),
             )
         })?;
-        let (metrics, seal) =
-            publish_graph_and_store_file_node_delta(&output_dir, previous, current)?;
+        let (metrics, seal) = publish_graph_and_store_delta(&output_dir, previous, current)?;
         (Some(metrics), Some(seal))
     } else {
         let receipt = write_atomic_with_digest(&graph_path, |writer| {
@@ -1952,7 +1951,7 @@ fn build_graph_inner(
                 graph.error = Some(format!("{language} extraction failed: empty document"));
             }
             compact_extraction(&mut graph);
-            let source = if needs_resolver_source_text {
+            let source = if needs_resolver_source_text && is_php_source_path(path) {
                 (
                     path.to_string_lossy().into_owned(),
                     String::from_utf8_lossy(&bytes).into_owned(),
@@ -2316,7 +2315,7 @@ fn build_graph_inner(
     let read_cached_source = |path: &PathBuf| {
         if fresh_paths.contains(path) {
             None
-        } else if needs_resolver_source_text {
+        } else if needs_resolver_source_text && is_php_source_path(path) {
             read_source(path)
         } else {
             // Cross-file resolution uses the keys as the complete language
@@ -2529,17 +2528,12 @@ fn build_graph_inner(
         let published_nodes = published.document.nodes.len();
         let published_edges = published.document.links.len();
         let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
-            let (metrics, seal) = if let Some(previous) =
-                load_file_node_delta_base(&output_dir, &published.document)
-            {
-                publish_graph_and_store_file_node_delta(
-                    &output_dir,
-                    &previous,
-                    &published.document,
-                )?
-            } else {
-                publish_graph_and_store_from_canonical(&output_dir, &published.document)?
-            };
+            let (metrics, seal) =
+                if let Some(previous) = load_graph_delta_base(&output_dir, &published.document) {
+                    publish_graph_and_store_delta(&output_dir, &previous, &published.document)?
+                } else {
+                    publish_graph_and_store_from_canonical(&output_dir, &published.document)?
+                };
             (Some(metrics), Some(seal))
         } else {
             let graph_path = output_dir.join("graph.json");
@@ -3025,13 +3019,12 @@ fn build_graph_inner(
     let omissions = published.omissions;
     let serialization_started = Instant::now();
     let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
-        let (metrics, seal) = if let Some(previous) =
-            load_file_node_delta_base(&output_dir, &published.document)
-        {
-            publish_graph_and_store_file_node_delta(&output_dir, &previous, &published.document)?
-        } else {
-            publish_graph_and_store_from_canonical(&output_dir, &published.document)?
-        };
+        let (metrics, seal) =
+            if let Some(previous) = load_graph_delta_base(&output_dir, &published.document) {
+                publish_graph_and_store_delta(&output_dir, &previous, &published.document)?
+            } else {
+                publish_graph_and_store_from_canonical(&output_dir, &published.document)?
+            };
         (Some(metrics), Some(seal))
     } else {
         let graph_path = output_dir.join("graph.json");
@@ -3509,18 +3502,15 @@ fn ensure_store_snapshot(output_dir: &Path) -> Result<StorePublishMetrics, CoreE
 }
 
 /// Return the previous graph only when the current publication can use the
-/// strict file-node delta path. The check is intentionally cheap and does not
-/// serialize records; the snapshot layer repeats its bounded validation before
-/// touching the active store.
-fn load_file_node_delta_base(
-    output_dir: &Path,
-    current: &V1GraphDocument,
-) -> Option<V1GraphDocument> {
+/// bounded graph-delta path. The check is intentionally cheap and does not
+/// serialize records; the snapshot layer repeats its validation before touching
+/// the active store.
+fn load_graph_delta_base(output_dir: &Path, current: &V1GraphDocument) -> Option<V1GraphDocument> {
     let previous = V1GraphDocument::load(&output_dir.join("graph.json")).ok()?;
-    file_node_delta_candidate(&previous, current).then_some(previous)
+    graph_delta_candidate(&previous, current).then_some(previous)
 }
 
-fn file_node_delta_candidate(previous: &V1GraphDocument, current: &V1GraphDocument) -> bool {
+fn graph_delta_candidate(previous: &V1GraphDocument, current: &V1GraphDocument) -> bool {
     if previous.directed != current.directed || previous.multigraph != current.multigraph {
         return false;
     }
@@ -3534,25 +3524,22 @@ fn file_node_delta_candidate(previous: &V1GraphDocument, current: &V1GraphDocume
         .iter()
         .map(|node| (node.id.as_str(), node))
         .collect::<BTreeMap<_, _>>();
-    if previous_nodes.len() != current_nodes.len() || previous_nodes.keys().ne(current_nodes.keys())
-    {
-        return false;
-    }
-    let mut changed_file = false;
-    for (id, current_node) in &current_nodes {
-        let Some(previous_node) = previous_nodes.get(id) else {
-            return false;
-        };
-        if *previous_node != *current_node {
-            if current_node.kind != NodeKind::File {
-                return false;
-            }
-            changed_file = true;
-        }
-    }
-    if !changed_file {
-        return false;
-    }
+    let changed_nodes = previous_nodes
+        .iter()
+        .filter(|(id, previous_node)| {
+            current_nodes
+                .get(*id)
+                .is_none_or(|current| *current != **previous_node)
+        })
+        .count()
+        + current_nodes
+            .iter()
+            .filter(|(id, current_node)| {
+                previous_nodes
+                    .get(*id)
+                    .is_none_or(|previous| *previous != **current_node)
+            })
+            .count();
     let previous_edges = previous
         .links
         .iter()
@@ -3563,22 +3550,35 @@ fn file_node_delta_candidate(previous: &V1GraphDocument, current: &V1GraphDocume
         .iter()
         .map(|edge| (edge.id.as_str(), edge))
         .collect::<BTreeMap<_, _>>();
-    if previous_edges.len() != current_edges.len() || previous_edges != current_edges {
+    let changed_edges = previous_edges
+        .iter()
+        .filter(|(id, previous_edge)| {
+            current_edges
+                .get(*id)
+                .is_none_or(|current| *current != **previous_edge)
+        })
+        .count()
+        + current_edges
+            .iter()
+            .filter(|(id, current_edge)| {
+                previous_edges
+                    .get(*id)
+                    .is_none_or(|previous| *previous != **current_edge)
+            })
+            .count();
+    let changed_records = changed_nodes.saturating_add(changed_edges);
+    let total_records = previous
+        .nodes
+        .len()
+        .saturating_add(previous.links.len())
+        .max(1);
+    if changed_records == 0 {
+        return previous.graph != current.graph;
+    }
+    if changed_records > total_records.saturating_div(4).max(64) {
         return false;
     }
-    let previous_files = previous
-        .graph
-        .files
-        .iter()
-        .map(|file| (file.path.as_str(), file.id.as_str()))
-        .collect::<BTreeMap<_, _>>();
-    let current_files = current
-        .graph
-        .files
-        .iter()
-        .map(|file| (file.path.as_str(), file.id.as_str()))
-        .collect::<BTreeMap<_, _>>();
-    previous_files == current_files
+    true
 }
 
 fn publish_graph_and_store_from_canonical(
@@ -3610,7 +3610,7 @@ fn publish_graph_and_store_from_canonical(
     Ok((metrics, graph_seal))
 }
 
-fn publish_graph_and_store_file_node_delta(
+fn publish_graph_and_store_delta(
     output_dir: &Path,
     previous: &V1GraphDocument,
     graph: &V1GraphDocument,
@@ -3627,7 +3627,7 @@ fn publish_graph_and_store_file_node_delta(
     let canonical = canonical_graph_document_presorted(graph);
     let (graph_receipt, content) = rayon::join(
         || write_json_atomic_with_digest(&graph_path, &canonical),
-        || builder.prepare_file_node_delta(&store, previous, graph),
+        || builder.prepare_graph_delta(&store, previous, graph),
     );
     let graph_receipt = graph_receipt?;
     let graph_seal = ArtifactSeal {
@@ -3697,6 +3697,11 @@ const DEFAULT_AST_WORKER_CAP: usize = 8;
 
 fn should_parallel_extract(options: &BuildOptions, missing: usize, sources: usize) -> bool {
     missing >= 256 || sources >= 256 || options.max_workers.is_some_and(|workers| workers > 1)
+}
+
+fn is_php_source_path(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("php"))
 }
 
 fn semantic_layer_is_empty(layer: &SemanticLayer) -> bool {
@@ -6072,6 +6077,13 @@ mod tests {
     fn default_ast_workers_stay_within_the_memory_bound() {
         assert!(default_ast_workers() > 0);
         assert!(default_ast_workers() <= DEFAULT_AST_WORKER_CAP);
+    }
+
+    #[test]
+    fn resolver_source_text_is_scoped_to_php_files() {
+        assert!(is_php_source_path(Path::new("src/controller.PHP")));
+        assert!(!is_php_source_path(Path::new("src/controller.py")));
+        assert!(!is_php_source_path(Path::new("src/controller")));
     }
 
     #[test]

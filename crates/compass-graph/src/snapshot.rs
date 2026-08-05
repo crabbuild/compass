@@ -627,6 +627,61 @@ impl GraphSnapshotBuilder {
         })
     }
 
+    /// Prepare a bounded graph delta when an incremental edit changes graph
+    /// records or relationships. Unchanged immutable index trees are reused;
+    /// only indexes whose logical projection depends on changed records are
+    /// rebuilt. This preserves the full graph contract while avoiding a full
+    /// snapshot rewrite for small topology edits.
+    pub fn prepare_graph_delta<S: Store + ?Sized>(
+        &self,
+        store: &S,
+        previous: &GraphDocument,
+        current: &GraphDocument,
+    ) -> Result<PreparedGraphSnapshotContent, SnapshotError> {
+        validate_code_graph(current)
+            .map_err(|error| SnapshotError::Corrupt(format!("graph validation failed: {error}")))?;
+        validate_graph_delta(previous, current)?;
+        let reader = GraphSnapshotReader::open_active(store)?.ok_or_else(|| {
+            SnapshotError::Unsupported("graph delta requires an active snapshot".to_owned())
+        })?;
+        let previous_snapshot_id = snapshot_identity(previous)?;
+        if reader.selector().snapshot_id != previous_snapshot_id
+            || reader.manifest().node_count != previous.nodes.len() as u64
+            || reader.manifest().edge_count != previous.links.len() as u64
+        {
+            return Err(SnapshotError::Corrupt(
+                "active snapshot does not match the previous graph".to_owned(),
+            ));
+        }
+
+        let changed_indexes = graph_delta_indexes(previous, current);
+        if changed_indexes.is_empty() {
+            return Err(SnapshotError::Corrupt(
+                "graph delta contains no changed index projections".to_owned(),
+            ));
+        }
+        let mut writer = ObjectWriter::new(store)?;
+        let mut roots = reader.manifest().roots.clone();
+        for root in &mut roots {
+            if !changed_indexes.contains(&root.index) {
+                continue;
+            }
+            let term_postings =
+                (root.index == IndexKind::Terms).then(|| build_term_postings(current));
+            let entries = build_index(current, root.index, term_postings.as_ref())?;
+            root.entry_count = entries.len() as u64;
+            root.digest = build_index_tree(&mut writer, root.index, entries)?;
+        }
+        let stats = writer.finish()?;
+        Ok(PreparedGraphSnapshotContent {
+            snapshot_id: snapshot_identity(current)?,
+            node_count: current.nodes.len() as u64,
+            edge_count: current.links.len() as u64,
+            roots,
+            stats,
+        })
+    }
+
     /// Bind prepared index content to the digest of the exact compact
     /// canonical JSON bytes and publish the immutable manifest.
     pub fn finish_content<S: Store + ?Sized>(
@@ -2012,6 +2067,47 @@ fn validate_file_node_delta(
         ));
     }
     Ok(())
+}
+
+fn validate_graph_delta(
+    previous: &GraphDocument,
+    current: &GraphDocument,
+) -> Result<(), SnapshotError> {
+    if previous.directed != current.directed || previous.multigraph != current.multigraph {
+        return Err(SnapshotError::Unsupported(
+            "graph delta changed graph directionality".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn graph_delta_indexes(previous: &GraphDocument, current: &GraphDocument) -> BTreeSet<IndexKind> {
+    let mut changed = BTreeSet::new();
+    if previous.graph != current.graph {
+        changed.insert(IndexKind::Metadata);
+    }
+    if previous.graph.files != current.graph.files {
+        changed.insert(IndexKind::Files);
+    }
+
+    let nodes_changed = previous.nodes != current.nodes;
+    if nodes_changed {
+        changed.insert(IndexKind::Nodes);
+        changed.insert(IndexKind::Names);
+        changed.insert(IndexKind::Communities);
+    }
+
+    let links_changed = previous.links != current.links;
+    if links_changed {
+        changed.insert(IndexKind::Edges);
+        changed.insert(IndexKind::Outgoing);
+        changed.insert(IndexKind::Incoming);
+    }
+    if nodes_changed || links_changed {
+        // Alias edges contribute searchable terms for their target nodes.
+        changed.insert(IndexKind::Terms);
+    }
+    changed
 }
 
 fn file_node_index_projection_equal(previous: &NodeRecord, current: &NodeRecord) -> bool {

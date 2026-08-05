@@ -15,6 +15,12 @@ use super::model::{
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate_evidence};
 
+// Go selector attribution can cross a closure, a multi-return call, and a
+// range expression before reaching the receiver type. Keep that traversal
+// bounded, but allow the real-world chain without falling back to an
+// unresolved method.
+const GO_TYPE_INFERENCE_DEPTH_LIMIT: usize = 16;
+
 /// Bounded direct-construction API shared by hard-cut language adapters.
 pub struct EvidenceBuilder {
     batch: SemanticEvidenceBatch,
@@ -2844,45 +2850,100 @@ impl<'source> DirectAdapterState<'source> {
     }
 
     fn collect_rust_generic_bounds(&mut self, callable: Node<'_>, owner: &DeclarationContext) {
-        let Some(parameters) = callable.child_by_field_name("type_parameters") else {
-            return;
-        };
-        let mut parameter_cursor = parameters.walk();
-        for parameter in parameters
-            .children(&mut parameter_cursor)
-            .filter(|child| child.kind() == "type_parameter")
-        {
-            let Some(name_node) = parameter.child_by_field_name("name") else {
-                continue;
-            };
-            let name = self.text(name_node);
-            if name.is_empty() {
-                continue;
-            }
-            let mut bounds = Vec::new();
-            let mut pending = vec![parameter];
-            while let Some(descendant) = pending.pop() {
-                if descendant.kind() == "trait_bound"
-                    && let Some(bound) = rust_trait_bound_path(&self.text(descendant))
-                {
-                    bounds.push(bound);
+        if let Some(parameters) = callable.child_by_field_name("type_parameters") {
+            let mut parameter_cursor = parameters.walk();
+            for parameter in parameters
+                .children(&mut parameter_cursor)
+                .filter(|child| child.kind() == "type_parameter")
+            {
+                let Some(name_node) = parameter.child_by_field_name("name") else {
+                    continue;
+                };
+                let name = self.text(name_node);
+                if name.is_empty() {
+                    continue;
                 }
-                let mut cursor = descendant.walk();
-                pending.extend(
-                    descendant
-                        .children(&mut cursor)
-                        .filter(|child| child.is_named()),
-                );
-            }
-            bounds.sort_unstable();
-            bounds.dedup();
-            if !bounds.is_empty() {
-                self.rust_generic_bounds
-                    .entry(owner.scope_id.clone())
-                    .or_default()
-                    .insert(name, bounds);
+                let mut bounds = Vec::new();
+                if let Some(bound_nodes) = parameter.child_by_field_name("bounds") {
+                    self.collect_rust_trait_bound_paths(bound_nodes, &mut bounds);
+                } else {
+                    // Keep compatibility with older Rust grammars that exposed
+                    // bounds as `trait_bound` descendants instead of a
+                    // `trait_bounds` field.
+                    let mut pending = vec![parameter];
+                    while let Some(descendant) = pending.pop() {
+                        if descendant.kind() == "trait_bound"
+                            && let Some(bound) = rust_trait_bound_path(&self.text(descendant))
+                        {
+                            bounds.push(bound);
+                        }
+                        let mut cursor = descendant.walk();
+                        pending.extend(
+                            descendant
+                                .children(&mut cursor)
+                                .filter(|child| child.is_named()),
+                        );
+                    }
+                }
+                self.record_rust_generic_bounds(&owner.scope_id, &name, bounds);
             }
         }
+
+        let mut callable_cursor = callable.walk();
+        for where_clause in callable
+            .children(&mut callable_cursor)
+            .filter(|child| child.kind() == "where_clause")
+        {
+            let mut predicate_cursor = where_clause.walk();
+            for predicate in where_clause
+                .children(&mut predicate_cursor)
+                .filter(|child| child.kind() == "where_predicate")
+            {
+                let Some(left) = predicate.child_by_field_name("left") else {
+                    continue;
+                };
+                let name = self.text(left);
+                if name.is_empty() {
+                    continue;
+                }
+                let Some(bound_nodes) = predicate.child_by_field_name("bounds") else {
+                    continue;
+                };
+                let mut bounds = Vec::new();
+                self.collect_rust_trait_bound_paths(bound_nodes, &mut bounds);
+                self.record_rust_generic_bounds(&owner.scope_id, &name, bounds);
+            }
+        }
+    }
+
+    fn collect_rust_trait_bound_paths(&self, node: Node<'_>, output: &mut Vec<String>) {
+        if matches!(node.kind(), "trait_bound" | "higher_ranked_trait_bound")
+            || rust_is_type_node(node.kind())
+        {
+            if let Some(bound) = rust_trait_bound_path(&self.text(node)) {
+                output.push(bound);
+            }
+            return;
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_rust_trait_bound_paths(child, output);
+        }
+    }
+
+    fn record_rust_generic_bounds(&mut self, scope_id: &str, name: &str, bounds: Vec<String>) {
+        if name.is_empty() || bounds.is_empty() {
+            return;
+        }
+        let entry = self
+            .rust_generic_bounds
+            .entry(scope_id.to_owned())
+            .or_default()
+            .entry(name.to_owned())
+            .or_default();
+        entry.extend(bounds);
+        entry.sort_unstable();
+        entry.dedup();
     }
 
     fn collect_rust_parameter_bindings(
@@ -3802,28 +3863,30 @@ impl<'source> DirectAdapterState<'source> {
                 .rust_receiver_method_target(enclosing, spelling)
                 .or_else(|| Some(rust_join_qualified(enclosing, spelling)));
         }
+        let generic_receiver_type = self
+            .rust_value_type_for(
+                owner,
+                qualified_binding_head(qualifier),
+                use_start,
+                Some(use_node),
+            )
+            .and_then(rust_nominal_type_path);
+        if let Some(receiver_type) = generic_receiver_type.as_deref()
+            && let Some(method) =
+                self.rust_generic_receiver_method_target(owner, receiver_type, spelling, use_start)
+        {
+            return Some(method);
+        }
         if let Some(receiver_type) =
             self.rust_field_receiver_type(owner, qualifier, use_start, use_node)
         {
             return Some(rust_join_qualified(&receiver_type, spelling));
         }
-        if let Some(raw_type) = self.rust_value_type_for(
-            owner,
-            qualified_binding_head(qualifier),
-            use_start,
-            Some(use_node),
-        ) && let Some(nominal_type) = rust_nominal_type_path(raw_type)
-        {
-            if let Some(method) =
-                self.rust_generic_receiver_method_target(owner, &nominal_type, spelling, use_start)
-            {
-                return Some(method);
-            }
-            if let Some(receiver_type) =
+        if let Some(nominal_type) = generic_receiver_type
+            && let Some(receiver_type) =
                 rust_qualify_evidence_path(self, owner, &nominal_type, use_start)
-            {
-                return Some(rust_join_qualified(&receiver_type, spelling));
-            }
+        {
+            return Some(rust_join_qualified(&receiver_type, spelling));
         }
         if let Some(target) = self.local_target_for(owner, qualifier) {
             if let Some(method) = self.rust_receiver_method_target(target, spelling) {
@@ -5099,7 +5162,7 @@ impl<'source> DirectAdapterState<'source> {
         depth: usize,
         visited: &mut HashSet<String>,
     ) -> Option<String> {
-        if depth >= 8 {
+        if depth >= GO_TYPE_INFERENCE_DEPTH_LIMIT {
             return None;
         }
         match function.kind() {
@@ -5180,7 +5243,7 @@ impl<'source> DirectAdapterState<'source> {
         depth: usize,
         visited: &mut HashSet<String>,
     ) -> Option<String> {
-        if depth >= 8 || !visited.insert(name.to_owned()) {
+        if depth >= GO_TYPE_INFERENCE_DEPTH_LIMIT || !visited.insert(name.to_owned()) {
             return None;
         }
         let result = go_enclosing_range_value(use_node, name, self.source)
@@ -5219,7 +5282,7 @@ impl<'source> DirectAdapterState<'source> {
         visited: &mut HashSet<String>,
         output_index: Option<u32>,
     ) -> Option<String> {
-        if depth >= 8 {
+        if depth >= GO_TYPE_INFERENCE_DEPTH_LIMIT {
             return None;
         }
         match expression.kind() {
@@ -5301,7 +5364,7 @@ impl<'source> DirectAdapterState<'source> {
         visited: &mut HashSet<String>,
         output_index: Option<u32>,
     ) -> Option<String> {
-        if depth >= 8 {
+        if depth >= GO_TYPE_INFERENCE_DEPTH_LIMIT {
             return None;
         }
         match expression.kind() {
