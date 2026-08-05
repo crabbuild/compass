@@ -524,6 +524,75 @@ fn invoke<T: Render>(container: T) {
 }
 
 #[test]
+fn rust_where_clause_generic_receiver_resolves_to_trait_method() {
+    let source = br#"trait IndexedParallelIterator {
+    fn with_producer(&self);
+}
+fn bridge<I>(par_iter: I)
+where
+    I: IndexedParallelIterator,
+{
+    par_iter.with_producer();
+}
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let with_producer = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name") == "crate::IndexedParallelIterator::with_producer"
+        })
+        .expect("IndexedParallelIterator::with_producer trait method");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == with_producer.id
+            && edge.string("source_location") == "L8"
+    }));
+}
+
+#[test]
+fn rust_cross_module_where_clause_generic_receiver_resolves_to_trait_method() {
+    let provider_source = b"pub trait IndexedParallelIterator {\n    fn with_producer(&self);\n}\n";
+    let caller_source = b"use super::IndexedParallelIterator;\nfn bridge<I>(par_iter: I)\nwhere\n    I: IndexedParallelIterator,\n{\n    par_iter.with_producer();\n}\n";
+    let provider = extract("src/iter/mod.rs", provider_source);
+    let caller = extract("src/iter/plumbing/mod.rs", caller_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, caller],
+        &HashMap::from([
+            (
+                "src/iter/mod.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/iter/plumbing/mod.rs".to_owned(),
+                String::from_utf8(caller_source.to_vec()).expect("caller source"),
+            ),
+        ]),
+    );
+    let with_producer = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name") == "crate::iter::IndexedParallelIterator::with_producer"
+        })
+        .expect("IndexedParallelIterator::with_producer trait method");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == with_producer.id
+            && edge.string("source_location") == "L6"
+    }));
+}
+
+#[test]
 fn rust_cross_file_generic_trait_bound_receiver_keeps_imported_trait_owner() {
     let provider_source = b"pub trait Render { fn render(&self); }\n";
     let caller_source = b"use crate::api::Render;\nfn invoke<T: Render>(container: T) {\n    container.render();\n}\n";
@@ -1339,6 +1408,127 @@ func caller(command *Command) {
                     && edge.string("source_location") == location
             }),
             "missing Go call at {location}"
+        );
+    }
+}
+
+#[test]
+fn go_cobra_shape_preserves_nested_closure_and_multi_return_method_attribution() {
+    let go_source = br#"package pkg
+type ShellCompDirective int
+type Command struct { helpCommand *Command }
+func (*Command) Root() *Command { return nil }
+func (*Command) Find(args []string) (*Command, []string, error) { return nil, nil, nil }
+func (*Command) Commands() []*Command { return nil }
+func (*Command) IsAvailableCommand() bool { return true }
+func (*Command) Name() string { return "" }
+func (c *Command) initDefaultHelpCmd() {
+    c.helpCommand = &Command{}
+    c.helpCommand.ValidArgsFunction = func(cmd *Command, args []string, toComplete string) ([]string, ShellCompDirective) {
+        cmd, _, _ := c.Root().Find(args)
+        for _, subCmd := range cmd.Commands() {
+            if subCmd.IsAvailableCommand() || subCmd == cmd.helpCommand {
+                _ = subCmd.Name()
+            }
+        }
+        return nil, 0
+    }
+}
+"#;
+    let extracted = extract("pkg/command.go", go_source);
+    let sources = HashMap::from([(
+        "pkg/command.go".to_owned(),
+        String::from_utf8(go_source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let command_methods = ["Root", "Find", "Commands", "IsAvailableCommand", "Name"]
+        .into_iter()
+        .map(|method| {
+            resolved
+                .nodes
+                .iter()
+                .find(|node| node.string("qualified_name") == format!("pkg.Command::{method}"))
+                .unwrap_or_else(|| panic!("Command.{method} declaration"))
+                .id
+                .clone()
+        })
+        .collect::<Vec<_>>();
+
+    for (target, location) in command_methods
+        .into_iter()
+        .zip(["L12", "L12", "L13", "L14", "L15"])
+    {
+        assert!(
+            resolved.edges.iter().any(|edge| {
+                edge.string("relation") == "calls"
+                    && edge.target == target
+                    && edge.string("source_location") == location
+            }),
+            "missing Cobra-shaped Go call at {location}"
+        );
+    }
+}
+
+#[test]
+fn go_cobra_exact_find_guard_preserves_range_element_method_attribution() {
+    let go_source = br#"package pkg
+import "strings"
+type ShellCompDirective int
+type Completion struct{}
+type Command struct {
+    helpCommand *Command
+    ValidArgsFunction func(*Command, []string, string) ([]Completion, ShellCompDirective)
+    Short string
+}
+func (*Command) Root() *Command { return nil }
+func (*Command) Find(args []string) (*Command, []string, error) { return nil, nil, nil }
+func (*Command) Commands() []*Command { return nil }
+func (*Command) IsAvailableCommand() bool { return true }
+func (*Command) Name() string { return "" }
+func (*Command) HasSubCommands() bool { return true }
+func CompletionWithDesc(choice string, description string) Completion { return Completion{} }
+func (c *Command) initDefaultHelpCmd() {
+    if !c.HasSubCommands() { return }
+    if c.helpCommand == nil {
+        c.helpCommand = &Command{
+            ValidArgsFunction: func(c *Command, args []string, toComplete string) ([]Completion, ShellCompDirective) {
+                var completions []Completion
+                cmd, _, e := c.Root().Find(args)
+                if e != nil { return nil, 0 }
+                if cmd == nil { cmd = c.Root() }
+                for _, subCmd := range cmd.Commands() {
+                    if subCmd.IsAvailableCommand() || subCmd == cmd.helpCommand {
+                        if strings.HasPrefix(subCmd.Name(), toComplete) {
+                            completions = append(completions, CompletionWithDesc(subCmd.Name(), subCmd.Short))
+                        }
+                    }
+                }
+                return completions, 0
+            },
+        }
+    }
+}
+"#;
+    let extracted = extract("pkg/command.go", go_source);
+    let sources = HashMap::from([(
+        "pkg/command.go".to_owned(),
+        String::from_utf8(go_source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    for method in ["Root", "Find", "Commands", "IsAvailableCommand", "Name"] {
+        let target = resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == format!("pkg.Command::{method}"))
+            .unwrap_or_else(|| panic!("Command.{method} declaration"))
+            .id
+            .clone();
+        assert!(
+            resolved
+                .edges
+                .iter()
+                .any(|edge| { edge.string("relation") == "calls" && edge.target == target }),
+            "missing Cobra exact-shape Go call to {method}"
         );
     }
 }

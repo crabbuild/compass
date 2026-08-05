@@ -317,6 +317,84 @@ fn file_node_delta_reuses_unaffected_index_trees() -> Result<(), Box<dyn Error>>
 }
 
 #[test]
+fn graph_delta_rebuilds_relationship_indexes_without_rewriting_nodes() -> Result<(), Box<dyn Error>>
+{
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let previous = graph();
+    let first = builder.prepare(&store, &previous)?;
+    builder.activate(&store, &first)?;
+
+    let mut current = previous.clone();
+    current.graph.build.generation_id = "next-generation".to_owned();
+    let mut replacement = current.links.pop().ok_or("relationship missing")?;
+    replacement.source = "b".to_owned();
+    replacement.target = "a".to_owned();
+    replacement.occurrence_rule = OccurrenceRule::new("third");
+    replacement.id = edge_id(
+        &replacement.source,
+        replacement.kind,
+        &replacement.target,
+        replacement.relationship_site.as_ref(),
+        replacement
+            .occurrence_rule
+            .as_ref()
+            .map(OccurrenceRule::as_str),
+    );
+    replacement.key.clone_from(&replacement.id);
+    current.links.push(replacement.clone());
+
+    let content = builder.prepare_graph_delta(&store, &previous, &current)?;
+    let graph_bytes = canonical_graph_json(&current)?;
+    let graph_digest = format!("{:x}", sha2::Sha256::digest(&graph_bytes));
+    let delta = builder.finish_content(&store, content, graph_digest, graph_bytes.len() as u64)?;
+    let first_roots = first
+        .manifest
+        .roots
+        .iter()
+        .map(|root| (root.index, root.digest.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let delta_roots = delta
+        .manifest
+        .roots
+        .iter()
+        .map(|root| (root.index, root.digest.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for index in [
+        IndexKind::Nodes,
+        IndexKind::Names,
+        IndexKind::Files,
+        IndexKind::Communities,
+        IndexKind::Diagnostics,
+    ] {
+        assert_eq!(
+            first_roots.get(&index),
+            delta_roots.get(&index),
+            "{index:?}"
+        );
+    }
+    for index in [
+        IndexKind::Metadata,
+        IndexKind::Edges,
+        IndexKind::Outgoing,
+        IndexKind::Incoming,
+    ] {
+        assert_ne!(
+            first_roots.get(&index),
+            delta_roots.get(&index),
+            "{index:?}"
+        );
+    }
+
+    builder.activate(&store, &delta)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    assert_eq!(reader.get_edge(&replacement.id)?, Some(replacement));
+    assert_eq!(reader.outgoing("b", limits(4))?.len(), 1);
+    assert_eq!(reader.export_graph()?, graph_sorted_with(&current));
+    Ok(())
+}
+
+#[test]
 fn missing_or_tampered_objects_fail_closed() -> Result<(), Box<dyn Error>> {
     let store = MemoryStore::default();
     let builder = GraphSnapshotBuilder::new();
