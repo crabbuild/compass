@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Correct the diagnostic Graphify comparator when Graphify projects a Rust
+  return-type reference onto its callable's declaration line while Compass
+  preserves the exact returned-symbol occurrence. Dominance requires exact
+  source and target identities, a return-type context, and one Compass
+  `returns` fact; unrelated references and competing returns still fail
+  closed.
+
 - Preserve every source-valid call target behind mutually exclusive Rust
   `#[cfg(unix)]` and `#[cfg(windows)]` reexports, including a lexical fallback
   for other platforms. Ordinary duplicate reexports and feature flags that can

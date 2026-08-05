@@ -1444,6 +1444,132 @@ class Widget(base_factory(), metaclass=meta_factory()):
             result.metrics["graphify_edges_coverage_reasons"],
         )
 
+    def test_precise_return_type_dominates_a_declaration_line_projection(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"build","kind":"function",
+               "source_file":"src/lib.rs","source_location":"L10","language":"rust"},
+              {"id":"target","label":"BuildError","kind":"struct",
+               "source_file":"src/error.rs","source_location":"L2","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"target","relation":"returns",
+               "source_file":"src/lib.rs","source_location":"L12"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"owner","label":"build()",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"id":"target","label":"BuildError",
+               "source_file":"src/error.rs","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"target","relation":"references",
+               "context":"generic_arg","source_file":"src/lib.rs","source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertIn(
+            "dominated:precise_return_type_declaration_projection",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_return_projection_requires_exact_endpoint_and_type_context(self) -> None:
+        compass = """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"build","kind":"function",
+               "source_file":"src/lib.rs","source_location":"L10","language":"rust"},
+              {"id":"returned","label":"BuildError","kind":"struct",
+               "source_file":"src/error.rs","source_location":"L2","language":"rust"},
+              {"id":"other","label":"OtherError","kind":"struct",
+               "source_file":"src/other.rs","source_location":"L3","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"returned","relation":"returns",
+               "source_file":"src/lib.rs","source_location":"L12"}
+            ]}
+        """
+        wrong_endpoint = compare_documents(
+            compass,
+            """
+            {"nodes":[
+              {"id":"owner","label":"build()",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"id":"other","label":"OtherError",
+               "source_file":"src/other.rs","source_location":"L3"}
+            ],"links":[
+              {"source":"owner","target":"other","relation":"references",
+               "context":"return_type","source_file":"src/lib.rs","source_location":"L10"}
+            ]}
+            """,
+        )
+        value_reference = compare_documents(
+            compass,
+            """
+            {"nodes":[
+              {"id":"owner","label":"build()",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"id":"returned","label":"BuildError",
+               "source_file":"src/error.rs","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"returned","relation":"references",
+               "context":"value","source_file":"src/lib.rs","source_location":"L10"}
+            ]}
+            """,
+        )
+        wrong_occurrence = compare_documents(
+            compass,
+            """
+            {"nodes":[
+              {"id":"owner","label":"build()",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"id":"returned","label":"BuildError",
+               "source_file":"src/error.rs","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"returned","relation":"references",
+               "context":"return_type","source_file":"src/lib.rs","source_location":"L11"}
+            ]}
+            """,
+        )
+        for result in (wrong_endpoint, value_reference, wrong_occurrence):
+            self.assertFalse(result.passed)
+            self.assertEqual(result.metrics["missing_graphify_edges"], 1)
+
+    def test_multiple_projected_return_occurrences_remain_ambiguous(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"build","kind":"function",
+               "source_file":"src/lib.rs","source_location":"L10","language":"rust"},
+              {"id":"target","label":"BuildError","kind":"struct",
+               "source_file":"src/error.rs","source_location":"L2","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"target","relation":"returns",
+               "source_file":"src/lib.rs","source_location":"L12"},
+              {"source":"owner","target":"target","relation":"returns",
+               "source_file":"src/lib.rs","source_location":"L13"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"owner","label":"build()",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"id":"target","label":"BuildError",
+               "source_file":"src/error.rs","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"target","relation":"references",
+               "context":"return_type","source_file":"src/lib.rs","source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.metrics["ambiguous_graphify_edges"], 1)
+        self.assertIn(
+            "ambiguous:multiple_projected_return_types",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
     def test_qualified_external_target_rejects_same_named_local_rebinding(self) -> None:
         result = compare_documents(
             """

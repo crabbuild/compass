@@ -1925,6 +1925,33 @@ def _classify_edges(
                     Coverage("ambiguous", "multiple_associated_return_types", None)
                 )
                 continue
+            declaration_projected_returns = [
+                edge
+                for returned_type, edge in return_references_by_source.get(source, [])
+                if returned_type == target
+                and not direct_index.get(("references", source, target))
+                and graphify.context in {"generic_arg", "return_type"}
+                and graphify_source is not None
+                and graphify_source.callable
+                and graphify.occurrence_file == graphify_source.source_file
+                and graphify.occurrence_location == graphify_source.source_location
+                and edge.occurrence_file == graphify.occurrence_file
+                and edge.occurrence_location != graphify.occurrence_location
+            ]
+            if len(declaration_projected_returns) == 1:
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "precise_return_type_declaration_projection",
+                        declaration_projected_returns[0].payload_sha256,
+                    )
+                )
+                continue
+            if len(declaration_projected_returns) > 1:
+                output.append(
+                    Coverage("ambiguous", "multiple_projected_return_types", None)
+                )
+                continue
             typed_references = [
                 edge
                 for edge in typed_reference_index.get((source, target), [])

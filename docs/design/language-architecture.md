@@ -192,6 +192,19 @@ Examples include:
 - Python modules, aliases, decorators, and dynamic member occurrences
 - Go packages, receiver ownership, imports, and interfaces
 
+The current graph contract has a known Rust representation boundary. An
+implementation owner can be published exactly when the implementer is a
+source-local nominal declaration or an implementation-scoped generic
+parameter. External, primitive, reference, tuple, slice, and constructed type
+expressions such as `str`, `&mut [T]`, and `Option<T>` have no first-class node
+kind in `compass.graph/1`. Compass must not encode an implementation block as
+a fabricated struct or type alias merely to attach its methods or an
+`implements` edge. Closing this gap requires an explicitly versioned
+implementation/type-realization representation, validation rules, query and
+renderer support, compatibility review, and qualification in the same change.
+Until then, unsupported implementation owners remain unresolved rather than
+being assigned a convenient but false identity.
+
 An AST-backed adapter receives borrowed source bytes and one prepared tree. It does not parse the source again or call the language pack's generic intelligence pipeline.
 
 After a language completes its universal transition, its adapter emits evidence only. The shared projector creates graph nodes and edges for both single-file and collection builds.

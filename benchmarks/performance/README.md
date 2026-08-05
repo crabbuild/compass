@@ -130,6 +130,11 @@ statement-level occurrence equivalence. For example, the first line of a
 multiline Python import and the exact imported-item line are equivalent only
 when both fall inside the same parsed import statement. Missing, unreadable,
 escaped, unsupported, or malformed source fails closed to exact-line matching.
+For Rust return types, Graphify's declaration-line projection is dominated by
+Compass's exact `returns` occurrence only when source and target identities
+match, the context is type-related, the projected site is the callable's own
+declaration, and one return fact proves the pair. This bounded compatibility
+rule does not relax body references or endpoint conflicts.
 
 ## Source-grounded quality audit
 

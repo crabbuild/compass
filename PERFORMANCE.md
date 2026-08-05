@@ -493,6 +493,22 @@ dangling relationships, rather than the pinned artifact's 4,197 nodes, 7,701
 relationships, and zero dangling relationships. These are source-constrained
 comparator classifications, not statistical precision or recall measurements.
 
+A comparator-only follow-up reused those byte-identical Compass and pinned
+Graphify artifacts. Graphify places some multiline Rust return-type references
+on the callable declaration line, while Compass preserves the exact returned
+symbol on a later line. The comparator now treats that projection as dominated
+only when the mapped callable and returned type are exact, the Graphify context
+is `return_type` or `generic_arg`, the Graphify occurrence is the callable
+declaration, and exactly one Compass `returns` fact supports the pair. Eight
+Rayon hypotheses moved from `missing:no_matching_relationship_occurrence` to
+`dominated:precise_return_type_declaration_projection`: returns from
+`init_global_registry`, `Registry::new`, `get_in_place_thread_registry`,
+`Counters::increment_jobs_event_counter_if`, `ThreadPool::build`, and
+`Board::new_with_custom_rules`. Exact, rejected, ambiguous, and all other
+reason counts were unchanged. The resulting edge classifications are 2,258
+exact, 2,613 dominated, 2,497 rejected, 19 ambiguous, and 314 missing. This
+changes no Compass graph node, relationship, identity, or digest.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and
