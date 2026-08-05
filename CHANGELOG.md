@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Resolve Rust calls chained from a same-file, source-proven method result by
+  preserving the exact outer nominal result type. Generic results such as
+  `ThreadPoolBuilder<CustomSpawn<F>>` now resolve the next member against
+  `ThreadPoolBuilder`, replacing malformed inferred placeholders with exact
+  call edges; unknown, ambiguous, or non-local result/member evidence still
+  fails closed. Rust structural facts advance to adapter version 12.
+
 - Resolve Rust calls chained from a source-proven associated-function result,
   including uniquely aliased receiver owners such as
   `super::DrainGuard::new(...).par_drain(...)`. Concrete implementation

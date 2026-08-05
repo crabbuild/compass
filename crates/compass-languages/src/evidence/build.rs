@@ -186,6 +186,28 @@ impl EvidenceBuilder {
             target_declaration_id,
             scope_id,
             None,
+            None,
+            range,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bind_call_result_with_type(
+        &mut self,
+        spelling: &str,
+        qualified_target: &str,
+        result_type_qualified_name: &str,
+        scope_id: Option<&str>,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
+        self.bind_with_output_index(
+            BindingKind::CallResult,
+            spelling,
+            qualified_target,
+            None,
+            scope_id,
+            None,
+            Some(result_type_qualified_name),
             range,
         )
     }
@@ -199,6 +221,7 @@ impl EvidenceBuilder {
         target_declaration_id: Option<&str>,
         scope_id: Option<&str>,
         output_index: Option<u32>,
+        result_type_qualified_name: Option<&str>,
         range: EvidenceRange,
     ) -> Result<String, EvidenceError> {
         ensure_capacity("bindings", self.batch.bindings.len(), self.limits.bindings)?;
@@ -212,6 +235,7 @@ impl EvidenceBuilder {
                 target_declaration_id.unwrap_or_default(),
                 scope_id.unwrap_or_default(),
                 output_index_text.as_deref().unwrap_or_default(),
+                result_type_qualified_name.unwrap_or_default(),
                 &range.start_byte.to_string(),
                 &range.end_byte.to_string(),
             ],
@@ -225,6 +249,7 @@ impl EvidenceBuilder {
             target_declaration_id: target_declaration_id.map(str::to_owned),
             scope_id: scope_id.map(str::to_owned),
             output_index,
+            result_type_qualified_name: result_type_qualified_name.map(str::to_owned),
             range,
         });
         Ok(id)
@@ -616,6 +641,7 @@ struct DirectAdapterState<'source> {
     rust_platform_fallbacks: HashSet<(String, String)>,
     rust_field_types: HashMap<String, HashMap<String, String>>,
     rust_value_types: HashMap<String, HashMap<String, Vec<RustValueTypeVersion>>>,
+    rust_callable_return_types: HashMap<String, Vec<String>>,
     rust_call_result_bindings: HashMap<(String, String, usize), String>,
     rust_import_nodes: HashSet<usize>,
     rust_test_declarations: HashSet<String>,
@@ -696,6 +722,7 @@ impl<'source> DirectAdapterState<'source> {
             rust_platform_fallbacks: HashSet::new(),
             rust_field_types: HashMap::new(),
             rust_value_types: HashMap::new(),
+            rust_callable_return_types: HashMap::new(),
             rust_call_result_bindings: HashMap::new(),
             rust_import_nodes: HashSet::new(),
             rust_test_declarations: HashSet::new(),
@@ -3079,8 +3106,35 @@ impl<'source> DirectAdapterState<'source> {
         self.collect_rust_module_imports(root, &file)?;
         self.collect_rust_declarations(root, &file, None)?;
         self.collect_rust_imports(root, &file)?;
+        self.collect_rust_callable_return_types(root);
         self.collect_rust_parameter_bindings(root, &file)?;
         self.walk_rust_evidence(root, &file, true)
+    }
+
+    fn collect_rust_callable_return_types(&mut self, node: Node<'_>) {
+        if let Some(owner) = self.declarations.get(&node.id()).cloned()
+            && matches!(owner.kind.as_str(), "function" | "method")
+            && let Some(return_type) = node.child_by_field_name("return_type")
+        {
+            let raw = self.text(return_type);
+            let qualified = if raw.trim() == "Self" {
+                self.rust_concrete_callable_receiver(&owner)
+            } else {
+                rust_nominal_type_path(&raw).and_then(|nominal| {
+                    rust_qualify_evidence_path(self, &owner, &nominal, return_type.start_byte())
+                })
+            };
+            if let Some(qualified) = qualified {
+                self.rust_callable_return_types
+                    .entry(owner.qualified_name)
+                    .or_default()
+                    .push(qualified);
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_rust_callable_return_types(child);
+        }
     }
 
     fn collect_rust_module_imports(
@@ -4737,14 +4791,39 @@ impl<'source> DirectAdapterState<'source> {
             return Ok(None);
         }
         let raw_called = self.text(called);
-        if !raw_called.contains("::") {
+        let (qualifier, called_spelling) = split_qualified(&raw_called);
+        let Some(qualified_callable) = self.rust_call_qualified_name(
+            owner,
+            qualifier,
+            called_spelling,
+            called.start_byte(),
+            called,
+        ) else {
             return Ok(None);
-        }
-        let (qualifier, spelling) = split_qualified(&raw_called);
-        let Some(qualified_callable) =
-            self.rust_call_qualified_name(owner, qualifier, spelling, called.start_byte(), called)
-        else {
-            return Ok(None);
+        };
+        let result_type_qualified_name = if !raw_called.contains("::") {
+            let Some(result_member) = function
+                .child_by_field_name("field")
+                .map(|field| self.text(field))
+            else {
+                return Ok(None);
+            };
+            let Some(return_types) = self
+                .rust_callable_return_types
+                .get(&qualified_callable)
+                .filter(|return_types| return_types.len() == 1)
+            else {
+                return Ok(None);
+            };
+            if self
+                .rust_receiver_method_target(&return_types[0], &result_member)
+                .is_none()
+            {
+                return Ok(None);
+            }
+            Some(return_types[0].clone())
+        } else {
+            None
         };
         let receiver = self.text(result_call);
         let key = (
@@ -4755,14 +4834,25 @@ impl<'source> DirectAdapterState<'source> {
         if let Some(binding) = self.rust_call_result_bindings.get(&key) {
             return Ok(Some(binding.clone()));
         }
-        let binding = self.builder.bind(
-            BindingKind::CallResult,
-            &receiver,
-            &qualified_callable,
-            None,
-            Some(&owner.scope_id),
-            range_for_node(self.source_file, result_call),
-        )?;
+        let range = range_for_node(self.source_file, result_call);
+        let binding = if let Some(result_type) = result_type_qualified_name {
+            self.builder.bind_call_result_with_type(
+                &receiver,
+                &qualified_callable,
+                &result_type,
+                Some(&owner.scope_id),
+                range,
+            )?
+        } else {
+            self.builder.bind(
+                BindingKind::CallResult,
+                &receiver,
+                &qualified_callable,
+                None,
+                Some(&owner.scope_id),
+                range,
+            )?
+        };
         self.rust_call_result_bindings.insert(key, binding.clone());
         Ok(Some(binding))
     }
@@ -6149,6 +6239,7 @@ impl<'source> DirectAdapterState<'source> {
             None,
             Some(&owner.scope_id),
             output_index,
+            None,
             range_for_node(self.source_file, result_call),
         )?;
         self.go_call_result_bindings.insert(key, binding.clone());

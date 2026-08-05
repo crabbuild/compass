@@ -3513,6 +3513,82 @@ fn run() { Guard::new().par_drain(); }
 }
 
 #[test]
+fn rust_chained_method_result_resolves_source_proven_member() {
+    let source = br#"struct Input;
+struct Output;
+impl Input { fn transform(self) -> Output { Output } }
+impl Output { fn finish(self) {} }
+fn run(input: Input) { input.transform().finish(); }
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let finish = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Output::finish")
+        .expect("Output.finish method");
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.string("relation") == "calls"
+                && edge.target == finish.id
+                && edge.string("source_location") == "L5"
+                && edge.string("confidence") == "EXTRACTED"
+        }),
+        "edges={:#?}",
+        resolved.edges
+    );
+}
+
+#[test]
+fn rust_chained_generic_method_result_uses_the_outer_nominal_type() {
+    let source = br#"struct DefaultSpawn;
+struct CustomSpawn<F>(F);
+struct Builder<S = DefaultSpawn>(S);
+impl<S> Builder<S> { fn build(self) {} }
+impl Builder<DefaultSpawn> {
+    fn spawn_handler<F>(self, spawn: F) -> Builder<CustomSpawn<F>> {
+        Builder(CustomSpawn(spawn))
+    }
+}
+fn run(builder: Builder) { builder.spawn_handler(|| {}).build(); }
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let build = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Builder::build")
+        .expect("Builder.build method");
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.string("relation") == "calls"
+                && edge.target == build.id
+                && edge.string("source_location") == "L10"
+                && edge.string("confidence") == "EXTRACTED"
+        }),
+        "edges={:#?}",
+        resolved.edges
+    );
+    assert!(resolved.nodes.iter().all(|node| {
+        !node
+            .string("qualified_name")
+            .contains("spawn_handler(|| {})::build")
+    }));
+}
+
+#[test]
 fn rust_chained_call_result_follows_a_unique_aliased_owner_prefix() {
     let provider_source = br#"mod guard {
     pub trait Drain { fn par_drain(self); }

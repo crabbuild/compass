@@ -371,6 +371,21 @@ fn validate_fact(
                     "only call-result bindings may select an output index",
                 ));
             }
+            if fact.result_type_qualified_name.is_some()
+                && fact.kind != crate::BindingKind::CallResult
+            {
+                return Err(invalid_fact(
+                    &fact.id,
+                    "only call-result bindings may carry an exact result type",
+                ));
+            }
+            if fact
+                .result_type_qualified_name
+                .as_deref()
+                .is_some_and(str::is_empty)
+            {
+                return Err(invalid_fact(&fact.id, "call-result type is empty"));
+            }
             require_optional_reference(
                 &fact.id,
                 "target declaration",

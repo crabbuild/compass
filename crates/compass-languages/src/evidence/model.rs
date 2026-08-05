@@ -250,6 +250,9 @@ pub struct BindingFact {
     /// Zero-based result selected by a source-level destructuring assignment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_index: Option<u32>,
+    /// Exact nominal result type proven by the adapter for this call result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_type_qualified_name: Option<String>,
     pub range: EvidenceRange,
 }
 

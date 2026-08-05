@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use compass_languages::{
-    CandidateRelation, Engine, HierarchyConstraint, LanguageCapability, SemanticRole,
+    BindingKind, CandidateRelation, Engine, HierarchyConstraint, LanguageCapability, SemanticRole,
     UniversalAdapterProfile,
 };
 
@@ -32,7 +32,7 @@ fn build() {
         .ok_or("missing Rust semantic evidence")?;
 
     assert_eq!(evidence.adapter.id, "compass.rust");
-    assert_eq!(evidence.adapter.version, 11);
+    assert_eq!(evidence.adapter.version, 12);
     assert_eq!(
         evidence.adapter.evidence_schema,
         "compass.languages.evidence/1"
@@ -102,6 +102,46 @@ fn build() {
             && candidate.constraints.qualified_name.as_deref()
                 == Some("crate::qualified::Beta::new")
             && !candidate.constraints.allow_external
+    }));
+    Ok(())
+}
+
+#[test]
+fn source_proven_method_results_bind_the_next_call_receiver() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("method_chain.rs");
+    let source = br#"struct Input;
+struct Output;
+impl Input { fn transform(self) -> Output { Output } }
+impl Output { fn finish(self) {} }
+fn local(input: Input) { input.transform().finish(); }
+fn unknown<T>(input: T) { input.transform().finish(); }
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let bindings = evidence
+        .bindings
+        .iter()
+        .filter(|binding| binding.kind == BindingKind::CallResult)
+        .collect::<Vec<_>>();
+    assert_eq!(bindings.len(), 1, "bindings={bindings:#?}");
+    let binding = bindings[0];
+    assert_eq!(binding.spelling, "input.transform()");
+    assert_eq!(
+        binding.qualified_target,
+        "crate::method_chain::Input::transform"
+    );
+    assert_eq!(
+        binding.result_type_qualified_name.as_deref(),
+        Some("crate::method_chain::Output")
+    );
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "finish"
+            && candidate.binding_id.as_deref() == Some(binding.id.as_str())
     }));
     Ok(())
 }

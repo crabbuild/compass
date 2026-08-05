@@ -2821,6 +2821,12 @@ impl UniversalResolutionIndex {
         candidate: &RelationshipCandidate,
     ) -> Result<Option<String>, usize> {
         if binding.kind == compass_languages::BindingKind::CallResult {
+            if let Some(return_type) = binding.result_type_qualified_name.as_deref() {
+                return Ok(Some(format!(
+                    "{return_type}::{}",
+                    candidate.target_spelling
+                )));
+            }
             let callable_ids = self.callable_declarations(language, &binding.qualified_target);
             let [callable_id] = callable_ids.as_slice() else {
                 return if callable_ids.is_empty() {

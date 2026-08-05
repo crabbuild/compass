@@ -74,6 +74,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
             target_declaration_id: None,
             scope_id: Some("scope:caller".to_owned()),
             output_index: None,
+            result_type_qualified_name: None,
             range: range(7, 13),
         }],
         occurrences: vec![OccurrenceFact {
@@ -161,6 +162,13 @@ fn unknown_fields_are_rejected_at_nested_boundaries() {
 fn output_positions_are_reserved_for_call_result_bindings() {
     let mut batch = valid_batch();
     batch.bindings[0].output_index = Some(0);
+    assert_code(&batch, EvidenceErrorCode::InvalidFact);
+}
+
+#[test]
+fn exact_result_types_are_reserved_for_call_result_bindings() {
+    let mut batch = valid_batch();
+    batch.bindings[0].result_type_qualified_name = Some("example.Result".to_owned());
     assert_code(&batch, EvidenceErrorCode::InvalidFact);
 }
 
@@ -440,7 +448,7 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
     );
     assert_eq!(
         AdapterRegistry::universal_profile("rust").map(|profile| profile.version),
-        Some(10)
+        Some(12)
     );
 }
 
