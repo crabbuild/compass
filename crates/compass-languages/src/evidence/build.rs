@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -575,6 +575,13 @@ struct RustValueTypeVersion {
     active_from: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum RustPlatformCfg {
+    Fallback,
+    Unix,
+    Windows,
+}
+
 struct DirectAdapterState<'source> {
     path: &'source Path,
     source_file: &'source str,
@@ -605,6 +612,8 @@ struct DirectAdapterState<'source> {
     rust_receiver_methods: HashMap<(String, String), Vec<String>>,
     rust_typed_receivers: HashSet<(String, String)>,
     rust_imported_typed_receivers: HashSet<(String, String)>,
+    rust_platform_reexport_bindings: HashMap<String, RustPlatformCfg>,
+    rust_platform_fallbacks: HashSet<(String, String)>,
     rust_field_types: HashMap<String, HashMap<String, String>>,
     rust_value_types: HashMap<String, HashMap<String, Vec<RustValueTypeVersion>>>,
     rust_import_nodes: HashSet<usize>,
@@ -682,6 +691,8 @@ impl<'source> DirectAdapterState<'source> {
             rust_receiver_methods: HashMap::new(),
             rust_typed_receivers: HashSet::new(),
             rust_imported_typed_receivers: HashSet::new(),
+            rust_platform_reexport_bindings: HashMap::new(),
+            rust_platform_fallbacks: HashSet::new(),
             rust_field_types: HashMap::new(),
             rust_value_types: HashMap::new(),
             rust_import_nodes: HashSet::new(),
@@ -3430,6 +3441,10 @@ impl<'source> DirectAdapterState<'source> {
             .entry(parent_scope.to_owned())
             .or_default()
             .insert(name.clone(), qualified_name.clone());
+        if !method && rust_platform_cfg(node, self.source) == Some(RustPlatformCfg::Fallback) {
+            self.rust_platform_fallbacks
+                .insert((parent_scope.to_owned(), name.clone()));
+        }
         if let Some(implementation) = active_impl {
             self.rust_receiver_methods
                 .entry((implementation.type_qualified_name.clone(), name))
@@ -4246,6 +4261,13 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&owner.scope_id),
                 range.clone(),
             )?;
+            if reexport
+                && let Some(platform @ (RustPlatformCfg::Unix | RustPlatformCfg::Windows)) =
+                    rust_platform_cfg(node, self.source)
+            {
+                self.rust_platform_reexport_bindings
+                    .insert(binding_id.clone(), platform);
+            }
             self.record_import_binding(owner, &local, &target, &binding_id, 0);
             let occurrence_id = self.builder.occur(
                 SemanticRole::Import,
@@ -4435,12 +4457,22 @@ impl<'source> DirectAdapterState<'source> {
             return Ok(());
         }
         let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
-        if self.import_binding_is_ambiguous(owner, binding_name) {
+        let platform_reexport_bindings = self
+            .import_binding_is_ambiguous(owner, binding_name)
+            .then(|| self.rust_platform_reexport_bindings(owner, binding_name))
+            .flatten();
+        if self.import_binding_is_ambiguous(owner, binding_name)
+            && platform_reexport_bindings.is_none()
+        {
             return Ok(());
         }
-        let direct_binding = self
-            .binding_for_occurrence(owner, binding_name, function.start_byte(), true)
-            .cloned();
+        let direct_binding = platform_reexport_bindings
+            .is_none()
+            .then(|| {
+                self.binding_for_occurrence(owner, binding_name, function.start_byte(), true)
+                    .cloned()
+            })
+            .flatten();
         let wildcard_lookup_eligible = qualifier.is_none()
             || qualifier.is_some_and(|value| {
                 qualified_binding_head(value)
@@ -4452,8 +4484,20 @@ impl<'source> DirectAdapterState<'source> {
             .then(|| self.rust_wildcard_binding(owner, function.start_byte()))
             .flatten()
             .cloned();
-        let qualified_name = self
-            .rust_call_qualified_name(owner, qualifier, spelling, function.start_byte(), function)
+        let qualified_name = platform_reexport_bindings
+            .as_ref()
+            .map_or_else(
+                || {
+                    self.rust_call_qualified_name(
+                        owner,
+                        qualifier,
+                        spelling,
+                        function.start_byte(),
+                        function,
+                    )
+                },
+                |_| None,
+            )
             .or_else(|| {
                 wildcard_binding.is_some().then(|| {
                     qualifier.map_or_else(
@@ -4471,12 +4515,15 @@ impl<'source> DirectAdapterState<'source> {
         }) || (qualifier.is_none()
             && spelling.chars().next().is_some_and(char::is_uppercase));
         let binding = direct_binding.or(wildcard_binding);
-        let occurrence_id = self.builder.occur(
+        let occurrence_id = self.builder.occur_with_context(
             SemanticRole::Call,
             &owner.fact_id,
             spelling,
             qualifier,
             Some(&owner.scope_id),
+            platform_reexport_bindings
+                .as_ref()
+                .map(|_| "rust-platform-cfg-reexport"),
             range_for_node(self.source_file, function),
         )?;
         let constraints = ResolutionConstraint {
@@ -4503,23 +4550,37 @@ impl<'source> DirectAdapterState<'source> {
                     && !rust_identity_is_internal(&self.module_or_package, qualified)
             }),
         };
-        self.builder.relate(
-            CandidateRelation::Calls,
-            &owner.fact_id,
-            Some(&occurrence_id),
-            binding.as_deref(),
-            spelling,
-            constraints.clone(),
-        )?;
-        if self.rust_test_declarations.contains(&owner.fact_id) {
+        let candidate_bindings = platform_reexport_bindings.as_ref().map_or_else(
+            || vec![binding],
+            |(bindings, has_fallback)| {
+                let mut candidates = bindings.iter().cloned().map(Some).collect::<Vec<_>>();
+                if *has_fallback {
+                    // The source-proven fallback is a lexical declaration,
+                    // not an import binding.
+                    candidates.push(None);
+                }
+                candidates
+            },
+        );
+        for candidate_binding in candidate_bindings {
             self.builder.relate(
-                CandidateRelation::Tests,
+                CandidateRelation::Calls,
                 &owner.fact_id,
                 Some(&occurrence_id),
-                binding.as_deref(),
+                candidate_binding.as_deref(),
                 spelling,
-                constraints,
+                constraints.clone(),
             )?;
+            if self.rust_test_declarations.contains(&owner.fact_id) {
+                self.builder.relate(
+                    CandidateRelation::Tests,
+                    &owner.fact_id,
+                    Some(&occurrence_id),
+                    candidate_binding.as_deref(),
+                    spelling,
+                    constraints.clone(),
+                )?;
+            }
         }
         Ok(())
     }
@@ -6482,6 +6543,47 @@ impl<'source> DirectAdapterState<'source> {
             scope_id = self.scope_parents.get(current).map(String::as_str);
         }
         None
+    }
+
+    fn rust_platform_reexport_bindings(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+    ) -> Option<(Vec<String>, bool)> {
+        let scope_id = self.import_binding_scope(owner, name)?;
+        let versions = self.import_bindings.get(scope_id)?.get(name)?;
+        if versions.len() != 2 {
+            return None;
+        }
+        let mut platforms = BTreeSet::new();
+        let mut targets = BTreeSet::new();
+        let mut bindings = Vec::with_capacity(versions.len());
+        for version in versions {
+            platforms.insert(
+                *self
+                    .rust_platform_reexport_bindings
+                    .get(&version.binding_id)?,
+            );
+            targets.insert(version.target.as_str());
+            bindings.push(version.binding_id.clone());
+        }
+        if platforms != BTreeSet::from([RustPlatformCfg::Unix, RustPlatformCfg::Windows])
+            || targets.len() != 2
+        {
+            return None;
+        }
+        let has_local_target = self
+            .local_targets
+            .get(scope_id)
+            .is_some_and(|targets| targets.contains_key(name));
+        let has_fallback = self
+            .rust_platform_fallbacks
+            .contains(&(scope_id.to_owned(), name.to_owned()));
+        if has_local_target && !has_fallback {
+            return None;
+        }
+        bindings.sort_unstable();
+        Some((bindings, has_fallback))
     }
 
     fn import_binding_version_at(
@@ -9192,6 +9294,49 @@ const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::InvokesMacro => "invokes_macro",
         CandidateRelation::Tests => "tests",
     }
+}
+
+fn rust_platform_cfg(node: Node<'_>, source: &[u8]) -> Option<RustPlatformCfg> {
+    let parse = |attribute: Node<'_>| {
+        let compact =
+            String::from_utf8_lossy(&source[attribute.start_byte()..attribute.end_byte()])
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect::<String>();
+        match compact.as_str() {
+            "#[cfg(not(any(unix,windows)))]" | "#[cfg(not(any(windows,unix)))]" => {
+                Some(RustPlatformCfg::Fallback)
+            }
+            "#[cfg(unix)]" => Some(RustPlatformCfg::Unix),
+            "#[cfg(windows)]" => Some(RustPlatformCfg::Windows),
+            _ => None,
+        }
+    };
+    let mut platforms = BTreeSet::new();
+    let mut sibling = node.prev_named_sibling();
+    while let Some(attribute) = sibling {
+        if attribute.kind() != "attribute_item" {
+            break;
+        }
+        if let Some(platform) = parse(attribute) {
+            platforms.insert(platform);
+        }
+        sibling = attribute.prev_named_sibling();
+    }
+    let mut cursor = node.walk();
+    for attribute in node
+        .children(&mut cursor)
+        .filter(|child| child.kind() == "attribute_item")
+    {
+        if let Some(platform) = parse(attribute) {
+            platforms.insert(platform);
+        }
+    }
+    let platforms = platforms.into_iter().collect::<Vec<_>>();
+    let [platform] = platforms.as_slice() else {
+        return None;
+    };
+    Some(*platform)
 }
 
 fn rust_has_test_attribute(node: Node<'_>, source: &[u8]) -> bool {

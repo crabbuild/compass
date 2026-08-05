@@ -797,6 +797,134 @@ fn rust_local_module_reexports_resolve_without_external_placeholders() {
 }
 
 #[test]
+fn rust_mutually_exclusive_platform_reexports_preserve_every_possible_call_target() {
+    let source = br#"mod unix {
+    pub fn get_cpu_time() {}
+}
+mod win {
+    pub fn get_cpu_time() {}
+}
+#[cfg(windows)]
+pub use self::win::get_cpu_time;
+#[cfg(unix)]
+pub use self::unix::get_cpu_time;
+#[cfg(not(any(unix, windows)))]
+pub fn get_cpu_time() {}
+fn measure_cpu() { get_cpu_time(); }
+"#;
+    let resolved = compass_resolve::resolve(
+        &[extract("src/lib.rs", source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let measure_cpu = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::measure_cpu")
+        .expect("measure_cpu declaration");
+    let expected_targets = BTreeSet::from([
+        "crate::get_cpu_time".to_owned(),
+        "crate::unix::get_cpu_time".to_owned(),
+        "crate::win::get_cpu_time".to_owned(),
+    ]);
+    let actual_targets = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.source == measure_cpu.id && edge.string("relation") == "calls")
+        .filter_map(|edge| {
+            resolved
+                .nodes
+                .iter()
+                .find(|node| node.id == edge.target)
+                .map(|node| node.string("qualified_name"))
+        })
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(actual_targets, expected_targets);
+
+    let ambiguous_source = br#"mod first { pub fn work() {} }
+mod second { pub fn work() {} }
+pub use self::first::work;
+pub use self::second::work;
+fn caller() { work(); }
+"#;
+    let ambiguous = compass_resolve::resolve(
+        &[extract("src/lib.rs", ambiguous_source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(ambiguous_source.to_vec()).expect("ambiguous source"),
+        )]),
+    );
+    let caller = ambiguous
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::caller")
+        .expect("caller declaration");
+    assert!(
+        ambiguous
+            .edges
+            .iter()
+            .all(|edge| { edge.source != caller.id || edge.string("relation") != "calls" })
+    );
+
+    let feature_source = br#"mod first { pub fn work() {} }
+mod second { pub fn work() {} }
+#[cfg(feature = "first")]
+pub use self::first::work;
+#[cfg(feature = "second")]
+pub use self::second::work;
+fn caller() { work(); }
+"#;
+    let feature_ambiguous = compass_resolve::resolve(
+        &[extract("src/lib.rs", feature_source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(feature_source.to_vec()).expect("feature source"),
+        )]),
+    );
+    let feature_caller = feature_ambiguous
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::caller")
+        .expect("feature caller declaration");
+    assert!(
+        feature_ambiguous
+            .edges
+            .iter()
+            .all(|edge| { edge.source != feature_caller.id || edge.string("relation") != "calls" })
+    );
+
+    let malformed_fallback_source = br#"mod unix { pub fn work() {} }
+mod win { pub fn work() {} }
+#[cfg(unix)]
+pub use self::unix::work;
+#[cfg(windows)]
+pub use self::win::work;
+pub fn work() {}
+fn caller() { work(); }
+"#;
+    let malformed_fallback = compass_resolve::resolve(
+        &[extract("src/lib.rs", malformed_fallback_source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(malformed_fallback_source.to_vec()).expect("malformed source"),
+        )]),
+    );
+    let malformed_caller = malformed_fallback
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::caller")
+        .expect("malformed caller declaration");
+    assert!(
+        malformed_fallback.edges.iter().all(|edge| {
+            edge.source != malformed_caller.id || edge.string("relation") != "calls"
+        })
+    );
+}
+
+#[test]
 fn rust_child_glob_resolves_parent_reexports_with_source_present_sibling_crate() {
     let provider_source = b"pub struct Empty;\npub fn empty() -> Empty { Empty }\n";
     let parent_source = b"mod empty;\npub use self::empty::{Empty, empty};\nmod test;\n";

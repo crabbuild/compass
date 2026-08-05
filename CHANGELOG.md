@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Preserve every source-valid call target behind mutually exclusive Rust
+  `#[cfg(unix)]` and `#[cfg(windows)]` reexports, including a lexical fallback
+  for other platforms. Ordinary duplicate reexports and feature flags that can
+  overlap still fail closed. Rust structural facts advance to adapter version
+  9 so cached evidence refreshes.
+
 - Publish Rust blanket trait implementations from the exact impl-scoped
   generic parameter declaration. The trait occurrence remains source-anchored;
   competing wildcard imports and parser-recovered implementation headers fail

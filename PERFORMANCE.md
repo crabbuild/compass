@@ -474,6 +474,25 @@ missing. Rust adapter metadata advances to version 8. These are
 source-constrained comparator classifications, not statistical precision or
 recall measurements.
 
+The following 2026-08-05 Rayon qualification preserved calls through the
+mutually exclusive `#[cfg(unix)]` and `#[cfg(windows)]` reexports of
+`get_cpu_time`, together with the source-declared fallback for other targets.
+Three clean release-binary builds were byte-identical at 12,060 nodes, 26,820
+relationships, and graph SHA-256
+`08e304704903ecaf5df14cfa8f828c0563cf7df255833c5a5bd8a818c953f73b`.
+The only graph delta was six exact, source-anchored `calls` relationships: each
+of the two call sites in `rayon-demo/src/cpu_time/mod.rs` targets the Unix,
+Windows, and fallback declarations. No node or preceding relationship changed.
+Against the same pinned Graphify artifact used by the preceding qualification,
+the comparator reports 2,258 exact, 2,605 dominated, 2,497 rejected, 19
+ambiguous, and 322 missing Graphify edge hypotheses; the line-33
+`get_cpu_time` hypothesis moved from missing to exact. Rust adapter metadata
+advances to version 9. A separate fresh Graphify run was excluded from change
+attribution because it produced 4,185 nodes, 8,183 relationships, and 497
+dangling relationships, rather than the pinned artifact's 4,197 nodes, 7,701
+relationships, and zero dangling relationships. These are source-constrained
+comparator classifications, not statistical precision or recall measurements.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and
