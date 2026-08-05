@@ -699,3 +699,77 @@ enum Event { Local(Local), Remote { value: Remote } }
     }
     Ok(())
 }
+
+#[test]
+fn rust_generic_impl_bounds_resolve_direct_and_field_receivers() -> Result<(), Box<dyn Error>> {
+    let extraction = Engine::default().extract_source(
+        Path::new("src/lib.rs"),
+        br#"
+trait Render { fn render(&self); }
+struct Wrapper<T> { value: T }
+impl<T> Wrapper<T>
+where
+    T: Render,
+{
+    fn invoke(&self, value: T) { value.render(); self.value.render(); }
+}
+"#,
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+
+    let calls = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "render"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2, "calls={calls:#?}");
+    assert!(
+        calls.iter().all(|candidate| {
+            candidate.constraints.qualified_name.as_deref() == Some("crate::Render::render")
+                && !candidate.constraints.allow_external
+        }),
+        "calls={calls:#?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_struct_generic_bounds_flow_into_inherent_impls() -> Result<(), Box<dyn Error>> {
+    let extraction = Engine::default().extract_source(
+        Path::new("src/lib.rs"),
+        br#"
+trait Render { fn render(&self); }
+struct Wrapper<T: Render> { value: T }
+impl<T> Wrapper<T> {
+    fn invoke(&self, value: T) { value.render(); self.value.render(); }
+}
+"#,
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+    let calls = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "render"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2, "calls={calls:#?}");
+    assert!(
+        calls.iter().all(|candidate| {
+            candidate.constraints.qualified_name.as_deref() == Some("crate::Render::render")
+                && !candidate.constraints.allow_external
+        }),
+        "calls={calls:#?}"
+    );
+    Ok(())
+}

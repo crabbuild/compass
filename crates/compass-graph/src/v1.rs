@@ -194,6 +194,24 @@ impl BuildEvidence {
         )
     }
 
+    /// Derive deterministic build and file evidence while reusing exact
+    /// source digests from a build that already read those bytes for
+    /// extraction.
+    pub fn from_extraction_with_source_digests(
+        repository_root: impl Into<PathBuf>,
+        extraction: &Extraction,
+        configuration_digest: impl Into<String>,
+        source_digests: &BTreeMap<String, SourceDigest>,
+    ) -> Result<Self, GraphError> {
+        Self::from_records(
+            repository_root,
+            &extraction.nodes,
+            &extraction.edges,
+            configuration_digest,
+            Some(source_digests),
+        )
+    }
+
     /// Derive publication evidence directly from an immutable analysis graph.
     ///
     /// This avoids cloning the complete graph merely to prepare file and build
@@ -944,7 +962,13 @@ fn finalize_prepared_edge(
                 (source_kind.is_type() || source_is_rust_type_parameter)
                     && matches!(
                         target_kind,
-                        NodeKind::Interface | NodeKind::Trait | NodeKind::Protocol
+                        NodeKind::Interface
+                            | NodeKind::Trait
+                            | NodeKind::Protocol
+                            // TypeScript permits a class to implement a
+                            // structural object type declared through a type
+                            // alias.
+                            | NodeKind::TypeAlias
                     )
             }
             _ => false,
@@ -2784,12 +2808,35 @@ pub fn normalize_document_v1_with_inventory_best_effort_owned(
     source_commit: Option<&str>,
     inventory: Vec<InventoryEvidence>,
 ) -> Result<PublicationOutcome, GraphError> {
+    normalize_document_v1_with_inventory_and_source_digests_best_effort_owned(
+        document,
+        repository_root,
+        configuration_digest,
+        source_commit,
+        inventory,
+        None,
+    )
+}
+
+/// Publish an owned analysis document while reusing source digests already
+/// computed by the extraction pipeline. Missing entries (for example
+/// external references or cached files) still use the bounded existing source
+/// read path, so this optimization never weakens publication evidence.
+pub fn normalize_document_v1_with_inventory_and_source_digests_best_effort_owned(
+    document: compass_model::GraphDocument,
+    repository_root: &Path,
+    configuration_digest: impl Into<String>,
+    source_commit: Option<&str>,
+    inventory: Vec<InventoryEvidence>,
+    source_digests: Option<&BTreeMap<String, SourceDigest>>,
+) -> Result<PublicationOutcome, GraphError> {
     let (extraction, evidence) = document_publication_input_owned(
         document,
         repository_root,
         configuration_digest,
         source_commit,
         inventory,
+        source_digests,
     )?;
     normalize_v1_best_effort(extraction, evidence)
 }
@@ -2848,6 +2895,7 @@ fn document_publication_input_owned(
     configuration_digest: impl Into<String>,
     source_commit: Option<&str>,
     inventory: Vec<InventoryEvidence>,
+    source_digests: Option<&BTreeMap<String, SourceDigest>>,
 ) -> Result<(Extraction, BuildEvidence), GraphError> {
     // The owned document may have been assembled from parallel extraction
     // results. Leave raw-order canonicalization enabled so relocation and
@@ -2855,8 +2903,16 @@ fn document_publication_input_owned(
     let mut profile_started = Instant::now();
     let extraction = document_extraction_owned(document);
     profile_v1("v1 raw input transfer", &mut profile_started);
-    let mut evidence =
-        BuildEvidence::from_extraction(repository_root, &extraction, configuration_digest)?;
+    let mut evidence = if let Some(source_digests) = source_digests {
+        BuildEvidence::from_extraction_with_source_digests(
+            repository_root,
+            &extraction,
+            configuration_digest,
+            source_digests,
+        )?
+    } else {
+        BuildEvidence::from_extraction(repository_root, &extraction, configuration_digest)?
+    };
     profile_v1("v1 build evidence", &mut profile_started);
     evidence.include_inventory(inventory)?;
     profile_v1("v1 inventory enrichment", &mut profile_started);

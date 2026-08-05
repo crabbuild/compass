@@ -1,12 +1,33 @@
 import { expect, test } from "@playwright/test";
 
+test("initialization step connectors stay centered on every marker", async ({ page }) => {
+  await page.goto("/initialize.html");
+
+  const offset = async (axis: "horizontal" | "vertical") => page.locator(
+    ".init-step-nav li"
+  ).first().evaluate((item, requestedAxis) => {
+    const marker = item.querySelector(".init-step-marker")?.getBoundingClientRect();
+    const bounds = item.getBoundingClientRect();
+    const connector = getComputedStyle(item, "::after");
+    if (!marker) throw new Error("Step marker is missing");
+    return requestedAxis === "vertical"
+      ? Math.abs(marker.x + marker.width / 2 - bounds.x - Number.parseFloat(connector.left))
+      : Math.abs(marker.y + marker.height / 2 - bounds.y - Number.parseFloat(connector.top));
+  }, axis);
+
+  expect(await offset("vertical")).toBeLessThan(0.5);
+  await page.setViewportSize({ width: 520, height: 900 });
+  expect(await offset("horizontal")).toBeLessThan(0.5);
+});
+
 test("initialization reviews scope before starting file-level progress", async ({ page }) => {
   await page.goto("/initialize.html?manualSuccess=true");
 
   await expect(page.getByRole("heading", { name: "Build a map of compass" })).toBeVisible();
   await page.getByRole("radio", { name: /custom scope/i }).click();
+  await page.getByRole("checkbox", { name: "src" }).check();
   await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByLabel("Include paths and globs").fill("src\npackages/**");
+  await page.getByLabel("Additional include globs").fill("packages/**");
   await page.getByLabel("Exclude paths and globs").fill("**/generated/**");
   await page.getByRole("button", { name: "Review configuration" }).click();
   await expect(page.getByText("packages/**")).toBeVisible();

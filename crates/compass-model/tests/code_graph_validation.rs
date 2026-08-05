@@ -632,6 +632,7 @@ fn endpoint_matrix_accepts_nested_dynamic_and_database_producer_shapes() {
         (EdgeKind::Contains, NodeKind::Function, NodeKind::Method),
         (EdgeKind::Contains, NodeKind::Method, NodeKind::Class),
         (EdgeKind::Contains, NodeKind::TypeAlias, NodeKind::Method),
+        (EdgeKind::Contains, NodeKind::ConfigKey, NodeKind::ConfigKey),
         (EdgeKind::Calls, NodeKind::Class, NodeKind::Method),
         (EdgeKind::Calls, NodeKind::Variable, NodeKind::Function),
         (EdgeKind::Calls, NodeKind::Struct, NodeKind::Method),
@@ -678,6 +679,27 @@ fn endpoint_matrix_accepts_nested_dynamic_and_database_producer_shapes() {
             "{kind:?} rejected producer shape {source_kind:?} -> {target_kind:?}"
         );
     }
+}
+
+#[test]
+fn typescript_implements_accepts_a_structural_type_alias() {
+    let mut graph = document();
+    graph.nodes[0].kind = NodeKind::Class;
+    graph.nodes[0].language = Some("typescript".to_owned());
+    graph.nodes[1].kind = NodeKind::TypeAlias;
+    graph.nodes[1].language = Some("typescript".to_owned());
+    graph.links[0].kind = EdgeKind::Implements;
+    let id = edge_id(
+        "route",
+        EdgeKind::Implements,
+        "handler",
+        Some(&anchor()),
+        None,
+    );
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+
+    assert!(validate_code_graph(&graph).is_ok());
 }
 
 #[test]

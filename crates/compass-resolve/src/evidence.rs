@@ -217,29 +217,64 @@ impl UniversalResolutionIndex {
         validate_batches: bool,
     ) -> Result<Self, String> {
         let mut profile_started = Instant::now();
-        let go_module_path = read_go_module_path(root);
-        // Reserve the aggregate fact counts before consuming the batches. A
-        // corpus-scale evidence index otherwise grows each primary map by
-        // repeated rehashes while the old and new tables overlap in memory.
-        let capacities = batches.iter().fold([0_usize; 5], |mut counts, batch| {
-            counts[0] = counts[0].saturating_add(batch.declarations.len());
-            counts[1] = counts[1].saturating_add(batch.occurrences.len());
-            counts[2] = counts[2].saturating_add(batch.bindings.len());
-            counts[3] = counts[3].saturating_add(batch.candidates.len());
-            counts[4] = counts[4].saturating_add(batch.scopes.len());
-            counts
-        });
-        let mut declarations = AHashMap::with_capacity(capacities[0]);
-        let mut occurrences = AHashMap::with_capacity(capacities[1]);
-        let mut bindings = AHashMap::with_capacity(capacities[2]);
-        let mut candidates = AHashMap::with_capacity(capacities[3]);
-        let mut scopes = AHashMap::with_capacity(capacities[4]);
         if validate_batches {
             batches.par_iter().try_for_each(|batch| {
                 validate_evidence(batch, EvidenceLimits::default())
                     .map_err(|error| format!("invalid universal evidence: {error}"))
             })?;
         }
+
+        // Check aggregate input sizes before reserving hash-map capacity. A
+        // valid batch is bounded on its own, but an unbounded number of valid
+        // batches could otherwise make the old aggregate reservation attempt
+        // a very large allocation before the resolver's configured limits are
+        // consulted. The scope table has no separate public limit; sharing the
+        // candidate ceiling keeps the public limit shape stable while still
+        // bounding every resolver-owned primary table.
+        let capacities = batches.iter().try_fold(
+            [0_usize; 5],
+            |mut counts, batch| -> Result<[usize; 5], String> {
+                for (index, (name, value)) in [
+                    ("declarations", batch.declarations.len()),
+                    ("occurrences", batch.occurrences.len()),
+                    ("bindings", batch.bindings.len()),
+                    ("candidates", batch.candidates.len()),
+                    ("scopes", batch.scopes.len()),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    counts[index] = counts[index].checked_add(value).ok_or_else(|| {
+                        format!("universal aggregate {name} count overflows usize")
+                    })?;
+                }
+                Ok(counts)
+            },
+        )?;
+        for (name, count, limit) in [
+            ("declarations", capacities[0], limits.declarations),
+            ("occurrences", capacities[1], limits.occurrences),
+            ("bindings", capacities[2], limits.bindings),
+            ("candidates", capacities[3], limits.candidates),
+            ("scopes", capacities[4], limits.candidates),
+        ] {
+            if count > limit {
+                return Err(format!(
+                    "universal aggregate {name} count {count} exceeds limit {limit}"
+                ));
+            }
+        }
+
+        let go_module_path = read_go_module_path(root);
+        // Reserve the checked aggregate fact counts before consuming the
+        // batches. A corpus-scale evidence index otherwise grows each primary
+        // map by repeated rehashes while the old and new tables overlap in
+        // memory.
+        let mut declarations = AHashMap::with_capacity(capacities[0]);
+        let mut occurrences = AHashMap::with_capacity(capacities[1]);
+        let mut bindings = AHashMap::with_capacity(capacities[2]);
+        let mut candidates = AHashMap::with_capacity(capacities[3]);
+        let mut scopes = AHashMap::with_capacity(capacities[4]);
         profile_internal("universal evidence validation", &mut profile_started);
         for batch in batches {
             for fact in batch.declarations {
@@ -269,15 +304,9 @@ impl UniversalResolutionIndex {
             .collect::<AHashSet<_>>();
         let mut declaration_ids = declarations.keys().cloned().collect::<Vec<_>>();
         declaration_ids.sort_unstable();
-        let declaration_slots = declaration_ids
-            .iter()
-            .enumerate()
-            .map(|(index, id)| {
-                u32::try_from(index)
-                    .map(|slot| (id.clone(), slot))
-                    .map_err(|_| "universal declaration slot count exceeds u32".to_owned())
-            })
-            .collect::<Result<AHashMap<_, _>, _>>()?;
+        if u32::try_from(declaration_ids.len()).is_err() {
+            return Err("universal declaration slot count exceeds u32".to_owned());
+        }
         let definition_ranges = unique_definition_ranges(&declarations, &scopes);
         for (name, count, limit) in [
             ("declarations", declarations.len(), limits.declarations),
@@ -296,7 +325,7 @@ impl UniversalResolutionIndex {
                 || {
                     let mut index = AHashMap::<(String, String), Vec<DeclarationSlot>>::new();
                     for declaration in declarations.values() {
-                        let Some(&slot) = declaration_slots.get(&declaration.id) else {
+                        let Some(slot) = declaration_slot(&declaration_ids, &declaration.id) else {
                             continue;
                         };
                         index
@@ -320,7 +349,17 @@ impl UniversalResolutionIndex {
                             let mut index =
                                 AHashMap::<(String, String, String), Vec<DeclarationSlot>>::new();
                             for declaration in declarations.values() {
-                                let Some(&slot) = declaration_slots.get(&declaration.id) else {
+                                // Go methods live in the receiver method set, not in
+                                // the package block. Keeping them in the package-name
+                                // index makes an unqualified call ambiguous whenever a
+                                // package function shares the method name (for example,
+                                // a method forwarding to its package-level helper).
+                                if declaration.language == "go" && declaration.kind == "method" {
+                                    continue;
+                                }
+                                let Some(slot) =
+                                    declaration_slot(&declaration_ids, &declaration.id)
+                                else {
                                     continue;
                                 };
                                 let Some(module) = declaration.module_or_package.as_ref() else {
@@ -350,7 +389,16 @@ impl UniversalResolutionIndex {
                                         Vec<DeclarationSlot>,
                                     >::new();
                                     for declaration in declarations.values() {
-                                        let Some(&slot) = declaration_slots.get(&declaration.id)
+                                        // Go methods are selected through a receiver or
+                                        // method expression; they are not lexical names
+                                        // in the package/file scope.
+                                        if declaration.language == "go"
+                                            && declaration.kind == "method"
+                                        {
+                                            continue;
+                                        }
+                                        let Some(slot) =
+                                            declaration_slot(&declaration_ids, &declaration.id)
                                         else {
                                             continue;
                                         };
@@ -379,7 +427,8 @@ impl UniversalResolutionIndex {
                                         Vec<DeclarationSlot>,
                                     >::new();
                                     for declaration in declarations.values() {
-                                        let Some(&slot) = declaration_slots.get(&declaration.id)
+                                        let Some(slot) =
+                                            declaration_slot(&declaration_ids, &declaration.id)
                                         else {
                                             continue;
                                         };
@@ -437,7 +486,7 @@ impl UniversalResolutionIndex {
             values.sort_unstable();
             values.dedup();
             if values.len() > limits.candidates_per_lookup {
-                values.truncate(limits.candidates_per_lookup);
+                values.truncate(candidate_storage_limit(limits.candidates_per_lookup));
             }
         }
         profile_internal("universal source inventory index", &mut profile_started);
@@ -565,7 +614,7 @@ impl UniversalResolutionIndex {
         let mut members_by_owner =
             AHashMap::<(String, String, String), Vec<DeclarationSlot>>::new();
         for declaration in declarations.values() {
-            let Some(&slot) = declaration_slots.get(&declaration.id) else {
+            let Some(slot) = declaration_slot(&declaration_ids, &declaration.id) else {
                 continue;
             };
             let Some(owner) = declaration
@@ -592,12 +641,11 @@ impl UniversalResolutionIndex {
             });
             members.dedup();
             if members.len() > limits.candidates_per_lookup {
-                members.truncate(limits.candidates_per_lookup);
+                members.truncate(candidate_storage_limit(limits.candidates_per_lookup));
             }
         }
         let rust_impl_associated_types = rust_impl_associated_type_index(
             &declarations,
-            &declaration_slots,
             &declaration_ids,
             &scopes,
             &candidates,
@@ -757,7 +805,7 @@ impl UniversalResolutionIndex {
             .into_iter()
             .map(|(key, mut entries)| {
                 entries.sort_unstable();
-                entries.truncate(limits.candidates_per_lookup);
+                entries.truncate(candidate_storage_limit(limits.candidates_per_lookup));
                 (
                     key,
                     entries
@@ -2893,7 +2941,7 @@ impl UniversalResolutionIndex {
         let mut declarations = BTreeSet::<DeclarationSlot>::new();
         for owner_id in owner_ids
             .into_iter()
-            .take(self.limits.candidates_per_lookup)
+            .take(candidate_storage_limit(self.limits.candidates_per_lookup))
         {
             let owner = &self.declaration(owner_id)?.qualified_name;
             if let Some(ids) = self
@@ -3230,7 +3278,7 @@ impl UniversalResolutionIndex {
         }
         declarations
             .into_iter()
-            .take(self.limits.candidates_per_lookup)
+            .take(candidate_storage_limit(self.limits.candidates_per_lookup))
             .collect()
     }
 
@@ -3969,6 +4017,13 @@ fn materialized_declaration_ids<'a>(
     ids
 }
 
+fn declaration_slot(declaration_ids: &[String], id: &str) -> Option<DeclarationSlot> {
+    let index = declaration_ids
+        .binary_search_by(|candidate| candidate.as_str().cmp(id))
+        .ok()?;
+    u32::try_from(index).ok()
+}
+
 fn c3_merge(mut sequences: Vec<Vec<String>>, limit: usize) -> Result<Vec<String>, ()> {
     let mut merged = Vec::new();
     loop {
@@ -4078,14 +4133,13 @@ fn sort_declaration_index<K: Eq + Hash>(
         });
         values.dedup();
         if values.len() > candidate_limit {
-            values.truncate(candidate_limit);
+            values.truncate(candidate_storage_limit(candidate_limit));
         }
     }
 }
 
 fn rust_impl_associated_type_index(
     declarations: &AHashMap<String, DeclarationFact>,
-    declaration_slots: &AHashMap<String, DeclarationSlot>,
     declaration_ids: &[String],
     scopes: &AHashMap<String, compass_languages::ScopeFact>,
     candidates: &AHashMap<String, RelationshipCandidate>,
@@ -4137,7 +4191,7 @@ fn rust_impl_associated_type_index(
                 && declaration.kind == "type_alias"
                 && declaration.scope_id.as_deref() == Some(scope.id.as_str())
         }) {
-            let Some(&slot) = declaration_slots.get(&declaration.id) else {
+            let Some(slot) = declaration_slot(declaration_ids, &declaration.id) else {
                 continue;
             };
             let associated = index
@@ -4234,6 +4288,21 @@ fn rust_impl_trait_index(
         }
     }
     index
+}
+
+/// Keep one extra candidate as an overflow marker when an index is bounded.
+///
+/// A lookup is allowed to resolve only when exactly one eligible candidate is
+/// present. Truncating a vector of two candidates to a configured limit of one
+/// erased the evidence that the result was ambiguous and could manufacture a
+/// false unique resolution. The extra slot keeps the operation bounded while
+/// making incompleteness observable to the existing `take(limit + 1)` checks.
+fn candidate_storage_limit(candidate_limit: usize) -> usize {
+    if candidate_limit == 0 {
+        0
+    } else {
+        candidate_limit.saturating_add(1)
+    }
 }
 
 fn unique_definition_ranges(

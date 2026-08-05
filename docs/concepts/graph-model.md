@@ -116,6 +116,11 @@ Relation names depend on the extractor and input type. Common families include:
 Do not assume every relation implies runtime execution. `imports_from` and
 `references` express different kinds of dependency from `calls`.
 
+Configuration keys preserve their source hierarchy: root keys are contained by
+the file or schema node, and nested keys are contained by their immediate
+parent key. Nested keys may also retain a `references` edge with
+`context=config-child` for configuration-specific provenance.
+
 ## Attributes
 
 Nodes and edges retain open-ended JSON attributes. Common logical attributes include:

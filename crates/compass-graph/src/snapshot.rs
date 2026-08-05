@@ -6,8 +6,10 @@
 //! logical layout.  The JSON artifact remains the compatibility engine and is
 //! reconstructed from these records for export and differential testing.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read, Write};
+use std::ops::Range;
 
 use compass_model::code_graph::{
     CODE_GRAPH_SCHEMA_V1, EdgeRecord, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
@@ -35,6 +37,10 @@ pub const GRAPH_SNAPSHOT_MAX_OBJECTS: usize = 100_000;
 pub const GRAPH_SNAPSHOT_MAX_ITEMS: usize = 5_000_000;
 pub const GRAPH_SNAPSHOT_MAX_FANOUT: usize = 32;
 pub const GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES: usize = 128;
+/// Maximum previous JSON artifact retained while attempting a byte-preserving
+/// fact-neutral publication. Larger artifacts use the bounded streaming
+/// serializer instead of adding another resident graph-sized buffer.
+pub const GRAPH_JSON_DELTA_MAX_SOURCE_BYTES: usize = 512 * 1024 * 1024;
 const TREE_ZSTD_MAGIC: &[u8; 5] = b"CSTZ1";
 const TREE_ZSTD_HEADER_BYTES: usize = TREE_ZSTD_MAGIC.len() + std::mem::size_of::<u32>();
 
@@ -627,6 +633,61 @@ impl GraphSnapshotBuilder {
         })
     }
 
+    /// Prepare a bounded graph delta when an incremental edit changes graph
+    /// records or relationships. Unchanged immutable index trees are reused;
+    /// only indexes whose logical projection depends on changed records are
+    /// rebuilt. This preserves the full graph contract while avoiding a full
+    /// snapshot rewrite for small topology edits.
+    pub fn prepare_graph_delta<S: Store + ?Sized>(
+        &self,
+        store: &S,
+        previous: &GraphDocument,
+        current: &GraphDocument,
+    ) -> Result<PreparedGraphSnapshotContent, SnapshotError> {
+        validate_code_graph(current)
+            .map_err(|error| SnapshotError::Corrupt(format!("graph validation failed: {error}")))?;
+        validate_graph_delta(previous, current)?;
+        let reader = GraphSnapshotReader::open_active(store)?.ok_or_else(|| {
+            SnapshotError::Unsupported("graph delta requires an active snapshot".to_owned())
+        })?;
+        let previous_snapshot_id = snapshot_identity(previous)?;
+        if reader.selector().snapshot_id != previous_snapshot_id
+            || reader.manifest().node_count != previous.nodes.len() as u64
+            || reader.manifest().edge_count != previous.links.len() as u64
+        {
+            return Err(SnapshotError::Corrupt(
+                "active snapshot does not match the previous graph".to_owned(),
+            ));
+        }
+
+        let changed_indexes = graph_delta_indexes(previous, current);
+        if changed_indexes.is_empty() {
+            return Err(SnapshotError::Corrupt(
+                "graph delta contains no changed index projections".to_owned(),
+            ));
+        }
+        let mut writer = ObjectWriter::new(store)?;
+        let mut roots = reader.manifest().roots.clone();
+        for root in &mut roots {
+            if !changed_indexes.contains(&root.index) {
+                continue;
+            }
+            let term_postings =
+                (root.index == IndexKind::Terms).then(|| build_term_postings(current));
+            let entries = build_index(current, root.index, term_postings.as_ref())?;
+            root.entry_count = entries.len() as u64;
+            root.digest = build_index_tree(&mut writer, root.index, entries)?;
+        }
+        let stats = writer.finish()?;
+        Ok(PreparedGraphSnapshotContent {
+            snapshot_id: snapshot_identity(current)?,
+            node_count: current.nodes.len() as u64,
+            edge_count: current.links.len() as u64,
+            roots,
+            stats,
+        })
+    }
+
     /// Bind prepared index content to the digest of the exact compact
     /// canonical JSON bytes and publish the immutable manifest.
     pub fn finish_content<S: Store + ?Sized>(
@@ -766,6 +827,419 @@ pub fn write_canonical_graph_json<W: Write + ?Sized>(
     writer.write_all(b"}")
 }
 
+/// Publish a fact-neutral graph edit by reusing the previous canonical node
+/// and link bytes. Fact-neutral edits only update file-node metadata and graph
+/// inventory; the semantic node IDs and every relationship remain unchanged.
+///
+/// The function performs a complete structural preflight before writing any
+/// bytes. It returns `Ok(false)` when the previous artifact is not the
+/// canonical node-link shape or when the supplied changed-node set is not
+/// compatible with a file-only delta, allowing the caller to use the normal
+/// full serializer without risking a partial duplicate document.
+pub fn write_fact_neutral_graph_json_delta<W: Write + ?Sized>(
+    previous_bytes: &[u8],
+    graph: &GraphDocument,
+    changed_file_node_ids: &BTreeSet<String>,
+    writer: &mut W,
+) -> io::Result<bool> {
+    write_fact_neutral_graph_json_delta_inner(
+        previous_bytes,
+        graph,
+        changed_file_node_ids,
+        true,
+        writer,
+    )
+}
+
+/// Publish a fact-neutral edit after the caller has already validated the
+/// previous graph document. The core pipeline uses this variant because it
+/// loads `graph.json` as a bounded, typed `GraphDocument` before attempting the
+/// byte-preserving publication. Skipping the redundant per-record payload
+/// deserialization keeps large incremental edits bounded by one graph parse.
+pub fn write_fact_neutral_graph_json_delta_prevalidated<W: Write + ?Sized>(
+    previous_bytes: &[u8],
+    graph: &GraphDocument,
+    changed_file_node_ids: &BTreeSet<String>,
+    writer: &mut W,
+) -> io::Result<bool> {
+    write_fact_neutral_graph_json_delta_inner(
+        previous_bytes,
+        graph,
+        changed_file_node_ids,
+        false,
+        writer,
+    )
+}
+
+fn write_fact_neutral_graph_json_delta_inner<W: Write + ?Sized>(
+    previous_bytes: &[u8],
+    graph: &GraphDocument,
+    changed_file_node_ids: &BTreeSet<String>,
+    validate_records: bool,
+    writer: &mut W,
+) -> io::Result<bool> {
+    if previous_bytes.is_empty()
+        || previous_bytes.len() > MAX_GRAPH_BYTES
+        || previous_bytes.len() > GRAPH_JSON_DELTA_MAX_SOURCE_BYTES
+    {
+        return Ok(false);
+    }
+    let Some(nodes_range) = top_level_member_range(previous_bytes, "nodes") else {
+        return Ok(false);
+    };
+    // The canonical writer emits `links` immediately after `nodes`. Starting
+    // from the end of the already located nodes value avoids rescanning the
+    // complete node array just to find the next top-level member.
+    let Some(links_range) = top_level_member_range_after(previous_bytes, nodes_range.end, "links")
+    else {
+        return Ok(false);
+    };
+    let Some(node_ranges) = json_array_element_ranges_matching(
+        previous_bytes,
+        nodes_range.clone(),
+        graph.nodes.iter().map(|node| node.id.as_str()),
+        validate_records,
+    ) else {
+        return Ok(false);
+    };
+    if node_ranges.len() != graph.nodes.len()
+        || !json_array_identities_match(
+            previous_bytes,
+            links_range.clone(),
+            graph.links.iter().map(|link| link.id.as_str()),
+            validate_records,
+        )
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+
+    let mut changed_seen = BTreeSet::new();
+    for (index, _) in node_ranges.iter().enumerate() {
+        let current = &graph.nodes[index];
+        if changed_file_node_ids.contains(&current.id) {
+            if current.kind != NodeKind::File {
+                return Ok(false);
+            }
+            changed_seen.insert(current.id.clone());
+        }
+    }
+    if changed_seen.len() != changed_file_node_ids.len() {
+        return Ok(false);
+    }
+
+    writer.write_all(b"{\"directed\":")?;
+    serde_json::to_writer(&mut *writer, &graph.directed).map_err(io::Error::other)?;
+    writer.write_all(b",\"multigraph\":")?;
+    serde_json::to_writer(&mut *writer, &graph.multigraph).map_err(io::Error::other)?;
+    writer.write_all(b",\"graph\":")?;
+    if graph_metadata_files_are_canonical(graph) {
+        serde_json::to_writer(&mut *writer, &graph.graph).map_err(io::Error::other)?;
+    } else {
+        let mut metadata = graph.graph.clone();
+        metadata.files.sort_by(|left, right| left.id.cmp(&right.id));
+        serde_json::to_writer(&mut *writer, &metadata).map_err(io::Error::other)?;
+    }
+    writer.write_all(b",\"nodes\":[")?;
+    for (index, range) in node_ranges.iter().enumerate() {
+        if index > 0 {
+            writer.write_all(b",")?;
+        }
+        let node = &graph.nodes[index];
+        if changed_file_node_ids.contains(&node.id) {
+            serde_json::to_writer(&mut *writer, node).map_err(io::Error::other)?;
+        } else {
+            writer.write_all(&previous_bytes[range.clone()])?;
+        }
+    }
+    writer.write_all(b"],\"links\":")?;
+    writer.write_all(&previous_bytes[links_range])?;
+    writer.write_all(b"}")?;
+    Ok(true)
+}
+
+#[derive(Deserialize)]
+struct JsonRecordIdentity<'a> {
+    #[serde(borrow)]
+    id: Cow<'a, str>,
+}
+
+fn json_record_identity(bytes: &[u8], validate_record: bool) -> Option<Cow<'_, str>> {
+    if validate_record {
+        return serde_json::from_slice::<JsonRecordIdentity<'_>>(bytes)
+            .ok()
+            .map(|record| record.id);
+    }
+    // Canonical node/link records serialize `id` first.  The caller has
+    // already loaded the previous graph through `GraphDocument`, so the
+    // complete record payload has been validated before this byte-preserving
+    // preflight runs.  Avoid deserializing every large record a second time;
+    // the array scanner above still validates the record boundaries and this
+    // check only needs the leading identity used to prove ordering.
+    let object_start = skip_json_whitespace(bytes, 0);
+    if bytes.get(object_start) != Some(&b'{') {
+        return None;
+    }
+    let key_start = skip_json_whitespace(bytes, object_start.saturating_add(1));
+    let key_end = json_string_end(bytes, key_start)?;
+    if &bytes[key_start..key_end] != b"\"id\"" {
+        return None;
+    }
+    let colon = skip_json_whitespace(bytes, key_end);
+    if bytes.get(colon) != Some(&b':') {
+        return None;
+    }
+    let value_start = skip_json_whitespace(bytes, colon.saturating_add(1));
+    let value_end = json_string_end(bytes, value_start)?;
+    let raw = bytes.get(value_start.saturating_add(1)..value_end.saturating_sub(1))?;
+    if raw.iter().all(|byte| *byte >= 0x20 && *byte != b'\\') {
+        return std::str::from_utf8(raw).ok().map(Cow::Borrowed);
+    }
+    serde_json::from_slice::<Cow<'_, str>>(&bytes[value_start..value_end]).ok()
+}
+
+fn top_level_member_range(bytes: &[u8], wanted: &str) -> Option<Range<usize>> {
+    let object_start = skip_json_whitespace(bytes, 0);
+    if bytes.get(object_start) != Some(&b'{') {
+        return None;
+    }
+    let mut index = skip_json_whitespace(bytes, object_start.saturating_add(1));
+    if bytes.get(index) == Some(&b'}') {
+        return None;
+    }
+    loop {
+        let key_start = index;
+        let key_end = json_string_end(bytes, key_start)?;
+        index = skip_json_whitespace(bytes, key_end);
+        if bytes.get(index) != Some(&b':') {
+            return None;
+        }
+        let value_start = skip_json_whitespace(bytes, index.saturating_add(1));
+        let value_end = json_value_end(bytes, value_start)?;
+        if json_key_matches(bytes, key_start..key_end, wanted) {
+            return Some(value_start..value_end);
+        }
+        index = skip_json_whitespace(bytes, value_end);
+        match bytes.get(index) {
+            Some(b',') => {
+                index = skip_json_whitespace(bytes, index.saturating_add(1));
+            }
+            Some(b'}') => return None,
+            _ => return None,
+        }
+    }
+}
+
+fn top_level_member_range_after(
+    bytes: &[u8],
+    previous_value_end: usize,
+    wanted: &str,
+) -> Option<Range<usize>> {
+    let comma = skip_json_whitespace(bytes, previous_value_end);
+    if bytes.get(comma) != Some(&b',') {
+        return None;
+    }
+    let key_start = skip_json_whitespace(bytes, comma.saturating_add(1));
+    let key_end = json_string_end(bytes, key_start)?;
+    if !json_key_matches(bytes, key_start..key_end, wanted) {
+        return None;
+    }
+    let colon = skip_json_whitespace(bytes, key_end);
+    if bytes.get(colon) != Some(&b':') {
+        return None;
+    }
+    let value_start = skip_json_whitespace(bytes, colon.saturating_add(1));
+    let value_end = json_value_end(bytes, value_start)?;
+    Some(value_start..value_end)
+}
+
+fn json_key_matches(bytes: &[u8], range: Range<usize>, wanted: &str) -> bool {
+    let key = &bytes[range];
+    key.len() == wanted.len().saturating_add(2)
+        && key.first() == Some(&b'"')
+        && key.last() == Some(&b'"')
+        && &key[1..key.len().saturating_sub(1)] == wanted.as_bytes()
+}
+
+fn json_array_element_ranges_matching<'a>(
+    bytes: &[u8],
+    range: Range<usize>,
+    expected_ids: impl Iterator<Item = &'a str>,
+    validate_records: bool,
+) -> Option<Vec<Range<usize>>> {
+    if bytes.get(range.start) != Some(&b'[')
+        || range.end <= range.start.saturating_add(1)
+        || bytes.get(range.end.saturating_sub(1)) != Some(&b']')
+    {
+        return None;
+    }
+    let mut elements = Vec::new();
+    let mut expected_ids = expected_ids;
+    let mut index = skip_json_whitespace(bytes, range.start.saturating_add(1));
+    if index == range.end.saturating_sub(1) {
+        return expected_ids.next().is_none().then_some(elements);
+    }
+    loop {
+        let value_start = index;
+        let value_end = json_value_end(bytes, value_start)?;
+        if value_end > range.end.saturating_sub(1) {
+            return None;
+        }
+        if elements.len() >= GRAPH_SNAPSHOT_MAX_ITEMS {
+            return None;
+        }
+        let expected_id = expected_ids.next()?;
+        let identity = json_record_identity(&bytes[value_start..value_end], validate_records)?;
+        if identity.as_ref() != expected_id {
+            return None;
+        }
+        elements.push(value_start..value_end);
+        index = skip_json_whitespace(bytes, value_end);
+        match bytes.get(index) {
+            Some(b',') => {
+                index = skip_json_whitespace(bytes, index.saturating_add(1));
+                if index >= range.end.saturating_sub(1) {
+                    return None;
+                }
+            }
+            Some(b']') if index == range.end.saturating_sub(1) => {
+                return expected_ids.next().is_none().then_some(elements);
+            }
+            _ => return None,
+        }
+    }
+}
+
+fn json_array_identities_match<'a>(
+    bytes: &[u8],
+    range: Range<usize>,
+    expected_ids: impl Iterator<Item = &'a str>,
+    validate_records: bool,
+) -> Option<bool> {
+    if bytes.get(range.start) != Some(&b'[')
+        || range.end <= range.start.saturating_add(1)
+        || bytes.get(range.end.saturating_sub(1)) != Some(&b']')
+    {
+        return None;
+    }
+    let mut expected_ids = expected_ids;
+    let mut element_count = 0_usize;
+    let mut index = skip_json_whitespace(bytes, range.start.saturating_add(1));
+    if index == range.end.saturating_sub(1) {
+        return Some(expected_ids.next().is_none());
+    }
+    loop {
+        let value_start = index;
+        let value_end = json_value_end(bytes, value_start)?;
+        if value_end > range.end.saturating_sub(1) {
+            return None;
+        }
+        if element_count >= GRAPH_SNAPSHOT_MAX_ITEMS {
+            return None;
+        }
+        element_count = element_count.saturating_add(1);
+        let Some(expected_id) = expected_ids.next() else {
+            return Some(false);
+        };
+        let identity = json_record_identity(&bytes[value_start..value_end], validate_records)?;
+        if identity.as_ref() != expected_id {
+            return Some(false);
+        }
+        index = skip_json_whitespace(bytes, value_end);
+        match bytes.get(index) {
+            Some(b',') => {
+                index = skip_json_whitespace(bytes, index.saturating_add(1));
+                if index >= range.end.saturating_sub(1) {
+                    return None;
+                }
+            }
+            Some(b']') if index == range.end.saturating_sub(1) => {
+                return Some(expected_ids.next().is_none());
+            }
+            _ => return None,
+        }
+    }
+}
+
+fn skip_json_whitespace(bytes: &[u8], mut index: usize) -> usize {
+    while bytes
+        .get(index)
+        .is_some_and(|byte| matches!(byte, b' ' | b'\n' | b'\r' | b'\t'))
+    {
+        index = index.saturating_add(1);
+    }
+    index
+}
+
+fn json_string_end(bytes: &[u8], start: usize) -> Option<usize> {
+    if bytes.get(start) != Some(&b'"') {
+        return None;
+    }
+    let mut escaped = false;
+    for (index, byte) in bytes.iter().enumerate().skip(start.saturating_add(1)) {
+        let byte = *byte;
+        if escaped {
+            escaped = false;
+        } else if byte == b'\\' {
+            escaped = true;
+        } else if byte == b'"' {
+            return Some(index.saturating_add(1));
+        }
+    }
+    None
+}
+
+fn json_value_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let start = skip_json_whitespace(bytes, start);
+    match bytes.get(start) {
+        Some(b'"') => json_string_end(bytes, start),
+        Some(b'{') | Some(b'[') => {
+            let mut stack = vec![if bytes[start] == b'{' { b'}' } else { b']' }];
+            let mut index = start.saturating_add(1);
+            while index < bytes.len() {
+                match bytes[index] {
+                    b'"' => index = json_string_end(bytes, index)?,
+                    b'{' => {
+                        if stack.len() >= GRAPH_SNAPSHOT_MAX_DEPTH {
+                            return None;
+                        }
+                        stack.push(b'}');
+                        index = index.saturating_add(1);
+                    }
+                    b'[' => {
+                        if stack.len() >= GRAPH_SNAPSHOT_MAX_DEPTH {
+                            return None;
+                        }
+                        stack.push(b']');
+                        index = index.saturating_add(1);
+                    }
+                    b'}' | b']' => {
+                        if stack.pop() != Some(bytes[index]) {
+                            return None;
+                        }
+                        index = index.saturating_add(1);
+                        if stack.is_empty() {
+                            return Some(index);
+                        }
+                    }
+                    _ => index = index.saturating_add(1),
+                }
+            }
+            None
+        }
+        Some(_) => {
+            let mut index = start;
+            while bytes.get(index).is_some_and(|byte| {
+                !matches!(byte, b' ' | b'\n' | b'\r' | b'\t' | b',' | b']' | b'}')
+            }) {
+                index = index.saturating_add(1);
+            }
+            (index > start).then_some(index)
+        }
+        None => None,
+    }
+}
+
 fn graph_metadata_files_are_canonical(graph: &GraphDocument) -> bool {
     graph
         .graph
@@ -779,6 +1253,17 @@ where
     W: Write + ?Sized,
     T: Serialize + Sync,
 {
+    // Most small and medium repositories fit in one bounded chunk. Avoid
+    // dispatching a one-chunk array through Rayon: that path cannot overlap
+    // useful work and otherwise pays the global-pool scheduling cost during
+    // the latency-sensitive final publication step.
+    if records.len() <= CANONICAL_RECORD_CHUNK {
+        writer.write_all(b"[")?;
+        if !records.is_empty() {
+            writer.write_all(&encode_canonical_record_chunk(records)?)?;
+        }
+        return writer.write_all(b"]");
+    }
     writer.write_all(b"[")?;
     let mut chunks = records.chunks(CANONICAL_RECORD_CHUNK);
     let mut first = true;
@@ -2014,6 +2499,47 @@ fn validate_file_node_delta(
     Ok(())
 }
 
+fn validate_graph_delta(
+    previous: &GraphDocument,
+    current: &GraphDocument,
+) -> Result<(), SnapshotError> {
+    if previous.directed != current.directed || previous.multigraph != current.multigraph {
+        return Err(SnapshotError::Unsupported(
+            "graph delta changed graph directionality".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn graph_delta_indexes(previous: &GraphDocument, current: &GraphDocument) -> BTreeSet<IndexKind> {
+    let mut changed = BTreeSet::new();
+    if previous.graph != current.graph {
+        changed.insert(IndexKind::Metadata);
+    }
+    if previous.graph.files != current.graph.files {
+        changed.insert(IndexKind::Files);
+    }
+
+    let nodes_changed = previous.nodes != current.nodes;
+    if nodes_changed {
+        changed.insert(IndexKind::Nodes);
+        changed.insert(IndexKind::Names);
+        changed.insert(IndexKind::Communities);
+    }
+
+    let links_changed = previous.links != current.links;
+    if links_changed {
+        changed.insert(IndexKind::Edges);
+        changed.insert(IndexKind::Outgoing);
+        changed.insert(IndexKind::Incoming);
+    }
+    if nodes_changed || links_changed {
+        // Alias edges contribute searchable terms for their target nodes.
+        changed.insert(IndexKind::Terms);
+    }
+    changed
+}
+
 fn file_node_index_projection_equal(previous: &NodeRecord, current: &NodeRecord) -> bool {
     if previous.kind != current.kind
         || previous.roles != current.roles
@@ -2755,7 +3281,10 @@ fn digest_bytes(value: &[u8]) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use compass_model::code_graph::{BuildMetadata, ExtractionStatus, FileRecord, NodeKind};
+    use compass_model::code_graph::{
+        BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails, FileRecord,
+        NodeDetails, NodeKind,
+    };
 
     #[test]
     fn streamed_canonical_graph_json_matches_serde_encoding() -> Result<(), SnapshotError> {
@@ -2802,7 +3331,21 @@ mod tests {
                     community: None,
                 },
             ],
-            links: Vec::new(),
+            links: vec![EdgeRecord {
+                id: "edge".to_owned(),
+                key: "edge".to_owned(),
+                source: "file".to_owned(),
+                target: "symbol".to_owned(),
+                kind: EdgeKind::Contains,
+                occurrence_rule: None,
+                relationship_site: None,
+                details: None,
+                evidence: Vec::new(),
+                weight: None,
+                context: None,
+                deferred: false,
+                diagnostics: Vec::new(),
+            }],
         };
         let expected = serde_json::to_vec(&canonical_graph_document_presorted(&graph))
             .map_err(|error| SnapshotError::Encode(error.to_string()))?;
@@ -2845,6 +3388,123 @@ mod tests {
 
         assert_eq!(actual, expected);
         Ok(())
+    }
+
+    #[test]
+    fn fact_neutral_delta_reuses_unchanged_record_bytes() -> Result<(), SnapshotError> {
+        let build = BuildMetadata {
+            builder_version: "test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "tree".to_owned(),
+            configuration_digest: "config".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        };
+        let file_node = NodeRecord {
+            id: "file".to_owned(),
+            kind: NodeKind::File,
+            roles: Vec::new(),
+            name: "main.rs".to_owned(),
+            qualified_name: "main.rs".to_owned(),
+            language: Some("rust".to_owned()),
+            framework: None,
+            source: None,
+            details: None,
+            evidence: Vec::new(),
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+            community: None,
+        };
+        let symbol_node = NodeRecord {
+            id: "symbol".to_owned(),
+            kind: NodeKind::Function,
+            roles: Vec::new(),
+            name: "main".to_owned(),
+            qualified_name: "main".to_owned(),
+            language: Some("rust".to_owned()),
+            framework: None,
+            source: None,
+            details: None,
+            evidence: Vec::new(),
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+            community: None,
+        };
+        let previous = GraphDocument {
+            directed: true,
+            multigraph: true,
+            graph: GraphMetadata::v1(build),
+            nodes: vec![file_node, symbol_node],
+            links: Vec::new(),
+        };
+        let mut previous_bytes = Vec::new();
+        write_canonical_graph_json(&previous, &mut previous_bytes)
+            .map_err(|error| SnapshotError::Encode(error.to_string()))?;
+
+        let mut current = previous.clone();
+        current.nodes[0].details = Some(NodeDetails::File(FileNodeDetails {
+            content_digest: "sha256:changed".to_owned(),
+            byte_size: 42,
+            generated: false,
+        }));
+        let expected = {
+            let mut bytes = Vec::new();
+            write_canonical_graph_json(&current, &mut bytes)
+                .map_err(|error| SnapshotError::Encode(error.to_string()))?;
+            bytes
+        };
+        let changed = BTreeSet::from(["file".to_owned()]);
+        let mut actual = Vec::new();
+        assert!(
+            write_fact_neutral_graph_json_delta(&previous_bytes, &current, &changed, &mut actual,)
+                .map_err(|error| SnapshotError::Encode(error.to_string()))?
+        );
+        assert_eq!(actual, expected);
+
+        let mut prevalidated = Vec::new();
+        assert!(
+            write_fact_neutral_graph_json_delta_prevalidated(
+                &previous_bytes,
+                &current,
+                &changed,
+                &mut prevalidated,
+            )
+            .map_err(|error| SnapshotError::Encode(error.to_string()))?
+        );
+        assert_eq!(prevalidated, expected);
+
+        let invalid = BTreeSet::from(["symbol".to_owned()]);
+        let mut no_output = Vec::new();
+        assert!(
+            !write_fact_neutral_graph_json_delta(
+                &previous_bytes,
+                &current,
+                &invalid,
+                &mut no_output,
+            )
+            .map_err(|error| SnapshotError::Encode(error.to_string()))?
+        );
+        assert!(no_output.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn json_record_identity_uses_the_canonical_leading_id() {
+        assert_eq!(
+            json_record_identity(br#"{"id":"plain","name":"ignored"}"#, false).as_deref(),
+            Some("plain")
+        );
+        assert_eq!(
+            json_record_identity(br#"{"id":"escaped\"id","name":"ignored"}"#, false).as_deref(),
+            Some("escaped\"id")
+        );
+        let malformed = br#"{"id":"plain","value":01}"#;
+        assert!(json_record_identity(malformed, true).is_none());
+        assert_eq!(
+            json_record_identity(malformed, false).as_deref(),
+            Some("plain")
+        );
+        assert!(json_record_identity(br#"{"name":"plain","id":"not-leading"}"#, false).is_none());
     }
 
     #[test]

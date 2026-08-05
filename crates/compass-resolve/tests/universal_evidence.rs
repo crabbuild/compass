@@ -5,6 +5,9 @@ use std::path::Path;
 use compass_graph::{BuildEvidence, normalize_v1};
 use compass_languages::{CandidateRelation, Engine, EvidenceLimits, validate_evidence};
 use compass_model::code_graph::NodeKind;
+use compass_resolve::evidence::{
+    ResolutionDecision, UniversalResolutionIndex, UniversalResolutionLimits,
+};
 use compass_resolve::{resolve, resolve_with_root};
 
 #[test]
@@ -107,6 +110,67 @@ fn ambiguous_owned_scopes_fall_back_to_the_exact_declaration_anchor() -> Result<
             .get("line_end")
             .and_then(serde_json::Value::as_u64),
         Some(3)
+    );
+    Ok(())
+}
+
+#[test]
+fn bounded_universal_indexes_preserve_ambiguous_declarations() -> Result<(), Box<dyn Error>> {
+    let source =
+        b"def target():\n    pass\n\ndef target():\n    pass\n\ndef caller():\n    target()\n";
+    let extraction = Engine::default().extract_source(Path::new("module.py"), source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Python semantic evidence")?;
+    let candidate = evidence
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "target"
+        })
+        .ok_or("missing target call candidate")?;
+
+    let index = UniversalResolutionIndex::new(
+        std::slice::from_ref(evidence),
+        UniversalResolutionLimits {
+            candidates_per_lookup: 1,
+            ..UniversalResolutionLimits::default()
+        },
+    )?;
+    assert!(matches!(
+        index.resolve(&candidate.id),
+        ResolutionDecision::Ambiguous { candidate_count: 2 }
+    ));
+    Ok(())
+}
+
+#[test]
+fn aggregate_universal_limits_are_checked_before_reserving_indexes() -> Result<(), Box<dyn Error>> {
+    let mut engine = Engine::default();
+    let left = engine.extract_source(Path::new("left.py"), b"def left():\n    pass\n")?;
+    let right = engine.extract_source(Path::new("right.py"), b"def right():\n    pass\n")?;
+    let batches = [
+        left.semantic_evidence
+            .ok_or("missing left semantic evidence")?,
+        right
+            .semantic_evidence
+            .ok_or("missing right semantic evidence")?,
+    ];
+
+    let error = match UniversalResolutionIndex::new(
+        &batches,
+        UniversalResolutionLimits {
+            declarations: 1,
+            ..UniversalResolutionLimits::default()
+        },
+    ) {
+        Ok(_) => return Err("aggregate declaration limit was not enforced".into()),
+        Err(error) => error,
+    };
+    assert!(
+        error.contains("aggregate declarations count"),
+        "error={error}"
     );
     Ok(())
 }
@@ -277,6 +341,47 @@ fn read(entry: &Entry) { entry.path(); }
         targets[0],
     );
     assert_eq!(targets[0].string("qualified_name"), "crate::Entry::path");
+    Ok(())
+}
+
+#[test]
+fn rust_generic_impl_bound_calls_resolve_to_the_trait_method() -> Result<(), Box<dyn Error>> {
+    let source = br#"
+trait Render { fn render(&self); }
+struct Wrapper<T> { value: T }
+impl<T> Wrapper<T>
+where
+    T: Render,
+{
+    fn invoke(&self, value: T) { value.render(); self.value.render(); }
+}
+"#;
+    let source_file = "src/lib.rs";
+    let extracted = Engine::default().extract_source(Path::new(source_file), source)?;
+    let merged = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    let invoke = merged
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Wrapper::invoke")
+        .ok_or("missing generic impl method")?;
+    let render = merged
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Render::render")
+        .ok_or("missing trait method")?;
+    let calls = merged
+        .edges
+        .iter()
+        .filter(|edge| edge.source == invoke.id && edge.string("relation") == "calls")
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2, "calls={calls:#?}");
+    assert!(
+        calls.iter().all(|edge| edge.target == render.id),
+        "calls={calls:#?}"
+    );
     Ok(())
 }
 

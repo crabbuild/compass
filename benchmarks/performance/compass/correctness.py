@@ -73,6 +73,8 @@ class EdgeFact:
     target_fact_key: str
     occurrence_file: str
     occurrence_location: str
+    occurrence_start_byte: int | None
+    occurrence_end_byte: int | None
     payload_sha256: str
 
 
@@ -174,7 +176,7 @@ def _qualified_name(record: dict[str, object]) -> str:
     ).casefold()
 
 
-def _edge_occurrence(record: dict[str, object]) -> tuple[str, str]:
+def _edge_occurrence(record: dict[str, object]) -> tuple[str, str, int | None, int | None]:
     site = record.get("relationshipSite", record.get("relationship_site"))
     nested = site if isinstance(site, dict) else {}
     source_file = _text(record.get("source_file", nested.get("file"))).replace("\\", "/")
@@ -183,7 +185,11 @@ def _edge_occurrence(record: dict[str, object]) -> tuple[str, str]:
         start_line = nested.get("startLine", nested.get("start_line"))
         if isinstance(start_line, int) and start_line > 0:
             source_location = f"L{start_line}"
-    return source_file, source_location
+    start_byte = nested.get("startByte", nested.get("start_byte"))
+    end_byte = nested.get("endByte", nested.get("end_byte"))
+    start_byte = start_byte if type(start_byte) is int and start_byte >= 0 else None
+    end_byte = end_byte if type(end_byte) is int and end_byte >= 0 else None
+    return source_file, source_location, start_byte, end_byte
 
 
 def _shared_relation(tool: str, relation: str) -> str:
@@ -202,7 +208,7 @@ def _shared_relation(tool: str, relation: str) -> str:
 
 
 def _create_schema(database: sqlite3.Connection) -> None:
-    schema_version = 2
+    schema_version = 3
     current = int(database.execute("PRAGMA user_version").fetchone()[0])
     if current != schema_version:
         database.executescript(
@@ -247,6 +253,8 @@ def _create_schema(database: sqlite3.Connection) -> None:
             target_fact_key TEXT NOT NULL,
             occurrence_file TEXT NOT NULL,
             occurrence_location TEXT NOT NULL,
+            occurrence_start_byte INTEGER,
+            occurrence_end_byte INTEGER,
             payload_sha256 TEXT NOT NULL,
             UNIQUE (tool, source, target, relation, payload_sha256)
         );
@@ -418,7 +426,12 @@ def index_graph(
         context = _text(record.get("context"))
         source_fact_key = node_facts.get(source, "")
         target_fact_key = node_facts.get(target, "")
-        occurrence_file, occurrence_location = _edge_occurrence(record)
+        (
+            occurrence_file,
+            occurrence_location,
+            occurrence_start_byte,
+            occurrence_end_byte,
+        ) = _edge_occurrence(record)
         confidence = record.get("confidence")
         if isinstance(confidence, float) and not math.isfinite(confidence):
             raise ValueError(f"{tool} edge has non-finite confidence")
@@ -432,11 +445,13 @@ def index_graph(
                 _text(confidence),
                 occurrence_file,
                 occurrence_location,
+                occurrence_start_byte,
+                occurrence_end_byte,
             )
         )
         before = database.total_changes
         database.execute(
-            "INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 tool,
                 source,
@@ -448,6 +463,8 @@ def index_graph(
                 target_fact_key,
                 occurrence_file,
                 occurrence_location,
+                occurrence_start_byte,
+                occurrence_end_byte,
                 payload,
             ),
         )
@@ -497,9 +514,11 @@ def canonical_graph_digest(database: sqlite3.Connection, tool: str) -> str:
         ),
         (
             "edge",
-            "SELECT source,target,relation,occurrence_file,occurrence_location,payload_sha256 "
+            "SELECT source,target,relation,occurrence_file,occurrence_location,"
+            "occurrence_start_byte,occurrence_end_byte,payload_sha256 "
             "FROM edges "
-            "WHERE tool = ? ORDER BY source,target,relation,payload_sha256",
+            "WHERE tool = ? ORDER BY source,target,relation,occurrence_file,"
+            "occurrence_location,occurrence_start_byte,occurrence_end_byte,payload_sha256",
         ),
     ):
         for row in database.execute(query, (tool,)):
@@ -554,15 +573,19 @@ def _edge_facts(database: sqlite3.Connection, tool: str) -> list[EdgeFact]:
             target_fact_key=str(row[6]),
             occurrence_file=str(row[7]),
             occurrence_location=str(row[8]),
-            payload_sha256=str(row[9]),
+            occurrence_start_byte=(int(row[9]) if row[9] is not None else None),
+            occurrence_end_byte=(int(row[10]) if row[10] is not None else None),
+            payload_sha256=str(row[11]),
         )
         for row in database.execute(
             """
             SELECT source,target,relation,original_relation,context,
                    source_fact_key,target_fact_key,occurrence_file,
-                   occurrence_location,payload_sha256
+                   occurrence_location,occurrence_start_byte,occurrence_end_byte,
+                   payload_sha256
             FROM edges WHERE tool = ?
-            ORDER BY source,target,relation,occurrence_file,occurrence_location,payload_sha256
+            ORDER BY source,target,relation,occurrence_file,occurrence_location,
+                     occurrence_start_byte,occurrence_end_byte,payload_sha256
             """,
             (tool,),
         )

@@ -330,6 +330,7 @@ def independent_source_inventory(
         try:
             resolved.relative_to(root)
         except ValueError:
+            rejected.append(path.relative_to(root).as_posix())
             continue
         if resolved.is_file():
             scanned += 1

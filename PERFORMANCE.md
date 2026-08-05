@@ -219,11 +219,21 @@ Click (Python, 91 files). The run used `extract --code-only --no-cluster
 | Click | 1.47 s | 3,876 | 9,471 |
 
 These are diagnostic observations, not promoted baselines or a claim of a
-4×–5× cold-build advantage. Small-project extraction now stays sequential by
-default to avoid multiplying parser/AST working sets; `--max-workers` remains
-the explicit opt-in for parallel extraction. Portable AST cache publication
+4×–5× cold-build advantage. Extraction with fewer than 32 missing files stays
+sequential to avoid multiplying parser/AST working sets; the automatic path
+uses a default cap of 8 local workers below 1,024 missing files and 4 workers
+at or above that boundary, while `--max-workers` remains the explicit
+override. Portable AST publication
 also streams one compressed value at a time instead of retaining the entire
-compressed batch in memory.
+compressed batch in memory. Incremental cache hits now remain in that portable
+representation and decode directly into typed extraction records when loaded
+by the pipeline, so only freshly extracted files pay the source-path
+normalization walk; the public cache reader continues to return its established
+absolute-path representation. The bounded graph-delta candidate check walks
+the already canonical node/link order without allocating full ID maps, and the
+framework resolver skips target-index construction when no framework facts
+exist. These are internal optimizations: the immutable snapshot validator and
+the full graph publication contract remain authoritative.
 
 The same Cobra checkout was cold-built into a fresh SQLite output and then
 received a comment-only edit. The edit extracted 1 file and reused 36 cached
@@ -234,8 +244,11 @@ Communities, and Diagnostics roots remain immutable for a file-only change.
 
 The language fixtures cover the remaining attribution gaps directly: Go
 variadic range elements, type assertions, and nested closure parameters now
-resolve to their receiver methods; Rust generic impl calls resolve to the
-exact impl owner both within one file and across an imported module. On the
+resolve to their receiver methods; Rust generic `impl` and struct bounds now
+carry through direct and field receivers, resolving calls to the exact trait
+method while preserving fail-closed ambiguity. Rust generic impl calls also
+resolve to the exact impl owner both within one file and across an imported
+module. On the
 same filtered Graphify Go comparison, exact comparable edges improved from
 1,469 to 1,492 and missing edges fell from 38 to 15. These quality numbers are
 diagnostic and do not imply that all Graphify gaps are closed.
@@ -617,6 +630,70 @@ the same graph SHA-256 for all four pinned repositories (`78ef5b7b` Cobra,
 `c25d3b97` Click, `06014539` Rayon, and `f620afe4` Zod). The observed peak RSS
 was 103, 168, 270, and 309 MiB respectively. These are single-run diagnostic
 measurements, not a promoted memory baseline.
+
+The automatic AST pool now uses the default cap of 8 workers below 1,024
+missing files and a host-aware, bounded cap of up to 12 workers at or above
+that repository-size boundary. The build-wide Rayon pool uses the same
+host-aware ceiling; an explicit `--max-workers` value continues to override
+both automatic choices. The cap is deliberately finite rather than an
+unbounded host-sized pool, because parser and graph-publication working sets
+scale with concurrency.
+
+A clean three-sample follow-up on the pinned 2026-08-05 qualification corpora
+measured the release binary with JSON output and fresh output directories on
+each run. Graphify values are the paired three-sample p50 baselines:
+
+| Repository | Compass p50 | Graphify p50 | Graphify / Compass | Compass RSS p50 |
+| --- | ---: | ---: | ---: | ---: |
+| Cobra (Go) | 0.30 s | 0.95 s | 3.17× | 123.5 MiB |
+| Click (Python) | 0.50 s | 1.94 s | 3.88× | 180.7 MiB |
+| Rayon (Rust) | 0.80 s | 1.90 s | 2.38× | 284.5 MiB |
+| Zod (TypeScript) | 1.00 s | 4.80 s | 4.80× | 284.8 MiB |
+| Django (Python) | 10.80 s | 40.76 s | 3.77× | 2,248 MiB |
+
+The Django graph remained 80,976 nodes / 195,164 edges with zero validation
+errors, and the four small-corpus graph populations and normalized digests
+remained unchanged. The host-aware default therefore improves the large
+repository path, but these measurements still do not establish the requested
+universal 4× target; the higher Compass RSS is also an explicit tradeoff to
+monitor in future qualification.
+
+The default SQLite publication path now uses the same bounded canonical graph
+stream as JSON-only publication while the immutable snapshot indexes are built
+in parallel. This removes per-record hashing overhead from the generic serde
+writer without changing the atomic-write, digest, or snapshot contracts. On a
+release-binary A/B smoke run over the pinned Go Cobra, Rust Rayon, and
+TypeScript Zod repositories, the resulting `graph.json` bytes were byte-for-byte
+identical in every comparison; observed internal cold-build wall times were
+0.7 s, 1.1 s, and 1.4 s respectively for the changed path versus 0.6 s, 1.5 s,
+and 1.5 s for the control. Mounted-volume contention makes these diagnostic
+observations rather than a promoted baseline.
+
+On the same 444-file Zod checkout, a release-binary smoke measurement recorded
+about 332 MiB peak RSS with the previous host-sized worker pool, 289 MiB with
+the new default cap of 8 workers, and 257 MiB with an explicit cap of 4. The
+8-worker run retained essentially the previous wall time; the 4-worker run
+was about 0.26 s slower. These are diagnostic measurements on one macOS
+runner, not a cross-platform performance guarantee.
+
+A follow-up release build from the merged `origin/main` tip was measured with
+three fresh cold processes per repository on the same four pinned corpora. The
+Graphify values are the authoritative three-sample baselines from the pinned
+comparison run; the Compass samples used the compact JSON graph path:
+
+| Repository | Compass p50 | Graphify p50 | Graphify / Compass | Compass RSS p50 | Graphify RSS | Compass graph (nodes / edges) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Cobra | 0.32 s | 0.718 s | 2.24× | 121.00 MiB | 64.53 MiB | 1,206 / 5,711 |
+| Click | 0.54 s | 1.764 s | 3.27× | 181.34 MiB | 99.45 MiB | 3,876 / 9,471 |
+| Rayon | 0.82 s | 2.025 s | 2.47× | 298.38 MiB | 80.95 MiB | 8,563 / 17,941 |
+| Zod | 1.14 s | 4.330 s | 3.80× | 295.44 MiB | 234.62 MiB | 11,058 / 9,644 |
+
+The run is deterministic across all three samples per corpus and no longer
+reports a partial graph for Zod: its recovered TypeScript `implements`
+relationship now targets the structural `ParseInput` type alias. These
+measurements still do not establish the requested 4× speed target for every
+repository or the Graphify RSS gate; the richer typed graph remains the
+correctness priority while publication and resolver costs are reduced.
 
 ## Django cold-build regression qualification
 

@@ -611,7 +611,13 @@ fn endpoint_kinds_are_valid(
                     && source.language.as_deref() == Some("rust")))
                 && matches!(
                     target.kind,
-                    NodeKind::Interface | NodeKind::Trait | NodeKind::Protocol
+                    NodeKind::Interface
+                        | NodeKind::Trait
+                        | NodeKind::Protocol
+                        // TypeScript permits a class to implement a
+                        // structural object type declared through a type
+                        // alias.
+                        | NodeKind::TypeAlias
                 )
         }
         EdgeKind::TypeOf => {
@@ -865,6 +871,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
             NodeKind::Resource,
             NodeKind::File | NodeKind::Resource | NodeKind::ConfigKey
         ) | (NodeKind::Schema, NodeKind::ConfigKey)
+            | (NodeKind::ConfigKey, NodeKind::ConfigKey)
     ) || database_contains(source, target)
 }
 

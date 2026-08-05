@@ -46,6 +46,11 @@ describe("InitializationWizard", () => {
       <InitializationWizard
         repositoryName="compass"
         repositoryRoot="/workspace/compass"
+        scopeFiles={[
+          "packages/api/src/main.ts",
+          "src/commands/init.ts",
+          "src/views/graph.ts"
+        ]}
         host={wizardHost}
       />
     ));
@@ -54,8 +59,13 @@ describe("InitializationWizard", () => {
       .find((candidate) => candidate.closest("label")?.textContent?.includes("Custom scope"));
     if (!customScope) throw new Error("custom scope option not found");
     flushSync(() => customScope.click());
+    const srcScope = Array.from(container.querySelectorAll<HTMLInputElement>(
+      '.init-scope-tree input[type="checkbox"]'
+    )).find((candidate) => candidate.closest("label")?.textContent?.trim() === "src");
+    if (!srcScope) throw new Error("src tree scope not found");
+    flushSync(() => srcScope.click());
     flushSync(() => button(container, "Continue").click());
-    setTextarea(container, "Include paths and globs", "src\npackages/**");
+    setTextarea(container, "Additional include globs", "packages/**");
     setTextarea(container, "Exclude paths and globs", "**/generated/**\nvendor");
     flushSync(() => button(container, "Review configuration").click());
 

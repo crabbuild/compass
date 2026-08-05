@@ -16,8 +16,11 @@ Dev Container extension hosts. Browser-only `vscode.dev` is not supported.
    directly.
 5. Open the Compass activity bar and run **Initialize Repository**.
 
-Initialization previews include and exclude globs before it writes
-`.compass/config.toml`. The extension never installs a CLI automatically.
+Initialization can include the whole repository or build a focused scope by
+selecting folders and files from a bounded workspace tree. Additional include
+and exclude globs remain available for patterns that span the tree or paths not
+shown in a truncated preview. The wizard reviews the combined rules before it
+writes `.compass/config.toml`. The extension never installs a CLI automatically.
 The CLI must support `compass capabilities --format json`. If capability
 negotiation fails or a required versioned contract is missing, the extension
 does not run the incompatible command; upgrade Compass or use **Compass: Select
