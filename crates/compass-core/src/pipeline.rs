@@ -2498,6 +2498,7 @@ fn build_graph_inner(
         ));
     }
     if options.no_cluster {
+        let no_cluster_graph_started = Instant::now();
         enforce_incomplete_raw_guard(
             semantic,
             &output_dir.join("graph.json"),
@@ -2505,11 +2506,16 @@ fn build_graph_inner(
             deduped_node_count(&resolved.nodes),
         )?;
         let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
+        profile_internal_duration(
+            "no-cluster graph document build",
+            no_cluster_graph_started.elapsed(),
+        );
         let configuration_digest = graph_configuration_digest(options, &output_dir)?;
         let source_commit = options
             .built_at_commit
             .clone()
             .or_else(|| git_commit(&root));
+        let no_cluster_normalization_started = Instant::now();
         let published = normalize_document_v1_with_inventory_best_effort_owned(
             document,
             &root,
@@ -2523,12 +2529,17 @@ fn build_graph_inner(
                 &root,
             ),
         )?;
+        profile_internal_duration(
+            "no-cluster v1 normalization",
+            no_cluster_normalization_started.elapsed(),
+        );
         if published.document.nodes.is_empty() {
             return Err(CoreError::EmptyGraph);
         }
         let omissions = published.omissions;
         let published_nodes = published.document.nodes.len();
         let published_edges = published.document.links.len();
+        let no_cluster_graph_write_started = Instant::now();
         let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
             let (metrics, seal) =
                 if let Some(previous) = load_graph_delta_base(&output_dir, &published.document) {
@@ -2555,6 +2566,10 @@ fn build_graph_inner(
                 }),
             )
         };
+        profile_internal_duration(
+            "no-cluster graph and store publication",
+            no_cluster_graph_write_started.elapsed(),
+        );
         if let Some(metrics) = store_metrics {
             record_store_metrics(&mut timings, metrics);
         }
@@ -2576,6 +2591,7 @@ fn build_graph_inner(
             )?;
         }
         let mut manifest = prior_manifest;
+        let no_cluster_manifest_started = Instant::now();
         save_build_manifest(
             &mut manifest,
             &detection.files,
@@ -2583,10 +2599,15 @@ fn build_graph_inner(
             &root,
             semantic,
         )?;
+        profile_internal_duration(
+            "no-cluster manifest publication",
+            no_cluster_manifest_started.elapsed(),
+        );
         remove_if_exists(&output_dir.join("needs_update"))?;
         if let Some(program) = program.as_mut() {
             program.finish_pending_seal(&mut timings)?;
         }
+        let no_cluster_state_started = Instant::now();
         publish_build_state(
             options,
             &output_dir,
@@ -2601,6 +2622,11 @@ fn build_graph_inner(
             store_metrics.is_some(),
             &mut timings,
         )?;
+        profile_internal_duration(
+            "no-cluster build-state publication",
+            no_cluster_state_started.elapsed(),
+        );
+        let no_cluster_commit_started = Instant::now();
         let published_output_dir = commit_generation(
             guard,
             &output_container,
@@ -2609,6 +2635,10 @@ fn build_graph_inner(
             !options.graph_storage.publishes_store(),
             &mut timings,
         )?;
+        profile_internal_duration(
+            "no-cluster generation commit",
+            no_cluster_commit_started.elapsed(),
+        );
         timings.publish = stage_started.elapsed();
         return Ok((
             BuildResult {

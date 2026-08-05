@@ -41,6 +41,7 @@ pub use v1::{
     normalize_document_v1_with_inventory_best_effort_owned, normalize_v1, normalize_v1_best_effort,
 };
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::time::Instant;
@@ -71,8 +72,8 @@ struct NodeSourceFacts<'a> {
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
 pub const GRAPH_DIAGNOSTICS_EXTENSION: &str = "_compass_v1_graph_diagnostics";
 
-enum EndpointResolution {
-    Exact(String),
+enum EndpointResolution<'a> {
+    Exact(&'a str),
     Rewritten {
         endpoint: String,
         evidence: EndpointRewriteEvidence,
@@ -297,14 +298,18 @@ fn build_from_owned_extraction(
     let mut source_edges = std::mem::take(&mut extraction.edges);
     for edge in &mut source_edges {
         preserve_occurrence_rule(&mut edge.attributes);
-        let original_source = edge.source.clone();
-        let original_target = edge.target.clone();
+        let original_source_was_doc_twin = doc_twin_rewrite_sources.contains(edge.source.as_str());
+        let original_target_was_doc_twin = doc_twin_rewrite_sources.contains(edge.target.as_str());
         let (source, mut rewrites) =
             remap_endpoint_with_evidence(&edge.source, &endpoint_remap, &endpoint_rewrite_evidence);
         let (target, target_rewrites) =
             remap_endpoint_with_evidence(&edge.target, &endpoint_remap, &endpoint_rewrite_evidence);
-        edge.source = source;
-        edge.target = target;
+        if let Cow::Owned(source) = source {
+            edge.source = source;
+        }
+        if let Cow::Owned(target) = target {
+            edge.target = target;
+        }
         rewrites.extend(target_rewrites);
         rewrites.sort_by_key(|rewrite| rewrite.rule);
         rewrites.dedup_by_key(|rewrite| rewrite.rule);
@@ -312,8 +317,7 @@ fn build_from_owned_extraction(
             stamp_graph_endpoint_rewrites(edge, &rewrites);
         }
         if edge.source == edge.target
-            && (doc_twin_rewrite_sources.contains(original_source.as_str())
-                || doc_twin_rewrite_sources.contains(original_target.as_str()))
+            && (original_source_was_doc_twin || original_target_was_doc_twin)
         {
             edge.attributes
                 .insert("_drop".to_owned(), Value::Bool(true));
@@ -330,30 +334,44 @@ fn build_from_owned_extraction(
         if edge.attributes.remove("_drop") == Some(Value::Bool(true)) {
             return (None, diagnostics);
         }
-        let source_value = edge.source.clone();
-        let target_value = edge.target.clone();
-        let Some(source) = resolve_edge_endpoint(
-            &source_value,
+        let source = match resolve_edge_endpoint(
+            &edge.source,
             "source",
-            &mut edge,
             &positions,
             &normalized,
             &mut diagnostics,
-        ) else {
-            return (None, diagnostics);
+        ) {
+            Some(EndpointResolution::Exact(_)) => None,
+            Some(EndpointResolution::Rewritten { endpoint, evidence }) => {
+                stamp_graph_endpoint_rewrites(&mut edge, &[evidence]);
+                Some(endpoint)
+            }
+            Some(EndpointResolution::Ambiguous { .. })
+            | Some(EndpointResolution::Missing)
+            | None => return (None, diagnostics),
         };
-        let Some(target) = resolve_edge_endpoint(
-            &target_value,
+        let target = match resolve_edge_endpoint(
+            &edge.target,
             "target",
-            &mut edge,
             &positions,
             &normalized,
             &mut diagnostics,
-        ) else {
-            return (None, diagnostics);
+        ) {
+            Some(EndpointResolution::Exact(_)) => None,
+            Some(EndpointResolution::Rewritten { endpoint, evidence }) => {
+                stamp_graph_endpoint_rewrites(&mut edge, &[evidence]);
+                Some(endpoint)
+            }
+            Some(EndpointResolution::Ambiguous { .. })
+            | Some(EndpointResolution::Missing)
+            | None => return (None, diagnostics),
         };
-        edge.source = source;
-        edge.target = target;
+        if let Some(source) = source {
+            edge.source = source;
+        }
+        if let Some(target) = target {
+            edge.target = target;
+        }
         edge.attributes.remove("target_file");
         sanitize_numeric(&mut edge.attributes, "weight");
         sanitize_numeric(&mut edge.attributes, "confidence_score");
@@ -742,11 +760,11 @@ fn remap_endpoint(value: &str, remap: &HashMap<String, String>) -> String {
     current.to_owned()
 }
 
-fn remap_endpoint_with_evidence(
-    value: &str,
+fn remap_endpoint_with_evidence<'a>(
+    value: &'a str,
     remap: &HashMap<String, String>,
     evidence: &HashMap<String, EndpointRewriteEvidence>,
-) -> (String, Vec<EndpointRewriteEvidence>) {
+) -> (Cow<'a, str>, Vec<EndpointRewriteEvidence>) {
     let mut current = value;
     let mut rewrites = Vec::new();
     let mut remaining = remap.len() + 1;
@@ -763,7 +781,12 @@ fn remap_endpoint_with_evidence(
         current = next;
         remaining -= 1;
     }
-    (current.to_owned(), rewrites)
+    let endpoint = if current == value {
+        Cow::Borrowed(value)
+    } else {
+        Cow::Owned(current.to_owned())
+    };
+    (endpoint, rewrites)
 }
 
 fn stamp_graph_endpoint_rewrites(edge: &mut EdgeRecord, rewrites: &[EndpointRewriteEvidence]) {
@@ -1057,13 +1080,13 @@ fn path_text(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-fn resolve_endpoint(
-    value: &str,
+fn resolve_endpoint<'a>(
+    value: &'a str,
     positions: &HashMap<String, usize>,
     normalized: &EndpointAliases,
-) -> EndpointResolution {
+) -> EndpointResolution<'a> {
     if positions.contains_key(value) {
-        return EndpointResolution::Exact(value.to_owned());
+        return EndpointResolution::Exact(value);
     }
     let alias = normalize_id(value);
     let Some(candidates) = normalized.get(&alias) else {
@@ -1084,20 +1107,16 @@ fn resolve_endpoint(
     }
 }
 
-fn resolve_edge_endpoint(
-    value: &str,
+fn resolve_edge_endpoint<'a>(
+    value: &'a str,
     role: &str,
-    edge: &mut EdgeRecord,
     positions: &HashMap<String, usize>,
     normalized: &EndpointAliases,
     diagnostics: &mut Vec<Value>,
-) -> Option<String> {
+) -> Option<EndpointResolution<'a>> {
     match resolve_endpoint(value, positions, normalized) {
-        EndpointResolution::Exact(endpoint) => Some(endpoint),
-        EndpointResolution::Rewritten { endpoint, evidence } => {
-            stamp_graph_endpoint_rewrites(edge, &[evidence]);
-            Some(endpoint)
-        }
+        exact @ EndpointResolution::Exact(_) => Some(exact),
+        rewritten @ EndpointResolution::Rewritten { .. } => Some(rewritten),
         EndpointResolution::Ambiguous { alias, candidates } => {
             diagnostics.push(ambiguous_endpoint_diagnostic(
                 value, &alias, role, candidates,
@@ -1371,8 +1390,10 @@ fn canonical_hyperedges(
                 let (remapped, mut member_rewrites) =
                     remap_endpoint_with_evidence(member, rekey, rewrite_evidence);
                 rewrites.append(&mut member_rewrites);
-                match resolve_endpoint(&remapped, positions, normalized) {
-                    EndpointResolution::Exact(endpoint) => valid.push(Value::String(endpoint)),
+                match resolve_endpoint(remapped.as_ref(), positions, normalized) {
+                    EndpointResolution::Exact(endpoint) => {
+                        valid.push(Value::String(endpoint.to_owned()));
+                    }
                     EndpointResolution::Rewritten { endpoint, evidence } => {
                         valid.push(Value::String(endpoint));
                         rewrites.push(evidence);
@@ -1402,7 +1423,10 @@ fn canonical_hyperedges(
 
 #[cfg(test)]
 mod tests {
-    use super::{dedupe_nodes, deduped_node_count};
+    use std::borrow::Cow;
+
+    use super::{dedupe_nodes, deduped_node_count, remap_endpoint_with_evidence};
+    use ahash::AHashMap;
     use compass_languages::RawNodeRecord;
     use serde_json::Map;
 
@@ -1424,5 +1448,23 @@ mod tests {
         ];
 
         assert_eq!(deduped_node_count(&nodes), dedupe_nodes(&nodes).len());
+    }
+
+    #[test]
+    fn endpoint_remap_borrows_unchanged_ids_and_owns_rewritten_ids() {
+        let remap = AHashMap::new();
+        let evidence = AHashMap::new();
+        let unchanged = String::from("stable");
+        let (unchanged_endpoint, unchanged_rewrites) =
+            remap_endpoint_with_evidence(&unchanged, &remap, &evidence);
+        assert!(matches!(unchanged_endpoint, Cow::Borrowed("stable")));
+        assert!(unchanged_rewrites.is_empty());
+
+        let remap = AHashMap::from([(String::from("legacy"), String::from("canonical"))]);
+        let rewritten = String::from("legacy");
+        let (rewritten_endpoint, rewritten_rewrites) =
+            remap_endpoint_with_evidence(&rewritten, &remap, &evidence);
+        assert!(matches!(rewritten_endpoint, Cow::Owned(endpoint) if endpoint == "canonical"));
+        assert!(rewritten_rewrites.is_empty());
     }
 }
