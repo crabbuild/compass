@@ -296,6 +296,47 @@ class CorrectnessTests(unittest.TestCase):
         )
         self.assertEqual(result.metrics["missing_graphify_edges"], 1)
 
+    def test_python_source_inventory_includes_definition_time_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "sample.py"
+            source.write_text(
+                """
+@class_decorator(class_option())
+class Widget(base_factory(), metaclass=meta_factory()):
+    @method_decorator(method_option())
+    def run(
+        self,
+        value: annotation_factory() = default_factory(),
+    ) -> return_factory():
+        body_call()
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            constructs = independent_source_constructs(root, "python")
+
+        calls = {
+            (construct.owner_qualified_name, construct.target_spelling)
+            for construct in constructs
+            if construct.relation == "calls"
+        }
+        self.assertEqual(
+            calls,
+            {
+                ("sample", "base_factory"),
+                ("sample", "class_decorator"),
+                ("sample", "class_option"),
+                ("sample", "meta_factory"),
+                ("sample.Widget", "annotation_factory"),
+                ("sample.Widget", "default_factory"),
+                ("sample.Widget", "method_decorator"),
+                ("sample.Widget", "method_option"),
+                ("sample.Widget", "return_factory"),
+                ("sample.Widget.run", "body_call"),
+            },
+        )
+
     def test_rationale_facts_match_by_source_anchor_across_schema_names(self) -> None:
         database = self.database()
         with tempfile.TemporaryDirectory() as directory:

@@ -232,6 +232,11 @@ equal or stronger Compass fact.
   references, rejects 587 false indirect calls (including fp wrapper aliases
   incorrectly rebound to an unrelated test helper), and reduces call misses
   from 593 to 6. Extraction semantics version 4 invalidates older cached facts.
+- The independent Python source oracle inventories calls evaluated while a
+  function or class is defined, including decorators, bases, metaclasses,
+  annotations, and default values. It attributes those calls to the enclosing
+  execution scope and keeps function-body calls under the function owner, so
+  recall audits cannot silently omit definition-time execution.
 - JavaScript and TypeScript now publish source-anchored `extends` and
   `implements` relationships, resolving named and aliased imports to exact
   definitions. Exact date-fns inheritance coverage rises from 0 to 255 facts;

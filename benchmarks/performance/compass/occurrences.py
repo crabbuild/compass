@@ -165,13 +165,48 @@ def _python_constructs(root: Path, path: Path) -> tuple[SourceConstruct, ...] | 
             self.owners.pop()
 
         def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            for base in node.bases:
+                self.visit(base)
+            for keyword in node.keywords:
+                self.visit(keyword.value)
+            for type_parameter in getattr(node, "type_params", ()):  # Python 3.12+
+                self.visit(type_parameter)
             self._nested(node.name, node.body)
 
         def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self._visit_function_definition_expressions(node)
             self._nested(node.name, node.body)
 
         def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            self._visit_function_definition_expressions(node)
             self._nested(node.name, node.body)
+
+        def _visit_function_definition_expressions(
+            self,
+            node: ast.FunctionDef | ast.AsyncFunctionDef,
+        ) -> None:
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            arguments = node.args
+            for argument in (
+                *arguments.posonlyargs,
+                *arguments.args,
+                *arguments.kwonlyargs,
+            ):
+                if argument.annotation is not None:
+                    self.visit(argument.annotation)
+            for argument in (arguments.vararg, arguments.kwarg):
+                if argument is not None and argument.annotation is not None:
+                    self.visit(argument.annotation)
+            for default in (*arguments.defaults, *arguments.kw_defaults):
+                if default is not None:
+                    self.visit(default)
+            if node.returns is not None:
+                self.visit(node.returns)
+            for type_parameter in getattr(node, "type_params", ()):  # Python 3.12+
+                self.visit(type_parameter)
 
         def visit_Call(self, node: ast.Call) -> None:
             bounded = byte_range(node.func)
