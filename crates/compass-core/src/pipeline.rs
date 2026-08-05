@@ -22,8 +22,8 @@ use compass_graph::{
     cluster, deduped_node_count, extraction_from_v1, garbage_collect_graph_snapshots,
     graph_insights, graph_snapshot_needs_gc, label_communities_by_hub,
     normalize_document_v1_with_evidence_best_effort_owned,
-    normalize_document_v1_with_inventory_best_effort,
-    normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
+    normalize_document_v1_with_inventory_and_source_digests_best_effort_owned,
+    normalize_document_v1_with_inventory_best_effort, remap_communities_to_previous,
     score_communities, write_canonical_graph_json,
     write_fact_neutral_graph_json_delta_prevalidated,
 };
@@ -3285,7 +3285,7 @@ fn build_graph_inner(
             .clone()
             .or_else(|| git_commit(&root));
         let no_cluster_normalization_started = Instant::now();
-        let published = normalize_document_v1_with_inventory_best_effort_owned(
+        let published = normalize_document_v1_with_inventory_and_source_digests_best_effort_owned(
             document,
             &root,
             configuration_digest,
@@ -3297,6 +3297,7 @@ fn build_graph_inner(
                 &extraction_partials,
                 &root,
             ),
+            Some(&fresh_source_digests),
         )?;
         profile_internal_duration(
             "no-cluster v1 normalization",

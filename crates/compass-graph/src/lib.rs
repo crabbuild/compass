@@ -38,6 +38,7 @@ pub use v1::{
     BuildEvidence, InventoryEvidence, SourceDigest, V1_PUBLICATION_SEMANTICS_VERSION,
     canonical_edge_kind, canonical_raw_edge_sites, extraction_from_v1, normalize_document_v1,
     normalize_document_v1_with_evidence_best_effort_owned, normalize_document_v1_with_inventory,
+    normalize_document_v1_with_inventory_and_source_digests_best_effort_owned,
     normalize_document_v1_with_inventory_best_effort,
     normalize_document_v1_with_inventory_best_effort_owned, normalize_v1, normalize_v1_best_effort,
 };
