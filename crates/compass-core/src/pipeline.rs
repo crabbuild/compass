@@ -22,8 +22,8 @@ use compass_graph::{
     cluster, deduped_node_count, extraction_from_v1, garbage_collect_graph_snapshots,
     graph_insights, graph_snapshot_needs_gc, label_communities_by_hub,
     normalize_document_v1_with_evidence_best_effort_owned,
-    normalize_document_v1_with_inventory_best_effort,
-    normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
+    normalize_document_v1_with_inventory_and_source_digests_best_effort_owned,
+    normalize_document_v1_with_inventory_best_effort, remap_communities_to_previous,
     score_communities, write_canonical_graph_json,
     write_fact_neutral_graph_json_delta_prevalidated,
 };
@@ -79,6 +79,7 @@ use crate::raw_guard::enforce_incomplete_raw_guard;
 /// repositories with intentionally large generated sources.
 pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const SEMANTIC_MARKER_FILE: &str = ".compass_semantic_marker";
+const PIPELINE_RAYON_WORKER_CAP: usize = 12;
 const STORE_GENERATION_EXCLUSIONS: [&str; 3] = [
     STORE_FILE_NAME,
     "compass-store.sqlite3-wal",
@@ -238,12 +239,12 @@ fn compact_extraction(extraction: &mut Extraction) {
         for call in &mut *calls {
             compact_json_map(&mut call.extensions);
         }
-        calls.shrink_to_fit();
+        compact_vec(calls);
     }
     for fact in &mut extraction.framework_facts {
         match fact {
             compass_languages::RawFrameworkFact::Route(route) => {
-                route.middleware_references.shrink_to_fit();
+                compact_vec(&mut route.middleware_references);
                 compact_json_map(&mut route.detail);
             }
             compass_languages::RawFrameworkFact::Domain(domain) => {
@@ -256,19 +257,36 @@ fn compact_extraction(extraction: &mut Extraction) {
         }
     }
     if let Some(evidence) = extraction.semantic_evidence.as_mut() {
-        evidence.adapter.capabilities.shrink_to_fit();
-        evidence.declarations.shrink_to_fit();
-        evidence.scopes.shrink_to_fit();
-        evidence.bindings.shrink_to_fit();
-        evidence.occurrences.shrink_to_fit();
-        evidence.candidates.shrink_to_fit();
-        evidence.diagnostics.shrink_to_fit();
+        compact_vec(&mut evidence.adapter.capabilities);
+        compact_vec(&mut evidence.declarations);
+        compact_vec(&mut evidence.scopes);
+        compact_vec(&mut evidence.bindings);
+        compact_vec(&mut evidence.occurrences);
+        compact_vec(&mut evidence.candidates);
+        compact_vec(&mut evidence.diagnostics);
     }
     compact_json_map(&mut extraction.extensions);
-    extraction.nodes.shrink_to_fit();
-    extraction.edges.shrink_to_fit();
-    extraction.hyperedges.shrink_to_fit();
-    extraction.framework_facts.shrink_to_fit();
+    compact_vec(&mut extraction.nodes);
+    compact_vec(&mut extraction.edges);
+    compact_vec(&mut extraction.hyperedges);
+    compact_vec(&mut extraction.framework_facts);
+}
+
+/// Shrink a vector only when it retained a meaningful amount of growth slack.
+///
+/// Extractors commonly reserve a small amount beyond the final length while
+/// parsing a file. Reallocating those tight buffers costs CPU without making a
+/// useful difference to the project-wide working set. A 25% slack threshold
+/// preserves the memory reduction for vectors that grew substantially while
+/// making the per-file compaction pass cheap for ordinary source files.
+fn compact_vec<T>(values: &mut Vec<T>) {
+    let useful_capacity = values
+        .len()
+        .saturating_add(values.len() / 4)
+        .saturating_add(1);
+    if values.capacity() > useful_capacity {
+        values.shrink_to_fit();
+    }
 }
 
 fn compact_json_map(map: &mut serde_json::Map<String, Value>) {
@@ -296,7 +314,7 @@ fn compact_json_value(value: &mut Value) {
             for value in values.iter_mut() {
                 compact_json_value(value);
             }
-            values.shrink_to_fit();
+            compact_vec(values);
         }
         Value::Object(map) => compact_json_map(map),
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
@@ -2184,6 +2202,43 @@ fn build_graph_inner(
     progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
     retain_artifacts: bool,
 ) -> Result<(BuildResult, Option<RetainedBuildArtifacts>), CoreError> {
+    let worker_count = pipeline_rayon_workers(options);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(worker_count)
+        .thread_name(|index| format!("compass-pipeline-{index}"))
+        .build()
+        .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
+    pool.install(move || {
+        build_graph_inner_unscoped(
+            options,
+            semantic,
+            supplemental,
+            tiebreaker,
+            progress,
+            retain_artifacts,
+        )
+    })
+}
+
+fn pipeline_rayon_workers(options: &BuildOptions) -> usize {
+    options
+        .max_workers
+        .unwrap_or_else(default_pipeline_rayon_workers)
+        .max(1)
+}
+
+fn default_pipeline_rayon_workers() -> usize {
+    available_worker_count().clamp(1, PIPELINE_RAYON_WORKER_CAP)
+}
+
+fn build_graph_inner_unscoped(
+    options: &BuildOptions,
+    semantic: Option<&SemanticLayer>,
+    supplemental: &[Extraction],
+    tiebreaker: Option<&mut dyn EntityTiebreaker>,
+    progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
+    retain_artifacts: bool,
+) -> Result<(BuildResult, Option<RetainedBuildArtifacts>), CoreError> {
     let mut timings = BuildTimings::default();
     let mut stage_started = Instant::now();
     if !options.root.exists() {
@@ -2618,7 +2673,9 @@ fn build_graph_inner(
             }
         }
     }
-    let worker_count = options.max_workers.unwrap_or_else(default_ast_workers);
+    let worker_count = options
+        .max_workers
+        .unwrap_or_else(|| default_ast_workers(missing.len()));
     // Resolver source text is only consulted by the PHP type-reference pass.
     // Keeping every decoded source string alive across extraction and graph
     // publication otherwise duplicates the repository's source footprint in
@@ -3283,7 +3340,7 @@ fn build_graph_inner(
             .clone()
             .or_else(|| git_commit(&root));
         let no_cluster_normalization_started = Instant::now();
-        let published = normalize_document_v1_with_inventory_best_effort_owned(
+        let published = normalize_document_v1_with_inventory_and_source_digests_best_effort_owned(
             document,
             &root,
             configuration_digest,
@@ -3295,6 +3352,7 @@ fn build_graph_inner(
                 &extraction_partials,
                 &root,
             ),
+            Some(&fresh_source_digests),
         )?;
         profile_internal_duration(
             "no-cluster v1 normalization",
@@ -4508,19 +4566,45 @@ fn write_store_ref(output_dir: &Path, reference: &StoreRef) -> Result<(), CoreEr
 }
 
 #[cfg(target_os = "macos")]
-fn default_ast_workers() -> usize {
-    num_cpus::get()
-        .max(num_cpus::get_physical())
-        .min(DEFAULT_AST_WORKER_CAP)
+fn default_ast_workers(missing: usize) -> usize {
+    available_worker_count()
+        .min(default_ast_worker_cap(missing))
+        .max(1)
 }
 
 #[cfg(not(target_os = "macos"))]
-fn default_ast_workers() -> usize {
-    num_cpus::get().min(DEFAULT_AST_WORKER_CAP)
+fn default_ast_workers(missing: usize) -> usize {
+    available_worker_count()
+        .min(default_ast_worker_cap(missing))
+        .max(1)
 }
 
 const DEFAULT_AST_WORKER_CAP: usize = 8;
+#[cfg(target_os = "macos")]
+fn available_worker_count() -> usize {
+    num_cpus::get().max(num_cpus::get_physical())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn available_worker_count() -> usize {
+    num_cpus::get()
+}
+
+// Large cold repositories retain enough per-file parser state for worker
+// parallelism to dominate peak RSS. Keep the automatic path bounded by the
+// host-aware pipeline ceiling; callers that have a known memory budget can
+// still opt into a different count through BuildOptions::max_workers.
+const LARGE_REPOSITORY_AST_WORKER_CAP: usize = PIPELINE_RAYON_WORKER_CAP;
+const LARGE_REPOSITORY_AST_WORKER_MIN_FILES: usize = 1_024;
 const AUTOMATIC_PARALLEL_EXTRACT_MIN_FILES: usize = 32;
+
+fn default_ast_worker_cap(missing: usize) -> usize {
+    if missing < LARGE_REPOSITORY_AST_WORKER_MIN_FILES {
+        DEFAULT_AST_WORKER_CAP
+    } else {
+        LARGE_REPOSITORY_AST_WORKER_CAP
+    }
+}
 
 fn should_parallel_extract(options: &BuildOptions, missing: usize) -> bool {
     missing >= AUTOMATIC_PARALLEL_EXTRACT_MIN_FILES
@@ -6891,8 +6975,37 @@ mod tests {
 
     #[test]
     fn default_ast_workers_stay_within_the_memory_bound() {
-        assert!(default_ast_workers() > 0);
-        assert!(default_ast_workers() <= DEFAULT_AST_WORKER_CAP);
+        assert_eq!(default_ast_worker_cap(0), DEFAULT_AST_WORKER_CAP);
+        assert_eq!(
+            default_ast_worker_cap(LARGE_REPOSITORY_AST_WORKER_MIN_FILES - 1),
+            DEFAULT_AST_WORKER_CAP
+        );
+        assert_eq!(
+            default_ast_worker_cap(LARGE_REPOSITORY_AST_WORKER_MIN_FILES),
+            LARGE_REPOSITORY_AST_WORKER_CAP
+        );
+        assert!(default_ast_workers(0) > 0);
+        assert!(default_ast_workers(0) <= DEFAULT_AST_WORKER_CAP);
+        assert!(default_ast_workers(LARGE_REPOSITORY_AST_WORKER_MIN_FILES) > 0);
+        assert!(
+            default_ast_workers(LARGE_REPOSITORY_AST_WORKER_MIN_FILES)
+                <= LARGE_REPOSITORY_AST_WORKER_CAP
+        );
+    }
+
+    #[test]
+    fn pipeline_rayon_workers_use_a_bounded_default_and_explicit_override() {
+        let mut options = BuildOptions::new(".");
+        let default_workers = pipeline_rayon_workers(&options);
+        assert_eq!(default_workers, default_pipeline_rayon_workers());
+        assert!(default_workers > 0);
+        assert!(default_workers <= PIPELINE_RAYON_WORKER_CAP);
+
+        options.max_workers = Some(2);
+        assert_eq!(pipeline_rayon_workers(&options), 2);
+
+        options.max_workers = Some(0);
+        assert_eq!(pipeline_rayon_workers(&options), 1);
     }
 
     #[cfg(unix)]
@@ -6967,6 +7080,51 @@ mod tests {
 
         assert_eq!(before, serde_json::to_value(extraction)?);
         Ok(())
+    }
+
+    #[test]
+    fn compact_extraction_shrinks_only_materially_overallocated_vectors() {
+        let mut overallocated_calls = Vec::with_capacity(64);
+        overallocated_calls.push(compass_languages::RawCall {
+            caller_nid: "node".to_owned(),
+            callee: "callee".to_owned(),
+            is_member_call: None,
+            source_file: "source.go".to_owned(),
+            source_location: "1:1".to_owned(),
+            receiver: None,
+            receiver_type: None,
+            lang: Some("go".to_owned()),
+            extensions: Map::new(),
+        });
+        let overallocated_capacity = overallocated_calls.capacity();
+
+        let mut tight_nodes = Vec::with_capacity(2);
+        tight_nodes.extend([
+            RawNodeRecord {
+                id: "node-1".to_owned(),
+                attributes: Map::new(),
+            },
+            RawNodeRecord {
+                id: "node-2".to_owned(),
+                attributes: Map::new(),
+            },
+        ]);
+        let tight_capacity = tight_nodes.capacity();
+
+        let mut extraction = Extraction {
+            nodes: tight_nodes,
+            raw_calls: Some(overallocated_calls),
+            ..Extraction::default()
+        };
+        compact_extraction(&mut extraction);
+
+        assert!(
+            extraction
+                .raw_calls
+                .as_ref()
+                .is_some_and(|calls| calls.capacity() < overallocated_capacity)
+        );
+        assert_eq!(extraction.nodes.capacity(), tight_capacity);
     }
 
     #[test]

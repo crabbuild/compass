@@ -317,7 +317,9 @@ fn resolve_owned_with_root_impl(
     root: &Path,
     evidence_prevalidated: bool,
 ) -> Extraction {
+    let mut profile_started = Instant::now();
     let language_facts = members::collect_language_call_facts_owned(extractions);
+    profile_internal("resolver language fact collection", &mut profile_started);
     let mut evidence_batches = Vec::new();
     let mut merged = Extraction::default();
     for extraction in extractions.iter_mut() {
@@ -360,6 +362,7 @@ fn resolve_owned_with_root_impl(
             evidence_batches.push(batch);
         }
     }
+    profile_internal("resolver owned extraction merge", &mut profile_started);
     extractions.clear();
     finish_resolution(
         merged,

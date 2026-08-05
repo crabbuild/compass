@@ -2443,6 +2443,16 @@ fn build_evidence_reuses_precomputed_source_digests_without_changing_file_record
 
     assert_eq!(reused.files, baseline.files);
     assert_eq!(reused.build, baseline.build);
+
+    let extraction_baseline = BuildEvidence::from_extraction(root, &extraction, "sha256:config")?;
+    let extraction_reused = BuildEvidence::from_extraction_with_source_digests(
+        root,
+        &extraction,
+        "sha256:config",
+        &digests,
+    )?;
+    assert_eq!(extraction_reused.files, extraction_baseline.files);
+    assert_eq!(extraction_reused.build, extraction_baseline.build);
     Ok(())
 }
 

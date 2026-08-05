@@ -221,8 +221,9 @@ Click (Python, 91 files). The run used `extract --code-only --no-cluster
 These are diagnostic observations, not promoted baselines or a claim of a
 4×–5× cold-build advantage. Extraction with fewer than 32 missing files stays
 sequential to avoid multiplying parser/AST working sets; the automatic path
-uses a default cap of 8 local workers once that measured crossover is reached,
-while `--max-workers` remains the explicit override. Portable AST publication
+uses a default cap of 8 local workers below 1,024 missing files and 4 workers
+at or above that boundary, while `--max-workers` remains the explicit
+override. Portable AST publication
 also streams one compressed value at a time instead of retaining the entire
 compressed batch in memory. Incremental cache hits now remain in that portable
 representation and decode directly into typed extraction records when loaded
@@ -261,6 +262,33 @@ the same graph SHA-256 for all four pinned repositories (`78ef5b7b` Cobra,
 `c25d3b97` Click, `06014539` Rayon, and `f620afe4` Zod). The observed peak RSS
 was 103, 168, 270, and 309 MiB respectively. These are single-run diagnostic
 measurements, not a promoted memory baseline.
+
+The automatic AST pool now uses the default cap of 8 workers below 1,024
+missing files and a host-aware, bounded cap of up to 12 workers at or above
+that repository-size boundary. The build-wide Rayon pool uses the same
+host-aware ceiling; an explicit `--max-workers` value continues to override
+both automatic choices. The cap is deliberately finite rather than an
+unbounded host-sized pool, because parser and graph-publication working sets
+scale with concurrency.
+
+A clean three-sample follow-up on the pinned 2026-08-05 qualification corpora
+measured the release binary with JSON output and fresh output directories on
+each run. Graphify values are the paired three-sample p50 baselines:
+
+| Repository | Compass p50 | Graphify p50 | Graphify / Compass | Compass RSS p50 |
+| --- | ---: | ---: | ---: | ---: |
+| Cobra (Go) | 0.30 s | 0.95 s | 3.17× | 123.5 MiB |
+| Click (Python) | 0.50 s | 1.94 s | 3.88× | 180.7 MiB |
+| Rayon (Rust) | 0.80 s | 1.90 s | 2.38× | 284.5 MiB |
+| Zod (TypeScript) | 1.00 s | 4.80 s | 4.80× | 284.8 MiB |
+| Django (Python) | 10.80 s | 40.76 s | 3.77× | 2,248 MiB |
+
+The Django graph remained 80,976 nodes / 195,164 edges with zero validation
+errors, and the four small-corpus graph populations and normalized digests
+remained unchanged. The host-aware default therefore improves the large
+repository path, but these measurements still do not establish the requested
+universal 4× target; the higher Compass RSS is also an explicit tradeoff to
+monitor in future qualification.
 
 The default SQLite publication path now uses the same bounded canonical graph
 stream as JSON-only publication while the immutable snapshot indexes are built
