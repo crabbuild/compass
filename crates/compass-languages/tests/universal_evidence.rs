@@ -489,7 +489,9 @@ class Derived(Base):
 
 #[test]
 fn python_bound_method_receivers_emit_dispatch_and_fail_closed_on_rebinding() {
-    let source = br#"class Model:
+    let source = br#"from pkg.helpers import check
+
+class Model:
     def check(self):
         return None
 
@@ -541,6 +543,11 @@ fn python_bound_method_receivers_emit_dispatch_and_fail_closed_on_rebinding() {
                 strategy: ReceiverDispatchStrategy::C3FromReceiver,
             })
     }));
+    assert!(
+        checks
+            .iter()
+            .all(|candidate| candidate.constraints.qualified_name.is_none())
+    );
 }
 
 #[test]

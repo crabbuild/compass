@@ -5068,40 +5068,47 @@ impl<'source> DirectAdapterState<'source> {
             )
             .cloned()
         });
-        let qualified_name = exact_super_target.or_else(|| {
-            qualifier
-                .and_then(|qualifier| {
-                    self.local_target_for(owner, qualifier)
-                        .map(|target| format!("{target}::{spelling}"))
-                })
-                .or_else(|| {
-                    (self.language == "go")
-                        .then(|| self.go_selector_receiver_type(owner, function))
-                        .flatten()
-                        .map(|target| format!("{target}::{spelling}"))
-                })
-                .or_else(|| {
-                    qualifier
-                        .and_then(|qualifier| {
-                            self.imported_qualified_target_for(
-                                owner,
-                                qualifier,
-                                function.start_byte(),
-                                allow_later_file_binding,
-                            )
-                        })
-                        .map(|target| format!("{target}.{spelling}"))
-                })
-                .or_else(|| {
-                    self.imported_target_for_occurrence(
-                        owner,
-                        spelling,
-                        function.start_byte(),
-                        allow_later_file_binding,
-                    )
-                    .cloned()
-                })
-        });
+        let qualified_name = if python_bound_receiver.is_some() {
+            // Receiver dispatch is the complete target-selection constraint.
+            // Keeping an imported or local spelling beside it would make the
+            // candidate contradictory and is rejected by evidence validation.
+            None
+        } else {
+            exact_super_target.or_else(|| {
+                qualifier
+                    .and_then(|qualifier| {
+                        self.local_target_for(owner, qualifier)
+                            .map(|target| format!("{target}::{spelling}"))
+                    })
+                    .or_else(|| {
+                        (self.language == "go")
+                            .then(|| self.go_selector_receiver_type(owner, function))
+                            .flatten()
+                            .map(|target| format!("{target}::{spelling}"))
+                    })
+                    .or_else(|| {
+                        qualifier
+                            .and_then(|qualifier| {
+                                self.imported_qualified_target_for(
+                                    owner,
+                                    qualifier,
+                                    function.start_byte(),
+                                    allow_later_file_binding,
+                                )
+                            })
+                            .map(|target| format!("{target}.{spelling}"))
+                    })
+                    .or_else(|| {
+                        self.imported_target_for_occurrence(
+                            owner,
+                            spelling,
+                            function.start_byte(),
+                            allow_later_file_binding,
+                        )
+                        .cloned()
+                    })
+            })
+        };
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
