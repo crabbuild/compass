@@ -238,8 +238,9 @@ declaration. Explicit receiver calls such as `self.settings()` never borrow a
 same-named unqualified import as their target.
 Zero-argument Python `super()` calls use source-proven C3 dispatch after the
 enclosing class. Compass may cross multiple source-backed bases only when the
-required base sets are complete and uniquely resolved; an unknown preceding
-base, incomplete hierarchy, cycle, or ambiguous member fails closed.
+required base sets are complete and uniquely resolved for an exact target. A
+known later member behind unknown preceding ancestry may be published only as
+an `INFERRED` possible dispatch. Cycles and ambiguous members fail closed.
 Exact Python calls may form self-loops when the occurrence resolves to its
 owning function or method, so direct recursion remains visible in the graph.
 Python's statically local parameters and assignment targets shadow module and
@@ -317,14 +318,33 @@ uses the complete C3 linearization while skipping the receiver. Full C3
 resolution requires every base to resolve uniquely, an acyclic and
 C3-consistent hierarchy, a bounded traversal, and one unique selected member.
 
+Receiver dispatch also preserves bounded runtime alternatives without
+relabeling them as exact. The resolver builds a deterministic reverse-subtype
+index. For each source-defined descendant with a complete valid C3 order, it
+selects the runtime member for `self`/`cls`, or the first member after the
+defining receiver for zero-argument `super()`. Every distinct proven target is
+published with `INFERRED` confidence and the
+`closed-world-receiver-dispatch` rule. If earlier ancestry is unknown but a
+later direct base uniquely declares the member, that target may be published
+with `INFERRED` confidence and the
+`incomplete-hierarchy-receiver-dispatch` rule. These edges mean "possible for
+this proven hierarchy," not "the only runtime target." An existing exact edge
+is retained separately. The same inferred rule applies when a source-defined
+descendant has unresolved external ancestry but a direct member on its first
+source base is ordered before the defining mixin whenever that descendant can
+be linearized. A fully source-known C3 inconsistency is invalid, not
+incomplete, and publishes no possible edge.
+
 The old single-direct-base and terminal-name shortcuts have been removed.
 Multiple inheritance and methods inherited beyond the direct base use the same
 shared C3 implementation.
-Dynamic receiver bases, incomplete receiver base lists, explicit-argument
-`super`, inconsistent hierarchies, ambiguous members, and bound overflows
-remain unresolved. An unresolved or external later ancestor blocks full C3
+Dynamic receiver bases and incomplete receiver base lists cannot produce an
+exact target. Explicit-argument `super`, inconsistent hierarchies, ambiguous
+members, and bound overflows remain unresolved and cannot produce possible
+dispatch edges. An unresolved or external later ancestor blocks full C3
 recovery but does not invalidate a unique member declared directly on the
-exact first base. Nested sibling bases use their enclosing class identity. A
+exact first base. Repository-wide name equality is never evidence for a
+possible target. Nested sibling bases use their enclosing class identity. A
 receiver-dispatch candidate cannot also carry a qualified target and cannot
 fall through to a same-named local or imported symbol.
 

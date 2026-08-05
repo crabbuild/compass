@@ -5,8 +5,14 @@
 - Resolve Python `self` and `cls` calls through source-proven inheritance,
   including a later direct base when every preceding base is a known leaf and
   class members that directly alias an earlier module-level callable. Rebound
-  and static-method receiver names, overwritten aliases, unknown preceding
-  bases, and incomplete C3 order continue to fail closed.
+  and static-method receiver names and overwritten aliases continue to fail
+  closed. When a source-defined concrete descendant proves a different runtime
+  target, or unknown earlier ancestry makes a later direct member possible,
+  publish every bounded hierarchy-proven alternative as `INFERRED` without
+  weakening the exact target. A descendant with external ancestry may retain
+  a direct first-base member as possible dispatch, while unrelated same-name
+  members, fully known inconsistent C3 hierarchies, ambiguous members, and
+  bound overflows remain unpublished.
 
 - Resolve calls through source-proven inheritance when a Python function-local
   class is used as the qualified receiver, while failing closed after a local
@@ -33,8 +39,9 @@
   unqualified import. Python structural facts advance to adapter version 7.
 - Resolve zero-argument Python `super()` calls through complete source-backed
   C3 hierarchies instead of requiring the method on the immediate base.
-  Unknown or ambiguous hierarchy prefixes still fail closed. Python structural
-  facts advance to adapter version 8.
+  Unknown hierarchy prefixes may expose a later member only as an explicitly
+  inferred possible dispatch; ambiguous members still fail closed. Python
+  structural facts advance to adapter version 8.
 - Preserve source-proven recursive Python calls, including distinct occurrence
   anchors for repeated recursion. Parameters, assignment targets, closure
   bindings, and unknown receivers cannot fall through to a same-named

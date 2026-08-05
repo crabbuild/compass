@@ -6,6 +6,7 @@ use std::path::Path;
 
 use compass_graph::build_from_extraction;
 use compass_languages::{Engine, RawCall};
+use compass_resolve::evidence::{UniversalResolutionIndex, UniversalResolutionLimits};
 use serde_json::Map;
 
 fn extract(path: &str, source: &[u8]) -> compass_languages::Extraction {
@@ -777,7 +778,7 @@ fn python_super_call_uses_complete_c3_order_across_multiple_bases() {
 }
 
 #[test]
-fn python_super_call_stops_before_an_unknown_preceding_base() {
+fn python_super_call_marks_a_later_base_behind_unknown_ancestry_as_possible() {
     let source = b"from external import Unknown\nclass Known:\n    def run(self):\n        return None\nclass Child(Unknown, Known):\n    def run(self):\n        super().run()\n";
     let extracted = extract("pkg/models.py", source);
     let resolved = compass_resolve::resolve(
@@ -788,8 +789,17 @@ fn python_super_call_stops_before_an_unknown_preceding_base() {
         )]),
     );
 
-    assert!(resolved.edges.iter().all(|edge| {
-        edge.string("relation") != "calls" || edge.string("source_location") != "L7"
+    let known_run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.models.Known::run")
+        .unwrap_or_else(|| panic!("known method; nodes={:#?}", resolved.nodes));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == known_run.id
+            && edge.string("source_location") == "L7"
+            && edge.string("confidence") == "INFERRED"
+            && edge.string("resolution_rule") == "incomplete-hierarchy-receiver-dispatch"
     }));
 }
 
@@ -836,7 +846,7 @@ fn python_bound_receiver_reaches_a_later_leaf_separated_base() {
 }
 
 #[test]
-fn python_bound_receiver_stops_at_an_unknown_preceding_base() {
+fn python_bound_receiver_marks_a_later_base_behind_unknown_ancestry_as_possible() {
     let source = b"from external import Unknown\nclass Known:\n    def run(self):\n        return None\nclass Child(Unknown, Known):\n    def call(self):\n        return self.run()\n";
     let extracted = extract("pkg/models.py", source);
     let resolved = compass_resolve::resolve(
@@ -847,8 +857,243 @@ fn python_bound_receiver_stops_at_an_unknown_preceding_base() {
         )]),
     );
 
-    assert!(resolved.edges.iter().all(|edge| {
-        edge.string("relation") != "calls" || edge.string("source_location") != "L7"
+    let known_run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.models.Known::run")
+        .unwrap_or_else(|| panic!("known method; nodes={:#?}", resolved.nodes));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == known_run.id
+            && edge.string("source_location") == "L7"
+            && edge.string("confidence") == "INFERRED"
+            && edge.string("resolution_rule") == "incomplete-hierarchy-receiver-dispatch"
+    }));
+}
+
+#[test]
+fn python_mixin_receiver_discovers_closed_world_descendant_dispatch() {
+    let source = b"class Provider:\n    def run(self):\n        return None\nclass Mixin:\n    def call(self):\n        return self.run()\nclass Concrete(Provider, Mixin):\n    pass\n";
+    let extracted = extract("pkg/models.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/models.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let provider_run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.models.Provider::run")
+        .unwrap_or_else(|| panic!("provider method; nodes={:#?}", resolved.nodes));
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == provider_run.id
+            && edge.string("source_location") == "L6"
+            && edge.string("confidence") == "INFERRED"
+            && edge.string("resolution_rule") == "closed-world-receiver-dispatch"
+    }));
+}
+
+#[test]
+fn python_mixin_receiver_marks_a_first_base_target_with_external_ancestry_as_possible() {
+    let source = b"from external import Unknown\nclass Provider(Unknown):\n    def run(self):\n        return None\nclass Mixin:\n    def call(self):\n        return self.run()\nclass Concrete(Provider, Mixin):\n    pass\n";
+    let extracted = extract("pkg/models.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/models.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let provider_run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.models.Provider::run")
+        .unwrap_or_else(|| panic!("provider method; nodes={:#?}", resolved.nodes));
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == provider_run.id
+            && edge.string("source_location") == "L7"
+            && edge.string("confidence") == "INFERRED"
+            && edge.string("resolution_rule") == "incomplete-hierarchy-receiver-dispatch"
+    }));
+}
+
+#[test]
+fn python_mixin_receiver_preserves_every_proven_descendant_target() {
+    let source = b"class First:\n    def run(self):\n        return None\nclass Second:\n    def run(self):\n        return None\nclass Mixin:\n    def call(self):\n        return self.run()\nclass UsesFirst(First, Mixin):\n    pass\nclass UsesSecond(Second, Mixin):\n    pass\n";
+    let extracted = extract("pkg/models.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/models.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let targets = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "calls"
+                && edge.string("source_location") == "L9"
+                && edge.string("resolution_rule") == "closed-world-receiver-dispatch"
+        })
+        .map(|edge| edge.target.as_str())
+        .collect::<BTreeSet<_>>();
+    let expected = resolved
+        .nodes
+        .iter()
+        .filter(|node| {
+            matches!(
+                node.string("qualified_name").as_str(),
+                "pkg.models.First::run" | "pkg.models.Second::run"
+            )
+        })
+        .map(|node| node.id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(targets, expected);
+    assert!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                targets.contains(edge.target.as_str())
+                    && edge.string("source_location") == "L9"
+                    && edge.string("resolution_rule") == "closed-world-receiver-dispatch"
+            })
+            .all(|edge| edge.string("confidence") == "INFERRED")
+    );
+}
+
+#[test]
+fn python_possible_dispatch_fails_closed_when_descendants_exceed_the_lookup_bound() {
+    let source = b"class First:\n    def run(self):\n        return None\nclass Second:\n    def run(self):\n        return None\nclass Third:\n    def run(self):\n        return None\nclass Mixin:\n    def call(self):\n        return self.run()\nclass UsesFirst(First, Mixin):\n    pass\nclass UsesSecond(Second, Mixin):\n    pass\nclass UsesThird(Third, Mixin):\n    pass\n";
+    let extracted = extract("pkg/models.py", source);
+    let evidence = extracted
+        .semantic_evidence
+        .clone()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let limits = UniversalResolutionLimits {
+        candidates_per_lookup: 2,
+        ..UniversalResolutionLimits::default()
+    };
+    let index = UniversalResolutionIndex::new(&evidence, limits).expect("bounded index");
+    let mut nodes = extracted.nodes.clone();
+    let mut edges = extracted.edges.clone();
+    index.materialize(&mut nodes, &mut edges);
+
+    assert!(edges.iter().all(|edge| {
+        !matches!(
+            edge.string("resolution_rule").as_str(),
+            "closed-world-receiver-dispatch" | "incomplete-hierarchy-receiver-dispatch"
+        )
+    }));
+}
+
+#[test]
+fn python_bound_receiver_keeps_exact_target_and_marks_subclass_override_as_possible() {
+    let source = b"class Base:\n    def run(self):\n        return None\n    def call(self):\n        return self.run()\nclass Child(Base):\n    def run(self):\n        return None\n";
+    let extracted = extract("pkg/models.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/models.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.string("source_location") == "L5")
+        .map(|edge| {
+            (
+                resolved
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == edge.target)
+                    .map(|node| node.string("qualified_name"))
+                    .expect("call target"),
+                edge.string("confidence"),
+                edge.string("resolution_rule"),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+
+    assert!(calls.contains(&(
+        "pkg.models.Base::run".to_owned(),
+        "EXTRACTED".to_owned(),
+        "linearized-receiver-dispatch".to_owned(),
+    )));
+    assert!(calls.contains(&(
+        "pkg.models.Child::run".to_owned(),
+        "INFERRED".to_owned(),
+        "closed-world-receiver-dispatch".to_owned(),
+    )));
+}
+
+#[test]
+fn python_mixin_receiver_does_not_match_an_unrelated_same_name_member() {
+    let source = b"class Mixin:\n    def call(self):\n        return self.run()\nclass Unrelated:\n    def run(self):\n        return None\n";
+    let extracted = extract("pkg/models.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/models.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+
+    assert!(!resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls" && edge.string("source_location") == "L3"
+    }));
+}
+
+#[test]
+fn python_mixin_receiver_rejects_an_inconsistent_descendant_c3() {
+    let source = b"class X:\n    pass\nclass Y:\n    pass\nclass A(X, Y):\n    def run(self):\n        return None\nclass B(Y, X):\n    pass\nclass Mixin:\n    def call(self):\n        return self.run()\nclass Broken(A, B, Mixin):\n    pass\n";
+    let extracted = extract("pkg/models.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/models.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+
+    assert!(!resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls" && edge.string("source_location") == "L12"
+    }));
+}
+
+#[test]
+fn python_mixin_super_discovers_the_member_after_it_in_descendant_c3() {
+    let source = b"class Mixin:\n    def call(self):\n        return super().run()\nclass Provider:\n    def run(self):\n        return None\nclass Concrete(Mixin, Provider):\n    pass\n";
+    let extracted = extract("pkg/models.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/models.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let provider_run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.models.Provider::run")
+        .unwrap_or_else(|| panic!("provider method; nodes={:#?}", resolved.nodes));
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == provider_run.id
+            && edge.string("source_location") == "L3"
+            && edge.string("confidence") == "INFERRED"
+            && edge.string("resolution_rule") == "closed-world-receiver-dispatch"
     }));
 }
 

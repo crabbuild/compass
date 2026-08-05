@@ -49,6 +49,8 @@ pub enum ResolutionRule {
     ExactHierarchyBase,
     DirectReceiverSuccessorDispatch,
     LinearizedReceiverDispatch,
+    ClosedWorldReceiverDispatch,
+    IncompleteHierarchyReceiverDispatch,
     ExactSourceInventory,
     QualifiedExternal,
 }
@@ -65,6 +67,12 @@ struct DirectBaseLink {
 #[derive(Clone, Debug, Default)]
 struct DirectBaseSet {
     links: Vec<DirectBaseLink>,
+    complete: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct DirectSubtypeSet {
+    types: Vec<String>,
     complete: bool,
 }
 
@@ -119,6 +127,7 @@ pub struct UniversalResolutionIndex {
     by_scope_name: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
     by_source_directory_name: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
     direct_bases: AHashMap<(String, String), DirectBaseSet>,
+    direct_subtypes: AHashMap<(String, String), DirectSubtypeSet>,
     members_by_owner: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
     inventory_by_qualified: AHashMap<(String, String), Vec<String>>,
     aliases: AHashMap<(String, String), Vec<String>>,
@@ -492,6 +501,33 @@ impl UniversalResolutionIndex {
             "universal alias and hierarchy indices",
             &mut profile_started,
         );
+        let mut direct_subtypes = AHashMap::<(String, String), DirectSubtypeSet>::new();
+        for ((language, subtype), bases) in &direct_bases {
+            for link in &bases.links {
+                let Some(base) = link.qualified_name.as_ref() else {
+                    continue;
+                };
+                let entry = direct_subtypes
+                    .entry((language.clone(), base.clone()))
+                    .or_insert_with(|| DirectSubtypeSet {
+                        types: Vec::new(),
+                        complete: true,
+                    });
+                if entry.types.len() <= limits.candidates_per_lookup {
+                    entry.types.push(subtype.clone());
+                } else {
+                    entry.complete = false;
+                }
+            }
+        }
+        for subtypes in direct_subtypes.values_mut() {
+            subtypes.types.sort_unstable();
+            subtypes.types.dedup();
+            if subtypes.types.len() > limits.candidates_per_lookup {
+                subtypes.complete = false;
+                subtypes.types.truncate(limits.candidates_per_lookup);
+            }
+        }
         let mut members_by_owner =
             AHashMap::<(String, String, String), Vec<DeclarationSlot>>::new();
         for declaration in declarations.values() {
@@ -624,6 +660,7 @@ impl UniversalResolutionIndex {
             by_scope_name,
             by_source_directory_name,
             direct_bases,
+            direct_subtypes,
             members_by_owner,
             inventory_by_qualified,
             aliases,
@@ -1178,7 +1215,42 @@ impl UniversalResolutionIndex {
         profile_internal("universal candidate ordering", &mut profile_started);
         let decisions = candidate_ids
             .into_par_iter()
-            .map(|candidate_id| (candidate_id, self.resolve(candidate_id)))
+            .map(|candidate_id| {
+                let decision = self.resolve(candidate_id);
+                let exact_declaration_id = match &decision {
+                    ResolutionDecision::Resolved { declaration_id, .. } => {
+                        Some(declaration_id.clone())
+                    }
+                    _ => None,
+                };
+                let allow_possible = !matches!(decision, ResolutionDecision::Ambiguous { .. });
+                let mut decisions = vec![(candidate_id, decision)];
+                if allow_possible {
+                    decisions.extend(
+                        self.possible_receiver_dispatches(
+                            candidate_id,
+                            exact_declaration_id.as_deref(),
+                        )
+                        .into_iter()
+                        .map(|(declaration_id, rule)| {
+                            (
+                                candidate_id,
+                                ResolutionDecision::Resolved {
+                                    declaration_id,
+                                    evidence: ResolutionEvidence {
+                                        rule,
+                                        candidate_count: 1,
+                                    },
+                                },
+                            )
+                        }),
+                    );
+                }
+                decisions
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flatten()
             .collect::<Vec<_>>();
         profile_internal("universal candidate decisions", &mut profile_started);
         let prepared_targets = decisions
@@ -1357,10 +1429,9 @@ impl UniversalResolutionIndex {
                                 .map(|declaration| &declaration.range)
                         });
                     let site = site?;
-                    // Candidate IDs are unique by construction and every candidate is
-                    // visited exactly once, so a second full edge-identity set cannot
-                    // remove duplicates here. Downstream graph publication still
-                    // performs its contract-level semantic edge coalescing.
+                    // Exact resolution and bounded possible dispatches can project
+                    // more than one target for a candidate. Downstream publication
+                    // performs contract-level semantic edge coalescing.
                     if source == target && relation != "calls" {
                         return None;
                     }
@@ -1489,6 +1560,244 @@ impl UniversalResolutionIndex {
             }
         }
         ResolutionDecision::Unresolved
+    }
+
+    fn possible_receiver_dispatches(
+        &self,
+        candidate_id: &str,
+        exact_declaration_id: Option<&str>,
+    ) -> Vec<(String, ResolutionRule)> {
+        let Some(candidate) = self.candidates.get(candidate_id) else {
+            return Vec::new();
+        };
+        let Some(HierarchyConstraint::ReceiverDispatch {
+            receiver_qualified_name,
+            strategy,
+        }) = candidate.constraints.hierarchy.as_ref()
+        else {
+            return Vec::new();
+        };
+        let language = candidate
+            .constraints
+            .exact_language
+            .as_deref()
+            .unwrap_or(&candidate.language);
+        let Some(receiver) = self.exact_hierarchy_type(language, receiver_qualified_name) else {
+            return Vec::new();
+        };
+        let mut possible = BTreeMap::<String, ResolutionRule>::new();
+        if let Some(declaration_id) =
+            self.possible_incomplete_hierarchy_member(language, &receiver, candidate)
+            && exact_declaration_id != Some(declaration_id.as_str())
+        {
+            possible.insert(
+                declaration_id,
+                ResolutionRule::IncompleteHierarchyReceiverDispatch,
+            );
+        }
+        let Some(descendants) = self.closed_world_descendants(language, &receiver) else {
+            return possible.into_iter().collect();
+        };
+        for descendant in descendants {
+            let mut memo = BTreeMap::new();
+            let mut visiting = BTreeSet::new();
+            let linearization =
+                match self.c3_linearization(language, &descendant, &mut memo, &mut visiting, 0) {
+                    Ok(linearization) => linearization,
+                    Err(()) => {
+                        if *strategy == ReceiverDispatchStrategy::C3FromReceiver
+                            && self.hierarchy_has_unresolved_base(language, &descendant)
+                        {
+                            let decision = self
+                                .resolve_exact_receiver_member(language, &descendant, candidate)
+                                .or_else(|| {
+                                    self.resolve_source_proven_receiver_prefix(
+                                        language,
+                                        &descendant,
+                                        candidate,
+                                    )
+                                });
+                            match decision {
+                                Some(ResolutionDecision::Resolved { declaration_id, .. }) => {
+                                    if exact_declaration_id != Some(declaration_id.as_str()) {
+                                        possible.entry(declaration_id).or_insert(
+                                            ResolutionRule::IncompleteHierarchyReceiverDispatch,
+                                        );
+                                    }
+                                }
+                                Some(ResolutionDecision::Ambiguous { .. }) => return Vec::new(),
+                                Some(_) | None => {}
+                            }
+                        }
+                        continue;
+                    }
+                };
+            let start = match strategy {
+                ReceiverDispatchStrategy::C3FromReceiver => 0,
+                ReceiverDispatchStrategy::C3AfterReceiver => {
+                    let Some(position) = linearization.iter().position(|owner| owner == &receiver)
+                    else {
+                        continue;
+                    };
+                    position.saturating_add(1)
+                }
+            };
+            if !linearization.iter().any(|owner| owner == &receiver) {
+                continue;
+            }
+            for owner in linearization.iter().skip(start) {
+                match self.unique_receiver_member_id(language, owner, candidate) {
+                    Ok(Some(declaration_id)) => {
+                        if exact_declaration_id != Some(declaration_id.as_str()) {
+                            possible
+                                .entry(declaration_id)
+                                .or_insert(ResolutionRule::ClosedWorldReceiverDispatch);
+                        }
+                        break;
+                    }
+                    Ok(None) => {}
+                    Err(()) => return Vec::new(),
+                }
+            }
+            if possible.len() > self.limits.candidates_per_lookup {
+                return Vec::new();
+            }
+        }
+        possible.into_iter().collect()
+    }
+
+    fn hierarchy_has_unresolved_base(&self, language: &str, root: &str) -> bool {
+        let mut visiting = BTreeSet::new();
+        self.hierarchy_incompleteness(language, root, &mut visiting, 0)
+            .unwrap_or(false)
+    }
+
+    fn hierarchy_incompleteness(
+        &self,
+        language: &str,
+        qualified_name: &str,
+        visiting: &mut BTreeSet<(String, String)>,
+        depth: usize,
+    ) -> Result<bool, ()> {
+        if depth >= self.limits.candidates_per_lookup {
+            return Err(());
+        }
+        let canonical = self
+            .exact_hierarchy_type(language, qualified_name)
+            .ok_or(())?;
+        let key = (language.to_owned(), canonical);
+        if !visiting.insert(key.clone()) {
+            return Err(());
+        }
+        let result = (|| {
+            let Some(bases) = self.direct_bases.get(&key) else {
+                return Ok(false);
+            };
+            if bases.links.len() > self.limits.candidates_per_lookup {
+                return Err(());
+            }
+            let mut incomplete = !bases.complete;
+            for link in &bases.links {
+                let Some(base) = link
+                    .qualified_name
+                    .as_deref()
+                    .and_then(|name| self.exact_hierarchy_type(language, name))
+                else {
+                    incomplete = true;
+                    continue;
+                };
+                incomplete |= self.hierarchy_incompleteness(
+                    language,
+                    &base,
+                    visiting,
+                    depth.saturating_add(1),
+                )?;
+            }
+            Ok(incomplete)
+        })();
+        visiting.remove(&key);
+        result
+    }
+
+    fn closed_world_descendants(&self, language: &str, receiver: &str) -> Option<Vec<String>> {
+        let mut discovered = BTreeSet::new();
+        let mut frontier = vec![receiver.to_owned()];
+        let mut cursor = 0usize;
+        while let Some(current) = frontier.get(cursor).cloned() {
+            cursor = cursor.saturating_add(1);
+            let Some(direct) = self.direct_subtypes.get(&(language.to_owned(), current)) else {
+                continue;
+            };
+            if !direct.complete {
+                return None;
+            }
+            for subtype in &direct.types {
+                if discovered.insert(subtype.clone()) {
+                    if discovered.len() > self.limits.candidates_per_lookup {
+                        return None;
+                    }
+                    frontier.push(subtype.clone());
+                }
+            }
+        }
+        Some(discovered.into_iter().collect())
+    }
+
+    fn possible_incomplete_hierarchy_member(
+        &self,
+        language: &str,
+        receiver: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<String> {
+        let bases = self
+            .direct_bases
+            .get(&(language.to_owned(), receiver.to_owned()))?;
+        if !bases.complete
+            || bases.links.len() < 2
+            || bases.links.len() > self.limits.candidates_per_lookup
+        {
+            return None;
+        }
+        let mut preceding_hierarchy_unknown = false;
+        for link in &bases.links {
+            let Some(base) = link
+                .qualified_name
+                .as_deref()
+                .and_then(|name| self.exact_hierarchy_type(language, name))
+            else {
+                preceding_hierarchy_unknown = true;
+                continue;
+            };
+            match self.unique_receiver_member_id(language, &base, candidate) {
+                Ok(Some(declaration_id)) => {
+                    return preceding_hierarchy_unknown.then_some(declaration_id);
+                }
+                Ok(None) => {}
+                Err(()) => return None,
+            }
+            let mut memo = BTreeMap::new();
+            let mut visiting = BTreeSet::new();
+            if self
+                .c3_linearization(language, &base, &mut memo, &mut visiting, 0)
+                .is_err()
+            {
+                preceding_hierarchy_unknown = true;
+            }
+        }
+        None
+    }
+
+    fn unique_receiver_member_id(
+        &self,
+        language: &str,
+        receiver: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Result<Option<String>, ()> {
+        match self.resolve_exact_receiver_member(language, receiver, candidate) {
+            Some(ResolutionDecision::Resolved { declaration_id, .. }) => Ok(Some(declaration_id)),
+            Some(ResolutionDecision::Ambiguous { .. }) => Err(()),
+            Some(_) | None => Ok(None),
+        }
     }
 
     fn resolve_source_proven_receiver_prefix(
@@ -3114,7 +3423,10 @@ fn materialized_edge(
     };
     let confidence = if matches!(
         resolution_rule,
-        ResolutionRule::QualifiedExternal | ResolutionRule::DeferredReceiver
+        ResolutionRule::QualifiedExternal
+            | ResolutionRule::DeferredReceiver
+            | ResolutionRule::ClosedWorldReceiverDispatch
+            | ResolutionRule::IncompleteHierarchyReceiverDispatch
     ) {
         "INFERRED"
     } else {
@@ -3322,6 +3634,10 @@ const fn resolution_rule_name(rule: ResolutionRule) -> &'static str {
         ResolutionRule::ExactHierarchyBase => "exact-hierarchy-base",
         ResolutionRule::DirectReceiverSuccessorDispatch => "direct-receiver-successor-dispatch",
         ResolutionRule::LinearizedReceiverDispatch => "linearized-receiver-dispatch",
+        ResolutionRule::ClosedWorldReceiverDispatch => "closed-world-receiver-dispatch",
+        ResolutionRule::IncompleteHierarchyReceiverDispatch => {
+            "incomplete-hierarchy-receiver-dispatch"
+        }
         ResolutionRule::ExactSourceInventory => "exact-source-inventory",
         ResolutionRule::QualifiedExternal => "qualified-external",
     }
