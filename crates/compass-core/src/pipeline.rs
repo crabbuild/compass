@@ -1819,13 +1819,15 @@ fn build_graph_inner(
                 );
                 continue;
             }
-            let cached = cache.load_portable_ast(path, false)?;
-            if let Some(value) = cached {
-                let extraction =
-                    serde_json::from_value(value).map_err(|source| CoreError::InvalidCache {
-                        path: path.clone(),
-                        source,
-                    })?;
+            let cached =
+                cache.load_portable_ast_typed(path, false, |extraction: &Extraction| {
+                    extraction
+                        .extensions
+                        .get(EXTRACTION_QUALITY_PARTIAL)
+                        .and_then(Value::as_bool)
+                        == Some(true)
+                })?;
+            if let Some(extraction) = cached {
                 if cached_framework_evidence_matches(&extraction, path, &project_evidence)
                     && cached_universal_evidence_matches(&extraction, path)
                 {
@@ -3515,58 +3517,15 @@ fn graph_delta_candidate(previous: &V1GraphDocument, current: &V1GraphDocument) 
     if previous.directed != current.directed || previous.multigraph != current.multigraph {
         return false;
     }
-    let previous_nodes = previous
-        .nodes
-        .iter()
-        .map(|node| (node.id.as_str(), node))
-        .collect::<BTreeMap<_, _>>();
-    let current_nodes = current
-        .nodes
-        .iter()
-        .map(|node| (node.id.as_str(), node))
-        .collect::<BTreeMap<_, _>>();
-    let changed_nodes = previous_nodes
-        .iter()
-        .filter(|(id, previous_node)| {
-            current_nodes
-                .get(*id)
-                .is_none_or(|current| *current != **previous_node)
-        })
-        .count()
-        + current_nodes
-            .iter()
-            .filter(|(id, current_node)| {
-                previous_nodes
-                    .get(*id)
-                    .is_none_or(|previous| *previous != **current_node)
-            })
-            .count();
-    let previous_edges = previous
-        .links
-        .iter()
-        .map(|edge| (edge.id.as_str(), edge))
-        .collect::<BTreeMap<_, _>>();
-    let current_edges = current
-        .links
-        .iter()
-        .map(|edge| (edge.id.as_str(), edge))
-        .collect::<BTreeMap<_, _>>();
-    let changed_edges = previous_edges
-        .iter()
-        .filter(|(id, previous_edge)| {
-            current_edges
-                .get(*id)
-                .is_none_or(|current| *current != **previous_edge)
-        })
-        .count()
-        + current_edges
-            .iter()
-            .filter(|(id, current_edge)| {
-                previous_edges
-                    .get(*id)
-                    .is_none_or(|previous| *previous != **current_edge)
-            })
-            .count();
+    // V1 publication sorts both records by stable ID. A merge walk avoids
+    // four BTreeMap allocations on every incremental build while preserving
+    // the same changed-record count. The snapshot layer repeats its complete
+    // validation before applying a delta, so this remains only a cheap
+    // candidate check and never decides graph meaning.
+    let changed_nodes =
+        changed_record_count(&previous.nodes, &current.nodes, |node| node.id.as_str());
+    let changed_edges =
+        changed_record_count(&previous.links, &current.links, |edge| edge.id.as_str());
     let changed_records = changed_nodes.saturating_add(changed_edges);
     let total_records = previous
         .nodes
@@ -3580,6 +3539,60 @@ fn graph_delta_candidate(previous: &V1GraphDocument, current: &V1GraphDocument) 
         return false;
     }
     true
+}
+
+fn changed_record_count<T, F>(previous: &[T], current: &[T], key: F) -> usize
+where
+    T: PartialEq,
+    F: Fn(&T) -> &str,
+{
+    debug_assert!(
+        previous
+            .windows(2)
+            .all(|records| key(&records[0]) <= key(&records[1]))
+    );
+    debug_assert!(
+        current
+            .windows(2)
+            .all(|records| key(&records[0]) <= key(&records[1]))
+    );
+
+    let mut previous_index = 0;
+    let mut current_index = 0;
+    let mut changed = 0;
+    while previous_index < previous.len() || current_index < current.len() {
+        match (previous.get(previous_index), current.get(current_index)) {
+            (Some(previous_record), Some(current_record)) => {
+                match key(previous_record).cmp(key(current_record)) {
+                    std::cmp::Ordering::Less => {
+                        changed += 1;
+                        previous_index += 1;
+                    }
+                    std::cmp::Ordering::Greater => {
+                        changed += 1;
+                        current_index += 1;
+                    }
+                    std::cmp::Ordering::Equal => {
+                        if previous_record != current_record {
+                            changed += 1;
+                        }
+                        previous_index += 1;
+                        current_index += 1;
+                    }
+                }
+            }
+            (Some(_), None) => {
+                changed += previous.len().saturating_sub(previous_index);
+                break;
+            }
+            (None, Some(_)) => {
+                changed += current.len().saturating_sub(current_index);
+                break;
+            }
+            (None, None) => break,
+        }
+    }
+    changed
 }
 
 fn publish_graph_and_store_from_canonical(
@@ -6111,6 +6124,20 @@ mod tests {
 
         assert_eq!(before, serde_json::to_value(extraction)?);
         Ok(())
+    }
+
+    #[test]
+    fn graph_delta_change_count_walks_canonical_records() {
+        let previous = [("a", 1_u8), ("c", 1_u8)];
+        let current = [("a", 1_u8), ("b", 1_u8), ("c", 2_u8)];
+        assert_eq!(
+            changed_record_count(&previous, &current, |record| record.0),
+            2
+        );
+        assert_eq!(
+            changed_record_count(&current, &previous, |record| record.0),
+            2
+        );
     }
 
     #[test]

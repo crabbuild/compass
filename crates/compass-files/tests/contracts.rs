@@ -11,8 +11,17 @@ use compass_files::{
     write_text_atomic,
 };
 use compass_files::{FileType, IgnorePolicy};
+use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+
+#[derive(Debug, Deserialize, PartialEq)]
+struct PortableAstFixture {
+    nodes: Vec<serde_json::Value>,
+    edges: Vec<serde_json::Value>,
+    #[serde(default)]
+    framework_facts: Vec<serde_json::Value>,
+}
 
 #[test]
 fn database_only_detection_does_not_read_local_files() -> Result<(), Box<dyn Error>> {
@@ -477,6 +486,14 @@ fn streaming_portable_ast_batch_round_trips() -> Result<(), Box<dyn Error>> {
     assert_eq!(
         cache.load_portable_ast(&source, false)?,
         Some(portable.clone())
+    );
+    assert_eq!(
+        cache.load_portable_ast_typed::<PortableAstFixture, _>(&source, false, |_| false)?,
+        Some(PortableAstFixture {
+            nodes: vec![json!({"id":"streamed","source_file":"streamed.rs"})],
+            edges: Vec::new(),
+            framework_facts: Vec::new(),
+        })
     );
     let mut expected = portable;
     expected["nodes"][0]["source_file"] = json!(fs::canonicalize(&source)?.to_string_lossy());
