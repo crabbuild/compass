@@ -4886,13 +4886,7 @@ impl<'source> DirectAdapterState<'source> {
         {
             return Ok(());
         }
-        let construction =
-            self.language == "python" && spelling.chars().next().is_some_and(char::is_uppercase);
-        let (role, relation) = if construction {
-            (SemanticRole::Construction, CandidateRelation::Constructs)
-        } else {
-            (SemanticRole::Call, CandidateRelation::Calls)
-        };
+        let (role, relation) = (SemanticRole::Call, CandidateRelation::Calls);
         let argument_count = (self.language == "go")
             .then(|| call.child_by_field_name("arguments"))
             .flatten()
@@ -4983,10 +4977,11 @@ impl<'source> DirectAdapterState<'source> {
                 qualified_name: qualified_name.clone(),
                 argument_count,
                 argument_types: Vec::new(),
-                allowed_target_kinds: if construction {
+                allowed_target_kinds: if self.language == "python" {
                     vec![
+                        "function".to_owned(),
+                        "method".to_owned(),
                         "class".to_owned(),
-                        "struct".to_owned(),
                         "type_alias".to_owned(),
                     ]
                 } else if self.language == "go" {

@@ -241,6 +241,13 @@ the receiving API invokes the value. The current Python adapter does not infer
 such contracts, so uninvoked argument, collection, assignment, and return uses
 remain references.
 
+Python call syntax does not prove whether its target is a function or class,
+and capitalization is not semantic evidence. The adapter therefore emits a
+call candidate that permits either callable declaration kind. Publication
+normalizes a uniquely resolved class target to `instantiates`; an unresolved
+target remains a call-shaped external or unresolved endpoint rather than an
+invented constructor.
+
 The following resolution behavior is forbidden:
 
 - repository-wide terminal-label search;

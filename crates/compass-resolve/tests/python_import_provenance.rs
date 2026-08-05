@@ -829,7 +829,7 @@ fn universal_python_qualified_calls_resolve_through_package_wildcard_reexports()
             edge.source == build.id
                 && edge.target == target.id
                 && edge.string("relation") == "calls"
-                && edge.string("rule").starts_with("universal-construction-")
+                && edge.string("rule").starts_with("universal-call-")
         })
         .collect::<Vec<_>>();
     assert_eq!(constructions.len(), 1, "edges={:#?}", resolved.edges);
@@ -865,6 +865,61 @@ fn universal_python_qualified_calls_resolve_through_package_wildcard_reexports()
                 .get("external")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
+    }));
+    Ok(())
+}
+
+#[test]
+fn python_call_targets_use_declaration_kind_instead_of_name_capitalization()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "app.py",
+            "from pkg import Factory, override_settings\n\ndef build():\n    Factory()\n    override_settings(DEBUG=True)\n",
+        ),
+        (
+            "pkg/__init__.py",
+            "from .api import Factory, override_settings\n",
+        ),
+        (
+            "pkg/api.py",
+            "def Factory():\n    return None\n\nclass override_settings:\n    pass\n",
+        ),
+    ];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    let build = resolved
+        .nodes
+        .iter()
+        .find(|node| node.label() == "build()")
+        .ok_or("missing build declaration")?;
+    let factory = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.api.Factory")
+        .ok_or("missing Factory declaration")?;
+    let settings = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.api.override_settings")
+        .ok_or("missing override_settings declaration")?;
+
+    for target in [factory, settings] {
+        assert!(resolved.edges.iter().any(|edge| {
+            edge.source == build.id
+                && edge.target == target.id
+                && edge.string("relation") == "calls"
+                && edge.string("rule").starts_with("universal-call-")
+        }));
+    }
+    assert!(resolved.nodes.iter().all(|node| {
+        !matches!(
+            node.string("qualified_name").as_str(),
+            "pkg.Factory" | "pkg.override_settings"
+        ) || node
+            .attributes
+            .get("external")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
     }));
     Ok(())
 }

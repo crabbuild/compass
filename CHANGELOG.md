@@ -8,6 +8,9 @@
 - Preserve source-anchored Python wildcard imports and package re-exports, and
   resolve uniquely proven repository-local symbols through bounded wildcard
   facade chains. Multiple wildcard sources remain ambiguous and fail closed.
+- Classify Python call syntax from resolved declaration kinds rather than name
+  capitalization, so lowercase classes resolve as constructions, uppercase
+  functions remain calls, and unresolved names do not invent class identity.
 
 - Split framework extraction into focused Spring, Express, Axum, Next.js, and
   Vite adapters. Project evidence now indexes framework configuration files,
