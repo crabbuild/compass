@@ -380,6 +380,62 @@ fn raw_go_embeddings_remain_first_class_v1_relationships() -> Result<(), Box<dyn
     Ok(())
 }
 
+#[test]
+fn raw_typescript_implements_type_alias_remains_a_published_relationship()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut implementation = raw_node(root, "implementation", "ParseInputLazyPath", 10);
+    implementation
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("class"));
+    implementation
+        .attributes
+        .insert("language".to_owned(), json!("typescript"));
+    implementation.attributes.insert(
+        "extractor".to_owned(),
+        json!("compass.languages.typescript"),
+    );
+    let mut contract = raw_node(root, "contract", "ParseInput", 30);
+    contract
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("type_alias"));
+    contract
+        .attributes
+        .insert("language".to_owned(), json!("typescript"));
+    contract.attributes.insert(
+        "extractor".to_owned(),
+        json!("compass.languages.typescript"),
+    );
+    let graph = normalize_v1(
+        Extraction {
+            nodes: vec![implementation, contract],
+            edges: vec![RawEdgeRecord {
+                source: "implementation".to_owned(),
+                target: "contract".to_owned(),
+                attributes: Map::from_iter([
+                    ("relation".to_owned(), json!("implements")),
+                    ("confidence".to_owned(), json!("EXTRACTED")),
+                    (
+                        "extractor".to_owned(),
+                        json!("compass.languages.typescript"),
+                    ),
+                    ("source_anchor".to_owned(), anchor(root, 50)),
+                ]),
+            }],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+
+    assert_eq!(graph.links.len(), 1);
+    assert_eq!(graph.links[0].kind, EdgeKind::Implements);
+    assert_eq!(graph.nodes[0].kind, NodeKind::Class);
+    assert_eq!(graph.nodes[1].kind, NodeKind::TypeAlias);
+    assert!(validate_code_graph(&graph).is_ok());
+    Ok(())
+}
+
 fn raw_class_node(
     root: &Path,
     id: &str,

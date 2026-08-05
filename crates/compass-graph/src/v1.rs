@@ -939,7 +939,13 @@ fn finalize_prepared_edge(
                 EdgeKind::Embeds | EdgeKind::Extends => target_kind.is_type(),
                 EdgeKind::Implements => matches!(
                     target_kind,
-                    NodeKind::Interface | NodeKind::Trait | NodeKind::Protocol
+                    NodeKind::Interface
+                        | NodeKind::Trait
+                        | NodeKind::Protocol
+                        // TypeScript permits a class to implement a
+                        // structural object type declared through a type
+                        // alias.
+                        | NodeKind::TypeAlias
                 ),
                 _ => false,
             };

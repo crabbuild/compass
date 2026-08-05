@@ -219,9 +219,9 @@ Click (Python, 91 files). The run used `extract --code-only --no-cluster
 | Click | 1.47 s | 3,876 | 9,471 |
 
 These are diagnostic observations, not promoted baselines or a claim of a
-4×–5× cold-build advantage. Small-project extraction now stays sequential by
-default to avoid multiplying parser/AST working sets; large-project extraction
-uses a default cap of 8 local workers so those working sets remain bounded,
+4×–5× cold-build advantage. Extraction with fewer than 32 missing files stays
+sequential to avoid multiplying parser/AST working sets; the automatic path
+uses a default cap of 8 local workers once that measured crossover is reached,
 while `--max-workers` remains the explicit override. Portable AST publication
 also streams one compressed value at a time instead of retaining the entire
 compressed batch in memory.
@@ -257,6 +257,25 @@ the new default cap of 8 workers, and 257 MiB with an explicit cap of 4. The
 8-worker run retained essentially the previous wall time; the 4-worker run
 was about 0.26 s slower. These are diagnostic measurements on one macOS
 runner, not a cross-platform performance guarantee.
+
+A follow-up release build from the merged `origin/main` tip was measured with
+three fresh cold processes per repository on the same four pinned corpora. The
+Graphify values are the authoritative three-sample baselines from the pinned
+comparison run; the Compass samples used the compact JSON graph path:
+
+| Repository | Compass p50 | Graphify p50 | Graphify / Compass | Compass RSS p50 | Graphify RSS | Compass graph (nodes / edges) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Cobra | 0.32 s | 0.718 s | 2.24× | 121.00 MiB | 64.53 MiB | 1,206 / 5,711 |
+| Click | 0.54 s | 1.764 s | 3.27× | 181.34 MiB | 99.45 MiB | 3,876 / 9,471 |
+| Rayon | 0.82 s | 2.025 s | 2.47× | 298.38 MiB | 80.95 MiB | 8,563 / 17,941 |
+| Zod | 1.14 s | 4.330 s | 3.80× | 295.44 MiB | 234.62 MiB | 11,058 / 9,644 |
+
+The run is deterministic across all three samples per corpus and no longer
+reports a partial graph for Zod: its recovered TypeScript `implements`
+relationship now targets the structural `ParseInput` type alias. These
+measurements still do not establish the requested 4× speed target for every
+repository or the Graphify RSS gate; the richer typed graph remains the
+correctness priority while publication and resolver costs are reduced.
 
 ## Django cold-build regression qualification
 

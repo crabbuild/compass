@@ -120,7 +120,8 @@ pub struct BuildOptions {
     /// Resource limits for offline program artifacts.
     pub program_artifact_limits: compass_program::ArtifactLimits,
     /// Maximum number of worker threads used by the deterministic AST stages.
-    /// `None` uses the host CPU count in a build-local Rayon pool.
+    /// `None` uses the bounded host CPU count in a build-local Rayon pool once
+    /// enough files are missing to amortize parser-table residency.
     pub max_workers: Option<usize>,
     /// Maximum size of one source file admitted to AST and Program analysis.
     ///
@@ -1864,10 +1865,11 @@ fn build_graph_inner(
     // An explicit worker count is an opt-in performance decision. Honor it
     // even for smaller repositories so callers can trade parser-table
     // residency for throughput instead of silently falling back to the
-    // sequential path below. On small repositories, a single requested worker
-    // remains sequential; it avoids paying for a pool that cannot add
-    // parallelism.
-    let parallel_extraction = should_parallel_extract(options, missing.len(), sources.len());
+    // sequential path below. The automatic path uses the same bounded local
+    // pool once enough missing files exist to amortize parser-table residency.
+    // On small repositories, a single requested worker remains sequential; it
+    // avoids paying for a pool that cannot add parallelism.
+    let parallel_extraction = should_parallel_extract(options, missing.len());
     let worker_pool = if parallel_extraction {
         Some(
             rayon::ThreadPoolBuilder::new()
@@ -1880,12 +1882,11 @@ fn build_graph_inner(
         None
     };
     profile_internal("extract setup and cache load", &mut internal_started);
-    // A Rayon worker pool costs more resident memory than it saves time on
-    // small multilingual projects, where parser-table page residency dominates.
-    // Stay sequential below the measured crossover. Larger corpora use an
-    // bounded local pool so an embedding application's global Rayon settings
-    // cannot silently serialize cold extraction or multiply parser working
-    // sets without an explicit opt-in.
+    // A Rayon worker pool costs more resident memory than it saves time when
+    // only a handful of files are missing. Below the measured crossover stay
+    // sequential; above it use a bounded local pool so an embedding
+    // application's global Rayon settings cannot silently serialize cold
+    // extraction or multiply parser working sets without an explicit opt-in.
     let completed_files = Mutex::new(0_usize);
     let total_files = missing.len();
     let extract_source =
@@ -3694,9 +3695,11 @@ fn default_ast_workers() -> usize {
 }
 
 const DEFAULT_AST_WORKER_CAP: usize = 8;
+const AUTOMATIC_PARALLEL_EXTRACT_MIN_FILES: usize = 32;
 
-fn should_parallel_extract(options: &BuildOptions, missing: usize, sources: usize) -> bool {
-    missing >= 256 || sources >= 256 || options.max_workers.is_some_and(|workers| workers > 1)
+fn should_parallel_extract(options: &BuildOptions, missing: usize) -> bool {
+    missing >= AUTOMATIC_PARALLEL_EXTRACT_MIN_FILES
+        || options.max_workers.is_some_and(|workers| workers > 1)
 }
 
 fn is_php_source_path(path: &Path) -> bool {
@@ -6063,14 +6066,15 @@ mod tests {
     #[test]
     fn explicit_multiple_ast_workers_enable_small_project_parallelism() {
         let mut options = BuildOptions::new(".");
-        assert!(!should_parallel_extract(&options, 64, 64));
+        assert!(!should_parallel_extract(&options, 31));
+        assert!(should_parallel_extract(&options, 32));
 
         options.max_workers = Some(2);
-        assert!(should_parallel_extract(&options, 64, 64));
+        assert!(should_parallel_extract(&options, 1));
 
         options.max_workers = Some(1);
-        assert!(!should_parallel_extract(&options, 64, 64));
-        assert!(should_parallel_extract(&options, 256, 256));
+        assert!(!should_parallel_extract(&options, 31));
+        assert!(should_parallel_extract(&options, 32));
     }
 
     #[test]
