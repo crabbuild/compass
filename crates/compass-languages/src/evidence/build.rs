@@ -724,6 +724,18 @@ impl<'source> DirectAdapterState<'source> {
             .is_ok_and(|prefix| !valid_python_import_whitespace(prefix))
     }
 
+    fn has_invalid_python_import_suffix(&self, node: Node<'_>) -> bool {
+        let end = node.end_byte();
+        let line_end = self.source[end..]
+            .iter()
+            .position(|byte| matches!(*byte, b'\n' | b'\r'))
+            .map_or(self.source.len(), |offset| end.saturating_add(offset));
+        std::str::from_utf8(&self.source[end..line_end]).is_ok_and(|suffix| {
+            let suffix = suffix.trim_start();
+            !suffix.is_empty() && !suffix.starts_with('#') && !suffix.starts_with(';')
+        })
+    }
+
     fn declaration_metadata(&self, node: Node<'_>) -> DeclarationMetadata {
         let body = evidence_declaration_body(node);
         DeclarationMetadata {
@@ -1034,6 +1046,9 @@ impl<'source> DirectAdapterState<'source> {
                 node.start_byte(),
                 allow_later_file_binding,
             )
+            .or_else(|| {
+                self.python_wildcard_binding(owner, node.start_byte(), allow_later_file_binding)
+            })
             .cloned();
         let qualified_name = self
             .imported_target_for_occurrence(
@@ -1093,7 +1108,6 @@ impl<'source> DirectAdapterState<'source> {
         let statement = self.text(node);
         if !valid_python_import_whitespace(&statement)
             || !valid_python_line_continuations(&statement)
-            || python_import_contains_wildcard(&statement)
         {
             return Ok(());
         }
@@ -1104,6 +1118,21 @@ impl<'source> DirectAdapterState<'source> {
                 self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py"),
             )
         });
+        if python_import_contains_wildcard(&statement) {
+            if !self.has_invalid_python_import_suffix(node)
+                && let (Some(module), Some((start, end))) =
+                    (module.as_deref(), python_wildcard_import_span(&statement))
+            {
+                let range = range_for_byte_span(
+                    self.source_file,
+                    self.source,
+                    node.start_byte().saturating_add(start),
+                    node.start_byte().saturating_add(end),
+                );
+                self.add_python_wildcard_import(owner, module, range)?;
+            }
+            return Ok(());
+        }
         let mut cursor = node.walk();
         let imported_names = node
             .children_by_field_name("name", &mut cursor)
@@ -1178,6 +1207,81 @@ impl<'source> DirectAdapterState<'source> {
                 alias_node,
             )?;
         }
+        Ok(())
+    }
+
+    fn add_python_wildcard_import(
+        &mut self,
+        owner: &DeclarationContext,
+        module: &str,
+        range: EvidenceRange,
+    ) -> Result<(), EvidenceError> {
+        if module.is_empty() {
+            return Ok(());
+        }
+        let is_reexport = owner.kind == "file"
+            && self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py");
+        let kind = if is_reexport {
+            BindingKind::Reexport
+        } else {
+            BindingKind::Import
+        };
+        let binding_id = self.builder.bind(
+            kind,
+            "*",
+            module,
+            None,
+            Some(&owner.scope_id),
+            range.clone(),
+        )?;
+        self.record_import_binding(
+            owner,
+            "*",
+            module,
+            &binding_id,
+            usize::try_from(range.end_byte).unwrap_or(usize::MAX),
+        );
+        let occurrence_id = self.builder.occur(
+            if is_reexport {
+                SemanticRole::Reexport
+            } else {
+                SemanticRole::Import
+            },
+            &owner.fact_id,
+            "*",
+            None,
+            Some(&owner.scope_id),
+            range,
+        )?;
+        self.builder.relate(
+            if is_reexport {
+                CandidateRelation::Reexports
+            } else {
+                CandidateRelation::Imports
+            },
+            &owner.fact_id,
+            Some(&occurrence_id),
+            Some(&binding_id),
+            module.rsplit('.').next().unwrap_or(module),
+            ResolutionConstraint {
+                exact_target_declaration_id: None,
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: module
+                    .rsplit_once('.')
+                    .map(|(package, _)| package.to_owned()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: Some(module.to_owned()),
+                argument_count: None,
+                argument_types: Vec::new(),
+                allowed_target_kinds: vec![
+                    "file".to_owned(),
+                    "module".to_owned(),
+                    "package".to_owned(),
+                ],
+                hierarchy: None,
+                allow_external: true,
+            },
+        )?;
         Ok(())
     }
 
@@ -4811,6 +4915,9 @@ impl<'source> DirectAdapterState<'source> {
                 function.start_byte(),
                 allow_later_file_binding,
             )
+            .or_else(|| {
+                self.python_wildcard_binding(owner, function.start_byte(), allow_later_file_binding)
+            })
             .cloned()
         });
         let qualified_name = exact_super_target.or_else(|| {
@@ -5303,6 +5410,9 @@ impl<'source> DirectAdapterState<'source> {
                 node.start_byte(),
                 allow_later_file_binding,
             )
+            .or_else(|| {
+                self.python_wildcard_binding(owner, node.start_byte(), allow_later_file_binding)
+            })
             .cloned();
         let qualified_name = qualified_name_override
             .or_else(|| {
@@ -5413,7 +5523,8 @@ impl<'source> DirectAdapterState<'source> {
             existing_root == new_root
         });
 
-        if (self.language != "python" && !versions.is_empty())
+        if (local == "*" && !versions.is_empty())
+            || (self.language != "python" && !versions.is_empty())
             || (self.language == "python"
                 && same_package
                 && versions.iter().any(|version| version.target != target))
@@ -5490,6 +5601,19 @@ impl<'source> DirectAdapterState<'source> {
             self.import_binding_version_at(owner, name, use_start, allow_later_file_binding)
                 .map(|binding| &binding.binding_id)
         })
+    }
+
+    fn python_wildcard_binding(
+        &self,
+        owner: &DeclarationContext,
+        use_start: usize,
+        allow_later_file_binding: bool,
+    ) -> Option<&String> {
+        if self.language != "python" || self.import_binding_is_ambiguous(owner, "*") {
+            return None;
+        }
+        self.import_binding_version_at(owner, "*", use_start, allow_later_file_binding)
+            .map(|binding| &binding.binding_id)
     }
 
     fn imported_target_for_occurrence(
@@ -7091,6 +7215,20 @@ fn python_import_contains_wildcard(statement: &str) -> bool {
         }
     }
     false
+}
+
+fn python_wildcard_import_span(statement: &str) -> Option<(usize, usize)> {
+    let uncommented_end = statement.find('#').unwrap_or(statement.len());
+    let uncommented = statement.get(..uncommented_end)?;
+    let star = uncommented.find('*')?;
+    if uncommented.get(star.saturating_add(1)..)?.trim().is_empty()
+        && uncommented.get(..star)?.trim_end().ends_with("import")
+        && !uncommented.get(..star)?.contains('*')
+    {
+        Some((star, star.saturating_add(1)))
+    } else {
+        None
+    }
 }
 
 fn collect_nodes<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tree>>) {

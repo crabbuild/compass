@@ -773,6 +773,103 @@ fn universal_python_decorators_resolve_through_package_reexports() -> Result<(),
 }
 
 #[test]
+fn universal_python_qualified_calls_resolve_through_package_wildcard_reexports()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "app.py",
+            "from django.db import models\n\ndef build():\n    return models.CharField(max_length=255)\n",
+        ),
+        (
+            "direct.py",
+            "from django.db.models.fields import *\n\ndef build_direct():\n    return CharField(max_length=255)\n",
+        ),
+        (
+            "ambiguous.py",
+            "from django.db.models.fields import *\nfrom other.fields import *\n\ndef build_ambiguous():\n    return CharField(max_length=255)\n",
+        ),
+        ("django/__init__.py", ""),
+        ("django/db/__init__.py", ""),
+        (
+            "django/db/models/__init__.py",
+            "from django.db.models.fields import *\n",
+        ),
+        (
+            "django/db/models/fields.py",
+            "class CharField:\n    def __init__(self, max_length):\n        self.max_length = max_length\n",
+        ),
+        ("other/__init__.py", ""),
+        (
+            "other/fields.py",
+            "class CharField:\n    def __init__(self, max_length):\n        self.max_length = max_length\n",
+        ),
+    ];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    assert_no_retired_python_projection(&resolved);
+
+    let target = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.label() == "CharField"
+                && node
+                    .string("source_file")
+                    .ends_with("django/db/models/fields.py")
+        })
+        .ok_or("missing CharField declaration")?;
+    let build = resolved
+        .nodes
+        .iter()
+        .find(|node| node.label() == "build()")
+        .ok_or("missing build declaration")?;
+    let constructions = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.source == build.id
+                && edge.target == target.id
+                && edge.string("relation") == "calls"
+                && edge.string("rule").starts_with("universal-construction-")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(constructions.len(), 1, "edges={:#?}", resolved.edges);
+    assert_eq!(
+        constructions[0].string("resolution_rule"),
+        "wildcard-binding"
+    );
+    let build_direct = resolved
+        .nodes
+        .iter()
+        .find(|node| node.label() == "build_direct()")
+        .ok_or("missing build_direct declaration")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == build_direct.id
+            && edge.target == target.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "wildcard-binding"
+    }));
+    let build_ambiguous = resolved
+        .nodes
+        .iter()
+        .find(|node| node.label() == "build_ambiguous()")
+        .ok_or("missing build_ambiguous declaration")?;
+    assert!(
+        resolved.edges.iter().all(|edge| {
+            edge.source != build_ambiguous.id || edge.string("relation") != "calls"
+        })
+    );
+    assert!(resolved.nodes.iter().all(|node| {
+        node.string("qualified_name") != "django.db.models.CharField"
+            || !node
+                .attributes
+                .get("external")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+    }));
+    Ok(())
+}
+
+#[test]
 fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -1282,7 +1379,7 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
         "from pkg importWidget",
         "from pkg import helper as recovered",
     ];
-    let valid_statements = [statements[0], statements[1], statements[10]];
+    let valid_statements = [statements[0], statements[1], statements[2], statements[10]];
     let mut newline_snapshots = Vec::new();
 
     for newline in ["\n", "\r\n"] {
@@ -1318,7 +1415,7 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
         assert_eq!(
             resolver_edges.len(),
             valid_statements.len(),
-            "wildcards, keyword-prefix near matches, and malformed statements must not emit exact partial facts"
+            "valid wildcards must be exact while keyword-prefix near matches and malformed statements emit no partial facts: {resolver_edges:#?}"
         );
 
         let mut expected_spans = valid_statements

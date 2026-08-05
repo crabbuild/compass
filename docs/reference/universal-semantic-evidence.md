@@ -198,7 +198,8 @@ sorts candidate identities, and applies this order:
 1. typed hierarchy policy for direct bases and receiver dispatch;
 2. explicit import, alias, or re-export binding attached to the occurrence;
 3. exact declaration in the lexical scope or a parent scope;
-4. exact qualified identity;
+4. exact qualified identity, explicit member binding, or bounded wildcard
+   re-export chain;
 5. unique same-module or same-package declaration;
 6. source-scoped qualified external endpoint when explicitly allowed;
 7. ambiguous or unresolved.
@@ -216,7 +217,11 @@ Python file imports are visible at module scope. Function- and class-local
 imports are indexed only in their owning lexical scope, so they cannot leak to
 sibling functions or become file-owned facts. Each imported item retains its
 own parser range. Python source is not reparsed by the collection resolver,
-and there is no legacy import projection.
+and there is no legacy import projection. A static `from package import *`
+statement emits one source-anchored wildcard binding. Package `__init__.py`
+wildcards can expose a uniquely declared repository-local symbol through a
+bounded re-export chain; multiple wildcard sources or multiple eligible
+declarations remain ambiguous rather than selecting an arbitrary target.
 
 Language and allowed target kinds are filtered before uniqueness is decided.
 Case-insensitive or terminal-name equality cannot select a target. Cross-

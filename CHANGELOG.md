@@ -5,6 +5,9 @@
 - Harden Python value-reference resolution so argument, collection, assignment,
   and return references cannot fabricate function calls. Function-valued uses
   remain references unless future evidence proves an invocation contract.
+- Preserve source-anchored Python wildcard imports and package re-exports, and
+  resolve uniquely proven repository-local symbols through bounded wildcard
+  facade chains. Multiple wildcard sources remain ambiguous and fail closed.
 
 - Split framework extraction into focused Spring, Express, Axum, Next.js, and
   Vite adapters. Project evidence now indexes framework configuration files,

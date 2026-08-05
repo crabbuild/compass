@@ -813,6 +813,10 @@ impl UniversalResolutionIndex {
             if let Some(decision) = self.member_decision(language, &qualified, candidate) {
                 return decision;
             }
+            if let Some(decision) = self.wildcard_reexport_decision(language, &qualified, candidate)
+            {
+                return decision;
+            }
             if let Some(decision) = self.imported_member_decision(language, &qualified, candidate) {
                 return decision;
             }
@@ -1030,6 +1034,11 @@ impl UniversalResolutionIndex {
                 {
                     return Some(decision);
                 }
+                if let Some(decision) =
+                    self.wildcard_reexport_decision(language, &qualified, candidate)
+                {
+                    return Some(decision);
+                }
                 return Some(ResolutionDecision::QualifiedExternal {
                     qualified_name: qualified,
                     evidence: ResolutionEvidence {
@@ -1085,6 +1094,9 @@ impl UniversalResolutionIndex {
             return Some(decision);
         }
         if let Some(decision) = self.member_decision(language, &qualified, candidate) {
+            return Some(decision);
+        }
+        if let Some(decision) = self.wildcard_reexport_decision(language, &qualified, candidate) {
             return Some(decision);
         }
         if let Some(decision) = self.inventory_decision(language, &qualified, candidate) {
@@ -1975,6 +1987,73 @@ impl UniversalResolutionIndex {
             Some(&declarations),
             candidate,
             ResolutionRule::MemberBinding,
+        )
+    }
+
+    fn wildcard_reexport_decision(
+        &self,
+        language: &str,
+        qualified: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        let (facade, spelling) = qualified.rsplit_once('.')?;
+        if !self
+            .wildcard_reexports_by_module
+            .contains_key(&(language.to_owned(), facade.to_owned()))
+        {
+            return None;
+        }
+        let mut modules = vec![facade.to_owned()];
+        let mut visited = BTreeSet::new();
+        let mut declarations = BTreeSet::<DeclarationSlot>::new();
+        while let Some(module) = modules.pop() {
+            if !visited.insert(module.clone()) {
+                continue;
+            }
+            if visited.len() > self.limits.candidates_per_lookup {
+                return Some(ResolutionDecision::Ambiguous {
+                    candidate_count: visited.len(),
+                });
+            }
+            let Some(reexports) = self
+                .wildcard_reexports_by_module
+                .get(&(language.to_owned(), module))
+            else {
+                continue;
+            };
+            for reexport in reexports {
+                let reexported = format!("{reexport}.{spelling}");
+                let canonical = match self.follow_alias(language, &reexported) {
+                    Ok(canonical) => canonical,
+                    Err(candidate_count) => {
+                        return Some(ResolutionDecision::Ambiguous { candidate_count });
+                    }
+                };
+                if let Some(ids) = self
+                    .by_qualified
+                    .get(&(language.to_owned(), canonical.clone()))
+                {
+                    declarations.extend(
+                        ids.iter()
+                            .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
+                            .copied(),
+                    );
+                }
+                if let Some(ids) = self.member_declarations(language, &canonical, candidate) {
+                    declarations.extend(ids);
+                }
+                modules.push(reexport.clone());
+            }
+            if declarations.len() > self.limits.candidates_per_lookup {
+                return Some(ResolutionDecision::Ambiguous {
+                    candidate_count: declarations.len(),
+                });
+            }
+        }
+        self.unique_decision(
+            Some(&declarations.into_iter().collect::<Vec<_>>()),
+            candidate,
+            ResolutionRule::WildcardBinding,
         )
     }
 

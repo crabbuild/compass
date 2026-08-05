@@ -571,6 +571,39 @@ import tools.runner as runner
 }
 
 #[test]
+fn python_package_wildcard_reexports_emit_bounded_source_evidence() {
+    let source = b"from django.db.models.fields import *  # public facade\n";
+    let mut engine = Engine::default();
+    let extraction = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/django/db/models/__init__.py"),
+            "django/db/models/__init__.py",
+            source,
+        )
+        .expect("extract python");
+    let evidence = extraction
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid python evidence");
+
+    let binding = evidence
+        .bindings
+        .iter()
+        .find(|binding| binding.spelling == "*")
+        .expect("wildcard reexport binding");
+    assert_eq!(binding.kind, BindingKind::Reexport);
+    assert_eq!(binding.qualified_target, "django.db.models.fields");
+    assert_eq!(binding.range.start_byte, 36);
+    assert_eq!(binding.range.end_byte, 37);
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Reexports
+            && candidate.binding_id.as_deref() == Some(binding.id.as_str())
+            && candidate.constraints.qualified_name.as_deref() == Some("django.db.models.fields")
+    }));
+}
+
+#[test]
 fn python_dynamic_bases_and_nested_initializer_imports_fail_closed() {
     let source = br#"from framework import factory
 
