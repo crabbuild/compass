@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Publish Rust blanket trait implementations from the exact impl-scoped
+  generic parameter declaration. The trait occurrence remains source-anchored;
+  competing wildcard imports and parser-recovered implementation headers fail
+  closed. Code Graph v1 accepts this Rust-specific `parameter -> trait`
+  implementation shape while retaining the closed endpoint matrix for other
+  languages. Rust structural facts advance to adapter version 8 so cached
+  evidence refreshes.
+
 - Publish source-anchored Rust references from an implementer declaration
   proven in the current source evidence to every non-primitive nested type
   used as a trait implementation argument. The occurrence remains in the

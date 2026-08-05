@@ -3705,6 +3705,15 @@ impl<'source> DirectAdapterState<'source> {
             enclosing_type_qualified_name: Some(implementation.type_qualified_name.clone()),
         };
         self.add_rust_type_parameters(node, &implementation_owner)?;
+        let generic_type_qualified_name = rust_nominal_type_path(&type_name)
+            .map(|name| format!("{}::<{name}>", implementation_owner.qualified_name));
+        let generic_type_context = generic_type_qualified_name
+            .as_ref()
+            .and_then(|qualified_name| {
+                self.rust_type_parameters_by_qualified_name
+                    .get(qualified_name)
+            })
+            .cloned();
         if type_context.is_some()
             && let Some(type_arguments) =
                 trait_node.and_then(|trait_node| trait_node.child_by_field_name("type_arguments"))
@@ -3731,15 +3740,17 @@ impl<'source> DirectAdapterState<'source> {
                 )?;
             }
         }
-        if let (Some(type_context), Some(trait_node), Some(trait_qualified_name)) = (
-            type_context.as_ref(),
+        if let (Some(implementer), Some(trait_node), Some(trait_qualified_name)) = (
+            type_context.as_ref().or(generic_type_context.as_ref()),
             trait_node,
             trait_qualified_name.as_ref(),
-        ) {
+        ) && !self.overlaps_parser_error(type_node)
+            && !self.overlaps_parser_error(trait_node)
+        {
             self.add_rust_occurrence_candidate(
                 SemanticRole::TraitBound,
                 CandidateRelation::Implements,
-                type_context,
+                implementer,
                 trait_node,
                 Some(trait_qualified_name),
                 vec!["trait".to_owned()],

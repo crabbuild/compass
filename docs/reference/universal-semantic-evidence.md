@@ -259,6 +259,13 @@ published as a generic reference. If the adapter cannot prove the implementer
 declaration, the parser recovered through an error, or an argument has
 competing bindings, Compass does not invent a reference endpoint.
 
+When the implementer is an impl-scoped generic parameter, as in
+`impl<T> Trait for T`, the exact scoped parameter declaration owns the
+`implements` occurrence. Compass does not collapse that declaration into a
+same-named type elsewhere in the repository. Ambiguous trait imports and
+parser recovery overlapping either side of the implementation header fail
+closed.
+
 Python file imports are visible at module scope. Function- and class-local
 imports are indexed only in their owning lexical scope, so they cannot leak to
 sibling functions or become file-owned facts. Each imported item retains its

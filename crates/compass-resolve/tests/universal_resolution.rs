@@ -1024,6 +1024,68 @@ impl<T> Render for Container<T> {
 }
 
 #[test]
+fn rust_blanket_impl_is_owned_by_its_exact_scoped_type_parameter() {
+    let source = br#"trait Render {}
+impl<T> Render for T {}
+"#;
+    let resolved = compass_resolve::resolve(
+        &[extract("src/lib.rs", source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let parameter = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "<impl<T> Render for T>::<T>")
+        .expect("blanket implementation parameter");
+    let render = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Render")
+        .expect("Render declaration");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == parameter.id
+            && edge.target == render.id
+            && edge.string("relation") == "implements"
+            && edge.string("source_location") == "L2"
+    }));
+
+    let ambiguous_source = br#"mod left { pub trait Render {} }
+mod right { pub trait Render {} }
+use left::*;
+use right::*;
+impl<T> Render for T {}
+"#;
+    let ambiguous = compass_resolve::resolve(
+        &[extract("src/lib.rs", ambiguous_source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(ambiguous_source.to_vec()).expect("ambiguous source"),
+        )]),
+    );
+    let ambiguous_parameter = ambiguous
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "<impl<T> Render for T>::<T>")
+        .expect("ambiguous blanket implementation parameter");
+    let render_ids = ambiguous
+        .nodes
+        .iter()
+        .filter(|node| node.string("qualified_name").ends_with("::Render"))
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(render_ids.len(), 2);
+    assert!(ambiguous.edges.iter().all(|edge| {
+        edge.source != ambiguous_parameter.id
+            || !render_ids.contains(edge.target.as_str())
+            || edge.string("relation") != "implements"
+    }));
+}
+
+#[test]
 fn rust_impl_trait_arguments_are_source_anchored_references_from_the_implementer() {
     let source = br#"trait Convert<T> {}
 struct Input;

@@ -1142,6 +1142,9 @@ def _classify_edges(
     inheritance_occurrence_targets: dict[
         tuple[str, str, str, str], set[str]
     ] = {}
+    rust_blanket_implementations: dict[
+        tuple[str, str, str, str], list[EdgeFact]
+    ] = {}
     typed_reference_index: dict[tuple[str, str], list[EdgeFact]] = {}
     typed_references_by_source: dict[str, list[tuple[str, EdgeFact]]] = {}
     return_references_by_source: dict[str, list[tuple[str, EdgeFact]]] = {}
@@ -1196,6 +1199,23 @@ def _classify_edges(
                 [],
             ).append(edge)
         source_node = compass_nodes.get(edge.source)
+        if (
+            edge.relation == "implements"
+            and source_node is not None
+            and source_node.kind == "parameter"
+            and source_node.language == "rust"
+            and edge.occurrence_file
+            and edge.occurrence_location
+        ):
+            rust_blanket_implementations.setdefault(
+                (
+                    target,
+                    edge.occurrence_file,
+                    edge.occurrence_location,
+                    source_node.normalized_label,
+                ),
+                [],
+            ).append(edge)
         if (
             edge.relation in {"extends", "implements"}
             and source_node is not None
@@ -1487,6 +1507,37 @@ def _classify_edges(
         graphify_source = graphify_nodes.get(graphify.source)
         compass_source = compass_nodes.get(source) if source is not None else None
         compass_target = compass_nodes.get(target) if target is not None else None
+        if (
+            graphify.relation == "implements"
+            and target is not None
+            and graphify_source is not None
+            and graphify_source.language == "rust"
+            and compass_source is not None
+            and compass_source.kind == "parameter"
+            and compass_source.language == "rust"
+            and graphify_source.normalized_label == compass_source.normalized_label
+        ):
+            scoped_implementations = rust_blanket_implementations.get(
+                (
+                    target,
+                    graphify.occurrence_file,
+                    graphify.occurrence_location,
+                    graphify_source.normalized_label,
+                ),
+                [],
+            )
+            if (
+                len(scoped_implementations) == 1
+                and scoped_implementations[0].source != source
+            ):
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "precise_rust_blanket_impl_owner",
+                        scoped_implementations[0].payload_sha256,
+                    )
+                )
+                continue
         if (
             graphify.relation == "imports"
             and source is not None

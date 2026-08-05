@@ -530,6 +530,53 @@ class Widget(base_factory(), metaclass=meta_factory()):
             result.metrics["graphify_nodes_coverage_reasons"],
         )
 
+    def test_rust_blanket_impl_uses_the_occurrence_scoped_parameter_owner(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"first_i","label":"I","kind":"parameter",
+               "qualified_name":"<impl First for I>::<I>",
+               "source_file":"src/iter.rs","source_location":"L10","language":"rust"},
+              {"id":"second_i","label":"I","kind":"parameter",
+               "qualified_name":"<impl Second for I>::<I>",
+               "source_file":"src/iter.rs","source_location":"L20","language":"rust"},
+              {"id":"first","label":"First","kind":"trait",
+               "qualified_name":"crate::First",
+               "source_file":"src/iter.rs","source_location":"L1","language":"rust"},
+              {"id":"second","label":"Second","kind":"trait",
+               "qualified_name":"crate::Second",
+               "source_file":"src/iter.rs","source_location":"L2","language":"rust"}
+            ],"links":[
+              {"source":"first_i","target":"first","relation":"implements",
+               "source_file":"src/iter.rs","source_location":"L10"},
+              {"source":"second_i","target":"second","relation":"implements",
+               "source_file":"src/iter.rs","source_location":"L20"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"merged_i","label":"I","kind":"parameter",
+               "source_file":"src/iter.rs","source_location":"L10","language":"rust"},
+              {"id":"first","label":"First","kind":"trait",
+               "source_file":"src/iter.rs","source_location":"L1","language":"rust"},
+              {"id":"second","label":"Second","kind":"trait",
+               "source_file":"src/iter.rs","source_location":"L2","language":"rust"}
+            ],"links":[
+              {"source":"merged_i","target":"first","relation":"implements",
+               "source_file":"src/iter.rs","source_location":"L10"},
+              {"source":"merged_i","target":"second","relation":"implements",
+               "source_file":"src/iter.rs","source_location":"L20"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["exact_graphify_edges"], 1)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "dominated:precise_rust_blanket_impl_owner",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
     def test_embedding_relation_requires_first_class_compass_embedding(self) -> None:
         graphify = """
             {"nodes":[

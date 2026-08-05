@@ -455,6 +455,25 @@ classifications remain 2,758 exact, 271 dominated, 1,083 rejected, and 85
 missing. These are source-constrained comparator classifications, not
 statistical precision or recall measurements.
 
+The following 2026-08-05 Rayon qualification published Rust blanket trait
+implementations from their exact impl-scoped generic parameter declarations.
+Three clean release-binary builds were byte-identical at 12,060 nodes, 26,814
+relationships, and graph SHA-256
+`e073a4d8f83ade7b9fd01cc6ebcd09903e6f115c3191c48a78acc16238314f2c`.
+The five added `implements` relationships are source-anchored at the blanket
+implementation headers for `IntoParallelRefIterator`,
+`IntoParallelRefMutIterator`, `IntoParallelIterator`, `ParallelBridge`, and
+`Pattern`; no preceding node or relationship was removed. Publication still
+omits only the four pre-existing invalid macro-containment relationships. The
+comparator reports 2,257 exact, 2,605 dominated, 2,497 rejected, 19 ambiguous,
+and 323 missing Graphify edge hypotheses: four formerly missing blanket
+implementations are exact, while Graphify's single node for two distinct `I`
+parameters is dominated by Compass's occurrence-scoped owners. Node
+classifications remain 2,758 exact, 271 dominated, 1,083 rejected, and 85
+missing. Rust adapter metadata advances to version 8. These are
+source-constrained comparator classifications, not statistical precision or
+recall measurements.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and

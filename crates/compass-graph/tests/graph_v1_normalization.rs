@@ -2281,6 +2281,46 @@ fn normalization_drops_non_recursive_self_loops_and_invalid_inheritance_targets(
 }
 
 #[test]
+fn normalization_preserves_rust_blanket_implementation_edges()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut parameter = raw_node(root, "raw:parameter", "T", 10);
+    parameter
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("parameter"));
+    parameter.attributes.insert(
+        "qualified_name".to_owned(),
+        json!("<impl<T> Render for T>::<T>"),
+    );
+    let mut render = raw_node(root, "raw:render", "Render", 30);
+    render
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("trait"));
+    let graph = Extraction {
+        nodes: vec![parameter, render],
+        edges: vec![RawEdgeRecord {
+            source: "raw:parameter".to_owned(),
+            target: "raw:render".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("implements")),
+                ("confidence".to_owned(), json!("EXTRACTED")),
+                ("extractor".to_owned(), json!("test.rust")),
+                ("source_anchor".to_owned(), anchor(root, 50)),
+            ]),
+        }],
+        ..Extraction::default()
+    };
+
+    let document = normalize_v1(graph, build_evidence(root)?)?;
+    assert_eq!(document.links.len(), 1);
+    assert_eq!(document.links[0].kind, EdgeKind::Implements);
+    assert_eq!(document.nodes[0].language.as_deref(), Some("rust"));
+    validate_code_graph(&document)?;
+    Ok(())
+}
+
+#[test]
 fn build_evidence_derives_digests_generation_and_byte_anchors()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

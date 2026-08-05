@@ -32,7 +32,7 @@ fn build() {
         .ok_or("missing Rust semantic evidence")?;
 
     assert_eq!(evidence.adapter.id, "compass.rust");
-    assert_eq!(evidence.adapter.version, 7);
+    assert_eq!(evidence.adapter.version, 8);
     assert_eq!(
         evidence.adapter.evidence_schema,
         "compass.languages.evidence/1"
@@ -141,6 +141,53 @@ fn build() { other::Item::new(); }
 }
 
 #[test]
+fn blanket_implementations_use_the_exact_scoped_type_parameter_owner() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("blanket_impl.rs");
+    let source = br#"trait Render {}
+impl<T> Render for T {}
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let parameter = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "<impl<T> Render for T>::<T>")
+        .ok_or("missing blanket implementation parameter")?;
+    let implementation = evidence
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.source_declaration_id == parameter.id
+                && candidate.relation == CandidateRelation::Implements
+                && candidate.target_spelling == "Render"
+        })
+        .ok_or("missing blanket implementation candidate")?;
+    assert_eq!(
+        implementation.constraints.qualified_name.as_deref(),
+        Some("crate::blanket_impl::Render")
+    );
+    let occurrence = evidence
+        .occurrences
+        .iter()
+        .find(|occurrence| implementation.occurrence_id.as_deref() == Some(occurrence.id.as_str()))
+        .ok_or("missing blanket implementation occurrence")?;
+    let start = usize::try_from(occurrence.range.start_byte)?;
+    let end = usize::try_from(occurrence.range.end_byte)?;
+    assert_eq!(&source[start..end], b"Render");
+    assert!(evidence.candidates.iter().all(|candidate| {
+        candidate.source_declaration_id != parameter.id
+            || candidate.relation != CandidateRelation::References
+            || candidate.target_spelling != "Render"
+    }));
+    Ok(())
+}
+
+#[test]
 fn implementation_trait_arguments_emit_exact_implementer_owned_references()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
@@ -205,6 +252,36 @@ struct Output;
         .ok_or("missing malformed Rust semantic evidence")?;
     assert!(evidence.candidates.iter().all(|candidate| {
         candidate.relation != CandidateRelation::References || candidate.target_spelling != "Input"
+    }));
+    Ok(())
+}
+
+#[test]
+fn malformed_blanket_implementations_fail_closed() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("malformed_blanket_impl.rs");
+    let source = br#"trait Render<T> {}
+impl<T> Render<T +> for T {}
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing malformed Rust semantic evidence")?;
+    let parameter = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "<impl<T> Render<T +> for T>::<T>")
+        .ok_or("parser recovery did not preserve the implementation parameter")?;
+    assert!(
+        evidence
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "partial_parser_recovery")
+    );
+    assert!(evidence.candidates.iter().all(|candidate| {
+        candidate.source_declaration_id != parameter.id
+            || candidate.relation != CandidateRelation::Implements
     }));
     Ok(())
 }

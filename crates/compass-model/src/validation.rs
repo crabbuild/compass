@@ -606,7 +606,9 @@ fn endpoint_kinds_are_valid(
         }
         EdgeKind::Extends => source.kind.is_type() && target.kind.is_type(),
         EdgeKind::Implements => {
-            source.kind.is_type()
+            (source.kind.is_type()
+                || (source.kind == NodeKind::Parameter
+                    && source.language.as_deref() == Some("rust")))
                 && matches!(
                     target.kind,
                     NodeKind::Interface | NodeKind::Trait | NodeKind::Protocol
