@@ -1951,7 +1951,7 @@ fn build_graph_inner(
                 graph.error = Some(format!("{language} extraction failed: empty document"));
             }
             compact_extraction(&mut graph);
-            let source = if needs_resolver_source_text && is_php_source_path(&path) {
+            let source = if needs_resolver_source_text && is_php_source_path(path) {
                 (
                     path.to_string_lossy().into_owned(),
                     String::from_utf8_lossy(&bytes).into_owned(),
