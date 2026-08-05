@@ -359,6 +359,33 @@ missing edge hypotheses fell by 113 from the module-import run. These are
 comparator classifications with source and occurrence constraints, not a
 statistical precision or recall claim.
 
+A fifth 2026-08-05 Rayon run resolved unqualified Rust symbols across multiple
+visible repository-local glob imports. Three forced, fresh-output graphs from
+Compass revision `acc1f7992f85` were byte-identical (SHA-256
+`4b0d37f89ab94df99164d8511daf69ab58c81a6ed4761d8c1875841b619c5a15`)
+at 12,111 nodes and 26,537 occurrence-backed relationships. External wall
+times were 7.43, 1.51, and 1.38 seconds; the first host cold-launch outlier is
+retained and the median was 1.51 seconds. Maximum peak RSS was 382,681,088
+bytes. Against the retained 1.947-second Graphify sample, Compass was 1.29x
+faster at the median while publishing 3.45x as many raw relationships. Four
+pre-existing unrelated edges were omitted.
+
+The source-compatible comparison reports 2,209 exact, 2,495 dominated, 2,542
+rejected, and 455 missing Graphify edge hypotheses; node classifications stay
+at 2,758 exact, 271 dominated, 1,083 rejected, and 85 missing. Forty-nine
+previously missing `bridge` or `bridge_unindexed` calls now match exactly at
+their source occurrences. Another 74 Graphify hypotheses are dominated by
+source-backed implementation owners, inheritance occurrences, field types, or
+typed references after the same glob resolution rewired 84 implementation
+relationships away from placeholders. The resolver unions only bounded local
+glob scopes with one compatible declaration. Competing local declarations,
+mixed local/external glob sets, and truncated scope or re-export searches fail
+closed. Missing edge hypotheses fell by 53 from the associated-type run; the
+remaining set contains 53 calls, 111 type/signature references, nine
+implementation relationships, 170 containment relationships, and 112
+hypotheses with uncovered non-containment endpoints. These diagnostic
+classifications are not statistical precision or recall measurements.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and
