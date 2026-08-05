@@ -65,6 +65,9 @@ pub(crate) fn resolve_framework_facts(
     Result<Vec<ResolvedRoute>, FrameworkResolutionError>,
     Result<Vec<ResolvedDomainFact>, FrameworkResolutionError>,
 ) {
+    if extraction.framework_facts.is_empty() {
+        return (Ok(Vec::new()), Ok(Vec::new()));
+    }
     let targets = target_index::FrameworkTargetIndex::new_with_root(extraction, Some(root));
     join(
         || routes::resolve_routes_with_targets(extraction, limits, &targets, Some(root)),
@@ -74,9 +77,23 @@ pub(crate) fn resolve_framework_facts(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use compass_languages::FrameworkPackRegistry;
+    use compass_languages::{Extraction, FrameworkLimits};
 
     use super::UNIVERSAL_FRAMEWORK_PACKS;
+
+    #[test]
+    fn empty_framework_facts_skip_target_indexing() {
+        let (routes, domains) = super::resolve_framework_facts(
+            &Extraction::default(),
+            FrameworkLimits::default(),
+            Path::new("."),
+        );
+        assert!(routes.is_ok_and(|routes| routes.is_empty()));
+        assert!(domains.is_ok_and(|domains| domains.is_empty()));
+    }
 
     #[test]
     fn every_universal_language_pack_has_one_expansion_adapter() {

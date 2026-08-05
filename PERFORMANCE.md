@@ -225,9 +225,14 @@ uses a default cap of 8 local workers once that measured crossover is reached,
 while `--max-workers` remains the explicit override. Portable AST publication
 also streams one compressed value at a time instead of retaining the entire
 compressed batch in memory. Incremental cache hits now remain in that portable
-representation when loaded by the extraction pipeline, so only freshly
-extracted files pay the source-path normalization walk; the public cache reader
-continues to return its established absolute-path representation.
+representation and decode directly into typed extraction records when loaded
+by the pipeline, so only freshly extracted files pay the source-path
+normalization walk; the public cache reader continues to return its established
+absolute-path representation. The bounded graph-delta candidate check walks
+the already canonical node/link order without allocating full ID maps, and the
+framework resolver skips target-index construction when no framework facts
+exist. These are internal optimizations: the immutable snapshot validator and
+the full graph publication contract remain authoritative.
 
 The same Cobra checkout was cold-built into a fresh SQLite output and then
 received a comment-only edit. The edit extracted 1 file and reused 36 cached

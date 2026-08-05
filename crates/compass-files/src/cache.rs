@@ -217,6 +217,41 @@ impl Cache {
         self.load_with_source_paths(path, &CacheKind::Ast, None, allow_partial, false)
     }
 
+    /// Load a portable AST cache entry directly into its typed representation.
+    ///
+    /// The compatibility [`Self::load_portable_ast`] API intentionally returns
+    /// a JSON value, but the extraction pipeline immediately deserializes that
+    /// value into its typed extraction. Keeping this typed path beside the
+    /// compatibility API avoids materializing a second full tree of JSON
+    /// values on every warm build. `is_partial` is supplied by the caller so
+    /// this filesystem crate does not need to depend on a language crate.
+    pub fn load_portable_ast_typed<T, F>(
+        &mut self,
+        path: &Path,
+        allow_partial: bool,
+        is_partial: F,
+    ) -> Result<Option<T>, FileError>
+    where
+        T: DeserializeOwned,
+        F: Fn(&T) -> bool,
+    {
+        let hash = self.content_hash(path)?;
+        let key = self.source_cache_key(path, &hash);
+        let entry = self
+            .directory(&CacheKind::Ast, None)
+            .join(format!("{key}.{MESSAGEPACK_EXTENSION}"));
+        let Ok(bytes) = fs::read(entry) else {
+            return Ok(None);
+        };
+        let Some(value) = decode_messagepack::<T>(&bytes) else {
+            return Ok(None);
+        };
+        if !allow_partial && is_partial(&value) {
+            return Ok(None);
+        }
+        Ok(Some(value))
+    }
+
     fn load_with_source_paths(
         &mut self,
         path: &Path,
