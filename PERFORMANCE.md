@@ -331,6 +331,34 @@ evidence and the representation-aware comparison reduced missing hypotheses by
 and 85 missing. These counts remain diagnostic hypotheses, not precision or
 recall percentages.
 
+A fourth 2026-08-05 Rayon run preserved Rust associated types as exact
+trait- or implementation-scoped aliases and resolved `Self::Type` returns to
+the unique lexical declaration. Three forced, fresh-output graphs from Compass
+revision `5d414b11c710` were byte-identical (SHA-256
+`aeb329d04c758d275d06456188722e048afc55525e9a62485e39aa88eefee09e`)
+at 12,144 nodes and 26,378 occurrence-backed relationships. External wall
+times were 7.31, 1.56, and 1.42 seconds; the first host cold-launch outlier is
+retained and the median was 1.56 seconds. Maximum peak RSS was 392,937,472
+bytes. The retained Graphify 0.9.32 sample took 1.947 seconds and 84,639,744
+bytes, so Compass was 1.25x faster at the median while publishing 3.43x as many
+raw relationships. This is a single small-repository diagnostic comparison,
+not a promoted performance baseline.
+
+The source-compatible comparison reports 2,160 exact, 2,421 dominated, 2,612
+rejected, and 508 missing Graphify edge hypotheses; node classifications stay
+at 2,758 exact, 271 dominated, 1,083 rejected, and 85 missing. Exact return
+occurrences now distinguish the associated alias from its concrete realization:
+one Graphify concrete-return hypothesis is dominated by the stronger two-edge
+representation, and 110 terminal-name projections are rejected because they
+target an unrelated same-named trait or type. The targeted return-type subset
+fell from 128 missing hypotheses to 17. Those 17 consist of multiline or
+duplicated source-owner mapping cases, cross-impl associated types inherited
+through a related trait, and two Graphify synthetic slice endpoints; they
+remain open for separate source audits rather than being guessed. Overall
+missing edge hypotheses fell by 113 from the module-import run. These are
+comparator classifications with source and occurrence constraints, not a
+statistical precision or recall claim.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and
