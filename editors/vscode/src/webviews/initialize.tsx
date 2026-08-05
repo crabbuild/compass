@@ -15,6 +15,8 @@ const root = createRoot(element);
 let repositoryName = "repository";
 let repositoryRoot = "";
 let configurationExists = false;
+let scopeFiles: string[] = [];
+let scopeFilesTruncated = false;
 let status: InitializationStatus | undefined;
 
 function render(): void {
@@ -23,6 +25,8 @@ function render(): void {
       repositoryName={repositoryName}
       repositoryRoot={repositoryRoot}
       configurationExists={configurationExists}
+      scopeFiles={scopeFiles}
+      scopeFilesTruncated={scopeFilesTruncated}
       {...(status ? { status } : {})}
       host={{
         start(request: InitializationRequest) {
@@ -59,6 +63,10 @@ window.addEventListener("message", (event) => {
     repositoryName = String(message.repositoryName);
     repositoryRoot = String(message.repositoryRoot);
     configurationExists = message.configurationExists === true;
+    scopeFiles = Array.isArray(message.scopeFiles)
+      ? message.scopeFiles.filter((value: unknown): value is string => typeof value === "string")
+      : [];
+    scopeFilesTruncated = message.scopeFilesTruncated === true;
   } else if (message?.type === "progress") {
     const progress = message.event;
     status = {

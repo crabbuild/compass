@@ -781,6 +781,13 @@ window.acquireVsCodeApi=()=>({postMessage(message){
       type:"hydrate",
       repositoryName:"compass",
       repositoryRoot:"/workspace/compass",
+      scopeFiles:[
+        "packages/api/src/main.ts",
+        "src/commands/init.ts",
+        "src/core/index.ts",
+        "src/views/graph.ts"
+      ],
+      scopeFilesTruncated:false,
       configurationExists:new URLSearchParams(window.location.search).has("existing")
     },"*"),0);
     return;
