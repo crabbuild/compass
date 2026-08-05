@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Keep dense VS Code and HTML code graphs responsive by switching detailed
+  views with at least 1,000 nodes or 4,000 relationships to a deterministic
+  community-grouped layout with paused physics and reduced edge decoration.
+  Users can still enable force-directed physics explicitly.
+
 - Respect Rust's separate value and type/module namespaces when extracting
   scoped associated calls. A `module::Type::function()` path now retains its
   visible import binding even when a same-named value is in lexical scope;
