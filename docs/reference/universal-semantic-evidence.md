@@ -51,6 +51,12 @@ the unchanged extraction-semantics identity, language, producer, source path,
 fact category, semantic role, relevant names, and source range. Builders sort
 and deduplicate typed facts before validation.
 
+Rust generic parameters are source-backed `parameter` declarations. Type,
+lifetime, and const parameters receive owner-qualified identities and lexical
+scope; repeated spellings in a type, implementation, and method remain
+distinct. Proven signature, field, return, and bound occurrences target the
+parameter declaration rather than an unrelated same-named type.
+
 ### Required invariants
 
 `validate_evidence` rejects a batch when any of these conditions is false:

@@ -392,7 +392,7 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
     );
     assert_eq!(
         AdapterRegistry::universal_profile("rust").map(|profile| profile.version),
-        Some(3)
+        Some(4)
     );
 }
 

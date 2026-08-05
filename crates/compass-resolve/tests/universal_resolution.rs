@@ -440,6 +440,133 @@ fn invokes() { helper(); join(); }
 }
 
 #[test]
+fn rust_type_parameters_are_distinct_scoped_nodes_with_exact_type_relationships() {
+    let source = br#"struct Wrapper<T: Clone> { value: T }
+fn identity<T: Send>(value: T) -> T { value }
+"#;
+    let resolved = compass_resolve::resolve(
+        &[extract("src/lib.rs", source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let wrapper = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Wrapper")
+        .expect("Wrapper");
+    let field = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Wrapper::value")
+        .expect("value field");
+    let identity = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::identity")
+        .expect("identity");
+    let parameters = resolved
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "parameter" && node.string("label") == "T")
+        .collect::<Vec<_>>();
+    assert_eq!(parameters.len(), 2);
+    let wrapper_parameter = parameters
+        .iter()
+        .copied()
+        .find(|node| node.string("qualified_name").starts_with("crate::Wrapper"))
+        .expect("Wrapper type parameter");
+    let function_parameter = parameters
+        .iter()
+        .copied()
+        .find(|node| node.string("qualified_name").starts_with("crate::identity"))
+        .expect("identity type parameter");
+    assert_ne!(wrapper_parameter.id, function_parameter.id);
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == wrapper.id
+            && edge.target == wrapper_parameter.id
+            && edge.string("relation") == "contains"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == field.id
+            && edge.target == wrapper_parameter.id
+            && edge.string("relation") == "type_of"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == identity.id
+            && edge.target == function_parameter.id
+            && edge.string("relation") == "returns"
+    }));
+}
+
+#[test]
+fn rust_impl_and_method_type_parameters_shadow_without_escaping_their_scopes() {
+    let source = br#"trait Marker {}
+struct Wrapper<T> { value: T }
+impl<T: Marker> Wrapper<T> {
+    fn convert<U: Marker>(&self, value: U) -> T { self.value }
+}
+fn outside(value: T) {}
+"#;
+    let resolved = compass_resolve::resolve(
+        &[extract("src/lib.rs", source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let convert = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Wrapper::convert")
+        .expect("convert");
+    let outside = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::outside")
+        .expect("outside");
+    let implementation_parameter = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "parameter"
+                && node.string("label") == "T"
+                && node.string("qualified_name").contains("<impl<T: Marker>")
+        })
+        .expect("implementation T");
+    let method_parameter = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "parameter"
+                && node.string("label") == "U"
+                && node
+                    .string("qualified_name")
+                    .starts_with("crate::Wrapper::convert")
+        })
+        .expect("method U");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == convert.id
+            && edge.target == implementation_parameter.id
+            && edge.string("relation") == "returns"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == convert.id
+            && edge.target == method_parameter.id
+            && edge.string("relation") == "references"
+    }));
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.source != outside.id
+            || !matches!(
+                edge.target.as_str(),
+                target if target == implementation_parameter.id || target == method_parameter.id
+            )
+    }));
+}
+
+#[test]
 fn rust_nonstandard_crate_root_preserves_nested_module_identity() {
     let flags = extract(
         "crates/core/flags/mod.rs",
@@ -2091,6 +2218,7 @@ type Client struct {
             .find(|node| node.string("qualified_name") == qualified_name)
             .unwrap_or_else(|| panic!("external {qualified_name}; nodes={:#?}", resolved.nodes));
         assert_ne!(external.id, local.id);
+        assert_eq!(external.string("symbol_kind"), "type_alias");
         assert!(resolved.edges.iter().any(|edge| {
             edge.source == local.id
                 && edge.target == external.id
@@ -2099,6 +2227,44 @@ type Client struct {
         }));
     }
     assert!(resolved.edges.iter().all(|edge| edge.source != edge.target));
+}
+
+#[test]
+fn rust_external_generic_bounds_materialize_as_interfaces() {
+    let source = b"fn execute<T: Send + external::Ready>(value: T) {}\n";
+    let extracted = extract("src/lib.rs", source);
+    let sources = HashMap::from([(
+        "src/lib.rs".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let parameter = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "parameter"
+                && node.string("qualified_name") == "crate::execute::<T>"
+        })
+        .unwrap_or_else(|| panic!("generic parameter; nodes={:#?}", resolved.nodes));
+
+    let bound = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.label() == "external::Ready"
+                && node
+                    .attributes
+                    .get("external")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+        })
+        .unwrap_or_else(|| panic!("external bound; nodes={:#?}", resolved.nodes));
+    assert_eq!(bound.string("symbol_kind"), "interface");
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == parameter.id
+            && edge.target == bound.id
+            && edge.string("relation") == "references"
+    }));
 }
 
 #[test]

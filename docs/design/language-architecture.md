@@ -30,7 +30,7 @@ This architecture is transitioning one language at a time. The status labels bel
 | --- | --- |
 | Available now | The vendored package supplies 37 pinned static Tree-sitter grammars |
 | Available now | Python and Go are registered hard-cut adapters: they emit semantic evidence and use shared resolution and projection |
-| Available now | Rust is a quality-gated, hard-cut version-3 `UniversalCandidate`; version 3 preserves nested function declarations and lexical calls, and its replaced publisher and collection resolution branches remain removed |
+| Available now | Rust is a quality-gated, hard-cut version-4 `UniversalCandidate`; version 4 publishes scoped type, lifetime, and const generic parameters, while version 3 preserves nested function declarations and lexical calls; replaced publisher and collection resolution branches remain removed |
 | Available now | Java is a hard-cut version-3 `UniversalCandidate`; its replaced publisher and Java member resolver are removed, and post-cutover pinned-corpus qualification is complete |
 | Available now | The remaining production languages keep their established extraction and resolution paths |
 | Planned | Later languages transition independently after language-specific qualification |
@@ -97,7 +97,7 @@ The hard-cut route is selected by `AdapterRegistry`. Presence in the source
 registry or availability of a grammar does not select it. On the current
 branch, the registry contains `go`, `java`, `python`, and `rust`. Go is at
 adapter version 3, Java is at version 3, Python is at version 11, and Rust is at
-version 3. Candidate status
+version 4. Candidate status
 describes qualification maturity; it does not re-enable the removed direct
 route. Adapter-version changes invalidate cached evidence for only the changed
 language. Go identities retain the repository-relative directory prefix and
@@ -187,7 +187,7 @@ Each adapter owns the syntax rules and identity normalization unique to its lang
 
 Examples include:
 
-- Rust traits, impl ownership, macros, and `use` trees
+- Rust traits, impl ownership, scoped generic parameters, macros, and `use` trees
 - Java packages, overload signatures, annotations, and interfaces
 - Python modules, aliases, decorators, and dynamic member occurrences
 - Go packages, receiver ownership, imports, and interfaces

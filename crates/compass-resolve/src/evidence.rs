@@ -3381,10 +3381,37 @@ fn external_kind(candidate: &RelationshipCandidate) -> &'static str {
         CandidateRelation::Calls | CandidateRelation::IndirectCalls => "function",
         CandidateRelation::Constructs => "class",
         CandidateRelation::Decorates => "function",
-        CandidateRelation::References => "variable",
+        CandidateRelation::References => reference_external_kind(candidate),
         CandidateRelation::Contains | CandidateRelation::Owns => "variable",
         CandidateRelation::InvokesMacro => "macro",
         CandidateRelation::Tests => "function",
+    }
+}
+
+fn reference_external_kind(candidate: &RelationshipCandidate) -> &'static str {
+    let allowed = &candidate.constraints.allowed_target_kinds;
+    if allowed.is_empty() {
+        return "variable";
+    }
+    let type_only = allowed.iter().all(|kind| {
+        matches!(
+            kind.as_str(),
+            "class" | "struct" | "enum" | "interface" | "trait" | "type_alias" | "parameter"
+        )
+    });
+    if !type_only {
+        return "variable";
+    }
+    if allowed
+        .iter()
+        .all(|kind| matches!(kind.as_str(), "interface" | "trait" | "parameter"))
+        && allowed
+            .iter()
+            .any(|kind| matches!(kind.as_str(), "interface" | "trait"))
+    {
+        "interface"
+    } else {
+        "type_alias"
     }
 }
 

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Publish Rust type, lifetime, and const generic parameters as distinct,
+  owner-scoped parameter nodes. Exact field, signature, return, and bound uses
+  resolve to the lexical parameter without leaking across declarations or
+  implementation scopes. Rust structural facts advance to adapter version 4
+  so cached evidence refreshes.
+
 - Preserve Rust declarations nested inside function bodies and resolve their
   source-anchored lexical calls. Repository-local wildcard imports now resolve
   lowercase calls after lexical and module candidates, while unproven external

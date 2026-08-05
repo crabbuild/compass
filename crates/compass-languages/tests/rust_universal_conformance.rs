@@ -31,7 +31,7 @@ fn build() {
         .ok_or("missing Rust semantic evidence")?;
 
     assert_eq!(evidence.adapter.id, "compass.rust");
-    assert_eq!(evidence.adapter.version, 3);
+    assert_eq!(evidence.adapter.version, 4);
     assert_eq!(
         evidence.adapter.evidence_schema,
         "compass.languages.evidence/1"

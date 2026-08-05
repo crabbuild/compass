@@ -114,12 +114,12 @@ fn ids_match_python_unicode_casefold_contract() {
 }
 
 #[test]
-fn rust_is_a_version_three_hard_cut_candidate_descriptor() {
+fn rust_is_a_version_four_hard_cut_candidate_descriptor() {
     let rust = AdapterRegistry::universal_profile("rust").expect("Rust universal profile");
     assert_eq!(rust.id, "compass.rust");
     assert_eq!(rust.language, "rust");
     assert_eq!(rust.evidence_schema, UNIVERSAL_EVIDENCE_SCHEMA);
-    assert_eq!(rust.version, 3);
+    assert_eq!(rust.version, 4);
     assert_eq!(rust.profile, UniversalAdapterProfile::UniversalCandidate);
     for capability in [
         LanguageCapability::Namespaces,

@@ -115,6 +115,24 @@ class OracleTests(unittest.TestCase):
             {"kind": "enum_member", "language": "python"},
         ))
 
+    def test_endpoint_matrix_accepts_scoped_generic_parameter_relationships(self) -> None:
+        for source_kind, relation, target_kind in (
+            ("parameter", "references", "parameter"),
+            ("parameter", "references", "trait"),
+            ("field", "type_of", "parameter"),
+            ("function", "returns", "parameter"),
+        ):
+            with self.subTest(
+                source_kind=source_kind,
+                relation=relation,
+                target_kind=target_kind,
+            ):
+                self.assertTrue(endpoint_allowed(
+                    {"kind": source_kind},
+                    {"kind": relation},
+                    {"kind": target_kind},
+                ))
+
     def test_validate_graph_rejects_unknown_producer(self) -> None:
         item = node("function:a", "function")
         item["evidence"][0]["extractor"] = "compass.languages.unknown"

@@ -592,6 +592,7 @@ struct DirectAdapterState<'source> {
     rust_impls: HashMap<usize, RustImplContext>,
     rust_types_by_qualified_name: HashMap<String, DeclarationContext>,
     rust_types_by_name: HashMap<String, Vec<DeclarationContext>>,
+    rust_type_parameters_by_qualified_name: HashMap<String, DeclarationContext>,
     rust_receiver_methods: HashMap<(String, String), Vec<String>>,
     rust_typed_receivers: HashSet<(String, String)>,
     rust_imported_typed_receivers: HashSet<(String, String)>,
@@ -666,6 +667,7 @@ impl<'source> DirectAdapterState<'source> {
             rust_impls: HashMap::new(),
             rust_types_by_qualified_name: HashMap::new(),
             rust_types_by_name: HashMap::new(),
+            rust_type_parameters_by_qualified_name: HashMap::new(),
             rust_receiver_methods: HashMap::new(),
             rust_typed_receivers: HashSet::new(),
             rust_imported_typed_receivers: HashSet::new(),
@@ -3142,6 +3144,7 @@ impl<'source> DirectAdapterState<'source> {
                 .insert(name.clone(), qualified_name.clone());
             self.rust_containers.insert(node.id(), context.clone());
             self.declarations.insert(node.id(), context.clone());
+            self.add_rust_type_parameters(node, &context)?;
             if matches!(kind, "trait" | "struct" | "enum") {
                 self.rust_types_by_qualified_name
                     .insert(qualified_name, context.clone());
@@ -3255,9 +3258,13 @@ impl<'source> DirectAdapterState<'source> {
             range_for_node(self.source_file, name_node),
             metadata,
         )?;
-        let scope_id = if matches!(kind, "function" | "method") {
+        let scope_id = if matches!(kind, "function" | "method" | "type_alias") {
             let scope_id = self.builder.open_scope(
-                "callable",
+                if kind == "type_alias" {
+                    "type_alias"
+                } else {
+                    "callable"
+                },
                 Some(&fact_id),
                 Some(&owner.scope_id),
                 range_for_node(self.source_file, node),
@@ -3283,6 +3290,7 @@ impl<'source> DirectAdapterState<'source> {
             .or_default()
             .insert(name, qualified_name);
         self.declarations.insert(node.id(), context.clone());
+        self.add_rust_type_parameters(node, &context)?;
         Ok(Some(context))
     }
 
@@ -3382,7 +3390,74 @@ impl<'source> DirectAdapterState<'source> {
         if rust_has_test_attribute(node, self.source) {
             self.rust_test_declarations.insert(context.fact_id.clone());
         }
-        self.declarations.insert(node.id(), context);
+        self.declarations.insert(node.id(), context.clone());
+        self.add_rust_type_parameters(node, &context)?;
+        Ok(())
+    }
+
+    fn add_rust_type_parameters(
+        &mut self,
+        declaration: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(parameters) = declaration
+            .child_by_field_name("type_parameters")
+            .or_else(|| {
+                let mut cursor = declaration.walk();
+                declaration
+                    .children(&mut cursor)
+                    .find(|child| child.kind() == "type_parameters")
+            })
+        else {
+            return Ok(());
+        };
+        let mut cursor = parameters.walk();
+        for parameter in parameters.children(&mut cursor).filter(|child| {
+            matches!(
+                child.kind(),
+                "type_parameter" | "lifetime_parameter" | "const_parameter"
+            )
+        }) {
+            let Some(name_node) = rust_generic_parameter_name(parameter) else {
+                continue;
+            };
+            let name = self.text(name_node);
+            if name.is_empty() {
+                continue;
+            }
+            let qualified_name = format!("{}::<{name}>", owner.qualified_name);
+            let graph_node_id = self.unique_graph_id(
+                make_id(&[&self.module_or_package, &qualified_name]),
+                parameter,
+            );
+            let fact_id = self.builder.declare_with_metadata(
+                "parameter",
+                &graph_node_id,
+                &name,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, name_node),
+                self.declaration_metadata(parameter),
+            )?;
+            let context = DeclarationContext {
+                fact_id,
+                scope_id: owner.scope_id.clone(),
+                graph_node_id,
+                name: name.clone(),
+                qualified_name: qualified_name.clone(),
+                kind: "parameter".to_owned(),
+                enclosing_type_qualified_name: owner.enclosing_type_qualified_name.clone(),
+            };
+            self.add_ownership(owner, &context)?;
+            self.local_targets
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .insert(name, qualified_name.clone());
+            self.rust_type_parameters_by_qualified_name
+                .insert(qualified_name, context.clone());
+            self.declarations.insert(parameter.id(), context);
+        }
         Ok(())
     }
 
@@ -3526,6 +3601,27 @@ impl<'source> DirectAdapterState<'source> {
             trait_qualified_name: trait_qualified_name.clone(),
             owner_declaration_id: type_context.as_ref().map(|context| context.fact_id.clone()),
         };
+        let implementation_qualified_name = self
+            .declaration_metadata(node)
+            .signature
+            .unwrap_or_else(|| format!("impl {}", implementation.type_qualified_name));
+        let implementation_owner = DeclarationContext {
+            fact_id: type_context
+                .as_ref()
+                .map_or_else(|| owner.fact_id.clone(), |context| context.fact_id.clone()),
+            scope_id: implementation.scope_id.clone(),
+            graph_node_id: type_context.as_ref().map_or_else(
+                || owner.graph_node_id.clone(),
+                |context| context.graph_node_id.clone(),
+            ),
+            name: type_name.clone(),
+            qualified_name: format!("<{implementation_qualified_name}>"),
+            kind: type_context
+                .as_ref()
+                .map_or_else(|| owner.kind.clone(), |context| context.kind.clone()),
+            enclosing_type_qualified_name: Some(implementation.type_qualified_name.clone()),
+        };
+        self.add_rust_type_parameters(node, &implementation_owner)?;
         if let (Some(type_context), Some(trait_node), Some(trait_qualified_name)) = (
             type_context.as_ref(),
             trait_node,
@@ -4156,7 +4252,35 @@ impl<'source> DirectAdapterState<'source> {
             } else {
                 SemanticRole::TypeReference
             };
-            self.add_rust_path_candidate(role, relation, owner, target, None)?;
+            let allowed_target_kinds = (owner.kind == "parameter"
+                && rust_node_has_ancestor_before(target, node, "trait_bounds"))
+            .then(|| {
+                vec![
+                    "trait".to_owned(),
+                    "interface".to_owned(),
+                    "parameter".to_owned(),
+                ]
+            });
+            self.add_rust_path_candidate(role, relation, owner, target, allowed_target_kinds)?;
+        }
+        let mut generic_uses = Vec::new();
+        collect_rust_generic_use_nodes(node, body_start, name_id, &mut generic_uses);
+        for target in generic_uses {
+            let raw = self.text(target);
+            let qualified = rust_qualify_evidence_path(self, owner, &raw, target.start_byte());
+            if !qualified.is_some_and(|qualified| {
+                self.rust_type_parameters_by_qualified_name
+                    .contains_key(&qualified)
+            }) {
+                continue;
+            }
+            self.add_rust_path_candidate(
+                SemanticRole::TypeReference,
+                CandidateRelation::References,
+                owner,
+                target,
+                Some(vec!["parameter".to_owned()]),
+            )?;
         }
         Ok(())
     }
@@ -4509,6 +4633,9 @@ impl<'source> DirectAdapterState<'source> {
             .binding_for_occurrence(owner, binding_name, node.start_byte(), true)
             .or_else(|| self.rust_wildcard_binding(owner, node.start_byte()))
             .cloned();
+        let exact_type_parameter = qualified_name
+            .and_then(|qualified| self.rust_type_parameters_by_qualified_name.get(qualified))
+            .map(|parameter| parameter.fact_id.clone());
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
@@ -4524,7 +4651,7 @@ impl<'source> DirectAdapterState<'source> {
             binding.as_deref(),
             spelling,
             ResolutionConstraint {
-                exact_target_declaration_id: None,
+                exact_target_declaration_id: exact_type_parameter,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: qualified_name
                     .and_then(|qualified| rust_qualified_parent(qualified).map(str::to_owned))
@@ -7412,6 +7539,14 @@ fn collect_rust_type_nodes<'tree>(
     if node.start_byte() >= body_start || declaration_name == Some(node.id()) {
         return;
     }
+    if matches!(
+        node.kind(),
+        "type_parameter" | "lifetime_parameter" | "const_parameter"
+    ) && rust_generic_parameter_name(node)
+        .is_some_and(|name| declaration_name != Some(name.id()))
+    {
+        return;
+    }
     match node.kind() {
         "scoped_type_identifier" => {
             output.push(node);
@@ -7427,6 +7562,33 @@ fn collect_rust_type_nodes<'tree>(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
         collect_rust_type_nodes(child, body_start, declaration_name, output);
+    }
+}
+
+fn collect_rust_generic_use_nodes<'tree>(
+    node: Node<'tree>,
+    body_start: usize,
+    declaration_name: Option<usize>,
+    output: &mut Vec<Node<'tree>>,
+) {
+    if node.start_byte() >= body_start || declaration_name == Some(node.id()) {
+        return;
+    }
+    if matches!(
+        node.kind(),
+        "type_parameter" | "lifetime_parameter" | "const_parameter"
+    ) && rust_generic_parameter_name(node)
+        .is_some_and(|name| declaration_name != Some(name.id()))
+    {
+        return;
+    }
+    if matches!(node.kind(), "identifier" | "lifetime") {
+        output.push(node);
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_rust_generic_use_nodes(child, body_start, declaration_name, output);
     }
 }
 
@@ -7555,6 +7717,24 @@ fn rust_is_type_node(kind: &str) -> bool {
             | "tuple_type"
             | "array_type"
     )
+}
+
+fn first_named_child_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .find(|child| child.is_named() && child.kind() == kind)
+}
+
+fn rust_generic_parameter_name(parameter: Node<'_>) -> Option<Node<'_>> {
+    parameter.child_by_field_name("name").or_else(|| {
+        let kind = match parameter.kind() {
+            "type_parameter" => "type_identifier",
+            "lifetime_parameter" => "lifetime",
+            "const_parameter" => "identifier",
+            _ => return None,
+        };
+        first_named_child_of_kind(parameter, kind)
+    })
 }
 
 fn split_qualified(raw: &str) -> (Option<&str>, &str) {
@@ -8650,9 +8830,6 @@ fn target_kinds_for_relation(relation: CandidateRelation) -> Vec<String> {
         CandidateRelation::Annotates
         | CandidateRelation::Extends
         | CandidateRelation::Implements
-        | CandidateRelation::References
-        | CandidateRelation::TypeOf
-        | CandidateRelation::Returns
         | CandidateRelation::Embeds => vec![
             "class".to_owned(),
             "struct".to_owned(),
@@ -8661,6 +8838,17 @@ fn target_kinds_for_relation(relation: CandidateRelation) -> Vec<String> {
             "trait".to_owned(),
             "type_alias".to_owned(),
         ],
+        CandidateRelation::References | CandidateRelation::TypeOf | CandidateRelation::Returns => {
+            vec![
+                "class".to_owned(),
+                "struct".to_owned(),
+                "enum".to_owned(),
+                "interface".to_owned(),
+                "trait".to_owned(),
+                "type_alias".to_owned(),
+                "parameter".to_owned(),
+            ]
+        }
         CandidateRelation::AccessesMember => vec!["field".to_owned(), "method".to_owned()],
         CandidateRelation::InvokesMacro => vec!["macro".to_owned()],
         CandidateRelation::Contains | CandidateRelation::Owns => Vec::new(),

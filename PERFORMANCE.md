@@ -283,6 +283,30 @@ dominated, 1,083 unverifiable placeholders were rejected, and 89 remained
 missing. These classifications use source-compatible endpoints and occurrence
 anchors; they are diagnostic hypotheses, not precision or recall percentages.
 
+A second 2026-08-05 Rayon run qualified scoped Rust type, lifetime, and const
+generic parameters. Three fresh outputs were byte-identical (SHA-256
+`2b9111ed6f21748749c8046c8c3f8730c9991ab9b218be63d5e60c4a6f9eab80`)
+at 11,963 nodes and 24,929 occurrence-backed relationships. External wall
+times were 7.94, 2.01, and 2.04 seconds; the first copied-binary launch is
+retained as a host cold-launch outlier, and the 2.04-second median remains
+slightly slower than the retained 1.947-second Graphify sample. Peak RSS was
+377,454,592 bytes. Four pre-existing unrelated edges were omitted; no generic
+parameter or bound relationship was omitted.
+
+The source-compatible comparison improved to 2,160 exact and 2,349 dominated
+Graphify edge hypotheses, with 2,520 rejected and 672 missing. Four formerly
+missing Graphify node hypotheses now match exact scoped parameters, leaving 85
+missing nodes. Of the 110-edge reduction in missing hypotheses, one is a newly
+covered typed reference and 109 are now rejected because Graphify targets a
+same-named generic parameter from the wrong lexical owner. Another 599
+previously unverifiable generic edges are dominated by Compass's exact
+occurrence targets. The remaining missing-node set consists almost entirely
+of Graphify's synthetic Rust impl-receiver spellings such as `Vec<T>` and
+`&'a [T]`; Compass graph schema version 1 has no first-class impl-block node.
+That representation gap and the remaining exact-endpoint call, type, and
+import hypotheses require separate source audits rather than synthetic count
+inflation.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and

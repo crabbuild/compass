@@ -612,7 +612,10 @@ fn endpoint_kinds_are_valid(
                     NodeKind::Interface | NodeKind::Trait | NodeKind::Protocol
                 )
         }
-        EdgeKind::TypeOf => is_typed_value(source.kind) && target.kind.is_type(),
+        EdgeKind::TypeOf => {
+            is_typed_value(source.kind)
+                && (target.kind.is_type() || target.kind == NodeKind::Parameter)
+        }
         EdgeKind::Returns => source.kind.is_callable() && is_return_target(target.kind),
         EdgeKind::Instantiates => {
             is_call_source(source.kind)
@@ -1015,6 +1018,7 @@ const fn is_return_target(kind: NodeKind) -> bool {
         || matches!(
             kind,
             NodeKind::TypeAlias
+                | NodeKind::Parameter
                 | NodeKind::Variable
                 | NodeKind::Import
                 | NodeKind::Schema
@@ -1062,6 +1066,7 @@ const fn is_reference_source(kind: NodeKind) -> bool {
                 | NodeKind::Field
                 | NodeKind::Variable
                 | NodeKind::Constant
+                | NodeKind::Parameter
                 | NodeKind::EnumMember
                 | NodeKind::Import
                 | NodeKind::Export
