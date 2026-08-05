@@ -229,11 +229,12 @@ source-scoped and inferred; they never substitute a same-named repository
 node.
 
 Python callable-value occurrences publish a reference candidate for the exact
-value use. They publish an indirect call only when the resolver proves a local
-function or method target. Qualified external fallback is not permitted for
-indirect calls because an import binding proves identity, not callability; an
-unproven external value remains a reference rather than becoming an invented
-function endpoint.
+value use. They do not publish an indirect call merely because that value
+resolves to a function or method: target identity and callability do not prove
+invocation. An indirect call requires separate source or contract evidence that
+the receiving API invokes the value. The current Python adapter does not infer
+such contracts, so uninvoked argument, collection, assignment, and return uses
+remain references.
 
 The following resolution behavior is forbidden:
 

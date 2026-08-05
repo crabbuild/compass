@@ -789,7 +789,7 @@ impl<'source> DirectAdapterState<'source> {
         self.collect_python_imports(root, &file)?;
         let module_bound = crate::engine::python_bound_names(root, self.source, true);
         self.python_module_bound_names.clone_from(&module_bound);
-        self.walk_python_indirect(root, &file, true, &module_bound)?;
+        self.walk_python_value_references(root, &file, true, &module_bound)?;
         self.walk_python_evidence(root, &file, true)
     }
 
@@ -920,7 +920,7 @@ impl<'source> DirectAdapterState<'source> {
             if node.kind() == "function_definition" {
                 let body = node.child_by_field_name("body").unwrap_or(node);
                 let bound = crate::engine::python_bound_names(node, self.source, false);
-                self.walk_python_indirect(body, &active, true, &bound)?;
+                self.walk_python_value_references(body, &active, true, &bound)?;
             }
         }
         match node.kind() {
@@ -941,7 +941,7 @@ impl<'source> DirectAdapterState<'source> {
         Ok(())
     }
 
-    fn walk_python_indirect(
+    fn walk_python_value_references(
         &mut self,
         node: Node<'_>,
         owner: &DeclarationContext,
@@ -965,7 +965,7 @@ impl<'source> DirectAdapterState<'source> {
                     None
                 };
                 if candidate.is_some_and(|candidate| candidate.kind() == "identifier") {
-                    self.add_python_callable_reference(owner, candidate, "argument", bound)?;
+                    self.add_python_value_reference(owner, candidate, "argument", bound)?;
                 }
             }
         }
@@ -973,7 +973,7 @@ impl<'source> DirectAdapterState<'source> {
             let mut identifiers = Vec::new();
             crate::engine::collect_python_collection_values(node, &mut identifiers);
             for identifier in identifiers {
-                self.add_python_callable_reference(owner, Some(identifier), "collection", bound)?;
+                self.add_python_value_reference(owner, Some(identifier), "collection", bound)?;
             }
         } else if node.kind() == "assignment"
             && let Some(value) = node.child_by_field_name("right")
@@ -981,7 +981,7 @@ impl<'source> DirectAdapterState<'source> {
             let mut identifiers = Vec::new();
             crate::engine::collect_python_reference_values(value, &mut identifiers);
             for identifier in identifiers {
-                self.add_python_callable_reference(owner, Some(identifier), "assignment", bound)?;
+                self.add_python_value_reference(owner, Some(identifier), "assignment", bound)?;
             }
         } else if node.kind() == "return_statement" {
             let mut cursor = node.walk();
@@ -989,18 +989,18 @@ impl<'source> DirectAdapterState<'source> {
                 let mut identifiers = Vec::new();
                 crate::engine::collect_python_reference_values(value, &mut identifiers);
                 for identifier in identifiers {
-                    self.add_python_callable_reference(owner, Some(identifier), "return", bound)?;
+                    self.add_python_value_reference(owner, Some(identifier), "return", bound)?;
                 }
             }
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            self.walk_python_indirect(child, owner, false, bound)?;
+            self.walk_python_value_references(child, owner, false, bound)?;
         }
         Ok(())
     }
 
-    fn add_python_callable_reference(
+    fn add_python_value_reference(
         &mut self,
         owner: &DeclarationContext,
         node: Option<Node<'_>>,
@@ -1077,29 +1077,6 @@ impl<'source> DirectAdapterState<'source> {
                 ],
                 hierarchy: None,
                 allow_external: qualified_name.is_some(),
-            },
-        )?;
-        self.builder.relate(
-            CandidateRelation::IndirectCalls,
-            &owner.fact_id,
-            Some(&occurrence_id),
-            binding.as_deref(),
-            &spelling,
-            ResolutionConstraint {
-                exact_target_declaration_id: None,
-                exact_language: Some(self.language.to_owned()),
-                module_or_package: qualified_name
-                    .as_deref()
-                    .and_then(|qualified| qualified.rsplit_once('.').map(|(module, _)| module))
-                    .map(str::to_owned)
-                    .or_else(|| Some(self.module_or_package.clone())),
-                scope_id: Some(owner.scope_id.clone()),
-                qualified_name: qualified_name.clone(),
-                argument_count: None,
-                argument_types: Vec::new(),
-                allowed_target_kinds: vec!["function".to_owned(), "method".to_owned()],
-                hierarchy: None,
-                allow_external: false,
             },
         )?;
         Ok(())

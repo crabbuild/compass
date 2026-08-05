@@ -695,10 +695,11 @@ def dotted():
             candidate.relation == CandidateRelation::References
                 && candidate.constraints.allow_external
         }));
-        assert!(candidates.iter().any(|candidate| {
-            candidate.relation == CandidateRelation::IndirectCalls
-                && !candidate.constraints.allow_external
-        }));
+        assert!(
+            candidates
+                .iter()
+                .all(|candidate| candidate.relation != CandidateRelation::IndirectCalls)
+        );
     }
 }
 

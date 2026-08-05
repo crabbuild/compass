@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-- Harden Python callable-value resolution so argument, collection, assignment,
-  and return references cannot fabricate external function calls; proven
-  callbacks retain indirect-call edges and other values remain references.
+- Harden Python value-reference resolution so argument, collection, assignment,
+  and return references cannot fabricate function calls. Function-valued uses
+  remain references unless future evidence proves an invocation contract.
 
 - Split framework extraction into focused Spring, Express, Axum, Next.js, and
   Vite adapters. Project evidence now indexes framework configuration files,

@@ -856,14 +856,19 @@ def dotted():
         .expect("callback target");
     assert!(resolved.edges.iter().any(|edge| {
         edge.target == callback.id
-            && edge.string("relation") == "indirect_call"
+            && edge.string("relation") == "references"
             && edge.string("context") == "return"
             && edge.string("resolution_rule") == "explicit-binding"
+    }));
+    assert!(resolved.edges.iter().all(|edge| {
+        !(edge.target == callback.id
+            && edge.string("relation") == "indirect_call"
+            && edge.string("context") == "return")
     }));
 }
 
 #[test]
-fn python_callable_values_do_not_invent_external_calls() {
+fn python_callable_values_are_references_without_invocation_evidence() {
     let provider = extract(
         "pkg/provider.py",
         br#"class ValidationError(Exception):
@@ -935,10 +940,8 @@ def register(consume):
         }),
         "callback edges: {callback_edges:#?}"
     );
-    assert!(resolved.edges.iter().any(|edge| {
-        edge.target == callback.id
-            && edge.string("relation") == "indirect_call"
-            && edge.string("context") == "argument"
+    assert!(resolved.edges.iter().all(|edge| {
+        !(edge.target == callback.id && edge.string("relation") == "indirect_call")
     }));
     assert_eq!(unknown.string("symbol_kind"), "variable");
     assert!(resolved.edges.iter().any(|edge| {
