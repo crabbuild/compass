@@ -24,7 +24,8 @@ use compass_graph::{
     normalize_document_v1_with_evidence_best_effort_owned,
     normalize_document_v1_with_inventory_best_effort,
     normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
-    score_communities, write_canonical_graph_json, write_fact_neutral_graph_json_delta,
+    score_communities, write_canonical_graph_json,
+    write_fact_neutral_graph_json_delta_prevalidated,
 };
 use compass_languages::{
     BindingFact, DeclarationFact, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL,
@@ -1820,8 +1821,13 @@ fn publish_fact_neutral_incremental(
         let receipt = write_atomic_with_digest(&graph_path, |writer| {
             let delta_started = Instant::now();
             let used_delta = if let Some(bytes) = previous_bytes.as_deref() {
-                write_fact_neutral_graph_json_delta(bytes, current, changed_file_node_ids, writer)
-                    .map_err(|source| compass_files::FileError::Io {
+                write_fact_neutral_graph_json_delta_prevalidated(
+                    bytes,
+                    current,
+                    changed_file_node_ids,
+                    writer,
+                )
+                .map_err(|source| compass_files::FileError::Io {
                     path: graph_path.clone(),
                     source,
                 })?

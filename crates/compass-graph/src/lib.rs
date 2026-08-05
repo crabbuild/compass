@@ -32,7 +32,7 @@ pub use snapshot::{
     active_graph_snapshot, canonical_graph_document, canonical_graph_document_presorted,
     canonical_graph_json, encode_graph_index_key, garbage_collect_graph_snapshots,
     graph_snapshot_needs_gc, prepare_graph_snapshot, write_canonical_graph_json,
-    write_fact_neutral_graph_json_delta,
+    write_fact_neutral_graph_json_delta, write_fact_neutral_graph_json_delta_prevalidated,
 };
 pub use v1::{
     BuildEvidence, InventoryEvidence, SourceDigest, V1_PUBLICATION_SEMANTICS_VERSION,
