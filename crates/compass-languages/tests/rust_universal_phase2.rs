@@ -418,6 +418,102 @@ impl<T: Marker> Wrapper<T> {
 }
 
 #[test]
+fn rust_phase2_scopes_associated_types_and_resolves_self_returns_exactly()
+-> Result<(), Box<dyn Error>> {
+    let extraction = Engine::default().extract_source(
+        Path::new("src/lib.rs"),
+        br#"trait Produce {
+    type Output;
+    fn produce() -> Self::Output;
+}
+struct Alpha;
+struct Beta;
+struct AlphaOutput;
+struct BetaOutput;
+struct Iter;
+impl Produce for Alpha {
+    type Output = AlphaOutput;
+    fn produce() -> Self::Output { AlphaOutput }
+}
+impl Produce for Beta {
+    type Output = BetaOutput;
+    fn produce() -> Self::Output { BetaOutput }
+}
+trait Iterate { type Iter; fn iter() -> Self::Iter; }
+impl Iterate for Alpha { type Iter = Iter; fn iter() -> Self::Iter { Iter } }
+"#,
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+
+    let associated_types = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.kind == "type_alias" && declaration.name == "Output")
+        .collect::<Vec<_>>();
+    assert_eq!(associated_types.len(), 3);
+    assert_eq!(
+        associated_types
+            .iter()
+            .map(|declaration| declaration.qualified_name.as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "<impl Produce for Alpha>::Output",
+            "<impl Produce for Beta>::Output",
+            "crate::Produce::Output",
+        ])
+    );
+
+    for (owner, concrete) in [("Alpha", "AlphaOutput"), ("Beta", "BetaOutput")] {
+        let associated = associated_types
+            .iter()
+            .copied()
+            .find(|declaration| {
+                declaration
+                    .qualified_name
+                    .contains(&format!("for {owner}>"))
+            })
+            .ok_or("missing impl-scoped associated type")?;
+        let method = evidence
+            .declarations
+            .iter()
+            .find(|declaration| {
+                declaration.kind == "method"
+                    && declaration
+                        .qualified_name
+                        .starts_with(&format!("<crate::{owner} as crate::Produce>"))
+            })
+            .ok_or("missing impl method")?;
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.source_declaration_id == method.id
+                && candidate.relation == CandidateRelation::Returns
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(associated.id.as_str())
+        }));
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.source_declaration_id == associated.id
+                && candidate.relation == CandidateRelation::References
+                && candidate.constraints.qualified_name.as_deref()
+                    == Some(format!("crate::{concrete}").as_str())
+        }));
+    }
+    let iteration_alias = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "<impl Iterate for Alpha>::Iter")
+        .ok_or("missing same-named associated type")?;
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.source_declaration_id == iteration_alias.id
+            && candidate.relation == CandidateRelation::References
+            && candidate.constraints.qualified_name.as_deref() == Some("crate::Iter")
+    }));
+    Ok(())
+}
+
+#[test]
 fn rust_phase2_publishes_type_lifetime_and_const_generic_parameters() -> Result<(), Box<dyn Error>>
 {
     let extraction = Engine::default().extract_source(

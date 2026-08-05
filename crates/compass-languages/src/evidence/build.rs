@@ -593,6 +593,8 @@ struct DirectAdapterState<'source> {
     rust_types_by_qualified_name: HashMap<String, DeclarationContext>,
     rust_types_by_name: HashMap<String, Vec<DeclarationContext>>,
     rust_type_parameters_by_qualified_name: HashMap<String, DeclarationContext>,
+    rust_associated_types_by_scope: HashMap<String, HashMap<String, Vec<DeclarationContext>>>,
+    rust_associated_types_by_qualified_name: HashMap<String, Vec<DeclarationContext>>,
     rust_receiver_methods: HashMap<(String, String), Vec<String>>,
     rust_typed_receivers: HashSet<(String, String)>,
     rust_imported_typed_receivers: HashSet<(String, String)>,
@@ -668,6 +670,8 @@ impl<'source> DirectAdapterState<'source> {
             rust_types_by_qualified_name: HashMap::new(),
             rust_types_by_name: HashMap::new(),
             rust_type_parameters_by_qualified_name: HashMap::new(),
+            rust_associated_types_by_scope: HashMap::new(),
+            rust_associated_types_by_qualified_name: HashMap::new(),
             rust_receiver_methods: HashMap::new(),
             rust_typed_receivers: HashSet::new(),
             rust_imported_typed_receivers: HashSet::new(),
@@ -3210,8 +3214,15 @@ impl<'source> DirectAdapterState<'source> {
                 }
                 return Ok(());
             }
-            "type_item" => {
-                self.add_rust_named_declaration(node, owner, "type_alias")?;
+            "type_item" | "associated_type" => {
+                if active_impl.is_some()
+                    || owner.kind == "trait"
+                    || node.kind() == "associated_type"
+                {
+                    self.add_rust_associated_type(node, owner, active_impl.is_some())?;
+                } else {
+                    self.add_rust_named_declaration(node, owner, "type_alias")?;
+                }
                 return Ok(());
             }
             "const_item" | "static_item" => {
@@ -3292,6 +3303,34 @@ impl<'source> DirectAdapterState<'source> {
         self.declarations.insert(node.id(), context.clone());
         self.add_rust_type_parameters(node, &context)?;
         Ok(Some(context))
+    }
+
+    fn add_rust_associated_type(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        implementation_scoped: bool,
+    ) -> Result<(), EvidenceError> {
+        let Some(context) = self.add_rust_named_declaration(node, owner, "type_alias")? else {
+            return Ok(());
+        };
+        if implementation_scoped
+            && let Some(targets) = self.local_targets.get_mut(&owner.scope_id)
+            && targets.get(&context.name) == Some(&context.qualified_name)
+        {
+            targets.remove(&context.name);
+        }
+        self.rust_associated_types_by_scope
+            .entry(owner.scope_id.clone())
+            .or_default()
+            .entry(context.name.clone())
+            .or_default()
+            .push(context.clone());
+        self.rust_associated_types_by_qualified_name
+            .entry(context.qualified_name.clone())
+            .or_default()
+            .push(context);
+        Ok(())
     }
 
     fn add_rust_callable(
@@ -3563,6 +3602,29 @@ impl<'source> DirectAdapterState<'source> {
             .find(|context| context.fact_id == fact_id)
     }
 
+    fn rust_associated_type_for(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+    ) -> Option<&DeclarationContext> {
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let current = scope_id?;
+            if let Some(candidates) = self
+                .rust_associated_types_by_scope
+                .get(current)
+                .and_then(|types| types.get(name))
+            {
+                let [candidate] = candidates.as_slice() else {
+                    return None;
+                };
+                return Some(candidate);
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        None
+    }
+
     fn add_rust_impl(
         &mut self,
         node: Node<'_>,
@@ -3641,7 +3703,11 @@ impl<'source> DirectAdapterState<'source> {
         if let Some(body) = node.child_by_field_name("body") {
             let mut cursor = body.walk();
             for child in body.children(&mut cursor).filter(|child| child.is_named()) {
-                self.collect_rust_declarations(child, owner, Some(&implementation))?;
+                self.collect_rust_declarations(
+                    child,
+                    &implementation_owner,
+                    Some(&implementation),
+                )?;
             }
         }
         Ok(())
@@ -4224,7 +4290,7 @@ impl<'source> DirectAdapterState<'source> {
         collect_rust_type_nodes(node, body_start, name_id, &mut targets);
         for target in targets {
             let raw = self.text(target);
-            if raw.is_empty() || rust_primitive_type(&raw) || raw == owner.name {
+            if raw.is_empty() || rust_primitive_type(&raw) {
                 continue;
             }
             let relation = if node.kind() == "trait_item"
@@ -4636,6 +4702,14 @@ impl<'source> DirectAdapterState<'source> {
         let exact_type_parameter = qualified_name
             .and_then(|qualified| self.rust_type_parameters_by_qualified_name.get(qualified))
             .map(|parameter| parameter.fact_id.clone());
+        let exact_associated_type = qualified_name
+            .and_then(|qualified| self.rust_associated_types_by_qualified_name.get(qualified))
+            .and_then(|types| {
+                let [associated_type] = types.as_slice() else {
+                    return None;
+                };
+                Some(associated_type.fact_id.clone())
+            });
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
@@ -4651,7 +4725,7 @@ impl<'source> DirectAdapterState<'source> {
             binding.as_deref(),
             spelling,
             ResolutionConstraint {
-                exact_target_declaration_id: exact_type_parameter,
+                exact_target_declaration_id: exact_type_parameter.or(exact_associated_type),
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: qualified_name
                     .and_then(|qualified| rust_qualified_parent(qualified).map(str::to_owned))
@@ -7282,6 +7356,11 @@ fn rust_qualify_evidence_path(
         return None;
     }
     let (qualifier, spelling) = split_qualified(&raw);
+    if qualifier == Some("Self") {
+        return state
+            .rust_associated_type_for(owner, spelling)
+            .map(|associated_type| associated_type.qualified_name.clone());
+    }
     let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
     if let Some(target) = state.imported_target_for_occurrence(owner, binding_name, use_start, true)
     {

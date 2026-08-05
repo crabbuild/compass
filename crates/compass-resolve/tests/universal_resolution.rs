@@ -810,6 +810,92 @@ impl<T> Render for Container<T> {
 }
 
 #[test]
+fn rust_associated_returns_resolve_per_impl_and_ambiguity_fails_closed() {
+    let source = br#"trait Produce { type Output; fn produce() -> Self::Output; }
+struct Alpha;
+struct Beta;
+struct AlphaOutput;
+struct BetaOutput;
+impl Produce for Alpha {
+    type Output = AlphaOutput;
+    fn produce() -> Self::Output { AlphaOutput }
+}
+impl Produce for Beta {
+    type Output = BetaOutput;
+    fn produce() -> Self::Output { BetaOutput }
+}
+"#;
+    let resolved = compass_resolve::resolve(
+        &[extract("src/lib.rs", source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    for (owner, concrete) in [("Alpha", "AlphaOutput"), ("Beta", "BetaOutput")] {
+        let associated = resolved
+            .nodes
+            .iter()
+            .find(|node| {
+                node.string("qualified_name") == format!("<impl Produce for {owner}>::Output")
+            })
+            .expect("impl-scoped associated type");
+        let method = resolved
+            .nodes
+            .iter()
+            .find(|node| {
+                node.string("qualified_name")
+                    == format!("<crate::{owner} as crate::Produce>::produce")
+            })
+            .expect("impl method");
+        let concrete = resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == format!("crate::{concrete}"))
+            .expect("concrete associated type realization");
+        assert!(resolved.edges.iter().any(|edge| {
+            edge.source == method.id
+                && edge.target == associated.id
+                && edge.string("relation") == "returns"
+        }));
+        assert!(resolved.edges.iter().any(|edge| {
+            edge.source == associated.id
+                && edge.target == concrete.id
+                && edge.string("relation") == "references"
+        }));
+    }
+
+    let ambiguous_source = br#"trait Produce { type Output; fn produce() -> Self::Output; }
+struct Alpha;
+struct First;
+struct Second;
+impl Produce for Alpha {
+    type Output = First;
+    type Output = Second;
+    fn produce() -> Self::Output { First }
+}
+"#;
+    let ambiguous = compass_resolve::resolve(
+        &[extract("src/lib.rs", ambiguous_source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(ambiguous_source.to_vec()).expect("ambiguous source"),
+        )]),
+    );
+    let method = ambiguous
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "<crate::Alpha as crate::Produce>::produce")
+        .expect("ambiguous impl method");
+    assert!(
+        ambiguous
+            .edges
+            .iter()
+            .all(|edge| { edge.source != method.id || edge.string("relation") != "returns" })
+    );
+}
+
+#[test]
 fn rust_generic_trait_impl_calls_resolve_to_exact_impl_owner() {
     let source = br#"trait Render<T> {
     fn render(&self, value: T);

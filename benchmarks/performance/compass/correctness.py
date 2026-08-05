@@ -1138,6 +1138,8 @@ def _classify_edges(
     ] = {}
     typed_reference_index: dict[tuple[str, str], list[EdgeFact]] = {}
     typed_references_by_source: dict[str, list[tuple[str, EdgeFact]]] = {}
+    return_references_by_source: dict[str, list[tuple[str, EdgeFact]]] = {}
+    type_alias_realizations: dict[str, set[str]] = {}
     field_type_references: dict[tuple[str, str], list[EdgeFact]] = {}
     value_references: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
     containment: dict[str, set[str]] = {}
@@ -1168,8 +1170,14 @@ def _classify_edges(
         direct_index.setdefault((edge.relation, source, target), []).append(edge)
         if edge.relation in {"returns", "type_of"}:
             typed_reference_index.setdefault((source, target), []).append(edge)
+        if edge.relation == "returns":
+            return_references_by_source.setdefault(source, []).append((target, edge))
         if edge.relation == "type_of":
             typed_references_by_source.setdefault(source, []).append((target, edge))
+        if edge.relation == "references":
+            source_node = compass_nodes.get(edge.source)
+            if source_node is not None and source_node.kind == "type_alias":
+                type_alias_realizations.setdefault(source, set()).add(target)
         if (
             edge.relation == "references"
             and edge.context in {"argument", "collection"}
@@ -1752,6 +1760,34 @@ def _classify_edges(
                 continue
 
         if graphify.relation == "references":
+            associated_returns = [
+                (associated_type, edge)
+                for associated_type, edge in return_references_by_source.get(source, [])
+                if (associated_node := compass_nodes.get(associated_type)) is not None
+                and associated_node.kind == "type_alias"
+                and associated_node.qualified_name.startswith("<impl")
+                and _occurrence_match(graphify, edge, occurrence_oracle) is not None
+            ]
+            if len(associated_returns) == 1:
+                associated_type, edge = associated_returns[0]
+                realizations = type_alias_realizations.get(associated_type, set())
+                status = (
+                    "dominated"
+                    if target == associated_type or target in realizations
+                    else "rejected"
+                )
+                reason = (
+                    "associated_return_realization"
+                    if status == "dominated"
+                    else "associated_return_target_conflict"
+                )
+                output.append(Coverage(status, reason, edge.payload_sha256))
+                continue
+            if len(associated_returns) > 1:
+                output.append(
+                    Coverage("ambiguous", "multiple_associated_return_types", None)
+                )
+                continue
             typed_references = [
                 edge
                 for edge in typed_reference_index.get((source, target), [])

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Preserve Rust associated types as trait- or implementation-scoped type
+  aliases and resolve `Self::Type` returns to the exact lexical declaration.
+  Each associated alias separately references its concrete realization;
+  duplicate declarations remain unresolved. Rust structural facts advance to
+  adapter version 5 so cached evidence refreshes.
+
 - Resolve repository-local Rust imports and reexports to the unique semantic
   module when file and module realizations share the same qualified identity.
   Resolution still fails closed when another declaration kind participates or

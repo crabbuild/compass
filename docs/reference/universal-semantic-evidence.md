@@ -57,6 +57,13 @@ scope; repeated spellings in a type, implementation, and method remain
 distinct. Proven signature, field, return, and bound occurrences target the
 parameter declaration rather than an unrelated same-named type.
 
+Rust associated types are source-backed `type_alias` declarations scoped to
+their trait or exact implementation. A `Self::Type` occurrence targets that
+declaration only when one associated type survives the lexical impl scope;
+duplicate or missing declarations remain unresolved. The associated type's
+value is represented separately by its source-anchored reference, preserving
+the distinction between the contract and its concrete realization.
+
 ### Required invariants
 
 `validate_evidence` rejects a batch when any of these conditions is false:

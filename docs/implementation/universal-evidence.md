@@ -30,7 +30,7 @@ future work.
 | Status | Implementation |
 | --- | --- |
 | Available now | `compass-languages` owns the source registry, parsers, established adapters, and semantic evidence version 1 |
-| Available now | Python, Go, Rust, and Java are entries in the hard-cut `AdapterRegistry`; Go and Java are at adapter version 3, Rust is at version 4, and Python is at version 11 |
+| Available now | Python, Go, Rust, and Java are entries in the hard-cut `AdapterRegistry`; Go and Java are at adapter version 3, Rust is at version 5, and Python is at version 11 |
 | Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all four hard-cut languages |
 | Available now | `UniversalResolutionIndex` resolves and projects hard-cut evidence without a language-name branch |
 | Available now | Rust has passed Phase 2 qualification; Java remains `UniversalCandidate` after completing post-cutover pinned-corpus qualification |
@@ -145,7 +145,7 @@ The architectural profile names are `Direct`, `UniversalCandidate`, and
 an internal `legacy` variant. Treat it as an old wire identifier, not the name
 or quality status of an established adapter.
 
-Go and Java are at adapter version 3, Rust is at version 4, and Python is at version 11.
+Go and Java are at adapter version 3, Rust is at version 5, and Python is at version 11.
 Adapter versions advance when a semantic evidence change
 requires language-local cache invalidation; grammar provenance and the
 extraction-semantics identity remain independent cache inputs.
@@ -372,7 +372,7 @@ This table describes the current branch.
 | --- | --- | --- |
 | Python | Hard-cut universal | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced collection resolver |
 | Go | Hard-cut universal | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced Go collection resolver |
-| Rust | Hard-cut `UniversalCandidate` | Version-4 adapter evidence plus shared resolution and projection; scoped generic parameters and nested lexical calls are preserved, Phase 2 is qualified, and replaced Rust paths are removed |
+| Rust | Hard-cut `UniversalCandidate` | Version-5 adapter evidence plus shared resolution and projection; impl-scoped associated types, exact `Self::Type` returns, scoped generic parameters, and nested lexical calls are preserved, Phase 2 is qualified, and replaced Rust paths are removed |
 | Java | Hard-cut `UniversalCandidate` | Version-3 evidence plus shared resolution and projection; exact callable ownership, proven conversions, replaced Java paths removed, and post-cutover corpus qualification complete |
 | Remaining registered languages | Established direct adapters | Current language-specific or generic extraction paths |
 

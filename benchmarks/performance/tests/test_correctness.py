@@ -807,6 +807,89 @@ class Widget(base_factory(), metaclass=meta_factory()):
             result.metrics["graphify_edges_coverage_reasons"],
         )
 
+    def test_associated_return_alias_dominates_its_concrete_realization(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"method","label":"iter","kind":"method",
+               "qualified_name":"<crate::Collection as crate::Iterate>::iter",
+               "source_file":"src/lib.rs","source_location":"L10","language":"rust"},
+              {"id":"associated","label":"Iter","kind":"type_alias",
+               "qualified_name":"<impl Iterate for Collection>::Iter",
+               "source_file":"src/lib.rs","source_location":"L9","language":"rust"},
+              {"id":"concrete","label":"Iter","kind":"struct",
+               "qualified_name":"crate::Iter","source_file":"src/lib.rs",
+               "source_location":"L3","language":"rust"}
+            ],"links":[
+              {"source":"method","target":"associated","relation":"returns",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"source":"associated","target":"concrete","relation":"references",
+               "source_file":"src/lib.rs","source_location":"L9"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"method","label":"iter()","source_file":"src/lib.rs",
+               "source_location":"L10"},
+              {"id":"concrete","label":"Iter","source_file":"src/lib.rs",
+               "source_location":"L3"}
+            ],"links":[
+              {"source":"method","target":"concrete","relation":"references",
+               "context":"return_type","source_file":"src/lib.rs",
+               "source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertIn(
+            "dominated:associated_return_realization",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_associated_return_rejects_a_terminal_name_trait_projection(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"method","label":"folder","kind":"method",
+               "qualified_name":"<crate::Consumer as crate::Consume>::folder",
+               "source_file":"src/lib.rs","source_location":"L10","language":"rust"},
+              {"id":"associated","label":"Folder","kind":"type_alias",
+               "qualified_name":"<impl Consume for Consumer>::Folder",
+               "source_file":"src/lib.rs","source_location":"L9","language":"rust"},
+              {"id":"concrete","label":"LocalFolder","kind":"struct",
+               "qualified_name":"crate::LocalFolder","source_file":"src/lib.rs",
+               "source_location":"L3","language":"rust"},
+              {"id":"wrong","label":"Folder","kind":"trait",
+               "qualified_name":"crate::Folder","source_file":"src/api.rs",
+               "source_location":"L2","language":"rust"}
+            ],"links":[
+              {"source":"method","target":"associated","relation":"returns",
+               "source_file":"src/lib.rs","source_location":"L10"},
+              {"source":"associated","target":"concrete","relation":"references",
+               "source_file":"src/lib.rs","source_location":"L9"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"method","label":"folder()","source_file":"src/lib.rs",
+               "source_location":"L10"},
+              {"id":"wrong","label":"Folder","source_file":"src/api.rs",
+               "source_location":"L2"}
+            ],"links":[
+              {"source":"method","target":"wrong","relation":"references",
+               "context":"return_type","source_file":"src/lib.rs",
+               "source_location":"L10"}
+            ]}
+            """,
+        )
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:associated_return_target_conflict",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
     def test_rust_generic_impl_owner_is_dominated_by_exact_type_ownership(self) -> None:
         result = compare_documents(
             """
