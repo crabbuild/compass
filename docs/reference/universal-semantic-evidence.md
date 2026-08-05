@@ -274,6 +274,13 @@ visible glob scopes, while an unknown dependency keeps that union incomplete.
 The resolver never assumes that a different crate root is external or that a
 named dependency is local solely from its spelling.
 
+An associated callable reached through such a source-present glob may provide
+receiver evidence for a chained call. The resolver reuses the retained glob
+binding or bounded visible-glob scope only to select one compatible source
+declaration, then resolves that declaration's published return candidate
+before selecting the next member. Competing callable declarations, incomplete
+glob evidence, or an unresolved return candidate leave the chain unresolved.
+
 For `impl Trait<Argument> for Implementer`, an implementer declaration proven
 in the current source evidence owns an exact type-reference occurrence for
 every non-primitive nested trait argument. Lookup uses the implementation

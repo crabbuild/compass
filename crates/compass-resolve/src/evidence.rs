@@ -1124,6 +1124,7 @@ impl UniversalResolutionIndex {
             {
                 Some(ResolutionDecision::QualifiedExternal {
                     qualified_name: wildcard_qualified_names(
+                        language,
                         &binding.qualified_target,
                         qualifier,
                         &candidate.target_spelling,
@@ -1149,15 +1150,18 @@ impl UniversalResolutionIndex {
         language: &str,
         candidate: &RelationshipCandidate,
     ) -> Option<ResolutionDecision> {
+        let qualifier = self
+            .occurrence(candidate)
+            .and_then(|occurrence| occurrence.qualifier.as_deref());
         if language != "rust"
             || candidate.binding_id.is_some()
             || matches!(
                 candidate.relation,
                 CandidateRelation::Imports | CandidateRelation::Reexports
             )
-            || self
-                .occurrence(candidate)
-                .is_none_or(|occurrence| occurrence.qualifier.is_some())
+            || qualifier.is_some_and(|qualifier| {
+                !rust_external_wildcard_target_is_explicit(Some(qualifier), candidate)
+            })
         {
             return None;
         }
@@ -1181,7 +1185,7 @@ impl UniversalResolutionIndex {
                 let declarations = match self.wildcard_declarations(
                     language,
                     &bindings.modules,
-                    None,
+                    qualifier,
                     candidate,
                 ) {
                     Ok(declarations) => declarations,
@@ -1246,7 +1250,7 @@ impl UniversalResolutionIndex {
                 );
             }
             for qualified in
-                wildcard_qualified_names(&module, qualifier, &candidate.target_spelling)
+                wildcard_qualified_names(language, &module, qualifier, &candidate.target_spelling)
             {
                 let qualified = self.follow_alias(language, &qualified)?;
                 if let Some(ids) = self
@@ -3005,6 +3009,14 @@ impl UniversalResolutionIndex {
                 candidate,
             )?);
         }
+        if callable_ids.is_empty() {
+            callable_ids.extend(self.rust_wildcard_callable_declarations(
+                language,
+                binding,
+                &qualified_callable,
+                candidate,
+            )?);
+        }
         if callable_ids.len() > self.limits.candidates_per_lookup {
             return Err(callable_ids.len());
         }
@@ -3041,6 +3053,77 @@ impl UniversalResolutionIndex {
             return Err(return_candidates.len());
         };
         self.resolved_return_type(return_candidate)
+    }
+
+    fn rust_wildcard_callable_declarations(
+        &self,
+        language: &str,
+        call_result_binding: &BindingFact,
+        qualified_callable: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Result<BTreeSet<DeclarationSlot>, usize> {
+        if language != "rust" || call_result_binding.receiver_binding_id.is_some() {
+            return Ok(BTreeSet::new());
+        }
+        let Some((qualifier, spelling)) = split_qualified_member(qualified_callable) else {
+            return Ok(BTreeSet::new());
+        };
+
+        let mut callable_candidate = candidate.clone();
+        callable_candidate.target_spelling = spelling.to_owned();
+        callable_candidate.constraints.exact_target_declaration_id = None;
+        callable_candidate.constraints.qualified_name = Some(qualified_callable.to_owned());
+        callable_candidate.constraints.argument_count = None;
+        callable_candidate.constraints.argument_types.clear();
+        callable_candidate.constraints.allowed_target_kinds =
+            vec!["function".to_owned(), "method".to_owned()];
+        callable_candidate.constraints.hierarchy = None;
+        callable_candidate.constraints.allow_external = false;
+
+        if let Some(wildcard_binding) = call_result_binding
+            .fallback_binding_id
+            .as_deref()
+            .and_then(|binding_id| self.bindings.get(binding_id))
+            .filter(|binding| binding.spelling == "*")
+        {
+            callable_candidate.binding_id = Some(wildcard_binding.id.clone());
+            return self.wildcard_declarations(
+                language,
+                std::slice::from_ref(&wildcard_binding.qualified_target),
+                Some(qualifier),
+                &callable_candidate,
+            );
+        }
+
+        let mut scope_id = call_result_binding.scope_id.as_deref();
+        let mut visited_scopes = BTreeSet::new();
+        while let Some(current) = scope_id.filter(|scope| visited_scopes.insert(*scope)) {
+            if visited_scopes.len() > self.limits.candidates_per_lookup {
+                return Err(visited_scopes.len());
+            }
+            if let Some(bindings) = self
+                .wildcard_bindings_by_scope
+                .get(&(language.to_owned(), current.to_owned()))
+            {
+                if !bindings.complete {
+                    return Err(bindings.modules.len().saturating_add(1));
+                }
+                let declarations = self.wildcard_declarations(
+                    language,
+                    &bindings.modules,
+                    Some(qualifier),
+                    &callable_candidate,
+                )?;
+                if !declarations.is_empty() {
+                    return Ok(declarations);
+                }
+            }
+            scope_id = self
+                .scopes
+                .get(current)
+                .and_then(|scope| scope.parent_scope_id.as_deref());
+        }
+        Ok(BTreeSet::new())
     }
 
     fn resolved_return_type(&self, candidate_id: &str) -> Result<Option<String>, usize> {
@@ -3718,8 +3801,17 @@ fn declaration_overloads<'a>(
     overloads
 }
 
-fn wildcard_qualified_names(module: &str, qualifier: Option<&str>, spelling: &str) -> Vec<String> {
-    let separator = if module.contains("::") { "::" } else { "." };
+fn wildcard_qualified_names(
+    language: &str,
+    module: &str,
+    qualifier: Option<&str>,
+    spelling: &str,
+) -> Vec<String> {
+    let separator = if language == "rust" || module.contains("::") {
+        "::"
+    } else {
+        "."
+    };
     let mut parts = vec![module];
     if let Some(qualifier) = qualifier.filter(|qualifier| !qualifier.is_empty()) {
         parts.push(qualifier);

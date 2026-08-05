@@ -1015,6 +1015,128 @@ fn rust_child_glob_resolves_parent_reexports_with_source_present_sibling_crate()
 }
 
 #[test]
+fn rust_source_present_sibling_glob_resolves_associated_call_chains() {
+    let provider_source = br#"pub struct Builder;
+pub struct Pool;
+impl Builder {
+    pub fn new() -> Self { Builder }
+    pub fn tune(self) -> Self { self }
+    pub fn build(self) -> Result<Pool, ()> { todo!() }
+}
+"#;
+    let prelude_source = b"pub fn unrelated() {}\n";
+    let consumer_source = b"use crate::prelude::*;\nuse rayon_core::*;\nfn run() { Builder::new().tune().build().unwrap(); }\n";
+    let resolved = compass_resolve::resolve(
+        &[
+            extract("rayon-core/src/lib.rs", provider_source),
+            extract("src/prelude.rs", prelude_source),
+            extract("src/test.rs", consumer_source),
+        ],
+        &HashMap::from([
+            (
+                "rayon-core/src/lib.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/prelude.rs".to_owned(),
+                String::from_utf8(prelude_source.to_vec()).expect("prelude source"),
+            ),
+            (
+                "src/test.rs".to_owned(),
+                String::from_utf8(consumer_source.to_vec()).expect("consumer source"),
+            ),
+        ]),
+    );
+    for target in [
+        "rayon_core::Builder::new",
+        "rayon_core::Builder::tune",
+        "rayon_core::Builder::build",
+    ] {
+        let declaration = resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == target)
+            .expect("provider declaration");
+        assert!(
+            resolved.edges.iter().any(|edge| {
+                edge.string("relation") == "calls"
+                    && edge.target == declaration.id
+                    && edge.string("source_location") == "L3"
+                    && edge.string("confidence") == "EXTRACTED"
+            }),
+            "associated call did not resolve through the source-present sibling glob: {target}"
+        );
+    }
+    let unwrap = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "std::result::Result::unwrap")
+        .expect("canonical Result.unwrap target");
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.string("relation") == "calls"
+                && edge.target == unwrap.id
+                && edge.string("source_location") == "L3"
+                && edge.string("confidence") == "INFERRED"
+        }),
+        "edges={:#?}",
+        resolved.edges
+    );
+}
+
+#[test]
+fn rust_colliding_globs_do_not_guess_an_associated_call_chain() {
+    let first_source = br#"pub struct Builder;
+impl Builder {
+    pub fn new() -> Self { Builder }
+    pub fn tune(self) -> Self { self }
+}
+"#;
+    let second_source = first_source;
+    let consumer_source =
+        b"use crate::first::*;\nuse crate::second::*;\nfn run() { Builder::new().tune(); }\n";
+    let resolved = compass_resolve::resolve(
+        &[
+            extract("src/first.rs", first_source),
+            extract("src/second.rs", second_source),
+            extract("src/lib.rs", consumer_source),
+        ],
+        &HashMap::from([
+            (
+                "src/first.rs".to_owned(),
+                String::from_utf8(first_source.to_vec()).expect("first source"),
+            ),
+            (
+                "src/second.rs".to_owned(),
+                String::from_utf8(second_source.to_vec()).expect("second source"),
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(consumer_source.to_vec()).expect("consumer source"),
+            ),
+        ]),
+    );
+    let declarations = resolved
+        .nodes
+        .iter()
+        .filter(|node| {
+            matches!(
+                node.string("qualified_name").as_str(),
+                "crate::first::Builder::new"
+                    | "crate::first::Builder::tune"
+                    | "crate::second::Builder::new"
+                    | "crate::second::Builder::tune"
+            )
+        })
+        .map(|node| node.id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(declarations.len(), 4);
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "calls" || !declarations.contains(edge.target.as_str())
+    }));
+}
+
+#[test]
 fn rust_importing_a_local_module_targets_its_module_declaration() {
     let root_source = b"mod unwind;\nmod job;\n";
     let unwind_source = b"pub fn halt() {}\n";

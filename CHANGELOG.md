@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Resolve Rust associated calls imported from a source-present sibling-crate
+  glob, including chained calls whose receiver type comes from that callable's
+  published return evidence. One-component crate names retain Rust `::`
+  qualification; competing or unknown glob targets continue to fail closed.
+
 - Resolve published return candidates before using their types as chained-call
   receivers, and require Rust field receiver types to be source-local or
   explicitly imported before qualification. Unresolved prelude types such as
