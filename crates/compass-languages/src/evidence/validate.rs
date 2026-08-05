@@ -191,6 +191,7 @@ pub fn validate_evidence(
             limits,
         )?;
     }
+    validate_binding_chains(&bindings)?;
 
     let mut diagnostics: Vec<_> = batch.diagnostics.iter().collect();
     diagnostics.sort_unstable_by(|left, right| {
@@ -385,6 +386,46 @@ fn validate_fact(
                 .is_some_and(str::is_empty)
             {
                 return Err(invalid_fact(&fact.id, "call-result type is empty"));
+            }
+            if (fact.receiver_binding_id.is_some() || fact.fallback_binding_id.is_some())
+                && fact.kind != crate::BindingKind::CallResult
+            {
+                return Err(invalid_fact(
+                    &fact.id,
+                    "only call-result bindings may reference receiver or fallback bindings",
+                ));
+            }
+            require_optional_reference(
+                &fact.id,
+                "receiver binding",
+                fact.receiver_binding_id.as_deref(),
+                bindings,
+            )?;
+            require_optional_reference(
+                &fact.id,
+                "fallback binding",
+                fact.fallback_binding_id.as_deref(),
+                bindings,
+            )?;
+            if let Some(receiver_id) = fact.receiver_binding_id.as_deref()
+                && bindings
+                    .get(receiver_id)
+                    .is_some_and(|receiver| receiver.kind != crate::BindingKind::CallResult)
+            {
+                return Err(invalid_fact(
+                    &fact.id,
+                    "call-result receiver must reference another call-result binding",
+                ));
+            }
+            if let Some(fallback_id) = fact.fallback_binding_id.as_deref()
+                && bindings
+                    .get(fallback_id)
+                    .is_some_and(|fallback| fallback.kind == crate::BindingKind::CallResult)
+            {
+                return Err(invalid_fact(
+                    &fact.id,
+                    "call-result fallback must reference a non-call-result binding",
+                ));
             }
             require_optional_reference(
                 &fact.id,
@@ -612,6 +653,56 @@ fn validate_fact(
                 ));
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_binding_chains(bindings: &AHashMap<&str, &BindingFact>) -> Result<(), EvidenceError> {
+    const MAX_BINDING_CHAIN_DEPTH: usize = 64;
+
+    fn visit<'a>(
+        id: &'a str,
+        bindings: &AHashMap<&'a str, &'a BindingFact>,
+        visiting: &mut BTreeSet<&'a str>,
+        visited: &mut BTreeSet<&'a str>,
+        depth: usize,
+    ) -> Result<(), EvidenceError> {
+        if visited.contains(id) {
+            return Ok(());
+        }
+        if depth >= MAX_BINDING_CHAIN_DEPTH {
+            return Err(EvidenceError::new(
+                EvidenceErrorCode::ResourceLimit,
+                format!("binding chain rooted at {id:?} exceeds depth limit"),
+            ));
+        }
+        if !visiting.insert(id) {
+            return Err(EvidenceError::new(
+                EvidenceErrorCode::InvalidFact,
+                format!("binding chain contains a cycle at {id:?}"),
+            ));
+        }
+        if let Some(binding) = bindings.get(id) {
+            for next in [
+                binding.receiver_binding_id.as_deref(),
+                binding.fallback_binding_id.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                visit(next, bindings, visiting, visited, depth.saturating_add(1))?;
+            }
+        }
+        visiting.remove(id);
+        visited.insert(id);
+        Ok(())
+    }
+
+    let mut visited = BTreeSet::new();
+    let mut ids = bindings.keys().copied().collect::<Vec<_>>();
+    ids.sort_unstable();
+    for id in ids {
+        visit(id, bindings, &mut BTreeSet::new(), &mut visited, 0)?;
     }
     Ok(())
 }

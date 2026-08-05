@@ -253,6 +253,12 @@ pub struct BindingFact {
     /// Exact nominal result type proven by the adapter for this call result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_type_qualified_name: Option<String>,
+    /// Earlier call result whose nominal type receives this method call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_binding_id: Option<String>,
+    /// Prior binding retained when project-wide call-result evidence is absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_binding_id: Option<String>,
     pub range: EvidenceRange,
 }
 

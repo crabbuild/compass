@@ -159,6 +159,7 @@ pub struct UniversalResolutionIndex {
     wildcard_reexports_by_module: AHashMap<(String, String), WildcardModuleSet>,
     members: AHashMap<(String, String, String), Vec<String>>,
     returns_by_callable: AHashMap<(String, String), Vec<String>>,
+    outer_returns_by_callable: AHashMap<(String, String), Vec<String>>,
     go_module_path: Option<String>,
     limits: UniversalResolutionLimits,
 }
@@ -719,6 +720,7 @@ impl UniversalResolutionIndex {
             targets.dedup();
         }
         let mut return_entries = AHashMap::<_, Vec<_>>::new();
+        let mut outer_return_entries = AHashMap::<_, Vec<_>>::new();
         for candidate in candidates
             .values()
             .filter(|candidate| candidate.relation == CandidateRelation::Returns)
@@ -738,8 +740,31 @@ impl UniversalResolutionIndex {
                 .entry((candidate.language.clone(), callable.qualified_name.clone()))
                 .or_default()
                 .push((start_byte, candidate.id.clone(), return_type.clone()));
+            if candidate
+                .occurrence_id
+                .as_deref()
+                .and_then(|id| occurrences.get(id))
+                .and_then(|occurrence| occurrence.context.as_deref())
+                == Some("rust-outer-nominal-return")
+            {
+                outer_return_entries
+                    .entry((candidate.language.clone(), callable.qualified_name.clone()))
+                    .or_default()
+                    .push((start_byte, candidate.id.clone(), return_type.clone()));
+            }
         }
         let returns_by_callable = return_entries
+            .into_iter()
+            .map(|(key, mut entries)| {
+                entries.sort_unstable();
+                entries.truncate(limits.candidates_per_lookup);
+                (
+                    key,
+                    entries.into_iter().map(|(_, _, target)| target).collect(),
+                )
+            })
+            .collect();
+        let outer_returns_by_callable = outer_return_entries
             .into_iter()
             .map(|(key, mut entries)| {
                 entries.sort_unstable();
@@ -777,6 +802,7 @@ impl UniversalResolutionIndex {
             wildcard_reexports_by_module,
             members,
             returns_by_callable,
+            outer_returns_by_callable,
             go_module_path,
             limits,
         })
@@ -890,6 +916,20 @@ impl UniversalResolutionIndex {
                 candidate,
             );
         }
+        if let Some(decision) = self.resolve_explicit_binding(language, candidate) {
+            return decision;
+        }
+        let fallback_candidate = candidate
+            .binding_id
+            .as_deref()
+            .and_then(|binding_id| self.bindings.get(binding_id))
+            .filter(|binding| binding.kind == compass_languages::BindingKind::CallResult)
+            .map(|binding| {
+                let mut fallback = candidate.clone();
+                fallback.binding_id.clone_from(&binding.fallback_binding_id);
+                fallback
+            });
+        let candidate = fallback_candidate.as_ref().unwrap_or(candidate);
         let occurrence = self.occurrence(candidate);
         let qualifier = occurrence.and_then(|occurrence| occurrence.qualifier.as_deref());
         let has_unbound_qualified_receiver = qualifier.is_some_and(|qualifier| {
@@ -901,10 +941,6 @@ impl UniversalResolutionIndex {
                 candidate.binding_id.is_none()
                     && matches!((language, qualifier), ("python", "self" | "cls"))
             });
-
-        if let Some(decision) = self.resolve_explicit_binding(language, candidate) {
-            return decision;
-        }
         if matches!(
             candidate.constraints.hierarchy.as_ref(),
             Some(HierarchyConstraint::DirectBase { .. })
@@ -1311,6 +1347,20 @@ impl UniversalResolutionIndex {
                 if let Some(decision) = self.member_decision(language, &qualified, candidate) {
                     return Some(decision);
                 }
+                match self.rust_trait_member_declarations(language, &qualified, candidate) {
+                    Ok(declarations) => {
+                        if let Some(decision) = self.unique_decision(
+                            Some(&declarations),
+                            candidate,
+                            ResolutionRule::MemberBinding,
+                        ) {
+                            return Some(decision);
+                        }
+                    }
+                    Err(candidate_count) => {
+                        return Some(ResolutionDecision::Ambiguous { candidate_count });
+                    }
+                }
                 if let Some(decision) =
                     self.imported_member_decision(language, &qualified, candidate)
                 {
@@ -1330,7 +1380,20 @@ impl UniversalResolutionIndex {
                 });
             }
             Ok(None) if binding.kind == compass_languages::BindingKind::CallResult => {
-                return Some(ResolutionDecision::Unresolved);
+                if let Some(fallback_binding_id) = binding.fallback_binding_id.as_ref() {
+                    let mut fallback = candidate.clone();
+                    fallback.binding_id = Some(fallback_binding_id.clone());
+                    if let Some(decision) = self.resolve_explicit_binding(language, &fallback)
+                        && decision != ResolutionDecision::Unresolved
+                    {
+                        return Some(decision);
+                    }
+                }
+                // The call-result evidence is an optional refinement. If the
+                // project-wide callable or return type is unavailable, keep
+                // the candidate on its prior qualified/deferred path instead
+                // of suppressing source-valid fallback evidence.
+                return None;
             }
             Ok(None) => {}
             Err(candidate_count) => {
@@ -2821,42 +2884,15 @@ impl UniversalResolutionIndex {
         candidate: &RelationshipCandidate,
     ) -> Result<Option<String>, usize> {
         if binding.kind == compass_languages::BindingKind::CallResult {
-            if let Some(return_type) = binding.result_type_qualified_name.as_deref() {
-                return Ok(Some(format!(
-                    "{return_type}::{}",
-                    candidate.target_spelling
-                )));
-            }
-            let callable_ids = self.callable_declarations(language, &binding.qualified_target);
-            let [callable_id] = callable_ids.as_slice() else {
-                return if callable_ids.is_empty() {
-                    Ok(None)
-                } else {
-                    Err(callable_ids.len())
-                };
-            };
-            let Some(callable) = self.declaration(*callable_id) else {
-                return Ok(None);
-            };
-            let Some(return_types) = self
-                .returns_by_callable
-                .get(&(language.to_owned(), callable.qualified_name.clone()))
+            let Some(return_type) = self.call_result_return_type(
+                language,
+                binding,
+                candidate,
+                &mut BTreeSet::new(),
+                0,
+            )?
             else {
                 return Ok(None);
-            };
-            let return_type = if let Some(output_index) = binding.output_index {
-                let Ok(output_index) = usize::try_from(output_index) else {
-                    return Ok(None);
-                };
-                let Some(return_type) = return_types.get(output_index) else {
-                    return Ok(None);
-                };
-                return_type
-            } else {
-                let [return_type] = return_types.as_slice() else {
-                    return Err(return_types.len());
-                };
-                return_type
             };
             return Ok(Some(format!(
                 "{return_type}::{}",
@@ -2892,6 +2928,110 @@ impl UniversalResolutionIndex {
             target.clone_from(next);
         }
         Ok(Some(format!("{target}::{}", candidate.target_spelling)))
+    }
+
+    fn call_result_return_type(
+        &self,
+        language: &str,
+        binding: &BindingFact,
+        candidate: &RelationshipCandidate,
+        visiting: &mut BTreeSet<String>,
+        depth: usize,
+    ) -> Result<Option<String>, usize> {
+        const MAX_CALL_RESULT_DEPTH: usize = 64;
+
+        if depth >= MAX_CALL_RESULT_DEPTH || !visiting.insert(binding.id.clone()) {
+            return Err(visiting.len().saturating_add(1));
+        }
+        let result =
+            self.call_result_return_type_inner(language, binding, candidate, visiting, depth);
+        visiting.remove(&binding.id);
+        result
+    }
+
+    fn call_result_return_type_inner(
+        &self,
+        language: &str,
+        binding: &BindingFact,
+        candidate: &RelationshipCandidate,
+        visiting: &mut BTreeSet<String>,
+        depth: usize,
+    ) -> Result<Option<String>, usize> {
+        if let Some(return_type) = binding.result_type_qualified_name.as_ref() {
+            return Ok(Some(return_type.clone()));
+        }
+        let qualified_callable =
+            if let Some(receiver_binding_id) = binding.receiver_binding_id.as_ref() {
+                let Some(receiver_binding) = self.bindings.get(receiver_binding_id) else {
+                    return Ok(None);
+                };
+                let Some(receiver_type) = self.call_result_return_type(
+                    language,
+                    receiver_binding,
+                    candidate,
+                    visiting,
+                    depth.saturating_add(1),
+                )?
+                else {
+                    return Ok(None);
+                };
+                format!("{receiver_type}::{}", binding.qualified_target)
+            } else {
+                binding.qualified_target.clone()
+            };
+
+        let mut callable_ids = BTreeSet::new();
+        callable_ids.extend(
+            self.callable_declarations(language, &qualified_callable)
+                .into_iter()
+                .filter(|slot| self.declaration_allowed_slot(*slot, candidate)),
+        );
+        if callable_ids.is_empty()
+            && let Some(member_ids) =
+                self.member_declarations(language, &qualified_callable, candidate)
+        {
+            callable_ids.extend(member_ids);
+        }
+        if callable_ids.is_empty() {
+            callable_ids.extend(self.rust_trait_member_declarations(
+                language,
+                &qualified_callable,
+                candidate,
+            )?);
+        }
+        if callable_ids.len() > self.limits.candidates_per_lookup {
+            return Err(callable_ids.len());
+        }
+        let callable_ids = callable_ids.into_iter().collect::<Vec<_>>();
+        let [callable_id] = callable_ids.as_slice() else {
+            return if callable_ids.is_empty() {
+                Ok(None)
+            } else {
+                Err(callable_ids.len())
+            };
+        };
+        let Some(callable) = self.declaration(*callable_id) else {
+            return Ok(None);
+        };
+        let key = (language.to_owned(), callable.qualified_name.clone());
+        let return_types = if language == "rust" {
+            self.outer_returns_by_callable.get(&key)
+        } else {
+            self.returns_by_callable.get(&key)
+        };
+        let Some(return_types) = return_types else {
+            return Ok(None);
+        };
+        if let Some(output_index) = binding.output_index {
+            let Ok(output_index) = usize::try_from(output_index) else {
+                return Ok(None);
+            };
+            return Ok(return_types.get(output_index).cloned());
+        }
+        let [return_type] = return_types.as_slice() else {
+            return Err(return_types.len());
+        };
+        Ok(Some(return_type.clone()))
     }
 
     fn callable_declarations(&self, language: &str, qualified: &str) -> Vec<DeclarationSlot> {
@@ -2960,6 +3100,96 @@ impl UniversalResolutionIndex {
             candidate,
             ResolutionRule::MemberBinding,
         )
+    }
+
+    fn rust_trait_member_declarations(
+        &self,
+        language: &str,
+        qualified: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Result<Vec<DeclarationSlot>, usize> {
+        if language != "rust" {
+            return Ok(Vec::new());
+        }
+        let Some((receiver, member)) = split_qualified_member(qualified) else {
+            return Ok(Vec::new());
+        };
+        let receiver_slots = self
+            .by_qualified
+            .get(&(language.to_owned(), receiver.to_owned()))
+            .into_iter()
+            .flatten()
+            .filter(|slot| {
+                self.declaration(**slot).is_some_and(|declaration| {
+                    matches!(
+                        declaration.kind.as_str(),
+                        "class" | "enum" | "struct" | "trait" | "type_alias"
+                    )
+                })
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        let [receiver_slot] = receiver_slots.as_slice() else {
+            return if receiver_slots.is_empty() {
+                Ok(Vec::new())
+            } else {
+                Err(receiver_slots.len())
+            };
+        };
+        let Some(receiver_id) = self.declaration_id(*receiver_slot) else {
+            return Ok(Vec::new());
+        };
+        let mut matching_trait_sets = self
+            .rust_impl_traits
+            .iter()
+            .filter(|((implementer_id, _), _)| implementer_id == receiver_id)
+            .collect::<Vec<_>>();
+        matching_trait_sets.sort_by(|left, right| left.0.1.cmp(&right.0.1));
+        if matching_trait_sets.len() > self.limits.candidates_per_lookup {
+            return Err(matching_trait_sets.len());
+        }
+        let mut declarations = BTreeSet::new();
+        for ((_, raw_trait_name), traits) in matching_trait_sets {
+            if !traits.complete {
+                return Err(traits.candidate_ids.len().saturating_add(1));
+            }
+            for candidate_id in &traits.candidate_ids {
+                let Some(implementation) = self.candidates.get(candidate_id) else {
+                    return Err(1);
+                };
+                let trait_name =
+                    match self.resolve_rust_impl_trait_candidate(implementation, raw_trait_name) {
+                        ResolutionDecision::Resolved { declaration_id, .. } => {
+                            let Some(declaration) = self.declarations.get(&declaration_id) else {
+                                return Err(1);
+                            };
+                            declaration.qualified_name.as_str()
+                        }
+                        ResolutionDecision::Ambiguous { candidate_count } => {
+                            return Err(candidate_count);
+                        }
+                        ResolutionDecision::QualifiedExternal { .. }
+                        | ResolutionDecision::DeferredReceiver { .. }
+                        | ResolutionDecision::ResolvedInventory { .. }
+                        | ResolutionDecision::Unresolved => continue,
+                    };
+                if let Some(slots) = self
+                    .by_qualified
+                    .get(&(language.to_owned(), format!("{trait_name}::{member}")))
+                {
+                    declarations.extend(
+                        slots
+                            .iter()
+                            .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
+                            .copied(),
+                    );
+                }
+                if declarations.len() > self.limits.candidates_per_lookup {
+                    return Err(declarations.len());
+                }
+            }
+        }
+        Ok(declarations.into_iter().collect())
     }
 
     fn wildcard_reexport_decision(

@@ -24,9 +24,12 @@ the adapter actually emits. The batch contains six bounded collections:
   call-result, or package binding. Its target is qualified; a proven local
   declaration may also be named directly. A call-result binding names the
   exact callable that initialized a receiver and may record the zero-based
-  output selected by a destructuring assignment. An adapter may also preserve
-  one exact nominal result type when both that type and the following member
-  are proven in the same source file. Resolution otherwise requires a unique
+  output selected by a destructuring assignment. It may preserve an exact
+  nominal result type proven in the same file, reference an earlier
+  call-result binding to represent a bounded receiver chain, and retain one
+  non-call-result fallback binding for incomplete project-wide evidence. Chain
+  references must exist, remain acyclic, and stay within the evidence depth
+  limit. Resolution otherwise requires a unique
   callable and either one published return type or an in-range exact output
   position; unpositioned multi-result calls remain unresolved.
 - `OccurrenceFact` records one exact use site and its role, owner, spelling,

@@ -32,7 +32,7 @@ fn build() {
         .ok_or("missing Rust semantic evidence")?;
 
     assert_eq!(evidence.adapter.id, "compass.rust");
-    assert_eq!(evidence.adapter.version, 12);
+    assert_eq!(evidence.adapter.version, 13);
     assert_eq!(
         evidence.adapter.evidence_schema,
         "compass.languages.evidence/1"
@@ -127,8 +127,11 @@ fn unknown<T>(input: T) { input.transform().finish(); }
         .iter()
         .filter(|binding| binding.kind == BindingKind::CallResult)
         .collect::<Vec<_>>();
-    assert_eq!(bindings.len(), 1, "bindings={bindings:#?}");
-    let binding = bindings[0];
+    assert_eq!(bindings.len(), 2, "bindings={bindings:#?}");
+    let binding = bindings
+        .iter()
+        .find(|binding| binding.result_type_qualified_name.is_some())
+        .ok_or("missing exact local call-result binding")?;
     assert_eq!(binding.spelling, "input.transform()");
     assert_eq!(
         binding.qualified_target,
@@ -143,6 +146,34 @@ fn unknown<T>(input: T) { input.transform().finish(); }
             && candidate.target_spelling == "finish"
             && candidate.binding_id.as_deref() == Some(binding.id.as_str())
     }));
+    assert!(bindings.iter().any(|binding| {
+        binding.result_type_qualified_name.is_none()
+            && binding.qualified_target == "crate::method_chain::unknown::<T>::transform"
+    }));
+    Ok(())
+}
+
+#[test]
+fn raw_pointer_returns_are_not_retyped_as_the_pointee_receiver() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("pointer_chain.rs");
+    let source = br#"struct Worker;
+impl Worker { fn current() -> *const Worker { std::ptr::null() } }
+fn run() { unsafe { Worker::current().as_ref(); } }
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let current_result = evidence
+        .bindings
+        .iter()
+        .find(|binding| {
+            binding.kind == BindingKind::CallResult && binding.spelling == "Worker::current()"
+        })
+        .ok_or("missing current call-result binding")?;
+    assert_eq!(current_result.result_type_qualified_name, None);
     Ok(())
 }
 

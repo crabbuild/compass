@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Resolve bounded, multi-stage Rust method-result chains across files. Each
+  stage records its receiver call-result evidence, exact outer nominal return
+  types are selected ahead of nested generic arguments, and incomplete
+  project-wide evidence preserves the prior source-proven binding. Missing,
+  ambiguous, cyclic, raw-pointer, and over-depth chains fail closed. Trait
+  default dispatch is accepted only through a unique source-proven
+  implementation. Rust structural facts advance to adapter version 13.
+
 - Resolve Rust calls chained from a same-file, source-proven method result by
   preserving the exact outer nominal result type. Generic results such as
   `ThreadPoolBuilder<CustomSpawn<F>>` now resolve the next member against

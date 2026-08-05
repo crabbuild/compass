@@ -565,6 +565,33 @@ pinned Graphify graph does not represent this corrected call. Process times
 were 7.94, 2.10, and 2.08 seconds; the first was a mounted-volume startup
 outlier, so no performance claim is made from this run.
 
+Rust adapter version 13 was qualified on the same pinned Rayon checkout after
+adding bounded cross-file and trait-default method-result chains. Three fresh
+release builds were byte-identical at 11,998 nodes, 27,090 relationships, and
+graph SHA-256
+`e7179312b42de8dcadcfc85b728b78625460f651438956e57ebf508320422aae`.
+Relative to version 12, 169 new relationship occurrences are exact and 13
+formerly inferred occurrences become exact, with no exact occurrence lost.
+This includes the complete `par_split -> filter -> drive_unindexed` chains in
+`src/str.rs` and repeated `ThreadPoolBuilder` builder chains. The graph has no
+dangling or duplicate edges, every relationship has a source occurrence, and
+publication reports zero omitted nodes, four omitted edges, and zero identity
+collisions.
+
+The retained Graphify 0.9.32 comparison contains 7,701 relationships versus
+Compass's 27,090. Its classifications are 2,258 exact, 2,613 dominated, 2,498
+rejected, 19 ambiguous, and 313 missing. Six formerly missing Graphify call
+hypotheses are now rejected by exact source-occurrence targets; one formerly
+rejected hypothesis becomes missing because Compass no longer treats a
+`*const WorkerThread` return as a `WorkerThread` method receiver. These are
+quality classifications, not precision or recall. The inferred surface also
+remains a gap: 199 inferred placeholder identities were added and 59 removed
+relative to version 12, for a net increase of 140. They remain occurrence
+anchored but require further language-aware return modeling before their raw
+count can be treated as useful graph coverage. Process times were 3.51, 3.30,
+and 3.38 seconds versus the retained 1.947-second Graphify sample, so this
+small-repository run makes no performance-win claim.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and

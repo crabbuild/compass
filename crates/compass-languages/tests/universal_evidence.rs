@@ -75,6 +75,8 @@ fn valid_batch() -> SemanticEvidenceBatch {
             scope_id: Some("scope:caller".to_owned()),
             output_index: None,
             result_type_qualified_name: None,
+            receiver_binding_id: None,
+            fallback_binding_id: None,
             range: range(7, 13),
         }],
         occurrences: vec![OccurrenceFact {
@@ -170,6 +172,40 @@ fn exact_result_types_are_reserved_for_call_result_bindings() {
     let mut batch = valid_batch();
     batch.bindings[0].result_type_qualified_name = Some("example.Result".to_owned());
     assert_code(&batch, EvidenceErrorCode::InvalidFact);
+}
+
+#[test]
+fn call_result_chain_references_are_typed_and_acyclic() {
+    let mut reserved = valid_batch();
+    reserved.bindings[0].receiver_binding_id = Some("binding:helper".to_owned());
+    assert_code(&reserved, EvidenceErrorCode::InvalidFact);
+
+    let mut missing = valid_batch();
+    missing
+        .adapter
+        .capabilities
+        .push(LanguageCapability::TypeReferences);
+    missing.bindings[0].kind = BindingKind::CallResult;
+    missing.bindings[0].receiver_binding_id = Some("binding:missing".to_owned());
+    assert_code(&missing, EvidenceErrorCode::MissingReference);
+
+    let mut receiver_cycle = valid_batch();
+    receiver_cycle
+        .adapter
+        .capabilities
+        .push(LanguageCapability::TypeReferences);
+    receiver_cycle.bindings[0].kind = BindingKind::CallResult;
+    receiver_cycle.bindings[0].receiver_binding_id = Some("binding:helper".to_owned());
+    assert_code(&receiver_cycle, EvidenceErrorCode::InvalidFact);
+
+    let mut call_result_fallback = valid_batch();
+    call_result_fallback
+        .adapter
+        .capabilities
+        .push(LanguageCapability::TypeReferences);
+    call_result_fallback.bindings[0].kind = BindingKind::CallResult;
+    call_result_fallback.bindings[0].fallback_binding_id = Some("binding:helper".to_owned());
+    assert_code(&call_result_fallback, EvidenceErrorCode::InvalidFact);
 }
 
 #[test]
@@ -448,7 +484,7 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
     );
     assert_eq!(
         AdapterRegistry::universal_profile("rust").map(|profile| profile.version),
-        Some(12)
+        Some(13)
     );
 }
 

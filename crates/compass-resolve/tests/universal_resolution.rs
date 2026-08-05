@@ -3589,6 +3589,139 @@ fn run(builder: Builder) { builder.spawn_handler(|| {}).build(); }
 }
 
 #[test]
+fn rust_nested_cross_file_method_results_resolve_each_source_proven_stage() {
+    let provider_source = br#"pub struct Start;
+pub struct Split;
+pub struct Filtered;
+impl Start { pub fn split(self) -> Split { Split } }
+impl Split { pub fn filter(self) -> Filtered { Filtered } }
+impl Filtered { pub fn finish(self) {} }
+"#;
+    let caller_source = br#"use crate::pipeline::Start;
+fn run(start: Start) { start.split().filter().finish(); }
+"#;
+    let provider = extract("src/pipeline.rs", provider_source);
+    let caller = extract("src/lib.rs", caller_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, caller],
+        &HashMap::from([
+            (
+                "src/pipeline.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(caller_source.to_vec()).expect("caller source"),
+            ),
+        ]),
+    );
+    for qualified_name in [
+        "crate::pipeline::Start::split",
+        "crate::pipeline::Split::filter",
+        "crate::pipeline::Filtered::finish",
+    ] {
+        let target = resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+            .unwrap_or_else(|| panic!("missing {qualified_name}"));
+        assert!(
+            resolved.edges.iter().any(|edge| {
+                edge.string("relation") == "calls"
+                    && edge.target == target.id
+                    && edge.string("source_location") == "L2"
+                    && edge.string("confidence") == "EXTRACTED"
+            }),
+            "missing exact call to {qualified_name}: {:#?}",
+            resolved.edges
+        );
+    }
+    assert!(resolved.nodes.iter().all(|node| {
+        let qualified = node.string("qualified_name");
+        !qualified.contains("split()::filter") && !qualified.contains("filter()::finish")
+    }));
+}
+
+#[test]
+fn rust_nested_trait_method_results_resolve_tuple_field_chains() {
+    let source = br#"trait ParallelIterator {
+    fn filter(self) -> Filter { Filter }
+    fn drive_unindexed(self) {}
+}
+trait ParallelString { fn par_split(&self) -> Split { Split } }
+impl ParallelString for str {}
+struct Split;
+impl ParallelIterator for Split {}
+struct Filter;
+impl ParallelIterator for Filter { fn drive_unindexed(self) {} }
+struct SplitWhitespace<'a>(&'a str);
+impl<'a> SplitWhitespace<'a> {
+    fn drive(self) { self.0.par_split().filter().drive_unindexed(); }
+}
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    for qualified_name in [
+        "crate::ParallelString::par_split",
+        "crate::ParallelIterator::filter",
+        "<crate::Filter as crate::ParallelIterator>::drive_unindexed",
+    ] {
+        let target = resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+            .unwrap_or_else(|| panic!("missing {qualified_name}: {:#?}", resolved.nodes));
+        assert!(
+            resolved.edges.iter().any(|edge| {
+                edge.string("relation") == "calls"
+                    && edge.target == target.id
+                    && edge.string("source_location") == "L13"
+                    && edge.string("confidence") == "EXTRACTED"
+            }),
+            "missing exact call to {qualified_name}: {:#?}",
+            resolved.edges
+        );
+    }
+}
+
+#[test]
+fn rust_nested_call_result_preserves_a_typed_receiver_fallback() {
+    let source = br#"struct Container;
+impl Container { fn into_return_value(self) {} }
+fn run(value: Container) { value.into_inner().into_return_value(); }
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let into_return_value = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Container::into_return_value")
+        .expect("Container.into_return_value method");
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.string("relation") == "calls"
+                && edge.target == into_return_value.id
+                && edge.string("source_location") == "L3"
+                && edge.string("confidence") == "EXTRACTED"
+        }),
+        "edges={:#?}",
+        resolved.edges
+    );
+}
+
+#[test]
 fn rust_chained_call_result_follows_a_unique_aliased_owner_prefix() {
     let provider_source = br#"mod guard {
     pub trait Drain { fn par_drain(self); }
@@ -3670,6 +3803,48 @@ fn invoke() { Guard::new().run(); }
         node.string("qualified_name") != "crate::Guard::run"
             && node.string("qualified_name") != "crate::Guard::new::run"
     }));
+}
+
+#[test]
+fn rust_chained_call_result_with_ambiguous_trait_defaults_fails_closed() {
+    let source = br#"trait First { fn finish(self) {} }
+trait Second { fn finish(self) {} }
+struct ResultValue;
+struct Start;
+impl Start { fn make(self) -> ResultValue { ResultValue } }
+impl First for ResultValue {}
+impl Second for ResultValue {}
+fn invoke(start: Start) { start.make().finish(); }
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let ambiguous_finishes = resolved
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.string("symbol_kind") == "method"
+                && node.string("qualified_name").ends_with("::finish")
+        })
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(ambiguous_finishes.len(), 2);
+    assert!(resolved.edges.iter().all(|edge| {
+        !(edge.string("relation") == "calls"
+            && edge.string("source_location") == "L8"
+            && ambiguous_finishes.contains(edge.target.as_str()))
+    }));
+    assert!(
+        resolved
+            .nodes
+            .iter()
+            .all(|node| node.string("qualified_name") != "crate::ResultValue::finish")
+    );
 }
 
 #[test]
