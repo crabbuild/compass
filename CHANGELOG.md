@@ -15,6 +15,12 @@
   across fully cached edit/restore builds, and improve canonical graph JSON
   publication parallelism for medium and large structural graphs without
   changing serialized bytes.
+- Bound default parallel AST extraction to eight workers to reduce parser
+  working-set multiplication on large repositories. Go multi-result call
+  attribution now preserves indexed return types through ranges and closures;
+  Rust generic trait-bound receivers resolve to their source trait methods,
+  while ambiguous bounds remain unresolved. Universal resolver publication
+  also avoids a duplicate declaration-slot index.
 
 ## 0.3.2 - 2026-08-03
 
