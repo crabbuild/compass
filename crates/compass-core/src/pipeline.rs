@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 use ahash::{AHashMap, AHashSet};
 use compass_files::{
-    BuildGuard, BuildScope, Cache, CacheKind, CacheOptions, DetectOptions, Detection, IgnorePolicy,
-    Manifest, ManifestKind, detect, write_atomic_with_digest, write_json_atomic,
+    BuildGuard, BuildScope, Cache, CacheOptions, DetectOptions, Detection, IgnorePolicy, Manifest,
+    ManifestKind, detect, write_atomic_with_digest, write_json_atomic,
     write_json_atomic_with_digest, write_text_atomic,
 };
 use compass_graph::{
@@ -1819,14 +1819,13 @@ fn build_graph_inner(
                 );
                 continue;
             }
-            let cached = cache.load(path, &CacheKind::Ast, None, false)?;
+            let cached = cache.load_portable_ast(path, false)?;
             if let Some(value) = cached {
-                let mut extraction =
+                let extraction =
                     serde_json::from_value(value).map_err(|source| CoreError::InvalidCache {
                         path: path.clone(),
                         source,
                     })?;
-                absolutize_cached_framework_fact_sources(&mut extraction, &root);
                 if cached_framework_evidence_matches(&extraction, path, &project_evidence)
                     && cached_universal_evidence_matches(&extraction, path)
                 {
@@ -2216,11 +2215,12 @@ fn build_graph_inner(
     }
     profile_internal("portable AST ID remapping", &mut internal_started);
     // Continue the cold build from the same portable representation that a
-    // subsequent cache hit will decode. Otherwise absolute origin attributes
-    // can make project-wide declaration merging and edge de-duplication depend
-    // on whether a file was freshly extracted or loaded from the AST cache.
+    // subsequent cache hit will decode. Cache hits already have this
+    // representation; only fresh extractions need the normalization walk.
     for (path, extraction) in ordered_paths.iter().zip(&mut ordered) {
-        prepare_portable_ast_cache_entry(extraction, path, &root);
+        if fresh_paths.contains(path) {
+            prepare_portable_ast_cache_entry(extraction, path, &root);
+        }
     }
     let ast_cache_sources = ordered_paths
         .iter()
@@ -5508,19 +5508,6 @@ fn make_framework_fact_sources_portable(extraction: &mut Extraction, root: &Path
             |_| portable_out_of_root_source(&canonical, root),
             |relative| relative.to_string_lossy().replace('\\', "/"),
         );
-    }
-}
-
-fn absolutize_cached_framework_fact_sources(extraction: &mut Extraction, root: &Path) {
-    for fact in &mut extraction.framework_facts {
-        let source_file = match fact {
-            RawFrameworkFact::Route(route) => &mut route.anchor.source_file,
-            RawFrameworkFact::Domain(domain) => &mut domain.anchor.source_file,
-            RawFrameworkFact::Annotation(annotation) => &mut annotation.anchor.source_file,
-        };
-        if !source_file.is_empty() && !Path::new(source_file).is_absolute() {
-            *source_file = root.join(&*source_file).to_string_lossy().into_owned();
-        }
     }
 }
 

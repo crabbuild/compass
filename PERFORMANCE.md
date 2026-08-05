@@ -224,7 +224,10 @@ sequential to avoid multiplying parser/AST working sets; the automatic path
 uses a default cap of 8 local workers once that measured crossover is reached,
 while `--max-workers` remains the explicit override. Portable AST publication
 also streams one compressed value at a time instead of retaining the entire
-compressed batch in memory.
+compressed batch in memory. Incremental cache hits now remain in that portable
+representation when loaded by the extraction pipeline, so only freshly
+extracted files pay the source-path normalization walk; the public cache reader
+continues to return its established absolute-path representation.
 
 The same Cobra checkout was cold-built into a fresh SQLite output and then
 received a comment-only edit. The edit extracted 1 file and reused 36 cached

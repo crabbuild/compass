@@ -202,6 +202,29 @@ impl Cache {
         prompt_fingerprint: Option<&str>,
         allow_partial: bool,
     ) -> Result<Option<Value>, FileError> {
+        self.load_with_source_paths(path, kind, prompt_fingerprint, allow_partial, true)
+    }
+
+    /// Load a pipeline-owned AST cache entry without expanding its portable
+    /// source paths. The extraction pipeline keeps these values portable until
+    /// publication, so expanding and then re-normalizing every cached node and
+    /// edge would only add work to incremental builds.
+    pub fn load_portable_ast(
+        &mut self,
+        path: &Path,
+        allow_partial: bool,
+    ) -> Result<Option<Value>, FileError> {
+        self.load_with_source_paths(path, &CacheKind::Ast, None, allow_partial, false)
+    }
+
+    fn load_with_source_paths(
+        &mut self,
+        path: &Path,
+        kind: &CacheKind,
+        prompt_fingerprint: Option<&str>,
+        allow_partial: bool,
+        absolutize_paths: bool,
+    ) -> Result<Option<Value>, FileError> {
         let hash = self.content_hash(path)?;
         let key = self.source_cache_key(path, &hash);
         if deterministic_binary_kind(kind) {
@@ -214,7 +237,9 @@ impl Cache {
                 if !allow_partial && value.get("partial").and_then(Value::as_bool) == Some(true) {
                     return Ok(None);
                 }
-                absolutize_source_files(&mut value, &self.root);
+                if absolutize_paths {
+                    absolutize_source_files(&mut value, &self.root);
+                }
                 return Ok(Some(value));
             }
             return Ok(None);
@@ -225,7 +250,7 @@ impl Cache {
         if !entry.exists() {
             return Ok(None);
         }
-        load_json_value(&entry, allow_partial, &self.root)
+        load_json_value(&entry, allow_partial, &self.root, absolutize_paths)
     }
 
     pub fn save(
@@ -699,6 +724,7 @@ fn load_json_value(
     path: &Path,
     allow_partial: bool,
     root: &Path,
+    absolutize_paths: bool,
 ) -> Result<Option<Value>, FileError> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
@@ -711,7 +737,9 @@ fn load_json_value(
     if !allow_partial && value.get("partial").and_then(Value::as_bool) == Some(true) {
         return Ok(None);
     }
-    absolutize_source_files(&mut value, root);
+    if absolutize_paths {
+        absolutize_source_files(&mut value, root);
+    }
     Ok(Some(value))
 }
 
