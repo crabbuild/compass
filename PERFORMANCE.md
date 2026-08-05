@@ -313,8 +313,9 @@ physical file had the same qualified identity. Three fresh graphs were
 byte-identical (SHA-256
 `21711c58282858cf0fc6873ac538ea88445f6a0718159ee776397eb359aa4af4`)
 at 11,963 nodes and 25,095 occurrence-backed relationships. Wall times were
-11.60, 2.24, and 1.88 seconds; the copied-binary cold-launch outlier is retained
-and the median was 2.24 seconds. Maximum peak RSS was 384,450,560 bytes. Four
+7.47, 1.96, and 2.45 seconds in the committed-revision rerun; the copied-binary
+cold-launch outlier is retained and the median was 2.45 seconds. Maximum peak
+RSS was 380,092,416 bytes. Four
 pre-existing unrelated edges were omitted.
 
 The source-compatible comparison now reports 2,160 exact, 2,408 dominated,
