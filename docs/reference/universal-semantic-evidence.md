@@ -31,7 +31,12 @@ the adapter actually emits. The batch contains six bounded collections:
   references must exist, remain acyclic, and stay within the evidence depth
   limit. Resolution otherwise requires a unique
   callable and either one published return type or an in-range exact output
-  position; unpositioned multi-result calls remain unresolved.
+  position; unpositioned multi-result calls remain unresolved. A return
+  candidate's proposed qualified name is not authoritative receiver evidence:
+  downstream call-result resolution may use it only after the candidate
+  resolves to an exact source declaration or an explicitly qualified external
+  identity. An unresolved prelude or imported spelling must not be
+  reinterpreted as a repository-local type.
 - `OccurrenceFact` records one exact use site and its role, owner, spelling,
   optional qualifier, lexical scope, and range. Repeated uses are separate
   occurrences.
@@ -79,6 +84,13 @@ available argument evidence cannot choose among them, the call remains
 unresolved; it must not fall through to an external or deferred placeholder.
 The absence of a local method with that spelling does not suppress a genuinely
 external inherent method on an external receiver.
+
+Rust typed receivers follow the same provenance rule across parameters,
+locals, fields, and callable results. An unqualified prelude spelling is not a
+repository-local receiver unless a source declaration or explicit import
+proves that ownership. Unshadowed `Option` and `Result` use their canonical
+standard-library identities; other unproven spellings remain unresolved
+rather than becoming crate-qualified placeholders.
 
 ### Required invariants
 

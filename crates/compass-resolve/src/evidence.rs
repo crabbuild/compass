@@ -158,8 +158,8 @@ pub struct UniversalResolutionIndex {
     wildcard_bindings_by_module: AHashMap<(String, String), WildcardModuleSet>,
     wildcard_reexports_by_module: AHashMap<(String, String), WildcardModuleSet>,
     members: AHashMap<(String, String, String), Vec<String>>,
-    returns_by_callable: AHashMap<(String, String), Vec<String>>,
-    outer_returns_by_callable: AHashMap<(String, String), Vec<String>>,
+    return_candidates_by_callable: AHashMap<(String, String), Vec<String>>,
+    outer_return_candidates_by_callable: AHashMap<(String, String), Vec<String>>,
     go_module_path: Option<String>,
     limits: UniversalResolutionLimits,
 }
@@ -728,9 +728,9 @@ impl UniversalResolutionIndex {
             let Some(callable) = declarations.get(&candidate.source_declaration_id) else {
                 continue;
             };
-            let Some(return_type) = candidate.constraints.qualified_name.as_ref() else {
+            if candidate.constraints.qualified_name.is_none() {
                 continue;
-            };
+            }
             let start_byte = candidate
                 .occurrence_id
                 .as_deref()
@@ -739,7 +739,7 @@ impl UniversalResolutionIndex {
             return_entries
                 .entry((candidate.language.clone(), callable.qualified_name.clone()))
                 .or_default()
-                .push((start_byte, candidate.id.clone(), return_type.clone()));
+                .push((start_byte, candidate.id.clone()));
             if candidate
                 .occurrence_id
                 .as_deref()
@@ -750,28 +750,34 @@ impl UniversalResolutionIndex {
                 outer_return_entries
                     .entry((candidate.language.clone(), callable.qualified_name.clone()))
                     .or_default()
-                    .push((start_byte, candidate.id.clone(), return_type.clone()));
+                    .push((start_byte, candidate.id.clone()));
             }
         }
-        let returns_by_callable = return_entries
+        let return_candidates_by_callable = return_entries
             .into_iter()
             .map(|(key, mut entries)| {
                 entries.sort_unstable();
                 entries.truncate(limits.candidates_per_lookup);
                 (
                     key,
-                    entries.into_iter().map(|(_, _, target)| target).collect(),
+                    entries
+                        .into_iter()
+                        .map(|(_, candidate)| candidate)
+                        .collect(),
                 )
             })
             .collect();
-        let outer_returns_by_callable = outer_return_entries
+        let outer_return_candidates_by_callable = outer_return_entries
             .into_iter()
             .map(|(key, mut entries)| {
                 entries.sort_unstable();
                 entries.truncate(limits.candidates_per_lookup);
                 (
                     key,
-                    entries.into_iter().map(|(_, _, target)| target).collect(),
+                    entries
+                        .into_iter()
+                        .map(|(_, candidate)| candidate)
+                        .collect(),
                 )
             })
             .collect();
@@ -801,8 +807,8 @@ impl UniversalResolutionIndex {
             wildcard_bindings_by_module,
             wildcard_reexports_by_module,
             members,
-            returns_by_callable,
-            outer_returns_by_callable,
+            return_candidates_by_callable,
+            outer_return_candidates_by_callable,
             go_module_path,
             limits,
         })
@@ -3014,24 +3020,54 @@ impl UniversalResolutionIndex {
             return Ok(None);
         };
         let key = (language.to_owned(), callable.qualified_name.clone());
-        let return_types = if language == "rust" {
-            self.outer_returns_by_callable.get(&key)
+        let return_candidates = if language == "rust" {
+            self.outer_return_candidates_by_callable.get(&key)
         } else {
-            self.returns_by_callable.get(&key)
+            self.return_candidates_by_callable.get(&key)
         };
-        let Some(return_types) = return_types else {
+        let Some(return_candidates) = return_candidates else {
             return Ok(None);
         };
         if let Some(output_index) = binding.output_index {
             let Ok(output_index) = usize::try_from(output_index) else {
                 return Ok(None);
             };
-            return Ok(return_types.get(output_index).cloned());
+            let Some(return_candidate) = return_candidates.get(output_index) else {
+                return Ok(None);
+            };
+            return self.resolved_return_type(return_candidate);
         }
-        let [return_type] = return_types.as_slice() else {
-            return Err(return_types.len());
+        let [return_candidate] = return_candidates.as_slice() else {
+            return Err(return_candidates.len());
         };
-        Ok(Some(return_type.clone()))
+        self.resolved_return_type(return_candidate)
+    }
+
+    fn resolved_return_type(&self, candidate_id: &str) -> Result<Option<String>, usize> {
+        let Some(candidate) = self.candidates.get(candidate_id) else {
+            return Ok(None);
+        };
+        if candidate
+            .binding_id
+            .as_deref()
+            .and_then(|binding_id| self.bindings.get(binding_id))
+            .is_some_and(|binding| binding.kind == compass_languages::BindingKind::CallResult)
+        {
+            return Ok(None);
+        }
+        match self.resolve(candidate_id) {
+            ResolutionDecision::Resolved { declaration_id, .. } => Ok(self
+                .declarations
+                .get(&declaration_id)
+                .map(|declaration| declaration.qualified_name.clone())),
+            ResolutionDecision::QualifiedExternal { qualified_name, .. } => {
+                Ok(Some(qualified_name))
+            }
+            ResolutionDecision::Ambiguous { candidate_count } => Err(candidate_count),
+            ResolutionDecision::ResolvedInventory { .. }
+            | ResolutionDecision::DeferredReceiver { .. }
+            | ResolutionDecision::Unresolved => Ok(None),
+        }
     }
 
     fn callable_declarations(&self, language: &str, qualified: &str) -> Vec<DeclarationSlot> {

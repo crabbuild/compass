@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Resolve published return candidates before using their types as chained-call
+  receivers, and require Rust field receiver types to be source-local or
+  explicitly imported before qualification. Unresolved prelude types such as
+  `Result` and `Option` now use their canonical standard-library ownership
+  instead of becoming fabricated crate-local types or methods, while exact
+  source-local and explicitly qualified external types remain resolvable.
+  Rust structural facts advance to adapter version 14.
+
 - Resolve bounded, multi-stage Rust method-result chains across files. Each
   stage records its receiver call-result evidence, exact outer nominal return
   types are selected ahead of nested generic arguments, and incomplete

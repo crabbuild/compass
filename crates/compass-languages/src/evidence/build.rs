@@ -7953,6 +7953,16 @@ fn rust_qualify_evidence_path(
             target.clone()
         });
     }
+    if qualifier.is_none() {
+        let prelude_type = match binding_name {
+            "Option" => Some("std::option::Option"),
+            "Result" => Some("std::result::Result"),
+            _ => None,
+        };
+        if let Some(prelude_type) = prelude_type {
+            return Some(prelude_type.to_owned());
+        }
+    }
     if matches!(binding_name, "crate" | "self" | "super") {
         return Some(state.rust_canonical_import_target(&state.rust_enclosing_module(owner), &raw));
     }

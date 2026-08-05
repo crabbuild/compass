@@ -3546,6 +3546,164 @@ fn run(input: Input) { input.transform().finish(); }
 }
 
 #[test]
+fn rust_unresolved_prelude_return_does_not_invent_a_local_result_receiver() {
+    let source = br#"struct Builder;
+struct Pool;
+struct Error;
+impl Builder { fn build(self) -> Result<Pool, Error> { todo!() } }
+fn run(builder: Builder) { builder.build().unwrap(); }
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    assert!(resolved.nodes.iter().all(|node| {
+        node.string("qualified_name") != "crate::Result::unwrap"
+            && node.string("qualified_name") != "crate::Result"
+    }));
+    assert!(
+        resolved
+            .nodes
+            .iter()
+            .any(|node| node.string("qualified_name") == "std::result::Result::unwrap")
+    );
+}
+
+#[test]
+fn rust_source_local_result_return_still_resolves_its_exact_member() {
+    let source = br#"struct ResultValue;
+impl ResultValue { fn unwrap(self) {} }
+struct Builder;
+impl Builder { fn build(self) -> ResultValue { ResultValue } }
+fn run(builder: Builder) { builder.build().unwrap(); }
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let unwrap = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::ResultValue::unwrap")
+        .expect("ResultValue.unwrap method");
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == unwrap.id
+            && edge.string("source_location") == "L5"
+            && edge.string("confidence") == "EXTRACTED"
+    }));
+}
+
+#[test]
+fn rust_imported_external_return_preserves_its_qualified_member() {
+    let source = br#"use external::Handle;
+struct Builder;
+impl Builder { fn build(self) -> Handle { todo!() } }
+fn run(builder: Builder) { builder.build().close(); }
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let close = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "external::Handle::close")
+        .expect("qualified external Handle.close placeholder");
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == close.id
+            && edge.string("source_location") == "L4"
+            && edge.string("confidence") == "INFERRED"
+    }));
+}
+
+#[test]
+fn rust_unresolved_prelude_field_does_not_invent_a_local_option_receiver() {
+    let source = br#"struct Holder { value: Option<u32> }
+impl Holder { fn run(&mut self) { self.value.take(); } }
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let take_candidate = extracted
+        .semantic_evidence
+        .as_ref()
+        .and_then(|evidence| {
+            evidence
+                .candidates
+                .iter()
+                .find(|candidate| candidate.target_spelling == "take")
+        })
+        .expect("self.value.take candidate");
+    assert_eq!(
+        take_candidate.constraints.qualified_name.as_deref(),
+        Some("std::option::Option::take")
+    );
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    assert!(resolved.nodes.iter().all(|node| {
+        node.string("qualified_name") != "crate::Option::take"
+            && node.string("qualified_name") != "crate::Option"
+    }));
+    let take_targets = resolved
+        .nodes
+        .iter()
+        .map(|node| node.string("qualified_name"))
+        .filter(|qualified| qualified.ends_with("::take"))
+        .collect::<Vec<_>>();
+    assert!(
+        take_targets
+            .iter()
+            .any(|target| target == "std::option::Option::take"),
+        "unexpected take targets: {take_targets:?}"
+    );
+}
+
+#[test]
+fn rust_source_local_field_type_still_resolves_its_exact_member() {
+    let source = br#"struct Value;
+impl Value { fn take(&mut self) {} }
+struct Holder { value: Value }
+impl Holder { fn run(&mut self) { self.value.take(); } }
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let take = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Value::take")
+        .expect("Value.take method");
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == take.id
+            && edge.string("source_location") == "L4"
+            && edge.string("confidence") == "EXTRACTED"
+    }));
+}
+
+#[test]
 fn rust_chained_generic_method_result_uses_the_outer_nominal_type() {
     let source = br#"struct DefaultSpawn;
 struct CustomSpawn<F>(F);
