@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Treat a Rust wildcard target in another crate as repository-local only when
+  that exact file, module, or enum declaration is present in the indexed
+  source. This lets multi-crate workspaces resolve unique grouped reexports and
+  local calls across sibling crate globs while unknown external globs still
+  make the search fail closed. It also removes misleading placeholders such as
+  `rayon::prelude::Vec` that assigned standard-prelude names to an unrelated
+  explicit wildcard.
+
 - Resolve Rust `Self::Type` through a complete source-proven supertrait
   hierarchy and the associated-type realization owned by the exact receiver
   declaration. Parent-module glob imports, including private imports exposed

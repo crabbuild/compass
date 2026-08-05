@@ -153,6 +153,7 @@ pub struct UniversalResolutionIndex {
     rust_impl_traits: AHashMap<(String, String), RustImplTraitSet>,
     inventory_by_qualified: AHashMap<(String, String), Vec<String>>,
     aliases: AHashMap<(String, String), Vec<String>>,
+    rust_source_wildcard_targets: AHashSet<String>,
     wildcard_bindings_by_scope: AHashMap<(String, String), WildcardModuleSet>,
     wildcard_bindings_by_module: AHashMap<(String, String), WildcardModuleSet>,
     wildcard_reexports_by_module: AHashMap<(String, String), WildcardModuleSet>,
@@ -257,6 +258,14 @@ impl UniversalResolutionIndex {
             }
         }
         profile_internal("universal fact collection", &mut profile_started);
+        let rust_source_wildcard_targets = declarations
+            .values()
+            .filter(|declaration| {
+                declaration.language == "rust"
+                    && matches!(declaration.kind.as_str(), "file" | "module" | "enum")
+            })
+            .map(|declaration| declaration.qualified_name.clone())
+            .collect::<AHashSet<_>>();
         let mut declaration_ids = declarations.keys().cloned().collect::<Vec<_>>();
         declaration_ids.sort_unstable();
         let declaration_slots = declaration_ids
@@ -622,7 +631,9 @@ impl UniversalResolutionIndex {
                 .is_some_and(|owner| {
                     qualified_root(&owner.qualified_name)
                         == qualified_root(&binding.qualified_target)
-                });
+                })
+                || (binding.language == "rust"
+                    && rust_source_wildcard_targets.contains(&binding.qualified_target));
             entry.complete &= target_is_internal;
             entry.modules.push(binding.qualified_target.clone());
             if let Some(owner) = scopes
@@ -760,6 +771,7 @@ impl UniversalResolutionIndex {
             rust_impl_traits,
             inventory_by_qualified,
             aliases,
+            rust_source_wildcard_targets,
             wildcard_bindings_by_scope,
             wildcard_bindings_by_module,
             wildcard_reexports_by_module,
@@ -1251,6 +1263,10 @@ impl UniversalResolutionIndex {
             return false;
         };
         qualified_root(&owner.qualified_name) == qualified_root(&binding.qualified_target)
+            || (binding.language == "rust"
+                && self
+                    .rust_source_wildcard_targets
+                    .contains(&binding.qualified_target))
     }
 
     fn resolve_explicit_binding(

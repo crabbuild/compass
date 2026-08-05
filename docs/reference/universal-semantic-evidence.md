@@ -242,6 +242,13 @@ by its source-proven parent module, including a private parent glob import.
 That parent scope is traversed only when it is an ancestor of the use site;
 external, truncated, or competing glob scopes still fail closed.
 
+Wildcard completeness may cross a Rust crate boundary only when the exact
+target has a file, module, or enum declaration in the indexed source set. A
+source-present sibling crate therefore participates in the bounded union of
+visible glob scopes, while an unknown dependency keeps that union incomplete.
+The resolver never assumes that a different crate root is external or that a
+named dependency is local solely from its spelling.
+
 Python file imports are visible at module scope. Function- and class-local
 imports are indexed only in their owning lexical scope, so they cannot leak to
 sibling functions or become file-owned facts. Each imported item retains its

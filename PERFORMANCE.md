@@ -420,6 +420,22 @@ run. Node classifications remain 2,758 exact, 271 dominated, 1,083 rejected,
 and 85 missing. These are source-constrained comparator classifications, not
 statistical precision or recall measurements.
 
+A further 2026-08-05 Rayon qualification made Rust wildcard completeness aware
+of exact source-present sibling crates. Three clean release builds were byte
+identical at 12,060 nodes, 26,675 relationships, and graph SHA-256
+`52df1abb0e84468f165b1e1066a254b45b1d8dafb200b83519d38c767a17e99b`.
+Relative to the preceding graph, 34 call and 20 test occurrences were added,
+including exact `empty`, `once`, `repeat_n`, `scope`, and `Board::random`
+targets. The graph removed 177 placeholder relationships whose targets were
+not declarations in the indexed wildcard modules, including false
+`rayon::prelude::Vec`, `rayon::prelude::Send`, and
+`rayon::prelude::FnOnce` identities. The comparator reports 2,251 exact, 2,516
+dominated, 2,585 rejected, 19 ambiguous, and 330 missing Graphify edge
+hypotheses: nine more exact matches and four fewer missing hypotheses than the
+preceding run. Node classifications remain 2,758 exact, 271 dominated, 1,083
+rejected, and 85 missing. These are source-constrained comparator
+classifications, not statistical precision or recall measurements.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and

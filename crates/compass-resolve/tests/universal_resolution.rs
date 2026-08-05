@@ -797,6 +797,96 @@ fn rust_local_module_reexports_resolve_without_external_placeholders() {
 }
 
 #[test]
+fn rust_child_glob_resolves_parent_reexports_with_source_present_sibling_crate() {
+    let provider_source = b"pub struct Empty;\npub fn empty() -> Empty { Empty }\n";
+    let parent_source = b"mod empty;\npub use self::empty::{Empty, empty};\nmod test;\n";
+    let sibling_source = b"pub fn sibling_api() {}\n";
+    let child_source =
+        b"use rayon_core::*;\nuse super::*;\nfn check_empty() { let _ = empty(); }\n";
+    let provider = extract("src/iter/empty.rs", provider_source);
+    let parent = extract("src/iter/mod.rs", parent_source);
+    let sibling = extract("rayon-core/src/lib.rs", sibling_source);
+    let child = extract("src/iter/test.rs", child_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, parent, sibling, child],
+        &HashMap::from([
+            (
+                "src/iter/empty.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/iter/mod.rs".to_owned(),
+                String::from_utf8(parent_source.to_vec()).expect("parent source"),
+            ),
+            (
+                "rayon-core/src/lib.rs".to_owned(),
+                String::from_utf8(sibling_source.to_vec()).expect("sibling source"),
+            ),
+            (
+                "src/iter/test.rs".to_owned(),
+                String::from_utf8(child_source.to_vec()).expect("child source"),
+            ),
+        ]),
+    );
+    let empty = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::iter::empty::empty")
+        .expect("re-exported empty function");
+    let caller = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::iter::test::check_empty")
+        .expect("child caller");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == caller.id
+            && edge.target == empty.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "wildcard-binding"
+    }));
+
+    let unknown_child_source =
+        b"use missing_core::*;\nuse super::*;\nfn check_empty() { let _ = empty(); }\n";
+    let unresolved = compass_resolve::resolve(
+        &[
+            extract("src/iter/empty.rs", provider_source),
+            extract("src/iter/mod.rs", parent_source),
+            extract("src/iter/test.rs", unknown_child_source),
+        ],
+        &HashMap::from([
+            (
+                "src/iter/empty.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/iter/mod.rs".to_owned(),
+                String::from_utf8(parent_source.to_vec()).expect("parent source"),
+            ),
+            (
+                "src/iter/test.rs".to_owned(),
+                String::from_utf8(unknown_child_source.to_vec()).expect("unknown child source"),
+            ),
+        ]),
+    );
+    let unresolved_empty = unresolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::iter::empty::empty")
+        .expect("re-exported empty function with unknown sibling");
+    let unresolved_caller = unresolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::iter::test::check_empty")
+        .expect("child caller with unknown sibling");
+    assert!(unresolved.edges.iter().all(|edge| {
+        edge.source != unresolved_caller.id
+            || edge.target != unresolved_empty.id
+            || edge.string("relation") != "calls"
+    }));
+}
+
+#[test]
 fn rust_importing_a_local_module_targets_its_module_declaration() {
     let root_source = b"mod unwind;\nmod job;\n";
     let unwind_source = b"pub fn halt() {}\n";
