@@ -1020,6 +1020,209 @@ impl Produce for Alpha {
 }
 
 #[test]
+fn rust_inherited_associated_return_resolves_through_the_exact_supertrait_impl() {
+    let traits = br#"pub trait Consumer<Item>: Send + Sized {
+    type Reducer;
+}
+pub trait UnindexedConsumer<I>: Consumer<I> {
+    fn to_reducer(&self) -> Self::Reducer;
+}
+"#;
+    let reexports = br#"use self::plumbing::*;
+"#;
+    let implementation = br#"use super::*;
+struct ConcreteReducer;
+struct ItemConsumer;
+impl<T: Send> Consumer<T> for ItemConsumer {
+    type Reducer = ConcreteReducer;
+}
+impl<T: Send> UnindexedConsumer<T> for ItemConsumer {
+    fn to_reducer(&self) -> Self::Reducer { ConcreteReducer }
+}
+"#;
+    let trait_extraction = extract("src/iter/plumbing/mod.rs", traits);
+    assert!(
+        trait_extraction.semantic_evidence.is_some(),
+        "trait extraction failed: {:?}",
+        trait_extraction.error
+    );
+    let implementation_extraction = extract("src/iter/extend.rs", implementation);
+    assert!(
+        implementation_extraction.semantic_evidence.is_some(),
+        "implementation extraction failed: {:?}",
+        implementation_extraction.error
+    );
+    let resolved = compass_resolve::resolve(
+        &[
+            trait_extraction,
+            extract("src/iter/mod.rs", reexports),
+            implementation_extraction,
+        ],
+        &HashMap::from([
+            (
+                "src/iter/plumbing/mod.rs".to_owned(),
+                String::from_utf8(traits.to_vec()).expect("traits"),
+            ),
+            (
+                "src/iter/mod.rs".to_owned(),
+                String::from_utf8(reexports.to_vec()).expect("reexports"),
+            ),
+            (
+                "src/iter/extend.rs".to_owned(),
+                String::from_utf8(implementation.to_vec()).expect("implementation"),
+            ),
+        ]),
+    );
+    let associated = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name") == "<impl<T: Send> Consumer<T> for ItemConsumer>::Reducer"
+        })
+        .expect("Consumer implementation associated type");
+    let method = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name").contains("ItemConsumer")
+                && node.string("qualified_name").ends_with("::to_reducer")
+        })
+        .expect("UnindexedConsumer implementation method");
+
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.source == method.id
+                && edge.target == associated.id
+                && edge.string("relation") == "returns"
+                && edge.string("resolution_rule") == "rust-associated-type"
+        }),
+        "inherited associated return was not resolved to the exact supertrait impl"
+    );
+}
+
+#[test]
+fn rust_inherited_associated_reference_resolves_from_a_parent_module_glob() {
+    let traits = br#"mod plumbing {}
+use self::plumbing::*;
+pub trait ParallelIterator: Sized + Send {
+    type Item;
+}
+pub trait IndexedParallelIterator: ParallelIterator {
+    fn drive(&self) -> Self::Item;
+}
+"#;
+    let implementation = br#"use super::*;
+struct FoldChunks;
+impl ParallelIterator for FoldChunks {
+    type Item = u32;
+}
+impl IndexedParallelIterator for FoldChunks {
+    fn drive(&self) -> Self::Item { 0 }
+}
+"#;
+    let resolved = compass_resolve::resolve(
+        &[
+            extract("src/iter/mod.rs", traits),
+            extract("src/iter/fold_chunks.rs", implementation),
+        ],
+        &HashMap::from([
+            (
+                "src/iter/mod.rs".to_owned(),
+                String::from_utf8(traits.to_vec()).expect("traits"),
+            ),
+            (
+                "src/iter/fold_chunks.rs".to_owned(),
+                String::from_utf8(implementation.to_vec()).expect("implementation"),
+            ),
+        ]),
+    );
+    let associated = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name")
+                .contains("ParallelIterator for FoldChunks")
+                && node.string("qualified_name").ends_with("::Item")
+        })
+        .expect("ParallelIterator implementation associated type");
+    let method = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name").contains("FoldChunks")
+                && node.string("qualified_name").ends_with("::drive")
+        })
+        .expect("IndexedParallelIterator implementation method");
+
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.source == method.id
+                && edge.target == associated.id
+                && edge.string("relation") == "returns"
+                && edge.string("resolution_rule") == "rust-associated-type"
+        }),
+        "inherited associated reference was not resolved through the parent module glob"
+    );
+}
+
+#[test]
+fn rust_inherited_associated_return_fails_closed_for_competing_or_unknown_traits() {
+    let ambiguous_source = br#"trait First { type Output; }
+trait Second { type Output; }
+trait Combined: First + Second {
+    fn output(&self) -> Self::Output;
+}
+struct FirstOutput;
+struct SecondOutput;
+struct Item;
+impl First for Item { type Output = FirstOutput; }
+impl Second for Item { type Output = SecondOutput; }
+impl Combined for Item {
+    fn output(&self) -> Self::Output { FirstOutput }
+}
+"#;
+    let ambiguous = compass_resolve::resolve(
+        &[extract("src/lib.rs", ambiguous_source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(ambiguous_source.to_vec()).expect("ambiguous source"),
+        )]),
+    );
+    let ambiguous_method = ambiguous
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "<crate::Item as crate::Combined>::output")
+        .expect("ambiguous Combined implementation method");
+    assert!(ambiguous.edges.iter().all(|edge| {
+        edge.source != ambiguous_method.id || edge.string("relation") != "returns"
+    }));
+
+    let incomplete_source = br#"trait Combined: external::Base {
+    fn output(&self) -> Self::Output;
+}
+struct Item;
+impl Combined for Item {
+    fn output(&self) -> Self::Output { loop {} }
+}
+"#;
+    let incomplete = compass_resolve::resolve(
+        &[extract("src/lib.rs", incomplete_source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(incomplete_source.to_vec()).expect("incomplete source"),
+        )]),
+    );
+    let incomplete_method = incomplete
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "<crate::Item as crate::Combined>::output")
+        .expect("incomplete Combined implementation method");
+    assert!(incomplete.edges.iter().all(|edge| {
+        edge.source != incomplete_method.id || edge.string("relation") != "returns"
+    }));
+}
+
+#[test]
 fn rust_generic_trait_impl_calls_resolve_to_exact_impl_owner() {
     let source = br#"trait Render<T> {
     fn render(&self, value: T);

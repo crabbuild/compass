@@ -318,15 +318,17 @@ fn validate_fact(
                 limits,
             )?;
             if fact.direct_bases_complete
-                && (fact.language != "java"
-                    || !matches!(
-                        fact.kind.as_str(),
+                && !matches!(
+                    (fact.language.as_str(), fact.kind.as_str()),
+                    (
+                        "java",
                         "class" | "interface" | "enum" | "record" | "annotation_type"
-                    ))
+                    ) | ("rust", "trait")
+                )
             {
                 return Err(invalid_fact(
                     &fact.id,
-                    "complete direct-base evidence requires a Java type declaration",
+                    "complete direct-base evidence requires a Java type or Rust trait declaration",
                 ));
             }
         }
@@ -476,8 +478,11 @@ fn validate_fact(
                 match hierarchy {
                     HierarchyConstraint::DirectBase { .. }
                         if fact.relation != CandidateRelation::Extends
-                            || occurrence
-                                .is_none_or(|fact| fact.role != SemanticRole::BaseType) =>
+                            || occurrence.is_none_or(|occurrence| {
+                                occurrence.role != SemanticRole::BaseType
+                                    && !(fact.language == "rust"
+                                        && occurrence.role == SemanticRole::TraitBound)
+                            }) =>
                     {
                         return Err(invalid_fact(
                             &fact.id,
@@ -509,6 +514,60 @@ fn validate_fact(
                             return Err(invalid_fact(
                                 &fact.id,
                                 "receiver dispatch cannot also select a qualified target",
+                            ));
+                        }
+                    }
+                    HierarchyConstraint::RustAssociatedType {
+                        receiver_declaration_id,
+                        receiver_qualified_name,
+                        trait_qualified_name,
+                    } => {
+                        if fact.language != "rust"
+                            || !matches!(
+                                fact.relation,
+                                CandidateRelation::References
+                                    | CandidateRelation::TypeOf
+                                    | CandidateRelation::Returns
+                            )
+                            || occurrence
+                                .is_none_or(|fact| fact.qualifier.as_deref() != Some("Self"))
+                        {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "Rust associated-type hierarchy evidence requires a Self-qualified type occurrence",
+                            ));
+                        }
+                        if receiver_declaration_id.is_empty()
+                            || receiver_qualified_name.is_empty()
+                            || trait_qualified_name.is_empty()
+                        {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "Rust associated-type hierarchy identity is empty",
+                            ));
+                        }
+                        require_reference(
+                            &fact.id,
+                            "Rust associated-type receiver declaration",
+                            receiver_declaration_id,
+                            declarations,
+                        )?;
+                        let receiver = declarations[receiver_declaration_id.as_str()];
+                        if receiver.language != "rust"
+                            || receiver.qualified_name != *receiver_qualified_name
+                            || !matches!(receiver.kind.as_str(), "struct" | "enum" | "type_alias")
+                        {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "Rust associated-type receiver identity does not match its declaration",
+                            ));
+                        }
+                        if fact.constraints.qualified_name.is_some()
+                            || fact.constraints.exact_target_declaration_id.is_some()
+                        {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "Rust associated-type hierarchy evidence cannot also select an exact target",
                             ));
                         }
                     }

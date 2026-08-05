@@ -403,6 +403,23 @@ ambiguous, and 377 missing Graphify edge hypotheses. The residual set contains
 dominated, 1,083 rejected, and 85 missing. These are source-constrained
 comparator classifications, not statistical precision or recall measurements.
 
+A subsequent 2026-08-05 Rayon qualification added exact receiver identity,
+complete Rust supertrait traversal, and bounded parent-module glob visibility.
+The fresh graph contains 12,091 nodes and 26,790 relationships. Relative to the
+preceding 12,111-node, 26,537-relationship graph, 22 repeated external
+`Producer`/`UnindexedProducer` relationships retarget to their exact local
+traits, eliminating 20 duplicate placeholder nodes; all nine previously
+missing inherited `Self::Reducer` returns resolve;
+and inherited `ParallelIterator::Item` uses resolve across exact
+`IndexedParallelIterator` implementations. The only two old non-placeholder
+relationships removed were source-invalid bindings from `Add<Output = T>` to
+unrelated `ProducerCallback::Output` aliases. The comparator reports 2,242
+exact, 2,518 dominated, 2,588 rejected, 19 ambiguous, and 334 missing Graphify
+edge hypotheses, reducing the missing set by 43 from the preceding audited
+run. Node classifications remain 2,758 exact, 271 dominated, 1,083 rejected,
+and 85 missing. These are source-constrained comparator classifications, not
+statistical precision or recall measurements.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and

@@ -1,7 +1,8 @@
 use std::error::Error;
 
 use compass_languages::{
-    CandidateRelation, Engine, LanguageCapability, SemanticRole, UniversalAdapterProfile,
+    CandidateRelation, Engine, HierarchyConstraint, LanguageCapability, SemanticRole,
+    UniversalAdapterProfile,
 };
 
 #[test]
@@ -31,7 +32,7 @@ fn build() {
         .ok_or("missing Rust semantic evidence")?;
 
     assert_eq!(evidence.adapter.id, "compass.rust");
-    assert_eq!(evidence.adapter.version, 5);
+    assert_eq!(evidence.adapter.version, 6);
     assert_eq!(
         evidence.adapter.evidence_schema,
         "compass.languages.evidence/1"
@@ -47,6 +48,7 @@ fn build() {
         LanguageCapability::Macros,
         LanguageCapability::Imports,
         LanguageCapability::Calls,
+        LanguageCapability::HierarchyDispatch,
         LanguageCapability::ExternalReferences,
     ] {
         assert!(evidence.adapter.capabilities.contains(&capability));
@@ -135,5 +137,76 @@ fn build() { other::Item::new(); }
         candidate.constraints.qualified_name.as_deref(),
         Some("crate::namespaced::Item::new")
     );
+    Ok(())
+}
+
+#[test]
+fn inherited_associated_types_emit_complete_trait_hierarchy_evidence() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("inherited.rs");
+    let source = br#"trait Consumer<Item>: Send + Sized { type Reducer; }
+trait UnindexedConsumer<I>: Consumer<I> {
+    fn to_reducer(&self) -> Self::Reducer;
+}
+struct ConcreteReducer;
+struct ItemConsumer;
+impl<T: Send> Consumer<T> for ItemConsumer { type Reducer = ConcreteReducer; }
+impl<T: Send> UnindexedConsumer<T> for ItemConsumer {
+    fn to_reducer(&self) -> Self::Reducer { ConcreteReducer }
+}
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let unindexed = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "crate::inherited::UnindexedConsumer")
+        .ok_or("missing UnindexedConsumer declaration")?;
+    assert!(unindexed.direct_bases_complete);
+    let direct_bases = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.source_declaration_id == unindexed.id
+                && candidate.relation == CandidateRelation::Extends
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(direct_bases.len(), 1, "direct bases={direct_bases:#?}");
+    assert_eq!(direct_bases[0].target_spelling, "Consumer");
+    assert_eq!(
+        direct_bases[0].constraints.hierarchy,
+        Some(HierarchyConstraint::DirectBase {
+            base_set_complete: true,
+        })
+    );
+
+    let method = evidence
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.qualified_name
+                == "<crate::inherited::ItemConsumer as crate::inherited::UnindexedConsumer>::to_reducer"
+        })
+        .ok_or("missing UnindexedConsumer implementation method")?;
+    let receiver = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "crate::inherited::ItemConsumer")
+        .ok_or("missing ItemConsumer declaration")?;
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.source_declaration_id == method.id
+            && candidate.relation == CandidateRelation::Returns
+            && candidate.target_spelling == "Reducer"
+            && candidate.constraints.hierarchy
+                == Some(HierarchyConstraint::RustAssociatedType {
+                    receiver_declaration_id: receiver.id.clone(),
+                    receiver_qualified_name: "crate::inherited::ItemConsumer".to_owned(),
+                    trait_qualified_name: "crate::inherited::UnindexedConsumer".to_owned(),
+                })
+    }));
     Ok(())
 }

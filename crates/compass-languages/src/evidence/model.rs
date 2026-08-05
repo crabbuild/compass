@@ -312,6 +312,13 @@ pub enum HierarchyConstraint {
         receiver_qualified_name: String,
         strategy: ReceiverDispatchStrategy,
     },
+    /// Resolve `Self::Type` through one exact Rust trait hierarchy and the
+    /// corresponding associated-type realization for the concrete receiver.
+    RustAssociatedType {
+        receiver_declaration_id: String,
+        receiver_qualified_name: String,
+        trait_qualified_name: String,
+    },
 }
 
 /// Language-selected linearization implemented by the shared resolver.

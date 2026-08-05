@@ -168,6 +168,7 @@ const RUST_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::Calls,
     LanguageCapability::TypeReferences,
     LanguageCapability::BaseTypes,
+    LanguageCapability::HierarchyDispatch,
     LanguageCapability::Members,
     LanguageCapability::Ownership,
     LanguageCapability::ExternalReferences,
@@ -201,7 +202,7 @@ const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
     AdapterProfile {
         id: "compass.rust",
         language: "rust",
-        version: 5,
+        version: 6,
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         profile: UniversalAdapterProfile::UniversalCandidate,
         capabilities: RUST_CAPABILITIES,

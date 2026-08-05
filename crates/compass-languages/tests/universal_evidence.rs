@@ -317,10 +317,58 @@ fn callable_type_vectors_must_match_their_source_arity() {
 }
 
 #[test]
-fn complete_direct_base_sets_are_reserved_for_java_types() {
+fn complete_direct_base_sets_reject_unsupported_declaration_kinds() {
     let mut batch = valid_batch();
     batch.declarations[0].direct_bases_complete = true;
     assert_code(&batch, EvidenceErrorCode::InvalidFact);
+}
+
+#[test]
+fn rust_associated_type_constraints_require_an_exact_receiver_identity() {
+    let mut batch = valid_batch();
+    batch.adapter.id = "compass.rust".to_owned();
+    batch.adapter.language = "rust".to_owned();
+    batch.adapter.version = 6;
+    batch.adapter.capabilities.extend([
+        LanguageCapability::TypeReferences,
+        LanguageCapability::HierarchyDispatch,
+    ]);
+    batch.declarations[0].language = "rust".to_owned();
+    batch.declarations[0].kind = "struct".to_owned();
+    batch.scopes[0].language = "rust".to_owned();
+    batch.bindings.clear();
+    batch.occurrences[0].language = "rust".to_owned();
+    batch.occurrences[0].role = SemanticRole::TypeReference;
+    batch.occurrences[0].qualifier = Some("Self".to_owned());
+    batch.candidates[0].language = "rust".to_owned();
+    batch.candidates[0].relation = CandidateRelation::References;
+    batch.candidates[0].binding_id = None;
+    batch.candidates[0].target_spelling = "Output".to_owned();
+    batch.candidates[0].constraints.exact_language = Some("rust".to_owned());
+    batch.candidates[0].constraints.qualified_name = None;
+    batch.candidates[0].constraints.hierarchy = Some(HierarchyConstraint::RustAssociatedType {
+        receiver_declaration_id: "decl:caller".to_owned(),
+        receiver_qualified_name: "example.caller".to_owned(),
+        trait_qualified_name: "example.Produce".to_owned(),
+    });
+    validate_evidence(&batch, EvidenceLimits::default()).expect("valid Rust associated type");
+
+    let mut missing = batch.clone();
+    missing.candidates[0].constraints.hierarchy = Some(HierarchyConstraint::RustAssociatedType {
+        receiver_declaration_id: "decl:missing".to_owned(),
+        receiver_qualified_name: "example.caller".to_owned(),
+        trait_qualified_name: "example.Produce".to_owned(),
+    });
+    assert_code(&missing, EvidenceErrorCode::MissingReference);
+
+    let mut mismatched = batch;
+    mismatched.candidates[0].constraints.hierarchy =
+        Some(HierarchyConstraint::RustAssociatedType {
+            receiver_declaration_id: "decl:caller".to_owned(),
+            receiver_qualified_name: "example.Other".to_owned(),
+            trait_qualified_name: "example.Produce".to_owned(),
+        });
+    assert_code(&mismatched, EvidenceErrorCode::InvalidFact);
 }
 
 #[test]
@@ -392,7 +440,7 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
     );
     assert_eq!(
         AdapterRegistry::universal_profile("rust").map(|profile| profile.version),
-        Some(5)
+        Some(6)
     );
 }
 

@@ -340,6 +340,13 @@ impl EvidenceBuilder {
                     ReceiverDispatchStrategy::C3AfterReceiver => "c3_after_receiver",
                 }
             ),
+            Some(HierarchyConstraint::RustAssociatedType {
+                receiver_declaration_id,
+                receiver_qualified_name,
+                trait_qualified_name,
+            }) => format!(
+                "rust_associated_type:{receiver_declaration_id}:{receiver_qualified_name}:{trait_qualified_name}"
+            ),
         };
         let mut identity = vec![
             candidate_relation_name(relation),
@@ -3112,7 +3119,10 @@ impl<'source> DirectAdapterState<'source> {
             let qualified_name = rust_join_qualified(&owner.qualified_name, &name);
             let graph_node_id =
                 self.unique_graph_id(make_id(&[&self.module_or_package, &qualified_name]), node);
-            let metadata = self.declaration_metadata(node);
+            let mut metadata = self.declaration_metadata(node);
+            if kind == "trait" {
+                metadata.direct_bases_complete = !self.overlaps_parser_error(node);
+            }
             let fact_id = self.builder.declare_with_metadata(
                 kind,
                 &graph_node_id,
@@ -3621,6 +3631,17 @@ impl<'source> DirectAdapterState<'source> {
                 return Some(candidate);
             }
             scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        None
+    }
+
+    fn rust_impl_for_node(&self, node: Node<'_>) -> Option<&RustImplContext> {
+        let mut current = Some(node);
+        while let Some(candidate) = current {
+            if candidate.kind() == "impl_item" {
+                return self.rust_impls.get(&candidate.id());
+            }
+            current = candidate.parent();
         }
         None
     }
@@ -4295,6 +4316,7 @@ impl<'source> DirectAdapterState<'source> {
             }
             let relation = if node.kind() == "trait_item"
                 && rust_node_has_ancestor_before(target, node, "trait_bounds")
+                && !rust_node_has_ancestor_before(target, node, "type_arguments")
             {
                 CandidateRelation::Extends
             } else if node
@@ -4710,6 +4732,31 @@ impl<'source> DirectAdapterState<'source> {
                 };
                 Some(associated_type.fact_id.clone())
             });
+        let hierarchy = if relation == CandidateRelation::Extends && owner.kind == "trait" {
+            let complete = rust_ancestor_of_kind(node, "trait_item")
+                .is_some_and(|declaration| !self.overlaps_parser_error(declaration));
+            Some(HierarchyConstraint::DirectBase {
+                base_set_complete: complete,
+            })
+        } else if qualifier == Some("Self") && qualified_name.is_none() {
+            self.rust_impl_for_node(node).and_then(|implementation| {
+                implementation
+                    .owner_declaration_id
+                    .as_ref()
+                    .and_then(|receiver_id| {
+                        implementation
+                            .trait_qualified_name
+                            .as_ref()
+                            .map(|trait_name| HierarchyConstraint::RustAssociatedType {
+                                receiver_declaration_id: receiver_id.clone(),
+                                receiver_qualified_name: implementation.type_qualified_name.clone(),
+                                trait_qualified_name: trait_name.clone(),
+                            })
+                    })
+            })
+        } else {
+            None
+        };
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
@@ -4735,7 +4782,7 @@ impl<'source> DirectAdapterState<'source> {
                 argument_count: None,
                 argument_types: Vec::new(),
                 allowed_target_kinds,
-                hierarchy: None,
+                hierarchy,
                 allow_external,
             },
         )?;
@@ -7683,6 +7730,17 @@ fn rust_node_has_ancestor_before(node: Node<'_>, boundary: Node<'_>, kind: &str)
         parent = current.parent();
     }
     false
+}
+
+fn rust_ancestor_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    let mut current = Some(node);
+    while let Some(candidate) = current {
+        if candidate.kind() == kind {
+            return Some(candidate);
+        }
+        current = candidate.parent();
+    }
+    None
 }
 
 fn rust_primitive_type(raw: &str) -> bool {

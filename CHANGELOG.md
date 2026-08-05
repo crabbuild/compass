@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Resolve Rust `Self::Type` through a complete source-proven supertrait
+  hierarchy and the associated-type realization owned by the exact receiver
+  declaration. Parent-module glob imports, including private imports exposed
+  through `use super::*`, participate only when their bounded local search has
+  one compatible target. Competing traits, repeated local receiver names,
+  external branches, and incomplete searches fail closed. Rust structural
+  facts advance to adapter version 6 so cached evidence refreshes.
+
 - Resolve an unqualified Rust symbol across multiple visible glob imports when
   their bounded, repository-local union contains exactly one compatible
   declaration. Competing declarations, excessive glob/search sets, and

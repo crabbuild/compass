@@ -58,11 +58,14 @@ distinct. Proven signature, field, return, and bound occurrences target the
 parameter declaration rather than an unrelated same-named type.
 
 Rust associated types are source-backed `type_alias` declarations scoped to
-their trait or exact implementation. A `Self::Type` occurrence targets that
-declaration only when one associated type survives the lexical impl scope;
-duplicate or missing declarations remain unresolved. The associated type's
-value is represented separately by its source-anchored reference, preserving
-the distinction between the contract and its concrete realization.
+their trait or exact implementation. A `Self::Type` occurrence retains the
+exact receiver declaration and implemented trait. The resolver may follow a
+complete, bounded source-proven supertrait hierarchy and select the one
+associated realization declared by that exact receiver. Competing traits,
+duplicate realizations, incomplete or external hierarchy branches, and missing
+declarations remain unresolved. The associated type's value is represented
+separately by its source-anchored reference, preserving the distinction between
+the contract and its concrete realization.
 
 ### Required invariants
 
@@ -233,6 +236,11 @@ bounded re-export chains. It publishes a relationship only when one compatible
 declaration remains. Two different eligible declarations, an incomplete
 scope/module search, or an unproven external lowercase symbol remains
 ambiguous or unresolved; source order never breaks the tie.
+
+For a Rust child module, `use super::*` also exposes the bounded names imported
+by its source-proven parent module, including a private parent glob import.
+That parent scope is traversed only when it is an ancestor of the use site;
+external, truncated, or competing glob scopes still fail closed.
 
 Python file imports are visible at module scope. Function- and class-local
 imports are indexed only in their owning lexical scope, so they cannot leak to
