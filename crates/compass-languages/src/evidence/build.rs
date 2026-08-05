@@ -800,6 +800,7 @@ impl<'source> DirectAdapterState<'source> {
         self.collect_python_declarations(root, &file)?;
         self.collect_python_imports(root, &file)?;
         self.collect_python_partial_aliases(root, &file)?;
+        self.collect_python_module_variables(root, &file)?;
         let module_bound = crate::engine::python_bound_names(root, self.source, true);
         self.python_module_bound_names.clone_from(&module_bound);
         self.walk_python_value_references(root, &file, true, &module_bound)?;
@@ -934,7 +935,190 @@ impl<'source> DirectAdapterState<'source> {
                     allow_external: false,
                 },
             )?;
+            self.declarations.insert(assignment.id(), alias_context);
         }
+        Ok(())
+    }
+
+    fn collect_python_module_variables(
+        &mut self,
+        root: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let mut binding_statements = HashMap::<String, HashSet<usize>>::new();
+        let mut deleted_names = HashSet::<String>::new();
+        let mut cursor = root.walk();
+        for statement in root.children(&mut cursor).filter(|child| child.is_named()) {
+            let statement_id = statement.id();
+            if !matches!(
+                statement.kind(),
+                "function_definition" | "class_definition" | "decorated_definition"
+            ) {
+                for name in crate::engine::python_bound_names(statement, self.source, true) {
+                    binding_statements
+                        .entry(name)
+                        .or_default()
+                        .insert(statement_id);
+                }
+            }
+            let mut declaration_names = HashSet::new();
+            collect_python_module_declaration_names(statement, self.source, &mut declaration_names);
+            collect_python_module_mutations(
+                statement,
+                self.source,
+                &mut binding_statements,
+                &mut deleted_names,
+                statement_id,
+            );
+            for name in declaration_names {
+                binding_statements
+                    .entry(name)
+                    .or_default()
+                    .insert(statement_id);
+            }
+        }
+
+        let mut cursor = root.walk();
+        for assignment in root
+            .children(&mut cursor)
+            .filter(|child| child.is_named() && child.kind() == "assignment")
+        {
+            if self.declarations.contains_key(&assignment.id())
+                || self.overlaps_parser_error(assignment)
+            {
+                continue;
+            }
+            let Some(name_node) = assignment
+                .child_by_field_name("left")
+                .filter(|node| node.kind() == "identifier")
+            else {
+                continue;
+            };
+            let name = self.text(name_node);
+            if !valid_python_identifier(&name)
+                || deleted_names.contains(&name)
+                || binding_statements.get(&name).is_none_or(|statements| {
+                    statements.len() != 1 || !statements.contains(&assignment.id())
+                })
+                || self
+                    .import_bindings
+                    .get(&owner.scope_id)
+                    .is_some_and(|bindings| bindings.contains_key(&name))
+                || assignment
+                    .child_by_field_name("right")
+                    .is_some_and(|right| {
+                        crate::engine::python_bound_names(right, self.source, true).contains(&name)
+                    })
+            {
+                continue;
+            }
+
+            let qualified_name = format!("{}.{}", self.module_or_package, name);
+            let graph_node_id = self.unique_graph_id(make_id(&[&self.stem, &name]), assignment);
+            let fact_id = self.builder.declare(
+                "variable",
+                &graph_node_id,
+                &name,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, name_node),
+            )?;
+            let context = DeclarationContext {
+                fact_id: fact_id.clone(),
+                scope_id: owner.scope_id.clone(),
+                graph_node_id,
+                name,
+                qualified_name,
+                kind: "variable".to_owned(),
+                enclosing_type_qualified_name: None,
+            };
+            self.add_ownership(owner, &context)?;
+            self.add_python_module_variable_type(root, assignment, &context)?;
+            self.declarations.insert(assignment.id(), context);
+        }
+        Ok(())
+    }
+
+    fn add_python_module_variable_type(
+        &mut self,
+        root: Node<'_>,
+        assignment: Node<'_>,
+        variable: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(call) = assignment
+            .child_by_field_name("right")
+            .filter(|node| node.kind() == "call")
+        else {
+            return Ok(());
+        };
+        let Some(function) = call
+            .child_by_field_name("function")
+            .filter(|node| node.kind() == "identifier")
+        else {
+            return Ok(());
+        };
+        let spelling = self.text(function);
+        let imported_target = self
+            .imported_target_for_occurrence(variable, &spelling, function.start_byte(), false)
+            .cloned();
+        let local_qualified_name = format!("{}.{}", self.module_or_package, spelling);
+        let local_targets = self
+            .declarations
+            .values()
+            .filter(|context| {
+                context.kind == "class" && context.qualified_name == local_qualified_name
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let local_target = match local_targets.as_slice() {
+            [target]
+                if direct_python_definition(root, &spelling, "class_definition", self.source)
+                    .is_some_and(|definition| definition.end_byte() <= assignment.start_byte()) =>
+            {
+                Some(target)
+            }
+            _ => None,
+        };
+        let qualified_name = imported_target
+            .clone()
+            .or_else(|| local_target.map(|target| target.qualified_name.clone()));
+        let Some(qualified_name) = qualified_name else {
+            return Ok(());
+        };
+        let binding_id = self
+            .binding_for_occurrence(variable, &spelling, function.start_byte(), false)
+            .cloned();
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::TypeReference,
+            &variable.fact_id,
+            &spelling,
+            None,
+            Some(&variable.scope_id),
+            Some("initializer_type"),
+            range_for_node(self.source_file, function),
+        )?;
+        self.builder.relate(
+            CandidateRelation::TypeOf,
+            &variable.fact_id,
+            Some(&occurrence_id),
+            binding_id.as_deref(),
+            &spelling,
+            ResolutionConstraint {
+                exact_target_declaration_id: local_target.map(|target| target.fact_id.clone()),
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: qualified_name
+                    .rsplit_once('.')
+                    .map(|(module, _)| module.to_owned()),
+                scope_id: Some(variable.scope_id.clone()),
+                qualified_name: Some(qualified_name),
+                argument_count: None,
+                argument_types: Vec::new(),
+                allowed_target_kinds: vec!["class".to_owned()],
+                hierarchy: None,
+                allow_external: false,
+            },
+        )?;
         Ok(())
     }
 
@@ -1240,6 +1424,7 @@ impl<'source> DirectAdapterState<'source> {
                     "class".to_owned(),
                     "function".to_owned(),
                     "method".to_owned(),
+                    "variable".to_owned(),
                 ],
                 hierarchy: None,
                 allow_external: qualified_name.is_some(),
@@ -1511,6 +1696,7 @@ impl<'source> DirectAdapterState<'source> {
                     "module".to_owned(),
                     "class".to_owned(),
                     "function".to_owned(),
+                    "variable".to_owned(),
                 ],
                 hierarchy: None,
                 allow_external: true,
@@ -5090,13 +5276,15 @@ impl<'source> DirectAdapterState<'source> {
                         .map(|target| format!("{target}.{spelling}"))
                 })
                 .or_else(|| {
-                    self.imported_target_for_occurrence(
-                        owner,
-                        spelling,
-                        function.start_byte(),
-                        allow_later_file_binding,
-                    )
-                    .cloned()
+                    qualifier.is_none().then(|| {
+                        self.imported_target_for_occurrence(
+                            owner,
+                            spelling,
+                            function.start_byte(),
+                            allow_later_file_binding,
+                        )
+                        .cloned()
+                    })?
                 })
         });
         let occurrence_id = self.builder.occur(
@@ -7288,17 +7476,156 @@ fn direct_python_function<'tree>(
     name: &str,
     source: &[u8],
 ) -> Option<Node<'tree>> {
+    direct_python_definition(root, name, "function_definition", source)
+}
+
+fn direct_python_definition<'tree>(
+    root: Node<'tree>,
+    name: &str,
+    kind: &str,
+    source: &[u8],
+) -> Option<Node<'tree>> {
     let mut cursor = root.walk();
-    let mut matches = root.children(&mut cursor).filter(|child| {
-        child.is_named()
-            && child.kind() == "function_definition"
-            && child
-                .child_by_field_name("name")
-                .and_then(|name_node| source.get(name_node.start_byte()..name_node.end_byte()))
-                .is_some_and(|spelling| spelling == name.as_bytes())
+    let mut matches = root.children(&mut cursor).filter_map(|child| {
+        let definition = if child.kind() == kind {
+            Some(child)
+        } else if child.kind() == "decorated_definition" {
+            let mut nested = child.walk();
+            child
+                .children(&mut nested)
+                .find(|candidate| candidate.kind() == kind)
+        } else {
+            None
+        }?;
+        definition
+            .child_by_field_name("name")
+            .and_then(|name_node| source.get(name_node.start_byte()..name_node.end_byte()))
+            .is_some_and(|spelling| spelling == name.as_bytes())
+            .then_some(definition)
     });
     let found = matches.next()?;
     matches.next().is_none().then_some(found)
+}
+
+fn collect_python_module_declaration_names(
+    node: Node<'_>,
+    source: &[u8],
+    output: &mut HashSet<String>,
+) {
+    if matches!(node.kind(), "function_definition" | "class_definition") {
+        if let Some(name) = node
+            .child_by_field_name("name")
+            .and_then(|name_node| source.get(name_node.start_byte()..name_node.end_byte()))
+            .and_then(|name| std::str::from_utf8(name).ok())
+            .filter(|name| valid_python_identifier(name))
+        {
+            output.insert(name.to_owned());
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_python_module_declaration_names(child, source, output);
+    }
+}
+
+fn collect_python_module_mutations(
+    node: Node<'_>,
+    source: &[u8],
+    binding_statements: &mut HashMap<String, HashSet<usize>>,
+    deleted_names: &mut HashSet<String>,
+    statement_id: usize,
+) {
+    if matches!(
+        node.kind(),
+        "function_definition" | "class_definition" | "decorated_definition"
+    ) {
+        collect_python_definition_time_bindings(node, source, binding_statements, statement_id);
+        return;
+    }
+    if matches!(node.kind(), "annotated_assignment" | "augmented_assignment") {
+        let mut names = HashSet::new();
+        collect_python_binding_target_names(node.child_by_field_name("left"), source, &mut names);
+        for name in names {
+            binding_statements
+                .entry(name)
+                .or_default()
+                .insert(statement_id);
+        }
+    } else if node.kind() == "delete_statement" {
+        let mut cursor = node.walk();
+        for target in node.children(&mut cursor).filter(|child| child.is_named()) {
+            collect_python_binding_target_names(Some(target), source, deleted_names);
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_python_module_mutations(
+            child,
+            source,
+            binding_statements,
+            deleted_names,
+            statement_id,
+        );
+    }
+}
+
+fn collect_python_definition_time_bindings(
+    node: Node<'_>,
+    source: &[u8],
+    binding_statements: &mut HashMap<String, HashSet<usize>>,
+    statement_id: usize,
+) {
+    if node.kind() == "named_expression" {
+        let mut names = HashSet::new();
+        collect_python_binding_target_names(node.child_by_field_name("name"), source, &mut names);
+        for name in names {
+            binding_statements
+                .entry(name)
+                .or_default()
+                .insert(statement_id);
+        }
+        return;
+    }
+    let body_id = node.child_by_field_name("body").map(|body| body.id());
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        if Some(child.id()) != body_id {
+            collect_python_definition_time_bindings(
+                child,
+                source,
+                binding_statements,
+                statement_id,
+            );
+        }
+    }
+}
+
+fn collect_python_binding_target_names(
+    node: Option<Node<'_>>,
+    source: &[u8],
+    output: &mut HashSet<String>,
+) {
+    let Some(node) = node else {
+        return;
+    };
+    if node.kind() == "identifier" {
+        if let Some(name) = source
+            .get(node.start_byte()..node.end_byte())
+            .and_then(|name| std::str::from_utf8(name).ok())
+            .filter(|name| valid_python_identifier(name))
+        {
+            output.insert(name.to_owned());
+        }
+    } else if matches!(
+        node.kind(),
+        "expression_list" | "pattern_list" | "tuple_pattern" | "list_pattern"
+    ) {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            collect_python_binding_target_names(Some(child), source, output);
+        }
+    }
 }
 
 fn is_python_hard_keyword(identifier: &str) -> bool {

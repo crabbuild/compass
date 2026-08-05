@@ -693,7 +693,147 @@ route = partial(_route, Pattern=str)
             evidence
                 .declarations
                 .iter()
-                .all(|declaration| declaration.qualified_name != "pkg.routes.route")
+                .all(
+                    |declaration| declaration.qualified_name != "pkg.routes.route"
+                        || declaration.kind != "function"
+                )
+        );
+    }
+}
+
+#[test]
+fn python_unique_module_variables_emit_exact_identity_and_initializer_type() {
+    let source = br#"class Service:
+    pass
+
+singleton = Service()
+constant = 7
+
+def factory():
+    return Service()
+
+product = factory()
+
+def local_shadow():
+    singleton = object()
+    return singleton
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/pkg/state.py"),
+            "pkg/state.py",
+            source,
+        )
+        .expect("extract python")
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid python evidence");
+
+    let singleton = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "pkg.state.singleton")
+        .expect("module singleton declaration");
+    let constant = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "pkg.state.constant")
+        .expect("module constant declaration");
+    let product = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "pkg.state.product")
+        .expect("module product declaration");
+    let service = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "pkg.state.Service")
+        .expect("initializer class declaration");
+    assert_eq!(singleton.kind, "variable");
+    assert_eq!(constant.kind, "variable");
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::TypeOf
+            && candidate.source_declaration_id == singleton.id
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(service.id.as_str())
+            && !candidate.constraints.allow_external
+    }));
+    assert!(evidence.candidates.iter().all(|candidate| {
+        candidate.relation != CandidateRelation::TypeOf
+            || candidate.source_declaration_id != constant.id
+    }));
+    assert!(evidence.candidates.iter().all(|candidate| {
+        candidate.relation != CandidateRelation::TypeOf
+            || candidate.source_declaration_id != product.id
+    }));
+}
+
+#[test]
+fn python_module_variables_fail_closed_for_competing_or_conditional_bindings() {
+    for source in [
+        br#"class Service:
+    pass
+singleton = Service()
+singleton = Service()
+"#
+        .as_slice(),
+        br#"class Service:
+    pass
+if enabled:
+    singleton = Service()
+"#
+        .as_slice(),
+        br#"class Service:
+    pass
+singleton = Service()
+singleton += replacement
+"#
+        .as_slice(),
+        br#"class Service:
+    pass
+singleton = Service()
+del singleton
+"#
+        .as_slice(),
+        br#"class Service:
+    pass
+singleton = Service()
+del singleton, other
+"#
+        .as_slice(),
+        br#"class Service:
+    pass
+singleton = Service()
+def configure(default=(singleton := replacement)):
+    return default
+"#
+        .as_slice(),
+        br#"from other import singleton
+class Service:
+    pass
+singleton = Service()
+"#
+        .as_slice(),
+    ] {
+        let mut engine = Engine::default();
+        let evidence = engine
+            .extract_source_combined(
+                std::path::Path::new("/repo/pkg/state.py"),
+                "pkg/state.py",
+                source,
+            )
+            .expect("extract python")
+            .graph
+            .semantic_evidence
+            .expect("python universal evidence");
+        validate_evidence(&evidence, EvidenceLimits::default()).expect("valid python evidence");
+        assert!(
+            evidence
+                .declarations
+                .iter()
+                .all(|declaration| declaration.qualified_name != "pkg.state.singleton")
         );
     }
 }

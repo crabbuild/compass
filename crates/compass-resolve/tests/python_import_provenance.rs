@@ -980,6 +980,83 @@ fn python_partial_callable_aliases_are_source_backed_through_package_reexports()
 }
 
 #[test]
+fn python_module_singletons_are_source_backed_with_exact_initializer_types()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "caller.py",
+            "from pkg.state import singleton\n\ndef use():\n    return singleton\n",
+        ),
+        (
+            "pkg/state.py",
+            "class Service:\n    pass\n\nsingleton = Service()\n",
+        ),
+    ];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    let singleton = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.state.singleton")
+        .ok_or("missing source-backed singleton")?;
+    let service = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.state.Service")
+        .ok_or("missing singleton initializer type")?;
+    let use_function = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "caller.use")
+        .ok_or("missing singleton consumer")?;
+
+    assert_eq!(singleton.string("symbol_kind"), "variable");
+    assert!(singleton.string("source_file").ends_with("pkg/state.py"));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == singleton.id
+            && edge.target == service.id
+            && edge.string("relation") == "type_of"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == use_function.id
+            && edge.target == singleton.id
+            && edge.string("relation") == "references"
+            && edge.string("resolution_rule") == "explicit-binding"
+    }));
+    assert!(resolved.nodes.iter().all(|node| {
+        node.string("qualified_name") != "pkg.state.singleton"
+            || node
+                .attributes
+                .get("external")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+    }));
+    Ok(())
+}
+
+#[test]
+fn python_receiver_methods_never_rebind_to_same_named_imports() -> Result<(), Box<dyn Error>> {
+    let files = [(
+        "case.py",
+        "from django.conf import settings\n\nclass Case:\n    def test(self):\n        return self.settings(DEBUG=True)\n",
+    )];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    let test_method = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "case.Case::test")
+        .ok_or("missing test method")?;
+
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.source != test_method.id
+            || edge.string("relation") != "calls"
+            || resolved.nodes.iter().all(|node| {
+                node.id != edge.target || node.string("qualified_name") != "django.conf.settings"
+            })
+    }));
+    Ok(())
+}
+
+#[test]
 fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();

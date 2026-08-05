@@ -15,6 +15,12 @@
   `functools.partial`, including package re-exports, while dynamic, shadowed,
   conditional, and ambiguous factories fail closed. Python structural facts
   advance to adapter version 6 so cached evidence is refreshed.
+- Publish uniquely bound, unconditional Python module variables as exact
+  declarations and connect direct constructor initializers to one proven local
+  class. Imports and value references can resolve those variables, while
+  competing, conditional, deleted, shadowed, and ambiguous bindings fail
+  closed. Explicit receiver calls no longer fall back to a same-named
+  unqualified import. Python structural facts advance to adapter version 7.
 
 - Split framework extraction into focused Spring, Express, Axum, Next.js, and
   Vite adapters. Project evidence now indexes framework configuration files,

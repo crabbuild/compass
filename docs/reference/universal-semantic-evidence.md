@@ -228,6 +228,14 @@ unique module-level function declaration and neither name was rebound before
 the assignment. Compass publishes the alias as a source-backed function and
 an exact reference to the wrapped function. Dynamic targets, conditional
 assignments, shadowed factories, and ambiguous declarations fail closed.
+One unconditional module-level assignment to an identifier publishes an exact
+Python variable declaration when the name has no competing module binding,
+deletion, import shadow, parser recovery, or proven callable-alias kind. A
+direct initializer call adds `type_of` evidence only when its target resolves
+to one source-backed class; functions and unresolved external factories do not
+invent a type. Function- and class-local shadows do not invalidate the module
+declaration. Explicit receiver calls such as `self.settings()` never borrow a
+same-named unqualified import as their target.
 
 Language and allowed target kinds are filtered before uniqueness is decided.
 Case-insensitive or terminal-name equality cannot select a target. Cross-
