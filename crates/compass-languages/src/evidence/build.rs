@@ -3196,6 +3196,15 @@ impl<'source> DirectAdapterState<'source> {
             }
             "function_item" | "function_signature_item" => {
                 self.add_rust_callable(node, owner, active_impl)?;
+                if let (Some(callable), Some(body)) = (
+                    self.declarations.get(&node.id()).cloned(),
+                    node.child_by_field_name("body"),
+                ) {
+                    let mut cursor = body.walk();
+                    for child in body.children(&mut cursor).filter(|child| child.is_named()) {
+                        self.collect_rust_declarations(child, &callable, None)?;
+                    }
+                }
                 return Ok(());
             }
             "type_item" => {
@@ -4183,20 +4192,15 @@ impl<'source> DirectAdapterState<'source> {
         let direct_binding = self
             .binding_for_occurrence(owner, binding_name, function.start_byte(), true)
             .cloned();
-        let wildcard_binding = direct_binding
-            .is_none()
-            .then(|| {
-                let wildcard_eligible = qualifier.is_some_and(|value| {
-                    qualified_binding_head(value)
-                        .chars()
-                        .next()
-                        .is_some_and(char::is_uppercase)
-                }) || (qualifier.is_none()
-                    && spelling.chars().next().is_some_and(char::is_uppercase));
-                wildcard_eligible
-                    .then(|| self.rust_wildcard_binding(owner, function.start_byte()))
-                    .flatten()
-            })
+        let wildcard_lookup_eligible = qualifier.is_none()
+            || qualifier.is_some_and(|value| {
+                qualified_binding_head(value)
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_uppercase)
+            });
+        let wildcard_binding = (direct_binding.is_none() && wildcard_lookup_eligible)
+            .then(|| self.rust_wildcard_binding(owner, function.start_byte()))
             .flatten()
             .cloned();
         let qualified_name = self
@@ -4210,6 +4214,13 @@ impl<'source> DirectAdapterState<'source> {
                 })
             });
         let wildcard_bound = wildcard_binding.is_some();
+        let wildcard_external_target_is_explicit = qualifier.is_some_and(|value| {
+            qualified_binding_head(value)
+                .chars()
+                .next()
+                .is_some_and(char::is_uppercase)
+        }) || (qualifier.is_none()
+            && spelling.chars().next().is_some_and(char::is_uppercase));
         let binding = direct_binding.or(wildcard_binding);
         let occurrence_id = self.builder.occur(
             SemanticRole::Call,
@@ -4238,7 +4249,8 @@ impl<'source> DirectAdapterState<'source> {
             ],
             hierarchy: None,
             allow_external: qualified_name.as_deref().is_some_and(|qualified| {
-                (wildcard_bound || !qualifier.is_some_and(rust_deferred_owner))
+                ((wildcard_bound && wildcard_external_target_is_explicit)
+                    || (!wildcard_bound && !qualifier.is_some_and(rust_deferred_owner)))
                     && !rust_identity_is_internal(&self.module_or_package, qualified)
             }),
         };

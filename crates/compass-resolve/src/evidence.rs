@@ -996,7 +996,10 @@ impl UniversalResolutionIndex {
                     candidate_count: 1,
                 },
             }),
-            [] if !self.binding_target_is_internal(binding) => {
+            [] if !self.binding_target_is_internal(binding)
+                && (language != "rust"
+                    || rust_external_wildcard_target_is_explicit(qualifier, candidate)) =>
+            {
                 Some(ResolutionDecision::QualifiedExternal {
                     qualified_name: wildcard_qualified_names(
                         &binding.qualified_target,
@@ -1041,6 +1044,11 @@ impl UniversalResolutionIndex {
             .binding_id
             .as_deref()
             .and_then(|binding_id| self.bindings.get(binding_id))?;
+        // Wildcards are a search scope, not an exact spelling. Let lexical and
+        // module resolution run before the dedicated wildcard stage below.
+        if binding.spelling == "*" {
+            return None;
+        }
         let qualified_occurrence = self
             .occurrence(candidate)
             .is_some_and(|occurrence| occurrence.qualifier.is_some());
@@ -2866,6 +2874,22 @@ fn wildcard_qualified_names(module: &str, qualifier: Option<&str>, spelling: &st
     }
     parts.push(spelling);
     vec![parts.join(separator)]
+}
+
+fn rust_external_wildcard_target_is_explicit(
+    qualifier: Option<&str>,
+    candidate: &RelationshipCandidate,
+) -> bool {
+    qualifier
+        .and_then(|value| value.split("::").next())
+        .and_then(|value| value.chars().next())
+        .is_some_and(char::is_uppercase)
+        || (qualifier.is_none()
+            && candidate
+                .target_spelling
+                .chars()
+                .next()
+                .is_some_and(char::is_uppercase))
 }
 
 fn split_qualified_member(qualified: &str) -> Option<(&str, &str)> {

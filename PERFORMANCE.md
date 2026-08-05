@@ -263,6 +263,26 @@ The 92 missing Graphify node hypotheses are unchanged. These comparator
 classifications and targeted source checks are diagnostic, not a statistical
 precision or recall claim.
 
+A 2026-08-05 Rust follow-up used the pinned 191-file Rayon checkout and fresh
+JSON output roots. Three release-binary Compass processes produced
+byte-identical graphs (SHA-256 `11d35db33a3ac2ad1c6914cd59b53ec6b5fbe637046c04307aad57978edb91fb`)
+with 8,828 nodes and 18,422 occurrence-backed relationships. Wall times were
+2.24, 2.14, and 2.30 seconds (2.24-second median), with a 326.7 MB maximum peak
+RSS. The retained Graphify 0.9.32 sample took 1.947 seconds and 84.6 MB, so this
+small-repository sample is not a Compass performance win; Compass publishes
+2.39× as many relationships.
+
+Preserving nested Rust declarations added 261 nodes and 501 relationships over
+the preceding Compass artifact. Resolving repository-local wildcard calls
+then made eight additional Graphify call hypotheses exact without redirecting
+same-module calls through the wildcard. In the final comparison, 2,159 of
+7,701 Graphify relationship hypotheses matched exactly, 1,795 were
+semantically dominated, 2,965 were rejected as unsafe projections, and 782
+remained missing. Of 4,197 node hypotheses, 2,754 matched exactly, 271 were
+dominated, 1,083 unverifiable placeholders were rejected, and 89 remained
+missing. These classifications use source-compatible endpoints and occurrence
+anchors; they are diagnostic hypotheses, not precision or recall percentages.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and

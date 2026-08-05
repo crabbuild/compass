@@ -226,6 +226,84 @@ fn rust_phase2_distinguishes_same_named_module_and_function_candidates()
 }
 
 #[test]
+fn rust_phase2_preserves_nested_function_declarations_and_calls() -> Result<(), Box<dyn Error>> {
+    let extraction = Engine::default().extract_source(
+        Path::new("src/lib.rs"),
+        b"fn join() { fn call() {} call(); call(); }\n",
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+
+    let outer = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "crate::join")
+        .ok_or("missing outer function")?;
+    let nested = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "crate::join::call")
+        .ok_or("missing nested function")?;
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Contains
+            && candidate.source_declaration_id == outer.id
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(nested.id.as_str())
+    }));
+    assert_eq!(
+        evidence
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.relation == CandidateRelation::Calls
+                    && candidate.source_declaration_id == outer.id
+                    && candidate.target_spelling == "call"
+            })
+            .count(),
+        2
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_phase2_attaches_local_wildcards_to_lowercase_call_candidates() -> Result<(), Box<dyn Error>>
+{
+    let extraction = Engine::default().extract_source(
+        Path::new("src/join/test.rs"),
+        b"use super::*;\nfn invokes() { join(); }\n",
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+
+    let call = evidence
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "join"
+        })
+        .ok_or("missing lowercase call candidate")?;
+    let binding = call
+        .binding_id
+        .as_deref()
+        .and_then(|binding_id| {
+            evidence
+                .bindings
+                .iter()
+                .find(|binding| binding.id == binding_id)
+        })
+        .ok_or("lowercase call has no wildcard binding")?;
+    assert_eq!(binding.spelling, "*");
+    assert_eq!(binding.qualified_target, "crate::join");
+    Ok(())
+}
+
+#[test]
 fn rust_phase2_preserves_impl_self_constructors_and_public_wildcards() -> Result<(), Box<dyn Error>>
 {
     let extraction = Engine::default().extract_source(

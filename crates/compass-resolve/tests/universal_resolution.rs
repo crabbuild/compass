@@ -311,6 +311,135 @@ enum Event { Local(Local), Remote { value: Remote } }
 }
 
 #[test]
+fn rust_nested_function_calls_resolve_to_the_lexical_declaration() {
+    let source = b"fn join() { fn call() {} call(); call(); }\n";
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let join = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::join")
+        .expect("outer function");
+    let call = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::join::call")
+        .expect("nested function");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == join.id && edge.target == call.id && edge.string("relation") == "contains"
+    }));
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == join.id
+                    && edge.target == call.id
+                    && edge.string("relation") == "calls"
+            })
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn rust_local_wildcard_resolves_lowercase_calls_without_inventing_external_ones() {
+    let provider_source = b"pub fn join() {}\nmod test;\n";
+    let caller_source = br#"use super::*;
+fn helper() {}
+fn partition<T>(_value: &mut [T]) -> usize { 0 }
+fn quick_sort<T>(value: &mut [T]) { let _mid = partition(value); join(); }
+fn invokes() { helper(); join(); }
+"#;
+    let external_source =
+        b"use external::prelude::*;\nfn caller() { lowercase(); std::iter::once(1); }\n";
+    let resolved = compass_resolve::resolve(
+        &[
+            extract("src/join/mod.rs", provider_source),
+            extract("src/join/test.rs", caller_source),
+            extract("src/external.rs", external_source),
+        ],
+        &HashMap::from([
+            (
+                "src/join/mod.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/join/test.rs".to_owned(),
+                String::from_utf8(caller_source.to_vec()).expect("caller source"),
+            ),
+            (
+                "src/external.rs".to_owned(),
+                String::from_utf8(external_source.to_vec()).expect("external source"),
+            ),
+        ]),
+    );
+    let join = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::join::join")
+        .expect("join declaration");
+    let invokes = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::join::test::invokes")
+        .expect("invokes declaration");
+    let helper = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::join::test::helper")
+        .expect("same-module helper declaration");
+    let partition = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::join::test::partition")
+        .expect("same-module generic declaration");
+    let quick_sort = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::join::test::quick_sort")
+        .expect("same-module generic caller");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == invokes.id
+            && edge.target == join.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "wildcard-binding"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == invokes.id
+            && edge.target == helper.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") != "wildcard-binding"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == quick_sort.id
+            && edge.target == partition.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") != "wildcard-binding"
+    }));
+    assert!(resolved.nodes.iter().all(|node| {
+        !matches!(
+            node.string("qualified_name").as_str(),
+            "external::prelude::lowercase" | "lowercase"
+        )
+    }));
+    assert!(
+        resolved
+            .nodes
+            .iter()
+            .any(|node| node.string("qualified_name") == "std::iter::once")
+    );
+}
+
+#[test]
 fn rust_nonstandard_crate_root_preserves_nested_module_identity() {
     let flags = extract(
         "crates/core/flags/mod.rs",

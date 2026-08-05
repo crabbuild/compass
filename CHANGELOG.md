@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Preserve Rust declarations nested inside function bodies and resolve their
+  source-anchored lexical calls. Repository-local wildcard imports now resolve
+  lowercase calls after lexical and module candidates, while unproven external
+  wildcard calls continue to fail closed. Rust structural facts advance to
+  adapter version 3 so cached evidence refreshes.
+
 - Preserve exact TypeScript and TSX extraction for valid `in`/`out` generic
   variance modifiers even though the pinned grammar reports those tokens as
   recoverable errors. Compass reparses only parser-identified variance tokens

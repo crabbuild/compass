@@ -608,6 +608,16 @@ def _rust_generic_owner_name(node: NodeFact) -> str | None:
     return _terminal_symbol(normalized) or None
 
 
+def _rust_generic_parameter_placeholder(node: NodeFact) -> bool:
+    return bool(
+        node.language == "rust"
+        and node.placeholder
+        and not node.kind
+        and node.source_file
+        and re.fullmatch(r"[A-Z]", node.label)
+    )
+
+
 def _qualified_name_has_owner(qualified_name: str) -> bool:
     return "." in qualified_name or "::" in qualified_name
 
@@ -722,6 +732,11 @@ def _classify_nodes(
                 "exact", "source_fact", exact_compatible[0].identifier
             )
             mapping[identifier] = exact_compatible[0].identifier
+            continue
+        if _rust_generic_parameter_placeholder(graphify):
+            coverage[identifier] = Coverage(
+                "missing", "no_compatible_anchored_definition", None
+            )
             continue
         if (
             graphify.source_file
@@ -908,6 +923,7 @@ def _classify_nodes(
                 candidate
                 for candidate in compass_by_label.get(graphify.normalized_label, [])
                 if _compatible_definition(graphify, candidate)
+                and candidate.kind in CODE_TYPE_KINDS
                 and candidate.module
                 and _identifier_carries_module(graphify.identifier, candidate.module)
             ]
@@ -1413,7 +1429,7 @@ def _classify_edges(
         compass_target = compass_nodes.get(target) if target is not None else None
         if (
             graphify.relation == "references"
-            and graphify.context == "field"
+            and graphify.context in {"field", "generic_arg"}
             and source is not None
             and target is not None
         ):

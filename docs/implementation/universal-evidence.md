@@ -30,7 +30,7 @@ future work.
 | Status | Implementation |
 | --- | --- |
 | Available now | `compass-languages` owns the source registry, parsers, established adapters, and semantic evidence version 1 |
-| Available now | Python, Go, Rust, and Java are entries in the hard-cut `AdapterRegistry`; Go and Java are at adapter version 3, Python is at version 11, and Rust is at version 2 |
+| Available now | Python, Go, Rust, and Java are entries in the hard-cut `AdapterRegistry`; Go, Java, and Rust are at adapter version 3, and Python is at version 11 |
 | Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all four hard-cut languages |
 | Available now | `UniversalResolutionIndex` resolves and projects hard-cut evidence without a language-name branch |
 | Available now | Rust has passed Phase 2 qualification; Java remains `UniversalCandidate` after completing post-cutover pinned-corpus qualification |
@@ -145,8 +145,7 @@ The architectural profile names are `Direct`, `UniversalCandidate`, and
 an internal `legacy` variant. Treat it as an old wire identifier, not the name
 or quality status of an established adapter.
 
-Go and Java are at adapter version 3, Python is at version 11, and Rust is at
-version 2.
+Go, Java, and Rust are at adapter version 3, and Python is at version 11.
 Adapter versions advance when a semantic evidence change
 requires language-local cache invalidation; grammar provenance and the
 extraction-semantics identity remain independent cache inputs.

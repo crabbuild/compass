@@ -448,6 +448,31 @@ class Widget(base_factory(), metaclass=meta_factory()):
             result.metrics["graphify_nodes_coverage_reasons"],
         )
 
+    def test_unqualified_placeholder_cannot_bind_to_a_value_or_module(self) -> None:
+        for kind in ("field", "module"):
+            with self.subTest(kind=kind):
+                result = compare_documents(
+                    f"""
+                    {{"graph":{{"diagnostics":[]}},"nodes":[
+                      {{"id":"result","label":"result","kind":"{kind}",
+                       "source_file":"src/lib.rs","source_location":"L8",
+                       "language":"rust"}}
+                    ],"links":[]}}
+                    """,
+                    """
+                    {"nodes":[
+                      {"id":"src_build_rs_result","label":"Result"}
+                    ],"links":[]}
+                    """,
+                )
+                self.assertTrue(result.passed, result.failures)
+                self.assertEqual(result.metrics["rejected_graphify_nodes"], 1)
+                self.assertEqual(result.metrics["dominated_graphify_nodes"], 0)
+                self.assertIn(
+                    "rejected:unverifiable_placeholder",
+                    result.metrics["graphify_nodes_coverage_reasons"],
+                )
+
     def test_case_exact_generated_owner_disambiguates_case_distinct_types(self) -> None:
         result = compare_documents(
             """
@@ -472,6 +497,36 @@ class Widget(base_factory(), metaclass=meta_factory()):
         self.assertEqual(result.metrics["dominated_graphify_nodes"], 1)
         self.assertIn(
             "dominated:case_exact_owner",
+            result.metrics["graphify_nodes_coverage_reasons"],
+        )
+
+    def test_rust_generic_parameter_remains_missing_instead_of_binding_an_unrelated_alias(
+        self,
+    ) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"field","label":"i","kind":"field",
+               "source_file":"src/iter/chunks.rs","source_location":"L12",
+               "language":"rust"},
+              {"id":"alias","label":"I","kind":"type_alias",
+               "source_file":"src/iter/test.rs","source_location":"L1918",
+               "language":"rust"}
+            ],"links":[]}
+            """,
+            """
+            {"nodes":[
+              {"id":"src_iter_mod_i","label":"I",
+               "source_file":"src/iter/mod.rs","source_location":"L290",
+               "language":"rust"}
+            ],"links":[]}
+            """,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.metrics["missing_graphify_nodes"], 1)
+        self.assertEqual(result.metrics["dominated_graphify_nodes"], 0)
+        self.assertIn(
+            "missing:no_compatible_anchored_definition",
             result.metrics["graphify_nodes_coverage_reasons"],
         )
 
@@ -811,6 +866,43 @@ class Widget(base_factory(), metaclass=meta_factory()):
             ],"links":[
               {"source":"legacy_owner","target":"legacy_target","relation":"references",
                "context":"field","source_file":"src/config.rs","source_location":"L2"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "dominated:precise_field_type",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_field_generic_argument_dominates_flat_owner_reference(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"JobFifo","kind":"struct",
+               "source_file":"src/job.rs","source_location":"L1","language":"rust"},
+              {"id":"field","label":"inner","kind":"field",
+               "source_file":"src/job.rs","source_location":"L2","language":"rust"},
+              {"id":"target","label":"JobRef","kind":"struct",
+               "source_file":"src/job.rs","source_location":"L10","language":"rust"}
+            ],"links":[
+              {"source":"owner","target":"field","relation":"contains",
+               "source_file":"src/job.rs","source_location":"L2"},
+              {"source":"field","target":"target","relation":"type_of",
+               "source_file":"src/job.rs","source_location":"L2"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_owner","label":"JobFifo",
+               "source_file":"src/job.rs","source_location":"L1"},
+              {"id":"legacy_target","label":"JobRef",
+               "source_file":"src/job.rs","source_location":"L10"}
+            ],"links":[
+              {"source":"legacy_owner","target":"legacy_target","relation":"references",
+               "context":"generic_arg","source_file":"src/job.rs","source_location":"L2"}
             ]}
             """,
         )
