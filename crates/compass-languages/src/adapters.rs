@@ -202,7 +202,7 @@ const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
     AdapterProfile {
         id: "compass.rust",
         language: "rust",
-        version: 6,
+        version: 7,
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         profile: UniversalAdapterProfile::UniversalCandidate,
         capabilities: RUST_CAPABILITIES,

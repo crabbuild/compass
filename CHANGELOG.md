@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Publish source-anchored Rust references from an implementer declaration
+  proven in the current source evidence to every non-primitive nested type
+  used as a trait implementation argument. The occurrence remains in the
+  implementation's lexical scope, so imported types and scoped implementation
+  parameters resolve exactly while competing wildcard imports remain unresolved. Rust
+  structural facts advance to adapter version 7 so cached evidence refreshes.
+
 - Treat a Rust wildcard target in another crate as repository-local only when
   that exact file, module, or enum declaration is present in the indexed
   source. This lets multi-crate workspaces resolve unique grouped reexports and

@@ -1024,6 +1024,82 @@ impl<T> Render for Container<T> {
 }
 
 #[test]
+fn rust_impl_trait_arguments_are_source_anchored_references_from_the_implementer() {
+    let source = br#"trait Convert<T> {}
+struct Input;
+struct Output;
+impl Convert<Input> for Output {}
+"#;
+    let resolved = compass_resolve::resolve(
+        &[extract("src/lib.rs", source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let input = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Input")
+        .expect("Input declaration");
+    let output = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Output")
+        .expect("Output declaration");
+    let convert = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Convert")
+        .expect("Convert declaration");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == output.id
+            && edge.target == input.id
+            && edge.string("relation") == "references"
+            && edge.string("source_location") == "L4"
+    }));
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.source != output.id
+            || edge.target != convert.id
+            || edge.string("relation") != "references"
+    }));
+
+    let ambiguous_source = br#"mod left { pub struct Input; }
+mod right { pub struct Input; }
+use left::*;
+use right::*;
+trait Convert<T> {}
+struct Output;
+impl Convert<Input> for Output {}
+"#;
+    let ambiguous = compass_resolve::resolve(
+        &[extract("src/lib.rs", ambiguous_source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(ambiguous_source.to_vec()).expect("ambiguous source"),
+        )]),
+    );
+    let ambiguous_output = ambiguous
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Output")
+        .expect("ambiguous Output declaration");
+    let input_ids = ambiguous
+        .nodes
+        .iter()
+        .filter(|node| node.string("qualified_name").ends_with("::Input"))
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(input_ids.len(), 2);
+    assert!(ambiguous.edges.iter().all(|edge| {
+        edge.source != ambiguous_output.id
+            || !input_ids.contains(edge.target.as_str())
+            || edge.string("relation") != "references"
+    }));
+}
+
+#[test]
 fn rust_associated_returns_resolve_per_impl_and_ambiguity_fails_closed() {
     let source = br#"trait Produce { type Output; fn produce() -> Self::Output; }
 struct Alpha;

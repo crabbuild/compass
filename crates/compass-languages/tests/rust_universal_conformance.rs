@@ -32,7 +32,7 @@ fn build() {
         .ok_or("missing Rust semantic evidence")?;
 
     assert_eq!(evidence.adapter.id, "compass.rust");
-    assert_eq!(evidence.adapter.version, 6);
+    assert_eq!(evidence.adapter.version, 7);
     assert_eq!(
         evidence.adapter.evidence_schema,
         "compass.languages.evidence/1"
@@ -137,6 +137,75 @@ fn build() { other::Item::new(); }
         candidate.constraints.qualified_name.as_deref(),
         Some("crate::namespaced::Item::new")
     );
+    Ok(())
+}
+
+#[test]
+fn implementation_trait_arguments_emit_exact_implementer_owned_references()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("impl_args.rs");
+    let source = br#"trait Convert<T> {}
+struct Input;
+struct Output;
+impl Convert<Input> for Output {}
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let output = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "crate::impl_args::Output")
+        .ok_or("missing Output declaration")?;
+    let reference = evidence
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.source_declaration_id == output.id
+                && candidate.relation == CandidateRelation::References
+                && candidate.target_spelling == "Input"
+        })
+        .ok_or("missing implementation argument reference")?;
+    assert_eq!(
+        reference.constraints.qualified_name.as_deref(),
+        Some("crate::impl_args::Input")
+    );
+    let occurrence = evidence
+        .occurrences
+        .iter()
+        .find(|occurrence| reference.occurrence_id.as_deref() == Some(occurrence.id.as_str()))
+        .ok_or("missing implementation argument occurrence")?;
+    let start = usize::try_from(occurrence.range.start_byte)?;
+    let end = usize::try_from(occurrence.range.end_byte)?;
+    assert_eq!(&source[start..end], b"Input");
+    assert!(evidence.candidates.iter().all(|candidate| {
+        candidate.source_declaration_id != output.id
+            || candidate.relation != CandidateRelation::References
+            || candidate.target_spelling != "Convert"
+    }));
+    Ok(())
+}
+
+#[test]
+fn malformed_implementation_trait_arguments_fail_closed() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("malformed_impl_args.rs");
+    let source = br#"trait Convert<T> {}
+struct Input;
+struct Output;
+    impl Convert<Input +> for Output {}
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing malformed Rust semantic evidence")?;
+    assert!(evidence.candidates.iter().all(|candidate| {
+        candidate.relation != CandidateRelation::References || candidate.target_spelling != "Input"
+    }));
     Ok(())
 }
 

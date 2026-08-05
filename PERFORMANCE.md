@@ -436,6 +436,25 @@ preceding run. Node classifications remain 2,758 exact, 271 dominated, 1,083
 rejected, and 85 missing. These are source-constrained comparator
 classifications, not statistical precision or recall measurements.
 
+The next 2026-08-05 Rayon qualification added exact Rust implementation-header
+type references. Three clean release builds were byte-identical at 12,060
+nodes, 26,809 relationships, and graph SHA-256
+`91b5e3c97c926d08a576341ef2fff991acac519a2791bf60fc628d7aa30550da`.
+All 134 added relationships are exact source occurrences: 131 target scoped
+implementation parameters, two target source structs, and one targets an
+explicitly imported type alias. A targeted source audit confirmed
+`WorkerThread -> ThreadBuilder`, `CollectReducer -> CollectResult`,
+`ListReducer -> LinkedList`, and tuple-parameter references on `Unzip` against
+their implementation headers. No node identities, node counts, or preceding
+relationships changed; Rust adapter metadata advances to version 7. The
+comparator reports 2,253 exact, 2,604 dominated, 2,497 rejected, 19
+ambiguous, and 328 missing Graphify edge hypotheses. Two formerly missing
+references are now exact, while 88 unverifiable generic placeholders are
+dominated by Compass's exact implementation-scoped parameter identities. Node
+classifications remain 2,758 exact, 271 dominated, 1,083 rejected, and 85
+missing. These are source-constrained comparator classifications, not
+statistical precision or recall measurements.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and

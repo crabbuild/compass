@@ -249,6 +249,16 @@ visible glob scopes, while an unknown dependency keeps that union incomplete.
 The resolver never assumes that a different crate root is external or that a
 named dependency is local solely from its spelling.
 
+For `impl Trait<Argument> for Implementer`, an implementer declaration proven
+in the current source evidence owns an exact type-reference occurrence for
+every non-primitive nested trait argument. Lookup uses the implementation
+scope rather than the implementer's declaration scope, preserving imported
+types and implementation-local type parameters. The outer trait remains represented
+only by the `implements` candidate, so the same source token is not also
+published as a generic reference. If the adapter cannot prove the implementer
+declaration, the parser recovered through an error, or an argument has
+competing bindings, Compass does not invent a reference endpoint.
+
 Python file imports are visible at module scope. Function- and class-local
 imports are indexed only in their owning lexical scope, so they cannot leak to
 sibling functions or become file-owned facts. Each imported item retains its

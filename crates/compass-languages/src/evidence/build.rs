@@ -3705,6 +3705,32 @@ impl<'source> DirectAdapterState<'source> {
             enclosing_type_qualified_name: Some(implementation.type_qualified_name.clone()),
         };
         self.add_rust_type_parameters(node, &implementation_owner)?;
+        if type_context.is_some()
+            && let Some(type_arguments) =
+                trait_node.and_then(|trait_node| trait_node.child_by_field_name("type_arguments"))
+            && !self.overlaps_parser_error(type_arguments)
+        {
+            let mut targets = Vec::new();
+            collect_rust_type_nodes(
+                type_arguments,
+                type_arguments.end_byte(),
+                None,
+                &mut targets,
+            );
+            for target in targets {
+                let raw = self.text(target);
+                if raw.is_empty() || rust_primitive_type(&raw) {
+                    continue;
+                }
+                self.add_rust_path_candidate(
+                    SemanticRole::TypeReference,
+                    CandidateRelation::References,
+                    &implementation_owner,
+                    target,
+                    None,
+                )?;
+            }
+        }
         if let (Some(type_context), Some(trait_node), Some(trait_qualified_name)) = (
             type_context.as_ref(),
             trait_node,

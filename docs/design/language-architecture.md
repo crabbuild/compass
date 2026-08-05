@@ -30,7 +30,7 @@ This architecture is transitioning one language at a time. The status labels bel
 | --- | --- |
 | Available now | The vendored package supplies 37 pinned static Tree-sitter grammars |
 | Available now | Python and Go are registered hard-cut adapters: they emit semantic evidence and use shared resolution and projection |
-| Available now | Rust is a quality-gated, hard-cut version-6 `UniversalCandidate`; version 6 resolves inherited associated types through complete source-proven supertrait hierarchies and exact receiver declarations, version 5 preserves impl-scoped associated types and exact lexical `Self::Type` returns, version 4 publishes scoped type, lifetime, and const generic parameters, and version 3 preserves nested function declarations and lexical calls; replaced publisher and collection resolution branches remain removed |
+| Available now | Rust is a quality-gated, hard-cut version-7 `UniversalCandidate`; version 7 publishes source-anchored references from an implementer declaration proven in the current source evidence to non-primitive nested type arguments in its trait implementation, version 6 resolves inherited associated types through complete source-proven supertrait hierarchies and exact receiver declarations, version 5 preserves impl-scoped associated types and exact lexical `Self::Type` returns, version 4 publishes scoped type, lifetime, and const generic parameters, and version 3 preserves nested function declarations and lexical calls; replaced publisher and collection resolution branches remain removed |
 | Available now | Java is a hard-cut version-3 `UniversalCandidate`; its replaced publisher and Java member resolver are removed, and post-cutover pinned-corpus qualification is complete |
 | Available now | The remaining production languages keep their established extraction and resolution paths |
 | Planned | Later languages transition independently after language-specific qualification |
@@ -97,7 +97,7 @@ The hard-cut route is selected by `AdapterRegistry`. Presence in the source
 registry or availability of a grammar does not select it. On the current
 branch, the registry contains `go`, `java`, `python`, and `rust`. Go is at
 adapter version 3, Java is at version 3, Python is at version 11, and Rust is at
-version 6. Candidate status
+version 7. Candidate status
 describes qualification maturity; it does not re-enable the removed direct
 route. Adapter-version changes invalidate cached evidence for only the changed
 language. Go identities retain the repository-relative directory prefix and
