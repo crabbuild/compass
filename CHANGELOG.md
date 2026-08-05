@@ -21,6 +21,10 @@
   competing, conditional, deleted, shadowed, and ambiguous bindings fail
   closed. Explicit receiver calls no longer fall back to a same-named
   unqualified import. Python structural facts advance to adapter version 7.
+- Resolve zero-argument Python `super()` calls through complete source-backed
+  C3 hierarchies instead of requiring the method on the immediate base.
+  Unknown or ambiguous hierarchy prefixes still fail closed. Python structural
+  facts advance to adapter version 8.
 
 - Split framework extraction into focused Spring, Express, Axum, Next.js, and
   Vite adapters. Project evidence now indexes framework configuration files,

@@ -236,6 +236,10 @@ to one source-backed class; functions and unresolved external factories do not
 invent a type. Function- and class-local shadows do not invalidate the module
 declaration. Explicit receiver calls such as `self.settings()` never borrow a
 same-named unqualified import as their target.
+Zero-argument Python `super()` calls use source-proven C3 dispatch after the
+enclosing class. Compass may cross multiple source-backed bases only when the
+required base sets are complete and uniquely resolved; an unknown preceding
+base, incomplete hierarchy, cycle, or ambiguous member fails closed.
 
 Language and allowed target kinds are filtered before uniqueness is decided.
 Case-insensitive or terminal-name equality cannot select a target. Cross-

@@ -5192,14 +5192,17 @@ impl<'source> DirectAdapterState<'source> {
         let python_super_receiver = (self.language == "python")
             .then(|| python_super_receiver(function, self.source))
             .flatten();
-        let exact_super_target = if let Some(receiver) = python_super_receiver {
+        let super_dispatch = if let Some(receiver) = python_super_receiver {
             if !python_super_call_is_builtin(receiver, call, owner, self) {
                 return Ok(());
             }
-            let Some(target) = self.direct_python_super_target(owner, spelling) else {
+            let Some(receiver_qualified_name) = owner.enclosing_type_qualified_name.clone() else {
                 return Ok(());
             };
-            Some(target)
+            Some(HierarchyConstraint::ReceiverDispatch {
+                receiver_qualified_name,
+                strategy: ReceiverDispatchStrategy::C3AfterReceiver,
+            })
         } else {
             None
         };
@@ -5251,7 +5254,9 @@ impl<'source> DirectAdapterState<'source> {
             })
             .cloned()
         });
-        let qualified_name = exact_super_target.or_else(|| {
+        let qualified_name = if super_dispatch.is_some() {
+            None
+        } else {
             qualifier
                 .and_then(|qualifier| {
                     self.local_target_for(owner, qualifier)
@@ -5286,7 +5291,7 @@ impl<'source> DirectAdapterState<'source> {
                         .cloned()
                     })?
                 })
-        });
+        };
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
@@ -5334,7 +5339,7 @@ impl<'source> DirectAdapterState<'source> {
                 } else {
                     vec!["function".to_owned(), "method".to_owned()]
                 },
-                hierarchy: None,
+                hierarchy: super_dispatch,
                 allow_external: qualified_name.is_some() && python_super_receiver.is_none(),
             },
         )?;
@@ -5659,19 +5664,6 @@ impl<'source> DirectAdapterState<'source> {
                 .and_then(|inner| self.go_range_expression_type(owner, inner, depth + 1, visited)),
             _ => None,
         }
-    }
-
-    fn direct_python_super_target(
-        &self,
-        owner: &DeclarationContext,
-        spelling: &str,
-    ) -> Option<String> {
-        let enclosing_type = owner.enclosing_type_qualified_name.as_deref()?;
-        let bases = self.python_type_bases.get(enclosing_type)?;
-        let [base] = bases.qualified_names.as_slice() else {
-            return None;
-        };
-        bases.complete.then(|| format!("{base}::{spelling}"))
     }
 
     fn python_base_qualified_name(
