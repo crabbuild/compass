@@ -3618,7 +3618,11 @@ pub(crate) fn python_bound_names(node: Node<'_>, source: &[u8], module: bool) ->
             return;
         }
         match node.kind() {
-            "assignment" | "for_statement" | "for_in_clause" => {
+            "assignment"
+            | "annotated_assignment"
+            | "augmented_assignment"
+            | "for_statement"
+            | "for_in_clause" => {
                 collect_python_assignment_targets(node.child_by_field_name("left"), source, output);
             }
             "with_statement" => {

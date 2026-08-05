@@ -1,9 +1,10 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+use compass_graph::build_from_extraction;
 use compass_languages::{Engine, RawCall};
 use serde_json::Map;
 
@@ -1104,6 +1105,135 @@ fn universal_declarations_project_without_prebuilt_graph_nodes() {
             && edge.target == target.id
             && edge.string("relation") == "calls"
             && edge.string("resolution_rule") == "explicit-binding"
+    }));
+}
+
+#[test]
+fn python_recursive_calls_preserve_exact_self_loops_and_occurrences() {
+    let source = b"def recurse(value):\n    if value:\n        return recurse(value - 1)\n    return recurse(0)\n\nclass Walker:\n    def walk(self, value):\n        if value:\n            return self.walk(value - 1)\n        return None\n";
+    let extracted = extract("pkg/recursive.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/recursive.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let recurse = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.recursive.recurse")
+        .unwrap_or_else(|| panic!("recursive function; nodes={:#?}", resolved.nodes));
+    let walk = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.recursive.Walker::walk")
+        .unwrap_or_else(|| panic!("recursive method; nodes={:#?}", resolved.nodes));
+
+    let recursive_calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.source == recurse.id
+                && edge.target == recurse.id
+                && edge.string("relation") == "calls"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(recursive_calls.len(), 2);
+    assert_eq!(
+        recursive_calls
+            .iter()
+            .map(|edge| edge.string("source_location"))
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["L3".to_owned(), "L4".to_owned()])
+    );
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == walk.id
+            && edge.target == walk.id
+            && edge.string("relation") == "calls"
+            && edge.string("source_location") == "L9"
+    }));
+
+    let published = build_from_extraction(&resolved, true, None);
+    assert_eq!(
+        published
+            .links
+            .iter()
+            .filter(|edge| {
+                edge.source == recurse.id
+                    && edge.target == recurse.id
+                    && edge.string("relation") == "calls"
+            })
+            .count(),
+        2,
+        "recursive occurrences must survive graph endpoint normalization"
+    );
+}
+
+#[test]
+fn python_shadowed_or_unknown_receivers_never_invent_recursive_calls() {
+    let source = b"def parameter_shadow(parameter_shadow):\n    return parameter_shadow()\n\ndef local_shadow():\n    local_shadow = callback\n    return local_shadow()\n\ndef closure_shadow(closure_shadow):\n    def inner():\n        return closure_shadow()\n    return inner()\n\ndef annotated_shadow():\n    annotated_shadow: object\n    return annotated_shadow()\n\ndef augmented_shadow():\n    augmented_shadow += callback\n    return augmented_shadow()\n\nclass Walker:\n    def walk_other(self, other):\n        return other.walk_other()\n";
+    let extracted = extract("pkg/not_recursive.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/not_recursive.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let declarations = resolved
+        .nodes
+        .iter()
+        .filter(|node| {
+            matches!(
+                node.string("qualified_name").as_str(),
+                "pkg.not_recursive.parameter_shadow"
+                    | "pkg.not_recursive.local_shadow"
+                    | "pkg.not_recursive.closure_shadow"
+                    | "pkg.not_recursive.annotated_shadow"
+                    | "pkg.not_recursive.augmented_shadow"
+                    | "pkg.not_recursive.Walker::walk_other"
+            )
+        })
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+
+    let false_shadow_edges = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "calls" && declarations.contains(edge.target.as_str())
+        })
+        .map(|edge| edge.string("source_location"))
+        .collect::<Vec<_>>();
+    assert!(
+        false_shadow_edges.is_empty(),
+        "false calls through statically shadowed names: {false_shadow_edges:?}"
+    );
+}
+
+#[test]
+fn python_global_directive_preserves_module_recursive_call() {
+    let source = b"def global_recurse():\n    global global_recurse\n    return global_recurse()\n";
+    let extracted = extract("pkg/global_recursive.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/global_recursive.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let recurse = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.global_recursive.global_recurse")
+        .unwrap_or_else(|| panic!("global recursive function; nodes={:#?}", resolved.nodes));
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == recurse.id
+            && edge.target == recurse.id
+            && edge.string("relation") == "calls"
+            && edge.string("source_location") == "L3"
     }));
 }
 

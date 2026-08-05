@@ -240,6 +240,14 @@ Zero-argument Python `super()` calls use source-proven C3 dispatch after the
 enclosing class. Compass may cross multiple source-backed bases only when the
 required base sets are complete and uniquely resolved; an unknown preceding
 base, incomplete hierarchy, cycle, or ambiguous member fails closed.
+Exact Python calls may form self-loops when the occurrence resolves to its
+owning function or method, so direct recursion remains visible in the graph.
+Python's statically local parameters and assignment targets shadow module and
+enclosing declarations even when the assignment follows the use. `global` and
+`nonlocal` directives alter that lookup as defined by the source; unresolved
+local callable values remain unpublished rather than becoming false recursive
+calls. Graph entity deduplication preserves an original `calls` self-edge but
+does not turn two distinct pre-deduplication endpoints into recursion.
 
 Language and allowed target kinds are filtered before uniqueness is decided.
 Case-insensitive or terminal-name equality cannot select a target. Cross-

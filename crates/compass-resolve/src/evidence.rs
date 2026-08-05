@@ -1361,7 +1361,7 @@ impl UniversalResolutionIndex {
                     // visited exactly once, so a second full edge-identity set cannot
                     // remove duplicates here. Downstream graph publication still
                     // performs its contract-level semantic edge coalescing.
-                    if source == target {
+                    if source == target && relation != "calls" {
                         return None;
                     }
                     Some(materialized_edge(

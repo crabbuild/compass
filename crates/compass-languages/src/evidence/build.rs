@@ -585,6 +585,8 @@ struct DirectAdapterState<'source> {
     scope_parents: HashMap<String, String>,
     ambiguous_bindings: HashSet<(String, String)>,
     python_module_bound_names: HashSet<String>,
+    python_local_bound_names: HashMap<String, HashSet<String>>,
+    python_global_names: HashMap<String, HashSet<String>>,
     python_type_bases: HashMap<String, PythonTypeBases>,
     rust_containers: HashMap<usize, DeclarationContext>,
     rust_impls: HashMap<usize, RustImplContext>,
@@ -657,6 +659,8 @@ impl<'source> DirectAdapterState<'source> {
             scope_parents: HashMap::new(),
             ambiguous_bindings: HashSet::new(),
             python_module_bound_names: HashSet::new(),
+            python_local_bound_names: HashMap::new(),
+            python_global_names: HashMap::new(),
             python_type_bases: HashMap::new(),
             rust_containers: HashMap::new(),
             rust_impls: HashMap::new(),
@@ -1266,7 +1270,14 @@ impl<'source> DirectAdapterState<'source> {
             self.add_python_annotations(node, &active)?;
             if node.kind() == "function_definition" {
                 let body = node.child_by_field_name("body").unwrap_or(node);
-                let bound = crate::engine::python_bound_names(node, self.source, false);
+                let mut bound = crate::engine::python_bound_names(node, self.source, false);
+                let (global_names, nonlocal_names) =
+                    python_scope_directive_names(node, self.source);
+                bound.retain(|name| !global_names.contains(name) && !nonlocal_names.contains(name));
+                self.python_local_bound_names
+                    .insert(active.scope_id.clone(), bound.clone());
+                self.python_global_names
+                    .insert(active.scope_id.clone(), global_names);
                 self.walk_python_value_references(body, &active, true, &bound)?;
             }
         }
@@ -5226,6 +5237,12 @@ impl<'source> DirectAdapterState<'source> {
         {
             return Ok(());
         }
+        if self.language == "python"
+            && qualifier.is_none()
+            && self.python_name_is_statically_local(owner, spelling)
+        {
+            return Ok(());
+        }
         let (role, relation) = (SemanticRole::Call, CandidateRelation::Calls);
         let argument_count = (self.language == "go")
             .then(|| call.child_by_field_name("arguments"))
@@ -5819,6 +5836,31 @@ impl<'source> DirectAdapterState<'source> {
                     && binding.active_from <= call.start_byte()
                     && call.start_byte() < binding.active_until
             })
+    }
+
+    fn python_name_is_statically_local(&self, owner: &DeclarationContext, spelling: &str) -> bool {
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let Some(current) = scope_id else {
+                break;
+            };
+            if self
+                .python_global_names
+                .get(current)
+                .is_some_and(|names| names.contains(spelling))
+            {
+                return false;
+            }
+            if self
+                .python_local_bound_names
+                .get(current)
+                .is_some_and(|names| names.contains(spelling))
+            {
+                return true;
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        false
     }
 
     fn record_import_binding(
@@ -7497,6 +7539,51 @@ fn direct_python_definition<'tree>(
     });
     let found = matches.next()?;
     matches.next().is_none().then_some(found)
+}
+
+fn python_scope_directive_names(
+    function: Node<'_>,
+    source: &[u8],
+) -> (HashSet<String>, HashSet<String>) {
+    fn walk(
+        node: Node<'_>,
+        source: &[u8],
+        root: bool,
+        global_names: &mut HashSet<String>,
+        nonlocal_names: &mut HashSet<String>,
+    ) {
+        if !root && matches!(node.kind(), "function_definition" | "class_definition") {
+            return;
+        }
+        let output = match node.kind() {
+            "global_statement" => Some(&mut *global_names),
+            "nonlocal_statement" => Some(&mut *nonlocal_names),
+            _ => None,
+        };
+        if let Some(output) = output {
+            let mut cursor = node.walk();
+            for child in node
+                .children(&mut cursor)
+                .filter(|child| child.kind() == "identifier")
+            {
+                if let Ok(name) = child.utf8_text(source) {
+                    output.insert(name.to_owned());
+                }
+            }
+            return;
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            walk(child, source, false, global_names, nonlocal_names);
+        }
+    }
+
+    let mut global_names = HashSet::new();
+    let mut nonlocal_names = HashSet::new();
+    if let Some(body) = function.child_by_field_name("body") {
+        walk(body, source, true, &mut global_names, &mut nonlocal_names);
+    }
+    (global_names, nonlocal_names)
 }
 
 fn collect_python_module_declaration_names(

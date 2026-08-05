@@ -25,6 +25,14 @@
   C3 hierarchies instead of requiring the method on the immediate base.
   Unknown or ambiguous hierarchy prefixes still fail closed. Python structural
   facts advance to adapter version 8.
+- Preserve source-proven recursive Python calls, including distinct occurrence
+  anchors for repeated recursion. Parameters, assignment targets, closure
+  bindings, and unknown receivers cannot fall through to a same-named
+  declaration; `global` and `nonlocal` directives retain Python lexical
+  semantics. Entity deduplication retains only recursive call loops that were
+  already self-edges before rewiring; non-call loops and loops created by
+  merging distinct endpoints remain suppressed. Python structural facts
+  advance to adapter version 9.
 
 - Split framework extraction into focused Spring, Express, Axum, Next.js, and
   Vite adapters. Project evidence now indexes framework configuration files,
