@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Resolve Rust calls chained from a source-proven associated-function result,
+  including uniquely aliased receiver owners such as
+  `super::DrainGuard::new(...).par_drain(...)`. Concrete implementation
+  methods returning `Self` now publish exact return evidence, mixed `::` and
+  `.` call syntax is parsed structurally, and ambiguous return or member sets
+  fail closed. Rust structural facts advance to adapter version 11.
+
 - Fail closed for Rust `self.method(...)` calls when the indexed receiver has
   multiple repository-local trait method declarations and available evidence
   cannot select one. Such calls no longer become fabricated external or

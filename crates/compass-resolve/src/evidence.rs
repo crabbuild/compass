@@ -1308,6 +1308,9 @@ impl UniversalResolutionIndex {
                 ) {
                     return Some(decision);
                 }
+                if let Some(decision) = self.member_decision(language, &qualified, candidate) {
+                    return Some(decision);
+                }
                 if let Some(decision) =
                     self.imported_member_decision(language, &qualified, candidate)
                 {
@@ -2886,9 +2889,25 @@ impl UniversalResolutionIndex {
     }
 
     fn callable_declarations(&self, language: &str, qualified: &str) -> Vec<DeclarationSlot> {
+        let qualified = match self.follow_alias(language, qualified) {
+            Ok(qualified) => qualified,
+            Err(_) => return Vec::new(),
+        };
+        let qualified = if language == "rust" {
+            let Some((owner, member)) = qualified.rsplit_once("::") else {
+                return Vec::new();
+            };
+            let owner = match self.follow_alias(language, owner) {
+                Ok(owner) => owner,
+                Err(_) => return Vec::new(),
+            };
+            format!("{owner}::{member}")
+        } else {
+            qualified
+        };
         if let Some(declarations) = self
             .by_qualified
-            .get(&(language.to_owned(), qualified.to_owned()))
+            .get(&(language.to_owned(), qualified.clone()))
         {
             return declarations.clone();
         }

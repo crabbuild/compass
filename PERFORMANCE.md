@@ -530,6 +530,25 @@ not supported those hypotheses. Rust adapter metadata advances to version 10.
 The first timing sample was a mounted-volume outlier; the other clean process
 times were 2.40 and 2.13 seconds, so no timing claim is made from this run.
 
+Rust adapter version 11 was then qualified on the same pinned Rayon checkout
+after adding source-proven associated-function result dispatch. Three clean
+release builds were byte-identical at 11,859 nodes, 26,604 relationships, and
+graph SHA-256
+`b99fda44928991ec8ef5265b7fa869541cfb75ff24e8f2fe393a0c1de7287b53`.
+Both `DrainGuard::new(...).par_drain(...)` occurrences resolve exactly to the
+single local `ParallelDrainRange` implementation. Relative to version 10, the
+graph removes 296 inferred external function placeholders, adds 98 corrected
+placeholders, and adds 233 exact concrete-`Self` return relationships; no
+source-backed declaration node is removed. The Graphify comparator records
+2,258 exact, 2,613 dominated, 2,493 rejected, 19 ambiguous, and 318 missing
+edge hypotheses. The four-net increase in `missing` is a comparator-label
+effect: two incorrect Graphify `par_drain` targets move from missing to
+rejected, while six formerly rejected hypotheses become missing after the
+malformed Compass placeholders that contradicted them are removed. These
+counts are diagnostic classifications, not a precision or recall claim. The
+three process times were 3.39, 2.99, and 2.92 seconds on a nearly full mounted
+workspace, so no performance claim is made from this run.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and

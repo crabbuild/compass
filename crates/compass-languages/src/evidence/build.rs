@@ -616,6 +616,7 @@ struct DirectAdapterState<'source> {
     rust_platform_fallbacks: HashSet<(String, String)>,
     rust_field_types: HashMap<String, HashMap<String, String>>,
     rust_value_types: HashMap<String, HashMap<String, Vec<RustValueTypeVersion>>>,
+    rust_call_result_bindings: HashMap<(String, String, usize), String>,
     rust_import_nodes: HashSet<usize>,
     rust_test_declarations: HashSet<String>,
     go_lexical_bindings: HashMap<usize, Vec<GoLexicalBinding>>,
@@ -695,6 +696,7 @@ impl<'source> DirectAdapterState<'source> {
             rust_platform_fallbacks: HashSet::new(),
             rust_field_types: HashMap::new(),
             rust_value_types: HashMap::new(),
+            rust_call_result_bindings: HashMap::new(),
             rust_import_nodes: HashSet::new(),
             rust_test_declarations: HashSet::new(),
             go_lexical_bindings: HashMap::new(),
@@ -4366,6 +4368,20 @@ impl<'source> DirectAdapterState<'source> {
             node.end_byte()
         };
         let name_id = node.child_by_field_name("name").map(|name| name.id());
+        if let Some(return_type) = node.child_by_field_name("return_type")
+            && self.text(return_type).trim() == "Self"
+            && let Some(receiver) = self.rust_concrete_callable_receiver(owner)
+        {
+            self.add_rust_occurrence_candidate(
+                SemanticRole::TypeReference,
+                CandidateRelation::Returns,
+                owner,
+                return_type,
+                Some(&receiver),
+                vec!["struct".to_owned(), "enum".to_owned()],
+                false,
+            )?;
+        }
         let mut targets = Vec::new();
         collect_rust_type_nodes(node, body_start, name_id, &mut targets);
         for target in targets {
@@ -4452,7 +4468,20 @@ impl<'source> DirectAdapterState<'source> {
             return Ok(());
         }
         let raw = self.text(function);
-        let (qualifier, spelling) = split_qualified(&raw);
+        let (qualifier, spelling) = if function.kind() == "field_expression" {
+            let qualifier = function
+                .child_by_field_name("value")
+                .map(|value| self.text(value));
+            let spelling = function
+                .child_by_field_name("field")
+                .map_or_else(String::new, |field| self.text(field));
+            (qualifier, spelling)
+        } else {
+            let (qualifier, spelling) = split_qualified(&raw);
+            (qualifier.map(str::to_owned), spelling.to_owned())
+        };
+        let qualifier = qualifier.as_deref();
+        let spelling = spelling.as_str();
         if spelling.is_empty() {
             return Ok(());
         }
@@ -4466,13 +4495,14 @@ impl<'source> DirectAdapterState<'source> {
         {
             return Ok(());
         }
-        let direct_binding = platform_reexport_bindings
-            .is_none()
-            .then(|| {
-                self.binding_for_occurrence(owner, binding_name, function.start_byte(), true)
-                    .cloned()
-            })
-            .flatten();
+        let call_result_binding = self.rust_call_result_binding_for_occurrence(owner, function)?;
+        let direct_binding = (platform_reexport_bindings.is_none()
+            && call_result_binding.is_none())
+        .then(|| {
+            self.binding_for_occurrence(owner, binding_name, function.start_byte(), true)
+                .cloned()
+        })
+        .flatten();
         let wildcard_lookup_eligible = qualifier.is_none()
             || qualifier.is_some_and(|value| {
                 qualified_binding_head(value)
@@ -4480,10 +4510,11 @@ impl<'source> DirectAdapterState<'source> {
                     .next()
                     .is_some_and(char::is_uppercase)
             });
-        let wildcard_binding = (direct_binding.is_none() && wildcard_lookup_eligible)
-            .then(|| self.rust_wildcard_binding(owner, function.start_byte()))
-            .flatten()
-            .cloned();
+        let wildcard_binding =
+            (call_result_binding.is_none() && direct_binding.is_none() && wildcard_lookup_eligible)
+                .then(|| self.rust_wildcard_binding(owner, function.start_byte()))
+                .flatten()
+                .cloned();
         let qualified_name = platform_reexport_bindings
             .as_ref()
             .map_or_else(
@@ -4525,7 +4556,7 @@ impl<'source> DirectAdapterState<'source> {
         } else {
             qualified_name
         };
-        let binding = direct_binding.or(wildcard_binding);
+        let binding = call_result_binding.or(direct_binding).or(wildcard_binding);
         let occurrence_id = self.builder.occur_with_context(
             SemanticRole::Call,
             &owner.fact_id,
@@ -4667,6 +4698,73 @@ impl<'source> DirectAdapterState<'source> {
             ));
         }
         Some(rust_join_qualified(qualifier, spelling))
+    }
+
+    fn rust_concrete_callable_receiver(&self, owner: &DeclarationContext) -> Option<String> {
+        let receiver = owner.enclosing_type_qualified_name.as_ref()?;
+        self.rust_receiver_methods
+            .get(&(receiver.clone(), owner.name.clone()))
+            .is_some_and(|methods| methods.iter().any(|method| method == &owner.qualified_name))
+            .then(|| receiver.clone())
+    }
+
+    fn rust_call_result_binding_for_occurrence(
+        &mut self,
+        owner: &DeclarationContext,
+        function: Node<'_>,
+    ) -> Result<Option<String>, EvidenceError> {
+        if function.kind() != "field_expression" {
+            return Ok(None);
+        }
+        let Some(result_call) = function
+            .child_by_field_name("value")
+            .filter(|value| value.kind() == "call_expression")
+        else {
+            return Ok(None);
+        };
+        let Some(called) = result_call.child_by_field_name("function") else {
+            return Ok(None);
+        };
+        let called = if called.kind() == "generic_function" {
+            called.child_by_field_name("function").unwrap_or(called)
+        } else {
+            called
+        };
+        if !matches!(
+            called.kind(),
+            "identifier" | "scoped_identifier" | "field_expression"
+        ) {
+            return Ok(None);
+        }
+        let raw_called = self.text(called);
+        if !raw_called.contains("::") {
+            return Ok(None);
+        }
+        let (qualifier, spelling) = split_qualified(&raw_called);
+        let Some(qualified_callable) =
+            self.rust_call_qualified_name(owner, qualifier, spelling, called.start_byte(), called)
+        else {
+            return Ok(None);
+        };
+        let receiver = self.text(result_call);
+        let key = (
+            owner.scope_id.clone(),
+            qualified_callable.clone(),
+            result_call.start_byte(),
+        );
+        if let Some(binding) = self.rust_call_result_bindings.get(&key) {
+            return Ok(Some(binding.clone()));
+        }
+        let binding = self.builder.bind(
+            BindingKind::CallResult,
+            &receiver,
+            &qualified_callable,
+            None,
+            Some(&owner.scope_id),
+            range_for_node(self.source_file, result_call),
+        )?;
+        self.rust_call_result_bindings.insert(key, binding.clone());
+        Ok(Some(binding))
     }
 
     fn rust_receiver_method_target(&self, receiver: &str, method: &str) -> Option<String> {

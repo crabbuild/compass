@@ -3469,6 +3469,134 @@ fn rust_cross_file_generic_receiver_parameters_resolve_through_imported_impls() 
 }
 
 #[test]
+fn rust_chained_associated_function_result_resolves_trait_method() {
+    let provider_source = br#"pub trait Drain { fn par_drain(self); }
+pub struct Guard;
+impl Guard { pub fn new() -> Self { Self } }
+impl Drain for &mut Guard { fn par_drain(self) {} }
+"#;
+    let caller_source = br#"use crate::api::{Drain, Guard};
+fn run() { Guard::new().par_drain(); }
+"#;
+    let provider = extract("src/api.rs", provider_source);
+    let caller = extract("src/lib.rs", caller_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, caller],
+        &HashMap::from([
+            (
+                "src/api.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(caller_source.to_vec()).expect("caller source"),
+            ),
+        ]),
+    );
+    let par_drain = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name") == "<crate::api::Guard as crate::api::Drain>::par_drain"
+        })
+        .expect("Guard Drain.par_drain implementation");
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.string("relation") == "calls"
+                && edge.target == par_drain.id
+                && edge.string("source_location") == "L2"
+                && edge.string("confidence") == "EXTRACTED"
+        }),
+        "edges={:#?}",
+        resolved.edges
+    );
+}
+
+#[test]
+fn rust_chained_call_result_follows_a_unique_aliased_owner_prefix() {
+    let provider_source = br#"mod guard {
+    pub trait Drain { fn par_drain(self); }
+    pub struct Guard;
+    impl Guard { pub fn new() -> Self { Self } }
+    impl Drain for Guard { fn par_drain(self) {} }
+}
+use self::guard::Guard;
+"#;
+    let caller_source = b"fn run() { super::Guard::new().par_drain(); }\n";
+    let provider = extract("src/api/mod.rs", provider_source);
+    let caller = extract("src/api/caller.rs", caller_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, caller],
+        &HashMap::from([
+            (
+                "src/api/mod.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/api/caller.rs".to_owned(),
+                String::from_utf8(caller_source.to_vec()).expect("caller source"),
+            ),
+        ]),
+    );
+    let par_drain = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name")
+                == "<crate::api::guard::Guard as crate::api::guard::Drain>::par_drain"
+        })
+        .expect("aliased Guard Drain.par_drain implementation");
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.string("relation") == "calls"
+                && edge.target == par_drain.id
+                && edge.string("source_location") == "L1"
+        }),
+        "edges={:#?}",
+        resolved.edges
+    );
+}
+
+#[test]
+fn rust_chained_call_result_with_ambiguous_members_fails_closed() {
+    let source = br#"trait First { fn run(self); }
+trait Second { fn run(self); }
+struct Guard;
+impl Guard { fn new() -> Self { Self } }
+impl First for Guard { fn run(self) {} }
+impl Second for Guard { fn run(self) {} }
+fn invoke() { Guard::new().run(); }
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let ambiguous_runs = resolved
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.string("symbol_kind") == "method"
+                && node.string("qualified_name").ends_with("::run")
+        })
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(ambiguous_runs.len(), 4);
+    assert!(resolved.edges.iter().all(|edge| {
+        !(edge.string("relation") == "calls"
+            && edge.string("source_location") == "L7"
+            && ambiguous_runs.contains(edge.target.as_str()))
+    }));
+    assert!(resolved.nodes.iter().all(|node| {
+        node.string("qualified_name") != "crate::Guard::run"
+            && node.string("qualified_name") != "crate::Guard::new::run"
+    }));
+}
+
+#[test]
 fn rust_typed_receivers_resolve_parameters_and_local_values_exactly() {
     let provider_source = b"pub struct Client;\nimpl Client { pub fn send(&self) {} }\n";
     let caller_source = b"use crate::api::Client;\nfn run(client: &Client) { let local: Client = Client; client.send(); local.send(); }\n";
