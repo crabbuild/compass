@@ -306,6 +306,14 @@ impl UniversalResolutionIndex {
                             let mut index =
                                 AHashMap::<(String, String, String), Vec<DeclarationSlot>>::new();
                             for declaration in declarations.values() {
+                                // Go methods live in the receiver method set, not in
+                                // the package block. Keeping them in the package-name
+                                // index makes an unqualified call ambiguous whenever a
+                                // package function shares the method name (for example,
+                                // a method forwarding to its package-level helper).
+                                if declaration.language == "go" && declaration.kind == "method" {
+                                    continue;
+                                }
                                 let Some(slot) =
                                     declaration_slot(&declaration_ids, &declaration.id)
                                 else {
@@ -338,6 +346,14 @@ impl UniversalResolutionIndex {
                                         Vec<DeclarationSlot>,
                                     >::new();
                                     for declaration in declarations.values() {
+                                        // Go methods are selected through a receiver or
+                                        // method expression; they are not lexical names
+                                        // in the package/file scope.
+                                        if declaration.language == "go"
+                                            && declaration.kind == "method"
+                                        {
+                                            continue;
+                                        }
                                         let Some(slot) =
                                             declaration_slot(&declaration_ids, &declaration.id)
                                         else {
