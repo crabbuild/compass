@@ -386,6 +386,23 @@ implementation relationships, 170 containment relationships, and 112
 hypotheses with uncovered non-containment endpoints. These diagnostic
 classifications are not statistical precision or recall measurements.
 
+A source-audited comparator follow-up at Compass revision `34e23ca7bd38`
+kept the graph digest, counts, and timing evidence unchanged while separating
+additional Graphify projection errors from native Compass gaps. Exact scoped
+child types reject 46 Graphify field or signature targets that bind to an
+unrelated same-named parameter; 19 multi-component field types remain
+ambiguous instead of selecting one constituent. Exact anchored signature
+occurrences reject 11 edges that Graphify assigns to an earlier same-named
+Rust impl method, and exact return occurrences reject two edges assigned to an
+earlier same-named function. Placeholder targets are not accepted as
+disproof, and multiple occurrence candidates fail closed as ambiguous. The
+updated comparison reports 2,209 exact, 2,495 dominated, 2,601 rejected, 19
+ambiguous, and 377 missing Graphify edge hypotheses. The residual set contains
+53 calls, 51 type/signature references, 103 implementation relationships, and
+170 containment relationships. Node classifications remain 2,758 exact, 271
+dominated, 1,083 rejected, and 85 missing. These are source-constrained
+comparator classifications, not statistical precision or recall measurements.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and
