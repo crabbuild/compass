@@ -2618,7 +2618,9 @@ fn build_graph_inner(
             }
         }
     }
-    let worker_count = options.max_workers.unwrap_or_else(default_ast_workers);
+    let worker_count = options
+        .max_workers
+        .unwrap_or_else(|| default_ast_workers(missing.len()));
     // Resolver source text is only consulted by the PHP type-reference pass.
     // Keeping every decoded source string alive across extraction and graph
     // publication otherwise duplicates the repository's source footprint in
@@ -4508,19 +4510,33 @@ fn write_store_ref(output_dir: &Path, reference: &StoreRef) -> Result<(), CoreEr
 }
 
 #[cfg(target_os = "macos")]
-fn default_ast_workers() -> usize {
+fn default_ast_workers(missing: usize) -> usize {
     num_cpus::get()
         .max(num_cpus::get_physical())
-        .min(DEFAULT_AST_WORKER_CAP)
+        .min(default_ast_worker_cap(missing))
 }
 
 #[cfg(not(target_os = "macos"))]
-fn default_ast_workers() -> usize {
-    num_cpus::get().min(DEFAULT_AST_WORKER_CAP)
+fn default_ast_workers(missing: usize) -> usize {
+    num_cpus::get().min(default_ast_worker_cap(missing))
 }
 
 const DEFAULT_AST_WORKER_CAP: usize = 8;
+// Large cold repositories retain enough per-file parser state for worker
+// parallelism to dominate peak RSS. Keep the automatic path conservative at
+// this measured crossover; callers that have a known memory budget can still
+// opt into a different count through BuildOptions::max_workers.
+const LARGE_REPOSITORY_AST_WORKER_CAP: usize = 4;
+const LARGE_REPOSITORY_AST_WORKER_MIN_FILES: usize = 1_024;
 const AUTOMATIC_PARALLEL_EXTRACT_MIN_FILES: usize = 32;
+
+fn default_ast_worker_cap(missing: usize) -> usize {
+    if missing < LARGE_REPOSITORY_AST_WORKER_MIN_FILES {
+        DEFAULT_AST_WORKER_CAP
+    } else {
+        LARGE_REPOSITORY_AST_WORKER_CAP
+    }
+}
 
 fn should_parallel_extract(options: &BuildOptions, missing: usize) -> bool {
     missing >= AUTOMATIC_PARALLEL_EXTRACT_MIN_FILES
@@ -6891,8 +6907,22 @@ mod tests {
 
     #[test]
     fn default_ast_workers_stay_within_the_memory_bound() {
-        assert!(default_ast_workers() > 0);
-        assert!(default_ast_workers() <= DEFAULT_AST_WORKER_CAP);
+        assert_eq!(default_ast_worker_cap(0), DEFAULT_AST_WORKER_CAP);
+        assert_eq!(
+            default_ast_worker_cap(LARGE_REPOSITORY_AST_WORKER_MIN_FILES - 1),
+            DEFAULT_AST_WORKER_CAP
+        );
+        assert_eq!(
+            default_ast_worker_cap(LARGE_REPOSITORY_AST_WORKER_MIN_FILES),
+            LARGE_REPOSITORY_AST_WORKER_CAP
+        );
+        assert!(default_ast_workers(0) > 0);
+        assert!(default_ast_workers(0) <= DEFAULT_AST_WORKER_CAP);
+        assert!(default_ast_workers(LARGE_REPOSITORY_AST_WORKER_MIN_FILES) > 0);
+        assert!(
+            default_ast_workers(LARGE_REPOSITORY_AST_WORKER_MIN_FILES)
+                <= LARGE_REPOSITORY_AST_WORKER_CAP
+        );
     }
 
     #[cfg(unix)]

@@ -221,8 +221,9 @@ Click (Python, 91 files). The run used `extract --code-only --no-cluster
 These are diagnostic observations, not promoted baselines or a claim of a
 4×–5× cold-build advantage. Extraction with fewer than 32 missing files stays
 sequential to avoid multiplying parser/AST working sets; the automatic path
-uses a default cap of 8 local workers once that measured crossover is reached,
-while `--max-workers` remains the explicit override. Portable AST publication
+uses a default cap of 8 local workers below 1,024 missing files and 4 workers
+at or above that boundary, while `--max-workers` remains the explicit
+override. Portable AST publication
 also streams one compressed value at a time instead of retaining the entire
 compressed batch in memory. Incremental cache hits now remain in that portable
 representation and decode directly into typed extraction records when loaded
@@ -261,6 +262,16 @@ the same graph SHA-256 for all four pinned repositories (`78ef5b7b` Cobra,
 `c25d3b97` Click, `06014539` Rayon, and `f620afe4` Zod). The observed peak RSS
 was 103, 168, 270, and 309 MiB respectively. These are single-run diagnostic
 measurements, not a promoted memory baseline.
+
+The automatic AST pool now uses the default cap of 8 workers below 1,024
+missing files and 4 workers at or above that repository-size boundary. An
+explicit `--max-workers` value continues to override the automatic cap. On a
+fresh 3,096-file Django extraction from the pinned 2026-08-05 qualification
+corpus, the adaptive path reported 11.75 seconds internally and measured
+18.07 seconds with `/usr/bin/time -l`, with 2.17 GiB peak RSS and the same
+80,976-node/195,164-edge graph. This is a single mounted-volume observation;
+the pinned three-sample Graphify comparison remains 40.76 seconds p50, so the
+universal 4× target is not established by this change.
 
 The default SQLite publication path now uses the same bounded canonical graph
 stream as JSON-only publication while the immutable snapshot indexes are built
