@@ -9,17 +9,16 @@ use std::time::{Duration, Instant};
 use ahash::{AHashMap, AHashSet};
 use compass_files::{
     BuildGuard, BuildScope, Cache, CacheOptions, DetectOptions, Detection, IgnorePolicy, Manifest,
-    ManifestKind, detect, write_atomic_with_digest, write_json_atomic,
-    write_json_atomic_with_digest, write_text_atomic,
+    ManifestKind, detect, write_atomic_with_digest, write_json_atomic, write_text_atomic,
 };
 use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
     GRAPH_SNAPSHOT_MAX_OBJECTS, GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder,
     GraphSnapshotGcStats, InventoryEvidence, PublicationOmissions, SnapshotSelector, SourceDigest,
-    build_owned_with_tiebreaker as build_document, canonical_edge_kind,
-    canonical_graph_document_presorted, canonical_raw_edge_sites, cluster, deduped_node_count,
-    extraction_from_v1, garbage_collect_graph_snapshots, graph_insights, graph_snapshot_needs_gc,
-    label_communities_by_hub, normalize_document_v1_with_evidence_best_effort_owned,
+    build_owned_with_tiebreaker as build_document, canonical_edge_kind, canonical_raw_edge_sites,
+    cluster, deduped_node_count, extraction_from_v1, garbage_collect_graph_snapshots,
+    graph_insights, graph_snapshot_needs_gc, label_communities_by_hub,
+    normalize_document_v1_with_evidence_best_effort_owned,
     normalize_document_v1_with_inventory_best_effort,
     normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
     score_communities, write_canonical_graph_json,
@@ -3608,9 +3607,17 @@ fn publish_graph_and_store_from_canonical(
     let graph_path = output_dir.join("graph.json");
     let store = SqliteStore::open(local_sqlite_store_path(&graph_path))?;
     let builder = GraphSnapshotBuilder::new();
-    let canonical = canonical_graph_document_presorted(graph);
     let (graph_receipt, content) = rayon::join(
-        || write_json_atomic_with_digest(&graph_path, &canonical),
+        || {
+            write_atomic_with_digest(&graph_path, |writer| {
+                write_canonical_graph_json(graph, writer).map_err(|source| {
+                    compass_files::FileError::Io {
+                        path: graph_path.clone(),
+                        source,
+                    }
+                })
+            })
+        },
         || builder.prepare_content(&store, graph),
     );
     let graph_receipt = graph_receipt?;
@@ -3638,9 +3645,17 @@ fn publish_graph_and_store_delta(
     let graph_path = output_dir.join("graph.json");
     let store = SqliteStore::open(local_sqlite_store_path(&graph_path))?;
     let builder = GraphSnapshotBuilder::new();
-    let canonical = canonical_graph_document_presorted(graph);
     let (graph_receipt, content) = rayon::join(
-        || write_json_atomic_with_digest(&graph_path, &canonical),
+        || {
+            write_atomic_with_digest(&graph_path, |writer| {
+                write_canonical_graph_json(graph, writer).map_err(|source| {
+                    compass_files::FileError::Io {
+                        path: graph_path.clone(),
+                        source,
+                    }
+                })
+            })
+        },
         || builder.prepare_graph_delta(&store, previous, graph),
     );
     let graph_receipt = graph_receipt?;

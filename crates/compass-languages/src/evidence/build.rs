@@ -2600,6 +2600,7 @@ impl<'source> DirectAdapterState<'source> {
                 enclosing_type_qualified_name: matches!(kind, "trait" | "struct" | "enum")
                     .then_some(qualified_name.clone()),
             };
+            self.collect_rust_generic_bounds_in_scope(node, &context.scope_id);
             self.add_ownership(owner, &context)?;
             self.local_targets
                 .entry(owner.scope_id.clone())
@@ -2850,7 +2851,11 @@ impl<'source> DirectAdapterState<'source> {
     }
 
     fn collect_rust_generic_bounds(&mut self, callable: Node<'_>, owner: &DeclarationContext) {
-        if let Some(parameters) = callable.child_by_field_name("type_parameters") {
+        self.collect_rust_generic_bounds_in_scope(callable, &owner.scope_id);
+    }
+
+    fn collect_rust_generic_bounds_in_scope(&mut self, declaration: Node<'_>, scope_id: &str) {
+        if let Some(parameters) = declaration.child_by_field_name("type_parameters") {
             let mut parameter_cursor = parameters.walk();
             for parameter in parameters
                 .children(&mut parameter_cursor)
@@ -2885,13 +2890,13 @@ impl<'source> DirectAdapterState<'source> {
                         );
                     }
                 }
-                self.record_rust_generic_bounds(&owner.scope_id, &name, bounds);
+                self.record_rust_generic_bounds(scope_id, &name, bounds);
             }
         }
 
-        let mut callable_cursor = callable.walk();
-        for where_clause in callable
-            .children(&mut callable_cursor)
+        let mut declaration_cursor = declaration.walk();
+        for where_clause in declaration
+            .children(&mut declaration_cursor)
             .filter(|child| child.kind() == "where_clause")
         {
             let mut predicate_cursor = where_clause.walk();
@@ -2911,7 +2916,7 @@ impl<'source> DirectAdapterState<'source> {
                 };
                 let mut bounds = Vec::new();
                 self.collect_rust_trait_bound_paths(bound_nodes, &mut bounds);
-                self.record_rust_generic_bounds(&owner.scope_id, &name, bounds);
+                self.record_rust_generic_bounds(scope_id, &name, bounds);
             }
         }
     }
@@ -3086,6 +3091,17 @@ impl<'source> DirectAdapterState<'source> {
             trait_qualified_name: trait_qualified_name.clone(),
             owner_declaration_id: type_context.as_ref().map(|context| context.fact_id.clone()),
         };
+        self.collect_rust_generic_bounds_in_scope(node, &implementation.scope_id);
+        if let Some(type_context) = type_context.as_ref()
+            && let Some(bounds) = self
+                .rust_generic_bounds
+                .get(&type_context.scope_id)
+                .cloned()
+        {
+            for (name, bounds) in bounds {
+                self.record_rust_generic_bounds(&implementation.scope_id, &name, bounds);
+            }
+        }
         if let (Some(type_context), Some(trait_node), Some(trait_qualified_name)) = (
             type_context.as_ref(),
             trait_node,
@@ -3223,6 +3239,29 @@ impl<'source> DirectAdapterState<'source> {
             current = rust_qualify_evidence_path(self, owner, &nominal, use_start)?;
         }
         Some(current)
+    }
+
+    fn rust_field_receiver_nominal_type(
+        &self,
+        owner: &DeclarationContext,
+        qualifier: &str,
+        use_start: usize,
+        use_node: Node<'_>,
+    ) -> Option<String> {
+        let mut fields = qualifier.split('.');
+        let first = fields.next()?.trim();
+        let mut current = if first == "self" {
+            rust_callable_owner(owner)?.to_owned()
+        } else {
+            self.rust_value_type_for(owner, first, use_start, Some(use_node))?
+                .to_owned()
+        };
+        for field in fields.map(str::trim).filter(|field| !field.is_empty()) {
+            let nominal = rust_nominal_type_path(&current)?;
+            let qualified = rust_qualify_evidence_path(self, owner, &nominal, use_start)?;
+            current = self.rust_field_types.get(&qualified)?.get(field)?.clone();
+        }
+        rust_nominal_type_path(&current)
     }
 
     fn collect_rust_parameter_value_types(&mut self, parameters: Node<'_>, scope_id: &str) {
@@ -3874,6 +3913,13 @@ impl<'source> DirectAdapterState<'source> {
         if let Some(receiver_type) = generic_receiver_type.as_deref()
             && let Some(method) =
                 self.rust_generic_receiver_method_target(owner, receiver_type, spelling, use_start)
+        {
+            return Some(method);
+        }
+        if let Some(receiver_type) =
+            self.rust_field_receiver_nominal_type(owner, qualifier, use_start, use_node)
+            && let Some(method) =
+                self.rust_generic_receiver_method_target(owner, &receiver_type, spelling, use_start)
         {
             return Some(method);
         }
