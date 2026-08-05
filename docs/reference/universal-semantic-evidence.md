@@ -280,6 +280,10 @@ binding or bounded visible-glob scope only to select one compatible source
 declaration, then resolves that declaration's published return candidate
 before selecting the next member. Competing callable declarations, incomplete
 glob evidence, or an unresolved return candidate leave the chain unresolved.
+When the glob module exposes the receiver through a named reexport, associated
+lookup may expand that source-proven receiver prefix before selecting the
+callable. Expansion requires one alias at every step and is depth-bounded;
+competing aliases, incomplete evidence, and cycles fail closed.
 
 For `impl Trait<Argument> for Implementer`, an implementer declaration proven
 in the current source evidence owns an exact type-reference occurrence for

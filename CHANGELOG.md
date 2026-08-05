@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Follow a unique source-present Rust named reexport when resolving an
+  associated callable reached through a glob facade. Receiver-prefix alias
+  expansion is depth-bounded; competing aliases and reexport cycles remain
+  unresolved.
+
 - Resolve Rust associated calls imported from a source-present sibling-crate
   glob, including chained calls whose receiver type comes from that callable's
   published return evidence. One-component crate names retain Rust `::`

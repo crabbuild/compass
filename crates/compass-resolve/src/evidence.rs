@@ -1249,23 +1249,50 @@ impl UniversalResolutionIndex {
                         .cloned(),
                 );
             }
-            for qualified in
+            for raw_qualified in
                 wildcard_qualified_names(language, &module, qualifier, &candidate.target_spelling)
             {
-                let qualified = self.follow_alias(language, &qualified)?;
+                let qualified = self.follow_alias(language, &raw_qualified)?;
+                let mut qualified_declarations = BTreeSet::new();
                 if let Some(ids) = self
                     .by_qualified
                     .get(&(language.to_owned(), qualified.clone()))
                 {
-                    declarations.extend(
+                    qualified_declarations.extend(
                         ids.iter()
                             .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
                             .cloned(),
                     );
                 }
                 if let Some(ids) = self.member_declarations(language, &qualified, candidate) {
-                    declarations.extend(ids);
+                    qualified_declarations.extend(ids);
                 }
+                if qualified_declarations.is_empty()
+                    && qualifier.is_some_and(|qualifier| {
+                        rust_external_wildcard_target_is_explicit(Some(qualifier), candidate)
+                    })
+                    && qualified == raw_qualified
+                {
+                    let expanded =
+                        self.follow_wildcard_qualified_alias(language, &raw_qualified)?;
+                    if expanded != qualified {
+                        if let Some(ids) = self
+                            .by_qualified
+                            .get(&(language.to_owned(), expanded.clone()))
+                        {
+                            qualified_declarations.extend(
+                                ids.iter()
+                                    .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
+                                    .cloned(),
+                            );
+                        }
+                        if let Some(ids) = self.member_declarations(language, &expanded, candidate)
+                        {
+                            qualified_declarations.extend(ids);
+                        }
+                    }
+                }
+                declarations.extend(qualified_declarations);
             }
             if declarations.len() > self.limits.candidates_per_lookup {
                 return Err(declarations.len());
@@ -3676,6 +3703,65 @@ impl UniversalResolutionIndex {
             current.clone_from(target);
         }
         Err(64)
+    }
+
+    fn follow_wildcard_qualified_alias(
+        &self,
+        language: &str,
+        qualified: &str,
+    ) -> Result<String, usize> {
+        if language != "rust" {
+            return self.follow_alias(language, qualified);
+        }
+
+        const MAX_ALIAS_DEPTH: usize = 64;
+        let mut current = qualified.to_owned();
+        let mut seen = BTreeSet::new();
+        for _ in 0..MAX_ALIAS_DEPTH {
+            if !seen.insert(current.clone()) {
+                return Err(seen.len());
+            }
+            if let Some(targets) = self.aliases.get(&(language.to_owned(), current.clone())) {
+                let [target] = targets.as_slice() else {
+                    return Err(targets.len());
+                };
+                if target == &current {
+                    return Ok(current);
+                }
+                current.clone_from(target);
+                continue;
+            }
+
+            let separators = current
+                .match_indices("::")
+                .map(|(index, _)| index)
+                .take(MAX_ALIAS_DEPTH.saturating_add(1))
+                .collect::<Vec<_>>();
+            if separators.len() > MAX_ALIAS_DEPTH {
+                return Err(separators.len());
+            }
+            let mut expanded = None;
+            for separator in separators.into_iter().rev() {
+                let prefix = &current[..separator];
+                let Some(targets) = self.aliases.get(&(language.to_owned(), prefix.to_owned()))
+                else {
+                    continue;
+                };
+                let [target] = targets.as_slice() else {
+                    return Err(targets.len());
+                };
+                if target == prefix {
+                    return Ok(current);
+                }
+                expanded = Some(format!("{target}{}", &current[separator..]));
+                break;
+            }
+            let Some(next) = expanded else {
+                return Ok(current);
+            };
+            current = next;
+        }
+        Err(MAX_ALIAS_DEPTH)
     }
 }
 

@@ -592,6 +592,22 @@ count can be treated as useful graph coverage. Process times were 3.51, 3.30,
 and 3.38 seconds versus the retained 1.947-second Graphify sample, so this
 small-repository run makes no performance-win claim.
 
+A later current-branch Rayon qualification followed the source-present named
+reexport behind `use rayon::*` before resolving the associated
+`ThreadPoolBuilder` chain in `tests/named-threads.rs`. Relative to the preceding
+deterministic graph, exactly eight `calls`/`tests` occurrences changed:
+`new`, `thread_name`, and `build_global` now target their source-backed
+`rayon_core::ThreadPoolBuilder` declarations, while `unwrap` targets the
+canonical `std::result::Result` endpoint. Four malformed expression
+placeholders were removed and one canonical external endpoint was added, for
+a net change from 12,069 to 12,066 nodes; the 27,367 relationship count is
+unchanged. No unrelated occurrence changed. Two clean release builds were
+byte-identical at graph SHA-256
+`c77d3f0edf3170a39efc01ab78a946bbcafcac7855fbd10cd9d3e6a73dc240e1`.
+Competing named reexports, cycles, lowercase local receivers, and direct-path
+collisions remain fail-closed. A mounted-volume startup delay affected one
+process sample, so this qualification makes no timing claim.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and

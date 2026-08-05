@@ -1085,6 +1085,191 @@ impl Builder {
 }
 
 #[test]
+fn rust_glob_resolves_associated_chain_through_named_reexport() {
+    let provider_source = br#"pub struct Builder;
+pub struct Pool;
+impl Builder {
+    pub fn new() -> Self { Builder }
+    pub fn tune(self) -> Self { self }
+    pub fn build(self) -> Result<Pool, ()> { todo!() }
+}
+"#;
+    let facade_source = b"pub use rayon_core::Builder;\n";
+    let consumer_source = b"use crate::*;\nfn run() { Builder::new().tune().build().unwrap(); }\n";
+    let resolved = compass_resolve::resolve(
+        &[
+            extract("rayon-core/src/lib.rs", provider_source),
+            extract("src/lib.rs", facade_source),
+            extract("tests/named.rs", consumer_source),
+        ],
+        &HashMap::from([
+            (
+                "rayon-core/src/lib.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(facade_source.to_vec()).expect("facade source"),
+            ),
+            (
+                "tests/named.rs".to_owned(),
+                String::from_utf8(consumer_source.to_vec()).expect("consumer source"),
+            ),
+        ]),
+    );
+    for target in [
+        "rayon_core::Builder::new",
+        "rayon_core::Builder::tune",
+        "rayon_core::Builder::build",
+    ] {
+        let declaration = resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == target)
+            .expect("provider declaration");
+        assert!(
+            resolved.edges.iter().any(|edge| {
+                edge.string("relation") == "calls"
+                    && edge.target == declaration.id
+                    && edge.string("source_file") == "tests/named.rs"
+                    && edge.string("confidence") == "EXTRACTED"
+            }),
+            "named reexport did not resolve associated call: {target}"
+        );
+    }
+}
+
+#[test]
+fn rust_glob_does_not_guess_through_colliding_named_reexports() {
+    let provider_source = br#"pub struct Builder;
+impl Builder { pub fn new() -> Self { Builder } }
+"#;
+    let facade_source = b"pub use first::Builder;\npub use second::Builder;\n";
+    let consumer_source = b"use crate::*;\nfn run() { Builder::new(); }\n";
+    let resolved = compass_resolve::resolve(
+        &[
+            extract("first/src/lib.rs", provider_source),
+            extract("second/src/lib.rs", provider_source),
+            extract("src/lib.rs", facade_source),
+            extract("tests/named.rs", consumer_source),
+        ],
+        &HashMap::from([
+            (
+                "first/src/lib.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("first source"),
+            ),
+            (
+                "second/src/lib.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("second source"),
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(facade_source.to_vec()).expect("facade source"),
+            ),
+            (
+                "tests/named.rs".to_owned(),
+                String::from_utf8(consumer_source.to_vec()).expect("consumer source"),
+            ),
+        ]),
+    );
+    let declarations = resolved
+        .nodes
+        .iter()
+        .filter(|node| {
+            matches!(
+                node.string("qualified_name").as_str(),
+                "first::Builder::new" | "second::Builder::new"
+            )
+        })
+        .map(|node| node.id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(declarations.len(), 2);
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "calls" || !declarations.contains(edge.target.as_str())
+    }));
+}
+
+#[test]
+fn rust_glob_does_not_follow_a_named_reexport_cycle() {
+    let root_source = b"mod first;\nmod second;\n";
+    let first_source = b"pub use crate::second::Builder;\n";
+    let second_source = b"pub use crate::first::Builder;\n";
+    let consumer_source = b"use crate::first::*;\nfn run() { Builder::new(); }\n";
+    let resolved = compass_resolve::resolve(
+        &[
+            extract("src/lib.rs", root_source),
+            extract("src/first.rs", first_source),
+            extract("src/second.rs", second_source),
+            extract("tests/named.rs", consumer_source),
+        ],
+        &HashMap::from([
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(root_source.to_vec()).expect("root source"),
+            ),
+            (
+                "src/first.rs".to_owned(),
+                String::from_utf8(first_source.to_vec()).expect("first source"),
+            ),
+            (
+                "src/second.rs".to_owned(),
+                String::from_utf8(second_source.to_vec()).expect("second source"),
+            ),
+            (
+                "tests/named.rs".to_owned(),
+                String::from_utf8(consumer_source.to_vec()).expect("consumer source"),
+            ),
+        ]),
+    );
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("source_file") != "tests/named.rs" || edge.string("relation") != "calls"
+    }));
+}
+
+#[test]
+fn rust_named_reexport_does_not_capture_a_lowercase_receiver() {
+    let provider_source = b"pub fn rng() {}\n";
+    let facade_source = b"pub use provider::rng;\n";
+    let consumer_source =
+        b"use crate::*;\nfn run() { let rng = missing(); rng.sample_iter().take(); }\n";
+    let resolved = compass_resolve::resolve(
+        &[
+            extract("provider/src/lib.rs", provider_source),
+            extract("src/lib.rs", facade_source),
+            extract("tests/receiver.rs", consumer_source),
+        ],
+        &HashMap::from([
+            (
+                "provider/src/lib.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                String::from_utf8(facade_source.to_vec()).expect("facade source"),
+            ),
+            (
+                "tests/receiver.rs".to_owned(),
+                String::from_utf8(consumer_source.to_vec()).expect("consumer source"),
+            ),
+        ]),
+    );
+    let reexported_rng = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "provider::rng")
+        .expect("reexported rng declaration");
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("source_file") != "tests/receiver.rs"
+            || edge.string("relation") != "calls"
+            || edge.target != reexported_rng.id
+    }));
+    assert!(resolved.nodes.iter().all(|node| {
+        let qualified_name = node.string("qualified_name");
+        !qualified_name.starts_with("rng()::") && !qualified_name.starts_with("rng().")
+    }));
+}
+
+#[test]
 fn rust_colliding_globs_do_not_guess_an_associated_call_chain() {
     let first_source = br#"pub struct Builder;
 impl Builder {
