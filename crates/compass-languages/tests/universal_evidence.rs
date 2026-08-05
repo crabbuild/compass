@@ -604,6 +604,101 @@ fn python_package_wildcard_reexports_emit_bounded_source_evidence() {
 }
 
 #[test]
+fn python_partial_aliases_emit_exact_callable_declarations_and_references() {
+    let source = br#"from functools import partial
+
+def _route(value, *, Pattern):
+    return Pattern(value)
+
+route = partial(_route, Pattern=str)
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/pkg/routes.py"),
+            "pkg/routes.py",
+            source,
+        )
+        .expect("extract python")
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid python evidence");
+
+    let alias = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "pkg.routes.route")
+        .expect("partial alias declaration");
+    assert_eq!(alias.kind, "function");
+    let target = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "pkg.routes._route")
+        .expect("underlying function declaration");
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::References
+            && candidate.source_declaration_id == alias.id
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(target.id.as_str())
+            && !candidate.constraints.allow_external
+    }));
+}
+
+#[test]
+fn python_partial_aliases_fail_closed_for_dynamic_or_shadowed_factories() {
+    for source in [
+        br#"from functools import partial
+def _route(value):
+    return value
+route = partial(factory(), Pattern=str)
+"#
+        .as_slice(),
+        br#"from functools import partial
+def _route(value):
+    return value
+partial = factory
+route = partial(_route, Pattern=str)
+"#
+        .as_slice(),
+        br#"from functools import partial
+def _route(value):
+    return value
+if enabled:
+    route = partial(_route, Pattern=str)
+"#
+        .as_slice(),
+        br#"from functools import partial
+def _route(value):
+    return value
+def _route(value, extra):
+    return value, extra
+route = partial(_route, Pattern=str)
+"#
+        .as_slice(),
+    ] {
+        let mut engine = Engine::default();
+        let evidence = engine
+            .extract_source_combined(
+                std::path::Path::new("/repo/pkg/routes.py"),
+                "pkg/routes.py",
+                source,
+            )
+            .expect("extract python")
+            .graph
+            .semantic_evidence
+            .expect("python universal evidence");
+        validate_evidence(&evidence, EvidenceLimits::default()).expect("valid python evidence");
+        assert!(
+            evidence
+                .declarations
+                .iter()
+                .all(|declaration| declaration.qualified_name != "pkg.routes.route")
+        );
+    }
+}
+
+#[test]
 fn python_dynamic_bases_and_nested_initializer_imports_fail_closed() {
     let source = br#"from framework import factory
 

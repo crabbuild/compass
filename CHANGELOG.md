@@ -11,6 +11,10 @@
 - Classify Python call syntax from resolved declaration kinds rather than name
   capitalization, so lowercase classes resolve as constructions, uppercase
   functions remain calls, and unresolved names do not invent class identity.
+- Preserve statically proven module-level Python callables created with
+  `functools.partial`, including package re-exports, while dynamic, shadowed,
+  conditional, and ambiguous factories fail closed. Python structural facts
+  advance to adapter version 6 so cached evidence is refreshed.
 
 - Split framework extraction into focused Spring, Express, Axum, Next.js, and
   Vite adapters. Project evidence now indexes framework configuration files,

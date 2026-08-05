@@ -222,6 +222,12 @@ statement emits one source-anchored wildcard binding. Package `__init__.py`
 wildcards can expose a uniquely declared repository-local symbol through a
 bounded re-export chain; multiple wildcard sources or multiple eligible
 declarations remain ambiguous rather than selecting an arbitrary target.
+An unconditional module-level alias created by an imported
+`functools.partial` is callable evidence only when its first argument is one
+unique module-level function declaration and neither name was rebound before
+the assignment. Compass publishes the alias as a source-backed function and
+an exact reference to the wrapped function. Dynamic targets, conditional
+assignments, shadowed factories, and ambiguous declarations fail closed.
 
 Language and allowed target kinds are filtered before uniqueness is decided.
 Case-insensitive or terminal-name equality cannot select a target. Cross-

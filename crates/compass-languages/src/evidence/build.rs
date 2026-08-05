@@ -799,10 +799,161 @@ impl<'source> DirectAdapterState<'source> {
         })?;
         self.collect_python_declarations(root, &file)?;
         self.collect_python_imports(root, &file)?;
+        self.collect_python_partial_aliases(root, &file)?;
         let module_bound = crate::engine::python_bound_names(root, self.source, true);
         self.python_module_bound_names.clone_from(&module_bound);
         self.walk_python_value_references(root, &file, true, &module_bound)?;
         self.walk_python_evidence(root, &file, true)
+    }
+
+    fn collect_python_partial_aliases(
+        &mut self,
+        root: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let mut cursor = root.walk();
+        for assignment in root
+            .children(&mut cursor)
+            .filter(|child| child.is_named() && child.kind() == "assignment")
+        {
+            let (Some(alias_node), Some(call)) = (
+                assignment.child_by_field_name("left"),
+                assignment.child_by_field_name("right"),
+            ) else {
+                continue;
+            };
+            if alias_node.kind() != "identifier" || call.kind() != "call" {
+                continue;
+            }
+            let Some(function) = call.child_by_field_name("function") else {
+                continue;
+            };
+            let partial_name = self.text(function);
+            if function.kind() != "identifier"
+                || self
+                    .imported_target_for_occurrence(
+                        owner,
+                        &partial_name,
+                        function.start_byte(),
+                        false,
+                    )
+                    .map(String::as_str)
+                    != Some("functools.partial")
+                || self.python_name_rebound_between(root, 0, assignment.start_byte(), &partial_name)
+            {
+                continue;
+            }
+            let Some(arguments) = call.child_by_field_name("arguments") else {
+                continue;
+            };
+            let mut arguments_cursor = arguments.walk();
+            let Some(target_node) = arguments
+                .named_children(&mut arguments_cursor)
+                .next()
+                .filter(|node| node.kind() == "identifier")
+            else {
+                continue;
+            };
+            let target_name = self.text(target_node);
+            let target_qualified_name = format!("{}.{}", self.module_or_package, target_name);
+            let matching_targets = self
+                .declarations
+                .values()
+                .filter(|context| {
+                    context.kind == "function"
+                        && context.qualified_name == target_qualified_name
+                        && context.scope_id != owner.scope_id
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let [target] = matching_targets.as_slice() else {
+                continue;
+            };
+            let Some(target_definition) = direct_python_function(root, &target_name, self.source)
+            else {
+                continue;
+            };
+            if target_definition.end_byte() > assignment.start_byte()
+                || self.python_name_rebound_between(
+                    root,
+                    target_definition.end_byte(),
+                    assignment.start_byte(),
+                    &target_name,
+                )
+            {
+                continue;
+            }
+
+            let alias = self.text(alias_node);
+            let qualified_name = format!("{}.{}", self.module_or_package, alias);
+            let graph_node_id = self.unique_graph_id(make_id(&[&self.stem, &alias]), assignment);
+            let fact_id = self.builder.declare(
+                "function",
+                &graph_node_id,
+                &alias,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, alias_node),
+            )?;
+            let alias_context = DeclarationContext {
+                fact_id: fact_id.clone(),
+                scope_id: owner.scope_id.clone(),
+                graph_node_id,
+                name: alias,
+                qualified_name,
+                kind: "function".to_owned(),
+                enclosing_type_qualified_name: None,
+            };
+            self.add_ownership(owner, &alias_context)?;
+            let occurrence_id = self.builder.occur_with_context(
+                SemanticRole::CallableReference,
+                &fact_id,
+                &target_name,
+                None,
+                Some(&owner.scope_id),
+                Some("partial_target"),
+                range_for_node(self.source_file, target_node),
+            )?;
+            self.builder.relate(
+                CandidateRelation::References,
+                &fact_id,
+                Some(&occurrence_id),
+                None,
+                &target_name,
+                ResolutionConstraint {
+                    exact_target_declaration_id: Some(target.fact_id.clone()),
+                    exact_language: Some(self.language.to_owned()),
+                    module_or_package: Some(self.module_or_package.clone()),
+                    scope_id: Some(owner.scope_id.clone()),
+                    qualified_name: Some(target.qualified_name.clone()),
+                    argument_count: None,
+                    argument_types: Vec::new(),
+                    allowed_target_kinds: vec!["function".to_owned()],
+                    hierarchy: None,
+                    allow_external: false,
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    fn python_name_rebound_between(
+        &self,
+        root: Node<'_>,
+        start: usize,
+        end: usize,
+        name: &str,
+    ) -> bool {
+        let mut cursor = root.walk();
+        root.children(&mut cursor)
+            .filter(|child| child.is_named())
+            .any(|child| {
+                child.start_byte() >= start
+                    && child.end_byte() <= end
+                    && !matches!(child.kind(), "import_statement" | "import_from_statement")
+                    && crate::engine::python_bound_names(child, self.source, true).contains(name)
+            })
     }
 
     fn collect_python_imports(
@@ -7130,6 +7281,24 @@ fn valid_python_identifier(identifier: &str) -> bool {
     (first == '_' || first.is_alphabetic())
         && characters.all(|character| character == '_' || character.is_alphanumeric())
         && !is_python_hard_keyword(identifier)
+}
+
+fn direct_python_function<'tree>(
+    root: Node<'tree>,
+    name: &str,
+    source: &[u8],
+) -> Option<Node<'tree>> {
+    let mut cursor = root.walk();
+    let mut matches = root.children(&mut cursor).filter(|child| {
+        child.is_named()
+            && child.kind() == "function_definition"
+            && child
+                .child_by_field_name("name")
+                .and_then(|name_node| source.get(name_node.start_byte()..name_node.end_byte()))
+                .is_some_and(|spelling| spelling == name.as_bytes())
+    });
+    let found = matches.next()?;
+    matches.next().is_none().then_some(found)
 }
 
 fn is_python_hard_keyword(identifier: &str) -> bool {

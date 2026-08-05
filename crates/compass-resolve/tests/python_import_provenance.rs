@@ -925,6 +925,61 @@ fn python_call_targets_use_declaration_kind_instead_of_name_capitalization()
 }
 
 #[test]
+fn python_partial_callable_aliases_are_source_backed_through_package_reexports()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "caller.py",
+            "from pkg import route\n\ndef build():\n    return route('home/')\n",
+        ),
+        ("pkg/__init__.py", "from .routes import route\n"),
+        (
+            "pkg/routes.py",
+            "from functools import partial\n\ndef _route(value, *, Pattern):\n    return Pattern(value)\n\nroute = partial(_route, Pattern=str)\n",
+        ),
+    ];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    let build = resolved
+        .nodes
+        .iter()
+        .find(|node| node.label() == "build()")
+        .ok_or("missing build declaration")?;
+    let route = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.routes.route")
+        .ok_or("missing source-backed route callable alias")?;
+    let underlying = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.routes._route")
+        .ok_or("missing underlying route function")?;
+
+    assert_eq!(route.string("symbol_kind"), "function");
+    assert!(route.string("source_file").ends_with("pkg/routes.py"));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == build.id
+            && edge.target == route.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "explicit-binding"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == route.id
+            && edge.target == underlying.id
+            && edge.string("relation") == "references"
+    }));
+    assert!(resolved.nodes.iter().all(|node| {
+        node.string("qualified_name") != "pkg.route"
+            || node
+                .attributes
+                .get("external")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+    }));
+    Ok(())
+}
+
+#[test]
 fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
