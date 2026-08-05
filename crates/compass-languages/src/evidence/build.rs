@@ -5217,6 +5217,23 @@ impl<'source> DirectAdapterState<'source> {
         } else {
             None
         };
+        let local_python_receiver = if super_dispatch.is_none() && self.language == "python" {
+            qualifier.and_then(|qualifier| {
+                self.python_local_class_receiver(owner, qualifier, function.start_byte(), call)
+            })
+        } else {
+            None
+        };
+        let receiver_dispatch = super_dispatch.or_else(|| {
+            local_python_receiver
+                .as_ref()
+                .map(
+                    |receiver_qualified_name| HierarchyConstraint::ReceiverDispatch {
+                        receiver_qualified_name: receiver_qualified_name.clone(),
+                        strategy: ReceiverDispatchStrategy::C3FromReceiver,
+                    },
+                )
+        });
         let lookup_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
         let allow_later_file_binding =
             self.language == "python" && matches!(owner.kind.as_str(), "function" | "method");
@@ -5271,7 +5288,7 @@ impl<'source> DirectAdapterState<'source> {
             })
             .cloned()
         });
-        let qualified_name = if super_dispatch.is_some() {
+        let qualified_name = if receiver_dispatch.is_some() {
             None
         } else {
             qualifier
@@ -5356,12 +5373,69 @@ impl<'source> DirectAdapterState<'source> {
                 } else {
                     vec!["function".to_owned(), "method".to_owned()]
                 },
-                hierarchy: super_dispatch,
+                hierarchy: receiver_dispatch,
                 allow_external: qualified_name.is_some() && python_super_receiver.is_none(),
             },
         )?;
         let _ = call_kind;
         Ok(())
+    }
+
+    fn python_local_class_receiver(
+        &self,
+        owner: &DeclarationContext,
+        receiver: &str,
+        use_start: usize,
+        call: Node<'_>,
+    ) -> Option<String> {
+        let use_start_u64 = u64::try_from(use_start).ok()?;
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let current = scope_id?;
+            let mut matches = self
+                .builder
+                .batch
+                .declarations
+                .iter()
+                .filter(|declaration| {
+                    declaration.kind == "class"
+                        && declaration.name == receiver
+                        && declaration.scope_id.as_deref() == Some(current)
+                        && declaration.range.end_byte <= use_start_u64
+                })
+                .take(2);
+            let declaration = matches.next();
+            if matches.next().is_some() {
+                return None;
+            }
+            if let Some(declaration) = declaration {
+                let declaration_end = usize::try_from(declaration.range.end_byte).ok()?;
+                let mut syntax_scope = Some(call);
+                while let Some(node) = syntax_scope {
+                    if matches!(node.kind(), "function_definition" | "class_definition")
+                        && self
+                            .declarations
+                            .get(&node.id())
+                            .is_some_and(|context| context.fact_id == owner.fact_id)
+                    {
+                        let body = node.child_by_field_name("body").unwrap_or(node);
+                        if self.python_name_rebound_between(
+                            body,
+                            declaration_end,
+                            use_start,
+                            receiver,
+                        ) {
+                            return None;
+                        }
+                        return Some(declaration.qualified_name.clone());
+                    }
+                    syntax_scope = node.parent();
+                }
+                return None;
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        None
     }
 
     fn go_selector_receiver_type(

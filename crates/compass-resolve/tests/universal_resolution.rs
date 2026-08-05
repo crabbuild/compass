@@ -701,6 +701,57 @@ fn python_super_call_follows_a_complete_single_inheritance_chain() {
 }
 
 #[test]
+fn python_local_class_call_resolves_an_inherited_class_method() {
+    let provider = extract(
+        "pkg/base.py",
+        b"class Base:\n    @classmethod\n    def check(cls):\n        return []\n",
+    );
+    let caller_source = b"from pkg.base import Base\ndef verify():\n    class Model(Base):\n        pass\n    return Model.check()\n";
+    let caller = extract("pkg/checks.py", caller_source);
+    let resolved = compass_resolve::resolve(
+        &[provider, caller],
+        &HashMap::from([(
+            "pkg/checks.py".to_owned(),
+            String::from_utf8(caller_source.to_vec()).expect("source"),
+        )]),
+    );
+    let base_check = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.base.Base::check")
+        .unwrap_or_else(|| panic!("base method; nodes={:#?}", resolved.nodes));
+
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == base_check.id)
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].string("source_location"), "L5");
+    assert_eq!(
+        calls[0].string("resolution_rule"),
+        "linearized-receiver-dispatch"
+    );
+}
+
+#[test]
+fn python_rebound_local_class_receiver_does_not_invent_inherited_dispatch() {
+    let source = b"class Base:\n    @classmethod\n    def check(cls):\n        return []\ndef verify(replacement):\n    class Model(Base):\n        pass\n    Model = replacement\n    return Model.check()\n";
+    let extracted = extract("pkg/checks.py", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "pkg/checks.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "calls" || edge.string("source_location") != "L9"
+    }));
+}
+
+#[test]
 fn python_super_call_uses_complete_c3_order_across_multiple_bases() {
     let source = b"class Left:\n    pass\nclass Right:\n    def run(self):\n        return None\nclass Child(Left, Right):\n    def run(self):\n        super().run()\n";
     let extracted = extract("pkg/models.py", source);

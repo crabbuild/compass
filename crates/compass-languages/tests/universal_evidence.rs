@@ -488,6 +488,46 @@ class Derived(Base):
 }
 
 #[test]
+fn python_local_class_receivers_emit_bounded_hierarchy_dispatch() {
+    fn call_candidate(source: &[u8]) -> RelationshipCandidate {
+        let mut engine = Engine::default();
+        engine
+            .extract_source_combined(
+                std::path::Path::new("/repo/pkg/checks.py"),
+                "pkg/checks.py",
+                source,
+            )
+            .expect("extract python")
+            .graph
+            .semantic_evidence
+            .expect("python universal evidence")
+            .candidates
+            .into_iter()
+            .find(|candidate| {
+                candidate.relation == CandidateRelation::Calls
+                    && candidate.target_spelling == "check"
+            })
+            .expect("Model.check call candidate")
+    }
+
+    let candidate = call_candidate(
+        b"class Base:\n    @classmethod\n    def check(cls):\n        return []\ndef verify():\n    class Model(Base):\n        pass\n    return Model.check()\n",
+    );
+    assert_eq!(
+        candidate.constraints.hierarchy,
+        Some(HierarchyConstraint::ReceiverDispatch {
+            receiver_qualified_name: "pkg.checks.verify::Model".to_owned(),
+            strategy: ReceiverDispatchStrategy::C3FromReceiver,
+        })
+    );
+
+    let rebound = call_candidate(
+        b"class Base:\n    @classmethod\n    def check(cls):\n        return []\ndef verify(replacement):\n    class Model(Base):\n        pass\n    Model = replacement\n    return Model.check()\n",
+    );
+    assert_eq!(rebound.constraints.hierarchy, None);
+}
+
+#[test]
 fn universal_declarations_preserve_signature_and_implementation_change_metadata() {
     fn function_declaration(source: &[u8]) -> DeclarationFact {
         let mut engine = Engine::default();

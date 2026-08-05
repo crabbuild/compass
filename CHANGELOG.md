@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Resolve calls through source-proven inheritance when a Python function-local
+  class is used as the qualified receiver, while failing closed after a local
+  rebinding of that class name.
+
 - Harden Python value-reference resolution so argument, collection, assignment,
   and return references cannot fabricate function calls. Function-valued uses
   remain references unless future evidence proves an invocation contract.
