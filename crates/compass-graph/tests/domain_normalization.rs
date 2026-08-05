@@ -143,6 +143,30 @@ fn json_config_keys_publish_with_config_provenance_and_stable_paths()
             .iter()
             .all(|edge| edge.evidence[0].origin == EvidenceOrigin::Config)
     );
+
+    let compiler_options = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "compilerOptions")
+        .ok_or("missing compilerOptions config key")?;
+    let paths = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "compilerOptions.paths")
+        .ok_or("missing compilerOptions.paths config key")?;
+    let nested_path = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "compilerOptions.paths.@app/*")
+        .ok_or("missing nested config key")?;
+    assert!(graph.links.iter().any(|edge| {
+        edge.kind == EdgeKind::Contains
+            && edge.source == compiler_options.id
+            && edge.target == paths.id
+    }));
+    assert!(graph.links.iter().any(|edge| {
+        edge.kind == EdgeKind::Contains && edge.source == paths.id && edge.target == nested_path.id
+    }));
     Ok(())
 }
 
