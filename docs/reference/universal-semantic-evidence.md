@@ -67,6 +67,14 @@ declarations remain unresolved. The associated type's value is represented
 separately by its source-anchored reference, preserving the distinction between
 the contract and its concrete realization.
 
+Rust `self.method(...)` calls use the complete method declarations collected
+for the source receiver. A unique declaration may resolve exactly. When more
+than one local trait or implementation method has the same spelling and the
+available argument evidence cannot choose among them, the call remains
+unresolved; it must not fall through to an external or deferred placeholder.
+The absence of a local method with that spelling does not suppress a genuinely
+external inherent method on an external receiver.
+
 ### Required invariants
 
 `validate_evidence` rejects a batch when any of these conditions is false:

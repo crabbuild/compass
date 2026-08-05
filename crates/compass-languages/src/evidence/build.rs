@@ -4514,6 +4514,17 @@ impl<'source> DirectAdapterState<'source> {
                 .is_some_and(char::is_uppercase)
         }) || (qualifier.is_none()
             && spelling.chars().next().is_some_and(char::is_uppercase));
+        let has_ambiguous_local_self_methods = qualifier.is_some_and(rust_receiver_is_self)
+            && rust_callable_owner(owner).is_some_and(|receiver| {
+                self.rust_receiver_methods
+                    .get(&(receiver.to_owned(), spelling.to_owned()))
+                    .is_some_and(|methods| methods.len() > 1)
+            });
+        let qualified_name = if has_ambiguous_local_self_methods {
+            None
+        } else {
+            qualified_name
+        };
         let binding = direct_binding.or(wildcard_binding);
         let occurrence_id = self.builder.occur_with_context(
             SemanticRole::Call,
@@ -4547,6 +4558,7 @@ impl<'source> DirectAdapterState<'source> {
             allow_external: qualified_name.as_deref().is_some_and(|qualified| {
                 ((wildcard_bound && wildcard_external_target_is_explicit)
                     || (!wildcard_bound && !qualifier.is_some_and(rust_deferred_owner)))
+                    && !has_ambiguous_local_self_methods
                     && !rust_identity_is_internal(&self.module_or_package, qualified)
             }),
         };

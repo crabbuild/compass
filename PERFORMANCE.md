@@ -509,6 +509,27 @@ reason counts were unchanged. The resulting edge classifications are 2,258
 exact, 2,613 dominated, 2,497 rejected, 19 ambiguous, and 314 missing. This
 changes no Compass graph node, relationship, identity, or digest.
 
+The next 2026-08-05 Rayon qualification removed fabricated external fallbacks
+for ambiguous Rust `self.par_extend(...)` dispatch. When the indexed receiver
+already has multiple local trait-method declarations, Compass now leaves the
+call unresolved instead of publishing a same-named external or deferred
+placeholder. Three clean release builds were byte-identical at 12,057 nodes,
+26,817 relationships, and graph SHA-256
+`623b619089b6391f6eaabf112e57e143f1c2d2516d009c07aa635a158beb715c`.
+The exact delta removed only the `LinkedList::par_extend`,
+`String::par_extend`, and `Vec::par_extend` placeholder nodes and their three
+source-anchored calls in `src/iter/extend.rs`; no retained record changed and
+no record was added. The regression fixture also proves that a genuine
+external inherent call such as `String::push_str` remains published. Against
+the same pinned Graphify artifact, every node and edge classification stayed
+unchanged at 2,758 exact, 271 dominated, 1,083 rejected, and 85 missing nodes,
+plus 2,258 exact, 2,613 dominated, 2,497 rejected, 19 ambiguous, and 314
+missing edges. This is expected: Graphify assigned the three forwarding calls
+to an unrelated unit implementation, so the removed Compass placeholders had
+not supported those hypotheses. Rust adapter metadata advances to version 10.
+The first timing sample was a mounted-volume outlier; the other clean process
+times were 2.40 and 2.13 seconds, so no timing claim is made from this run.
+
 The extraction handoff now releases excess capacity from the AST fact working
 set before project-wide resolution. Large nested JSON fact maps are rebuilt
 only above a high cardinality threshold; this keeps the common per-node and

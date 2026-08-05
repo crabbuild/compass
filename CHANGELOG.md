@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fail closed for Rust `self.method(...)` calls when the indexed receiver has
+  multiple repository-local trait method declarations and available evidence
+  cannot select one. Such calls no longer become fabricated external or
+  deferred method placeholders; a unique local method and a genuinely
+  external inherent method remain resolvable. Rust structural facts advance
+  to adapter version 10 so cached evidence refreshes.
+
 - Correct the diagnostic Graphify comparator when Graphify projects a Rust
   return-type reference onto its callable's declaration line while Compass
   preserves the exact returned-symbol occurrence. Dominance requires exact

@@ -3299,6 +3299,63 @@ fn build() -> Widget { Widget(1) }
 }
 
 #[test]
+fn rust_ambiguous_local_trait_self_call_does_not_invent_an_external_method() {
+    let source = br#"trait Fill<T> { fn fill<I>(&mut self, values: I); }
+impl Fill<char> for String {
+    fn fill<I>(&mut self, _values: I) { self.push_str(""); }
+}
+impl<'a> Fill<&'a char> for String {
+    fn fill<I>(&mut self, values: I) {
+        self.fill(values.convert());
+    }
+}
+impl Fill<()> for () {
+    fn fill<I>(&mut self, _values: I) {}
+}
+"#;
+    let extracted = extract("src/lib.rs", source);
+    let resolved = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let local_fill_methods = resolved
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.string("symbol_kind") == "method"
+                && node.string("qualified_name").ends_with("::fill")
+        })
+        .count();
+    assert_eq!(local_fill_methods, 4, "fixture must retain every overload");
+    let external_push = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "String::push_str")
+        .expect("external inherent String.push_str method");
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.target == external_push.id
+            && edge.string("relation") == "calls"
+            && edge.string("source_location") == "L3"
+            && edge.string("resolution_rule") == "qualified-external"
+    }));
+    assert!(
+        resolved
+            .nodes
+            .iter()
+            .all(|node| node.string("qualified_name") != "String::fill"),
+        "an ambiguous local method must not become any placeholder"
+    );
+    assert!(resolved.edges.iter().all(|edge| {
+        !(edge.string("relation") == "calls"
+            && edge.string("source_location") == "L7"
+            && edge.string("resolution_rule") == "qualified-external")
+    }));
+}
+
+#[test]
 fn rust_local_qualified_call_resolves_before_a_wildcard_candidate() {
     let source = br#"pub use crate::support::*;
 struct App;
