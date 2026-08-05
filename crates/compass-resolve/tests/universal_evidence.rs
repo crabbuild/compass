@@ -345,6 +345,47 @@ fn read(entry: &Entry) { entry.path(); }
 }
 
 #[test]
+fn rust_generic_impl_bound_calls_resolve_to_the_trait_method() -> Result<(), Box<dyn Error>> {
+    let source = br#"
+trait Render { fn render(&self); }
+struct Wrapper<T> { value: T }
+impl<T> Wrapper<T>
+where
+    T: Render,
+{
+    fn invoke(&self, value: T) { value.render(); self.value.render(); }
+}
+"#;
+    let source_file = "src/lib.rs";
+    let extracted = Engine::default().extract_source(Path::new(source_file), source)?;
+    let merged = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    let invoke = merged
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Wrapper::invoke")
+        .ok_or("missing generic impl method")?;
+    let render = merged
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Render::render")
+        .ok_or("missing trait method")?;
+    let calls = merged
+        .edges
+        .iter()
+        .filter(|edge| edge.source == invoke.id && edge.string("relation") == "calls")
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2, "calls={calls:#?}");
+    assert!(
+        calls.iter().all(|edge| edge.target == render.id),
+        "calls={calls:#?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn rust_import_aliases_resolve_cross_file_types_functions_and_methods() -> Result<(), Box<dyn Error>>
 {
     let mut engine = Engine::default();

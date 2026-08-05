@@ -243,8 +243,11 @@ Communities, and Diagnostics roots remain immutable for a file-only change.
 
 The language fixtures cover the remaining attribution gaps directly: Go
 variadic range elements, type assertions, and nested closure parameters now
-resolve to their receiver methods; Rust generic impl calls resolve to the
-exact impl owner both within one file and across an imported module. On the
+resolve to their receiver methods; Rust generic `impl` and struct bounds now
+carry through direct and field receivers, resolving calls to the exact trait
+method while preserving fail-closed ambiguity. Rust generic impl calls also
+resolve to the exact impl owner both within one file and across an imported
+module. On the
 same filtered Graphify Go comparison, exact comparable edges improved from
 1,469 to 1,492 and missing edges fell from 38 to 15. These quality numbers are
 diagnostic and do not imply that all Graphify gaps are closed.
@@ -258,6 +261,17 @@ the same graph SHA-256 for all four pinned repositories (`78ef5b7b` Cobra,
 `c25d3b97` Click, `06014539` Rayon, and `f620afe4` Zod). The observed peak RSS
 was 103, 168, 270, and 309 MiB respectively. These are single-run diagnostic
 measurements, not a promoted memory baseline.
+
+The default SQLite publication path now uses the same bounded canonical graph
+stream as JSON-only publication while the immutable snapshot indexes are built
+in parallel. This removes per-record hashing overhead from the generic serde
+writer without changing the atomic-write, digest, or snapshot contracts. On a
+release-binary A/B smoke run over the pinned Go Cobra, Rust Rayon, and
+TypeScript Zod repositories, the resulting `graph.json` bytes were byte-for-byte
+identical in every comparison; observed internal cold-build wall times were
+0.7 s, 1.1 s, and 1.4 s respectively for the changed path versus 0.6 s, 1.5 s,
+and 1.5 s for the control. Mounted-volume contention makes these diagnostic
+observations rather than a promoted baseline.
 
 On the same 444-file Zod checkout, a release-binary smoke measurement recorded
 about 332 MiB peak RSS with the previous host-sized worker pool, 289 MiB with
