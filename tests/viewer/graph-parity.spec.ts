@@ -72,6 +72,33 @@ test("file-only graph nodes stay inspectable without source navigation", async (
   await expect(page.getByRole("button", { name: /open source/i })).toHaveCount(0);
 });
 
+test("graph layout styles can be selected without enabling physics", async ({ page }) => {
+  await page.goto("/graph.html");
+  const layout = page.getByRole("combobox", { name: "Graph layout" });
+  const graph = page.getByRole("region", { name: "Interactive Compass code graph" });
+
+  await layout.selectOption("circle");
+  await expect(graph).toHaveAttribute("data-layout-style", "circle");
+  await expect(page.getByRole("status")).toContainText("Circle layout");
+  await expect(page.getByRole("button", { name: "Fixed layout" })).toBeDisabled();
+
+  await layout.selectOption("concentric");
+  await expect(graph).toHaveAttribute("data-layout-style", "concentric");
+  await expect(page.getByRole("status")).toContainText("Concentric layout");
+
+  await layout.selectOption("spiral");
+  await expect(graph).toHaveAttribute("data-layout-style", "spiral");
+  await expect(page.getByRole("status")).toContainText("Spiral layout");
+
+  await layout.selectOption("grid");
+  await expect(graph).toHaveAttribute("data-layout-style", "grid");
+  await expect(page.getByRole("status")).toContainText("Square grid layout");
+
+  await layout.selectOption("automatic");
+  await expect(graph).toHaveAttribute("data-layout-style", "automatic");
+  await expect(page.locator(".compass-tool-button").filter({ hasText: /layout/ })).toBeEnabled();
+});
+
 test("single-click inspects and double-click opens the selected node's exact range", async ({
   page
 }) => {

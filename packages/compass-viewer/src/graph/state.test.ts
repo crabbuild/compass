@@ -59,6 +59,19 @@ describe("graphReducer", () => {
     expect(revealed.initialLayoutPending).toBe(false);
   });
 
+  it("uses fixed positioning for a selected layout style", () => {
+    const grid = graphReducer(initialGraphState, {
+      type: "setLayout",
+      layout: "grid",
+      runPhysics: false
+    });
+    expect(grid).toMatchObject({
+      layoutStyle: "grid",
+      physicsRunning: false,
+      initialLayoutPending: false
+    });
+  });
+
   it("can hide or reveal every community in one action", () => {
     const hidden = graphReducer(initialGraphState, {
       type: "setHiddenCommunities",

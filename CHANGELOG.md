@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Let users switch code graphs between automatic, circular, concentric,
+  spiral, and community-grouped square-grid layouts. Grid communities form
+  aligned mini-grids with consistent gutters; fixed layouts remain
+  deterministic and keep physics disabled so large community overviews stay
+  responsive.
+
 - Keep the initialization repository tree and selected-path ledger inside
   bounded, independently scrollable panes so large file lists remain usable.
 

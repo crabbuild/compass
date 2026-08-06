@@ -1,17 +1,21 @@
 import {
   ArrowLeftIcon,
+  LayoutGridIcon,
   Maximize2Icon,
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
   TagsIcon
 } from "lucide-react";
+import type { GraphLayoutStyle } from "./renderingProfile";
 
 export function GraphToolbar({
   status,
   physicsRunning,
+  layoutStyle,
   forceLabels,
   onTogglePhysics,
+  onLayoutChange,
   onFit,
   onReset,
   onToggleLabels,
@@ -19,8 +23,10 @@ export function GraphToolbar({
 }: {
   status: string;
   physicsRunning: boolean;
+  layoutStyle: GraphLayoutStyle;
   forceLabels: boolean;
   onTogglePhysics(): void;
+  onLayoutChange(layout: GraphLayoutStyle): void;
   onFit(): void;
   onReset(): void;
   onToggleLabels(): void;
@@ -53,15 +59,40 @@ export function GraphToolbar({
             <span>Overview</span>
           </button>
         )}
+        <label className="compass-layout-picker">
+          <LayoutGridIcon aria-hidden="true" />
+          <span className="sr-only">Graph layout</span>
+          <select
+            aria-label="Graph layout"
+            value={layoutStyle}
+            onChange={(event) => onLayoutChange(event.target.value as GraphLayoutStyle)}
+          >
+            <option value="automatic">Automatic</option>
+            <option value="circle">Circle</option>
+            <option value="concentric">Concentric</option>
+            <option value="spiral">Spiral</option>
+            <option value="grid">Square grid</option>
+          </select>
+        </label>
         <button
           className="compass-tool-button"
           type="button"
-          aria-label={physicsRunning ? "Pause layout" : "Resume layout"}
+          aria-label={physicsRunning
+            ? "Pause layout"
+            : layoutStyle === "automatic" ? "Resume layout" : "Fixed layout"}
           aria-pressed={physicsRunning}
+          disabled={layoutStyle !== "automatic"}
+          title={layoutStyle === "automatic"
+            ? undefined
+            : "Physics is available in Automatic layout"}
           onClick={onTogglePhysics}
         >
-          {physicsRunning ? <PauseIcon /> : <PlayIcon />}
-          <span>{physicsRunning ? "Pause layout" : "Resume layout"}</span>
+          {physicsRunning
+            ? <PauseIcon />
+            : layoutStyle === "automatic" ? <PlayIcon /> : <PauseIcon />}
+          <span>{physicsRunning
+            ? "Pause layout"
+            : layoutStyle === "automatic" ? "Resume layout" : "Fixed layout"}</span>
         </button>
         <button
           className="compass-tool-button"

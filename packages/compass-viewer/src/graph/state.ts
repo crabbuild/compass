@@ -1,11 +1,15 @@
 import type { GraphNode, GraphViewModel } from "../contracts/graph";
-import { graphRenderingProfile } from "./renderingProfile";
+import {
+  graphRenderingProfile,
+  type GraphLayoutStyle
+} from "./renderingProfile";
 
 export type GraphChangeType = NonNullable<GraphNode["change"]>;
 
 export type GraphState = {
   focusedNodeId: string | null;
   physicsRunning: boolean;
+  layoutStyle: GraphLayoutStyle;
   initialLayoutPending: boolean;
   forceLabels: boolean;
   hiddenCommunities: ReadonlySet<number>;
@@ -19,6 +23,7 @@ export type GraphAction =
   | { type: "stabilized" }
   | { type: "revealLayout" }
   | { type: "setPhysics"; running: boolean }
+  | { type: "setLayout"; layout: GraphLayoutStyle; runPhysics: boolean }
   | { type: "setLabels"; visible: boolean }
   | { type: "toggleCommunity"; communityId: number }
   | { type: "setHiddenCommunities"; communityIds: number[] }
@@ -28,6 +33,7 @@ export type GraphAction =
 export const initialGraphState: GraphState = {
   focusedNodeId: null,
   physicsRunning: true,
+  layoutStyle: "automatic",
   initialLayoutPending: true,
   forceLabels: false,
   hiddenCommunities: new Set<number>(),
@@ -66,6 +72,13 @@ export function graphReducer(state: GraphState, action: GraphAction): GraphState
       };
     case "setPhysics":
       return { ...state, physicsRunning: action.running };
+    case "setLayout":
+      return {
+        ...state,
+        layoutStyle: action.layout,
+        physicsRunning: action.runPhysics,
+        initialLayoutPending: false
+      };
     case "setLabels":
       return { ...state, forceLabels: action.visible };
     case "search":
