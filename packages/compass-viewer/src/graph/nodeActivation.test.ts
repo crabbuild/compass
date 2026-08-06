@@ -32,4 +32,12 @@ describe("graphNodeActivation", () => {
       source: { file: "src/lib.rs", startLine: 3, endLine: 8 }
     });
   });
+
+  it("does not offer a drilldown omitted from a bounded standalone export", () => {
+    expect(graphNodeActivation(model, {
+      ...model.nodes[0]!,
+      detailAvailable: false,
+      source: undefined
+    })).toEqual({ type: "none" });
+  });
 });

@@ -14,7 +14,11 @@ import {
   bindGraphNetworkEvents,
   type GraphNetworkHandlers
 } from "./networkEvents";
-import { graphRenderingProfile, seedStaticGraphPositions } from "./renderingProfile";
+import {
+  graphRenderingProfile,
+  seedStaticGraphPositions,
+  visibleGraphEdges
+} from "./renderingProfile";
 import type { GraphChangeType } from "./state";
 
 export type GraphCanvasHandle = {
@@ -57,6 +61,7 @@ const fallbackComparisonPalette: ComparisonPalette = {
   changed: { background: "#3d3015", border: "#d7a72b" },
   unchanged: { background: "#29313b", border: "#8b949e" }
 };
+const STATIC_VISIBLE_LABEL_LIMIT = 200;
 
 const defaultOptions: Options = {
   autoResize: true,
@@ -139,6 +144,8 @@ const staticOptions: Options = {
     tooltipDelay: 100,
     hideEdgesOnDrag: true,
     hideEdgesOnZoom: true,
+    hoverConnectedEdges: false,
+    selectConnectedEdges: false,
     navigationButtons: false,
     keyboard: { enabled: true }
   },
@@ -152,6 +159,7 @@ const staticOptions: Options = {
   },
   edges: {
     arrows: { to: { enabled: false } },
+    chosen: false,
     smooth: false,
     selectionWidth: 3
   },
@@ -191,6 +199,7 @@ function cssColor(name: string, fallback: string): string {
 function edgeAppearance(confidence: string | undefined) {
   if (confidence === "extracted") return { dashes: false, width: 2, opacity: 0.7 };
   if (confidence === "ambiguous") return { dashes: [3, 4], width: 2, opacity: 0.62 };
+  if (confidence === "aggregated") return { dashes: false, width: 1, opacity: 0.2 };
   return { dashes: true, width: 1, opacity: 0.35 };
 }
 
@@ -375,6 +384,10 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       () => graphRenderingProfile(model),
       [model.edges.length, model.nodes.length]
     );
+    const renderedEdges = useMemo(
+      () => visibleGraphEdges(model),
+      [model]
+    );
     const maxDegree = useMemo(() => {
       let maximum = 1;
       for (const node of model.nodes) maximum = Math.max(maximum, node.degree ?? 1);
@@ -458,15 +471,22 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             .map((node) => node.id)
           : []
     ), [comparisonMode, model.nodes, renderingProfile]);
+    const expandedLabelIds = useMemo(() => renderingProfile === "static"
+      ? new Set([...model.nodes]
+        .sort((left, right) =>
+          (right.degree ?? 0) - (left.degree ?? 0) || left.id.localeCompare(right.id))
+        .slice(0, STATIC_VISIBLE_LABEL_LIMIT)
+        .map((node) => node.id))
+      : new Set<string>(), [model.nodes, renderingProfile]);
     const comparisonPositions = useMemo(
       () => comparisonMode ? seedComparisonPositions(model.nodes) : new Map(),
       [comparisonMode, model.nodes]
     );
     const staticPositions = useMemo(
       () => renderingProfile === "static" && !comparisonMode
-        ? seedStaticGraphPositions(model.nodes)
+        ? seedStaticGraphPositions(model.nodes, model.stats.aggregated)
         : new Map(),
-      [comparisonMode, model.nodes, renderingProfile]
+      [comparisonMode, model.nodes, model.stats.aggregated, renderingProfile]
     );
     const contrastBorder = useMemo(() => {
       if (typeof document === "undefined") return undefined;
@@ -525,7 +545,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       staticPositions
     ]);
     const edgeData = useMemo(() => new DataSet<Edge>(
-      model.edges.map((edge) => {
+      renderedEdges.map((edge) => {
         const appearance = comparisonEdgeAppearance(
           edge.change,
           edge.confidence,
@@ -544,7 +564,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           color: { color: appearance.color, opacity: appearance.opacity }
         };
       })
-    ), [comparisonMode, model.edges, renderingProfile]);
+    ), [comparisonMode, renderedEdges, renderingProfile]);
     useEffect(() => {
       const container = containerRef.current;
       if (!container) return;
@@ -618,7 +638,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         id: node.id,
         hidden: hiddenNodes.has(node.id)
       })));
-      edgeData.update(model.edges.map((edge) => ({
+      edgeData.update(renderedEdges.map((edge) => ({
         id: edge.id,
         hidden: hiddenNodes.has(edge.source) || hiddenNodes.has(edge.target)
       })));
@@ -626,7 +646,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       edgeData,
       hiddenChanges,
       hiddenCommunities,
-      model.edges,
+      renderedEdges,
       model.nodes,
       nodeData
     ]);
@@ -669,7 +689,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             : { enabled: false }
         };
       }));
-      edgeData.update(model.edges.map((edge) => {
+      edgeData.update(renderedEdges.map((edge) => {
         const appearance = comparisonEdgeAppearance(
           edge.change,
           edge.confidence,
@@ -706,7 +726,8 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       edgeData,
       focusedNodeId,
       model,
-      nodeData
+      nodeData,
+      renderedEdges
     ]);
 
     useEffect(() => {
@@ -714,7 +735,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         id: node.id,
         font: {
           color: labelColor,
-          size: forceLabels
+          size: (forceLabels && (renderingProfile !== "static" || expandedLabelIds.has(node.id)))
             || node.id === focusedNodeId
             || (comparisonMode
               ? automaticLabelIds.has(node.id)
@@ -728,6 +749,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     }, [
       automaticLabelIds,
       comparisonMode,
+      expandedLabelIds,
       focusedNodeId,
       forceLabels,
       labelColor,

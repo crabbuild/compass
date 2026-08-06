@@ -55,6 +55,8 @@ pub struct GraphViewNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub member_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail_available: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<GraphViewSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<GraphViewColor>,
@@ -90,6 +92,8 @@ pub struct GraphViewEdge {
     pub source: String,
     pub target: String,
     pub relation: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weight: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<String>,
     #[serde(rename = "relationshipSite", skip_serializing_if = "Option::is_none")]
@@ -137,6 +141,7 @@ pub fn graph_view_model(
                     .get("member_count")
                     .and_then(Value::as_u64)
                     .map(|value| value as usize),
+                detail_available: None,
                 source: file
                     .filter(|file| !file.is_empty())
                     .map(|file| GraphViewSource {
@@ -173,6 +178,11 @@ pub fn graph_view_model(
                 source,
                 target,
                 relation: string(object, "label").unwrap_or_default(),
+                weight: object
+                    .get("weight")
+                    .and_then(Value::as_u64)
+                    .filter(|value| *value > 0)
+                    .map(|value| value as usize),
                 confidence: string(object, "confidence").map(|value| {
                     match value.to_ascii_lowercase().as_str() {
                         "extracted" => "extracted",
@@ -472,7 +482,8 @@ mod tests {
                 "source": "0",
                 "target": "1",
                 "relation": "2 cross-community edges",
-                "confidence": "AGGREGATED"
+                "confidence": "AGGREGATED",
+                "weight": 2
             }]
         }))?;
         let communities: Communities =
@@ -486,6 +497,7 @@ mod tests {
         );
 
         assert_eq!(model.edges[0].relation, "2 cross-community edges");
+        assert_eq!(model.edges[0].weight, Some(2));
         assert_eq!(model.edges[0].confidence.as_deref(), Some("aggregated"));
         assert!(model.edges[0].relationship_site.is_none());
         Ok(())

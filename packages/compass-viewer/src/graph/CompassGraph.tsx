@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useDeferredValue,
   useMemo,
   useReducer,
   useRef,
@@ -22,6 +23,7 @@ import { EdgeHoverCard, type GraphEdgeHover } from "./EdgeHoverCard";
 import { navigableRelationshipSource } from "./sourceNavigation";
 import type { GraphSourceRevisions } from "./ChangeEvidence";
 import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
+import { visibleGraphEdges } from "./renderingProfile";
 import {
   graphReducer,
   initialGraphStateForModel,
@@ -146,6 +148,36 @@ function CompassGraphView({
     () => new Map(model.edges.map((edge) => [edge.id, edge])),
     [model.edges]
   );
+  const graphIndex = useMemo(() => {
+    const neighborIds = new Map<string, Set<string>>();
+    const edges = new Map<string, GraphViewModel["edges"]>();
+    for (const edge of model.edges) {
+      const sourceNeighbors = neighborIds.get(edge.source) ?? new Set<string>();
+      sourceNeighbors.add(edge.target);
+      neighborIds.set(edge.source, sourceNeighbors);
+      const targetNeighbors = neighborIds.get(edge.target) ?? new Set<string>();
+      targetNeighbors.add(edge.source);
+      neighborIds.set(edge.target, targetNeighbors);
+      const sourceEdges = edges.get(edge.source) ?? [];
+      sourceEdges.push(edge);
+      edges.set(edge.source, sourceEdges);
+      const targetEdges = edges.get(edge.target) ?? [];
+      targetEdges.push(edge);
+      edges.set(edge.target, targetEdges);
+    }
+    return { neighborIds, edges };
+  }, [model.edges]);
+  const searchIndex = useMemo(() => model.nodes.map((node) => ({
+    node,
+    text: [node.label, node.source?.file, node.kind]
+      .filter((value) => value !== undefined)
+      .join("\n")
+      .toLocaleLowerCase()
+  })), [model.nodes]);
+  const renderedEdgeCount = useMemo(
+    () => visibleGraphEdges(model).length,
+    [model]
+  );
   const selected = state.focusedNodeId
     ? nodeById.get(state.focusedNodeId)
     : undefined;
@@ -171,31 +203,28 @@ function CompassGraphView({
   }, [model.nodes]);
   const neighbors = useMemo(() => {
     if (!selected) return [];
-    const ids = new Set<string>();
-    for (const edge of model.edges) {
-      if (edge.source === selected.id) ids.add(edge.target);
-      if (edge.target === selected.id) ids.add(edge.source);
-    }
-    return [...ids]
+    return [...(graphIndex.neighborIds.get(selected.id) ?? [])]
       .map((id) => nodeById.get(id))
       .filter((node) => node !== undefined)
       .sort((left, right) => left.label.localeCompare(right.label));
-  }, [model.edges, nodeById, selected]);
+  }, [graphIndex.neighborIds, nodeById, selected]);
   const connectedEdges = useMemo(
     () => selected
-      ? model.edges.filter((edge) => edge.source === selected.id || edge.target === selected.id)
+      ? graphIndex.edges.get(selected.id) ?? []
       : [],
-    [model.edges, selected]
+    [graphIndex.edges, selected]
   );
+  const deferredQuery = useDeferredValue(state.query);
   const matches = useMemo(() => {
-    const query = state.query.trim().toLocaleLowerCase();
+    const query = deferredQuery.trim().toLocaleLowerCase();
     if (!query) return [];
-    return model.nodes
-      .filter((node) => node.label.toLocaleLowerCase().includes(query)
-        || node.source?.file.toLocaleLowerCase().includes(query)
-        || node.kind?.toLocaleLowerCase().includes(query))
-      .slice(0, 20);
-  }, [model.nodes, state.query]);
+    const found = [];
+    for (const entry of searchIndex) {
+      if (entry.text.includes(query)) found.push(entry.node);
+      if (found.length === 20) break;
+    }
+    return found;
+  }, [deferredQuery, searchIndex]);
 
   const focus = useCallback((nodeId: string) => {
     setHover(null);
@@ -386,6 +415,7 @@ function CompassGraphView({
           comparisonMode={comparisonMode}
           sourceRevisions={sourceRevisions}
           queryResult={queryResult}
+          renderedEdgeCount={renderedEdgeCount}
           onQueryChange={(query) => dispatch({ type: "search", query })}
           onFocus={focus}
           onOpenSource={host.openSource}

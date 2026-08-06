@@ -1,7 +1,8 @@
-import type { GraphNode, GraphViewModel } from "../contracts/graph";
+import type { GraphEdge, GraphNode, GraphViewModel } from "../contracts/graph";
 
 export const STATIC_LAYOUT_NODE_THRESHOLD = 1_000;
 export const STATIC_LAYOUT_EDGE_THRESHOLD = 4_000;
+export const AGGREGATED_EDGE_RENDER_LIMIT = 4_000;
 
 export type GraphRenderingProfile = "interactive" | "static";
 
@@ -13,8 +14,11 @@ export function graphRenderingProfile(model: GraphViewModel): GraphRenderingProf
 }
 
 export function seedStaticGraphPositions(
-  nodes: readonly GraphNode[]
+  nodes: readonly GraphNode[],
+  aggregated = false
 ): ReadonlyMap<string, { x: number; y: number }> {
+  if (aggregated) return seedAggregatedGraphPositions(nodes);
+
   const grouped = new Map<number, GraphNode[]>();
   for (const node of nodes) {
     const group = grouped.get(node.community) ?? [];
@@ -58,4 +62,72 @@ export function seedStaticGraphPositions(
   });
 
   return positions;
+}
+
+export function visibleGraphEdges(model: GraphViewModel): readonly GraphEdge[] {
+  if (!model.stats.aggregated || model.edges.length <= AGGREGATED_EDGE_RENDER_LIMIT) {
+    return model.edges;
+  }
+  const ordered = [...model.edges].sort((left, right) =>
+    (right.weight ?? relationWeight(right.relation))
+      - (left.weight ?? relationWeight(left.relation))
+    || left.source.localeCompare(right.source)
+    || left.target.localeCompare(right.target)
+    || left.id.localeCompare(right.id));
+  const parent = new Map(model.nodes.map((node) => [node.id, node.id]));
+  const find = (id: string): string => {
+    let root = parent.get(id) ?? id;
+    while (parent.get(root) !== undefined && parent.get(root) !== root) {
+      root = parent.get(root)!;
+    }
+    let current = id;
+    while (parent.get(current) !== undefined && parent.get(current) !== root) {
+      const next = parent.get(current)!;
+      parent.set(current, root);
+      current = next;
+    }
+    return root;
+  };
+  const selected: GraphEdge[] = [];
+  const selectedIds = new Set<string>();
+  for (const edge of ordered) {
+    const source = find(edge.source);
+    const target = find(edge.target);
+    if (source === target) continue;
+    parent.set(target, source);
+    selected.push(edge);
+    selectedIds.add(edge.id);
+    if (selected.length === AGGREGATED_EDGE_RENDER_LIMIT) return selected;
+  }
+  for (const edge of ordered) {
+    if (selectedIds.has(edge.id)) continue;
+    selected.push(edge);
+    if (selected.length === AGGREGATED_EDGE_RENDER_LIMIT) break;
+  }
+  return selected;
+}
+
+function relationWeight(relation: string): number {
+  const parsed = Number.parseInt(relation, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function seedAggregatedGraphPositions(
+  nodes: readonly GraphNode[]
+): ReadonlyMap<string, { x: number; y: number }> {
+  const ordered = [...nodes].sort((left, right) =>
+    (right.degree ?? 0) - (left.degree ?? 0)
+    || (right.memberCount ?? 0) - (left.memberCount ?? 0)
+    || left.id.localeCompare(right.id));
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  const spacing = 34;
+  return new Map(ordered.map((node, index) => {
+    if (index === 0) return [node.id, { x: 0, y: 0 }];
+    const radius = spacing * Math.sqrt(index);
+    const angle = index * goldenAngle;
+    return [node.id, {
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius
+    }];
+  }));
 }

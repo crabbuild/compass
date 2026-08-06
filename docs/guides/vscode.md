@@ -38,8 +38,14 @@ palette remains the fallback.
 Detailed graphs with at least 1,000 nodes or 4,000 relationships open with a
 deterministic community-grouped layout, paused physics, straight relationships,
 and fewer labels. This keeps the canvas responsive while preserving every node
-and relationship. Use the layout control to enable physics explicitly when a
-force-directed arrangement is useful.
+and relationship in the complete view model. Use the layout control to enable
+physics explicitly when a force-directed arrangement is useful.
+
+Aggregated overviews use a hub-centered layout and draw a deterministic
+strongest-edge backbone capped at 4,000 visible relationships. The inspector
+retains complete counts and reports how many edges are currently drawn. When
+there are more than 200 communities, its filter keeps the control list bounded
+while still allowing any community to be found and toggled.
 
 Search symbols and files, pause or resume the layout, fit or reset the view,
 show labels, filter communities, and inspect connected nodes. Single-click a

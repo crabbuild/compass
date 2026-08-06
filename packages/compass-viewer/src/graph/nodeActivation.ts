@@ -13,7 +13,8 @@ export function graphNodeActivation(
 ): GraphNodeActivation {
   if (detailCommunityId === undefined
     && model.stats.aggregated
-    && node.memberCount !== undefined) {
+    && node.memberCount !== undefined
+    && node.detailAvailable !== false) {
     return { type: "community", communityId: node.community };
   }
   const source = navigableSource(node);
