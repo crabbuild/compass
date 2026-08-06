@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.5 - 2026-08-06
+
 - Keep very large HTML and VS Code community overviews responsive with a
   deterministic hub-centered layout, inexpensive aggregate edges, indexed
   search and relationship inspection, and bounded standalone community
