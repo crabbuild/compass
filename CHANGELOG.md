@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep the initialization repository tree and selected-path ledger inside
+  bounded, independently scrollable panes so large file lists remain usable.
+
 - Keep very large HTML and VS Code community overviews responsive with a
   deterministic hub-centered layout, inexpensive aggregate edges, indexed
   search and relationship inspection, and bounded standalone community

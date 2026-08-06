@@ -822,12 +822,18 @@ window.acquireVsCodeApi=()=>({postMessage(message){
       type:"hydrate",
       repositoryName:"compass",
       repositoryRoot:"/workspace/compass",
-      scopeFiles:[
-        "packages/api/src/main.ts",
-        "src/commands/init.ts",
-        "src/core/index.ts",
-        "src/views/graph.ts"
-      ],
+      scopeFiles:new URLSearchParams(window.location.search).has("manyFiles")
+        ? [
+          "packages/api/src/main.ts",
+          ...Array.from({length:180},(_,index)=>
+            "src/module-"+String(index).padStart(3,"0")+".ts")
+        ]
+        : [
+          "packages/api/src/main.ts",
+          "src/commands/init.ts",
+          "src/core/index.ts",
+          "src/views/graph.ts"
+        ],
       scopeFilesTruncated:false,
       configurationExists:new URLSearchParams(window.location.search).has("existing")
     },"*"),0);
