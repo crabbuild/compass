@@ -14,9 +14,11 @@ Graphify.
 - environment variables: `COMPASS_*`
 - MCP server and resources: `compass` and `compass://...`
 
-Legacy Graphify names are intentionally unsupported. Existing Graphify state
-must be archived or removed before creating fresh Compass artifacts. See
-[`MIGRATION.md`](MIGRATION.md) for the hard-cutover procedure.
+Legacy Graphify executable, environment, configuration, and protocol names are
+intentionally unsupported. Existing `graphify-out/` state can remain in place
+while a fresh Compass build creates `compass-out/`; the two products do not
+share caches or mutable state. See [`MIGRATION.md`](MIGRATION.md) for the
+transition procedure.
 
 ## VS Code extension compatibility
 
@@ -60,7 +62,11 @@ A user-visible incompatible change requires:
 Versioned formats use Compass-owned identifiers. Consumers should reject
 unknown major versions instead of attempting legacy fallback behavior.
 
-The current local build publishes `graph.json` (`compass.graph/1`) by default.
+The current local build publishes `graph.json` (`compass.graph/1`) directly
+under the selected output root by default. It also materializes
+`GRAPH_REPORT.md`, `manifest.json`, and optional `graph.html` at that stable
+root path. Compass retains an immutable generation behind those conventional
+paths as its coherent internal authority.
 Passing `--store sqlite` also publishes a validated `compass-store.sqlite3`
 sidecar and typed `store.ref` selector. Typed code queries use JSON by default;
 `--engine store` explicitly selects and validates the sidecar. The SQLite file

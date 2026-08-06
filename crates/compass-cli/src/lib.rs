@@ -899,7 +899,10 @@ fn write_watch_status_mode(
             let _result = native_line!(
                 stdout,
                 "[compass watch] graph artifacts updated in {}",
-                result.output_dir.display()
+                compass_files::BuildGuard::output_container_for_artifact(
+                    &result.output_dir.join("graph.json")
+                )
+                .display()
             );
             if result.partial_graph {
                 let _result = native_line!(
@@ -1323,6 +1326,7 @@ fn command_cluster_only(_frontend: Frontend, args: &[String]) -> Outcome {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
+    let public_output_dir = compass_files::BuildGuard::output_container_for_artifact(&graph_path);
     match cluster_existing_graph(&ClusterExistingOptions {
         graph_path,
         output_dir: output_dir.clone(),
@@ -1340,7 +1344,7 @@ fn command_cluster_only(_frontend: Frontend, args: &[String]) -> Outcome {
                 result.edges,
                 result.communities,
                 result.labels_reused,
-                output_dir.display()
+                public_output_dir.display()
             ));
             if timing {
                 outcome.stderr = format!(
@@ -2149,7 +2153,10 @@ fn command_build_with_validation_inner(
                 result.nodes,
                 result.edges,
                 result.communities,
-                result.output_dir.display()
+                compass_files::BuildGuard::output_container_for_artifact(
+                    &result.output_dir.join("graph.json")
+                )
+                .display()
             );
             output.push('\n');
             output.push_str(&format_program_analysis(&result));
@@ -3155,7 +3162,23 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
         _ => Err("unsupported export format".to_owned()),
     };
     match result {
-        Ok(output) => {
+        Ok(mut output) => {
+            if format == "html" {
+                let output_container =
+                    compass_files::BuildGuard::output_container_for_artifact(&graph_path);
+                if let Err(error) = compass_files::BuildGuard::publish_root_artifacts(
+                    &output_container,
+                    &["graph.html"],
+                    true,
+                ) {
+                    return Outcome::failure(format!(
+                        "error: could not publish graph.html at the output root: {error}"
+                    ));
+                }
+                if output.html_output.is_some() {
+                    output.html_output = Some(output_container.join("graph.html"));
+                }
+            }
             let outcome = Outcome::success(output.message);
             match (frontend, output.html_output) {
                 (Frontend::Compass, Some(path)) => outcome.with_html_output(path),

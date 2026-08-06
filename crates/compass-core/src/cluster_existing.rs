@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use compass_files::{write_json_atomic, write_text_atomic};
+use compass_files::{BuildGuard, write_json_atomic, write_text_atomic};
 use compass_graph::{
     ClusterOptions, Communities, GodNode, cluster, community_member_signatures, god_nodes,
     label_communities_by_hub, remap_communities_to_previous, score_communities, suggest_questions,
@@ -253,6 +253,17 @@ where
         }
         rendered.is_some()
     };
+    let output_container = BuildGuard::output_container_for_artifact(&options.graph_path);
+    BuildGuard::publish_root_artifacts(
+        &output_container,
+        &[
+            "GRAPH_REPORT.md",
+            "graph-overview.json",
+            "graph.html",
+            "graph.json",
+        ],
+        true,
+    )?;
     let export_elapsed = export_started.elapsed();
     Ok(ClusterExistingResult {
         nodes: document.nodes.len(),

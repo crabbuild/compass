@@ -233,6 +233,15 @@ empty usable graph remain failures and cannot replace the active generation.
 Write paths use temporary or staged artifacts and atomic replacement where the
 contract requires it.
 
+Compass first commits the authoritative immutable generation. It then
+materializes the conventional root-level files with independent atomic
+replacement, placing `graph.json`, `graph.html`, `GRAPH_REPORT.md`, and
+`manifest.json` exactly where ordinary file-based integrations expect them.
+If that façade publication is interrupted, its completion marker is left
+absent and the next build repairs the full set. The generation protocol and
+cache encoding can therefore evolve without forcing consumers to follow a
+private storage layout.
+
 Consumers should still avoid reading files while a writer is replacing an
 artifact set. A long-lived integration can either watch for completion, invoke
 Compass itself, or open a graph snapshot only after the producing command

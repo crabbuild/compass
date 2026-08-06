@@ -28,10 +28,52 @@ fn update_writes_to_compass_out_by_default() -> Result<(), Box<dyn Error>> {
     let root = tempfile::tempdir()?;
     run_update(root.path(), |_| {})?;
 
-    assert!(
-        BuildGuard::resolve_artifact(&root.path().join("compass-out"), "graph.json")?.is_file()
-    );
+    let output = root.path().join("compass-out");
+    assert!(BuildGuard::resolve_artifact(&output, "graph.json")?.is_file());
+    assert!(output.join("graph.json").is_file());
+    assert!(output.join("GRAPH_REPORT.md").is_file());
+    assert!(output.join("manifest.json").is_file());
+    assert!(output.join("cache").is_dir());
+    assert!(!output.join("graph.html").exists());
     assert!(!root.path().join("graphify-out").exists());
+    Ok(())
+}
+
+#[test]
+fn html_export_is_materialized_directly_in_compass_out() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    run_update(root.path(), |_| {})?;
+    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["export", "html"])
+        .current_dir(root.path())
+        .env_remove("COMPASS_OUT")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "compass export html failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(root.path().join("compass-out/graph.html").is_file());
+    Ok(())
+}
+
+#[test]
+fn update_materializes_html_directly_in_compass_out() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    std::fs::write(root.path().join("sample.rs"), "fn sample() {}\n")?;
+    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["update", ".", "--code-only"])
+        .current_dir(root.path())
+        .env_remove("COMPASS_OUT")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "compass update failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(root.path().join("compass-out/graph.html").is_file());
     Ok(())
 }
 
@@ -47,6 +89,7 @@ fn compass_out_overrides_the_output_and_graphify_out_is_ignored() -> Result<(), 
     assert!(
         BuildGuard::resolve_artifact(&root.path().join("chosen-output"), "graph.json")?.is_file()
     );
+    assert!(root.path().join("chosen-output/graph.json").is_file());
     assert!(!root.path().join("legacy-output").exists());
     Ok(())
 }

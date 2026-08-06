@@ -1,6 +1,9 @@
 # Migrate from Graphify to Compass
 
-Compass uses its own executable, output directory, environment variable, and sidecars. The first public release makes a clean break from Graphify compatibility paths.
+Compass uses its own executable, output directory, environment variable, and
+sidecars. Its output root now preserves the familiar flat artifact shape so
+file-based workflows can transition without learning Compass's hidden
+generation or store layout.
 
 ## Install Compass
 
@@ -14,7 +17,8 @@ The release contains only the `compass` executable. It doesn't install `graphify
 
 ## Rebuild project output
 
-Compass doesn't read `graphify-out/` or `GRAPHIFY_OUT`. Run a new build to create `compass-out/`:
+Compass doesn't read `graphify-out/` or `GRAPHIFY_OUT`. Keep the old directory
+for rollback and run a new build to create `compass-out/`:
 
 ```bash
 cd your_project_directory
@@ -22,6 +26,23 @@ compass update .
 ```
 
 Set `COMPASS_OUT` before running Compass when you need a custom output directory.
+
+The new directory exposes the main artifacts directly:
+
+```text
+compass-out/
+├── graph.json
+├── graph.html        # unless --no-viz or the render limit omits it
+├── GRAPH_REPORT.md
+├── manifest.json
+└── cache/
+```
+
+Scripts that open, copy, serve, mount, or archive these conventional filenames
+only need the executable and output-directory rename. The JSON schema and
+cache payloads remain Compass contracts: do not copy `graphify-out/cache/` or
+`graphify-out/manifest.json` into `compass-out/`. Compass rebuilds them from
+source while retaining its own internal generation and store protocols.
 
 ## Opt into Program IR generation
 
@@ -104,7 +125,9 @@ when the target binary reports an unsupported major or adapter.
 
 ## Regenerate HTML graph exports
 
-Current Compass releases use the shared graph workbench for `graph.html` and
+Normal builds now write the self-contained page directly to
+`compass-out/graph.html`; `compass export html` repairs or regenerates the same
+root path. Current Compass releases use the shared graph workbench and
 do not preserve the previous export's DOM, CSS selectors, or remote
 `vis-network` script boundary. Regenerate saved HTML exports with the current
 `compass export html` command. Any private CSS overrides or browser automation

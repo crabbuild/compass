@@ -44,6 +44,12 @@ compass update . --out custom-output
 
 Do not point two concurrent writers at one output directory.
 
+Successful builds materialize `graph.json`, `manifest.json`,
+`GRAPH_REPORT.md`, and optional `graph.html` directly under this root. These
+stable paths are the portable integration surface. Hidden generations, store
+references, and the encoding beneath `cache/` remain Compass-owned operational
+state and should be kept opaque.
+
 ## Compass Store configuration
 
 The local build publishes `graph.json` under the selected output root. SQLite
