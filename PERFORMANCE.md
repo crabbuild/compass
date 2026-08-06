@@ -725,6 +725,36 @@ when extraction and graph construction remain below their approved baseline.
 These local measurements are diagnostic evidence and do not replace a
 controlled CI baseline.
 
+### Django parallel fact-state qualification
+
+The 2026-08-05 large-repository fact-state hardening was measured from Compass
+revision `726df22ade0bcd3181b7b0e146783b781a87bd98` plus the candidate change,
+Django revision `dfc52e53f1d19a2730854d68b602fb4dba8bf0c5`, and Graphify revision
+`07b9143d4b90b1e1cb88dc71423f742a501efd29` (package 0.9.34). Both tools read
+the same pinned Django checkout and wrote each sample to a distinct fresh
+output root on the native APFS volume. The release Compass command used the
+comparison profile `--code-only --no-cluster --no-viz --store json`.
+
+Serial AST fact digest construction accounted for 1.98 seconds of the cold
+path. Indexed parallel digest collection reduced that stage to about 0.39
+seconds. Compass also constructs the unchanged pre-merge digest concurrently
+with portable AST cache publication, and deterministically recomputes it after
+any declaration/definition merge that changes facts.
+
+| Tool | Cold samples (s) | p50 | Graphify / Compass |
+| --- | --- | ---: | ---: |
+| Compass before | 9.971, 9.816, 9.821 | 9.821 s | 4.44x |
+| Compass candidate | 8.037, 8.045, 7.878 | 8.037 s | 5.43x |
+| Graphify 0.9.34 | 43.643, 43.544, 44.746 | 43.643 s | — |
+
+All three candidate runs published byte-identical 75,604-node / 203,871-edge
+graphs with SHA-256
+`a5dfcfbe8d77ba2308cf2f0585472132e16dd6f80efa428d5ecf879cb5600ea1`.
+Candidate peak RSS remained informational for this qualification and had a
+three-sample median of about 2,353 MiB. These native-volume measurements avoid
+the multi-second publication variance observed on the mounted workspace, but
+remain runner-specific rather than a cross-platform guarantee.
+
 ## Versioned history qualification
 
 Build a release binary, then measure a clean real repository:

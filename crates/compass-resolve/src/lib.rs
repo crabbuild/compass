@@ -37,6 +37,10 @@ const IMPLEMENTATION_SUFFIXES: &[&str] = &["m", "mm", "cpp", "cc", "cxx", "c"];
 /// ID collision from one directory/base-stem family with exactly one header
 /// is eligible; every other collision is left for conservative disambiguation.
 pub fn merge_decl_def_classes(extractions: &mut [Extraction]) {
+    merge_decl_def_classes_changed(extractions);
+}
+
+fn merge_decl_def_classes_changed(extractions: &mut [Extraction]) -> bool {
     let has_declaration_definition = extractions
         .iter()
         .flat_map(|extraction| &extraction.nodes)
@@ -51,7 +55,7 @@ pub fn merge_decl_def_classes(extractions: &mut [Extraction]) {
                     })
         });
     if !has_declaration_definition {
-        return;
+        return false;
     }
 
     let mut groups = HashMap::<String, Vec<(usize, usize, String)>>::new();
@@ -142,7 +146,7 @@ pub fn merge_decl_def_classes(extractions: &mut [Extraction]) {
         }
     }
     if dropped.is_empty() {
-        return;
+        return false;
     }
 
     for ((extraction_index, node_index), hashes) in definition_hashes {
@@ -171,11 +175,23 @@ pub fn merge_decl_def_classes(extractions: &mut [Extraction]) {
                 ))
         });
     }
+    true
 }
 
 /// Run declaration/definition merging only when the current source set can
 /// contain a native header/implementation pair.
 pub fn merge_decl_def_classes_if_needed(extractions: &mut [Extraction], sources: &[PathBuf]) {
+    merge_decl_def_classes_if_needed_changed(extractions, sources);
+}
+
+/// Merge declaration/definition classes when eligible and report whether facts changed.
+///
+/// This lets orchestration reuse pre-merge derived state when a corpus merely
+/// contains native-looking files but has no mergeable declaration family.
+pub fn merge_decl_def_classes_if_needed_changed(
+    extractions: &mut [Extraction],
+    sources: &[PathBuf],
+) -> bool {
     if !sources.iter().any(|source| {
         source
             .extension()
@@ -187,9 +203,9 @@ pub fn merge_decl_def_classes_if_needed(extractions: &mut [Extraction], sources:
                     .any(|suffix| extension.eq_ignore_ascii_case(suffix))
             })
     }) {
-        return;
+        return false;
     }
-    merge_decl_def_classes(extractions);
+    merge_decl_def_classes_changed(extractions)
 }
 
 fn is_declaration_source(source: &str) -> bool {
@@ -2822,7 +2838,13 @@ mod tests {
         };
         let mut extractions = vec![header, implementation, unrelated];
 
-        merge_decl_def_classes(&mut extractions);
+        assert!(merge_decl_def_classes_if_needed_changed(
+            &mut extractions,
+            &[
+                PathBuf::from("native/Widget.h"),
+                PathBuf::from("native/Widget.cpp"),
+            ],
+        ));
 
         let merged = extractions
             .iter()
@@ -2869,7 +2891,10 @@ mod tests {
             ..Extraction::default()
         }];
 
-        merge_decl_def_classes_if_needed(&mut extractions, &[PathBuf::from("package/first.py")]);
+        assert!(!merge_decl_def_classes_if_needed_changed(
+            &mut extractions,
+            &[PathBuf::from("package/first.py")],
+        ));
 
         assert_eq!(extractions[0].nodes.len(), 2);
     }
