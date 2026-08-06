@@ -891,6 +891,44 @@ button:not(:disabled),
   gap: 6px;
 }
 
+.compass-layout-picker {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding-left: 8px;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  color: var(--muted-foreground);
+  background: var(--vscode-dropdown-background, transparent);
+}
+
+.compass-layout-picker svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.compass-layout-picker select {
+  min-height: 28px;
+  padding: 0 24px 0 0;
+  border: 0;
+  outline: 0;
+  color: var(--vscode-dropdown-foreground, var(--foreground));
+  background: transparent;
+  font: inherit;
+}
+
+.compass-layout-picker:focus-within {
+  outline: 1px solid var(--vscode-focusBorder, var(--compass-focus));
+  outline-offset: 1px;
+}
+
+.compass-tool-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .compass-tool-button {
   display: inline-flex;
   min-height: 30px;

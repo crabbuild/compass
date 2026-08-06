@@ -3,6 +3,7 @@ import type { GraphNode, GraphViewModel } from "../contracts/graph";
 import {
   AGGREGATED_EDGE_RENDER_LIMIT,
   graphRenderingProfile,
+  seedGraphLayoutPositions,
   seedStaticGraphPositions,
   STATIC_LAYOUT_EDGE_THRESHOLD,
   STATIC_LAYOUT_NODE_THRESHOLD,
@@ -87,6 +88,95 @@ describe("seedStaticGraphPositions", () => {
     const height = Math.max(...coordinates.map(({ y }) => y))
       - Math.min(...coordinates.map(({ y }) => y));
     expect(Math.max(width, height) / Math.min(width, height)).toBeLessThan(1.15);
+  });
+});
+
+describe("seedGraphLayoutPositions", () => {
+  const nodes: GraphNode[] = [
+    { id: "gamma", label: "Gamma", community: 2 },
+    { id: "alpha", label: "Alpha", community: 1 },
+    { id: "beta", label: "Beta", community: 1 }
+  ];
+
+  it.each(["circle", "concentric", "spiral", "grid"] as const)(
+    "produces a deterministic %s layout",
+    (style) => {
+      expect([...seedGraphLayoutPositions(nodes, style)]).toEqual([
+        ...seedGraphLayoutPositions([...nodes].reverse(), style)
+      ]);
+    }
+  );
+
+  it("centers the highest-degree node and expands through concentric rings", () => {
+    const hubs: GraphNode[] = Array.from({ length: 24 }, (_, index) => ({
+      id: `hub-${index.toString().padStart(2, "0")}`,
+      label: `Hub ${index}`,
+      community: index % 3,
+      degree: index
+    }));
+    const positions = seedGraphLayoutPositions(hubs, "concentric");
+    expect(positions.get("hub-23")).toEqual({ x: 0, y: 0 });
+    const radii = [...positions.values()].map(({ x, y }) => Math.hypot(x, y));
+    expect(new Set(radii.map((radius) => Math.round(radius)))).toEqual(
+      new Set([0, 72, 144])
+    );
+  });
+
+  it("places spiral nodes at monotonically increasing radii", () => {
+    const positions = seedGraphLayoutPositions(nodes, "spiral");
+    const radii = [...positions.values()].map(({ x, y }) => Math.hypot(x, y));
+    expect(radii).toEqual([...radii].sort((left, right) => left - right));
+  });
+
+  it("places grid nodes at distinct coordinates", () => {
+    const positions = seedGraphLayoutPositions(model(5_200, 0).nodes, "grid");
+    const coordinates = new Set(
+      [...positions.values()].map(({ x, y }) => `${x},${y}`)
+    );
+    expect(positions.size).toBe(5_200);
+    expect(coordinates.size).toBe(5_200);
+  });
+
+  it("aligns natural community blocks in outer rows and columns", () => {
+    const groupedNodes: GraphNode[] = Array.from({ length: 16 }, (_, index) => ({
+      id: `grouped-${index}`,
+      label: `Grouped ${index}`,
+      community: Math.floor(index / 4)
+    }));
+    const positions = seedGraphLayoutPositions(groupedNodes, "grid");
+    const first = positions.get("grouped-0")!;
+    const nextColumn = positions.get("grouped-4")!;
+    const nextRow = positions.get("grouped-8")!;
+
+    expect(first.y).toBe(nextColumn.y);
+    expect(first.x).toBe(nextRow.x);
+    expect(nextColumn.x - first.x).toBeGreaterThan(112);
+    expect(nextRow.y - first.y).toBeGreaterThan(112);
+  });
+
+  it("batches aggregated communities into aligned four-by-four blocks", () => {
+    const communities: GraphNode[] = Array.from({ length: 40 }, (_, index) => ({
+      id: `community-${index}`,
+      label: `Community ${index}`,
+      community: index
+    }));
+    const positions = seedGraphLayoutPositions(communities, "grid", true);
+    const blockCenter = (start: number, end: number) => {
+      const block = Array.from({ length: end - start }, (_, offset) =>
+        positions.get(`community-${start + offset}`)!);
+      return {
+        x: (Math.min(...block.map(({ x }) => x)) + Math.max(...block.map(({ x }) => x))) / 2,
+        y: (Math.min(...block.map(({ y }) => y)) + Math.max(...block.map(({ y }) => y))) / 2
+      };
+    };
+    const first = blockCenter(0, 16);
+    const nextColumn = blockCenter(16, 32);
+    const nextRow = blockCenter(32, 40);
+
+    expect(first.y).toBe(nextColumn.y);
+    expect(first.x).toBe(nextRow.x);
+    expect(nextColumn.x - first.x).toBeGreaterThan(4 * 56);
+    expect(nextRow.y - first.y).toBeGreaterThan(4 * 56);
   });
 });
 

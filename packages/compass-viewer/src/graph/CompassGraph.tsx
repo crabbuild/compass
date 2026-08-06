@@ -23,7 +23,11 @@ import { EdgeHoverCard, type GraphEdgeHover } from "./EdgeHoverCard";
 import { navigableRelationshipSource } from "./sourceNavigation";
 import type { GraphSourceRevisions } from "./ChangeEvidence";
 import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
-import { visibleGraphEdges } from "./renderingProfile";
+import {
+  graphRenderingProfile,
+  visibleGraphEdges,
+  type GraphLayoutStyle
+} from "./renderingProfile";
 import {
   graphReducer,
   initialGraphStateForModel,
@@ -39,6 +43,13 @@ const CHANGE_TYPES: Array<{
   { value: "changed", label: "Changed" },
   { value: "unchanged", label: "Context" }
 ];
+
+const FIXED_LAYOUT_STATUS: Record<Exclude<GraphLayoutStyle, "automatic">, string> = {
+  circle: "Circle layout",
+  concentric: "Concentric layout",
+  spiral: "Spiral layout",
+  grid: "Square grid layout"
+};
 
 export type GraphHost = {
   openSource(source: SourceLocation, revision?: string): void;
@@ -274,7 +285,9 @@ function CompassGraphView({
   }, [edgeById, sourceRevisions?.after, sourceRevisions?.before]);
   const status = selected
     ? `Inspecting ${selected.label}`
-    : state.physicsRunning ? "Layout running" : "Layout paused";
+    : state.layoutStyle !== "automatic"
+      ? FIXED_LAYOUT_STATUS[state.layoutStyle]
+      : state.physicsRunning ? "Layout running" : "Layout paused";
   const loadingCommunity = communityLoading !== undefined && communityLoading !== null
     ? model.communities.find((community) => community.id === communityLoading)
     : undefined;
@@ -309,6 +322,7 @@ function CompassGraphView({
             model={model}
             focusedNodeId={state.focusedNodeId}
             physicsRunning={state.physicsRunning}
+            layoutStyle={state.layoutStyle}
             forceLabels={state.forceLabels}
             hiddenCommunities={state.hiddenCommunities}
             hiddenChanges={state.hiddenChanges}
@@ -323,10 +337,17 @@ function CompassGraphView({
           <GraphToolbar
             status={status}
             physicsRunning={state.physicsRunning}
+            layoutStyle={state.layoutStyle}
             forceLabels={state.forceLabels}
             onTogglePhysics={() => dispatch({
               type: "setPhysics",
               running: !state.physicsRunning
+            })}
+            onLayoutChange={(layout: GraphLayoutStyle) => dispatch({
+              type: "setLayout",
+              layout,
+              runPhysics: layout === "automatic"
+                && graphRenderingProfile(model) === "interactive"
             })}
             onFit={() => canvasRef.current?.fit()}
             onReset={() => {
