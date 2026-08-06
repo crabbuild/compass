@@ -85,6 +85,14 @@ const STORE_GENERATION_EXCLUSIONS: [&str; 3] = [
     "compass-store.sqlite3-wal",
     "compass-store.sqlite3-shm",
 ];
+const ROOT_ARTIFACTS: [&str; 6] = [
+    "GRAPH_REPORT.md",
+    "graph-overview.json",
+    "graph.html",
+    "manifest.json",
+    "program.json",
+    "graph.json",
+];
 
 #[derive(Clone, Debug)]
 pub struct BuildOptions {
@@ -1934,6 +1942,7 @@ fn publish_fact_neutral_incremental(
         options.graph_storage,
         store_metrics.is_some(),
         !options.graph_storage.publishes_store(),
+        true,
         timings,
     )?;
     timings.publish = publish_started.elapsed();
@@ -2416,6 +2425,7 @@ fn build_graph_inner_unscoped(
                 options.graph_storage,
                 store_ready,
                 false,
+                false,
                 &mut timings,
             )?;
             return Ok((
@@ -2499,6 +2509,7 @@ fn build_graph_inner_unscoped(
             &output_container,
             options.graph_storage,
             true,
+            false,
             false,
             &mut timings,
         )?;
@@ -3316,6 +3327,7 @@ fn build_graph_inner_unscoped(
             options.graph_storage,
             true,
             false,
+            false,
             &mut timings,
         )?;
         return Ok((
@@ -3497,6 +3509,7 @@ fn build_graph_inner_unscoped(
             options.graph_storage,
             true,
             !options.graph_storage.publishes_store(),
+            true,
             &mut timings,
         )?;
         profile_internal_duration(
@@ -3626,6 +3639,7 @@ fn build_graph_inner_unscoped(
                 &output_container,
                 options.graph_storage,
                 true,
+                false,
                 false,
                 &mut timings,
             )?;
@@ -4008,6 +4022,7 @@ fn build_graph_inner_unscoped(
         options.graph_storage,
         true,
         !options.graph_storage.publishes_store(),
+        true,
         &mut timings,
     )?;
     timings.publish = publish_started.elapsed();
@@ -4256,6 +4271,7 @@ fn commit_generation(
     graph_storage: GraphStorage,
     store_ready: bool,
     presealed_artifacts: bool,
+    root_artifacts_changed: bool,
     timings: &mut BuildTimings,
 ) -> Result<PathBuf, CoreError> {
     let publish_store = graph_storage.publishes_store();
@@ -4294,6 +4310,7 @@ fn commit_generation(
     } else {
         guard.commit_with_artifacts(&artifacts)?;
     }
+    BuildGuard::publish_root_artifacts(output_container, &ROOT_ARTIFACTS, root_artifacts_changed)?;
     Ok(BuildGuard::resolve_active_directory(output_container)?)
 }
 

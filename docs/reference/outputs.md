@@ -10,21 +10,39 @@ Default:
 
 ```text
 compass-out/
+├── graph.json
+├── graph.html                   # unless omitted by size or --no-viz
+├── GRAPH_REPORT.md
+├── manifest.json
+├── program.json                 # only with --program or --program-artifact
+├── graph-overview.json          # clustered builds
+├── cache/                       # Compass-owned disposable cache layout
 ├── .compass-active-generation
 ├── .compass-generations/<active>/
 │   ├── graph.json
-│   └── store.ref               # with the default SQLite query index
+│   ├── graph.html, report, manifest, and optional public artifacts
+│   └── store.ref                # with the default SQLite query index
 ├── .compass-store/
 │   └── compass-store.sqlite3   # with the default SQLite query index
-├── program.json                 # only with --program or --program-artifact
-├── GRAPH_REPORT.md
-├── graph.html
-├── manifest.json
-├── cache/
 └── optional sidecars and exports
 ```
 
 `--out DIR` or compatible `COMPASS_OUT` use can select another root.
+
+The ordinary files at the root are a stable, flat consumer façade. Compass
+publishes its immutable generation first, then materializes each root file by
+atomic replacement; a completion marker makes an interrupted façade update
+self-repair on the next build. Compass-aware readers continue to resolve the
+active generation, while browsers, scripts, archive tools, and integrations
+can use literal paths such as `compass-out/graph.json` and
+`compass-out/graph.html`. Consumers that need a related set should read it only
+after the producing Compass command returns successfully.
+
+The `cache/` directory is already rooted beside these files for familiar
+incremental-build ergonomics, but its contents and encoding are private to
+Compass. Do not copy another product's cache or manifest into it. Future
+Compass storage and cache revisions can evolve independently without changing
+the flat public artifact paths.
 
 ## Authority table
 

@@ -1,14 +1,16 @@
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, BufReader};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::atomic::sync_directory;
-use crate::{FileError, io_error, write_text_atomic};
+use crate::{FileError, io_error, write_atomic_with, write_text_atomic};
 
 const GENERATIONS_DIRECTORY: &str = ".compass-generations";
 const ACTIVE_GENERATION: &str = ".compass-active-generation";
 const INCOMPLETE_MARKER: &str = ".compass-build-incomplete";
+const ROOT_ARTIFACTS_COMPLETE: &str = ".compass-root-artifacts-complete";
 const RETAINED_COMPLETE_GENERATIONS: usize = 2;
 const MAX_GENERATION_DIRECTORY_ENTRIES: usize = 1_024;
 static GENERATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -166,6 +168,78 @@ impl BuildGuard {
         }
     }
 
+    /// Return the stable output container that owns a generated artifact.
+    ///
+    /// Paths inside the active immutable generation map back to their public
+    /// output root. Standalone and legacy-root artifacts keep their immediate
+    /// parent directory.
+    #[must_use]
+    pub fn output_container_for_artifact(path: &Path) -> PathBuf {
+        let artifact_directory = path.parent().unwrap_or_else(|| Path::new("."));
+        let Some(generations_directory) = artifact_directory.parent() else {
+            return artifact_directory.to_path_buf();
+        };
+        if generations_directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            != Some(GENERATIONS_DIRECTORY)
+        {
+            return artifact_directory.to_path_buf();
+        }
+        let Some(output_directory) = generations_directory.parent() else {
+            return artifact_directory.to_path_buf();
+        };
+        if Self::resolve_active_directory(output_directory)
+            .is_ok_and(|active| active == artifact_directory)
+        {
+            output_directory.to_path_buf()
+        } else {
+            artifact_directory.to_path_buf()
+        }
+    }
+
+    /// Materialize selected generation files directly under the output root.
+    ///
+    /// The immutable generation remains authoritative for Compass-aware
+    /// readers. These independently atomic copies provide stable conventional
+    /// paths for browsers, scripts, archives, and other file-based consumers.
+    /// Missing optional artifacts remove an older root copy. A failed or
+    /// interrupted projection leaves no completion marker, so the next build
+    /// performs a full repair.
+    pub fn publish_root_artifacts(
+        output_directory: &Path,
+        artifacts: &[&str],
+        refresh: bool,
+    ) -> Result<(), FileError> {
+        validate_exclusions(artifacts)?;
+        let active = Self::resolve_active_directory(output_directory)?;
+        if active == output_directory {
+            return Ok(());
+        }
+
+        let completion_marker = output_directory.join(ROOT_ARTIFACTS_COMPLETE);
+        let repair_all = refresh || !completion_marker.is_file();
+        remove_file_if_exists(&completion_marker)?;
+
+        for artifact in artifacts {
+            let source = active.join(artifact);
+            let destination = output_directory.join(artifact);
+            if source.is_file() {
+                if repair_all || !destination.is_file() {
+                    copy_file_atomic(&source, &destination)?;
+                }
+            } else {
+                remove_file_if_exists(&destination)?;
+            }
+        }
+
+        let generation = active
+            .file_name()
+            .ok_or_else(|| FileError::InvalidGenerationArtifact(active.clone()))?
+            .to_string_lossy();
+        write_text_atomic(completion_marker, &generation)
+    }
+
     pub fn commit(self) -> Result<(), FileError> {
         self.commit_with_artifacts(&[])
     }
@@ -222,6 +296,24 @@ impl BuildGuard {
         )?;
         self.committed = true;
         Ok(())
+    }
+}
+
+fn copy_file_atomic(source: &Path, destination: &Path) -> Result<(), FileError> {
+    let file = File::open(source).map_err(|error| io_error(source, error))?;
+    let mut reader = BufReader::new(file);
+    write_atomic_with(destination, |writer| {
+        io::copy(&mut reader, writer)
+            .map(|_| ())
+            .map_err(|error| io_error(source, error))
+    })
+}
+
+fn remove_file_if_exists(path: &Path) -> Result<(), FileError> {
+    match fs::remove_file(path) {
+        Ok(()) => sync_directory(path.parent().unwrap_or_else(|| Path::new("."))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(io_error(path, error)),
     }
 }
 

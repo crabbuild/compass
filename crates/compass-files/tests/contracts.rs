@@ -767,6 +767,64 @@ fn build_guard_publishes_atomic_artifacts_without_resealing_them() -> Result<(),
 }
 
 #[test]
+fn build_guard_materializes_and_repairs_root_artifacts() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let first = BuildGuard::begin(directory.path())?;
+    fs::write(first.staging_directory().join("graph.json"), "graph-one")?;
+    fs::write(first.staging_directory().join("graph.html"), "html-one")?;
+    first.commit_with_artifacts(&["graph.json", "graph.html"])?;
+
+    BuildGuard::publish_root_artifacts(directory.path(), &["graph.html", "graph.json"], true)?;
+    assert_eq!(
+        fs::read_to_string(directory.path().join("graph.json"))?,
+        "graph-one"
+    );
+    assert_eq!(
+        fs::read_to_string(directory.path().join("graph.html"))?,
+        "html-one"
+    );
+
+    fs::remove_file(directory.path().join("graph.json"))?;
+    BuildGuard::publish_root_artifacts(directory.path(), &["graph.html", "graph.json"], false)?;
+    assert_eq!(
+        fs::read_to_string(directory.path().join("graph.json"))?,
+        "graph-one"
+    );
+
+    let second = BuildGuard::begin(directory.path())?;
+    fs::write(second.staging_directory().join("graph.json"), "graph-two")?;
+    fs::remove_file(second.staging_directory().join("graph.html"))?;
+    second.commit_with_artifacts(&["graph.json"])?;
+    BuildGuard::publish_root_artifacts(directory.path(), &["graph.html", "graph.json"], true)?;
+    assert_eq!(
+        fs::read_to_string(directory.path().join("graph.json"))?,
+        "graph-two"
+    );
+    assert!(!directory.path().join("graph.html").exists());
+    Ok(())
+}
+
+#[test]
+fn build_guard_maps_active_artifacts_to_the_output_container() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let guard = BuildGuard::begin(directory.path())?;
+    fs::write(guard.staging_directory().join("graph.json"), "graph")?;
+    guard.commit_with_artifacts(&["graph.json"])?;
+    let graph = BuildGuard::resolve_artifact(directory.path(), "graph.json")?;
+
+    assert_eq!(
+        BuildGuard::output_container_for_artifact(&graph),
+        directory.path()
+    );
+    let standalone = directory.path().join("standalone/graph.json");
+    assert_eq!(
+        BuildGuard::output_container_for_artifact(&standalone),
+        directory.path().join("standalone")
+    );
+    Ok(())
+}
+
+#[test]
 fn build_guard_can_exclude_a_large_generation_sidecar() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let first = BuildGuard::begin(directory.path())?;

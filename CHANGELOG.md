@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Materialize `graph.json`, `graph.html`, `GRAPH_REPORT.md`, `manifest.json`,
+  and optional public build artifacts directly under `compass-out/`. The flat
+  paths support low-effort migration of file-based workflows while Compass's
+  immutable generations, store references, and cache encoding remain
+  independent internal protocols. Root files use atomic replacement, remove
+  stale optional outputs, and self-repair after interrupted publication.
+
 ## 0.3.4 - 2026-08-05
 
 - Keep dense VS Code and HTML code graphs responsive by switching detailed
