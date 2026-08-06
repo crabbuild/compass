@@ -9,6 +9,8 @@
   independent internal protocols. Root files use atomic replacement, remove
   stale optional outputs, and self-repair after interrupted publication.
 
+## 0.3.4 - 2026-08-05
+
 - Keep dense VS Code and HTML code graphs responsive by switching detailed
   views with at least 1,000 nodes or 4,000 relationships to a deterministic
   community-grouped layout with paused physics and reduced edge decoration.
