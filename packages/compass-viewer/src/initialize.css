@@ -469,15 +469,26 @@
 
 .init-scope-body {
   display: grid;
-  min-height: 210px;
-  max-height: 310px;
+  height: clamp(230px, 38vh, 310px);
+  min-height: 0;
+  overflow: hidden;
   grid-template-columns: minmax(0, 1.45fr) minmax(180px, 0.8fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .init-scope-tree {
+  min-width: 0;
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 6px 0;
   border-right: 1px solid var(--compass-line);
+  scrollbar-gutter: stable;
+}
+
+.init-scope-tree:focus-visible {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: -2px;
 }
 
 .init-scope-row {
@@ -546,9 +557,12 @@ button.init-scope-disclosure:hover {
 
 .init-scope-ledger {
   min-width: 0;
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 10px;
   background: color-mix(in srgb, var(--compass-panel) 73%, transparent);
+  scrollbar-gutter: stable;
 }
 
 .init-scope-ledger > div {
@@ -1266,14 +1280,25 @@ button.init-scope-disclosure:hover {
     grid-template-columns: 1fr;
   }
 
+  .init-scope-browser > header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+    padding-block: 10px;
+  }
+
   .init-scope-body {
+    height: auto;
     max-height: none;
+    overflow: visible;
     grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
   }
 
   .init-scope-tree {
+    height: clamp(210px, 42vh, 300px);
     min-height: 210px;
-    max-height: 300px;
+    max-height: none;
     border-right: 0;
     border-bottom: 1px solid var(--compass-line);
   }

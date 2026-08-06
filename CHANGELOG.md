@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep the initialization repository tree and selected-path ledger inside
+  bounded, independently scrollable panes so large file lists remain usable.
+
 ## 0.3.5 - 2026-08-06
 
 - Keep very large HTML and VS Code community overviews responsive with a

@@ -645,10 +645,11 @@ function ScopeTree({
       <header>
         <div>
           <strong id="init-scope-browser-title">Repository files</strong>
-          <small>Selecting a folder includes every eligible file beneath it.</small>
+          <small>Select a folder to include it. Scroll or filter to browse every path.</small>
         </div>
-        <span>
-          {selected.length} selected{selected.length === MAX_SCOPE_RULES ? " · limit" : ""}
+        <span title={`${files.length.toLocaleString()} available repository paths`}>
+          {files.length.toLocaleString()} paths · {selected.length} selected
+          {selected.length === MAX_SCOPE_RULES ? " · limit" : ""}
         </span>
       </header>
       <div className="init-scope-toolbar">
@@ -667,7 +668,12 @@ function ScopeTree({
         )}
       </div>
       <div className="init-scope-body">
-        <div className="init-scope-tree" role="tree" aria-label="Repository scope">
+        <div
+          className="init-scope-tree"
+          role="tree"
+          aria-label="Repository scope"
+          tabIndex={0}
+        >
           {visible.length > 0 ? visible.map((node) => (
             <ScopeTreeNode
               key={node.path}

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep large repository file trees and selected-path lists inside bounded,
+  keyboard-focusable scroll panes during Compass initialization.
 - Replace manual path entry in initialization with a bounded repository tree
   picker, retain advanced include/exclude globs, and precisely align the
   three-step progress rail.
