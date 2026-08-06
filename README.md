@@ -202,12 +202,16 @@ compass-out/
 
 ```bash
 compass query "where is authentication enforced?"
+compass query "where is authentication enforced?" --budget 8000 --page 2
 compass explain TokenVerifier
 compass path ApiHandler TokenVerifier
 compass affected TokenVerifier --depth 3
 ```
 
 These commands read the saved graph and do not call a model.
+Natural `query` and `explain` output is deterministically paged. Callers may set
+an approximate per-page token budget with `--budget N` (2,000 by default) and
+follow the reported `next` page with `--page N`.
 
 ## Compass-specific workflows
 

@@ -98,6 +98,12 @@ fn command_and_nested_help_explain_options_and_examples() {
     let flag = invoke(&["history", "build", "--help"]);
     let command = invoke(&["help", "history", "build"]);
     assert_eq!(flag.stdout, command.stdout);
+
+    for command in ["query", "explain"] {
+        let outcome = invoke(&[command, "--help"]);
+        assert!(outcome.stdout.contains("--budget <N>"), "{command}");
+        assert!(outcome.stdout.contains("--page <N>"), "{command}");
+    }
 }
 
 #[test]

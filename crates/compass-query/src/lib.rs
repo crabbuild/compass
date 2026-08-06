@@ -24,7 +24,11 @@ pub use index::{EngineSelection, QueryEngineKind, open, open_with_engine, open_w
 pub use program_join::join_program_evidence;
 pub use score::{QueryScores, ScoredNode, find_node, pick_scored_endpoint, score_nodes};
 pub use text::{normalize_context_filters, query_terms, sanitize_label, search_tokens};
-pub use traversal::{TraversalMode, query_graph_text, render_explanation, render_shortest_path};
+pub use traversal::{
+    DEFAULT_TEXT_TOKEN_BUDGET, TextPageOptions, TextPaginationError, TraversalMode,
+    query_graph_text, query_graph_text_page, render_explanation, render_explanation_page,
+    render_shortest_path,
+};
 
 #[cfg(test)]
 mod tests {
@@ -344,6 +348,95 @@ mod tests {
         assert!(output.contains("Connections (1):"));
         assert_eq!(output.matches("--> module.ts").count(), 1);
         assert!(output.contains("[imports_from] [EXTRACTED]"));
+        Ok(())
+    }
+
+    #[test]
+    fn natural_query_and_explanation_pages_are_complete_and_deterministic()
+    -> Result<(), Box<dyn Error>> {
+        let mut nodes = vec![serde_json::json!({
+            "id": "seed",
+            "label": "Seed",
+            "source_file": "src/seed.rs",
+            "source_location": "L1"
+        })];
+        let mut links = Vec::new();
+        for index in 0..8 {
+            nodes.push(serde_json::json!({
+                "id": format!("neighbor-{index}"),
+                "label": format!("Neighbor{index}"),
+                "source_file": format!("src/neighbor_{index}.rs"),
+                "source_location": "L1"
+            }));
+            links.push(serde_json::json!({
+                "source": "seed",
+                "target": format!("neighbor-{index}"),
+                "relation": "calls",
+                "confidence": "EXTRACTED"
+            }));
+        }
+        let document = serde_json::from_value::<GraphDocument>(serde_json::json!({
+            "directed": true,
+            "multigraph": false,
+            "graph": {},
+            "nodes": nodes,
+            "links": links
+        }))?;
+        let graph = Graph::from_document(document)?;
+
+        let query_first = query_graph_text_page(
+            &graph,
+            "Seed",
+            TraversalMode::Bfs,
+            2,
+            TextPageOptions {
+                token_budget: 60,
+                page: 1,
+            },
+            &[],
+            &HashMap::new(),
+        )?;
+        let query_second = query_graph_text_page(
+            &graph,
+            "Seed",
+            TraversalMode::Bfs,
+            2,
+            TextPageOptions {
+                token_budget: 60,
+                page: 2,
+            },
+            &[],
+            &HashMap::new(),
+        )?;
+        assert!(query_first.contains("Pagination: page=1/"));
+        assert!(query_first.contains("next=2"));
+        assert!(query_second.contains("Pagination: page=2/"));
+        assert_ne!(query_first, query_second);
+        let query_complete = query_graph_text_page(
+            &graph,
+            "Seed",
+            TraversalMode::Bfs,
+            2,
+            TextPageOptions {
+                token_budget: 100_000,
+                page: 1,
+            },
+            &[],
+            &HashMap::new(),
+        )?;
+        assert!(query_complete.contains("page=1/1"));
+        assert!(query_complete.contains("next=none"));
+
+        let explain_first = render_explanation_page(&graph, "Seed", 60, 1, &HashMap::new())?;
+        let explain_second = render_explanation_page(&graph, "Seed", 60, 2, &HashMap::new())?;
+        assert!(explain_first.contains("Connections (8):"));
+        assert!(explain_first.contains("connections=1-1/8"));
+        assert!(explain_second.contains("connections=2-2/8"));
+        assert_ne!(explain_first, explain_second);
+        assert!(matches!(
+            render_explanation_page(&graph, "Seed", 60, 99, &HashMap::new()),
+            Err(TextPaginationError::PageOutOfRange { .. })
+        ));
         Ok(())
     }
 

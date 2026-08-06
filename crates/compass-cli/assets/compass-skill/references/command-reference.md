@@ -18,11 +18,13 @@ whether a Compass capability is covered by the installed skill. Run
 - `compass node`: show an attributable evidence trail between two symbols.
 - `compass call-graph`: trace bounded callers, callees, or both from a source
   position or structural symbol, with optional Program IR enrichment.
-- `compass query`: natural-language graph traversal or deterministic CompassQL.
+- `compass query`: budgeted, deterministic pages of natural-language graph
+  traversal, or deterministic CompassQL.
 - `compass program`: inspect canonical Program IR functions, coverage, callers,
   and call evidence, or run CompassQL over its read-only graph projection.
 - `compass path`: shortest known graph route between two matched nodes.
-- `compass explain`: one matched node plus its local neighborhood.
+- `compass explain`: budgeted, deterministic pages for one matched node plus
+  its local neighborhood.
 - `compass affected`: downstream review candidates, optionally filtered by
   relation and depth.
 - `compass tree`: repository hierarchy enriched with graph metadata.

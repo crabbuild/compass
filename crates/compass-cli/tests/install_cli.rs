@@ -76,6 +76,9 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     assert!(body.contains("references/labeling.md"));
     assert!(body.contains("references/security-and-boundaries.md"));
     assert!(body.contains("run `compass update .`\nonce and continue"));
+    assert!(body.contains("--budget N"));
+    assert!(body.contains("--page N"));
+    assert!(body.contains("next=none"));
     assert_native(&body);
     assert!(skill.with_file_name(".compass_version").is_file());
     assert!(
@@ -84,6 +87,9 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
             .join("query.md")
             .is_file()
     );
+    let query = fs::read_to_string(skill.with_file_name("references").join("query.md"))?;
+    assert!(query.contains("4,000–16,000 tokens"));
+    assert!(query.contains("additional pages remain"));
     let references = skill.with_file_name("references");
     assert_eq!(
         fs::read_dir(&references)?

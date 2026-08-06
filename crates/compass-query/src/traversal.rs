@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use compass_model::{Graph, NodeIndex};
 use serde_json::{Map, Value};
+use thiserror::Error;
 
 use crate::score::{find_exact_nodes, find_node, pick_scored_endpoint, pick_seeds, score_nodes};
 use crate::text::{infer_context_filters, normalize_context_filters, query_terms, sanitize_label};
@@ -10,6 +11,24 @@ use crate::text::{infer_context_filters, normalize_context_filters, query_terms,
 pub enum TraversalMode {
     Bfs,
     Dfs,
+}
+
+pub const DEFAULT_TEXT_TOKEN_BUDGET: usize = 2_000;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TextPageOptions {
+    pub token_budget: usize,
+    pub page: usize,
+}
+
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+pub enum TextPaginationError {
+    #[error("token budget must be greater than zero")]
+    ZeroBudget,
+    #[error("page must be greater than zero")]
+    ZeroPage,
+    #[error("page {requested} exceeds the last available page {last}")]
+    PageOutOfRange { requested: usize, last: usize },
 }
 
 impl TraversalMode {
@@ -31,11 +50,46 @@ pub fn query_graph_text(
     explicit_contexts: &[String],
     overlay: &HashMap<String, Map<String, Value>>,
 ) -> String {
+    match query_graph_text_page(
+        graph,
+        question,
+        mode,
+        depth,
+        TextPageOptions {
+            token_budget,
+            page: 1,
+        },
+        explicit_contexts,
+        overlay,
+    ) {
+        Ok(output) => output,
+        Err(error) => format!("Query output error: {error}."),
+    }
+}
+
+pub fn query_graph_text_page(
+    graph: &Graph,
+    question: &str,
+    mode: TraversalMode,
+    depth: usize,
+    options: TextPageOptions,
+    explicit_contexts: &[String],
+    overlay: &HashMap<String, Map<String, Value>>,
+) -> Result<String, TextPaginationError> {
+    let TextPageOptions { token_budget, page } = options;
+    validate_pagination(token_budget, page)?;
     let terms = query_terms(question);
     let scores = score_nodes(graph, &terms, true);
     let seeds = pick_seeds(graph, &scores, 3, 0.2);
     if seeds.is_empty() {
-        return "No matching nodes found.".to_owned();
+        return if page == 1 {
+            Ok("No matching nodes found.".to_owned())
+        } else {
+            Err(TextPaginationError::PageOutOfRange {
+                requested: page,
+                last: 1,
+            })
+        };
     }
     let normalized = normalize_context_filters(explicit_contexts);
     let (contexts, source) = if normalized.is_empty() {
@@ -67,11 +121,16 @@ pub fn query_graph_text(
         ));
     }
     header.push(format!("{} nodes found", nodes.len()));
-    format!(
-        "{}\n\n{}",
-        header.join(" | "),
-        render_subgraph(&filtered, &nodes, &edges, token_budget, &seeds, overlay)
-    )
+    let header = header.join(" | ");
+    let lines = render_subgraph_lines(&filtered, &nodes, &edges, &seeds, overlay);
+    let page = render_paginated_lines(
+        &lines,
+        token_budget,
+        page,
+        header.chars().count().saturating_add(2),
+        "facts",
+    )?;
+    Ok(format!("{header}\n\n{page}"))
 }
 
 pub fn render_shortest_path(
@@ -161,6 +220,20 @@ pub fn render_explanation(
     label: &str,
     overlay: &HashMap<String, Map<String, Value>>,
 ) -> String {
+    match render_explanation_page(graph, label, DEFAULT_TEXT_TOKEN_BUDGET, 1, overlay) {
+        Ok(output) => output,
+        Err(error) => format!("Explanation output error: {error}."),
+    }
+}
+
+pub fn render_explanation_page(
+    graph: &Graph,
+    label: &str,
+    token_budget: usize,
+    page: usize,
+    overlay: &HashMap<String, Map<String, Value>>,
+) -> Result<String, TextPaginationError> {
+    validate_pagination(token_budget, page)?;
     let exact_matches = find_exact_nodes(graph, label);
     let mut matches = if exact_matches.is_empty() {
         find_node(graph, label)
@@ -176,10 +249,17 @@ pub fn render_explanation(
         matches = source_backed;
     }
     if matches.len() > 1 {
-        return render_ambiguity(graph, label, &matches);
+        return render_ambiguity_page(graph, label, &matches, token_budget, page);
     }
     let Some(&node_index) = matches.first() else {
-        return format!("No node matching '{label}' found.");
+        return if page == 1 {
+            Ok(format!("No node matching '{label}' found."))
+        } else {
+            Err(TextPaginationError::PageOutOfRange {
+                requested: page,
+                last: 1,
+            })
+        };
     };
     let node = graph.node(node_index);
     let mut lines = vec![
@@ -257,21 +337,30 @@ pub fn render_explanation(
             connections.push((false, neighbor, edge));
         }
     }
-    if !connections.is_empty() {
-        lines.push(String::new());
-        lines.push(format!("Connections ({}):", connections.len()));
-        connections.sort_by(|left, right| {
-            let left_source_backed = !graph.node(left.1).string("source_file").is_empty();
-            let right_source_backed = !graph.node(right.1).string("source_file").is_empty();
-            right_source_backed
-                .cmp(&left_source_backed)
-                .then_with(|| graph.degree(right.1).cmp(&graph.degree(left.1)))
-                .then_with(|| graph.node(left.1).id.cmp(&graph.node(right.1).id))
-        });
-        for (outgoing, neighbor, edge_index) in connections.iter().take(20) {
+    if connections.is_empty() {
+        return if page == 1 {
+            Ok(lines.join("\n"))
+        } else {
+            Err(TextPaginationError::PageOutOfRange {
+                requested: page,
+                last: 1,
+            })
+        };
+    }
+    connections.sort_by(|left, right| {
+        let left_source_backed = !graph.node(left.1).string("source_file").is_empty();
+        let right_source_backed = !graph.node(right.1).string("source_file").is_empty();
+        right_source_backed
+            .cmp(&left_source_backed)
+            .then_with(|| graph.degree(right.1).cmp(&graph.degree(left.1)))
+            .then_with(|| graph.node(left.1).id.cmp(&graph.node(right.1).id))
+    });
+    let connection_lines = connections
+        .iter()
+        .map(|(outgoing, neighbor, edge_index)| {
             let edge = graph.edge(*edge_index);
             let site = formatted_site(&edge.string("source_file"), &edge.string("source_location"));
-            lines.push(format!(
+            vec![format!(
                 "  {} {} [{}] [{}]{}",
                 if *outgoing { "-->" } else { "<--" },
                 graph.node(*neighbor).label(),
@@ -282,16 +371,29 @@ pub fn render_explanation(
                 } else {
                     format!(" {site}")
                 }
-            ));
-        }
-        if connections.len() > 20 {
-            lines.push(format!("  ... and {} more", connections.len() - 20));
-        }
-    }
-    lines.join("\n")
+            )]
+        })
+        .collect::<Vec<_>>();
+    lines.push(String::new());
+    lines.push(format!("Connections ({}):", connection_lines.len()));
+    let fixed = lines.join("\n");
+    let rendered = render_paginated_groups(
+        &connection_lines,
+        token_budget,
+        page,
+        fixed.chars().count().saturating_add(1),
+        "connections",
+    )?;
+    Ok(format!("{fixed}\n{rendered}"))
 }
 
-fn render_ambiguity(graph: &Graph, label: &str, matches: &[NodeIndex]) -> String {
+fn render_ambiguity_page(
+    graph: &Graph,
+    label: &str,
+    matches: &[NodeIndex],
+    token_budget: usize,
+    page: usize,
+) -> Result<String, TextPaginationError> {
     let mut matches = matches.to_vec();
     matches.sort_by(|left, right| {
         let left_node = graph.node(*left);
@@ -314,34 +416,41 @@ fn render_ambiguity(graph: &Graph, label: &str, matches: &[NodeIndex]) -> String
     } else {
         ""
     };
-    let mut lines = vec![format!(
+    let header = format!(
         "Ambiguous: '{label}' matches {}{qualifier} nodes.",
         matches.len()
-    )];
-    for index in matches.iter().take(20) {
-        let node = graph.node(*index);
-        let source_file = node.string("source_file");
-        let source_location = node.string("source_location");
-        let source = match (source_file.is_empty(), source_location.is_empty()) {
-            (true, true) => String::new(),
-            (false, true) => source_file,
-            (true, false) => source_location,
-            (false, false) => format!("{source_file} {source_location}"),
-        };
-        let wiring = formatted_site(&node.string("wiring_file"), &node.string("wiring_location"));
-        let site = if source.is_empty() { wiring } else { source };
-        if site.is_empty() {
-            lines.push(format!("  {}", node.label()));
-        } else {
-            lines.push(format!("  {site}"));
-        }
-        lines.push(format!("    id: {}", node.id));
-    }
-    if matches.len() > 20 {
-        lines.push(format!("  ... and {} more", matches.len() - 20));
-    }
-    lines.push("Retry with the full node ID.".to_owned());
-    lines.join("\n")
+    );
+    let groups = matches
+        .iter()
+        .map(|index| {
+            let node = graph.node(*index);
+            let source_file = node.string("source_file");
+            let source_location = node.string("source_location");
+            let source = match (source_file.is_empty(), source_location.is_empty()) {
+                (true, true) => String::new(),
+                (false, true) => source_file,
+                (true, false) => source_location,
+                (false, false) => format!("{source_file} {source_location}"),
+            };
+            let wiring =
+                formatted_site(&node.string("wiring_file"), &node.string("wiring_location"));
+            let site = if source.is_empty() { wiring } else { source };
+            let summary = if site.is_empty() {
+                format!("  {}", node.label())
+            } else {
+                format!("  {site}")
+            };
+            vec![summary, format!("    id: {}", node.id)]
+        })
+        .collect::<Vec<_>>();
+    let footer = "Retry with the full node ID.";
+    let overhead = header
+        .chars()
+        .count()
+        .saturating_add(footer.chars().count())
+        .saturating_add(2);
+    let rendered = render_paginated_groups(&groups, token_budget, page, overhead, "matches")?;
+    Ok(format!("{header}\n{rendered}\n{footer}"))
 }
 
 fn bfs(
@@ -418,14 +527,13 @@ fn hub_threshold(graph: &Graph) -> usize {
     degrees[index.min(degrees.len() - 1)].max(50)
 }
 
-fn render_subgraph(
+fn render_subgraph_lines(
     graph: &Graph,
     nodes: &HashSet<NodeIndex>,
     edges: &[(NodeIndex, NodeIndex)],
-    token_budget: usize,
     seeds: &[NodeIndex],
     overlay: &HashMap<String, Map<String, Value>>,
-) -> String {
+) -> Vec<String> {
     let seed_set = seeds.iter().copied().collect::<HashSet<_>>();
     let mut ordered = seeds
         .iter()
@@ -512,7 +620,7 @@ fn render_subgraph(
             site
         ));
     }
-    truncate_to_budget(&lines, token_budget)
+    lines
 }
 
 fn formatted_site(file: &str, location: &str) -> String {
@@ -556,27 +664,100 @@ fn contextual_wiring_site(
         .min()
 }
 
-fn truncate_to_budget(lines: &[String], token_budget: usize) -> String {
-    let budget = token_budget.saturating_mul(3);
-    let output = lines.join("\n");
-    if output.chars().count() <= budget {
-        return output;
+fn validate_pagination(token_budget: usize, page: usize) -> Result<(), TextPaginationError> {
+    if token_budget == 0 {
+        return Err(TextPaginationError::ZeroBudget);
     }
-    let prefix = output.chars().take(budget).collect::<String>();
-    let cut = prefix.rfind('\n').unwrap_or(prefix.len());
-    let visible = &prefix[..cut];
-    let total_nodes = lines
+    if page == 0 {
+        return Err(TextPaginationError::ZeroPage);
+    }
+    Ok(())
+}
+
+fn render_paginated_lines(
+    lines: &[String],
+    token_budget: usize,
+    page: usize,
+    overhead_chars: usize,
+    item_label: &str,
+) -> Result<String, TextPaginationError> {
+    let groups = lines
         .iter()
-        .filter(|line| line.starts_with("NODE "))
-        .count();
-    let shown_nodes = visible
-        .lines()
-        .filter(|line| line.starts_with("NODE "))
-        .count();
-    format!(
-        "{visible}\n... (truncated — {} more nodes cut by ~{token_budget}-token budget. Narrow with context_filter=['call'] or use get_node for a specific symbol)",
-        total_nodes.saturating_sub(shown_nodes)
-    )
+        .cloned()
+        .map(|line| vec![line])
+        .collect::<Vec<_>>();
+    render_paginated_groups(&groups, token_budget, page, overhead_chars, item_label)
+}
+
+fn render_paginated_groups(
+    groups: &[Vec<String>],
+    token_budget: usize,
+    page: usize,
+    overhead_chars: usize,
+    item_label: &str,
+) -> Result<String, TextPaginationError> {
+    validate_pagination(token_budget, page)?;
+    let capacity = token_budget
+        .saturating_mul(3)
+        .saturating_sub(overhead_chars)
+        .max(1);
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    let mut used = 0_usize;
+    for (index, group) in groups.iter().enumerate() {
+        let group_chars = group
+            .iter()
+            .map(|line| line.chars().count())
+            .sum::<usize>()
+            .saturating_add(group.len().saturating_sub(1));
+        let separator = usize::from(index > start);
+        if index > start && used.saturating_add(separator).saturating_add(group_chars) > capacity {
+            ranges.push(start..index);
+            start = index;
+            used = group_chars;
+        } else {
+            used = used.saturating_add(separator).saturating_add(group_chars);
+        }
+    }
+    if start < groups.len() {
+        ranges.push(start..groups.len());
+    }
+    if ranges.is_empty() {
+        ranges.push(0..0);
+    }
+    let total_pages = ranges.len();
+    let Some(range) = ranges.get(page - 1) else {
+        return Err(TextPaginationError::PageOutOfRange {
+            requested: page,
+            last: total_pages,
+        });
+    };
+    let body = groups[range.clone()]
+        .iter()
+        .flat_map(|group| group.iter())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    let first = if range.is_empty() { 0 } else { range.start + 1 };
+    let last = range.end;
+    let previous = page
+        .checked_sub(1)
+        .filter(|previous| *previous > 0)
+        .map_or_else(|| "none".to_owned(), |previous| previous.to_string());
+    let next = if page < total_pages {
+        (page + 1).to_string()
+    } else {
+        "none".to_owned()
+    };
+    let pagination = format!(
+        "Pagination: page={page}/{total_pages} {item_label}={first}-{last}/{} budget_tokens=~{token_budget} previous={previous} next={next}",
+        groups.len()
+    );
+    if body.is_empty() {
+        Ok(pagination)
+    } else {
+        Ok(format!("{body}\n{pagination}"))
+    }
 }
 
 fn shortest_path_undirected(

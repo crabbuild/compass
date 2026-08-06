@@ -298,3 +298,99 @@ fn explain_requires_an_exact_id_for_ambiguous_typed_nodes() -> Result<(), Box<dy
     assert!(exact.stdout.contains("Type:      code"));
     Ok(())
 }
+
+#[test]
+fn natural_query_and_explain_accept_agent_controlled_budgets_and_pages()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = directory.path().join("graph.json");
+    let nodes = std::iter::once(serde_json::json!({
+        "id": "seed", "label": "Seed", "source_file": "src/seed.rs", "source_location": "L1"
+    }))
+    .chain((0..8).map(|index| {
+        serde_json::json!({
+            "id": format!("neighbor-{index}"),
+            "label": format!("Neighbor{index}"),
+            "source_file": format!("src/neighbor_{index}.rs"),
+            "source_location": "L1"
+        })
+    }))
+    .collect::<Vec<_>>();
+    let links = (0..8)
+        .map(|index| {
+            serde_json::json!({
+                "source": "seed",
+                "target": format!("neighbor-{index}"),
+                "relation": "calls",
+                "confidence": "EXTRACTED"
+            })
+        })
+        .collect::<Vec<_>>();
+    std::fs::write(
+        &graph,
+        serde_json::to_vec(&serde_json::json!({
+            "directed": true,
+            "multigraph": false,
+            "graph": {},
+            "nodes": nodes,
+            "links": links
+        }))?,
+    )?;
+
+    for command in ["query", "explain"] {
+        let first = run(
+            Frontend::Compass,
+            [
+                OsString::from(command),
+                OsString::from("Seed"),
+                OsString::from("--budget=60"),
+                OsString::from("--page=1"),
+                OsString::from("--graph"),
+                graph.clone().into_os_string(),
+            ],
+        );
+        assert_eq!(first.code, 0, "{command}: {}", first.stderr);
+        assert!(first.stdout.contains("Pagination: page=1/"));
+        assert!(first.stdout.contains("next=2"));
+
+        let second = run(
+            Frontend::Compass,
+            [
+                OsString::from(command),
+                OsString::from("Seed"),
+                OsString::from("--budget"),
+                OsString::from("60"),
+                OsString::from("--page"),
+                OsString::from("2"),
+                OsString::from("--graph"),
+                graph.clone().into_os_string(),
+            ],
+        );
+        assert_eq!(second.code, 0, "{command}: {}", second.stderr);
+        assert!(second.stdout.contains("Pagination: page=2/"));
+        assert_ne!(first.stdout, second.stdout);
+    }
+
+    for arguments in [
+        vec!["query", "Seed", "--page=0"],
+        vec!["explain", "Seed", "--budget=0"],
+    ] {
+        let outcome = run(Frontend::Compass, arguments.into_iter().map(OsString::from));
+        assert_ne!(outcome.code, 0);
+        assert!(outcome.stderr.contains("error:"));
+    }
+
+    let out_of_range = run(
+        Frontend::Compass,
+        [
+            OsString::from("query"),
+            OsString::from("Seed"),
+            OsString::from("--page=999"),
+            OsString::from("--graph"),
+            graph.into_os_string(),
+        ],
+    );
+    assert_ne!(out_of_range.code, 0);
+    assert!(out_of_range.stderr.contains("last available page"));
+    Ok(())
+}

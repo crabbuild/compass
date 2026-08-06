@@ -8,12 +8,23 @@ Load this reference for codebase questions when a graph exists.
 compass query "where is authentication enforced?"
 compass query "payment retries" --dfs
 compass query "payment retries" --budget 1500
+compass query "payment retries" --budget 8000
+compass query "payment retries" --budget 8000 --page 2
 compass query "payment retries" --context CheckoutService
 ```
 
 The default traversal favors broad relevant context. Use `--dfs` when tracing a
 specific chain. A token budget bounds rendered output; it does not change graph
-contents.
+contents. Keep the 2,000-token default for a focused question. Raise it for a
+broad question only when enough context remains for source verification and the
+final answer; 4,000–16,000 tokens is a useful starting range, not a required
+limit. Read the final `Pagination:` line:
+when `next` is a page number, repeat the exact query, graph selector, contexts,
+mode, and budget with `--page N`. Continue until `next=none` before making an
+exhaustive claim. If enough evidence arrives earlier, stop and say that
+additional pages remain rather than treating the first page as complete. Prefer
+`--at REV` when paging through a historical investigation so every page is tied
+to one immutable graph.
 
 Before retrying a weak result, derive a small vocabulary set from the request:
 exact symbol spellings, file or crate names, domain nouns, and likely community
@@ -39,6 +50,7 @@ compass impact authorizePayment --max-depth 3
 compass explore CheckoutController PaymentGateway --root .
 compass node route:/checkout CheckoutController.create
 compass explain PaymentGateway
+compass explain PaymentGateway --budget 8000 --page 2
 compass path CheckoutHandler PaymentGateway
 compass affected authorizePayment --depth 3
 compass tree
@@ -51,7 +63,8 @@ compass tree
 - `explore` returns related source and paths together under source and response
   byte limits.
 - `node` exposes the evidence trail and provenance between two symbols.
-- `explain` reports a matched node and connected context.
+- `explain` reports a matched node and connected context; follow its pagination
+  metadata when connections or ambiguous candidates span multiple pages.
 - `path` reports the shortest known graph route; preserve relation direction.
 - `affected` follows impact relations and returns a review candidate set.
 - `tree` combines repository structure with graph metadata.
@@ -87,6 +100,9 @@ compass query --cql \
 Use `PROFILE` only when query-plan details are needed. Run
 `compass query --help` and consult the repository's CompassQL support document
 before using syntax beyond known supported clauses or changing execution limits.
+Natural-query `--page` does not apply to CompassQL. For large row sets, paginate
+with a stable `ORDER BY` plus `SKIP` and `LIMIT`; change only the offset between
+requests.
 
 For reusable automation, prefer `--file`, `--params-file`, and JSON or JSONL
 output over shell interpolation. Use parameters for values rather than splicing

@@ -66,14 +66,23 @@ codebase question:
 
 1. Run `compass reflect --if-stale`.
 2. Read `compass-out/reflections/LESSONS.md` if it exists and is relevant.
-3. Run `compass query "<question>"` before broad source searches.
-4. Inspect the returned nodes, relations, and source locations.
-5. Open only the source files needed to verify the answer.
+3. Run `compass query "<question>"` before broad source searches. Keep the
+   2,000-token default for a focused question, or set `--budget N` based on the
+   context available for graph evidence.
+4. Read the final `Pagination:` line when present. If it reports `next=N`,
+   repeat the same query, graph/revision selector, contexts, traversal mode, and
+   budget with `--page N`. Follow pages through `next=none` before making an
+   exhaustive claim; if sufficient evidence arrives earlier, disclose that
+   additional pages remain.
+5. Inspect the returned nodes, relations, and source locations.
+6. Open only the source files needed to verify the answer.
 
 Use the specialized navigation commands when they fit:
 
 - `compass path "<source>" "<target>"` for a shortest known dependency path.
-- `compass explain "<concept>"` for one node and its neighborhood.
+- `compass explain "<concept>"` for one node and its neighborhood; use the same
+  `--budget N` and `--page N` continuation workflow for large neighborhoods or
+  ambiguity lists.
 - `compass affected "<symbol>" --depth N` for downstream review scope.
 - `compass query --cql "..."` for exact, deterministic graph patterns.
 - `compass tree` for a graph-aware repository tree.
@@ -145,13 +154,15 @@ load the complete command reference from the on-demand index below.
 For architecture, dependency, and impact questions:
 
 1. Query the graph with the user's terminology.
-2. If results are weak, retry with concrete symbol, file, crate, or community
+2. Follow query or explanation pagination far enough to support the requested
+   scope. Reach `next=none` before claiming the result is exhaustive.
+3. If results are weak, retry with concrete symbol, file, crate, or community
    names found in the report—do not broaden immediately to the whole repository.
-3. Use `path`, `explain`, `affected`, or CompassQL to test the relationship.
-4. Verify decisive facts in source.
-5. Answer with the relevant path or source locations and distinguish observation
+4. Use `path`, `explain`, `affected`, or CompassQL to test the relationship.
+5. Verify decisive facts in source.
+6. Answer with the relevant path or source locations and distinguish observation
    from inference.
-6. When the result will help future work, record it with `compass save-result`
+7. When the result will help future work, record it with `compass save-result`
    only if the user asked to preserve project knowledge or repository guidance
    says to do so.
 
@@ -183,6 +194,8 @@ Load only the reference needed for the current request:
 ## Completion rules
 
 - Prefer concise graph output and targeted source reads over dumping whole files.
+- Treat `Pagination: ... next=N` as explicit evidence that more graph facts
+  remain. Do not silently equate a partial page with the complete result.
 - Treat `affected` as review scope, not proof that every result must change.
 - Treat an empty query or missing path as evidence that the graph does not encode
   the relationship, not proof that the relationship cannot exist.
