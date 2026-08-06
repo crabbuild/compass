@@ -2112,6 +2112,40 @@ button.compass-code-evidence-source:focus-visible {
   min-height: 0;
 }
 
+.compass-community-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 2px 0 8px;
+}
+
+.compass-community-search > svg {
+  position: absolute;
+  left: 8px;
+  width: 13px;
+  height: 13px;
+  color: var(--compass-faint);
+  pointer-events: none;
+}
+
+.compass-community-search input {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px 0 28px;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  background: var(--vscode-input-background, var(--background));
+  color: var(--foreground);
+  font: 11px/1.3 var(--compass-font-sans);
+}
+
+.compass-community-limit {
+  margin: 8px 0 0;
+  color: var(--compass-faint);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .compass-community-control,
 .compass-community-item {
   display: flex;

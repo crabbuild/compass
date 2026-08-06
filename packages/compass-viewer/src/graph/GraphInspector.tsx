@@ -18,6 +18,21 @@ import { ChangedSymbolList } from "./ChangedSymbolList";
 import { CodeEvidence } from "./CodeEvidence";
 import { navigableSource } from "./sourceNavigation";
 
+export const COMMUNITY_CONTROL_LIMIT = 200;
+
+export function visibleCommunityControls(
+  communities: GraphViewModel["communities"],
+  query: string
+): GraphViewModel["communities"] {
+  const normalized = query.trim().toLocaleLowerCase();
+  const matches = normalized
+    ? communities.filter((community) =>
+      community.label.toLocaleLowerCase().includes(normalized)
+      || String(community.id).includes(normalized))
+    : communities;
+  return matches.slice(0, COMMUNITY_CONTROL_LIMIT);
+}
+
 function lineRange(node: GraphNode): string | undefined {
   const start = node.source?.startLine;
   const end = node.source?.endLine;
@@ -77,6 +92,7 @@ export function GraphInspector({
   comparisonMode,
   sourceRevisions,
   queryResult,
+  renderedEdgeCount,
   onQueryChange,
   onFocus,
   onOpenSource,
@@ -97,6 +113,7 @@ export function GraphInspector({
   comparisonMode: boolean;
   sourceRevisions?: GraphSourceRevisions | undefined;
   queryResult?: CodeQueryResponse | undefined;
+  renderedEdgeCount: number;
   onQueryChange(query: string): void;
   onFocus(nodeId: string): void;
   onOpenSource(source: SourceLocation, revision?: string): void;
@@ -362,6 +379,7 @@ export function GraphInspector({
             />
             {model.stats.aggregated
               && selected.memberCount !== undefined
+              && selected.detailAvailable !== false
               && onOpenCommunity && (
                 <button
                   className="compass-inspector-action"
@@ -374,6 +392,14 @@ export function GraphInspector({
                     {comparisonMode ? "current symbols" : "members"}
                   </span>
                 </button>
+              )}
+            {model.stats.aggregated
+              && selected.memberCount !== undefined
+              && selected.detailAvailable === false && (
+                <p className="compass-empty">
+                  This community detail was omitted to keep the standalone HTML export bounded.
+                  Open the graph in VS Code or export this community as JSON for full inspection.
+                </p>
               )}
             {comparisonMode ? (
               <ChangeEvidence
@@ -462,7 +488,10 @@ export function GraphInspector({
         )}
       </section>
       <footer className="compass-graph-stats">
-        {model.stats.nodes.toLocaleString()} nodes · {model.stats.edges.toLocaleString()} edges ·{" "}
+        {model.stats.nodes.toLocaleString()} nodes · {model.stats.edges.toLocaleString()} edges
+        {renderedEdgeCount < model.stats.edges
+          ? ` (${renderedEdgeCount.toLocaleString()} shown)`
+          : ""} ·{" "}
         {model.stats.communities.toLocaleString()} communities
       </footer>
     </aside>
@@ -484,41 +513,72 @@ function CommunityControls({
   onSetAllVisible(visible: boolean): void;
   onToggleCommunity(communityId: number): void;
 }) {
+  const [query, setQuery] = useState("");
+  const visibleCommunities = useMemo(
+    () => visibleCommunityControls(model.communities, query),
+    [model.communities, query]
+  );
+  const matchingCount = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase();
+    return normalized
+      ? model.communities.filter((community) =>
+        community.label.toLocaleLowerCase().includes(normalized)
+        || String(community.id).includes(normalized)).length
+      : model.communities.length;
+  }, [model.communities, query]);
   return (
     <div className="compass-community-controls">
-        <label className="compass-community-control">
+      <label className="compass-community-control">
+        <input
+          type="checkbox"
+          checked={allVisible}
+          onChange={(event) => onSetAllVisible(event.target.checked)}
+        />
+        <span>Select all</span>
+      </label>
+      {model.communities.length > COMMUNITY_CONTROL_LIMIT && (
+        <label className="compass-community-search">
+          <span className="sr-only">Filter communities</span>
+          <SearchIcon aria-hidden="true" />
           <input
-            type="checkbox"
-            checked={allVisible}
-            onChange={(event) => onSetAllVisible(event.target.checked)}
+            type="search"
+            value={query}
+            placeholder="Filter communities"
+            onChange={(event) => setQuery(event.target.value)}
           />
-          <span>Select all</span>
         </label>
-        <div className="compass-community-list">
-          {model.communities.map((community) => {
-            const visible = !hiddenCommunities.has(community.id);
-            return (
-              <label
-                key={community.id}
-                className="compass-community-item"
-                data-hidden={!visible}
-              >
-                <input
-                  type="checkbox"
-                  checked={visible}
-                  onChange={() => onToggleCommunity(community.id)}
-                />
-                <span
-                  className="compass-community-dot"
-                  aria-hidden="true"
-                  style={{ background: community.color }}
-                />
-                <span className="compass-community-label">{community.label}</span>
-                <small>{communityCounts.get(community.id) ?? 0}</small>
-              </label>
-            );
-          })}
-        </div>
+      )}
+      <div className="compass-community-list">
+        {visibleCommunities.map((community) => {
+          const visible = !hiddenCommunities.has(community.id);
+          return (
+            <label
+              key={community.id}
+              className="compass-community-item"
+              data-hidden={!visible}
+            >
+              <input
+                type="checkbox"
+                checked={visible}
+                onChange={() => onToggleCommunity(community.id)}
+              />
+              <span
+                className="compass-community-dot"
+                aria-hidden="true"
+                style={{ background: community.color }}
+              />
+              <span className="compass-community-label">{community.label}</span>
+              <small>{communityCounts.get(community.id) ?? 0}</small>
+            </label>
+          );
+        })}
+      </div>
+      {matchingCount > visibleCommunities.length && (
+        <p className="compass-community-limit" role="status">
+          Showing {visibleCommunities.length.toLocaleString()} of{" "}
+          {matchingCount.toLocaleString()} communities. Filter to find another community.
+        </p>
+      )}
     </div>
   );
 }

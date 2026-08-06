@@ -33,6 +33,7 @@ describe("GraphViewModelSchema", () => {
         signature: "fn run(value: usize)",
         size: 28.5,
         memberCount: 7,
+        detailAvailable: false,
         learningStatus: "preferred",
         learningStale: false,
         source: { file: "src/main.rs", startLine: 4, endLine: 8 }
@@ -45,6 +46,7 @@ describe("GraphViewModelSchema", () => {
       signature: "fn run(value: usize)",
       size: 28.5,
       memberCount: 7,
+      detailAvailable: false,
       learningStatus: "preferred",
       learningStale: false
     });
@@ -64,6 +66,7 @@ describe("GraphViewModelSchema", () => {
         source: "0",
         target: "1",
         relation: "2 cross-community edges",
+        weight: 2,
         confidence: "aggregated"
       }],
       communities: [
@@ -73,6 +76,7 @@ describe("GraphViewModelSchema", () => {
     });
 
     expect(parsed.edges[0]?.confidence).toBe("aggregated");
+    expect(parsed.edges[0]?.weight).toBe(2);
   });
 
   it("preserves an optional relationship source anchor", () => {

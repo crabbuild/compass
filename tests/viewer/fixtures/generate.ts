@@ -102,31 +102,36 @@ export default async function generate(): Promise<void> {
   const viewerJs = await readFile(path.join(output, "graph.js"), "utf8");
   const viewerCss = await readFile(path.join(output, "viewer.css"), "utf8");
   await writeFile(path.join(output, "graph.html"), `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass graph fixture</title><style>${viewerCss}</style></head><body><div id="compass-viewer-root"></div><script id="compass-viewer-model" type="application/json">${JSON.stringify(graph)}</script><script>${viewerJs}</script></body></html>`);
-  const largeNodeCount = 1_200;
+  // Mirrors the prepared Django overview shape (3,376 communities and roughly
+  // three cross-community relationships per community) without carrying the
+  // original 281 MB graph fixture in the repository.
+  const largeNodeCount = 3_400;
+  const largeEdgeCount = 10_500;
   const largeGraph = {
     schema: "compass.viewer.graph/1",
     title: "Large graph fixture",
     stats: {
       nodes: largeNodeCount,
-      edges: largeNodeCount * 3,
-      communities: 12,
-      aggregated: false
+      edges: largeEdgeCount,
+      communities: largeNodeCount,
+      aggregated: true
     },
     nodes: Array.from({ length: largeNodeCount }, (_, index) => ({
       id: `large-node-${index}`,
       label: `Large node ${index}`,
-      kind: "function",
-      community: index % 12,
-      degree: 6
+      kind: "community",
+      community: index,
+      degree: index % 41,
+      memberCount: 1 + index % 97
     })),
-    edges: Array.from({ length: largeNodeCount * 3 }, (_, index) => ({
+    edges: Array.from({ length: largeEdgeCount }, (_, index) => ({
       id: `large-edge-${index}`,
       source: `large-node-${index % largeNodeCount}`,
       target: `large-node-${(index * 17 + 1) % largeNodeCount}`,
-      relation: "calls",
-      confidence: "extracted"
+      relation: `${1 + index % 13} cross-community edges`,
+      confidence: "aggregated"
     })),
-    communities: Array.from({ length: 12 }, (_, index) => ({
+    communities: Array.from({ length: largeNodeCount }, (_, index) => ({
       id: index,
       label: `Community ${index}`,
       color: ["#4E79A7", "#F28E2B", "#E15759", "#76B7B2"][index % 4],

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Keep very large HTML and VS Code community overviews responsive with a
+  deterministic hub-centered layout, inexpensive aggregate edges, indexed
+  search and relationship inspection, and bounded standalone community
+  details. Large standalone HTML exports no longer duplicate an unbounded
+  copy of every community graph inside the page.
+
 - Materialize `graph.json`, `graph.html`, `GRAPH_REPORT.md`, `manifest.json`,
   and optional public build artifacts directly under `compass-out/`. The flat
   paths support low-effort migration of file-based workflows while Compass's

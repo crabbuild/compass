@@ -725,6 +725,30 @@ when extraction and graph construction remain below their approved baseline.
 These local measurements are diagnostic evidence and do not replace a
 controlled CI baseline.
 
+### Django viewer qualification
+
+The 2026-08-05 large-graph viewer hardening was exercised against Django
+commit `957d0cee7167757ae221ffde59d2cf0a322e89c7` using the same published
+294,854,948-byte graph for both exports. The graph contains 78,064 nodes,
+205,291 edges, and 3,376 communities; its prepared community overview contains
+3,376 nodes and 10,437 aggregate edges.
+
+The previous standalone export embedded every community detail and occupied
+1,127,391,375 bytes. The bounded export embeds only complete details within a
+shared 5,000-node / 40,000-edge budget and occupied 13,570,416 bytes, a 98.8%
+reduction. Eight complete community details fit this particular graph; all
+other communities remain available through VS Code or explicit JSON export.
+No canonical graph records were removed or rewritten.
+
+On the local Apple Silicon development runner, Chromium reached the exported
+graph controls in 751 ms over a local HTTP server. The overview rendered a
+deterministic hub-centered layout and a strongest-edge connectivity backbone
+of 4,000 relationships. The browser qualification fixture mirrors this shape
+with 3,400 communities and 10,500 aggregate edges; it requires the useful
+controls, the static layout, the 200-row community DOM bound, and the visible
+edge disclosure to appear within three seconds. These are runner-specific
+diagnostic observations, not a cross-platform latency guarantee.
+
 ### Django parallel fact-state qualification
 
 The 2026-08-05 large-repository fact-state hardening was measured from Compass

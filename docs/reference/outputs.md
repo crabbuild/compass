@@ -196,12 +196,25 @@ the VS Code extension. It performs no runtime network requests, follows the
 operating system's light or dark color scheme, and retains keyboard, reduced
 motion, narrow-screen, and high-contrast behavior from the shared viewer.
 
-When the node limit selects a community overview, each complete community
-detail is embedded as inert JSON and validated only when opened. Double-click a
-community node (or use **Open community** in the inspector) to enter its member
-graph; use **Overview** to return. Community details preserve internal edges,
-source anchors, and hyperedges, while cross-community edges remain represented
-only in the overview.
+When the node limit selects a community overview, the standalone document
+embeds a deterministic bounded set of complete community details: at most
+5,000 detail nodes and 40,000 internal detail edges across the export. Details
+are validated only when opened. Double-click an available community node (or
+use **Open community** in the inspector) to enter its member graph; use
+**Overview** to return. Communities outside the embedded budget remain visible
+and are marked as unavailable for standalone drilldown; use the VS Code graph
+or `compass export json --community ID` to inspect one without loading every
+community into the HTML page. Embedded details preserve internal edges, source
+anchors, and hyperedges, while cross-community edges remain represented only
+in the overview.
+
+Large community overviews use a deterministic hub-centered layout. Physics is
+paused, labels remain bounded, and at most 4,000 aggregate edges are rendered
+as straight hairlines. The visible edges form a deterministic strongest-edge
+backbone; the inspector continues to report the complete relationship count
+and discloses the rendered count. This keeps repositories with thousands of
+communities from producing an expensive rectangular edge curtain without
+changing `graph.json` or the complete overview model.
 
 The HTML DOM and CSS classes are presentation details, not a compatibility
 contract. Automations should consume `graph.json` or `compass export json`

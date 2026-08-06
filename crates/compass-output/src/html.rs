@@ -12,6 +12,8 @@ use crate::OutputError;
 use crate::viewer_model::GraphViewModel;
 
 const DEFAULT_NODE_LIMIT: isize = 5_000;
+const EMBEDDED_DETAIL_NODE_BUDGET: usize = 5_000;
+const EMBEDDED_DETAIL_EDGE_BUDGET: usize = 40_000;
 const COMMUNITY_COLORS: [&str; 10] = [
     "#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F", "#EDC948", "#B07AA1", "#FF9DA7",
     "#9C755F", "#BAB0AC",
@@ -62,7 +64,12 @@ pub fn html_document(
                 node_limit: None,
                 learning_overlay: options.learning_overlay,
             },
-            Some((document, communities)),
+            Some((
+                document,
+                communities,
+                EMBEDDED_DETAIL_NODE_BUDGET,
+                EMBEDDED_DETAIL_EDGE_BUDGET,
+            )),
         )?;
         return Ok(Some(HtmlRender {
             nodes: meta.nodes.len(),
@@ -250,10 +257,10 @@ fn render(
     communities: &Communities,
     output_path: &Path,
     options: &HtmlOptions<'_>,
-    drilldown: Option<(&GraphDocument, &Communities)>,
+    drilldown: Option<(&GraphDocument, &Communities, usize, usize)>,
 ) -> Result<String, OutputError> {
     let title = sanitize_label(&output_path.to_string_lossy());
-    let model = crate::viewer_model::graph_view_model(
+    let mut model = crate::viewer_model::graph_view_model(
         document,
         communities,
         title.clone(),
@@ -262,10 +269,24 @@ fn render(
     );
     let details = drilldown.map_or_else(
         || Ok(BTreeMap::new()),
-        |(source, source_communities)| {
-            community_view_models(source, source_communities, &title, options)
+        |(source, source_communities, node_budget, edge_budget)| {
+            community_view_models(
+                source,
+                source_communities,
+                &title,
+                options,
+                node_budget,
+                edge_budget,
+            )
         },
     )?;
+    if drilldown.is_some() {
+        for node in &mut model.nodes {
+            if node.member_count.is_some() {
+                node.detail_available = Some(details.contains_key(&node.community));
+            }
+        }
+    }
     Ok(crate::viewer_model::shared_viewer_html_with_communities(
         &model, &details,
     )?)
@@ -276,6 +297,8 @@ fn community_view_models(
     communities: &Communities,
     title: &str,
     options: &HtmlOptions<'_>,
+    node_budget: usize,
+    edge_budget: usize,
 ) -> Result<BTreeMap<usize, GraphViewModel>, OutputError> {
     let node_community = communities
         .iter()
@@ -285,16 +308,65 @@ fn community_view_models(
                 .map(move |member| (member.as_str(), *community))
         })
         .collect::<HashMap<_, _>>();
+    let mut internal_edge_counts = BTreeMap::<usize, usize>::new();
+    for edge in &document.links {
+        let (Some(source), Some(target)) = (
+            node_community.get(edge.source.as_str()),
+            node_community.get(edge.target.as_str()),
+        ) else {
+            continue;
+        };
+        if source == target {
+            *internal_edge_counts.entry(*source).or_default() += 1;
+        }
+    }
+    let mut candidates = communities
+        .iter()
+        .map(|(community, members)| {
+            (
+                *community,
+                members.len(),
+                internal_edge_counts
+                    .get(community)
+                    .copied()
+                    .unwrap_or_default(),
+            )
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        right
+            .1
+            .cmp(&left.1)
+            .then_with(|| right.2.cmp(&left.2))
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    let mut remaining_nodes = node_budget;
+    let mut remaining_edges = edge_budget;
+    let mut selected = HashSet::new();
+    for (community, nodes, edges) in candidates {
+        if nodes == 0 || nodes > remaining_nodes || edges > remaining_edges {
+            continue;
+        }
+        selected.insert(community);
+        remaining_nodes -= nodes;
+        remaining_edges -= edges;
+    }
     let mut grouped_nodes = BTreeMap::<usize, Vec<NodeRecord>>::new();
     for node in &document.nodes {
-        if let Some(community) = node_community.get(node.id.as_str()) {
+        if let Some(community) = node_community
+            .get(node.id.as_str())
+            .filter(|community| selected.contains(community))
+        {
             grouped_nodes
                 .entry(*community)
                 .or_default()
                 .push(node.clone());
         }
     }
-    for (community, members) in communities {
+    for (community, members) in communities
+        .iter()
+        .filter(|(community, _)| selected.contains(community))
+    {
         let found = grouped_nodes.get(community).map_or(0, Vec::len);
         if found != members.len() {
             return Err(OutputError::IncompleteCommunity {
@@ -311,7 +383,7 @@ fn community_view_models(
         ) else {
             continue;
         };
-        if source == target {
+        if source == target && selected.contains(source) {
             grouped_links.entry(*source).or_default().push(edge.clone());
         }
     }
@@ -343,7 +415,8 @@ fn community_view_models(
             }
             owner = Some(community);
         }
-        if complete && let Some(community) = owner {
+        if complete && let Some(community) = owner.filter(|community| selected.contains(community))
+        {
             grouped_hyperedges
                 .entry(community)
                 .or_default()
@@ -674,6 +747,9 @@ pub(crate) fn edge_value(edge: &EdgeRecord) -> Value {
     output.insert("from".into(), Value::String(source.to_owned()));
     output.insert("to".into(), Value::String(target.to_owned()));
     output.insert("label".into(), Value::String(relation.clone()));
+    if let Some(weight) = edge.unsigned("weight") {
+        output.insert("weight".into(), Value::from(weight));
+    }
     output.insert(
         "title".into(),
         Value::String(html_escape(&format!("{relation} [{confidence}]"))),
@@ -2409,9 +2485,49 @@ mod tests {
             "\"startLine\":4",
             "\"endLine\":8",
             "\"signature\":\"def A(value)\"",
+            "\"detailAvailable\":true",
         ] {
             assert!(rendered.html.contains(marker), "missing {marker}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn standalone_detail_models_obey_total_node_and_edge_budgets() -> Result<(), Box<dyn Error>> {
+        let graph: GraphDocument = serde_json::from_value(json!({
+            "nodes":[
+                {"id":"a","label":"A"},{"id":"b","label":"B"},
+                {"id":"c","label":"C"},{"id":"d","label":"D"}
+            ],
+            "links":[
+                {"source":"a","target":"b","relation":"calls"},
+                {"source":"c","target":"d","relation":"calls"}
+            ]
+        }))?;
+        let communities = BTreeMap::from([
+            (0, vec!["a".into(), "b".into()]),
+            (1, vec!["c".into(), "d".into()]),
+        ]);
+        let options = HtmlOptions::default();
+        let details = community_view_models(&graph, &communities, "graph.html", &options, 2, 1)?;
+        assert_eq!(details.keys().copied().collect::<Vec<_>>(), [0]);
+
+        let (overview, overview_communities, member_counts) =
+            aggregate(&graph, &communities, &options);
+        let rendered = render(
+            &overview,
+            &overview_communities,
+            Path::new("graph.html"),
+            &HtmlOptions {
+                member_counts: Some(&member_counts),
+                ..HtmlOptions::default()
+            },
+            Some((&graph, &communities, 2, 1)),
+        )?;
+        assert!(rendered.contains("\"detailAvailable\":true"));
+        assert!(rendered.contains("\"detailAvailable\":false"));
+        assert!(rendered.contains("data-compass-community=\"0\""));
+        assert!(!rendered.contains("data-compass-community=\"1\""));
         Ok(())
     }
 
