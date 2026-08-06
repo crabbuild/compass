@@ -35,6 +35,12 @@ metadata, and inspector concepts. VS Code colors take priority so the canvas
 follows the active light, dark, or high-contrast theme; the Compass export
 palette remains the fallback.
 
+Detailed graphs with at least 1,000 nodes or 4,000 relationships open with a
+deterministic community-grouped layout, paused physics, straight relationships,
+and fewer labels. This keeps the canvas responsive while preserving every node
+and relationship. Use the layout control to enable physics explicitly when a
+force-directed arrangement is useful.
+
 Search symbols and files, pause or resume the layout, fit or reset the view,
 show labels, filter communities, and inspect connected nodes. Single-click a
 node to select it without leaving the graph. Double-click a node to open its

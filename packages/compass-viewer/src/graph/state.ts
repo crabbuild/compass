@@ -1,4 +1,5 @@
-import type { GraphNode } from "../contracts/graph";
+import type { GraphNode, GraphViewModel } from "../contracts/graph";
+import { graphRenderingProfile } from "./renderingProfile";
 
 export type GraphChangeType = NonNullable<GraphNode["change"]>;
 
@@ -33,6 +34,15 @@ export const initialGraphState: GraphState = {
   hiddenChanges: new Set<GraphChangeType>(),
   query: ""
 };
+
+export function initialGraphStateForModel(model: GraphViewModel): GraphState {
+  if (graphRenderingProfile(model) === "interactive") return initialGraphState;
+  return {
+    ...initialGraphState,
+    physicsRunning: false,
+    initialLayoutPending: false
+  };
+}
 
 export function graphReducer(state: GraphState, action: GraphAction): GraphState {
   switch (action.type) {

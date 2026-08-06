@@ -14,6 +14,7 @@ import {
   bindGraphNetworkEvents,
   type GraphNetworkHandlers
 } from "./networkEvents";
+import { graphRenderingProfile, seedStaticGraphPositions } from "./renderingProfile";
 import type { GraphChangeType } from "./state";
 
 export type GraphCanvasHandle = {
@@ -128,6 +129,35 @@ const comparisonOptions: Options = {
       damping: 0.3,
       avoidOverlap: 0.85
     }
+  }
+};
+
+const staticOptions: Options = {
+  autoResize: true,
+  interaction: {
+    hover: true,
+    tooltipDelay: 100,
+    hideEdgesOnDrag: true,
+    hideEdgesOnZoom: true,
+    navigationButtons: false,
+    keyboard: { enabled: true }
+  },
+  layout: {
+    improvedLayout: false,
+    randomSeed: 17
+  },
+  nodes: {
+    borderWidth: 1.5,
+    shape: "dot"
+  },
+  edges: {
+    arrows: { to: { enabled: false } },
+    smooth: false,
+    selectionWidth: 3
+  },
+  physics: {
+    enabled: false,
+    solver: "barnesHut"
   }
 };
 
@@ -341,6 +371,10 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     onStabilizedRef.current = onStabilized;
     const initialViewRef = useRef<{ position: { x: number; y: number }; scale: number } | null>(null);
     const themeRevision = useThemeRevision();
+    const renderingProfile = useMemo(
+      () => graphRenderingProfile(model),
+      [model.edges.length, model.nodes.length]
+    );
     const maxDegree = useMemo(() => {
       let maximum = 1;
       for (const node of model.nodes) maximum = Math.max(maximum, node.degree ?? 1);
@@ -416,11 +450,23 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             (right.degree ?? 0) - (left.degree ?? 0) || left.id.localeCompare(right.id))
           .slice(0, 12)
           .map((node) => node.id)
-        : []
-    ), [comparisonMode, model.nodes]);
+        : renderingProfile === "static"
+          ? [...model.nodes]
+            .sort((left, right) =>
+              (right.degree ?? 0) - (left.degree ?? 0) || left.id.localeCompare(right.id))
+            .slice(0, 20)
+            .map((node) => node.id)
+          : []
+    ), [comparisonMode, model.nodes, renderingProfile]);
     const comparisonPositions = useMemo(
       () => comparisonMode ? seedComparisonPositions(model.nodes) : new Map(),
       [comparisonMode, model.nodes]
+    );
+    const staticPositions = useMemo(
+      () => renderingProfile === "static" && !comparisonMode
+        ? seedStaticGraphPositions(model.nodes)
+        : new Map(),
+      [comparisonMode, model.nodes, renderingProfile]
     );
     const contrastBorder = useMemo(() => {
       if (typeof document === "undefined") return undefined;
@@ -438,7 +484,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             ? 7 + 5 * Math.sqrt((node.degree ?? 1) / maxDegree)
             : 11 + 12 * Math.sqrt((node.degree ?? 1) / maxDegree)
           : baseSize;
-        const position = comparisonPositions.get(node.id) ?? initialPositions?.get(node.id);
+        const position = comparisonPositions.get(node.id)
+          ?? initialPositions?.get(node.id)
+          ?? staticPositions.get(node.id);
         return {
           id: node.id,
           label: node.label,
@@ -457,7 +505,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             face: "system-ui",
             size: comparisonMode
               ? automaticLabelIds.has(node.id) ? 12 : 0
-              : (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0
+              : renderingProfile === "static"
+                ? automaticLabelIds.has(node.id) ? 12 : 0
+                : (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0
           }
         };
       })
@@ -470,7 +520,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       communityColors,
       initialPositions,
       maxDegree,
-      model
+      model,
+      renderingProfile,
+      staticPositions
     ]);
     const edgeData = useMemo(() => new DataSet<Edge>(
       model.edges.map((edge) => {
@@ -486,11 +538,13 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           to: edge.target,
           dashes: appearance.dashes,
           width: appearance.width,
-          ...(comparisonMode ? { smooth: comparisonEdgeCurve(edge.change) } : {}),
+          ...(comparisonMode && renderingProfile !== "static"
+            ? { smooth: comparisonEdgeCurve(edge.change) }
+            : {}),
           color: { color: appearance.color, opacity: appearance.opacity }
         };
       })
-    ), [comparisonMode, model.edges]);
+    ), [comparisonMode, model.edges, renderingProfile]);
     useEffect(() => {
       const container = containerRef.current;
       if (!container) return;
@@ -498,7 +552,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       const network = new Network(container, {
         nodes: nodeData,
         edges: edgeData
-      }, comparisonMode ? comparisonOptions : defaultOptions);
+      }, renderingProfile === "static"
+        ? staticOptions
+        : comparisonMode ? comparisonOptions : defaultOptions);
       network.setOptions({ physics: { enabled: physicsRunningRef.current } });
       if (!physicsRunningRef.current) network.stopSimulation();
       networkRef.current = network;
@@ -517,7 +573,10 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         };
         onStabilizedRef.current();
       });
-      if (!physicsRunningRef.current && initialPositions && initialPositions.size > 0) {
+      const hasSeededPositions = comparisonPositions.size > 0
+        || (initialPositions?.size ?? 0) > 0
+        || staticPositions.size > 0;
+      if (!physicsRunningRef.current && hasSeededPositions) {
         network.stopSimulation();
         network.fit({ animation: false });
         initialViewRef.current = {
@@ -532,7 +591,11 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     }, [
       edgeData,
       nodeData,
-      comparisonMode
+      comparisonMode,
+      comparisonPositions,
+      initialPositions,
+      renderingProfile,
+      staticPositions
     ]);
 
     useEffect(() => {
@@ -655,7 +718,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             || node.id === focusedNodeId
             || (comparisonMode
               ? automaticLabelIds.has(node.id)
-              : (node.degree ?? 1) >= maxDegree * 0.15)
+              : renderingProfile === "static"
+                ? automaticLabelIds.has(node.id)
+                : (node.degree ?? 1) >= maxDegree * 0.15)
             ? 12
             : 0
         }
@@ -668,7 +733,8 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       labelColor,
       maxDegree,
       model.nodes,
-      nodeData
+      nodeData,
+      renderingProfile
     ]);
 
     useImperativeHandle(ref, () => ({
@@ -699,6 +765,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       <div
         ref={containerRef}
         className="compass-canvas"
+        data-rendering-profile={renderingProfile}
         role="region"
         aria-label="Interactive Compass code graph"
         onMouseLeave={() => {

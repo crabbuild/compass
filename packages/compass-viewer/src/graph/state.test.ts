@@ -1,7 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { graphReducer, initialGraphState } from "./state";
+import type { GraphViewModel } from "../contracts/graph";
+import { STATIC_LAYOUT_NODE_THRESHOLD } from "./renderingProfile";
+import { graphReducer, initialGraphState, initialGraphStateForModel } from "./state";
 
 describe("graphReducer", () => {
+  it("starts large graphs with their deterministic layout visible and paused", () => {
+    const model: GraphViewModel = {
+      schema: "compass.viewer.graph/1",
+      title: "Large fixture",
+      stats: {
+        nodes: STATIC_LAYOUT_NODE_THRESHOLD,
+        edges: 0,
+        communities: 1,
+        aggregated: false
+      },
+      nodes: Array.from({ length: STATIC_LAYOUT_NODE_THRESHOLD }, (_, index) => ({
+        id: `n-${index}`,
+        label: `Node ${index}`,
+        community: 0
+      })),
+      edges: [],
+      communities: [{ id: 0, label: "Core", color: "#4e79a7", hidden: false }],
+      hyperedges: []
+    };
+
+    expect(initialGraphStateForModel(model)).toMatchObject({
+      physicsRunning: false,
+      initialLayoutPending: false
+    });
+  });
+
   it("pauses on focus and does not resume when focus clears", () => {
     const focused = graphReducer(initialGraphState, {
       type: "focus",

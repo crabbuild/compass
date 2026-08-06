@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Keep dense VS Code and HTML code graphs responsive by switching detailed
+  views with at least 1,000 nodes or 4,000 relationships to a deterministic
+  community-grouped layout with paused physics and reduced edge decoration.
+  Users can still enable force-directed physics explicitly.
+
 - Parallelize deterministic per-file AST fact digests for large repositories
   and overlap unchanged pre-merge digest construction with portable AST cache
   publication. Native-volume Django cold-build p50 improves from 9.82 seconds

@@ -24,7 +24,7 @@ import type { GraphSourceRevisions } from "./ChangeEvidence";
 import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
 import {
   graphReducer,
-  initialGraphState,
+  initialGraphStateForModel,
   type GraphChangeType
 } from "./state";
 
@@ -132,7 +132,7 @@ function CompassGraphView({
   inspectorLayout: InspectorLayout;
   onInspectorLayoutChange(layout: InspectorLayout): void;
 }) {
-  const [state, dispatch] = useReducer(graphReducer, initialGraphState);
+  const [state, dispatch] = useReducer(graphReducer, model, initialGraphStateForModel);
   const [hover, setHover] = useState<GraphHover | null>(null);
   const [edgeHover, setEdgeHover] = useState<GraphEdgeHover | null>(null);
   const canvasRef = useRef<GraphCanvasHandle>(null);
