@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Parallelize deterministic per-file AST fact digests for large repositories
+  and overlap unchanged pre-merge digest construction with portable AST cache
+  publication. Native-volume Django cold-build p50 improves from 9.82 seconds
+  to 8.04 seconds while preserving byte-identical graphs, reaching 5.43x
+  versus the paired Graphify sample.
+
 - Respect Rust's separate value and type/module namespaces when extracting
   scoped associated calls. A `module::Type::function()` path now retains its
   visible import binding even when a same-named value is in lexical scope;
