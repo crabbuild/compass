@@ -9,6 +9,9 @@ files to edit or when the user asked not to create generated files.
 Rules:
 
 - Run `compass query "<question>"` before broad source searches
+- Set `--budget N` to fit available context; when query or explain reports
+  `next=N`, repeat the unchanged command with `--page N` and reach `next=none`
+  before exhaustive claims
 - Use `compass path "<source>" "<target>"` for dependency paths
 - Use `compass explain "<concept>"` for one concept and its neighbors
 - Use `compass affected "<symbol>"` for change-review scope

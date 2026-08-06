@@ -268,8 +268,14 @@ Natural-language discovery:
 --dfs
 --context VALUE
 --budget N
+--page N
 --graph PATH | --at REV
 ```
+
+`--budget` controls approximate tokens per page (default 2,000). `--page` is
+one-based. Repeat all other query inputs unchanged when following the
+`previous` or `next` page reported in output. `compass explain` accepts the
+same two output controls for connection and ambiguity pages.
 
 CompassQL:
 

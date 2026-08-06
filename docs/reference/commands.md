@@ -197,8 +197,18 @@ compass query "<question>"
   [--dfs]
   [--context VALUE]
   [--budget N]
+  [--page N]
   [--graph PATH | --at REV]
 ```
+
+`--budget` is the approximate token budget for one result page. It defaults to
+2,000 and may be raised when the caller has a larger context window.
+Every matched result includes a deterministic `Pagination:` line with the
+current page, total pages, fact range, and previous/next page numbers. Fetch the
+next page by repeating the unchanged query, graph selector, contexts, traversal
+mode, and budget with `--page N`. Pagination is stable for an unchanged graph;
+use `--at REV` when multiple page requests must be pinned to one immutable
+snapshot.
 
 Query seeds prefer source-backed declarations over unresolved external-symbol
 placeholders with the same callable label. Source-less placeholder nodes retain
@@ -232,6 +242,10 @@ Limits:
 --max-memory-bytes N
 ```
 
+`--budget` and `--page` apply only to natural-language query rendering. Page
+CompassQL rows explicitly with a stable `ORDER BY` plus `SKIP` and `LIMIT`, for
+example `RETURN n.id ORDER BY n.id SKIP 100 LIMIT 100`.
+
 Canonical language contract: [CompassQL](../COMPASSQL.md).
 
 ### `path`
@@ -245,13 +259,19 @@ Renders a shortest known graph path while preserving relationship direction.
 ### `explain`
 
 ```text
-compass explain "<node>" [--graph PATH | --at REV]
+compass explain "<node>"
+  [--budget N]
+  [--page N]
+  [--graph PATH | --at REV]
 ```
 
 Shows one node and incoming/outgoing connections. An exact node ID resolves
 directly. When a label names multiple source-backed declarations, Compass lists
 the candidates and their source ranges and asks for the full node ID instead of
 silently selecting one. Connection lines include the stored relationship site.
+Connections and ambiguous candidates use the same bounded, deterministic
+pagination contract as natural-language queries instead of silently cutting off
+after the first group.
 
 ### `affected`
 

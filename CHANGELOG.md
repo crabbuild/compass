@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Let agents size natural `query` and `explain` pages with an explicit token
+  budget (2,000 by default) and retrieve every deterministic continuation with
+  `--page`. Output now reports exact page/fact ranges and no longer silently
+  drops `explain` connections after the first 20. The shipped Compass skill and
+  lightweight agent adapters now select budgets deliberately, follow `next`
+  pages, and disclose partial results instead of treating page one as complete.
+
 - Let users switch code graphs between automatic, circular, concentric,
   spiral, and community-grouped square-grid layouts. Grid communities form
   aligned mini-grids with consistent gutters; fixed layouts remain

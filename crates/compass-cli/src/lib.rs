@@ -60,8 +60,9 @@ use compass_output::{
     write_tree_html,
 };
 use compass_query::{
-    DEFAULT_AFFECTED_RELATIONS, TraversalMode, format_affected, format_benchmark, query_graph_text,
-    render_explanation, render_shortest_path, run_benchmark,
+    DEFAULT_AFFECTED_RELATIONS, DEFAULT_TEXT_TOKEN_BUDGET, TextPageOptions, TraversalMode,
+    format_affected, format_benchmark, query_graph_text_page, render_explanation_page,
+    render_shortest_path, run_benchmark,
 };
 use compass_semantic::{
     CachedCorpusExtractionOptions, CorpusExtractionOptions, detect_backend_with_custom,
@@ -3598,7 +3599,8 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
         return Outcome::failure(query_help(frontend));
     };
     let mut contexts = Vec::new();
-    let mut budget = 2000_usize;
+    let mut budget = DEFAULT_TEXT_TOKEN_BUDGET;
+    let mut page = 1_usize;
     let mut mode = TraversalMode::Bfs;
     let mut index = 1;
     while index < args.len() {
@@ -3624,6 +3626,16 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                 contexts.push(value.clone());
                 index += 2;
             }
+            "--page" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Outcome::failure("error: --page must be an integer".to_owned());
+                };
+                let Ok(value) = value.parse::<usize>() else {
+                    return Outcome::failure("error: --page must be an integer".to_owned());
+                };
+                page = value;
+                index += 2;
+            }
             value if value.starts_with("--budget=") => {
                 let Ok(value) = value[9..].parse::<usize>() else {
                     return Outcome::failure("error: --budget must be an integer".to_owned());
@@ -3635,24 +3647,40 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                 contexts.push(value[10..].to_owned());
                 index += 1;
             }
+            value if value.starts_with("--page=") => {
+                let Ok(value) = value[7..].parse::<usize>() else {
+                    return Outcome::failure("error: --page must be an integer".to_owned());
+                };
+                page = value;
+                index += 1;
+            }
             value => {
                 return Outcome::failure(format!("error: unexpected query argument {value}"));
             }
         }
     }
+    if let Err(error) = validate_text_pagination(budget, page) {
+        return Outcome::failure(format!("error: {error}"));
+    }
     let loaded = match load_selection(frontend, &selection, false) {
         Ok(loaded) => loaded,
         Err(outcome) => return outcome,
     };
-    let output = query_graph_text(
+    let output = match query_graph_text_page(
         &loaded.graph,
         question,
         mode,
         2,
-        budget,
+        TextPageOptions {
+            token_budget: budget,
+            page,
+        },
         &contexts,
         &loaded.overlay,
-    );
+    ) {
+        Ok(output) => output,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
+    };
     touch_selected_query_stamp(&selection);
     Outcome::success(output)
 }
@@ -3695,16 +3723,77 @@ fn command_explain(frontend: Frontend, args: &[String]) -> Outcome {
         Ok(parsed) => parsed,
         Err(error) => return Outcome::failure(format!("error: {error}")),
     };
-    if args.len() != 1 {
+    let Some(label) = args.first() else {
         return Outcome::failure(explain_help(frontend));
+    };
+    let mut budget = DEFAULT_TEXT_TOKEN_BUDGET;
+    let mut page = 1_usize;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--budget" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Outcome::failure("error: --budget must be an integer".to_owned());
+                };
+                let Ok(value) = value.parse::<usize>() else {
+                    return Outcome::failure("error: --budget must be an integer".to_owned());
+                };
+                budget = value;
+                index += 2;
+            }
+            "--page" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Outcome::failure("error: --page must be an integer".to_owned());
+                };
+                let Ok(value) = value.parse::<usize>() else {
+                    return Outcome::failure("error: --page must be an integer".to_owned());
+                };
+                page = value;
+                index += 2;
+            }
+            value if value.starts_with("--budget=") => {
+                let Ok(value) = value[9..].parse::<usize>() else {
+                    return Outcome::failure("error: --budget must be an integer".to_owned());
+                };
+                budget = value;
+                index += 1;
+            }
+            value if value.starts_with("--page=") => {
+                let Ok(value) = value[7..].parse::<usize>() else {
+                    return Outcome::failure("error: --page must be an integer".to_owned());
+                };
+                page = value;
+                index += 1;
+            }
+            value => {
+                return Outcome::failure(format!("error: unexpected explain argument {value}"));
+            }
+        }
+    }
+    if let Err(error) = validate_text_pagination(budget, page) {
+        return Outcome::failure(format!("error: {error}"));
     }
     let loaded = match load_selection(frontend, &selection, true) {
         Ok(loaded) => loaded,
         Err(outcome) => return outcome,
     };
-    let output = render_explanation(&loaded.graph, &args[0], &loaded.overlay);
+    let output = match render_explanation_page(&loaded.graph, label, budget, page, &loaded.overlay)
+    {
+        Ok(output) => output,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
+    };
     touch_selected_query_stamp(&selection);
     Outcome::success(output)
+}
+
+fn validate_text_pagination(token_budget: usize, page: usize) -> Result<(), String> {
+    if token_budget == 0 {
+        return Err("token budget must be greater than zero".to_owned());
+    }
+    if page == 0 {
+        return Err("page must be greater than zero".to_owned());
+    }
+    Ok(())
 }
 
 fn command_affected(args: &[String]) -> Outcome {
@@ -3864,7 +3953,7 @@ fn touch_selected_query_stamp(selection: &GraphSelection) {
 fn query_help(frontend: Frontend) -> String {
     let prefix = frontend_name(frontend);
     format!(
-        "Usage: {prefix} query \"<question>\" [--dfs] [--context VALUE] [--budget N] [--graph PATH|--at REV]"
+        "Usage: {prefix} query \"<question>\" [--dfs] [--context VALUE] [--budget N] [--page N] [--graph PATH|--at REV]"
     )
 }
 
@@ -3875,7 +3964,7 @@ fn path_help(frontend: Frontend) -> String {
 
 fn explain_help(frontend: Frontend) -> String {
     let prefix = frontend_name(frontend);
-    format!("Usage: {prefix} explain \"<node>\" [--graph PATH|--at REV]")
+    format!("Usage: {prefix} explain \"<node>\" [--budget N] [--page N] [--graph PATH|--at REV]")
 }
 
 fn frontend_name(frontend: Frontend) -> &'static str {
