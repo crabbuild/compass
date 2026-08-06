@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.3.3 - 2026-08-05
+
+- Improve Python bound-method and inheritance dispatch, Rust generic/reexport
+  resolution, and Go package/call attribution while keeping ambiguous targets
+  unresolved.
+- Harden incremental graph publication, graph-delta validation, nested
+  configuration containment, and qualification bounds for large repositories.
+- Improve build performance with adaptive AST workers, bounded graph
+  parallelism, cache reuse, source-digest reuse, and extraction-neutral deltas.
+- Add focused Fastify, Hono, and Remix framework-pack support and raise the
+  VS Code large-graph export limit.
+
 - Respect Rust's separate value and type/module namespaces when extracting
   scoped associated calls. A `module::Type::function()` path now retains its
   visible import binding even when a same-named value is in lexical scope;
