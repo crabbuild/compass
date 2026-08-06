@@ -51,7 +51,7 @@ use compass_output::{
 };
 use compass_resolve::{
     apply_program_projection, collect_program_projection_sites, merge_decl_def_classes_if_needed,
-    resolve_prevalidated_owned_with_root,
+    merge_decl_def_classes_if_needed_changed, resolve_prevalidated_owned_with_root,
 };
 use compass_store::{
     GRAPH_SCHEMA_V1, STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef,
@@ -1360,19 +1360,32 @@ fn ast_fact_digest_entries(
     output_dir: &Path,
     root: &Path,
 ) -> Result<BTreeMap<String, String>, CoreError> {
-    paths
-        .iter()
-        .zip(extractions)
-        .map(|(path, extraction)| {
-            let digest = extraction_fact_digest(extraction).map_err(|source| {
-                CoreError::SerializeExtraction {
-                    path: output_dir.join(AST_FACT_DIGESTS_FILE),
-                    source,
-                }
-            })?;
-            Ok((relative_fact_path(path, root), digest))
-        })
-        .collect()
+    let digest_entry = |(path, extraction): (&PathBuf, &Extraction)| {
+        let digest = extraction_fact_digest(extraction).map_err(|source| {
+            CoreError::SerializeExtraction {
+                path: output_dir.join(AST_FACT_DIGESTS_FILE),
+                source,
+            }
+        })?;
+        Ok((relative_fact_path(path, root), digest))
+    };
+    let entries = if paths.len() < 256 {
+        paths
+            .iter()
+            .zip(extractions)
+            .map(digest_entry)
+            .collect::<Vec<_>>()
+    } else {
+        paths
+            .par_iter()
+            .zip(extractions.par_iter())
+            .map(digest_entry)
+            .collect::<Vec<_>>()
+    };
+    // Indexed parallel collection preserves source order. Resolve errors and
+    // build the deterministic contract map sequentially so a malformed fact
+    // set reports the same first failure regardless of worker scheduling.
+    entries.into_iter().collect()
 }
 
 fn detected_file_sets_match(manifest: &Manifest, files: &BTreeMap<String, Vec<String>>) -> bool {
@@ -3053,18 +3066,30 @@ fn build_graph_inner_unscoped(
             fresh_paths.contains(*path) && extraction_has_cacheable_ast_facts(extraction)
         })
         .collect::<Vec<_>>();
-    let ast_cache_started = Instant::now();
-    cache.write_portable_ast_batch_ref(&ast_cache_sources)?;
-    cache.flush()?;
-    drop(ast_cache_sources);
-    profile_internal_duration(
-        "AST cache streaming publication",
-        ast_cache_started.elapsed(),
+    let ((cache_result, cache_elapsed), (premerge_digest_result, digest_elapsed)) = rayon::join(
+        || {
+            let started = Instant::now();
+            let result = cache
+                .write_portable_ast_batch_ref(&ast_cache_sources)
+                .and_then(|()| cache.flush());
+            (result, started.elapsed())
+        },
+        || {
+            let started = Instant::now();
+            let result = ast_fact_digest_entries(&ordered_paths, &ordered, &output_dir, &root);
+            (result, started.elapsed())
+        },
     );
+    cache_result?;
+    let premerge_fact_digests = premerge_digest_result?;
+    drop(ast_cache_sources);
+    profile_internal_duration("AST cache streaming publication", cache_elapsed);
+    profile_internal_duration("AST fact digest construction", digest_elapsed);
     // Declaration/definition merging is project-wide and is not idempotent.
     // Cache the portable per-file facts before applying it so a warm build
     // executes the same single merge as a cold build.
-    merge_decl_def_classes_if_needed(&mut ordered, &ordered_paths);
+    let declaration_merge_changed =
+        merge_decl_def_classes_if_needed_changed(&mut ordered, &ordered_paths);
     profile_internal("declaration merge", &mut internal_started);
     let live_sources = detection
         .files
@@ -3077,12 +3102,24 @@ fn build_graph_inner_unscoped(
         .keys()
         .map(|path| canonical_identity(Path::new(path)))
         .any(|path| !live_sources.contains(&path));
+    profile_internal("incremental source inventory", &mut internal_started);
+    let fact_digest_started = Instant::now();
+    let fact_digest_entries = if declaration_merge_changed {
+        ast_fact_digest_entries(&ordered_paths, &ordered, &output_dir, &root)?
+    } else {
+        premerge_fact_digests
+    };
+    profile_internal_duration(
+        "AST fact digest post-merge refresh",
+        fact_digest_started.elapsed(),
+    );
     let current_fact_state = AstFactDigestState {
         schema: AST_FACT_DIGESTS_SCHEMA.to_owned(),
         profile_digest: profile_digest.clone(),
         project_evidence_digest: project_evidence_digest.clone(),
-        entries: ast_fact_digest_entries(&ordered_paths, &ordered, &output_dir, &root)?,
+        entries: fact_digest_entries,
     };
+    internal_started = Instant::now();
     let fact_neutral = fact_neutral_incremental_candidate(
         options,
         semantic,
@@ -3160,6 +3197,7 @@ fn build_graph_inner_unscoped(
     };
     fresh_source_text.extend(cached_source_text);
     let source_text = fresh_source_text;
+    profile_internal("resolver source inventory", &mut internal_started);
     drop(worker_pool);
     drop(project_evidence);
     drop(fresh_paths);
@@ -3167,6 +3205,7 @@ fn build_graph_inner_unscoped(
     drop(ast_id_remap);
     drop(ast_root_marker);
     let program_projection_sites = collect_program_projection_sites(&ordered);
+    profile_internal("Program projection site collection", &mut internal_started);
     let mut resolved = resolve_prevalidated_owned_with_root(ordered, &source_text, &root);
     profile_internal("cross-file resolution total", &mut internal_started);
     drop(source_text);
@@ -7006,6 +7045,46 @@ mod tests {
 
         options.max_workers = Some(0);
         assert_eq!(pipeline_rayon_workers(&options), 1);
+    }
+
+    #[test]
+    fn parallel_ast_fact_digests_match_source_ordered_contract() -> Result<(), Box<dyn Error>> {
+        let root = Path::new("/repo");
+        let paths = (0..300)
+            .map(|index| root.join(format!("src/module_{index:03}.py")))
+            .collect::<Vec<_>>();
+        let extractions = (0..paths.len())
+            .map(|index| {
+                let mut extraction = Extraction::default();
+                extraction
+                    .extensions
+                    .insert("ordinal".to_owned(), json!(index));
+                extraction
+            })
+            .collect::<Vec<_>>();
+        let expected = paths
+            .iter()
+            .zip(&extractions)
+            .map(|(path, extraction)| {
+                Ok((
+                    relative_fact_path(path, root),
+                    extraction_fact_digest(extraction)?,
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>, serde_json::Error>>()?;
+
+        let actual = ast_fact_digest_entries(&paths, &extractions, root, root)?;
+
+        assert_eq!(actual, expected);
+        assert_eq!(
+            actual.keys().next().map(String::as_str),
+            Some("src/module_000.py")
+        );
+        assert_eq!(
+            actual.keys().next_back().map(String::as_str),
+            Some("src/module_299.py")
+        );
+        Ok(())
     }
 
     #[cfg(unix)]

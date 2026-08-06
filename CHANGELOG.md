@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Parallelize deterministic per-file AST fact digests for large repositories
+  and overlap unchanged pre-merge digest construction with portable AST cache
+  publication. Native-volume Django cold-build p50 improves from 9.82 seconds
+  to 8.04 seconds while preserving byte-identical graphs, reaching 5.43x
+  versus the paired Graphify sample.
+
 ## 0.3.3 - 2026-08-05
 
 - Improve Python bound-method and inheritance dispatch, Rust generic/reexport
