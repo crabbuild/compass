@@ -1770,6 +1770,45 @@ Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
 gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
 cut remain open.
 
+### Execution checkpoint (2026-08-07, source-proven object-spread slice)
+
+The qualification-only ECMAScript emitter now recovers a bounded, source-backed
+object-spread shape without turning JavaScript spread syntax into a name-match
+escape hatch:
+
+- A spread operand is admitted only when it is an immutable local variable whose
+  object literal is spread-free and has static, source-indexed keys. Direct
+  members and methods on the destination retain their own declaration anchors;
+  inherited members resolve through the source declaration without cloning or
+  inventing a second property identity.
+- Multiple spreads and direct properties are evaluated in source order. A later
+  spread wins over an earlier direct member, a later direct member wins over a
+  spread, and duplicate or source-mutated members fail closed. Straight-line
+  reassignment (`let value; value = { ...base }`) uses the same bounded proof.
+- Safe default and TypeScript export-assignment objects now publish their
+  synthetic `default` owner when direct static properties follow the proven
+  spreads. Cross-file default imports can resolve those direct properties;
+  inherited spread properties remain unresolved until a dedicated member-alias
+  contract preserves their original provider identity.
+- Unknown/imported/computed/conditional/mutable/ambiguous spread operands and
+  direct properties before an export spread remain unresolved. Candidate adapter
+  versions advanced to 4 to invalidate qualification-only evidence meaningfully.
+
+The focused candidate suite remains 99 tests and the universal resolver suite
+remains 171 tests. The exact-HEAD fixture qualification at
+`ebb4ebf7bb6016fa9881678c2d64e5c972e518fb` passes with 57 languages, 980
+coverage records, 1,565 invariants, 27 flows, 24 negatives, 25 diagnostics,
+28 edge kinds, 45 node kinds, graph digest
+`sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`,
+and clean/warm/rebuild/restored/alternate-checkout byte equality. The read-only
+Axios target differential remains zero-wrong at 3,054/3,167 exact local targets
+(113 missing; 391/503 members; 1,544/1,545 calls; 228 accepted-candidate false
+positives); this per-file diagnostic does not exercise cross-file publication
+and does not claim a recall or leadership increase.
+
+Compiler-source-oracle recall, accepted-sample/Wilson gates, framework tiers,
+equivalent Graphify/SCIP scope, and the production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for
