@@ -132,6 +132,43 @@ impl EvidenceBuilder {
         )
     }
 
+    /// Add a declaration with a bounded source-level signature fragment.
+    ///
+    /// Candidate adapters use this for type-shape facts that the shared
+    /// resolver can consume without inventing a target from a terminal name.
+    /// Keeping the entry point crate-private avoids expanding the public
+    /// builder surface while allowing adapters implemented in sibling
+    /// modules to publish the existing, versioned `signature` field.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn declare_with_signature(
+        &mut self,
+        kind: &str,
+        graph_node_id: &str,
+        name: &str,
+        qualified_name: &str,
+        module_or_package: Option<&str>,
+        scope_id: Option<&str>,
+        namespace: Option<SymbolNamespace>,
+        signature: Option<&str>,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
+        let metadata = DeclarationMetadata {
+            signature: signature.map(str::to_owned),
+            ..DeclarationMetadata::default()
+        };
+        self.declare_with_metadata_and_namespace(
+            kind,
+            graph_node_id,
+            name,
+            qualified_name,
+            module_or_package,
+            scope_id,
+            range,
+            namespace,
+            metadata,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn declare_with_metadata(
         &mut self,

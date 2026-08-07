@@ -796,6 +796,35 @@ differential recall, and the production hard cut remain open. The candidate
 adapter remains absent from `UNIVERSAL_ADAPTERS` until the mandatory quality
 and exact-release qualification gates complete.
 
+### Execution checkpoint (2026-08-06, bounded generic member-chain slice)
+
+The candidate adapter now publishes a bounded declaration-shape fragment in
+the existing `DeclarationFact.signature` field: generic class/interface
+parameter order and direct property nominal types. Imported generic receiver
+arguments are canonicalized to their proven module-qualified identities and
+remain attached to member constraints (for example,
+`Box<../lib/item::Item>.item.inspect`). This preserves the existing evidence
+schema and avoids turning a terminal member spelling into an authoritative
+target.
+
+The shared resolver follows a generic member-value chain only when every hop
+is source-backed and unique: it resolves the imported `Box`, substitutes the
+explicit `Item` argument for the property type parameter `T`, resolves the
+admitted `Item` module, and finally selects the exact `inspect` declaration.
+Ambiguous declarations, missing property type shapes, structural/complex
+types, and unsupported generic forms remain unresolved or follow the existing
+explicit external policy. A cross-module `Box<Item>` regression now proves
+the final call and member access target the exact `Item.inspect` node with
+`member-binding`; the full 137-test universal resolver suite and 44-test
+TypeScript candidate suite pass.
+
+This is a bounded generic propagation slice, not compiler-equivalent
+TypeScript. Nested mapped/conditional/indexed types, overload-aware generic
+substitution, framework tiers, compiler differential recall, and the
+production hard cut remain open. The candidate adapter remains absent from
+`UNIVERSAL_ADAPTERS` until the mandatory quality and exact-release
+qualification gates complete.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

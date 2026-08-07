@@ -102,6 +102,13 @@ struct TypeScriptReexportTarget {
     exported: String,
 }
 
+#[derive(Clone, Debug)]
+struct TypeScriptMemberPath {
+    root_export: String,
+    type_arguments: Vec<String>,
+    members: Vec<String>,
+}
+
 /// Compact slot into the declaration table used by secondary indexes.
 ///
 /// Declaration IDs are long, repeated strings on corpus-scale Java and
@@ -1289,7 +1296,7 @@ impl UniversalResolutionIndex {
         if keys.is_empty() {
             return None;
         }
-        let member_owner_export = if matches!(
+        let member_path = if matches!(
             candidate.relation,
             CandidateRelation::Calls
                 | CandidateRelation::IndirectCalls
@@ -1299,18 +1306,23 @@ impl UniversalResolutionIndex {
                 .constraints
                 .qualified_name
                 .as_deref()
-                .and_then(|qualified| qualified.rsplit_once("::"))
-                .and_then(|(_, path)| {
-                    let (owner, member) =
-                        path.rsplit_once('.').or_else(|| path.rsplit_once("::"))?;
-                    (member == candidate.target_spelling && !owner.is_empty())
-                        .then_some(owner.to_owned())
-                })
+                .and_then(|qualified| typescript_member_path(qualified, &candidate.target_spelling))
         } else {
             None
         };
+        let member_owner_export = member_path
+            .as_ref()
+            .filter(|path| path.members.len() == 1)
+            .map(|path| path.root_export.clone());
+        let is_member_candidate = member_path.is_some();
         let mut targets = BTreeSet::new();
         for key in keys {
+            if let Some(path) = member_path.as_ref()
+                && (path.members.len() > 1 || !path.type_arguments.is_empty())
+            {
+                targets.extend(self.typescript_member_chain_slots(language, &key, path, candidate));
+                continue;
+            }
             let owner_export = member_owner_export
                 .as_deref()
                 .unwrap_or(&exported)
@@ -1356,7 +1368,7 @@ impl UniversalResolutionIndex {
         self.unique_typescript_decision(
             Some(&targets),
             candidate,
-            if member_owner_export.is_some() {
+            if is_member_candidate {
                 ResolutionRule::MemberBinding
             } else if project_resolved {
                 ResolutionRule::ProjectModuleBinding
@@ -1364,6 +1376,140 @@ impl UniversalResolutionIndex {
                 ResolutionRule::ExplicitBinding
             },
         )
+    }
+
+    /// Resolve a bounded TypeScript member-value chain such as
+    /// `Box<Item>.item.inspect`. The root export and generic arguments come
+    /// from the import binding; each intermediate member must publish a
+    /// direct type signature, and every hop must resolve uniquely. Missing,
+    /// structural, or competing type evidence remains unresolved.
+    fn typescript_member_chain_slots(
+        &self,
+        language: &str,
+        module: &str,
+        path: &TypeScriptMemberPath,
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<DeclarationSlot> {
+        const MAX_MEMBER_CHAIN_DEPTH: usize = 16;
+        if path.members.is_empty() || path.members.len() > MAX_MEMBER_CHAIN_DEPTH {
+            return BTreeSet::new();
+        }
+        let root_targets =
+            self.typescript_export_slots(language, module, &path.root_export, candidate, true);
+        let mut targets = BTreeSet::new();
+        for root_slot in root_targets {
+            let Some(root) = self.declaration(root_slot) else {
+                continue;
+            };
+            let generic_parameters = root
+                .signature
+                .as_deref()
+                .map(typescript_generic_parameter_names)
+                .unwrap_or_default();
+            let mut owners = BTreeSet::from([root_slot]);
+            for (index, member_name) in path.members.iter().enumerate() {
+                let final_member = index.saturating_add(1) == path.members.len();
+                let mut next_owners = BTreeSet::new();
+                for owner_slot in owners.iter().copied() {
+                    let Some(owner) = self.declaration(owner_slot) else {
+                        continue;
+                    };
+                    let Some(members) = self.members_by_owner.get(&(
+                        owner.language.clone(),
+                        owner.qualified_name.clone(),
+                        member_name.clone(),
+                    )) else {
+                        continue;
+                    };
+                    if final_member {
+                        next_owners.extend(
+                            members
+                                .iter()
+                                .filter(|slot| {
+                                    self.typescript_declaration_allowed_slot(**slot, candidate)
+                                })
+                                .copied(),
+                        );
+                    } else {
+                        let typed_members = members
+                            .iter()
+                            .filter_map(|slot| self.declaration(*slot))
+                            .filter(|member| member.kind == "property")
+                            .filter_map(|member| member.signature.as_deref())
+                            .collect::<Vec<_>>();
+                        let [type_name] = typed_members.as_slice() else {
+                            continue;
+                        };
+                        next_owners.extend(self.typescript_member_type_slots(
+                            language,
+                            module,
+                            type_name,
+                            &generic_parameters,
+                            &path.type_arguments,
+                            candidate,
+                        ));
+                    }
+                }
+                if next_owners.is_empty() {
+                    owners.clear();
+                    break;
+                }
+                owners = next_owners;
+            }
+            targets.extend(owners);
+            if targets.len() > self.limits.candidates_per_lookup {
+                break;
+            }
+        }
+        targets
+    }
+
+    fn typescript_member_type_slots(
+        &self,
+        language: &str,
+        module: &str,
+        type_name: &str,
+        generic_parameters: &[String],
+        type_arguments: &[String],
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<DeclarationSlot> {
+        let type_name = type_name.trim();
+        if type_name.is_empty() || type_name.len() > 1024 {
+            return BTreeSet::new();
+        }
+        let substituted = generic_parameters
+            .iter()
+            .position(|parameter| parameter == type_name)
+            .and_then(|index| type_arguments.get(index))
+            .map_or_else(|| type_name.to_owned(), |argument| argument.clone());
+        let (base, _) = typescript_generic_type_parts(&substituted)
+            .unwrap_or((substituted.as_str(), Vec::new()));
+        let (qualified_module, exported) = split_typescript_module_qualified(base);
+        if exported.is_empty() {
+            return BTreeSet::new();
+        }
+        let mut modules = Vec::new();
+        if let Some(qualified_module) = qualified_module {
+            modules.push(qualified_module.to_owned());
+            modules.extend(typescript_import_module_keys(
+                module,
+                qualified_module,
+                &self.root,
+            ));
+        } else {
+            modules.push(module.to_owned());
+        }
+        modules.sort_unstable();
+        modules.dedup();
+        let mut slots = BTreeSet::new();
+        for module in modules {
+            slots
+                .extend(self.typescript_export_slots(language, &module, exported, candidate, true));
+            if slots.len() > self.limits.candidates_per_lookup {
+                break;
+            }
+        }
+        slots
     }
 
     fn typescript_export_slots(
@@ -4319,6 +4465,148 @@ fn typescript_language_family(language: &str) -> &'static [&'static str] {
         "javascript" => &["javascript", "typescript"],
         _ => &[],
     }
+}
+
+fn typescript_member_path(qualified: &str, target_spelling: &str) -> Option<TypeScriptMemberPath> {
+    let (_, path) = split_typescript_module_qualified(qualified);
+    let segments = split_typescript_member_segments(path);
+    if segments.len() < 2 || segments.last()?.as_str() != target_spelling {
+        return None;
+    }
+    let root_segment = segments.first()?;
+    let (root_export, type_arguments) = typescript_generic_type_parts(root_segment).map_or_else(
+        || (root_segment.clone(), Vec::new()),
+        |(base, arguments)| (base.to_owned(), arguments),
+    );
+    if root_export.is_empty() {
+        return None;
+    }
+    Some(TypeScriptMemberPath {
+        root_export,
+        type_arguments,
+        members: segments.into_iter().skip(1).collect(),
+    })
+}
+
+fn split_typescript_module_qualified(value: &str) -> (Option<&str>, &str) {
+    let bytes = value.as_bytes();
+    let mut angle_depth = 0_u32;
+    let mut split = None;
+    for index in 0..bytes.len().saturating_sub(1) {
+        match bytes[index] {
+            b'<' => angle_depth = angle_depth.saturating_add(1),
+            b'>' => angle_depth = angle_depth.saturating_sub(1),
+            b':' if bytes[index + 1] == b':' && angle_depth == 0 => split = Some(index),
+            _ => {}
+        }
+    }
+    split.map_or((None, value), |index| {
+        (
+            value.get(..index).filter(|module| !module.is_empty()),
+            value.get(index.saturating_add(2)..).unwrap_or_default(),
+        )
+    })
+}
+
+fn split_typescript_member_segments(value: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut start = 0_usize;
+    let mut angle_depth = 0_u32;
+    let bytes = value.as_bytes();
+    let mut index = 0_usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'<' => angle_depth = angle_depth.saturating_add(1),
+            b'>' => angle_depth = angle_depth.saturating_sub(1),
+            b'.' if angle_depth == 0 => {
+                if let Some(segment) = value.get(start..index).map(str::trim)
+                    && !segment.is_empty()
+                {
+                    segments.push(segment.to_owned());
+                }
+                start = index.saturating_add(1);
+            }
+            b':' if angle_depth == 0 && bytes.get(index.saturating_add(1)) == Some(&b':') => {
+                if let Some(segment) = value.get(start..index).map(str::trim)
+                    && !segment.is_empty()
+                {
+                    segments.push(segment.to_owned());
+                }
+                start = index.saturating_add(2);
+                index = index.saturating_add(1);
+            }
+            _ => {}
+        }
+        index = index.saturating_add(1);
+    }
+    if let Some(segment) = value.get(start..).map(str::trim)
+        && !segment.is_empty()
+    {
+        segments.push(segment.to_owned());
+    }
+    segments
+}
+
+fn typescript_generic_type_parts(value: &str) -> Option<(&str, Vec<String>)> {
+    let value = value.trim();
+    let bytes = value.as_bytes();
+    let open = bytes.iter().position(|byte| *byte == b'<')?;
+    if open == 0 || !value.ends_with('>') {
+        return None;
+    }
+    let base = value.get(..open)?.trim();
+    let arguments = value.get(open.saturating_add(1)..value.len().saturating_sub(1))?;
+    if base.is_empty() || arguments.is_empty() || arguments.len() > 1024 {
+        return None;
+    }
+    let mut parts = Vec::new();
+    let mut start = 0_usize;
+    let mut depth = 0_u32;
+    for (index, character) in arguments.char_indices() {
+        match character {
+            '<' | '[' | '(' | '{' => depth = depth.saturating_add(1),
+            '>' | ']' | ')' | '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                let part = arguments.get(start..index)?.trim();
+                if part.is_empty() || part.len() > 1024 {
+                    return None;
+                }
+                parts.push(part.to_owned());
+                start = index.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+    let part = arguments.get(start..)?.trim();
+    if part.is_empty() || part.len() > 1024 {
+        return None;
+    }
+    parts.push(part.to_owned());
+    (parts.len() <= 64).then_some((base, parts))
+}
+
+fn typescript_generic_parameter_names(signature: &str) -> Vec<String> {
+    let signature = signature.trim();
+    if !signature.starts_with('<') || !signature.ends_with('>') {
+        return Vec::new();
+    }
+    let body = &signature[1..signature.len().saturating_sub(1)];
+    let mut names = Vec::new();
+    for name in body.split(',').map(str::trim) {
+        if name.is_empty()
+            || name.len() > 128
+            || !name.chars().all(|character| {
+                character == '_' || character == '$' || character.is_ascii_alphanumeric()
+            })
+        {
+            return Vec::new();
+        }
+        names.push(name.to_owned());
+        if names.len() > 64 {
+            return Vec::new();
+        }
+    }
+    names
 }
 
 fn typescript_declaration_basic_allowed(

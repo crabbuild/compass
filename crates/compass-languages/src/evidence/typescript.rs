@@ -1118,7 +1118,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             format!("{qualified_prefix}.{name}")
         };
         let graph_node_id = stable_graph_id(self.source_file, kind, name, node.start_byte());
-        let declaration_id = self.builder.declare_with_namespace(
+        let signature = typescript_declaration_signature(node, kind, self.source);
+        let declaration_id = self.builder.declare_with_signature(
             kind,
             &graph_node_id,
             name,
@@ -1126,6 +1127,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             Some(self.source_file),
             Some(scope_id),
             Some(symbol_namespace(namespace)),
+            signature.as_deref(),
             range_for_node(self.source_file, range_node),
         )?;
         self.declaration_name_nodes.insert(name_node.start_byte());
@@ -4806,11 +4808,13 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             .import
             .as_ref()
             .is_some_and(|import| import.namespace == Namespace::Module);
-        let qualified_name = if namespace_import {
-            format!("{}::{property_name}", receiver.qualified_name)
-        } else {
-            format!("{}.{property_name}", receiver.qualified_name)
-        };
+        let qualified_name = typescript_member_qualified_name(
+            &receiver.qualified_name,
+            receiver.type_arguments.as_deref(),
+            &property_name,
+            namespace_import,
+            receiver.import.is_some(),
+        );
         if let Some(ids) = self.declarations_by_qualified.get(&qualified_name) {
             let flow_sensitive = self.receiver_is_flow_sensitive(&receiver);
             let all_declarations = ids
@@ -5777,16 +5781,18 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     .import
                     .as_ref()
                     .is_some_and(|import| import.namespace == Namespace::Module);
-                let qualified_name = if namespace_import {
-                    format!("{}::{property_name}", nested.qualified_name)
-                } else {
-                    format!("{}.{property_name}", nested.qualified_name)
-                };
+                let qualified_name = typescript_member_qualified_name(
+                    &nested.qualified_name,
+                    nested.type_arguments.as_deref(),
+                    &property_name,
+                    namespace_import,
+                    nested.import.is_some(),
+                );
                 let receiver = ReceiverTarget {
                     qualified_name,
                     import: nested.import,
                     scope_id: nested.scope_id,
-                    type_arguments: None,
+                    type_arguments: nested.type_arguments,
                 };
                 Some(
                     self.typed_member_receiver(scope_id, receiver.clone())
@@ -5987,6 +5993,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             let (lookup_name, type_arguments) = generic_type_parts(normalized)
                 .map(|(base, arguments)| (base.to_owned(), Some(arguments)))
                 .unwrap_or_else(|| (normalized.to_owned(), None));
+            let type_arguments =
+                type_arguments.map(|arguments| self.canonical_type_arguments(scope_id, &arguments));
             let resolution = self.resolve_name(scope_id, &lookup_name, Namespace::Both)?;
             match resolution {
                 Resolution::Import(import) => {
@@ -6037,6 +6045,26 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             }
         }
         None
+    }
+
+    /// Canonicalize direct generic arguments when the source proves an
+    /// import or local nominal declaration. Keeping the module-qualified
+    /// identity here prevents a same-spelled `Item` from another module from
+    /// being substituted into an imported `Box<Item>` chain. Unresolved or
+    /// structural arguments remain textual and are intentionally not used by
+    /// the cross-file member resolver.
+    fn canonical_type_arguments(&self, scope_id: &str, arguments: &[String]) -> Vec<String> {
+        arguments
+            .iter()
+            .map(|argument| {
+                self.resolve_name(scope_id, strip_type_arguments(argument), Namespace::Both)
+                    .and_then(|resolution| resolution.qualified_target())
+                    .filter(|qualified| {
+                        !qualified.is_empty() && qualified.len() <= MAX_TYPE_SHAPE_BYTES
+                    })
+                    .unwrap_or_else(|| argument.clone())
+            })
+            .collect()
     }
 
     /// Return the child scope owned by a nominal declaration when one exists.
@@ -6217,6 +6245,92 @@ const fn symbol_namespace(namespace: Namespace) -> SymbolNamespace {
 
 fn import_target_without_namespace(target: &str) -> String {
     target.strip_suffix("::*").unwrap_or(target).to_owned()
+}
+
+/// Keep generic arguments attached to the root nominal in a member path.
+/// `Box<Item>.value.inspect` is intentionally a constraint spelling, not a
+/// graph identity; it lets the resolver recover the concrete member type
+/// without treating the terminal `inspect` spelling as authoritative.
+fn typescript_member_qualified_name(
+    receiver: &str,
+    type_arguments: Option<&[String]>,
+    property: &str,
+    namespace_import: bool,
+    preserve_type_arguments: bool,
+) -> String {
+    let receiver = if preserve_type_arguments {
+        typescript_receiver_with_type_arguments(receiver, type_arguments)
+    } else {
+        receiver.to_owned()
+    };
+    if namespace_import {
+        format!("{receiver}::{property}")
+    } else {
+        format!("{receiver}.{property}")
+    }
+}
+
+fn typescript_receiver_with_type_arguments(
+    receiver: &str,
+    type_arguments: Option<&[String]>,
+) -> String {
+    let Some(type_arguments) = type_arguments.filter(|arguments| !arguments.is_empty()) else {
+        return receiver.to_owned();
+    };
+    let arguments = type_arguments.join(",");
+    if arguments.is_empty() || arguments.len() > MAX_TYPE_SHAPE_BYTES {
+        return receiver.to_owned();
+    }
+    let (module, symbol) = typescript_split_module_qualified(receiver);
+    let split = typescript_first_member_separator(symbol).unwrap_or(symbol.len());
+    let root = &symbol[..split];
+    if root.is_empty() || root.contains('<') {
+        return receiver.to_owned();
+    }
+    let suffix = &symbol[split..];
+    match module {
+        Some(module) if !module.is_empty() => {
+            format!("{module}::{root}<{arguments}>{suffix}")
+        }
+        _ => format!("{root}<{arguments}>{suffix}"),
+    }
+}
+
+fn typescript_split_module_qualified(value: &str) -> (Option<&str>, &str) {
+    let bytes = value.as_bytes();
+    let mut angle_depth = 0_u32;
+    let mut split = None;
+    for index in 0..bytes.len().saturating_sub(1) {
+        match bytes[index] {
+            b'<' => angle_depth = angle_depth.saturating_add(1),
+            b'>' => angle_depth = angle_depth.saturating_sub(1),
+            b':' if bytes[index + 1] == b':' && angle_depth == 0 => split = Some(index),
+            _ => {}
+        }
+    }
+    split.map_or((None, value), |index| {
+        (
+            value.get(..index).filter(|module| !module.is_empty()),
+            value.get(index.saturating_add(2)..).unwrap_or_default(),
+        )
+    })
+}
+
+fn typescript_first_member_separator(value: &str) -> Option<usize> {
+    let bytes = value.as_bytes();
+    let mut angle_depth = 0_u32;
+    for index in 0..bytes.len() {
+        match bytes[index] {
+            b'<' => angle_depth = angle_depth.saturating_add(1),
+            b'>' => angle_depth = angle_depth.saturating_sub(1),
+            b'.' if angle_depth == 0 => return Some(index),
+            b':' if angle_depth == 0 && bytes.get(index + 1) == Some(&b':') => {
+                return Some(index);
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn is_parameter_node(node: Node<'_>) -> bool {
@@ -6848,6 +6962,29 @@ fn normalize_type_text(source: &[u8], node: Node<'_>) -> String {
         .chars()
         .filter(|character| !character.is_ascii_whitespace())
         .collect()
+}
+
+/// Return the small amount of declaration shape needed to follow a proven
+/// TypeScript member value across files. This is deliberately not a full
+/// source signature: a generic owner publishes its parameter order and a
+/// property publishes its direct nominal type. The resolver can therefore
+/// substitute `T` in `Box<T> { item: T }` only when the use site carries an
+/// explicit `Box<Concrete>` argument.
+fn typescript_declaration_signature(node: Node<'_>, kind: &str, source: &[u8]) -> Option<String> {
+    if kind == "property"
+        && let Some(type_name) = direct_type_reference_name(node, source)
+    {
+        return Some(type_name);
+    }
+    if matches!(kind, "class" | "interface")
+        && let Some(parameters) = callable_type_parameter_order(node, source)
+    {
+        let signature = format!("<{}>", parameters.join(","));
+        if signature.len() <= MAX_TYPE_SHAPE_BYTES {
+            return Some(signature);
+        }
+    }
+    None
 }
 
 fn direct_type_reference_name(node: Node<'_>, source: &[u8]) -> Option<String> {
