@@ -2237,6 +2237,10 @@ fn install_skill_at_scoped(
             &format!("{REFERENCE_BUNDLE}/references/"),
             &stage.join("references"),
         )?;
+        install_asset_tree(
+            &format!("{REFERENCE_BUNDLE}/agents/"),
+            &stage.join("agents"),
+        )?;
         write_owned(stage.join("SKILL.md"), body)?;
         write_owned(stage.join(".compass_version"), SKILL_VERSION)?;
         let manifest = build_manifest(&stage, scope, root, merged_consumers)?;
@@ -3388,7 +3392,7 @@ fn install_asset_tree(prefix: &str, destination: &Path) -> Result<(), String> {
     if count == 0 {
         let _ = fs::remove_dir_all(&staged);
         return Err(format!(
-            "error: references for package bundle '{prefix}' are missing"
+            "error: assets for package bundle '{prefix}' are missing"
         ));
     }
     remove_dir_if_exists(destination)?;
@@ -3499,7 +3503,7 @@ fn expected_package_digests(skill_body: &str) -> BTreeMap<String, String> {
     let prefix = format!("{REFERENCE_BUNDLE}/");
     for asset in EMBEDDED_ASSETS {
         if let Some(relative) = asset.path.strip_prefix(&prefix)
-            && relative.starts_with("references/")
+            && (relative.starts_with("references/") || relative.starts_with("agents/"))
         {
             files.insert(relative.to_owned(), digest_bytes(asset.bytes));
         }
@@ -4108,6 +4112,9 @@ mod tests {
         assert!(body.contains("compass query"));
         assert!(body.contains("--budget N"));
         assert!(body.contains("next=none"));
+        let openai_metadata = asset_text("compass-skill/agents/openai.yaml").unwrap_or_default();
+        assert!(openai_metadata.contains("display_name: \"Compass\""));
+        assert!(openai_metadata.contains("$compass"));
         let query = asset_text("compass-skill/references/query.md").unwrap_or_default();
         assert!(query.contains("4,000–16,000 tokens"));
         assert!(query.contains("--page N"));

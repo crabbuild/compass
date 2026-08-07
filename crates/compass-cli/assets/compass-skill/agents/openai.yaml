@@ -1,0 +1,4 @@
+interface:
+  display_name: "Compass"
+  short_description: "Graph-first codebase navigation and impact analysis"
+  default_prompt: "Use $compass to map this repository and answer with cited graph and source evidence."

@@ -7,8 +7,10 @@ The canonical native skill lives under
 module before embedding assets and fails the build when:
 
 - the skill frontmatter is not named `compass`;
+- the Codex UI metadata is missing or pre-approves tools;
 - required core workflow sections disappear;
-- the core, any reference, or the complete bundle is unexpectedly small;
+- the core exceeds a conservative token budget, or the core, any reference, or
+  the complete bundle is unexpectedly small;
 - a bundled reference is not linked exactly once from the core index;
 - the core links a reference that is not bundled;
 - the public rich-help catalog and CLI dispatch disagree;
@@ -22,7 +24,9 @@ module before embedding assets and fails the build when:
 - a reference has no level-one heading or Compass command/path.
 
 Input files are sorted before embedding, so the generated Rust asset table is
-deterministic. Adding a reference requires adding the file and its
+deterministic. The optional `agents/openai.yaml` file is validated and installed
+alongside the portable bundle for Codex-aware UI metadata; it must not grant
+tool permissions. Adding a reference requires adding the file and its
 `references/<name>.md` entry to `SKILL.md`; removing one requires removing both.
 Adding a public CLI command requires adding a public page to `src/help.rs`, a
 dispatch arm, and a real workflow or boundary in the skill bundle. The build

@@ -11,7 +11,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 const MINIMUM_CORE_WORDS: usize = 500;
-const MAXIMUM_CORE_WORDS: usize = 5_000;
+const MAXIMUM_CORE_TOKENS: usize = 5_000;
 const MINIMUM_REFERENCES: usize = 10;
 const MINIMUM_REFERENCE_WORDS: usize = 120;
 const MINIMUM_BUNDLE_WORDS: usize = 5_000;
@@ -52,7 +52,7 @@ pub(crate) fn validate(assets: &Path, cli_source: &Path, help_source: &Path) -> 
         "core skill is unexpectedly small",
     )?;
     require(
-        skill.split_whitespace().count() <= MAXIMUM_CORE_WORDS,
+        approximate_token_count(&skill) <= MAXIMUM_CORE_TOKENS,
         &skill_path,
         "core skill exceeds the Agent Skills activation budget",
     )?;
@@ -69,6 +69,9 @@ pub(crate) fn validate(assets: &Path, cli_source: &Path, help_source: &Path) -> 
             &format!("core skill is missing required section {section:?}"),
         )?;
     }
+    let openai_metadata_path = skill_root.join("agents/openai.yaml");
+    let openai_metadata = read_utf8(&openai_metadata_path)?;
+    validate_openai_metadata(&openai_metadata_path, &openai_metadata)?;
 
     let reference_root = skill_root.join("references");
     let reference_paths = markdown_files(&reference_root)?;
@@ -313,6 +316,27 @@ fn validate_integrations(root: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn validate_openai_metadata(path: &Path, body: &str) -> io::Result<()> {
+    for required in [
+        "interface:",
+        "display_name: \"Compass\"",
+        "short_description:",
+        "default_prompt:",
+        "$compass",
+    ] {
+        require(
+            body.contains(required),
+            path,
+            &format!("Codex metadata is missing {required:?}"),
+        )?;
+    }
+    require(
+        !body.contains("allowed-tools:"),
+        path,
+        "Codex metadata must not pre-approve tools",
+    )
+}
+
 fn linked_references(skill: &str) -> BTreeSet<String> {
     let mut output = BTreeSet::new();
     let mut remainder = skill;
@@ -348,6 +372,10 @@ fn markdown_files(root: &Path) -> io::Result<Vec<PathBuf>> {
 fn read_utf8(path: &Path) -> io::Result<String> {
     fs::read_to_string(path)
         .map_err(|error| io::Error::new(error.kind(), format!("{}: {error}", path.display())))
+}
+
+fn approximate_token_count(text: &str) -> usize {
+    text.len().saturating_add(3) / 4
 }
 
 fn has_canonical_frontmatter(body: &str) -> bool {
@@ -386,7 +414,7 @@ fn path_string(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{has_canonical_frontmatter, linked_references};
+    use super::{approximate_token_count, has_canonical_frontmatter, linked_references};
 
     #[test]
     fn canonical_frontmatter_accepts_lf_and_crlf() {
@@ -412,5 +440,12 @@ mod tests {
             links.into_iter().collect::<Vec<_>>(),
             ["references/a-file.md", "references/z.md"]
         );
+    }
+
+    #[test]
+    fn token_estimate_rounds_up_conservatively() {
+        assert_eq!(approximate_token_count(""), 0);
+        assert_eq!(approximate_token_count("abcd"), 1);
+        assert_eq!(approximate_token_count("abcde"), 2);
     }
 }
