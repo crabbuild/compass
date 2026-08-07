@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const SCHEMA = "compass.typescript-source-oracle/1";
-const JSONL_SCHEMA = "compass.typescript-source-oracle-jsonl/2";
+const JSONL_SCHEMA = "compass.typescript-source-oracle-jsonl/3";
 const PROVIDER = "typescript_compiler_api_5_9_3";
 const MAX_FILES = 20_000;
 const MAX_SOURCE_BYTES = 128 * 1024 * 1024;
@@ -505,6 +505,33 @@ function callTargetKind(node) {
   return "dynamic";
 }
 
+function memberAccessKind(node) {
+  const parent = node?.parent;
+  if (!parent) return "read";
+  if (
+    (ts.isBinaryExpression(parent) &&
+      parent.left === node &&
+      parent.operatorToken.kind === ts.SyntaxKind.EqualsToken) ||
+    (ts.isPrefixUnaryExpression(parent) &&
+      (parent.operator === ts.SyntaxKind.PlusPlusToken ||
+        parent.operator === ts.SyntaxKind.MinusMinusToken)) ||
+    (ts.isPostfixUnaryExpression(parent) &&
+      (parent.operator === ts.SyntaxKind.PlusPlusToken ||
+        parent.operator === ts.SyntaxKind.MinusMinusToken))
+  ) {
+    return "write";
+  }
+  if (
+    ts.isBinaryExpression(parent) &&
+    parent.left === node &&
+    parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+    parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+  ) {
+    return "write";
+  }
+  return "read";
+}
+
 function isDeclarationName(node) {
   const parent = node.parent;
   if (!parent) return false;
@@ -546,7 +573,30 @@ function parseFile(root, fileName, raw, constructs, diagnostics, typedFacts) {
   const scopes = typedFacts.scopes;
   const declarations = typedFacts.declarations;
   const calls = typedFacts.calls;
+  const constructions = typedFacts.constructions;
+  const imports = typedFacts.imports;
+  const reexports = typedFacts.reexports;
+  const bases = typedFacts.bases;
+  const members = typedFacts.members;
+  const references = typedFacts.references;
   const scopeStack = [];
+  const addTypedFact = (collection, value, label) => {
+    if (typedFacts.count >= MAX_TYPED_FACTS) {
+      fail(`typed fact count exceeds ${MAX_TYPED_FACTS}`);
+    }
+    collection.push(value);
+    typedFacts.count += 1;
+    return label;
+  };
+  const statementFields = (node) => {
+    const range = nodeRange(sourceFile, offsets, node);
+    if (!range) return null;
+    return {
+      statementStartByte: range.startByte,
+      statementEndByte: range.endByte,
+      statementStartLine: range.startLine,
+    };
+  };
   const addScope = (node) => {
     const kind = scopeKind(node);
     if (!kind) return false;
@@ -556,11 +606,8 @@ function parseFile(root, fileName, raw, constructs, diagnostics, typedFacts) {
         : null)
       : nodeRange(sourceFile, offsets, node);
     if (!range) return false;
-    if (scopes.length >= MAX_TYPED_FACTS) {
-      fail(`scope count exceeds ${MAX_TYPED_FACTS}`);
-    }
     const scopeId = `${relative}:${kind}:${range.startByte}:${range.endByte}`;
-    scopes.push({
+    addTypedFact(scopes, {
       sourceFile: relative,
       scopeId,
       kind,
@@ -585,11 +632,8 @@ function parseFile(root, fileName, raw, constructs, diagnostics, typedFacts) {
     }
     const range = nodeRange(sourceFile, offsets, node.name);
     if (!range) return;
-    if (declarations.length >= MAX_TYPED_FACTS) {
-      fail(`declaration count exceeds ${MAX_TYPED_FACTS}`);
-    }
     const parameters = declarationParameters(node);
-    declarations.push({
+    addTypedFact(declarations, {
       sourceFile: relative,
       kind,
       name: node.name.text,
@@ -608,11 +652,8 @@ function parseFile(root, fileName, raw, constructs, diagnostics, typedFacts) {
     if (!target || !targetRange || !callRange) return;
     const targetSpelling = identifierText(sourceFile, target);
     if (!targetSpelling) return;
-    if (calls.length >= MAX_TYPED_FACTS) {
-      fail(`call count exceeds ${MAX_TYPED_FACTS}`);
-    }
     const argumentsList = Array.isArray(node.arguments) ? node.arguments : [];
-    calls.push({
+    addTypedFact(node.kind === ts.SyntaxKind.NewExpression ? constructions : calls, {
       sourceFile: relative,
       relation,
       kind: relation === "instantiates" ? "construction" : "call",
@@ -628,7 +669,113 @@ function parseFile(root, fileName, raw, constructs, diagnostics, typedFacts) {
       argumentCount: argumentsList.length,
       hasSpreadArgument: argumentsList.some((argument) => Boolean(argument.dotDotDotToken)),
       optional: Boolean(node.questionDotToken),
-    });
+    }, relation === "instantiates" ? "construction" : "call");
+  };
+
+  const addImportFact = (
+    node,
+    anchor,
+    kind,
+    moduleSpecifier,
+    importedName = null,
+    localName = null,
+    isTypeOnly = false,
+  ) => {
+    const range = nodeRange(sourceFile, offsets, anchor);
+    const statement = statementFields(node);
+    if (!range || !statement || !moduleSpecifier) return;
+    addTypedFact(imports, {
+      sourceFile: relative,
+      relation: "imports",
+      kind,
+      ownerQualifiedName: ownerName(root, sourceFile, node),
+      moduleSpecifier,
+      importedName,
+      localName,
+      isTypeOnly: Boolean(isTypeOnly),
+      ...range,
+      ...statement,
+    }, "import");
+  };
+
+  const addReexportFact = (
+    node,
+    anchor,
+    kind,
+    moduleSpecifier = null,
+    exportedName = null,
+    localName = null,
+    isTypeOnly = false,
+  ) => {
+    const range = nodeRange(sourceFile, offsets, anchor);
+    const statement = statementFields(node);
+    if (!range || !statement) return;
+    addTypedFact(reexports, {
+      sourceFile: relative,
+      relation: "reexports",
+      kind,
+      ownerQualifiedName: ownerName(root, sourceFile, node),
+      moduleSpecifier,
+      exportedName,
+      localName,
+      isTypeOnly: Boolean(isTypeOnly),
+      ...range,
+      ...statement,
+    }, "reexport");
+  };
+
+  const addBaseFact = (node, typeNode, relation) => {
+    const range = nodeRange(sourceFile, offsets, typeNode.expression);
+    const statement = statementFields(node);
+    const targetSpelling = identifierText(sourceFile, targetNode(typeNode.expression));
+    if (!range || !statement || !targetSpelling) return;
+    addTypedFact(bases, {
+      sourceFile: relative,
+      relation,
+      kind: relation,
+      ownerQualifiedName: ownerName(root, sourceFile, node),
+      targetSpelling,
+      qualifier: null,
+      ...range,
+      ...statement,
+    }, "base");
+  };
+
+  const addMemberFact = (node) => {
+    const target = targetNode(node);
+    const range = nodeRange(sourceFile, offsets, target);
+    const expression = statementFields(node);
+    const targetSpelling = identifierText(sourceFile, target);
+    if (!target || !range || !expression || !targetSpelling) return;
+    addTypedFact(members, {
+      sourceFile: relative,
+      relation: "accesses",
+      kind: ts.isPropertyAccessExpression(node) ? "property" : "computed_literal",
+      ownerQualifiedName: ownerName(root, sourceFile, node),
+      targetSpelling,
+      qualifier: targetQualifier(sourceFile, node)
+        ? nodeText(sourceFile, targetQualifier(sourceFile, node)) || null
+        : null,
+      accessKind: memberAccessKind(node),
+      optional: Boolean(node.questionDotToken),
+      ...range,
+      ...expression,
+    }, "member");
+  };
+
+  const addReferenceFact = (node, kind, anchor = node, qualifier = null) => {
+    const range = nodeRange(sourceFile, offsets, anchor);
+    const targetSpelling = identifierText(sourceFile, node);
+    if (!range || !targetSpelling) return;
+    addTypedFact(references, {
+      sourceFile: relative,
+      relation: "references",
+      kind,
+      ownerQualifiedName: ownerName(root, sourceFile, node),
+      targetSpelling,
+      qualifier: qualifier ? nodeText(sourceFile, qualifier) || null : null,
+      ...range,
+    }, "reference");
   };
 
   const add = (
@@ -663,36 +810,153 @@ function parseFile(root, fileName, raw, constructs, diagnostics, typedFacts) {
     const pushedScope = addScope(node);
     if (ts.isImportDeclaration(node) && node.moduleSpecifier) {
       add("imports", "imports", node.moduleSpecifier, null, node.moduleSpecifier.text);
+      const moduleSpecifier = node.moduleSpecifier.text;
+      const importClause = node.importClause;
+      if (!importClause) {
+        addImportFact(node, node.moduleSpecifier, "side_effect", moduleSpecifier, null, null, false);
+      }
+      if (importClause?.name) {
+        addImportFact(
+          node,
+          importClause.name,
+          "default",
+          moduleSpecifier,
+          "default",
+          importClause.name.text,
+          Boolean(importClause.isTypeOnly),
+        );
+      }
       if (node.importClause?.namedBindings && ts.isNamedImports(node.importClause.namedBindings)) {
         for (const element of node.importClause.namedBindings.elements) {
           add("imports", "imports", element.name, node.moduleSpecifier, identifierText(sourceFile, element.propertyName ?? element.name));
+          addImportFact(
+            node,
+            element.name,
+            "named",
+            moduleSpecifier,
+            identifierText(sourceFile, element.propertyName ?? element.name),
+            element.name.text,
+            Boolean(importClause?.isTypeOnly || element.isTypeOnly),
+          );
         }
+      }
+      if (node.importClause?.namedBindings && ts.isNamespaceImport(node.importClause.namedBindings)) {
+        addImportFact(
+          node,
+          node.importClause.namedBindings.name,
+          "namespace",
+          moduleSpecifier,
+          "*",
+          node.importClause.namedBindings.name.text,
+          Boolean(importClause?.isTypeOnly),
+        );
       }
       if (node.importClause?.name) {
         add("imports", "imports", node.importClause.name, node.moduleSpecifier, "default");
       }
     } else if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
       add("reexports", "reexports", node.moduleSpecifier, null, node.moduleSpecifier.text);
+      const moduleSpecifier = node.moduleSpecifier.text;
+      if (!node.exportClause) {
+        addReexportFact(node, node.moduleSpecifier, "star", moduleSpecifier, "*", null, Boolean(node.isTypeOnly));
+      }
       if (node.exportClause && ts.isNamedExports(node.exportClause)) {
         for (const element of node.exportClause.elements) {
           add("reexports", "reexports", element.name, node.moduleSpecifier, identifierText(sourceFile, element.propertyName ?? element.name));
+          addReexportFact(
+            node,
+            element.name,
+            "named",
+            moduleSpecifier,
+            element.name.text,
+            element.propertyName ? identifierText(sourceFile, element.propertyName) : element.name.text,
+            Boolean(node.isTypeOnly || element.isTypeOnly),
+          );
         }
       }
+      if (node.exportClause && ts.isNamespaceExport(node.exportClause)) {
+        addReexportFact(
+          node,
+          node.exportClause.name,
+          "namespace",
+          moduleSpecifier,
+          node.exportClause.name.text,
+          null,
+          Boolean(node.isTypeOnly),
+        );
+      }
+    } else if (ts.isExportDeclaration(node)) {
+      if (node.exportClause && ts.isNamedExports(node.exportClause)) {
+        for (const element of node.exportClause.elements) {
+          addReexportFact(
+            node,
+            element.name,
+            "local",
+            null,
+            element.name.text,
+            element.propertyName ? identifierText(sourceFile, element.propertyName) : element.name.text,
+            Boolean(node.isTypeOnly || element.isTypeOnly),
+          );
+        }
+      }
+    } else if (ts.isExportAssignment(node)) {
+      addReexportFact(node, node.expression, "default", null, "default", nodeText(sourceFile, node.expression), false);
     } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
       add("imports", "imports", node.moduleReference.expression, null, node.moduleReference.expression.text);
+      addImportFact(
+        node,
+        node.moduleReference.expression,
+        "import_equals",
+        node.moduleReference.expression.text,
+        "*",
+        node.name?.text ?? null,
+        Boolean(node.isTypeOnly),
+      );
     } else if (ts.isCallExpression(node)) {
       add("calls", "calls", node.expression, targetQualifier(sourceFile, node.expression));
       addCall(node, "calls");
+      if (node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments.length > 0) {
+        const argument = node.arguments[0];
+        addImportFact(
+          node,
+          argument,
+          "dynamic",
+          nodeText(sourceFile, argument),
+          null,
+          null,
+          false,
+        );
+      } else if (
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "require" &&
+        node.arguments.length > 0
+      ) {
+        const argument = node.arguments[0];
+        addImportFact(
+          node,
+          argument,
+          "require",
+          nodeText(sourceFile, argument),
+          null,
+          null,
+          false,
+        );
+      }
     } else if (ts.isNewExpression(node)) {
       add("instantiates", "construction", node.expression, targetQualifier(sourceFile, node.expression));
       addCall(node, "instantiates");
     } else if (ts.isPropertyAccessExpression(node)) {
       add("accesses", "members", node.name, node.expression);
+      addMemberFact(node);
     } else if (ts.isElementAccessExpression(node) && node.argumentExpression && (ts.isStringLiteral(node.argumentExpression) || ts.isNumericLiteral(node.argumentExpression))) {
       add("accesses", "members", node.argumentExpression, node.expression, node.argumentExpression.text);
+      addMemberFact(node);
     } else if (ts.isHeritageClause(node)) {
       const relation = node.token === ts.SyntaxKind.ExtendsKeyword ? "extends" : "implements";
-      for (const type of node.types) add(relation, "base_types", type.expression, null);
+      for (const type of node.types) {
+        add(relation, "base_types", type.expression, null);
+        addBaseFact(node, type, relation);
+      }
     } else if (ts.isTypeReferenceNode(node)) {
       // The parser represents `as const` as a TypeReferenceNode, but `const`
       // is an assertion keyword there rather than a named type reference.
@@ -704,11 +968,22 @@ function parseFile(root, fileName, raw, constructs, diagnostics, typedFacts) {
           node.typeName.getText(sourceFile) === "const")
       ) {
         add("references", "type_references", node.typeName, null);
+        addReferenceFact(node.typeName, "type", node.typeName);
       }
     } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument) && ts.isStringLiteral(node.argument.literal)) {
       add("imports", "imports", node.argument.literal, null, node.argument.literal.text);
+      addImportFact(
+        node,
+        node.argument.literal,
+        "import_type",
+        node.argument.literal.text,
+        null,
+        null,
+        Boolean(node.isTypeOf),
+      );
     } else if (ts.isJsxOpeningLikeElement(node)) {
       add("references", "jsx", node.tagName, null);
+      addReferenceFact(node.tagName, "jsx", node.tagName);
     } else if (ts.isIdentifier(node) && !isDeclarationName(node)) {
       const parent = node.parent;
       if (
@@ -722,6 +997,7 @@ function parseFile(root, fileName, raw, constructs, diagnostics, typedFacts) {
         !(ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent))
       ) {
         add("references", "references", node);
+        addReferenceFact(node, "identifier", node);
       }
     }
 
@@ -776,6 +1052,13 @@ function main() {
     scopes: [],
     declarations: [],
     calls: [],
+    constructions: [],
+    imports: [],
+    reexports: [],
+    bases: [],
+    members: [],
+    references: [],
+    count: 0,
   };
   let totalBytes = 0;
   let parsedFiles = 0;
@@ -849,6 +1132,57 @@ function main() {
     "relation",
     "targetSpelling",
   ]);
+  sortByFields(typedFacts.constructions, [
+    "sourceFile",
+    "callStartByte",
+    "callEndByte",
+    "startByte",
+    "endByte",
+    "targetSpelling",
+  ]);
+  sortByFields(typedFacts.imports, [
+    "sourceFile",
+    "statementStartByte",
+    "startByte",
+    "endByte",
+    "kind",
+    "moduleSpecifier",
+    "localName",
+  ]);
+  sortByFields(typedFacts.reexports, [
+    "sourceFile",
+    "statementStartByte",
+    "startByte",
+    "endByte",
+    "kind",
+    "moduleSpecifier",
+    "exportedName",
+  ]);
+  sortByFields(typedFacts.bases, [
+    "sourceFile",
+    "startByte",
+    "endByte",
+    "relation",
+    "ownerQualifiedName",
+    "targetSpelling",
+  ]);
+  sortByFields(typedFacts.members, [
+    "sourceFile",
+    "statementStartByte",
+    "startByte",
+    "endByte",
+    "kind",
+    "targetSpelling",
+    "qualifier",
+  ]);
+  sortByFields(typedFacts.references, [
+    "sourceFile",
+    "startByte",
+    "endByte",
+    "kind",
+    "ownerQualifiedName",
+    "targetSpelling",
+  ]);
   diagnostics.sort((left, right) => {
     if (left.file < right.file) return -1;
     if (left.file > right.file) return 1;
@@ -892,6 +1226,12 @@ function main() {
     scopes: typedFacts.scopes,
     declarations: typedFacts.declarations,
     calls: typedFacts.calls,
+    constructions: typedFacts.constructions,
+    imports: typedFacts.imports,
+    reexports: typedFacts.reexports,
+    bases: typedFacts.bases,
+    members: typedFacts.members,
+    references: typedFacts.references,
   };
   if (!jsonl) {
     process.stdout.write(`${JSON.stringify(payload)}\n`);
@@ -919,6 +1259,12 @@ function main() {
       scopeCount: payload.scopes.length,
       declarationCount: payload.declarations.length,
       callCount: payload.calls.length,
+      constructionCount: payload.constructions.length,
+      importCount: payload.imports.length,
+      reexportCount: payload.reexports.length,
+      baseCount: payload.bases.length,
+      memberCount: payload.members.length,
+      referenceCount: payload.references.length,
     },
     ...payload.projects.map((project) => ({ recordType: "project", ...project })),
     ...coverage,
@@ -927,6 +1273,12 @@ function main() {
     ...payload.scopes.map((scope) => ({ recordType: "scope", ...scope })),
     ...payload.declarations.map((declaration) => ({ recordType: "declaration", ...declaration })),
     ...payload.calls.map((call) => ({ recordType: "call", ...call })),
+    ...payload.constructions.map((construction) => ({ recordType: "construction", ...construction })),
+    ...payload.imports.map((entry) => ({ recordType: "import", ...entry })),
+    ...payload.reexports.map((entry) => ({ recordType: "reexport", ...entry })),
+    ...payload.bases.map((base) => ({ recordType: "base", ...base })),
+    ...payload.members.map((member) => ({ recordType: "member", ...member })),
+    ...payload.references.map((reference) => ({ recordType: "reference", ...reference })),
     {
       schema: JSONL_SCHEMA,
       provider: PROVIDER,
@@ -940,6 +1292,12 @@ function main() {
       scopeCount: payload.scopes.length,
       declarationCount: payload.declarations.length,
       callCount: payload.calls.length,
+      constructionCount: payload.constructions.length,
+      importCount: payload.imports.length,
+      reexportCount: payload.reexports.length,
+      baseCount: payload.bases.length,
+      memberCount: payload.members.length,
+      referenceCount: payload.references.length,
       sourceDigest: payload.metadata.sourceDigest,
       configDigest: payload.metadata.configDigest,
     },

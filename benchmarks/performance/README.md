@@ -141,9 +141,10 @@ rule does not relax body references or endpoint conflicts.
 TypeScript and JavaScript source recall uses the independent compiler oracle in
 `benchmarks/performance/oracles/typescript-source-oracle.mjs`. It is a pinned
 developer-side tool, not a Compass runtime dependency. The audit pipeline uses
-its bounded `--jsonl` stream (schema `compass.typescript-source-oracle-jsonl/2`;
+its bounded `--jsonl` stream (schema `compass.typescript-source-oracle-jsonl/3`;
 header, project/file coverage, diagnostics, flattened constructs, typed scopes,
-declarations, calls, and footer) so incomplete source denominators fail closed.
+declarations, calls, constructions, imports, reexports, bases, members,
+references, and footer) so incomplete source denominators fail closed.
 Run `npm ci` before the
 first TypeScript/JavaScript audit so the lockfile's TypeScript 5.9.3 package is
 available. The provider discovers bounded `tsconfig*.json`/`jsconfig*.json`

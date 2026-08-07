@@ -1340,13 +1340,40 @@ addition to the compatibility construct inventory:
   spread and optional-call flags. The range validator proves that the callee
   lies inside the full call expression and inside its source file.
 - Header/footer counts cover every typed record under
-  `compass.typescript-source-oracle-jsonl/2`; repeated output is byte-identical,
+  `compass.typescript-source-oracle-jsonl/3`; repeated output is byte-identical,
   and the Python audit reconstructs the legacy inventory only after validating
   the typed stream.
 
 This closes the source-oracle scope/declaration/call stream contract, but not
 target adjudication or semantic quality: compiler-backed target truth, four
 release corpora, accepted precision/Wilson gates, framework tiers, equivalent
+Graphify/SCIP scope, and the production hard cut remain open.
+
+### Execution checkpoint (2026-08-07, typed relationship fact stream)
+
+The qualification-only TypeScript/JavaScript JSONL oracle now promotes the
+remaining source relationships into typed records instead of relying only on
+the compatibility construct projection:
+
+- `import` and `reexport` records retain module specifiers, named/default/
+  namespace/local binding identity, type-only provenance, enclosing statement
+  ranges, and exact source anchors.
+- `construction` records separate `new` expressions from ordinary `call`
+  records while preserving full invocation ranges, target classification,
+  argument count, spread, and owner identity.
+- `base` records cover `extends` and `implements` expressions with exact
+  heritage-clause containment; `member` records cover property and bounded
+  literal-element accesses with read/write and optional-access metadata.
+- `reference` records cover source identifiers, type references, and JSX tag
+  anchors. Every new record is bounded, sorted deterministically, tied to a
+  parsed source file, and checked for enclosing-range and count consistency by
+  the Python audit validator.
+
+The JSONL contract is now
+`compass.typescript-source-oracle-jsonl/3`; the single-document schema and
+legacy construct inventory remain compatible. This closes the source-oracle
+relationship fact inventory, but compiler-backed target truth, four release
+corpora, accepted precision/Wilson gates, framework tiers, equivalent
 Graphify/SCIP scope, and the production hard cut remain open.
 
 ### Execution checkpoint (2026-08-07, imported literal utility projections)

@@ -15,15 +15,17 @@ with cycle/depth limits, and selects the compiler's project file set. If every
 discovered configuration is invalid it reports diagnostics and falls back to
 the bounded source tree instead of silently returning an empty inventory.
 
-The JSONL stream is schema `compass.typescript-source-oracle-jsonl/2`. In
+The JSONL stream is schema `compass.typescript-source-oracle-jsonl/3`. In
 addition to the legacy flattened `construct` records, it emits independently
-validated `scope`, `declaration`, and `call` records. Declarations retain
+validated `scope`, `declaration`, `call`, `construction`, `import`,
+`reexport`, `base`, `member`, and `reference` records. Declarations retain
 value/type/namespace identity and bounded parameter-shape metadata; scopes
-retain deterministic parent IDs; calls retain an exact callee anchor, full
-call-expression range, target kind, argument count, spread, and optional-call
-flags. Header/footer counts cover every typed record, and the Python audit
-rejects missing parents, duplicate IDs, invalid ranges, unknown fields, and
-count/digest mismatches.
+retain deterministic parent IDs; calls and constructions retain exact target
+anchors and full invocation ranges; imports/reexports retain module and
+binding identity; bases, members, and references retain enclosing owners and
+source ranges. Header/footer counts cover every typed record, and the Python
+audit rejects missing parents, duplicate IDs, invalid ranges, unknown fields,
+and count/digest mismatches.
 
 - `typescript-source-oracle.mjs` records source constructs for declarations,
   imports/reexports, calls, construction, members, bases, type references, and

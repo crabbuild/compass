@@ -407,6 +407,79 @@ class CorrectnessTests(unittest.TestCase):
             "run(café)".encode(),
         )
 
+    def test_typescript_source_oracle_jsonl_exposes_typed_relationship_records(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "src" / "base.ts").write_text(
+                "export default class Default { base(): void {} }\n"
+                "export const imported = () => 1;\n"
+                "export interface Runnable { run(): void }\n",
+                encoding="utf-8",
+            )
+            (root / "src" / "main.tsx").write_text(
+                'import Default, { imported, type Runnable as RunType } from "./base";\n'
+                'export { imported as exported };\n'
+                'export * from "./base";\n'
+                'class Child extends Default implements RunType {\n'
+                '  field = imported;\n'
+                '  run(): void {\n'
+                '    const obj = { literal: imported };\n'
+                '    obj.literal = imported;\n'
+                '    obj["literal"];\n'
+                '    new Default();\n'
+                '    imported();\n'
+                '    return <Default />;\n'
+                '  }\n'
+                '}\n'
+                'export default Child;\n',
+                encoding="utf-8",
+            )
+            command = ("node", str(SOURCE_ORACLE), "--root", str(root), "--jsonl")
+            result = subprocess.run(
+                command,
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            payload = _typescript_payload_from_jsonl(result.stdout)
+            _typescript_inventory_from_payload(payload, root)
+            source_sizes = {
+                file_name: (root / file_name).stat().st_size
+                for file_name in {record["sourceFile"] for field in ("imports", "reexports", "constructions", "bases", "members", "references") for record in payload[field]}
+            }
+        self.assertGreaterEqual(len(payload["imports"]), 3)
+        self.assertIn("named", {item["kind"] for item in payload["imports"]})
+        self.assertIn("default", {item["kind"] for item in payload["imports"]})
+        self.assertTrue(any(item["isTypeOnly"] for item in payload["imports"]))
+        self.assertGreaterEqual(len(payload["reexports"]), 3)
+        self.assertIn("star", {item["kind"] for item in payload["reexports"]})
+        self.assertIn("default", {item["kind"] for item in payload["reexports"]})
+        self.assertTrue(payload["constructions"])
+        self.assertTrue(all(item["relation"] == "instantiates" for item in payload["constructions"]))
+        self.assertIn("extends", {item["relation"] for item in payload["bases"]})
+        self.assertIn("implements", {item["relation"] for item in payload["bases"]})
+        self.assertIn("property", {item["kind"] for item in payload["members"]})
+        self.assertIn("computed_literal", {item["kind"] for item in payload["members"]})
+        self.assertIn("write", {item["accessKind"] for item in payload["members"]})
+        self.assertIn("jsx", {item["kind"] for item in payload["references"]})
+        for field in (
+            "imports",
+            "reexports",
+            "constructions",
+            "bases",
+            "members",
+            "references",
+        ):
+            for record in payload[field]:
+                source_size = source_sizes[record["sourceFile"]]
+                self.assertLessEqual(record["endByte"], source_size)
+                if "statementEndByte" in record:
+                    self.assertLessEqual(record["statementEndByte"], source_size)
+                if "callEndByte" in record:
+                    self.assertLessEqual(record["callEndByte"], source_size)
+
     def test_typescript_source_oracle_reports_invalid_config_and_follows_cycles_once(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
