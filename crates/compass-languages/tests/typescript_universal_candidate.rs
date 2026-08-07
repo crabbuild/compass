@@ -1906,6 +1906,111 @@ function useReadonly(value: Readonly<Item>) { value.inspect(); }
 }
 
 #[test]
+fn typescript_pick_and_omit_receivers_project_exact_members() {
+    let batch = candidate(
+        "src/pick-omit-receivers.ts",
+        br#"interface Options { enabled(): void; debug(): void }
+function use(picked: Pick<Options, "enabled">, omitted: Omit<Options, "debug">) {
+    picked.enabled();
+    picked.debug();
+    omitted.enabled();
+    omitted.debug();
+}
+"#,
+    );
+    let enabled = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Options.enabled"))
+        .expect("Options.enabled declaration");
+    let calls = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && matches!(candidate.target_spelling.as_str(), "enabled" | "debug")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 4);
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|candidate| candidate.target_spelling == "enabled")
+            .count(),
+        2
+    );
+    assert!(
+        calls
+            .iter()
+            .filter(|candidate| candidate.target_spelling == "enabled")
+            .all(|candidate| {
+                candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(enabled.id.as_str())
+            })
+    );
+    assert!(
+        calls
+            .iter()
+            .filter(|candidate| candidate.target_spelling == "debug")
+            .all(|candidate| candidate.constraints.exact_target_declaration_id.is_none())
+    );
+
+    let unknown = candidate(
+        "src/pick-unknown-key.ts",
+        br#"interface Options { enabled(): void }
+type Key = string;
+function use(value: Pick<Options, Key>) { value.enabled(); }
+"#,
+    );
+    assert!(unknown.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "enabled"
+            && candidate.constraints.exact_target_declaration_id.is_none()
+    }));
+}
+
+#[test]
+fn typescript_exclude_and_extract_narrow_nominal_union_receivers() {
+    let batch = candidate(
+        "src/exclude-extract-receivers.ts",
+        br#"class Item { inspect(): void {} }
+class Other { other(): void {} }
+function exclude(value: Exclude<Item | undefined, undefined>) { value.inspect(); }
+function extract(value: Extract<Item | Other, Item>) { value.inspect(); }
+function ambiguous(value: Exclude<Item | Other, undefined>) { value.inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    let calls = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "inspect"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|candidate| candidate.constraints.exact_target_declaration_id.is_some())
+            .count(),
+        2
+    );
+    assert!(calls.iter().any(|candidate| {
+        candidate.constraints.exact_target_declaration_id.as_deref() == Some(inspect.id.as_str())
+    }));
+    assert!(
+        calls
+            .iter()
+            .any(|candidate| { candidate.constraints.exact_target_declaration_id.is_none() })
+    );
+}
+
+#[test]
 fn typescript_non_nullable_multi_nominal_union_fails_closed() {
     let batch = candidate(
         "src/non-nullable-ambiguous.ts",

@@ -5315,14 +5315,25 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     ) -> Option<Resolution> {
         let object = object?;
         let receiver = self.receiver_target(scope_id, object)?;
+        let property_name = member_property_name(self.source, property)?;
+        let projection = decode_utility_projection(&receiver.qualified_name);
+        if let Some((utility, _, keys)) = projection.as_ref()
+            && ((utility == "Pick" && !keys.contains(&property_name))
+                || (utility == "Omit" && keys.contains(&property_name)))
+        {
+            return None;
+        }
+        let mut lookup_receiver = receiver.clone();
+        if let Some((_, base, _)) = projection.as_ref() {
+            lookup_receiver.qualified_name.clone_from(base);
+        }
         // A member value can carry a source-visible nominal type. Resolve
         // that type only when the value is used as a receiver; keeping this
         // bridge out of `receiver_target` avoids recursively re-typing every
         // intermediate member expression in a long chain.
         let receiver = self
-            .typed_member_receiver(scope_id, receiver.clone())
-            .unwrap_or(receiver);
-        let property_name = member_property_name(self.source, property)?;
+            .typed_member_receiver(scope_id, lookup_receiver.clone())
+            .unwrap_or(lookup_receiver);
         if let Some(name_node) = rightmost_identifier(object)
             && let Some(Resolution::Local(variable)) = self.resolve_name(
                 scope_id,
@@ -6781,6 +6792,37 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     type_arguments: None,
                 });
             }
+            if let Some((utility, base, arguments)) = utility_type_parts(normalized)
+                && matches!(utility, "Pick" | "Omit")
+            {
+                let keys = arguments.get(1).and_then(|keys| type_literal_names(keys))?;
+                if keys.len() > MAX_INLINE_OBJECT_PROPERTIES
+                    || keys
+                        .iter()
+                        .any(|key| key.contains('|') || key.contains(','))
+                    || base.len() > MAX_TYPE_SHAPE_BYTES
+                    || utility_type_parts(base).is_some()
+                {
+                    return None;
+                }
+                let base_receiver = self.resolve_declared_type_receiver(scope_id, base)?;
+                // Keep the first utility projection local and source-backed.
+                // Imported projected members require a project-wide property
+                // inventory and remain unresolved until that evidence exists.
+                if base_receiver.import.is_some() {
+                    return None;
+                }
+                return Some(ReceiverTarget {
+                    qualified_name: encode_utility_projection(
+                        utility,
+                        &base_receiver.qualified_name,
+                        &keys,
+                    ),
+                    import: None,
+                    scope_id: base_receiver.scope_id,
+                    type_arguments: base_receiver.type_arguments,
+                });
+            }
             if let Some(unwrapped) = candidate_utility_receiver_type(normalized) {
                 current = unwrapped;
                 continue;
@@ -8110,6 +8152,32 @@ fn candidate_type_mentions_parameter(type_name: &str, parameters: &[String]) -> 
         .any(|token| parameters.iter().any(|parameter| parameter == token))
 }
 
+const UTILITY_PROJECTION_PREFIX: &str = "__compass_utility_projection__";
+
+fn encode_utility_projection(utility: &str, base: &str, keys: &HashSet<String>) -> String {
+    let mut keys = keys.iter().cloned().collect::<Vec<_>>();
+    keys.sort_unstable();
+    format!(
+        "{UTILITY_PROJECTION_PREFIX}{utility}|{base}|{}",
+        keys.join(",")
+    )
+}
+
+fn decode_utility_projection(type_name: &str) -> Option<(String, String, BTreeSet<String>)> {
+    let encoded = type_name.strip_prefix(UTILITY_PROJECTION_PREFIX)?;
+    let mut parts = encoded.splitn(3, '|');
+    let utility = parts.next()?.to_owned();
+    let base = parts.next()?.to_owned();
+    let keys = parts
+        .next()?
+        .split(',')
+        .filter(|key| !key.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<BTreeSet<_>>();
+    (matches!(utility.as_str(), "Pick" | "Omit") && !base.is_empty() && !keys.is_empty())
+        .then_some((utility, base, keys))
+}
+
 fn candidate_utility_receiver_type(type_name: &str) -> Option<String> {
     candidate_utility_receiver_type_at_depth(type_name, 0)
 }
@@ -8119,6 +8187,31 @@ fn candidate_utility_receiver_type_at_depth(type_name: &str, depth: u32) -> Opti
         return None;
     }
     let (base, arguments) = generic_type_parts(type_name)?;
+    if matches!(base, "Exclude" | "Extract") {
+        if arguments.len() != 2 {
+            return None;
+        }
+        let members =
+            split_top_level_union(&arguments[0]).unwrap_or_else(|| vec![arguments[0].as_str()]);
+        let filters =
+            split_top_level_union(&arguments[1]).unwrap_or_else(|| vec![arguments[1].as_str()]);
+        let selected = members
+            .into_iter()
+            .map(str::trim)
+            .filter(|member| {
+                let matches_filter = filters.iter().any(|filter| {
+                    let filter = filter.trim();
+                    filter == "unknown" || filter == "any" || type_names_compatible(member, filter)
+                });
+                (base == "Exclude" && !matches_filter) || (base == "Extract" && matches_filter)
+            })
+            .filter(|member| !is_non_nominal_union_member(member))
+            .collect::<Vec<_>>();
+        let [selected] = selected.as_slice() else {
+            return None;
+        };
+        return Some((*selected).to_owned());
+    }
     if arguments.len() != 1 {
         return None;
     }
@@ -8731,6 +8824,8 @@ fn utility_type_parts(type_name: &str) -> Option<(&str, &str, Vec<&str>)> {
     let (utility, prefix) = [
         ("Pick", "Pick<"),
         ("Omit", "Omit<"),
+        ("Exclude", "Exclude<"),
+        ("Extract", "Extract<"),
         ("Partial", "Partial<"),
         ("Required", "Required<"),
         ("Readonly", "Readonly<"),

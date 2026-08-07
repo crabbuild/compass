@@ -1167,6 +1167,29 @@ mapped modifier semantics beyond the bounded utility/union rules, richer
 interprocedural flow, framework/compiler tiers, accepted precision/Wilson gates,
 equivalent Graphify/SCIP scope, and the production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, bounded utility receiver projections)
+
+The qualification-only TypeScript candidate now models a narrow, source-backed
+subset of utility receivers while preserving fail-closed behavior:
+
+- `Pick<LocalType, "member">` and `Omit<LocalType, "member">` project exact
+  local members for receiver lookup. Unknown key expressions, imported bases,
+  nested utility projections, oversized shapes, and duplicate/unsupported key
+  encodings remain unresolved rather than inventing a property target.
+- `Exclude<A | B, Filter>` and `Extract<A | B, Filter>` narrow to one nominal
+  source constituent only when the bounded union/filter comparison proves a
+  unique owner. Multiple surviving owners, non-nominal members, and unsupported
+  assignability remain unresolved.
+- Projection metadata is internal to candidate lookup; published declarations,
+  source anchors, occurrence ranges, and member direction remain unchanged.
+
+The focused candidate suite is now 79 tests and the universal resolver suite
+remains 159 tests. The candidate adapter remains absent from
+`UNIVERSAL_ADAPTERS`. Conditional and mapped modifier semantics beyond these
+bounded utility/union rules, richer interprocedural flow, framework/compiler
+tiers, accepted precision/Wilson gates, equivalent Graphify/SCIP scope, and the
+production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for
