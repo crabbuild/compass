@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const SCHEMA = "compass.typescript-source-oracle/1";
+const JSONL_SCHEMA = "compass.typescript-source-oracle-jsonl/1";
 const PROVIDER = "typescript_compiler_api_5_9_3";
 const MAX_FILES = 20_000;
 const MAX_SOURCE_BYTES = 128 * 1024 * 1024;
@@ -62,8 +63,13 @@ function sha256(value) {
 }
 
 function parseArguments(argv) {
-  if (argv.length !== 2 || argv[0] !== "--root" || !argv[1]) {
-    fail("usage: typescript-source-oracle.mjs --root PATH");
+  if (
+    (argv.length !== 2 && argv.length !== 3) ||
+    argv[0] !== "--root" ||
+    !argv[1] ||
+    (argv.length === 3 && argv[2] !== "--jsonl")
+  ) {
+    fail("usage: typescript-source-oracle.mjs --root PATH [--jsonl]");
   }
   let root;
   let stat;
@@ -76,7 +82,7 @@ function parseArguments(argv) {
   if (!stat.isDirectory()) {
     fail(`source root is not a directory: ${root}`);
   }
-  return root;
+  return { root, jsonl: argv.length === 3 };
 }
 
 function relativePath(root, fileName) {
@@ -563,7 +569,7 @@ function parseFile(root, fileName, raw, constructs, diagnostics) {
 }
 
 function main() {
-  const root = parseArguments(process.argv.slice(2));
+  const { root, jsonl } = parseArguments(process.argv.slice(2));
   const { files: discoveredFiles, configs, rejected: initialRejected } = collectFiles(root);
   const diagnostics = [];
   const projects = parseProjects(root, configs, diagnostics);
@@ -656,7 +662,50 @@ function main() {
     diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS),
     constructs,
   };
-  process.stdout.write(`${JSON.stringify(payload)}\n`);
+  if (!jsonl) {
+    process.stdout.write(`${JSON.stringify(payload)}\n`);
+    return;
+  }
+  const coverage = selected.map((fileName) => {
+    const file = relativePath(root, fileName);
+    return {
+      recordType: "file",
+      file,
+      status: rejected.has(file) ? "rejected" : "parsed",
+    };
+  });
+  const records = [
+    {
+      schema: JSONL_SCHEMA,
+      provider: PROVIDER,
+      recordType: "header",
+      metadata: payload.metadata,
+      scannedFiles: payload.scannedFiles,
+      parsedFiles: payload.parsedFiles,
+      projectCount: payload.projects.length,
+      diagnosticCount: payload.diagnostics.length,
+      constructCount: payload.constructs.length,
+    },
+    ...payload.projects.map((project) => ({ recordType: "project", ...project })),
+    ...coverage,
+    ...payload.diagnostics.map((diagnostic) => ({ recordType: "diagnostic", ...diagnostic })),
+    ...payload.constructs.map((construct) => ({ recordType: "construct", ...construct })),
+    {
+      schema: JSONL_SCHEMA,
+      provider: PROVIDER,
+      recordType: "footer",
+      scannedFiles: payload.scannedFiles,
+      parsedFiles: payload.parsedFiles,
+      rejectedFiles: payload.rejectedFiles,
+      projectCount: payload.projects.length,
+      diagnosticCount: payload.diagnostics.length,
+      constructCount: payload.constructs.length,
+      sourceDigest: payload.metadata.sourceDigest,
+      configDigest: payload.metadata.configDigest,
+    },
+  ];
+  process.stdout.write(records.map((record) => JSON.stringify(record)).join("\n"));
+  process.stdout.write("\n");
 }
 
 try {

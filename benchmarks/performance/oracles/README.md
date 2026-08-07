@@ -6,7 +6,10 @@ not be copied into the product boundary.
 
 The pinned provider is TypeScript 5.9.3. Both tools emit deterministic JSON,
 exact UTF-8 byte ranges, source/config digests, bounded diagnostics, and an
-explicit parsed/rejected-file count. The source oracle discovers bounded
+explicit parsed/rejected-file count. The source oracle also supports a
+record-oriented JSONL stream (`--jsonl`) with a header, project/file coverage,
+diagnostic/construct records, and a checked footer; the audit pipeline consumes
+that stream so a truncated or incomplete denominator fails closed. The source oracle discovers bounded
 `tsconfig*.json`/`jsconfig*.json` projects, follows in-root project references
 with cycle/depth limits, and selects the compiler's project file set. If every
 discovered configuration is invalid it reports diagnostics and falls back to
@@ -14,8 +17,9 @@ the bounded source tree instead of silently returning an empty inventory.
 
 - `typescript-source-oracle.mjs` records source constructs for declarations,
   imports/reexports, calls, construction, members, bases, type references, and
-  JSX. It does not select graph targets. Its payload includes project scopes,
-  configuration/source digests, diagnostics, and deterministic UTF-8 ranges.
+  JSX. It does not select graph targets. Its payload/JSONL stream includes
+  project scopes, configuration/source digests, diagnostics, and deterministic
+  UTF-8 ranges.
 - `typescript-resolution-oracle.mjs` records compiler-API import/reexport,
   dynamic-import, `import =`, and literal-`require()` decisions, including
   module mode, project ownership, source/external/unresolved/ambiguous outcome,
@@ -30,7 +34,7 @@ Run them against an external, read-only corpus after `npm ci`:
 
 ```bash
 node benchmarks/performance/oracles/typescript-source-oracle.mjs \
-  --root /Volumes/Workspace/Github/<owner>/<repository>
+  --root /Volumes/Workspace/Github/<owner>/<repository> --jsonl
 node benchmarks/performance/oracles/typescript-resolution-oracle.mjs \
   --root /Volumes/Workspace/Github/<owner>/<repository>
 ```

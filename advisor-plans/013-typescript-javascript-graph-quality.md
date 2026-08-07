@@ -1300,6 +1300,30 @@ project-manifest corpora, compiler-backed scope and declaration inventories,
 framework tiers, accepted precision/Wilson gates, equivalent Graphify/SCIP
 scope, and the production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, source-oracle JSONL coverage stream)
+
+The independent TypeScript/JavaScript source oracle now has a bounded,
+record-oriented JSONL mode used by the Python audit inventory:
+
+- `--jsonl` emits a deterministic header, project records, one parsed/rejected
+  file record for every scanned file, diagnostics, source constructs, and a
+  footer carrying counts and source/config digests. The parser rejects missing,
+  duplicated, unknown, malformed, truncated, or inconsistent records instead
+  of lowering the recall denominator.
+- The existing single-document JSON mode remains available for direct oracle
+  inspection and compatibility fixtures. Normal Compass builds still never
+  invoke Node.js, TypeScript, or this developer-only oracle.
+- Unicode byte ranges, project ownership, invalid-config fallback, parser
+  rejection, deterministic ordering, and repeated output remain covered by the
+  correctness suite; the audit path now validates the stream before building
+  its source inventory.
+
+The source oracle is still source-occurrence evidence rather than target truth.
+The final scope/declaration/call JSONL contract, compiler-backed target
+adjudication, four release corpora, accepted precision/Wilson gates, framework
+tiers, equivalent Graphify/SCIP scope, and the production hard cut remain
+open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

@@ -14,6 +14,7 @@ from benchmarks.performance.compass.correctness import (
     index_graph,
 )
 from benchmarks.performance.compass.occurrences import (
+    _typescript_payload_from_jsonl,
     _typescript_inventory_from_payload,
     independent_source_constructs,
     independent_source_inventory,
@@ -328,6 +329,44 @@ class CorrectnessTests(unittest.TestCase):
             source_bytes[cafe_construct["startByte"] : cafe_construct["endByte"]],
             "café".encode(),
         )
+
+    def test_typescript_source_oracle_jsonl_is_complete_and_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "src" / "main.ts").write_text("export function run(): void {}\n", encoding="utf-8")
+            (root / "src" / "bad.ts").write_text("const = ;\n", encoding="utf-8")
+            command = ("node", str(SOURCE_ORACLE), "--root", str(root), "--jsonl")
+            first = subprocess.run(
+                command,
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            second = subprocess.run(
+                command,
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            self.assertEqual(first.returncode, 0, first.stderr.decode())
+            self.assertEqual(second.returncode, 0, second.stderr.decode())
+            self.assertEqual(first.stdout, second.stdout)
+            lines = first.stdout.splitlines()
+            self.assertGreaterEqual(len(lines), 2)
+            self.assertEqual(json.loads(lines[0])["recordType"], "header")
+            self.assertEqual(json.loads(lines[-1])["recordType"], "footer")
+            payload = _typescript_payload_from_jsonl(first.stdout)
+            inventory = _typescript_inventory_from_payload(payload, root)
+            provider_inventory = independent_source_inventory(root, "typescript")
+
+        self.assertEqual(inventory.scanned_files, 2)
+        self.assertEqual(inventory.parsed_files, 1)
+        self.assertEqual(inventory.rejected_files, ("src/bad.ts",))
+        self.assertEqual(provider_inventory, inventory)
+        footer = json.loads(lines[-1])
+        self.assertEqual(footer["constructCount"], len(inventory.constructs))
+        self.assertEqual(footer["scannedFiles"], inventory.scanned_files)
 
     def test_typescript_source_oracle_reports_invalid_config_and_follows_cycles_once(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

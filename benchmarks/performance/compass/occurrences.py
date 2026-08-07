@@ -281,6 +281,7 @@ def _python_constructs(root: Path, path: Path) -> tuple[SourceConstruct, ...] | 
 
 
 _TYPESCRIPT_ORACLE_SCHEMA = "compass.typescript-source-oracle/1"
+_TYPESCRIPT_ORACLE_JSONL_SCHEMA = "compass.typescript-source-oracle-jsonl/1"
 _TYPESCRIPT_ORACLE_PROVIDER = "typescript_compiler_api_5_9_3"
 _TYPESCRIPT_ORACLE_SCRIPT = (
     Path(__file__).resolve().parents[1] / "oracles" / "typescript-source-oracle.mjs"
@@ -299,6 +300,7 @@ def _bounded_node_oracle(root: Path) -> bytes:
         str(_TYPESCRIPT_ORACLE_SCRIPT),
         "--root",
         str(root),
+        "--jsonl",
     )
     process = subprocess.Popen(
         command,
@@ -618,10 +620,130 @@ def _typescript_inventory_from_payload(
     )
 
 
+def _typescript_payload_from_jsonl(raw: bytes) -> dict[str, object]:
+    """Reassemble and validate the bounded source-oracle JSONL stream."""
+
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError as error:
+        raise RuntimeError(f"invalid TypeScript source oracle JSONL UTF-8: {error}") from error
+    if len(lines) < 2:
+        raise RuntimeError("TypeScript source oracle JSONL is incomplete")
+    records: list[object] = []
+    for index, line in enumerate(lines):
+        if not line:
+            raise RuntimeError(f"TypeScript source oracle JSONL line {index} is empty")
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(
+                f"invalid TypeScript source oracle JSONL line {index}: {error}"
+            ) from error
+        if not isinstance(record, dict):
+            raise RuntimeError(f"TypeScript source oracle JSONL line {index} is not an object")
+        records.append(record)
+    header = records[0]
+    footer = records[-1]
+    if (
+        header.get("recordType") != "header"
+        or footer.get("recordType") != "footer"
+        or header.get("schema") != _TYPESCRIPT_ORACLE_JSONL_SCHEMA
+        or footer.get("schema") != _TYPESCRIPT_ORACLE_JSONL_SCHEMA
+        or header.get("provider") != _TYPESCRIPT_ORACLE_PROVIDER
+        or footer.get("provider") != _TYPESCRIPT_ORACLE_PROVIDER
+    ):
+        raise RuntimeError("TypeScript source oracle JSONL header/footer is invalid")
+    metadata = header.get("metadata")
+    if not isinstance(metadata, dict):
+        raise RuntimeError("TypeScript source oracle JSONL metadata is invalid")
+    projects: list[dict[str, object]] = []
+    diagnostics: list[dict[str, object]] = []
+    constructs: list[dict[str, object]] = []
+    files: list[dict[str, object]] = []
+    for index, record in enumerate(records[1:-1], 1):
+        record_type = record.get("recordType")
+        if record_type == "project":
+            projects.append({key: value for key, value in record.items() if key != "recordType"})
+        elif record_type == "diagnostic":
+            diagnostics.append(
+                {key: value for key, value in record.items() if key != "recordType"}
+            )
+        elif record_type == "construct":
+            constructs.append(
+                {key: value for key, value in record.items() if key != "recordType"}
+            )
+        elif record_type == "file":
+            files.append(record)
+        else:
+            raise RuntimeError(
+                f"TypeScript source oracle JSONL record {index} has an invalid type"
+            )
+    scanned = header.get("scannedFiles")
+    parsed = header.get("parsedFiles")
+    if not isinstance(scanned, int) or isinstance(scanned, bool) or scanned < 0:
+        raise RuntimeError("TypeScript source oracle JSONL scannedFiles is invalid")
+    if not isinstance(parsed, int) or isinstance(parsed, bool) or parsed < 0 or parsed > scanned:
+        raise RuntimeError("TypeScript source oracle JSONL parsedFiles is invalid")
+    if len(files) != scanned:
+        raise RuntimeError("TypeScript source oracle JSONL file coverage is incomplete")
+    file_names: set[str] = set()
+    rejected: list[str] = []
+    for index, record in enumerate(files):
+        if set(record) != {"recordType", "file", "status"}:
+            raise RuntimeError(f"TypeScript source oracle JSONL file {index} has an invalid schema")
+        file_name = _safe_oracle_file(record["file"], f"jsonl files[{index}].file")
+        if file_name in file_names:
+            raise RuntimeError(f"TypeScript source oracle JSONL file {file_name} is duplicated")
+        file_names.add(file_name)
+        status = record["status"]
+        if status not in {"parsed", "rejected"}:
+            raise RuntimeError(f"TypeScript source oracle JSONL file {file_name} has invalid status")
+        if status == "rejected":
+            rejected.append(file_name)
+    if len(rejected) != scanned - parsed:
+        raise RuntimeError("TypeScript source oracle JSONL coverage counts are inconsistent")
+    footer_counts = {
+        "scannedFiles": scanned,
+        "parsedFiles": parsed,
+        "projectCount": len(projects),
+        "diagnosticCount": len(diagnostics),
+        "constructCount": len(constructs),
+    }
+    for key, expected in footer_counts.items():
+        if footer.get(key) != expected:
+            raise RuntimeError(
+                f"TypeScript source oracle JSONL footer count {key} is inconsistent"
+            )
+    if header.get("projectCount") != len(projects) or header.get("diagnosticCount") != len(diagnostics):
+        raise RuntimeError("TypeScript source oracle JSONL header counts are inconsistent")
+    if header.get("constructCount") != len(constructs):
+        raise RuntimeError("TypeScript source oracle JSONL construct count is inconsistent")
+    if footer.get("rejectedFiles") != sorted(rejected):
+        raise RuntimeError("TypeScript source oracle JSONL rejected file set is inconsistent")
+    for digest_name in ("sourceDigest", "configDigest"):
+        if footer.get(digest_name) != metadata.get(digest_name):
+            raise RuntimeError(
+                f"TypeScript source oracle JSONL footer {digest_name} is inconsistent"
+            )
+    return {
+        "schema": _TYPESCRIPT_ORACLE_SCHEMA,
+        "provider": _TYPESCRIPT_ORACLE_PROVIDER,
+        "metadata": metadata,
+        "scannedFiles": scanned,
+        "parsedFiles": parsed,
+        "rejectedFiles": sorted(rejected),
+        "projects": projects,
+        "diagnostics": diagnostics,
+        "constructs": constructs,
+    }
+
+
 def _typescript_compiler_inventory(root: Path) -> SourceConstructInventory:
     try:
-        payload = json.loads(_bounded_node_oracle(root).decode("utf-8"))
+        payload = _typescript_payload_from_jsonl(_bounded_node_oracle(root))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"invalid TypeScript source oracle output: {error}") from error
+    except RuntimeError as error:
         raise RuntimeError(f"invalid TypeScript source oracle output: {error}") from error
     return _typescript_inventory_from_payload(payload, root)
 
