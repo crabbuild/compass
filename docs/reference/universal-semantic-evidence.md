@@ -47,7 +47,8 @@ the adapter actually emits. The batch contains six bounded collections:
   The qualification-only TypeScript/JavaScript adapter may use a member binding
   with spelling `*` as a source-range-backed object-owner alias, including a
   CommonJS file-module owner for a proven `module.exports = { ...source }`
-  shape. This is not a wildcard export: the resolver follows it only when the
+  shape, including a source-anchored namespace import or static `require()`
+  source. This is not a wildcard export: the resolver follows it only when the
   target owner and requested member are independently source-proven, direct
   destination properties retain precedence, and otherwise it preserves an
   unresolved or ambiguous result.

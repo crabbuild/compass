@@ -1894,6 +1894,38 @@ gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
 cut remain open. This is an interop correctness slice, not a best-in-class
 release claim.
 
+### Execution checkpoint (2026-08-07, namespace and require spread owners)
+
+The CommonJS/ESM spread path now admits a second source-proven namespace shape:
+`import * as ns` and a static `const ns = require("...")` binding can be spread
+into an object export when the binding is source-anchored to a module owner.
+The candidate publishes the same bounded `Member("*")` owner marker used by
+default-object spreads. The resolver maps the source file to its canonical
+module keys, follows only published export slots, and keeps direct destination
+properties ahead of inherited ones.
+
+This also closes a precision hole exposed while adding the namespace path:
+private module-scope declarations are no longer treated as namespace members
+merely because they share a spelling. Explicit ESM reexports and CommonJS
+object-property reexports remain eligible; private ESM/CJS helpers resolve as
+unresolved through a spread namespace. Dynamic/indirect require values,
+computed spreads, and unsupported source shapes remain opaque. Regression
+coverage now includes ESM namespace and static-require spreads, published
+export positives, private-name negatives, and the existing ambiguity,
+non-object, and direct-override cases.
+
+The focused suites are now 101 candidate tests and 175 universal resolver
+tests. Exact-head fixture qualification at
+`912f01c23e6103783640289f6fd1a3b4bb22bfe5` passes with the unchanged
+57-language/980-record/1,565-invariant contract, 27 flows, 24 negatives, 25
+diagnostics, 28 edge kinds, and 45 node kinds. The graph digest remains
+`sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`,
+with 82 exact and 11 unresolved route resolutions; clean, warm, rebuild,
+restored, alternate-checkout, and source-fixture byte comparisons all pass.
+The unchanged digest is expected because the qualification-only adapter is not
+registered in production. This remains correctness evidence, not a leadership
+claim.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for
