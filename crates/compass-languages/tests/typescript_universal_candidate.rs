@@ -2011,6 +2011,84 @@ function ambiguous(value: Exclude<Item | Other, undefined>) { value.inspect(); }
 }
 
 #[test]
+fn typescript_conditional_receivers_select_unique_nominal_branch() {
+    let batch = candidate(
+        "src/conditional-receivers.ts",
+        br#"class Item { inspect(): void {} }
+class Other { other(): void {} }
+type Choose<T> = T extends Item ? Item : Other;
+type ChooseObject<T> = T extends object ? T : never;
+function selected(value: Choose<Item>) { value.inspect(); }
+function rejected(value: Choose<Other>) { value.inspect(); }
+function union(value: Choose<Item | Other>) { value.inspect(); }
+function direct(value: Item extends Item ? Item : Other) { value.inspect(); }
+function object(value: ChooseObject<Item>) { value.inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    let calls = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "inspect"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 5);
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|candidate| candidate.constraints.exact_target_declaration_id.is_some())
+            .count(),
+        3
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|candidate| candidate.constraints.exact_target_declaration_id.is_none())
+            .count(),
+        2
+    );
+    assert!(calls.iter().any(|candidate| {
+        candidate.constraints.exact_target_declaration_id.as_deref() == Some(inspect.id.as_str())
+    }));
+}
+
+#[test]
+fn typescript_mapped_modifier_aliases_preserve_nominal_member_targets() {
+    let batch = candidate(
+        "src/mapped-modifiers.ts",
+        br#"class Item { inspect(): void {} }
+type MutableRequired<T> = { -readonly [K in keyof T]-?: T[K] };
+type ReadonlyOptional<T> = { +readonly [K in keyof T]+?: T[K] };
+function use(mutable: MutableRequired<Item>, readonlyValue: ReadonlyOptional<Item>) {
+    mutable.inspect();
+    readonlyValue.inspect();
+}
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    let calls = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "inspect"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2);
+    assert!(calls.iter().all(|candidate| {
+        candidate.constraints.exact_target_declaration_id.as_deref() == Some(inspect.id.as_str())
+    }));
+}
+
+#[test]
 fn typescript_non_nullable_multi_nominal_union_fails_closed() {
     let batch = candidate(
         "src/non-nullable-ambiguous.ts",

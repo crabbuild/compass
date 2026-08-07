@@ -1190,6 +1190,31 @@ bounded utility/union rules, richer interprocedural flow, framework/compiler
 tiers, accepted precision/Wilson gates, equivalent Graphify/SCIP scope, and the
 production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, bounded conditional and mapped-modifier receivers)
+
+The qualification-only TypeScript candidate now evaluates a narrow,
+source-proven subset of conditional and mapped receiver types:
+
+- Generic aliases of the form `T extends U ? A : B` substitute bounded concrete
+  type arguments before branch selection. A branch is selected only when one
+  local nominal owner proves the `extends` relation (or a local nominal type
+  proves the bounded `object`/`unknown` check). Distributed unions, `any`,
+  unresolved structural checks, nested conditionals, and unsupported branches
+  remain unresolved.
+- Homomorphic mapped aliases with `+/-readonly` and `+/-?` modifiers preserve
+  their source nominal owner for member lookup. Key remapping, extra structural
+  members, nested mapped shapes, and other unsupported transformations remain
+  fail-closed.
+- Conditional parsing is bounded and quote/depth-aware; source ranges,
+  occurrence multiplicity, and published declaration identities are unchanged.
+
+The focused candidate suite is now 81 tests and the universal resolver suite
+remains 159 tests. The candidate adapter remains absent from
+`UNIVERSAL_ADAPTERS`. Broader distributive conditional semantics, indexed/keyof
+evaluation, richer interprocedural flow, framework/compiler tiers,
+accepted precision/Wilson gates, equivalent Graphify/SCIP scope, and the
+production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

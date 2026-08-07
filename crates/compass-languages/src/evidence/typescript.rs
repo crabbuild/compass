@@ -6767,6 +6767,69 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         self.resolve_declared_type_receiver(scope_id, &type_name)
     }
 
+    /// Select a conditional-type branch only when the source proves one
+    /// nominal constituent satisfies the `extends` check.  TypeScript
+    /// distributes conditional types over unions; choosing either branch for
+    /// a union, `any`, or an unresolved structural check would silently invent
+    /// a receiver, so those cases remain unresolved.
+    fn conditional_type_branch(
+        &self,
+        scope_id: &str,
+        check: &str,
+        expected: &str,
+        when_true: &str,
+        when_false: &str,
+    ) -> Option<String> {
+        let check = check.trim();
+        let expected = expected.trim();
+        if check.is_empty()
+            || expected.is_empty()
+            || when_true.trim().is_empty()
+            || when_false.trim().is_empty()
+            || matches!(check, "any" | "unknown" | "never")
+            || conditional_type_parts(check).is_some()
+        {
+            return None;
+        }
+        let members = split_top_level_union(check)?;
+        let [check] = members.as_slice() else {
+            return None;
+        };
+        let check = check.trim();
+        let matches_expected = if expected == "unknown" {
+            let receiver = self.resolve_declared_type_receiver(scope_id, check)?;
+            receiver.import.is_none()
+        } else if expected == "object" {
+            let receiver = self.resolve_declared_type_receiver(scope_id, check)?;
+            receiver.import.is_none() && is_object_like_type(check)
+        } else {
+            if conditional_type_parts(expected).is_some() {
+                return None;
+            }
+            let check_receiver = self.resolve_declared_type_receiver(scope_id, check)?;
+            let expected_receiver = self.resolve_declared_type_receiver(scope_id, expected)?;
+            if check_receiver.import.is_some() || expected_receiver.import.is_some() {
+                return None;
+            }
+            type_names_compatible(
+                &check_receiver.qualified_name,
+                &expected_receiver.qualified_name,
+            ) || self.source_type_assignable(
+                scope_id,
+                &expected_receiver.qualified_name,
+                &check_receiver.qualified_name,
+            )
+        };
+        Some(
+            if matches_expected {
+                when_true.trim()
+            } else {
+                when_false.trim()
+            }
+            .to_owned(),
+        )
+    }
+
     fn resolve_declared_type_receiver(
         &self,
         scope_id: &str,
@@ -6822,6 +6885,15 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     scope_id: base_receiver.scope_id,
                     type_arguments: base_receiver.type_arguments,
                 });
+            }
+            if let Some((check, expected, when_true, when_false)) =
+                conditional_type_parts(normalized)
+            {
+                let branch =
+                    self.conditional_type_branch(scope_id, check, expected, when_true, when_false)?;
+                current.clear();
+                current.push_str(&branch);
+                continue;
             }
             if let Some(unwrapped) = candidate_utility_receiver_type(normalized) {
                 current = unwrapped;
@@ -8009,6 +8081,15 @@ fn direct_type_reference_name(node: Node<'_>, source: &[u8]) -> Option<String> {
             return Some(normalized);
         }
     }
+    if type_node.kind() == "conditional_type" {
+        let normalized = node_text(source, type_node);
+        if !normalized.is_empty()
+            && normalized.len() <= MAX_TYPE_SHAPE_BYTES
+            && conditional_type_parts(&normalized).is_some()
+        {
+            return Some(normalized);
+        }
+    }
     let generic_text = (type_node.kind() == "generic_type")
         .then(|| normalize_type_text(source, type_node))
         .filter(|text| !text.is_empty());
@@ -8176,6 +8257,29 @@ fn decode_utility_projection(type_name: &str) -> Option<(String, String, BTreeSe
         .collect::<BTreeSet<_>>();
     (matches!(utility.as_str(), "Pick" | "Omit") && !base.is_empty() && !keys.is_empty())
         .then_some((utility, base, keys))
+}
+
+fn conditional_type_parts(type_name: &str) -> Option<(&str, &str, &str, &str)> {
+    let type_name = type_name.trim();
+    let question = top_level_delimiter(type_name, '?')?;
+    let condition = type_name.get(..question)?.trim();
+    let remainder = type_name.get(question.saturating_add(1)..)?.trim();
+    let colon = top_level_delimiter(remainder, ':')?;
+    let when_true = remainder.get(..colon)?.trim();
+    let when_false = remainder.get(colon.saturating_add(1)..)?.trim();
+    if condition.is_empty()
+        || when_true.is_empty()
+        || when_false.is_empty()
+        || type_name.len() > MAX_TYPE_SHAPE_BYTES
+    {
+        return None;
+    }
+    let extends = condition.find("extends")?;
+    let check = condition.get(..extends)?.trim();
+    let expected = condition
+        .get(extends.saturating_add("extends".len())..)?
+        .trim();
+    (!check.is_empty() && !expected.is_empty()).then_some((check, expected, when_true, when_false))
 }
 
 fn candidate_utility_receiver_type(type_name: &str) -> Option<String> {
@@ -8382,6 +8486,20 @@ fn substitute_candidate_type_parameters(
             })
             .collect::<Vec<_>>();
         let substituted = format!("[{}]", substituted.join(","));
+        return if substituted.len() <= MAX_TYPE_SHAPE_BYTES {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
+    }
+    if let Some((check, expected, when_true, when_false)) = conditional_type_parts(type_name) {
+        let substituted = format!(
+            "{} extends {} ? {} : {}",
+            substitute_candidate_type_parameters(check, parameters, arguments, depth + 1),
+            substitute_candidate_type_parameters(expected, parameters, arguments, depth + 1),
+            substitute_candidate_type_parameters(when_true, parameters, arguments, depth + 1),
+            substitute_candidate_type_parameters(when_false, parameters, arguments, depth + 1),
+        );
         return if substituted.len() <= MAX_TYPE_SHAPE_BYTES {
             substituted
         } else {
@@ -8975,7 +9093,23 @@ fn split_top_level_members(input: &str) -> Option<Vec<&str>> {
 
 fn top_level_delimiter(input: &str, delimiter: char) -> Option<usize> {
     let mut depth = 0_u32;
+    let mut quote = None;
+    let mut escaped = false;
     for (index, character) in input.char_indices() {
+        if let Some(quoted) = quote {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == quoted {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(character, '\'' | '"' | '`') {
+            quote = Some(character);
+            continue;
+        }
         match character {
             '<' | '{' | '(' | '[' => depth = depth.checked_add(1)?,
             '>' | '}' | ')' | ']' => depth = depth.checked_sub(1)?,

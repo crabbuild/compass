@@ -7779,6 +7779,54 @@ export function use(value: Copy<Item>) { value.inspect(); }
 }
 
 #[test]
+fn typescript_candidate_publishes_local_conditional_branch_members()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"class Item { inspect(): void {} }
+class Other { other(): void {} }
+type Choose<T> = T extends Item ? Item : Other;
+type ChooseObject<T> = T extends object ? T : never;
+function selected(value: Choose<Item>) { value.inspect(); }
+function rejected(value: Choose<Other>) { value.inspect(); }
+function union(value: Choose<Item | Other>) { value.inspect(); }
+function direct(value: Item extends Item ? Item : Other) { value.inspect(); }
+function object(value: ChooseObject<Item>) { value.inspect(); }
+"#;
+    let mut extraction = extract("src/conditional.ts", source);
+    extraction.semantic_evidence = Some(
+        Engine::default().extract_source_universal_candidate_evidence(
+            Path::new("src/conditional.ts"),
+            "src/conditional.ts",
+            source,
+        )?,
+    );
+    let resolved = compass_resolve::resolve(
+        &[extraction],
+        &HashMap::from([(
+            "src/conditional.ts".to_owned(),
+            String::from_utf8(source.to_vec())?,
+        )]),
+    );
+    assert!(resolved.error.is_none(), "resolver error: {:?}", resolved.error);
+    let inspect = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file") == "src/conditional.ts" && node.label() == ".inspect()"
+        })
+        .ok_or("missing conditional Item.inspect member")?;
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == inspect.id)
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 3);
+    assert!(calls.iter().all(|edge| {
+        edge.string("source_file") == "src/conditional.ts"
+    }));
+    Ok(())
+}
+
+#[test]
 fn typescript_candidate_resolves_imported_array_and_tuple_member_chains()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
