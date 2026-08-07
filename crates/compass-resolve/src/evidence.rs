@@ -731,6 +731,67 @@ impl UniversalResolutionIndex {
                 .or_default()
                 .push(slot);
         }
+        // Object-literal members are deliberately collected in their lexical
+        // binding scope by the TypeScript adapter: unlike a class/interface,
+        // an object value has no syntax-level scope owner.  Recover the
+        // source-qualified object variable as an additional owner so imported
+        // chains such as `api.make(value).inspect()` can traverse the
+        // callable property without widening ordinary lexical members.
+        let mut structural_object_owners =
+            AHashMap::<(String, String), Vec<DeclarationSlot>>::new();
+        for declaration in declarations.values().filter(|declaration| {
+            declaration.kind == "variable"
+                && matches!(declaration.language.as_str(), "typescript" | "javascript")
+        }) {
+            let Some(slot) = declaration_slot(&declaration_ids, &declaration.id) else {
+                continue;
+            };
+            structural_object_owners
+                .entry((
+                    declaration.language.clone(),
+                    declaration.qualified_name.clone(),
+                ))
+                .or_default()
+                .push(slot);
+        }
+        for declaration in declarations.values().filter(|declaration| {
+            matches!(declaration.language.as_str(), "typescript" | "javascript")
+                && matches!(
+                    declaration.kind.as_str(),
+                    "property" | "method" | "field" | "constructor"
+                )
+        }) {
+            let Some((owner_name, _)) = declaration.qualified_name.rsplit_once('.') else {
+                continue;
+            };
+            let Some(owner_slots) = structural_object_owners
+                .get(&(declaration.language.clone(), owner_name.to_owned()))
+            else {
+                continue;
+            };
+            let Some(slot) = declaration_slot(&declaration_ids, &declaration.id) else {
+                continue;
+            };
+            for owner_slot in owner_slots {
+                let Some(owner_id) = declaration_ids.get(*owner_slot as usize) else {
+                    continue;
+                };
+                let Some(owner) = declarations.get(owner_id) else {
+                    continue;
+                };
+                if owner.scope_id != declaration.scope_id {
+                    continue;
+                }
+                members_by_owner
+                    .entry((
+                        declaration.language.clone(),
+                        owner_name.to_owned(),
+                        declaration.name.clone(),
+                    ))
+                    .or_default()
+                    .push(slot);
+            }
+        }
         for members in members_by_owner.values_mut() {
             members.sort_unstable_by(|left, right| {
                 declaration_ids[*left as usize].cmp(&declaration_ids[*right as usize])
@@ -1355,8 +1416,8 @@ impl UniversalResolutionIndex {
                 member_owner_export.is_some(),
             );
             if member_owner_export.is_some() {
-                for owner in owner_targets {
-                    let Some(owner) = self.declaration(owner) else {
+                for owner_slot in &owner_targets {
+                    let Some(owner) = self.declaration(*owner_slot) else {
                         continue;
                     };
                     if let Some(members) = self.members_by_owner.get(&(
@@ -1372,6 +1433,45 @@ impl UniversalResolutionIndex {
                                 })
                                 .copied(),
                         );
+                    }
+                }
+                // A value import can be declared with a nominal object type
+                // (`declare const api: Api`).  Its callable members live on
+                // the interface/type declaration rather than on the value
+                // declaration itself; expand that direct type evidence before
+                // falling back to an external target.
+                if targets.is_empty()
+                    && let Some(path) = member_path.as_ref()
+                    && path.members.len() == 1
+                {
+                    for owner_slot in &owner_targets {
+                        for (typed_owner, _) in self.typescript_value_type_contexts(
+                            language,
+                            &key,
+                            *owner_slot,
+                            &path.type_arguments,
+                            candidate,
+                        ) {
+                            let Some(typed_owner) = self.declaration(typed_owner) else {
+                                continue;
+                            };
+                            if let Some(members) = self.members_by_owner.get(&(
+                                language.to_owned(),
+                                typed_owner.qualified_name.clone(),
+                                candidate.target_spelling.clone(),
+                            )) {
+                                targets.extend(
+                                    members
+                                        .iter()
+                                        .filter(|slot| {
+                                            self.typescript_declaration_allowed_slot(
+                                                **slot, candidate,
+                                            )
+                                        })
+                                        .copied(),
+                                );
+                            }
+                        }
                     }
                 }
             } else {
@@ -1427,6 +1527,18 @@ impl UniversalResolutionIndex {
                     root_slot,
                     &path.call_argument_types,
                     &path.call_type_arguments,
+                    candidate,
+                )
+            } else if let Some(signature) = self
+                .declaration(root_slot)
+                .and_then(|declaration| declaration.signature.as_deref())
+                && typescript_value_type(signature).is_some()
+            {
+                self.typescript_value_type_contexts(
+                    language,
+                    module,
+                    root_slot,
+                    &path.type_arguments,
                     candidate,
                 )
             } else if path.indexed && has_index_signature {
@@ -1535,6 +1647,36 @@ impl UniversalResolutionIndex {
             }
         }
         targets
+    }
+
+    fn typescript_value_type_contexts(
+        &self,
+        language: &str,
+        module: &str,
+        owner_slot: DeclarationSlot,
+        type_arguments: &[String],
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
+        let Some(owner) = self.declaration(owner_slot) else {
+            return BTreeSet::new();
+        };
+        let Some(signature) = owner.signature.as_deref() else {
+            return BTreeSet::new();
+        };
+        let Some(type_name) = typescript_value_type(signature) else {
+            return BTreeSet::new();
+        };
+        self.typescript_member_type_contexts(
+            language,
+            module,
+            type_name,
+            TypeScriptMemberContext {
+                owner_signature: None,
+                type_arguments,
+                index_selector: None,
+            },
+            candidate,
+        )
     }
 
     /// Resolve the nominal receiver produced by an imported callable result.
@@ -5258,6 +5400,11 @@ fn typescript_callable_return_type(signature: &str) -> Option<&str> {
     let (_, return_type) = signature.rsplit_once("|return:")?;
     let return_type = return_type.trim();
     (!return_type.is_empty() && return_type.len() <= 1024).then_some(return_type)
+}
+
+fn typescript_value_type(signature: &str) -> Option<&str> {
+    let type_name = signature.trim().strip_prefix("|type:")?.trim();
+    (!type_name.is_empty() && type_name.len() <= 1024).then_some(type_name)
 }
 
 fn typescript_callable_parameter_types(signature: &str) -> Option<Vec<String>> {

@@ -7532,6 +7532,14 @@ fn typescript_declaration_signature(node: Node<'_>, kind: &str, source: &[u8]) -
     {
         return Some(type_name);
     }
+    if kind == "variable"
+        && let Some(type_name) = direct_type_reference_name(node, source)
+    {
+        let signature = format!("|type:{type_name}");
+        if signature.len() <= MAX_TYPE_SHAPE_BYTES {
+            return Some(signature);
+        }
+    }
     let callable_value = callable_value_node(node);
     let generic_parameter_order = callable_type_parameter_order(node, source)
         .or_else(|| callable_value.and_then(|value| callable_type_parameter_order(value, source)));
@@ -7539,7 +7547,7 @@ fn typescript_declaration_signature(node: Node<'_>, kind: &str, source: &[u8]) -
         .filter(|parameters| !parameters.is_empty())
         .map(|parameters| format!("<{}>", parameters.join(",")))
         .unwrap_or_default();
-    if matches!(kind, "function" | "method") {
+    if matches!(kind, "function" | "method" | "property") {
         let parameter_types = callable_parameter_types(node, source)
             .or_else(|| callable_value.and_then(|value| callable_parameter_types(value, source)));
         let return_type = callable_return_type_name(node, source);

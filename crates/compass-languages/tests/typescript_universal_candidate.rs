@@ -1582,6 +1582,67 @@ function use(value: Item) { identity<Item>(value).inspect(); }
 }
 
 #[test]
+fn typescript_imported_callable_properties_publish_bounded_markers() {
+    let api_batch = candidate(
+        "src/api.ts",
+        br#"import type { Item } from "./item";
+interface TypedApi { make: (value: Item) => Item }
+export declare const typed: TypedApi;
+export const api = {
+    make: (value: Item): Item => value,
+    identity: <T>(value: T): T => value,
+};
+"#,
+    );
+    let make = api_batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".api.make"))
+        .expect("callable object property declaration");
+    assert_eq!(make.signature.as_deref(), Some("|params:Item|return:Item"));
+    let typed = api_batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".typed"))
+        .expect("typed object declaration");
+    assert_eq!(typed.signature.as_deref(), Some("|type:TypedApi"));
+    let batch = candidate(
+        "src/imported-properties.ts",
+        br#"import { api, typed } from "./api";
+import type { Item } from "./item";
+export function use(value: Item) {
+    api.make(value).inspect();
+    api.identity<Item>(value).inspect();
+    typed.make(value).inspect();
+}
+"#,
+    );
+    let inspect_calls = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "inspect"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(inspect_calls.len(), 3);
+    assert!(inspect_calls.iter().all(|candidate| {
+        candidate
+            .constraints
+            .qualified_name
+            .as_deref()
+            .is_some_and(|qualified| qualified.contains("#call<"))
+            && !candidate.constraints.allow_external
+    }));
+    assert!(inspect_calls.iter().any(|candidate| {
+        candidate
+            .constraints
+            .qualified_name
+            .as_deref()
+            .is_some_and(|qualified| qualified.contains("#types<"))
+    }));
+}
+
+#[test]
 fn typescript_generic_function_array_return_preserves_element_receiver() {
     let batch = candidate(
         "src/generic-return-array.ts",

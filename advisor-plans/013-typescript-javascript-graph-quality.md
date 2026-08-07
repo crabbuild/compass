@@ -1054,6 +1054,36 @@ flow, overload-aware generic substitution beyond bounded source shapes, and
 the production hard cut remain open. The candidate adapter remains absent
 from `UNIVERSAL_ADAPTERS`.
 
+### Execution checkpoint (2026-08-06, callable-property and typed-value slice)
+
+The qualification-only TypeScript/JavaScript path now preserves another
+source-proven callable boundary across project files:
+
+- Function-valued object properties publish bounded callable signatures with
+  fixed parameter and return shapes, including generic arrow properties. A
+  directly annotated value import also publishes its nominal `|type:` shape so
+  member traversal can expand the referenced interface without guessing.
+- Structural object-literal properties are indexed under their exact source
+  variable owner in the shared resolver. Imported calls such as
+  `api.make(value).inspect()` and `api.identity<Item>(value).inspect()` now
+  resolve both the callable property and the returned `Item.inspect` member
+  with `member-binding` provenance.
+- Nominally typed value imports such as `declare const typed: TypedApi` now
+  resolve their direct callable member target before external fallback. Duplicate
+  callable properties remain unresolved, and unknown/ambiguous owners are not
+  collapsed into a terminal-name match.
+
+The slice adds one direct candidate regression and two cross-file resolver
+regressions; the focused candidate suite is now 73 tests and the universal
+resolver suite is now 156 tests. The exact fixture qualification remains
+byte-stable at Compass revision `0d051868` with graph digest
+`sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`.
+Conditional/mapped modifier semantics, framework/compiler tiers, accepted
+precision/Wilson gates, equivalent Graphify/SCIP scope, alias escape/eval/
+proxy flow, overload-aware generic substitution beyond bounded source shapes,
+and the production hard cut remain open. The candidate adapter remains absent
+from `UNIVERSAL_ADAPTERS`.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for
