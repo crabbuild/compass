@@ -78,6 +78,16 @@ the adapter actually emits. The batch contains six bounded collections:
   conversions, but only when one applicable vector is more specific than all
   other applicable vectors. Unknown hierarchy or a competing conversion
   remains unresolved.
+  The qualification-only TypeScript/JavaScript adapter represents a tagged
+  template (``tag`text ${value}``) as a call with occurrence context
+  `tagged_template` (or `tagged_member` for a member tag). Its bounded argument
+  vector starts with an explicit unknown slot for the runtime
+  `TemplateStringsArray`, followed by one slot per substitution expression. The
+  synthetic slot is intentionally not typed as a general array, and dynamic tag
+  expressions remain targetless unless a declaration is independently source
+  proven. Tagged-template arity and known substitution types therefore
+  participate in the same fail-closed overload and cross-file resolution rules
+  as ordinary calls.
 - `EvidenceDiagnostic` records a bounded extraction problem without creating
   a graph fact.
 

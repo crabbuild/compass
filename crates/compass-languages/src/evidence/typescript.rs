@@ -4782,8 +4782,46 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         else {
             return Ok(());
         };
-        let argument_types = self.call_argument_types(node, scope_id);
-        let argument_count = call_argument_count(node);
+        let tagged_template = !construction
+            && node
+                .child_by_field_name("arguments")
+                .is_some_and(|arguments| arguments.kind() == "template_string");
+        let (argument_count, argument_types) = if tagged_template {
+            self.tagged_template_call_shape(node, scope_id)
+        } else {
+            (
+                call_argument_count(node),
+                self.call_argument_types(node, scope_id),
+            )
+        };
+        let dynamic_member_context = if construction {
+            "dynamic_new_member"
+        } else if tagged_template {
+            "dynamic_tagged_member"
+        } else {
+            "dynamic_member_call"
+        };
+        let member_context = if construction {
+            "new_member"
+        } else if tagged_template {
+            "tagged_member"
+        } else {
+            "member_call"
+        };
+        let dynamic_context = if construction {
+            "dynamic_new"
+        } else if tagged_template {
+            "dynamic_tagged"
+        } else {
+            "dynamic_call"
+        };
+        let call_context = if construction {
+            "new"
+        } else if tagged_template {
+            "tagged_template"
+        } else {
+            "call"
+        };
         let member_call = matches!(
             function.kind(),
             "member_expression" | "optional_member_expression" | "subscript_expression"
@@ -4815,11 +4853,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     },
                     &spelling,
                     qualifier.as_deref(),
-                    if construction {
-                        "dynamic_new_member"
-                    } else {
-                        "dynamic_member_call"
-                    },
+                    dynamic_member_context,
                     argument_count,
                     argument_types,
                     &[
@@ -4861,11 +4895,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     },
                     &spelling,
                     qualifier.as_deref(),
-                    if construction {
-                        "dynamic_new_member"
-                    } else {
-                        "dynamic_member_call"
-                    },
+                    dynamic_member_context,
                     argument_count,
                     argument_types,
                     &[
@@ -4885,7 +4915,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 scope_id,
                 object,
                 property,
-                call_argument_count(node),
+                argument_count,
                 &argument_types,
             );
             let Some(resolution) = resolution else {
@@ -4908,11 +4938,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         },
                         &property_name,
                         Some(&node_text(self.source, function)),
-                        if construction {
-                            "new_member"
-                        } else {
-                            "member_call"
-                        },
+                        member_context,
                         &target,
                         &module,
                         argument_count,
@@ -4947,11 +4973,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     },
                     &property_name,
                     Some(&node_text(self.source, function)),
-                    if construction {
-                        "new_member"
-                    } else {
-                        "member_call"
-                    },
+                    member_context,
                     argument_count,
                     argument_types,
                     &[
@@ -4981,11 +5003,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 },
                 &property_name,
                 Some(&node_text(self.source, function)),
-                Some(if construction {
-                    "new_member"
-                } else {
-                    "member_call"
-                }),
+                Some(member_context),
                 Namespace::Value,
                 argument_count,
                 argument_types,
@@ -5038,11 +5056,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 },
                 &spelling,
                 None,
-                if construction {
-                    "dynamic_new"
-                } else {
-                    "dynamic_call"
-                },
+                dynamic_context,
                 argument_count,
                 argument_types,
                 &["function", "class", "method", "constructor", "external"],
@@ -5118,6 +5132,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         None,
                         Some(if construction {
                             "new_this"
+                        } else if tagged_template {
+                            "tagged_template"
                         } else {
                             "this_call"
                         }),
@@ -5146,6 +5162,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 None,
                 if construction {
                     "new_this"
+                } else if tagged_template {
+                    "tagged_template"
                 } else {
                     "this_call"
                 },
@@ -5181,7 +5199,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     },
                     &spelling,
                     None,
-                    if construction { "new" } else { "call" },
+                    call_context,
                     &qualified_target,
                     &module,
                     argument_count,
@@ -5204,7 +5222,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 },
                 &spelling,
                 None,
-                if construction { "new" } else { "call" },
+                call_context,
                 argument_count,
                 argument_types,
                 &["function", "class", "method", "constructor", "external"],
@@ -5226,7 +5244,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             },
             &spelling,
             None,
-            Some(if construction { "new" } else { "call" }),
+            Some(call_context),
             Namespace::Value,
             argument_count,
             argument_types,
@@ -5248,6 +5266,47 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             .filter(|argument| !argument.kind().contains("comment"))
             .map(|argument| self.call_argument_type(argument, scope_id))
             .collect()
+    }
+
+    /// A tagged template invokes its tag with a synthetic strings-array
+    /// argument followed by one argument per template substitution.
+    /// Preserve that exact arity, but leave the first array type unknown so
+    /// overload selection cannot mistake it for an ordinary array or string.
+    fn tagged_template_call_shape(
+        &self,
+        node: Node<'tree>,
+        scope_id: &str,
+    ) -> (Option<u32>, Vec<Option<String>>) {
+        let Some(arguments) = node
+            .child_by_field_name("arguments")
+            .filter(|arguments| arguments.kind() == "template_string")
+        else {
+            return (None, Vec::new());
+        };
+        let mut argument_types = vec![None];
+        let mut substitution_count = 0_usize;
+        let mut cursor = arguments.walk();
+        for child in arguments.named_children(&mut cursor) {
+            if child.kind() != "template_substitution" {
+                continue;
+            }
+            if substitution_count >= MAX_INLINE_OBJECT_PROPERTIES.saturating_sub(1) {
+                return (None, Vec::new());
+            }
+            substitution_count = substitution_count.saturating_add(1);
+            let expression = child
+                .child_by_field_name("expression")
+                .or_else(|| first_named_child(child));
+            argument_types.push(
+                expression.and_then(|expression| self.call_argument_type(expression, scope_id)),
+            );
+        }
+        (
+            substitution_count
+                .checked_add(1)
+                .and_then(|count| u32::try_from(count).ok()),
+            argument_types,
+        )
     }
 
     fn call_argument_type(&self, node: Node<'tree>, scope_id: &str) -> Option<String> {

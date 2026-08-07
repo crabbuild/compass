@@ -1999,6 +1999,32 @@ languages, 980 coverage records, 1,565 invariants, 27 flows, 24 negatives,
 warm, rebuild, restored, alternate-checkout, and source-unchanged outputs.
 This is an interop correctness increment, not a production or leadership claim.
 
+### Execution checkpoint (2026-08-07, bounded tagged-template call evidence)
+
+The TypeScript/JavaScript candidate extractor now models tagged templates as
+calls instead of treating the template body as an ordinary argument list:
+
+- ``tag`text ${value}`` emits a `tagged_template` occurrence with a bounded
+  semantic call shape: one synthetic, intentionally unknown
+  `TemplateStringsArray` position followed by one argument position per
+  substitution. Literal substitution types (`string`, `number`, `boolean`,
+  `null`, `array`, `object`, and `function`) remain source-proven; dynamic
+  expressions remain explicit unknowns.
+- Member tags such as ``namespace.tag`...``` retain a `tagged_member`
+  context, exact member anchors, and the same synthetic-array/substitution
+  arity. Dynamic tag expressions keep their occurrence but no invented target.
+- The shared resolver consumes the tagged-template arity and type vector for
+  direct, named-import, and namespace-member tags. A source signature that
+  cannot accept the number or type of substitutions remains unresolved rather
+  than being selected by spelling alone.
+- Extraction is bounded by the existing inline-property limit, so a malformed
+  or oversized template cannot create an unbounded argument vector.
+
+Candidate and resolver coverage now stand at 105 and 179 focused tests. This
+remains qualification-only; the adapter is still not registered in
+`UNIVERSAL_ADAPTERS`, and compiler differential, framework, competitor, and
+production hard-cut gates remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

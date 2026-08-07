@@ -8153,6 +8153,91 @@ api.inherited();
 }
 
 #[test]
+fn typescript_tagged_template_calls_resolve_imported_tags_with_exact_shape()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/tags.ts",
+            br#"export function sql(strings: TemplateStringsArray, value: number) {}
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import { sql } from "../lib/tags";
+import * as tags from "../lib/tags";
+sql`select ${42}`;
+tags.sql`select ${42}`;
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            let path = root.join(relative);
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let sql = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "function" && declaration.name == "sql")
+        .ok_or("missing sql declaration")?;
+    let sql_calls = batches[1]
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "sql"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(sql_calls.len(), 2);
+    for sql_call in &sql_calls {
+        assert_eq!(sql_call.constraints.argument_count, Some(2));
+        assert_eq!(
+            sql_call.constraints.argument_types,
+            [None, Some("number".to_owned())]
+        );
+        assert!(matches!(
+            sql_call
+                .occurrence_id
+                .as_ref()
+                .and_then(|id| {
+                    batches[1]
+                        .occurrences
+                        .iter()
+                        .find(|occurrence| occurrence.id == *id)
+                })
+                .and_then(|occurrence| occurrence.context.as_deref()),
+            Some("tagged_template" | "tagged_member")
+        ));
+    }
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    for sql_call in sql_calls {
+        assert!(matches!(
+            index.resolve(&sql_call.id),
+            compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+                if declaration_id == &sql.id
+        ));
+    }
+    Ok(())
+}
+
+#[test]
 fn javascript_commonjs_require_callable_namespace_resolves_default_export()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

@@ -737,6 +737,85 @@ __exportStar(require("./wrong-target"), other);
 }
 
 #[test]
+fn typescript_tagged_templates_emit_exact_tag_call_shape() {
+    let source = br#"function tag(strings: TemplateStringsArray, value: any) {}
+const name = "x";
+tag`hello ${42}`;
+tag`hello ${"x"} ${'y'}`;
+getTag()`dynamic ${name}`;
+"#;
+    let batch = candidate("src/tagged.ts", source);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("tagged template evidence");
+    let tag = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "function" && declaration.name == "tag")
+        .expect("tag declaration");
+    let tag_calls = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == compass_languages::CandidateRelation::Calls
+                && candidate.target_spelling == "tag"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(tag_calls.len(), 2);
+    assert!(tag_calls.iter().any(|candidate| {
+        candidate.constraints.argument_count == Some(2)
+            && candidate.constraints.argument_types == [None, Some("number".to_owned())]
+            && candidate.constraints.exact_target_declaration_id.as_deref() == Some(tag.id.as_str())
+            && candidate
+                .occurrence_id
+                .as_ref()
+                .and_then(|id| {
+                    batch
+                        .occurrences
+                        .iter()
+                        .find(|occurrence| occurrence.id == *id)
+                })
+                .and_then(|occurrence| occurrence.context.as_deref())
+                == Some("tagged_template")
+    }));
+    assert!(tag_calls.iter().any(|candidate| {
+        candidate.constraints.argument_count == Some(3)
+            && candidate.constraints.argument_types
+                == [None, Some("string".to_owned()), Some("string".to_owned())]
+            && candidate.constraints.exact_target_declaration_id.is_none()
+    }));
+    let dynamic_call = batch
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == compass_languages::CandidateRelation::Calls
+                && candidate
+                    .occurrence_id
+                    .as_ref()
+                    .and_then(|id| {
+                        batch
+                            .occurrences
+                            .iter()
+                            .find(|occurrence| occurrence.id == *id)
+                    })
+                    .and_then(|occurrence| occurrence.context.as_deref())
+                    == Some("tagged_template")
+                && candidate.constraints.exact_target_declaration_id.is_none()
+        })
+        .expect("dynamic tagged call");
+    assert_eq!(dynamic_call.constraints.exact_target_declaration_id, None);
+    assert_eq!(
+        dynamic_call
+            .occurrence_id
+            .as_ref()
+            .and_then(|id| batch
+                .occurrences
+                .iter()
+                .find(|occurrence| occurrence.id == *id))
+            .and_then(|occurrence| occurrence.context.as_deref()),
+        Some("tagged_template")
+    );
+}
+
+#[test]
 fn javascript_static_this_factory_tracks_new_instance_members() {
     let batch = candidate(
         "src/factory.js",
