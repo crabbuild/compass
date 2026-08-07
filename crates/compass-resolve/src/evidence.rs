@@ -1695,12 +1695,46 @@ impl UniversalResolutionIndex {
             return Err(());
         };
         let owner_language = owner.language.as_str();
+        if owner.kind == "module" {
+            // Module-owner aliases represent a namespace object (including a
+            // CommonJS `module.exports` object). Resolve direct members only
+            // through the provider's published export slots; the lexical
+            // module scope also contains private declarations that must not be
+            // exposed merely because their names match the requested member.
+            let mut exported = BTreeSet::new();
+            let source_modules =
+                typescript_source_module_keys(&owner.range.source_file, &self.root);
+            for module in source_modules {
+                exported.extend(self.typescript_export_slots(
+                    owner_language,
+                    &module,
+                    property,
+                    candidate,
+                    false,
+                ));
+            }
+            if exported.is_empty() {
+                exported.extend(self.typescript_export_slots(
+                    owner_language,
+                    &owner.qualified_name,
+                    property,
+                    candidate,
+                    false,
+                ));
+            }
+            if !exported.is_empty() {
+                visiting.remove(&owner_slot);
+                return Ok(Some(exported));
+            }
+        }
         let direct_key = (
             owner_language.to_owned(),
             owner.qualified_name.clone(),
             property.to_owned(),
         );
-        if let Some(members) = self.members_by_owner.get(&direct_key) {
+        if owner.kind != "module"
+            && let Some(members) = self.members_by_owner.get(&direct_key)
+        {
             let direct = members
                 .iter()
                 .filter(|slot| self.typescript_declaration_allowed_slot(**slot, candidate))

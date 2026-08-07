@@ -580,6 +580,29 @@ module.exports = { ...base, direct() {} };
 }
 
 #[test]
+fn javascript_namespace_and_require_spreads_publish_module_owner_aliases() {
+    let source = br#"import * as esm from "./esm";
+const cjs = require("./cjs");
+module.exports = { ...esm, ...cjs };
+"#;
+    let batch = candidate("src/namespace-spread.cjs", source);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("namespace spread evidence");
+
+    let aliases = batch
+        .bindings
+        .iter()
+        .filter(|binding| {
+            binding.kind == compass_languages::BindingKind::Member && binding.spelling == "*"
+        })
+        .map(|binding| binding.qualified_target.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        aliases,
+        std::collections::BTreeSet::from(["./cjs::*", "./esm::*"])
+    );
+}
+
+#[test]
 fn javascript_static_this_factory_tracks_new_instance_members() {
     let batch = candidate(
         "src/factory.js",

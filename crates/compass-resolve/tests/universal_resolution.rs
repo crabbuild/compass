@@ -7723,6 +7723,112 @@ nonObject.missing();
 }
 
 #[test]
+fn javascript_namespace_and_require_spreads_follow_published_exports_only()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/esm.ts",
+            br#"export function esmPublished() {}
+function esmPrivate() {}
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/cjs.cjs",
+            br#"function cjsPublished() {}
+function cjsPrivate() {}
+module.exports = { cjsPublished };
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/derived.js",
+            br#"import * as esm from "./esm";
+const cjs = require("./cjs");
+module.exports = { ...esm, ...cjs };
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.js",
+            br#"const api = require("../lib/derived");
+api.esmPublished();
+api.cjsPublished();
+api.esmPrivate();
+api.cjsPrivate();
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            let path = root.join(relative);
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let esm_published = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "function" && declaration.name == "esmPublished")
+        .ok_or("missing published ESM function")?;
+    let cjs_published = batches[1]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "function" && declaration.name == "cjsPublished")
+        .ok_or("missing published CommonJS function")?;
+    let calls = batches[3]
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Calls)
+        .collect::<Vec<_>>();
+    let find_call = |name: &str| {
+        calls
+            .iter()
+            .find(|candidate| candidate.target_spelling == name)
+            .ok_or_else(|| format!("missing call {name}"))
+    };
+    let esm_call = find_call("esmPublished")?;
+    let cjs_call = find_call("cjsPublished")?;
+    let esm_private_call = find_call("esmPrivate")?;
+    let cjs_private_call = find_call("cjsPrivate")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&esm_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &esm_published.id
+    ));
+    assert!(matches!(
+        index.resolve(&cjs_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &cjs_published.id
+    ));
+    assert!(matches!(
+        index.resolve(&esm_private_call.id),
+        compass_resolve::evidence::ResolutionDecision::Unresolved
+    ));
+    assert!(matches!(
+        index.resolve(&cjs_private_call.id),
+        compass_resolve::evidence::ResolutionDecision::Unresolved
+    ));
+    Ok(())
+}
+
+#[test]
 fn javascript_commonjs_require_callable_namespace_resolves_default_export()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

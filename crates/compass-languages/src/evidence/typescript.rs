@@ -2056,12 +2056,28 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                             range: range_for_node(self.source_file, child),
                         });
                     }
+                    Some(Resolution::Import(import))
+                        if import.imported_name == "*"
+                            && !import.type_only
+                            && import.namespace == Namespace::Module =>
+                    {
+                        // A namespace import or a static `require()` binding
+                        // denotes the provider module object. Preserve that
+                        // owner identity so the resolver can project only
+                        // source-published exports; dynamic/indirect CommonJS
+                        // values still do not reach this branch.
+                        spreads.push(StructuralObjectSpread {
+                            source_qualified_name: import.target,
+                            source_variable_id: None,
+                            range: range_for_node(self.source_file, child),
+                        });
+                    }
                     None => {
                         // Static ES imports are hoisted, but the declaration
                         // pass intentionally runs before the full import
                         // emission pass. Recover only a default import from
                         // the top-level syntax; named, namespace, dynamic,
-                        // and CommonJS sources stay opaque.
+                        // and dynamic/indirect CommonJS sources stay opaque.
                         let target = self.syntactic_default_import_target(object, &name)?;
                         spreads.push(StructuralObjectSpread {
                             source_qualified_name: target,
