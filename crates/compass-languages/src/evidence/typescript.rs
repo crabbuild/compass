@@ -4569,10 +4569,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     /// Publish a source-complete ES default object as a source-backed value owner.
     /// Its member declarations are collected under `<module>.default`, which
     /// lets the shared resolver follow `import value from "./module"` without
-    /// treating the default object as an external namespace. A proven local
-    /// spread is admitted only for direct properties after the spread; source
-    /// properties inherited through the spread remain unresolved until a
-    /// dedicated member-alias contract can preserve their original identity.
+    /// treating the default object as an external namespace. A proven spread
+    /// also emits a bounded owner-alias marker so inherited source properties
+    /// retain their original declaration identity; direct properties after
+    /// the spread continue to override them.
     fn emit_default_object_export(
         &mut self,
         scope_id: &str,
@@ -6071,6 +6071,25 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             // reexports instead of leaving `require()` consumers external.
             self.emit_commonjs_module_default_export(scope_id, export_anchor)?;
             if object_literal_has_spread(right) {
+                // A CommonJS object export keeps the file module as its
+                // owner. When every spread operand is source-proven, retain
+                // that owner identity and publish a bounded alias for the
+                // inherited member inventory. Direct properties after the
+                // spread remain ordinary named reexports and therefore
+                // override an inherited member during resolution.
+                if self.object_literal_spread_export_is_safe(scope_id, right) {
+                    let destination = self.file_qualified_name.clone();
+                    self.record_structural_object_spreads(scope_id, &destination, right);
+                    self.emit_structural_spread_member_aliases(scope_id, &destination)?;
+                    let mut cursor = right.walk();
+                    for property in right
+                        .named_children(&mut cursor)
+                        .take(MAX_INLINE_OBJECT_PROPERTIES)
+                        .filter(|property| property.kind() != "spread_element")
+                    {
+                        self.emit_commonjs_object_property_export(scope_id, property)?;
+                    }
+                }
                 return Ok(());
             }
             let mut cursor = right.walk();

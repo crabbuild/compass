@@ -7524,6 +7524,205 @@ api.run();
 }
 
 #[test]
+fn javascript_commonjs_object_spreads_resolve_proven_members_and_direct_overrides()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/base.ts",
+            br#"export default {
+    inherited() { return true; },
+    conflict() { return true; },
+};
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/derived.js",
+            br#"import base from "./base";
+module.exports = {
+    ...base,
+    direct() { return base.inherited(); },
+    conflict() { return false; },
+};
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.js",
+            br#"const api = require("../lib/derived");
+api.inherited();
+api.direct();
+api.conflict();
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            let path = root.join(relative);
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let base = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "method" && declaration.name == "inherited")
+        .ok_or("missing base inherited method")?;
+    let derived_direct = batches[1]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "method" && declaration.name == "direct")
+        .ok_or("missing derived direct method")?;
+    let derived_conflict = batches[1]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "method" && declaration.name == "conflict")
+        .ok_or("missing derived conflict method")?;
+    let calls = batches[2]
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Calls)
+        .collect::<Vec<_>>();
+    let inherited_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "inherited")
+        .ok_or("missing inherited call")?;
+    let direct_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "direct")
+        .ok_or("missing direct call")?;
+    let conflict_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "conflict")
+        .ok_or("missing conflict call")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&inherited_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &base.id
+    ));
+    assert!(matches!(
+        index.resolve(&direct_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &derived_direct.id
+    ));
+    assert!(matches!(
+        index.resolve(&conflict_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &derived_conflict.id
+    ));
+    Ok(())
+}
+
+#[test]
+fn javascript_commonjs_object_spreads_fail_closed_for_ambiguity_and_non_objects()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/left.ts",
+            br#"export default { shared() {} };
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/right.ts",
+            br#"export default { shared() {} };
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/callable.ts",
+            br#"export default function callable() {}
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/ambiguous.js",
+            br#"import left from "./left";
+import right from "./right";
+module.exports = { ...left, ...right };
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/non-object.js",
+            br#"import callable from "./callable";
+module.exports = { ...callable };
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.js",
+            br#"const ambiguous = require("../lib/ambiguous");
+ambiguous.shared();
+const nonObject = require("../lib/non-object");
+nonObject.missing();
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            let path = root.join(relative);
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let calls = batches[5]
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Calls)
+        .collect::<Vec<_>>();
+    let ambiguous_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "shared")
+        .ok_or("missing ambiguous member call")?;
+    let non_object_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "missing")
+        .ok_or("missing non-object member call")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&ambiguous_call.id),
+        compass_resolve::evidence::ResolutionDecision::Ambiguous { .. }
+    ));
+    assert!(matches!(
+        index.resolve(&non_object_call.id),
+        compass_resolve::evidence::ResolutionDecision::Unresolved
+    ));
+    Ok(())
+}
+
+#[test]
 fn javascript_commonjs_require_callable_namespace_resolves_default_export()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

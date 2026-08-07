@@ -1540,6 +1540,21 @@ impl UniversalResolutionIndex {
                         member_owner_export.is_some(),
                     )
                 });
+            // A CommonJS namespace can inherit a member through a proven
+            // object spread without publishing that inherited name as a
+            // direct reexport. If the direct export lookup is empty, recover
+            // the module owner itself so the bounded `Member("*")` alias can
+            // project the source member. Direct named reexports still win
+            // because this fallback only runs for an empty owner set.
+            let mut structural_namespace_owner = false;
+            if owner_targets.is_empty() && namespace_member_export.is_some() {
+                let module_targets =
+                    self.typescript_export_slots(language, &key, "*", candidate, true);
+                if !module_targets.is_empty() {
+                    owner_targets = module_targets;
+                    structural_namespace_owner = true;
+                }
+            }
             if owner_targets.is_empty() && commonjs_namespace_call {
                 // A direct CommonJS require can return a callable
                 // `module.exports = fn`.  The namespace binding is retained
@@ -1550,16 +1565,18 @@ impl UniversalResolutionIndex {
                     self.typescript_export_slots(language, &key, "default", candidate, true);
             }
             source_member_target_seen |= !owner_targets.is_empty();
-            if member_owner_export.is_some() {
+            if member_owner_export.is_some() || structural_namespace_owner {
                 for owner_slot in &owner_targets {
                     let Some(owner) = self.declaration(*owner_slot) else {
                         continue;
                     };
-                    if let Some(members) = self.members_by_owner.get(&(
-                        owner.language.clone(),
-                        owner.qualified_name.clone(),
-                        candidate.target_spelling.clone(),
-                    )) {
+                    if member_owner_export.is_some()
+                        && let Some(members) = self.members_by_owner.get(&(
+                            owner.language.clone(),
+                            owner.qualified_name.clone(),
+                            candidate.target_spelling.clone(),
+                        ))
+                    {
                         let members = members.iter().copied().collect::<BTreeSet<_>>();
                         let members = if candidate.relation == CandidateRelation::Calls {
                             let argument_types = typescript_candidate_argument_types(candidate);
@@ -1740,9 +1757,17 @@ impl UniversalResolutionIndex {
         let Some(owner) = self.declaration(slot) else {
             return false;
         };
-        if owner.kind != "variable"
-            || !matches!(owner.language.as_str(), "typescript" | "javascript")
-        {
+        if !matches!(owner.language.as_str(), "typescript" | "javascript") {
+            return false;
+        }
+        // CommonJS object exports retain the file module as their owner. A
+        // `Member("*")` alias is emitted for that owner only after the
+        // adapter proves every spread source, so treating a module owner as a
+        // structural object here does not widen arbitrary module lookups.
+        if owner.kind == "module" {
+            return true;
+        }
+        if owner.kind != "variable" {
             return false;
         }
         if owner

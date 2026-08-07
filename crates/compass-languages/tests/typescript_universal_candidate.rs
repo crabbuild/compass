@@ -539,6 +539,44 @@ module.exports = { run, ...other };
     assert!(!spread.bindings.iter().any(|binding| {
         binding.spelling == "run" && binding.kind == compass_languages::BindingKind::Reexport
     }));
+    assert!(!spread.bindings.iter().any(|binding| {
+        binding.spelling == "*" && binding.kind == compass_languages::BindingKind::Member
+    }));
+}
+
+#[test]
+fn javascript_commonjs_object_spread_publishes_bounded_owner_aliases() {
+    let source = br#"const base = { inherited() {} };
+module.exports = { ...base, direct() {} };
+"#;
+    let batch = candidate("src/object-export-spread-safe.js", source);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("CommonJS spread evidence");
+
+    let alias = batch
+        .bindings
+        .iter()
+        .find(|binding| {
+            binding.kind == compass_languages::BindingKind::Member
+                && binding.spelling == "*"
+                && binding.qualified_target == "object-export-spread-safe.base"
+        })
+        .expect("bounded CommonJS spread owner alias");
+    assert_eq!(alias.namespace, Some(SymbolNamespace::Value));
+    let base = batch
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.kind == "variable"
+                && declaration.qualified_name == "object-export-spread-safe.base"
+        })
+        .expect("base declaration");
+    assert_eq!(
+        alias.target_declaration_id.as_deref(),
+        Some(base.id.as_str())
+    );
+    assert!(batch.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Reexport && binding.spelling == "direct"
+    }));
 }
 
 #[test]
