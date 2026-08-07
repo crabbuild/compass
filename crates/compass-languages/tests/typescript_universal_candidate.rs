@@ -213,6 +213,81 @@ export function render() { return <UI.Button />; }
 }
 
 #[test]
+fn javascript_commonjs_object_exports_publish_exact_named_reexports() {
+    let source = br#"function run() {}
+const alias = run;
+module.exports = {
+    run,
+    alias,
+    method() { return run(); },
+    literal: true,
+};
+"#;
+    let batch = candidate("src/object-export.js", source);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("CommonJS object evidence");
+
+    let reexports = batch
+        .bindings
+        .iter()
+        .filter(|binding| binding.kind == compass_languages::BindingKind::Reexport)
+        .map(|binding| binding.spelling.as_str())
+        .collect::<Vec<_>>();
+    for name in ["default", "run", "alias", "method", "literal"] {
+        assert!(
+            reexports.contains(&name),
+            "missing CommonJS object reexport {name}: {reexports:?}"
+        );
+    }
+
+    let run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "run" && declaration.kind == "function")
+        .expect("run declaration");
+    let run_binding = batch
+        .bindings
+        .iter()
+        .find(|binding| {
+            binding.spelling == "run" && binding.kind == compass_languages::BindingKind::Reexport
+        })
+        .expect("run reexport");
+    assert_eq!(
+        run_binding.target_declaration_id.as_deref(),
+        Some(run.id.as_str())
+    );
+
+    let method = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "method" && declaration.kind == "method")
+        .expect("method declaration");
+    let method_binding = batch
+        .bindings
+        .iter()
+        .find(|binding| {
+            binding.spelling == "method" && binding.kind == compass_languages::BindingKind::Reexport
+        })
+        .expect("method reexport");
+    assert_eq!(
+        method_binding.target_declaration_id.as_deref(),
+        Some(method.id.as_str())
+    );
+
+    let spread = candidate(
+        "src/object-export-spread.js",
+        br#"const other = getOther();
+module.exports = { run, ...other };
+"#,
+    );
+    assert!(spread.bindings.iter().any(|binding| {
+        binding.spelling == "default" && binding.kind == compass_languages::BindingKind::Reexport
+    }));
+    assert!(!spread.bindings.iter().any(|binding| {
+        binding.spelling == "run" && binding.kind == compass_languages::BindingKind::Reexport
+    }));
+}
+
+#[test]
 fn javascript_static_this_factory_tracks_new_instance_members() {
     let batch = candidate(
         "src/factory.js",

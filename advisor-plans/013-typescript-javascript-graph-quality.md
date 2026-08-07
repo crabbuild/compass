@@ -1543,6 +1543,31 @@ claim. Conditional structural exports, compiler-target truth, release corpora,
 precision/Wilson, framework tiers, equivalent Graphify/SCIP scope, and the
 production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, CommonJS object-export bridge)
+
+The universal TypeScript/JavaScript candidate now publishes bounded CommonJS
+object-export evidence:
+
+- `module.exports = { ... }` emits a source-backed default module reexport and
+  exact named reexports for spread-free object properties. Shorthand/value
+  properties retain the local declaration target; methods and literal
+  properties retain their exact object-property declaration.
+- Computed/dynamic keys and object spreads do not create guessed named
+  bindings. The default module fact remains available, while incomplete
+  property sets stay unresolved rather than widening to every visible name.
+- Cross-file resolver coverage proves named `require()` bindings reach the
+  exact exported function and method declarations. The candidate suite is now
+  90 tests and the universal resolver suite 167 tests.
+- Fixture qualification remains byte-identical (57 languages, 980 records,
+  1,565 invariants, 27 flows, 24 negatives, 25 diagnostics, 28 edge kinds,
+  and 45 node kinds). The Axios checker diagnostic remains 3,051/3,167 exact
+  local targets, 116 missing, and 0 wrong; this bridge is project-level
+  reexport evidence and is intentionally not presented as same-file recall.
+
+Conditional structural exports beyond the bounded spread-free form,
+compiler-target truth, release corpora, precision/Wilson, framework tiers,
+equivalent Graphify/SCIP scope, and the production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

@@ -6849,6 +6849,87 @@ new DefaultWidget().run();
 }
 
 #[test]
+fn javascript_commonjs_object_exports_resolve_named_require_bindings()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/cjs.js",
+            br#"function run() {}
+module.exports = {
+    run,
+    method() { return run(); },
+};
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.js",
+            br#"const { run, method } = require("../lib/cjs");
+run();
+method();
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            let path = root.join(relative);
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let run = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "function" && declaration.name == "run")
+        .ok_or("missing CommonJS run declaration")?;
+    let method = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "method" && declaration.name == "method")
+        .ok_or("missing CommonJS method declaration")?;
+    let calls = batches[1]
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Calls)
+        .collect::<Vec<_>>();
+    let run_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "run")
+        .ok_or("missing required run call")?;
+    let method_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "method")
+        .ok_or("missing required method call")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&run_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &run.id
+    ));
+    assert!(matches!(
+        index.resolve(&method_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &method.id
+    ));
+    Ok(())
+}
+
+#[test]
 fn typescript_candidate_does_not_use_terminal_name_for_relative_imports()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

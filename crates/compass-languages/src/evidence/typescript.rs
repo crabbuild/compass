@@ -190,6 +190,7 @@ struct CandidateState<'source, 'tree> {
     language: &'static str,
     root_scope: String,
     file_declaration: String,
+    file_qualified_name: String,
     scope_by_node: HashMap<usize, String>,
     scope_parents: HashMap<String, Option<String>>,
     scope_owners: HashMap<String, String>,
@@ -332,6 +333,7 @@ pub(crate) fn extract_candidate_tree_evidence(
         language,
         root_scope: root_scope.clone(),
         file_declaration: file_declaration.clone(),
+        file_qualified_name: module_name.clone(),
         scope_by_node: HashMap::new(),
         scope_parents: HashMap::from([(root_scope.clone(), None)]),
         scope_owners: HashMap::from([(root_scope.clone(), file_declaration)]),
@@ -5084,27 +5086,135 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let Some(left) = node.child_by_field_name("left") else {
             return Ok(());
         };
-        let left_text = node_text(self.source, left).replace(char::is_whitespace, "");
-        let export_name = if left_text == "module.exports" {
-            "default".to_owned()
-        } else if let Some(name) = left_text.strip_prefix("module.exports.") {
-            name.to_owned()
-        } else if let Some(name) = left_text.strip_prefix("exports.") {
-            name.to_owned()
-        } else {
+        let Some((export_name, export_anchor)) = commonjs_export_name(left, self.source) else {
             return Ok(());
         };
         let Some(right) = node.child_by_field_name("right") else {
             return Ok(());
         };
-        let Some(source_name) = rightmost_identifier(right) else {
+        let right = unwrap_expression_node(right);
+        if export_name == "default" && right.kind() == "object" {
+            // `module.exports = { ... }` is a default module export plus a
+            // bounded set of named properties. The declaration pass already
+            // records each spread-free property under the file module's
+            // source-qualified owner; publish those exact declarations as
+            // reexports instead of leaving `require()` consumers external.
+            self.emit_commonjs_module_default_export(scope_id, export_anchor)?;
+            if object_literal_has_spread(right) {
+                return Ok(());
+            }
+            let mut cursor = right.walk();
+            for property in right
+                .named_children(&mut cursor)
+                .take(MAX_INLINE_OBJECT_PROPERTIES)
+            {
+                self.emit_commonjs_object_property_export(scope_id, property)?;
+            }
+            return Ok(());
+        }
+        let resolution = self.commonjs_export_value_resolution(scope_id, right);
+        let Some(resolution) = resolution else {
             return Ok(());
         };
-        let source_name = node_text(self.source, source_name);
-        let Some(resolution) = self.resolve_name(scope_id, &source_name, Namespace::Both) else {
+        self.emit_commonjs_reexport_binding(scope_id, &export_name, export_anchor, resolution)
+    }
+
+    fn commonjs_export_value_resolution(
+        &self,
+        scope_id: &str,
+        value: Node<'tree>,
+    ) -> Option<Resolution> {
+        match value.kind() {
+            "identifier" | "type_identifier" | "shorthand_property_identifier" => {
+                self.resolve_name(scope_id, &node_text(self.source, value), Namespace::Both)
+            }
+            "member_expression" | "optional_member_expression" | "subscript_expression" => {
+                let property = member_property_node(value)?;
+                self.resolve_member_target(
+                    scope_id,
+                    value.child_by_field_name("object"),
+                    property,
+                    None,
+                    &[],
+                )
+            }
+            _ => None,
+        }
+    }
+
+    fn emit_commonjs_module_default_export(
+        &mut self,
+        scope_id: &str,
+        anchor: Node<'tree>,
+    ) -> Result<(), EvidenceError> {
+        let target = self.file_qualified_name.clone();
+        let target_declaration_id = self.file_declaration.clone();
+        self.emit_commonjs_reexport_target(
+            scope_id,
+            "default",
+            anchor,
+            &target,
+            Some(&target_declaration_id),
+            Namespace::Module,
+        )
+    }
+
+    fn emit_commonjs_object_property_export(
+        &mut self,
+        scope_id: &str,
+        property: Node<'tree>,
+    ) -> Result<(), EvidenceError> {
+        let Some((name_node, value)) = commonjs_object_property(property) else {
             return Ok(());
         };
-        let owner = self.owner_for_scope(scope_id);
+        let Some(export_name) = member_property_name(self.source, name_node) else {
+            // Computed or malformed object keys do not prove a stable export
+            // spelling. Keep the module's default evidence, but do not emit a
+            // guessed named binding.
+            return Ok(());
+        };
+        if export_name.is_empty() || export_name.len() > MAX_TYPE_SHAPE_BYTES {
+            return Ok(());
+        }
+        let resolution = value
+            .and_then(|value| self.commonjs_export_value_resolution(scope_id, value))
+            .or_else(|| self.commonjs_object_property_declaration(property, &export_name));
+        let Some(resolution) = resolution else {
+            return Ok(());
+        };
+        self.emit_commonjs_reexport_binding(scope_id, &export_name, name_node, resolution)
+    }
+
+    fn commonjs_object_property_declaration(
+        &self,
+        property: Node<'tree>,
+        property_name: &str,
+    ) -> Option<Resolution> {
+        let qualified_name = format!("{}.{property_name}", self.file_qualified_name);
+        let declarations = self
+            .declarations_by_qualified
+            .get(&qualified_name)?
+            .iter()
+            .filter_map(|id| self.declarations.get(id))
+            .filter(|declaration| {
+                matches!(
+                    declaration.kind.as_str(),
+                    "property" | "method" | "function" | "class" | "variable"
+                ) && declaration.range_start_byte >= property.start_byte()
+                    && declaration.range_start_byte <= property.end_byte()
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        (declarations.len() == 1).then(|| Resolution::Local(declarations[0].clone()))
+    }
+
+    fn emit_commonjs_reexport_binding(
+        &mut self,
+        scope_id: &str,
+        export_name: &str,
+        anchor: Node<'tree>,
+        resolution: Resolution,
+    ) -> Result<(), EvidenceError> {
         let (target, target_declaration_id, namespace) = match resolution {
             Resolution::Local(declaration) => (
                 declaration.qualified_name,
@@ -5113,37 +5223,65 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             ),
             Resolution::Import(import) => (import.target, None, import.namespace),
         };
-        let binding_id = self.builder.bind_with_identity(
-            BindingKind::Reexport,
-            &export_name,
+        self.emit_commonjs_reexport_target(
+            scope_id,
+            export_name,
+            anchor,
             &target,
             target_declaration_id.as_deref(),
+            namespace,
+        )
+    }
+
+    fn emit_commonjs_reexport_target(
+        &mut self,
+        scope_id: &str,
+        export_name: &str,
+        anchor: Node<'tree>,
+        target: &str,
+        target_declaration_id: Option<&str>,
+        namespace: Namespace,
+    ) -> Result<(), EvidenceError> {
+        if export_name.is_empty() || target.is_empty() {
+            return Ok(());
+        }
+        let owner = self.owner_for_scope(scope_id);
+        let binding_id = self.builder.bind_with_identity(
+            BindingKind::Reexport,
+            export_name,
+            target,
+            target_declaration_id,
             Some(scope_id),
             Some(symbol_namespace(namespace)),
             false,
-            range_for_node(self.source_file, left),
+            range_for_node(self.source_file, anchor),
         )?;
         let occurrence_id = self.builder.occur_with_context(
             SemanticRole::Reexport,
             &owner,
-            &export_name,
+            export_name,
             Some("commonjs"),
             Some(scope_id),
             Some("commonjs"),
-            range_for_node(self.source_file, left),
+            range_for_node(self.source_file, anchor),
         )?;
         self.builder.relate(
             CandidateRelation::Reexports,
             &owner,
             Some(&occurrence_id),
             Some(&binding_id),
-            &export_name,
+            export_name,
             ResolutionConstraint {
                 exact_language: Some(self.language.to_owned()),
                 allowed_target_kinds: vec![
+                    "module".to_owned(),
                     "function".to_owned(),
                     "class".to_owned(),
                     "variable".to_owned(),
+                    "property".to_owned(),
+                    "method".to_owned(),
+                    "enum".to_owned(),
+                    "interface".to_owned(),
                     "type_alias".to_owned(),
                 ],
                 ..ResolutionConstraint::default()
@@ -7931,6 +8069,35 @@ fn declaration_shape<'tree>(
             matches!(node.kind(), "namespace_export").then(|| first_identifier_node(node))?
         })?;
     Some((kind, name, namespace, creates_scope, scope_kind))
+}
+
+fn commonjs_export_name<'tree>(left: Node<'tree>, source: &[u8]) -> Option<(String, Node<'tree>)> {
+    let normalized = node_text(source, left).replace(char::is_whitespace, "");
+    if normalized == "module.exports" {
+        return Some(("default".to_owned(), left));
+    }
+    let property = member_property_node(left)?;
+    let object = left.child_by_field_name("object")?;
+    let object_text = node_text(source, object).replace(char::is_whitespace, "");
+    if !matches!(object_text.as_str(), "module.exports" | "exports") {
+        return None;
+    }
+    let name = member_property_name(source, property)?;
+    (!name.is_empty() && name.len() <= MAX_TYPE_SHAPE_BYTES).then_some((name, property))
+}
+
+fn commonjs_object_property<'tree>(
+    node: Node<'tree>,
+) -> Option<(Node<'tree>, Option<Node<'tree>>)> {
+    match node.kind() {
+        "pair" => Some((
+            node.child_by_field_name("key")?,
+            node.child_by_field_name("value"),
+        )),
+        "method_definition" => Some((node.child_by_field_name("name")?, None)),
+        "shorthand_property_identifier" => Some((node, Some(node))),
+        _ => None,
+    }
 }
 
 fn is_anonymous_signature_scope(node: Node<'_>) -> bool {
