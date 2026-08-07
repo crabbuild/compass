@@ -1839,11 +1839,21 @@ spread sources, and spreading a non-object default. Candidate adapter versions
 advanced to 5 so the qualification-only evidence cache cannot reuse the prior
 owner-less spread realization.
 
-The exact-HEAD fixture qualification and the read-only Axios differential need
-to be rerun at the implementation head before this checkpoint is treated as a
-measured release baseline. Compiler-source-oracle recall, accepted-sample/
-Wilson gates, framework tiers, equivalent Graphify/SCIP scope, and the
-production hard cut remain open.
+The exact-head fixture qualification at `3eb4b7f3a796238eeef954238461dfd63f4ca362`
+passes with 57 languages, 980 coverage records, 1,565 invariants, 27 flows,
+24 negatives, 25 diagnostics, 28 edge kinds, and 45 node kinds. It retains
+graph digest
+`sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`,
+82 exact/11 unresolved route resolutions, and byte-equivalent clean, warm,
+rebuild, restored, and alternate-checkout outputs. The unchanged digest is
+expected because the candidate adapter remains unregistered in production.
+The read-only Axios target differential remains 3,054/3,167 exact local
+targets (113 missing, 0 wrong; 391/503 member targets and 1,544/1,545 call
+targets, 228 accepted-candidate false positives); it remains diagnostic and
+does not establish a recall, precision, or leadership claim.
+
+Compiler-source-oracle recall, accepted-sample/Wilson gates, framework tiers,
+equivalent Graphify/SCIP scope, and the production hard cut remain open.
 
 ## Outcome
 
