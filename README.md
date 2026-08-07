@@ -5,18 +5,9 @@
 Compass turns source code and project artifacts into a graph you can search,
 query, visualize, compare across Git history, and share with development tools.
 
-```text
-large codebase
-     |
-     v
-  Compass  ----->  architecture map
-     |           \-> dependency and impact answers
-     |            \-> exact CompassQL results
-     |             \-> historical graph diffs
-     |              \-> focused context for assistants
-     v
-less searching, smaller context, traceable evidence
-```
+![High-level Compass workspace graph with package dependencies and subsystem filters](docs/assets/screenshots/code-graph-workspace-overview.png)
+
+*Start at the package map, filter by subsystem, then select any node to inspect its dependencies and source.*
 
 [Get started](docs/getting-started.md) ·
 [Read the documentation](docs/README.md) ·
@@ -27,6 +18,27 @@ Use Compass inside your editor with the first-party
 [Compass Codegraph extension for VS Code](https://marketplace.visualstudio.com/items?itemName=crabbuild.crabbuild-compass-vscode).
 See the [VS Code extension guide](docs/guides/vscode.md) for current graphs,
 cursor-rooted call graphs, architecture flow, queries, and exact Git evolution.
+
+## Put Compass in your daily loop
+
+Build the graph once, open it in a browser or VS Code, and keep it synchronized while you work:
+
+```bash
+compass init
+compass export html
+compass watch
+```
+
+Run `compass watch` in a second terminal. Refresh the browser after a build, or reopen the graph in VS Code.
+
+Use the graph from the right sidebar:
+
+1. Search for a symbol or file.
+2. Select a node to inspect its source, signature, community, evidence, and relationships.
+3. Open the source card, or double-click a located node, to jump to the exact code.
+4. Filter communities or change the layout when you need a different level of detail.
+
+In VS Code, choose **Open Code Graph** instead of `compass export html`. Right-click inside a function to open callers, callees, impact, related symbols, or a path.
 
 ## What Compass gives you
 
