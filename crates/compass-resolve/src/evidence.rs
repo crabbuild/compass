@@ -115,6 +115,7 @@ type TypeScriptProjectModuleIndex = AHashMap<(String, String), Vec<String>>;
 
 struct TypeScriptExportWalk<'a> {
     candidate: &'a RelationshipCandidate,
+    allow_type_owner: bool,
     visiting: BTreeSet<(String, String, String)>,
     slots: BTreeSet<DeclarationSlot>,
 }
@@ -1314,8 +1315,19 @@ impl UniversalResolutionIndex {
                 .as_deref()
                 .unwrap_or(&exported)
                 .to_owned();
-            let owner_targets =
-                self.typescript_export_slots(language, &key, &owner_export, candidate);
+            // A member candidate constrains the final target to
+            // callable/value kinds, but the exported owner can be a
+            // type-only declaration such as an interface. Widen only this
+            // internal owner lookup; member filtering below still uses the
+            // original candidate, so an interface itself is never published
+            // as the callable/access target.
+            let owner_targets = self.typescript_export_slots(
+                language,
+                &key,
+                &owner_export,
+                candidate,
+                member_owner_export.is_some(),
+            );
             if member_owner_export.is_some() {
                 for owner in owner_targets {
                     let Some(owner) = self.declaration(owner) else {
@@ -1360,10 +1372,12 @@ impl UniversalResolutionIndex {
         module: &str,
         exported: &str,
         candidate: &RelationshipCandidate,
+        allow_type_owner: bool,
     ) -> BTreeSet<DeclarationSlot> {
         const MAX_TYPESCRIPT_REEXPORT_DEPTH: usize = 64;
         let mut walk = TypeScriptExportWalk {
             candidate,
+            allow_type_owner,
             visiting: BTreeSet::new(),
             slots: BTreeSet::new(),
         };
@@ -1410,7 +1424,17 @@ impl UniversalResolutionIndex {
                             values
                                 .iter()
                                 .filter(|slot| {
-                                    self.typescript_declaration_allowed_slot(**slot, walk.candidate)
+                                    if walk.allow_type_owner {
+                                        self.typescript_declaration_allowed_owner_slot(
+                                            **slot,
+                                            walk.candidate,
+                                        )
+                                    } else {
+                                        self.typescript_declaration_allowed_slot(
+                                            **slot,
+                                            walk.candidate,
+                                        )
+                                    }
                                 })
                                 .take(remaining)
                                 .copied(),
@@ -3174,6 +3198,17 @@ impl UniversalResolutionIndex {
         typescript_declaration_basic_allowed(target, candidate)
     }
 
+    fn typescript_declaration_allowed_owner_slot(
+        &self,
+        slot: DeclarationSlot,
+        candidate: &RelationshipCandidate,
+    ) -> bool {
+        let Some(target) = self.declaration(slot) else {
+            return false;
+        };
+        typescript_declaration_basic_allowed_with_type_owner(target, candidate)
+    }
+
     fn unique_typescript_decision(
         &self,
         ids: Option<&Vec<DeclarationSlot>>,
@@ -4290,6 +4325,21 @@ fn typescript_declaration_basic_allowed(
     target: &DeclarationFact,
     candidate: &RelationshipCandidate,
 ) -> bool {
+    typescript_declaration_basic_allowed_for(target, candidate, false)
+}
+
+fn typescript_declaration_basic_allowed_with_type_owner(
+    target: &DeclarationFact,
+    candidate: &RelationshipCandidate,
+) -> bool {
+    typescript_declaration_basic_allowed_for(target, candidate, true)
+}
+
+fn typescript_declaration_basic_allowed_for(
+    target: &DeclarationFact,
+    candidate: &RelationshipCandidate,
+    allow_type_owner: bool,
+) -> bool {
     typescript_language_family(&candidate.language).contains(&target.language.as_str())
         && candidate
             .constraints
@@ -4304,7 +4354,12 @@ fn typescript_declaration_basic_allowed(
             || candidate
                 .constraints
                 .allowed_target_kinds
-                .contains(&target.kind))
+                .contains(&target.kind)
+            || (allow_type_owner
+                && matches!(
+                    target.kind.as_str(),
+                    "class" | "enum" | "interface" | "namespace" | "type_alias"
+                )))
 }
 
 fn declaration_overloads<'a>(

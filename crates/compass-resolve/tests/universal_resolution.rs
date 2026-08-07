@@ -7208,3 +7208,116 @@ new Widget().run();
     }
     Ok(())
 }
+
+#[test]
+fn typescript_candidate_merges_imported_interface_members_across_declarations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/types.ts",
+            br#"export interface Config { run(): void }
+export interface Config { inspect(): void }
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import type { Config } from "../lib/types";
+export function use(config: Config) { config.inspect(); }
+"#
+            .as_slice(),
+        ),
+    ];
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
+        let mut extraction = extract(relative, source);
+        extraction.semantic_evidence = Some(
+            Engine::default().extract_source_universal_candidate_evidence(
+                Path::new(relative),
+                relative,
+                source,
+            )?,
+        );
+        extractions.push(extraction);
+    }
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    let owned = compass_resolve::resolve_owned_with_root(extractions, &sources, root);
+    for resolved in [&resolved, &owned] {
+        assert!(
+            resolved.error.is_none(),
+            "resolver error: {:?}",
+            resolved.error
+        );
+        let inspect = resolved
+            .nodes
+            .iter()
+            .find(|node| {
+                node.string("source_file") == "lib/types.ts" && node.label() == ".inspect()"
+            })
+            .ok_or("missing merged interface member")?;
+        assert!(resolved.edges.iter().any(|edge| {
+            edge.string("relation") == "calls"
+                && edge.string("source_file") == "app/consumer.ts"
+                && edge.target == inspect.id
+                && edge.string("resolution_rule") == "member-binding"
+        }));
+    }
+    Ok(())
+}
+
+#[test]
+fn typescript_candidate_leaves_duplicate_merged_interface_members_ambiguous()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/types.ts",
+            br#"export interface Config { inspect(): void }
+export interface Config { inspect(): void }
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import type { Config } from "../lib/types";
+export function use(config: Config) { config.inspect(); }
+"#
+            .as_slice(),
+        ),
+    ];
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
+        let mut extraction = extract(relative, source);
+        extraction.semantic_evidence = Some(
+            Engine::default().extract_source_universal_candidate_evidence(
+                Path::new(relative),
+                relative,
+                source,
+            )?,
+        );
+        extractions.push(extraction);
+    }
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert!(
+        resolved.error.is_none(),
+        "resolver error: {:?}",
+        resolved.error
+    );
+    assert!(!resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls" && edge.string("source_file") == "app/consumer.ts"
+    }));
+    Ok(())
+}

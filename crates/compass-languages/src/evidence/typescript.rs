@@ -5590,6 +5590,21 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                             return Some(receiver);
                         }
 
+                        // Preserve the import proof carried by a direct
+                        // annotation (`value: ImportedType`).  The
+                        // `variable_types` cache intentionally stores only
+                        // the nominal qualified spelling for older
+                        // inference paths; recovering the source annotation
+                        // here keeps imported receivers attached to their
+                        // binding identity so cross-file member evidence can
+                        // resolve against the imported type's declarations.
+                        if let Some(type_name) = declaration.declared_type_name.as_deref()
+                            && let Some(receiver) =
+                                self.resolve_declared_type_receiver(scope_id, type_name)
+                        {
+                            return Some(receiver);
+                        }
+
                         if let Some(qualified_name) = self.variable_types.get(&declaration.id) {
                             let qualified_name = self
                                 .instance_receiver_qualified_name(qualified_name)

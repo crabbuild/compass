@@ -1930,3 +1930,37 @@ new Box().read();
                 == Some(quoted.id.as_str())
     }));
 }
+
+#[test]
+fn typescript_candidate_preserves_imported_type_receiver_for_member_evidence() {
+    let batch = candidate(
+        "src/consumer.ts",
+        br#"import type { Config } from "./types";
+export function use(config: Config) { config.inspect(); }
+"#,
+    );
+    validate_evidence(&batch, EvidenceLimits::default()).expect("imported member evidence");
+    let binding = batch
+        .bindings
+        .iter()
+        .find(|binding| binding.spelling == "Config")
+        .expect("imported type binding");
+    let candidates = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            matches!(
+                candidate.relation,
+                CandidateRelation::Calls | CandidateRelation::AccessesMember
+            ) && candidate.target_spelling == "inspect"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(candidates.len(), 2);
+    for candidate in candidates {
+        assert_eq!(candidate.binding_id.as_deref(), Some(binding.id.as_str()));
+        assert_eq!(
+            candidate.constraints.qualified_name.as_deref(),
+            Some("./types::Config.inspect")
+        );
+    }
+}

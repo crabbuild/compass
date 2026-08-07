@@ -771,6 +771,31 @@ production hard cut remain open. The candidate adapter remains absent from
 `UNIVERSAL_ADAPTERS` until those gates and the exact-release qualification
 complete.
 
+### Execution checkpoint (2026-08-06, imported declaration-merging slice)
+
+The TypeScript candidate path now preserves the source binding when a value is
+annotated with an imported nominal type (`value: ImportedType`). The receiver
+proof no longer collapses to a bare qualified spelling, so member calls and
+accesses carry the imported binding identity and a qualified target such as
+`module::Config.inspect`. This covers type-only imports as well as ordinary
+value-and-type imports and keeps unresolved/dynamic receivers conservative.
+
+The shared TypeScript resolver now widens only its internal exported-owner
+lookup to include type-space declarations (`interface`, `namespace`, and
+aliases); final member filtering still admits only the callable/value member
+target kinds. Consequently, two source declarations of one interface merge
+their distinct members, while duplicate same-spelled members remain
+ambiguous and publish no invented call. Borrowed and owned merge paths are
+covered by the cross-file regression, with candidate-level assertions for
+binding identity and member qualification.
+
+This advances declaration merging and imported nominal receiver quality but is
+not a full TypeScript type system. Generic instantiation beyond bounded source
+shapes, mapped/indexed conditional types, framework tiers, compiler
+differential recall, and the production hard cut remain open. The candidate
+adapter remains absent from `UNIVERSAL_ADAPTERS` until the mandatory quality
+and exact-release qualification gates complete.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for
