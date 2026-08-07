@@ -1478,6 +1478,116 @@ function use(box: Box<Item>) { box.pair[0].inspect(); }
 }
 
 #[test]
+fn typescript_generic_function_return_substitutes_nominal_argument() {
+    let batch = candidate(
+        "src/generic-return.ts",
+        br#"class Item { inspect(): void {} }
+function identity<T>(value: T): T { return value; }
+function fixed<T>(value: T): Item { return new Item(); }
+function use() {
+    identity(new Item()).inspect();
+    identity<Item>(new Item()).inspect();
+    fixed("value").inspect();
+}
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    let calls = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == compass_languages::CandidateRelation::Calls
+                && candidate.target_spelling == "inspect"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 3);
+    assert!(calls.iter().all(|candidate| {
+        candidate.constraints.exact_target_declaration_id.as_deref() == Some(inspect.id.as_str())
+    }));
+}
+
+#[test]
+fn typescript_generic_function_array_return_preserves_element_receiver() {
+    let batch = candidate(
+        "src/generic-return-array.ts",
+        br#"class Item { inspect(): void {} }
+function collect<T>(value: T): T[] { return [value]; }
+function use() { collect(new Item())[0].inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(inspect.id.as_str())
+    }));
+}
+
+#[test]
+fn typescript_generic_function_nominal_container_return_preserves_member_receiver() {
+    let batch = candidate(
+        "src/generic-return-container.ts",
+        br#"class Item { inspect(): void {} }
+interface Box<T> { value: T }
+function box<T>(value: T): Box<T> { return { value }; }
+function use() { box(new Item()).value.inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(inspect.id.as_str())
+    }));
+}
+
+#[test]
+fn typescript_generic_function_return_fails_closed_without_inference() {
+    let batch = candidate(
+        "src/generic-return-unknown.ts",
+        br#"declare function identity<T>(): T;
+function use() { identity().inspect(); }
+"#,
+    );
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.is_none()
+    }));
+}
+
+#[test]
+fn typescript_generic_function_return_fails_closed_on_conflicting_inference() {
+    let batch = candidate(
+        "src/generic-return-conflict.ts",
+        br#"class Item { inspect(): void {} }
+class Other {}
+function choose<T>(first: T, second: T): T { return first; }
+function use() { choose(new Item(), new Other()).inspect(); }
+"#,
+    );
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.is_none()
+    }));
+}
+
+#[test]
 fn typescript_generic_index_signature_values_resolve_member_calls() {
     let batch = candidate(
         "src/generic-index-signature.ts",

@@ -6146,9 +6146,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let Resolution::Local(declaration) = resolution else {
             return None;
         };
-        let return_type = declaration
-            .return_type_name
-            .clone()
+        let return_type = self
+            .call_return_type_name(scope_id, call, &declaration)
             .or_else(|| self.variable_alias_return_type(&declaration, scope_id))?;
         let return_type = return_type.trim();
         if return_type == "this" {
@@ -6156,6 +6155,70 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         }
         self.resolve_declared_type_receiver(scope_id, return_type)
             .or_else(|| self.resolve_declared_type_receiver(&declaration.scope_id, return_type))
+    }
+
+    /// Infer a bounded generic callable return shape from source-visible call
+    /// arguments. This intentionally handles only direct type-parameter
+    /// positions and recursively matching array/generic containers; contextual
+    /// inference, overload sets, conditional types, and structural
+    /// assignability remain unresolved rather than guessing a receiver.
+    fn call_return_type_name(
+        &self,
+        scope_id: &str,
+        call: Node<'tree>,
+        declaration: &DeclarationInfo,
+    ) -> Option<String> {
+        let return_type = declaration.return_type_name.clone()?;
+        let Some(order) = self
+            .generic_parameter_order_by_declaration
+            .get(&declaration.id)
+        else {
+            return Some(return_type);
+        };
+        if order.is_empty() {
+            return Some(return_type);
+        }
+        let function = call
+            .child_by_field_name("function")
+            .or_else(|| first_named_child(call))?;
+        let explicit = function
+            .child_by_field_name("type_arguments")
+            .or_else(|| first_named_child_kind(function, "type_arguments"))
+            .and_then(|type_arguments| {
+                let text = node_text(self.source, type_arguments);
+                let inner = text.strip_prefix('<')?.strip_suffix('>')?;
+                split_top_level_arguments(inner).map(|arguments| {
+                    self.canonical_type_arguments(
+                        scope_id,
+                        &arguments
+                            .into_iter()
+                            .map(str::trim)
+                            .map(ToOwned::to_owned)
+                            .collect::<Vec<_>>(),
+                    )
+                })
+            })
+            .unwrap_or_default();
+        let mut arguments = order.clone();
+        for (index, argument) in explicit.into_iter().enumerate() {
+            if let Some(slot) = arguments.get_mut(index) {
+                slot.clone_from(&argument);
+            }
+        }
+        let call_arguments = self.call_argument_types(call, scope_id);
+        if let Some(parameter_types) = declaration.parameter_types.as_ref() {
+            for (parameter, argument) in parameter_types.iter().zip(call_arguments.iter()) {
+                let Some(argument) = argument.as_deref() else {
+                    continue;
+                };
+                if !infer_candidate_type_arguments(parameter, argument, order, &mut arguments) {
+                    return None;
+                }
+            }
+        }
+        let substituted = substitute_candidate_type_parameters(&return_type, order, &arguments, 0);
+        (substituted != return_type || !candidate_type_mentions_parameter(&return_type, order))
+            .then_some(substituted)
     }
 
     fn variable_alias_return_type(
@@ -7359,6 +7422,12 @@ fn callable_return_type_name(node: Node<'_>, source: &[u8]) -> Option<String> {
             return Some(normalized);
         }
     }
+    if matches!(return_node.kind(), "array_type" | "tuple_type") {
+        let normalized = normalize_type_text(source, return_node);
+        if !normalized.is_empty() && normalized.len() <= MAX_TYPE_SHAPE_BYTES {
+            return Some(normalized);
+        }
+    }
     if matches!(
         return_node.kind(),
         "identifier" | "type_identifier" | "predefined_type"
@@ -7530,6 +7599,75 @@ fn indexed_sequence_element_type_name(type_name: &str, index: Option<&str>) -> O
         return Some(element);
     }
     index.and_then(|index| tuple_element_type_name(type_name, index))
+}
+
+fn infer_candidate_type_arguments(
+    parameter: &str,
+    argument: &str,
+    parameters: &[String],
+    arguments: &mut [String],
+) -> bool {
+    let parameter = parameter.trim();
+    let argument = argument.trim();
+    if parameter.is_empty() || argument.is_empty() {
+        return true;
+    }
+    if let Some(index) = parameters.iter().position(|name| name == parameter) {
+        let Some(slot) = arguments.get_mut(index) else {
+            return true;
+        };
+        if slot
+            == parameters
+                .get(index)
+                .map(String::as_str)
+                .unwrap_or_default()
+        {
+            slot.clone_from(&argument.to_owned());
+            return true;
+        }
+        return slot == argument;
+    }
+    if let (Some(parameter_element), Some(argument_element)) =
+        (parameter.strip_suffix("[]"), argument.strip_suffix("[]"))
+    {
+        return infer_candidate_type_arguments(
+            parameter_element,
+            argument_element,
+            parameters,
+            arguments,
+        );
+    }
+    let Some((parameter_base, parameter_arguments)) = generic_type_parts(parameter) else {
+        return true;
+    };
+    let Some((argument_base, argument_arguments)) = generic_type_parts(argument) else {
+        return true;
+    };
+    if parameter_base != argument_base || parameter_arguments.len() != argument_arguments.len() {
+        return true;
+    }
+    for (parameter_argument, argument_argument) in
+        parameter_arguments.iter().zip(argument_arguments.iter())
+    {
+        if !infer_candidate_type_arguments(
+            parameter_argument,
+            argument_argument,
+            parameters,
+            arguments,
+        ) {
+            return false;
+        }
+    }
+    true
+}
+
+fn candidate_type_mentions_parameter(type_name: &str, parameters: &[String]) -> bool {
+    type_name
+        .split(|character: char| {
+            !(character == '_' || character == '$' || character.is_ascii_alphanumeric())
+        })
+        .filter(|token| !token.is_empty())
+        .any(|token| parameters.iter().any(|parameter| parameter == token))
 }
 
 fn mapped_type_source_name(node: Node<'_>, source: &[u8]) -> Option<String> {

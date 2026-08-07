@@ -950,6 +950,32 @@ conditional/mapped modifier semantics, alias escape, dynamic mutation,
 framework tiers, compiler differential recall, and the production hard cut
 remain open. The candidate adapter remains absent from UNIVERSAL_ADAPTERS.
 
+### Execution checkpoint (2026-08-06, bounded generic callable-return slice)
+
+The qualification-only TypeScript/JavaScript path now preserves a
+source-proven generic callable's returned receiver when the call arguments
+uniquely determine its type parameters:
+
+- Direct `T` returns infer from typed or constructor arguments, and explicit
+  call-site arguments such as `identity<Item>(...)` are canonicalized through
+  the existing local type identity rules.
+- Inference recurses through matching postfix arrays and generic containers,
+  so `collect(new Item())[0].inspect()` and
+  `box(new Item()).value.inspect()` retain the exact `Item.inspect` target.
+  Array and tuple return shapes remain bounded by the existing type-shape
+  limits.
+- Missing inference and conflicting arguments fail closed. Contextual
+  overload inference, conditional/structural assignability, imported
+  callable return shapes, and dynamic `eval`/proxy mutation are not treated
+  as proven receivers.
+
+The slice adds five direct candidate regressions and one resolver regression;
+the focused candidate suite is now 67 tests and the universal resolver suite
+is now 150 tests. The production candidate adapter remains absent from
+`UNIVERSAL_ADAPTERS`; accepted precision/Wilson gates, cross-file callable
+return evidence, framework/compiler tiers, equivalent Graphify/SCIP scope,
+and the production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

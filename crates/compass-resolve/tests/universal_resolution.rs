@@ -7863,6 +7863,57 @@ export function use(values: Item[], box: Box<Item>) {
 }
 
 #[test]
+fn typescript_candidate_resolves_generic_callable_return_member_chain()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = "src/generic-return.ts";
+    let source = br#"class Item { inspect(): void {} }
+function identity<T>(value: T): T { return value; }
+export function use() { identity(new Item()).inspect(); }
+"#;
+    let path = root.join(relative);
+    fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+    fs::write(&path, source)?;
+    let mut extraction = extract(relative, source);
+    extraction.semantic_evidence = Some(
+        Engine::default().extract_source_universal_candidate_evidence(
+            Path::new(relative),
+            relative,
+            source,
+        )?,
+    );
+    let mut sources = HashMap::new();
+    sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
+    let resolved = compass_resolve::resolve_with_root(&[extraction], &sources, root);
+    assert!(
+        resolved.error.is_none(),
+        "resolver error: {:?}",
+        resolved.error
+    );
+    let inspect = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == relative && node.label() == ".inspect()")
+        .ok_or("missing generic return member")?;
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.string("source_file") == relative)
+        .collect::<Vec<_>>();
+    let inspect_calls = calls
+        .iter()
+        .filter(|edge| edge.target == inspect.id)
+        .collect::<Vec<_>>();
+    assert_eq!(inspect_calls.len(), 1);
+    assert_eq!(
+        inspect_calls[0].string("resolution_rule"),
+        "exact-source-declaration"
+    );
+    Ok(())
+}
+
+#[test]
 fn typescript_candidate_resolves_imported_index_signature_member_chain()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
