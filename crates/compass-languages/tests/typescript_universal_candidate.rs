@@ -1521,6 +1521,80 @@ function use(value: Copy<Item>) { value.inspect(); }
 }
 
 #[test]
+fn typescript_generic_literal_indexed_alias_substitutes_nominal_target() {
+    let batch = candidate(
+        "src/generic-indexed-alias.ts",
+        br#"interface Nested { run(): void }
+interface Item { nested: Nested }
+type NestedOf<T> = T["nested"];
+function use(value: NestedOf<Item>) { value.run(); }
+"#,
+    );
+    let run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Nested.run"))
+        .expect("Nested.run declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "run"
+            && candidate.constraints.exact_target_declaration_id.as_deref() == Some(run.id.as_str())
+    }));
+}
+
+#[test]
+fn typescript_keyof_identity_projection_preserves_nominal_members() {
+    let batch = candidate(
+        "src/keyof-identity.ts",
+        br#"interface Item { inspect(): void }
+type Copy<T> = Pick<T, keyof T>;
+type Empty<T> = Omit<T, keyof T>;
+function use(value: Copy<Item>) { value.inspect(); }
+function rejected(value: Empty<Item>) { value.inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    let calls = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "inspect"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2);
+    assert!(calls.iter().any(|candidate| {
+        candidate.constraints.exact_target_declaration_id.as_deref() == Some(inspect.id.as_str())
+    }));
+    assert!(
+        calls
+            .iter()
+            .any(|candidate| { candidate.constraints.exact_target_declaration_id.is_none() })
+    );
+}
+
+#[test]
+fn typescript_keyof_projection_with_competing_base_fails_closed() {
+    let batch = candidate(
+        "src/keyof-ambiguous.ts",
+        br#"interface First { inspect(): void }
+interface Second { inspect(): void }
+type Keys = keyof First | keyof Second;
+type Picked = Pick<First, Keys>;
+function use(value: Picked) { value.inspect(); }
+"#,
+    );
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.is_none()
+    }));
+}
+
+#[test]
 fn typescript_non_homomorphic_mapped_alias_fails_closed() {
     let batch = candidate(
         "src/non-homomorphic-mapped-alias.ts",

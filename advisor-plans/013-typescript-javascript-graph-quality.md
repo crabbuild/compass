@@ -1272,6 +1272,34 @@ conditional semantics, project-manifest corpora, compiler-backed scope and
 declaration inventories, framework tiers, accepted precision/Wilson gates,
 equivalent Graphify/SCIP scope, and the production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, bounded generic indexed and `keyof` identity slice)
+
+The qualification-only TypeScript candidate and resolver now preserve two
+additional source-proven type shapes:
+
+- Generic aliases such as `NestedOf<T> = T["nested"]` substitute the explicit
+  nominal argument before indexed-member lookup in both same-file candidate
+  evidence and cross-file resolver evidence. The indexed suffix is preserved
+  under the existing shape bound, so arbitrary computed keys still fail closed.
+- `Pick<Base, keyof Base>` is recognized as a local identity projection, and
+  the imported generic form follows the same identity through the project
+  export index. `Omit<Base, keyof Base>` remains empty for member lookup. A
+  literal or competing/structural key space is not widened by this slice;
+  duplicate owners, imported candidate-side projections, and ambiguous unions
+  remain unresolved.
+- The normalized type-shape encoding keeps a separator after the `keyof`
+  keyword, preventing a compact `keyofT` representation from being confused
+  with an ordinary identifier. The parser still treats identifiers such as
+  `keyofItem` as ordinary names.
+
+The focused TypeScript candidate suite is now 86 tests and the universal
+resolver suite is now 162 tests. The candidate adapter remains absent from
+`UNIVERSAL_ADAPTERS`. Full `keyof` value-space evaluation, arbitrary
+mapped/indexed projections, distributive conditional semantics,
+project-manifest corpora, compiler-backed scope and declaration inventories,
+framework tiers, accepted precision/Wilson gates, equivalent Graphify/SCIP
+scope, and the production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

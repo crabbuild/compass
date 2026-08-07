@@ -6887,7 +6887,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             if let Some((utility, base, arguments)) = utility_type_parts(normalized)
                 && matches!(utility, "Pick" | "Omit")
             {
-                let keys = arguments.get(1).and_then(|keys| type_literal_names(keys))?;
+                let base_receiver = self.resolve_declared_type_receiver(scope_id, base)?;
+                let keys = arguments
+                    .get(1)
+                    .and_then(|keys| self.utility_key_names(scope_id, &base_receiver, keys))?;
                 if keys.len() > MAX_INLINE_OBJECT_PROPERTIES
                     || keys
                         .iter()
@@ -6897,7 +6900,6 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 {
                     return None;
                 }
-                let base_receiver = self.resolve_declared_type_receiver(scope_id, base)?;
                 // Keep the first utility projection local and source-backed.
                 // Imported projected members require a project-wide property
                 // inventory and remain unresolved until that evidence exists.
@@ -6990,6 +6992,31 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             }
         }
         None
+    }
+
+    /// Resolve the bounded key set accepted by a local `Pick`/`Omit`
+    /// projection. Literal keys are source syntax; `keyof Base` is accepted
+    /// only when it names the same unique local nominal base, so `Pick<Base,
+    /// keyof Base>` remains an identity projection without pretending to
+    /// evaluate arbitrary structural or imported key spaces.
+    fn utility_key_names(
+        &self,
+        scope_id: &str,
+        base_receiver: &ReceiverTarget,
+        keys: &str,
+    ) -> Option<HashSet<String>> {
+        if let Some(keys) = type_literal_names(keys) {
+            return Some(keys);
+        }
+        let key_base = keyof_type_base(keys)?;
+        let key_receiver = self.resolve_declared_type_receiver(scope_id, key_base)?;
+        if key_receiver.import.is_some()
+            || base_receiver.import.is_some()
+            || key_receiver.qualified_name != base_receiver.qualified_name
+        {
+            return None;
+        }
+        self.source_type_property_names(&base_receiver.qualified_name)
     }
 
     /// Resolve a canonical module-qualified nominal name produced while
@@ -7997,12 +8024,26 @@ fn callable_return_type_name(node: Node<'_>, source: &[u8]) -> Option<String> {
 }
 
 fn normalize_type_text(source: &[u8], node: Node<'_>) -> String {
-    node_text(source, node)
+    let mut normalized = String::new();
+    for character in node_text(source, node)
         .trim()
         .trim_start_matches(':')
         .chars()
-        .filter(|character| !character.is_ascii_whitespace())
-        .collect()
+    {
+        if character.is_ascii_whitespace() {
+            // Keep one separator after the `keyof` keyword.  The compact
+            // signature format otherwise turns `keyof T` into `keyofT`,
+            // which is indistinguishable from an ordinary identifier and
+            // prevents bounded generic substitution from recognizing the
+            // key-space expression.
+            if normalized.ends_with("keyof") && !normalized.ends_with("keyof ") {
+                normalized.push(' ');
+            }
+        } else {
+            normalized.push(character);
+        }
+    }
+    normalized
 }
 
 /// Return the small amount of declaration shape needed to follow a proven
@@ -8106,9 +8147,7 @@ fn direct_type_reference_name(node: Node<'_>, source: &[u8]) -> Option<String> {
     };
     let normalized_type_text = node_text(source, type_node);
     if indexed_type_parts(&normalized_type_text).is_some()
-        || normalized_type_text
-            .strip_prefix("keyof")
-            .is_some_and(|rest| !rest.trim().is_empty())
+        || keyof_type_base(&normalized_type_text).is_some()
     {
         if normalized_type_text.len() <= MAX_TYPE_SHAPE_BYTES {
             return Some(normalized_type_text);
@@ -8512,6 +8551,30 @@ fn substitute_candidate_type_parameters(
     {
         return argument.clone();
     }
+    if let Some(key_base) = keyof_type_base(type_name) {
+        let substituted =
+            substitute_candidate_type_parameters(key_base, parameters, arguments, depth + 1);
+        let substituted = format!("keyof {substituted}");
+        return if substituted.len() <= MAX_TYPE_SHAPE_BYTES {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
+    }
+    if indexed_type_parts(type_name).is_some()
+        && let Some(open) = type_name.rfind('[')
+    {
+        let base = type_name.get(..open).unwrap_or_default();
+        let substituted_base =
+            substitute_candidate_type_parameters(base, parameters, arguments, depth + 1);
+        let suffix = type_name.get(open..).unwrap_or_default();
+        let substituted = format!("{substituted_base}{suffix}");
+        return if substituted.len() <= MAX_TYPE_SHAPE_BYTES {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
+    }
     if let Some(element) = type_name.strip_suffix("[]") {
         let substituted =
             substitute_candidate_type_parameters(element, parameters, arguments, depth + 1);
@@ -8822,6 +8885,15 @@ fn indexed_type_parts(type_name: &str) -> Option<(&str, String)> {
         return None;
     }
     Some((base, property.to_owned()))
+}
+
+fn keyof_type_base(type_name: &str) -> Option<&str> {
+    let rest = type_name.trim().strip_prefix("keyof")?;
+    rest.chars()
+        .next()
+        .filter(|character| character.is_whitespace())?;
+    let base = rest.trim();
+    (!base.is_empty()).then_some(base)
 }
 
 fn strip_type_arguments(type_name: &str) -> &str {

@@ -2192,6 +2192,33 @@ impl UniversalResolutionIndex {
             }
             return indexed_contexts;
         }
+        if let Some((utility, arguments)) = typescript_generic_type_parts(&substituted)
+            && matches!(utility, "Pick" | "Omit")
+            && arguments.len() == 2
+        {
+            let base = arguments[0].trim();
+            let keys = arguments[1].trim();
+            if typescript_keyof_type_base(keys) == Some(base) {
+                if utility == "Omit" {
+                    return BTreeSet::new();
+                }
+                // `Pick<Base, keyof Base>` is an identity projection. Keep
+                // this resolver branch deliberately narrow: literal Pick or
+                // Omit sets need member-level projection metadata, while a
+                // broad structural key expression must not widen a receiver.
+                return self.typescript_member_type_contexts(
+                    language,
+                    module,
+                    base,
+                    TypeScriptMemberContext {
+                        owner_signature: None,
+                        type_arguments: &[],
+                        index_selector: None,
+                    },
+                    candidate,
+                );
+            }
+        }
         let substituted = match context.index_selector {
             Some("") => match typescript_array_element_type(&substituted) {
                 Some(element) => element.to_owned(),
@@ -5676,6 +5703,15 @@ fn typescript_literal_indexed_type(value: &str) -> Option<(&str, String)> {
     Some((base, property.to_owned()))
 }
 
+fn typescript_keyof_type_base(value: &str) -> Option<&str> {
+    let rest = value.trim().strip_prefix("keyof")?;
+    rest.chars()
+        .next()
+        .filter(|character| character.is_whitespace())?;
+    let base = rest.trim();
+    (!base.is_empty()).then_some(base)
+}
+
 fn typescript_generic_parameter_names(signature: &str) -> Vec<String> {
     let signature = signature
         .trim()
@@ -5998,6 +6034,15 @@ fn typescript_substitute_type_parameters(
         && let Some(argument) = arguments.get(index)
     {
         return argument.clone();
+    }
+    if let Some(key_base) = typescript_keyof_type_base(type_name) {
+        let substituted = typescript_substitute_type_parameters(key_base, parameters, arguments);
+        let substituted = format!("keyof {substituted}");
+        return if substituted.len() <= 1024 {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
     }
     if let Some(element) = type_name.strip_suffix("[]") {
         let substituted = typescript_substitute_type_parameters(element, parameters, arguments);
