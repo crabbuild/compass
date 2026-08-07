@@ -88,6 +88,13 @@ the adapter actually emits. The batch contains six bounded collections:
   proven. Tagged-template arity and known substitution types therefore
   participate in the same fail-closed overload and cross-file resolution rules
   as ordinary calls.
+  Decorator factories use `Decorates` candidates rather than generic call
+  edges. Direct decorators carry `decorator` context; member decorators carry
+  `decorator_member` context and resolve through the nominal member/index
+  path. A decorator invocation's bounded argument count and known literal
+  types participate in overload selection. Dynamic or computed decorator
+  expressions retain a targetless occurrence, while calls nested inside
+  decorator arguments remain independent call evidence.
 - `EvidenceDiagnostic` records a bounded extraction problem without creating
   a graph fact.
 

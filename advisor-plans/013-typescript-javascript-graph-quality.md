@@ -2025,6 +2025,30 @@ remains qualification-only; the adapter is still not registered in
 `UNIVERSAL_ADAPTERS`, and compiler differential, framework, competitor, and
 production hard-cut gates remain open.
 
+### Execution checkpoint (2026-08-07, bounded decorator-factory evidence)
+
+Decorator syntax now has a first-class, source-backed candidate path instead
+of relying on the nested call traversal:
+
+- Direct decorators (`@Injectable`, `@Controller(...)`, and local decorator
+  factories) emit `Decorates` candidates with the exact decorator anchor,
+  `decorator` context, bounded argument count, and literal argument types.
+- Namespace/member decorators (`@decorators.Controller(...)`) use the same
+  nominal member resolver as calls and members, retaining the property anchor,
+  namespace binding, `decorator_member` context, and exact imported target.
+- Dynamic or computed decorator expressions preserve a targetless
+  `Decorates` occurrence with its source spelling and call shape. A nested
+  call in decorator arguments remains an ordinary call; the outer decorator
+  factory is not duplicated as a generic `Calls` edge.
+- Local, named-import, and namespace-import decorator factories now resolve
+  cross-file through the shared resolver. Overload/arity/type mismatches and
+  ambiguous members remain unresolved rather than being selected by spelling.
+
+Candidate and resolver coverage now stand at 107 and 180 focused tests. The
+adapter remains qualification-only and unregistered; compiler differential,
+framework-contract, competitor, production hard-cut, and leadership gates
+remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

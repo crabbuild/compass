@@ -8238,6 +8238,94 @@ tags.sql`select ${42}`;
 }
 
 #[test]
+fn typescript_decorator_factories_resolve_direct_and_namespace_imports()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/decorators.ts",
+            br#"export function Controller(options: any) {}
+"#
+            .as_slice(),
+        ),
+        (
+            "app/service.ts",
+            br#"import { Controller } from "../lib/decorators";
+import * as decorators from "../lib/decorators";
+@Controller({ path: "/users" })
+class Users {}
+@decorators.Controller({ path: "/admin" })
+class Admin {}
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            let path = root.join(relative);
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let controller = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "function" && declaration.name == "Controller")
+        .ok_or("missing Controller declaration")?;
+    let decorations = batches[1]
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Decorates
+                && candidate.target_spelling == "Controller"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(decorations.len(), 2);
+    for decoration in &decorations {
+        assert_eq!(decoration.constraints.argument_count, Some(1));
+        assert_eq!(
+            decoration.constraints.argument_types,
+            [Some("object".to_owned())]
+        );
+        assert!(matches!(
+            decoration
+                .occurrence_id
+                .as_ref()
+                .and_then(|id| {
+                    batches[1]
+                        .occurrences
+                        .iter()
+                        .find(|occurrence| occurrence.id == *id)
+                })
+                .and_then(|occurrence| occurrence.context.as_deref()),
+            Some("decorator" | "decorator_member")
+        ));
+    }
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    for decoration in decorations {
+        assert!(matches!(
+            index.resolve(&decoration.id),
+            compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+                if declaration_id == &controller.id
+        ));
+    }
+    Ok(())
+}
+
+#[test]
 fn javascript_commonjs_require_callable_namespace_resolves_default_export()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

@@ -327,6 +327,7 @@ struct CandidateState<'source, 'tree> {
     /// Source-proven bindings from a derived class's base type parameters to
     /// the concrete type arguments used in its `extends` clause.
     base_type_bindings: HashMap<String, HashMap<String, String>>,
+    parser_recovered: bool,
     declaration_name_nodes: HashSet<usize>,
     import_nodes: HashSet<usize>,
     emitted_facts: HashSet<String>,
@@ -373,6 +374,7 @@ pub(crate) fn extract_candidate_tree_evidence(
         file_range.clone(),
     )?;
     let root_scope = builder.open_scope("module", Some(&file_declaration), None, file_range)?;
+    let parser_recovered = root.has_error();
     let mut state = CandidateState {
         source_file,
         source,
@@ -418,6 +420,7 @@ pub(crate) fn extract_candidate_tree_evidence(
         base_targets: HashMap::new(),
         implements_targets: HashMap::new(),
         base_type_bindings: HashMap::new(),
+        parser_recovered,
         declaration_name_nodes: HashSet::new(),
         import_nodes: HashSet::new(),
         emitted_facts: HashSet::new(),
@@ -436,7 +439,7 @@ pub(crate) fn extract_candidate_tree_evidence(
     state.infer_variable_types(root, 0);
     state.collect_flow_assignment_facts(root, 0);
     state.emit_nodes(root, 0)?;
-    if root.has_error() {
+    if parser_recovered {
         state.builder.diagnose(
             "partial_parser_recovery",
             None,
@@ -3566,11 +3569,21 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 }
             }
             "call_expression" | "optional_call_expression" => {
-                self.emit_call(node, &scope_id, false)?;
-                self.emit_dynamic_import(node, &scope_id)?;
-                self.emit_commonjs_object_assign(&scope_id, node, false)?;
-                self.emit_commonjs_define_property(&scope_id, node)?;
-                self.emit_commonjs_export_star(&scope_id, node)?;
+                // A decorator factory invocation is represented by the
+                // Decorates candidate emitted from its enclosing decorator
+                // node. Do not publish a second ordinary Calls edge for the
+                // same syntax; nested calls in decorator arguments still
+                // receive their own traversal pass.
+                if !node
+                    .parent()
+                    .is_some_and(|parent| parent.kind() == "decorator")
+                {
+                    self.emit_call(node, &scope_id, false)?;
+                    self.emit_dynamic_import(node, &scope_id)?;
+                    self.emit_commonjs_object_assign(&scope_id, node, false)?;
+                    self.emit_commonjs_define_property(&scope_id, node)?;
+                    self.emit_commonjs_export_star(&scope_id, node)?;
+                }
             }
             "new_expression" => self.emit_call(node, &scope_id, true)?,
             "member_expression" | "optional_member_expression" | "subscript_expression" => {
@@ -5740,24 +5753,171 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     }
 
     fn emit_decorator(&mut self, node: Node<'tree>, scope_id: &str) -> Result<(), EvidenceError> {
-        let Some(target) = first_named_child_kind(node, "identifier") else {
+        let allowed_kinds = &["function", "class", "variable", "property", "external"];
+        if self.parser_recovered || node.has_error() {
+            let spelling = node_text(self.source, node)
+                .trim_start_matches('@')
+                .trim()
+                .to_owned();
+            if spelling.is_empty() {
+                return Ok(());
+            }
+            return self.add_unresolved_candidate(
+                node,
+                scope_id,
+                CandidateRelation::Decorates,
+                SemanticRole::Decorator,
+                &spelling,
+                None,
+                "decorator_recovery",
+                None,
+                Vec::new(),
+                allowed_kinds,
+                None,
+            );
+        }
+        let Some(expression) = first_named_child(node) else {
             return Ok(());
         };
-        let spelling = node_text(self.source, target);
-        let Some(resolution) = self.resolve_name(scope_id, &spelling, Namespace::Value) else {
-            return Ok(());
+        let (callee, argument_count, argument_types) = match expression.kind() {
+            "call_expression" | "optional_call_expression" => {
+                let callee = expression
+                    .child_by_field_name("function")
+                    .or_else(|| first_named_child(expression))
+                    .unwrap_or(expression);
+                (
+                    unwrap_expression_node(callee),
+                    call_argument_count(expression),
+                    self.call_argument_types(expression, scope_id),
+                )
+            }
+            _ => (unwrap_expression_node(expression), None, Vec::new()),
         };
-        self.add_declaration_resolution(
-            target,
+        let member_decorator = matches!(
+            callee.kind(),
+            "member_expression" | "optional_member_expression" | "subscript_expression"
+        );
+        if member_decorator {
+            let Some(property) = member_property_node(callee) else {
+                return self.add_unresolved_candidate(
+                    callee,
+                    scope_id,
+                    CandidateRelation::Decorates,
+                    SemanticRole::Decorator,
+                    &node_text(self.source, callee),
+                    None,
+                    "decorator_dynamic",
+                    argument_count,
+                    argument_types,
+                    allowed_kinds,
+                    None,
+                );
+            };
+            let Some(property_name) = member_property_name(self.source, property) else {
+                let spelling = node_text(self.source, callee);
+                let qualifier = callee
+                    .child_by_field_name("object")
+                    .map(|object| node_text(self.source, object));
+                return self.add_unresolved_candidate(
+                    property,
+                    scope_id,
+                    CandidateRelation::Decorates,
+                    SemanticRole::Decorator,
+                    &spelling,
+                    qualifier.as_deref(),
+                    "decorator_dynamic_member",
+                    argument_count,
+                    argument_types,
+                    allowed_kinds,
+                    None,
+                );
+            };
+            let qualifier = node_text(self.source, callee);
+            if let Some(resolution) = self.resolve_member_target(
+                scope_id,
+                callee.child_by_field_name("object"),
+                property,
+                argument_count,
+                &argument_types,
+            ) {
+                return self.add_declaration_resolution_with_arguments(
+                    property,
+                    scope_id,
+                    CandidateRelation::Decorates,
+                    SemanticRole::Decorator,
+                    &property_name,
+                    Some(&qualifier),
+                    Some("decorator_member"),
+                    Namespace::Value,
+                    argument_count,
+                    argument_types,
+                    resolution,
+                    allowed_kinds,
+                );
+            }
+            return self.add_unresolved_candidate(
+                property,
+                scope_id,
+                CandidateRelation::Decorates,
+                SemanticRole::Decorator,
+                &property_name,
+                Some(&qualifier),
+                "decorator_member",
+                argument_count,
+                argument_types,
+                allowed_kinds,
+                None,
+            );
+        }
+        let spelling = node_text(self.source, callee);
+        let simple_target = matches!(
+            callee.kind(),
+            "identifier" | "property_identifier" | "type_identifier"
+        );
+        if simple_target {
+            let resolution = argument_count
+                .map(|count| {
+                    self.resolve_name_for_call(
+                        scope_id,
+                        &spelling,
+                        Namespace::Value,
+                        Some(count),
+                        &argument_types,
+                    )
+                })
+                .unwrap_or_else(|| self.resolve_name(scope_id, &spelling, Namespace::Value));
+            if let Some(resolution) = resolution {
+                return self.add_declaration_resolution_with_arguments(
+                    callee,
+                    scope_id,
+                    CandidateRelation::Decorates,
+                    SemanticRole::Decorator,
+                    &spelling,
+                    None,
+                    Some("decorator"),
+                    Namespace::Value,
+                    argument_count,
+                    argument_types,
+                    resolution,
+                    allowed_kinds,
+                );
+            }
+        }
+        if spelling.is_empty() {
+            return Ok(());
+        }
+        self.add_unresolved_candidate(
+            callee,
             scope_id,
             CandidateRelation::Decorates,
             SemanticRole::Decorator,
             &spelling,
             None,
-            Some("decorator"),
-            Namespace::Value,
-            resolution,
-            &["function", "class", "variable"],
+            "decorator_dynamic",
+            argument_count,
+            argument_types,
+            allowed_kinds,
+            None,
         )
     }
 

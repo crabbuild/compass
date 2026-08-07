@@ -214,6 +214,115 @@ export function render() { return <UI.Button />; }
 }
 
 #[test]
+fn typescript_candidate_emits_call_and_member_decorator_evidence() {
+    let source = br#"import { Injectable, Controller as C } from "@nestjs/common";
+import * as decorators from "./decorators";
+function Local(value: string) {}
+@Local("service")
+@C
+@Injectable()
+@decorators.Controller({ path: "/users" })
+class Service {}
+@unknownFactory(makePath())
+class Dynamic {}
+"#;
+    let batch = candidate("src/service.ts", source);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("decorator evidence");
+    let decorators = batch
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Decorates)
+        .collect::<Vec<_>>();
+    assert_eq!(decorators.len(), 5);
+    let local = decorators
+        .iter()
+        .find(|candidate| candidate.target_spelling == "Local")
+        .expect("local decorator factory");
+    assert_eq!(local.constraints.argument_count, Some(1));
+    assert_eq!(
+        local.constraints.argument_types,
+        [Some("string".to_owned())]
+    );
+    assert!(local.constraints.exact_target_declaration_id.is_some());
+    assert_eq!(
+        local
+            .occurrence_id
+            .as_ref()
+            .and_then(|id| batch
+                .occurrences
+                .iter()
+                .find(|occurrence| occurrence.id == *id))
+            .and_then(|occurrence| occurrence.context.as_deref()),
+        Some("decorator")
+    );
+    let namespace = decorators
+        .iter()
+        .find(|candidate| candidate.target_spelling == "Controller")
+        .expect("namespace decorator factory");
+    assert_eq!(
+        namespace.constraints.qualified_name.as_deref(),
+        Some("./decorators::Controller")
+    );
+    assert_eq!(
+        namespace
+            .occurrence_id
+            .as_ref()
+            .and_then(|id| batch
+                .occurrences
+                .iter()
+                .find(|occurrence| occurrence.id == *id))
+            .and_then(|occurrence| occurrence.context.as_deref()),
+        Some("decorator_member")
+    );
+    let dynamic = decorators
+        .iter()
+        .find(|candidate| candidate.target_spelling == "unknownFactory")
+        .expect("dynamic decorator factory");
+    assert_eq!(dynamic.constraints.exact_target_declaration_id, None);
+    assert_eq!(dynamic.constraints.argument_count, Some(1));
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "makePath"
+    }));
+    assert!(!batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "Injectable"
+    }));
+}
+
+#[test]
+fn typescript_candidate_keeps_recovered_computed_decorator_unresolved() {
+    let batch = candidate(
+        "src/recovered-decorator.ts",
+        br#"@decorators[factoryKey]()
+class Computed {}
+"#,
+    );
+    validate_evidence(&batch, EvidenceLimits::default()).expect("recovered decorator evidence");
+    let decorator = batch
+        .candidates
+        .iter()
+        .find(|candidate| candidate.relation == CandidateRelation::Decorates)
+        .expect("recovered decorator candidate");
+    assert_eq!(decorator.constraints.exact_target_declaration_id, None);
+    assert_eq!(
+        decorator
+            .occurrence_id
+            .as_ref()
+            .and_then(|id| batch
+                .occurrences
+                .iter()
+                .find(|occurrence| occurrence.id == *id))
+            .and_then(|occurrence| occurrence.context.as_deref()),
+        Some("decorator_recovery")
+    );
+    assert!(
+        batch
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "partial_parser_recovery")
+    );
+}
+
+#[test]
 fn javascript_candidate_publishes_spread_free_default_object_members() {
     let batch = candidate(
         "src/utils.js",
