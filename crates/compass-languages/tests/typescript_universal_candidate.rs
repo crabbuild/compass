@@ -603,6 +603,54 @@ module.exports = { ...esm, ...cjs };
 }
 
 #[test]
+fn javascript_commonjs_object_assign_publishes_bounded_owner_aliases() {
+    let source = br#"const base = { inherited() {} };
+module.exports = Object.assign({}, base, { direct() {} });
+"#;
+    let batch = candidate("src/object-assign-export.js", source);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("Object.assign evidence");
+
+    assert!(batch.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Reexport && binding.spelling == "default"
+    }));
+    assert!(batch.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Member
+            && binding.spelling == "*"
+            && binding.qualified_target == "object-assign-export.base"
+    }));
+    assert!(batch.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Reexport && binding.spelling == "direct"
+    }));
+
+    let mutation = candidate(
+        "src/object-assign-mutation.js",
+        br#"const base = { inherited() {} };
+Object.assign(exports, base);
+"#,
+    );
+    validate_evidence(&mutation, EvidenceLimits::default())
+        .expect("Object.assign mutation evidence");
+    assert!(mutation.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Member
+            && binding.spelling == "*"
+            && binding.qualified_target == "object-assign-mutation.base"
+    }));
+
+    let unknown = candidate(
+        "src/object-assign-unknown.js",
+        br#"const base = getBase();
+module.exports = Object.assign({}, base, { direct() {} });
+"#,
+    );
+    assert!(!unknown.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Member && binding.spelling == "*"
+    }));
+    assert!(!unknown.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Reexport && binding.spelling == "direct"
+    }));
+}
+
+#[test]
 fn javascript_static_this_factory_tracks_new_instance_members() {
     let batch = candidate(
         "src/factory.js",

@@ -1926,6 +1926,34 @@ The unchanged digest is expected because the qualification-only adapter is not
 registered in production. This remains correctness evidence, not a leadership
 claim.
 
+### Execution checkpoint (2026-08-07, bounded CommonJS `Object.assign` owners)
+
+The CommonJS object-owner path now also recognizes the common source-proven
+composition forms `module.exports = Object.assign({}, source, { direct })` and
+`Object.assign(exports, source)`. The candidate retains the file-module owner,
+records each immutable object/default/namespace source as a bounded `Member("*")`
+alias, and emits a final direct object argument as named reexports. The
+resolver therefore inherits only source-published members, keeps the final
+direct object phase ahead of inherited members, and preserves exact member
+occurrences across `require()` consumers.
+
+The implementation deliberately rejects unknown or mutable sources, computed
+arguments, nested assign expressions, object arguments before a later source,
+and object spreads inside the direct phase. Those shapes remain unresolved
+rather than being approximated from the `Object.assign` spelling. Candidate and
+resolver coverage now includes positive source inheritance, direct override,
+mutating `exports`, and unknown-source negatives; the focused suites are 102
+candidate tests and 176 universal resolver tests.
+
+Exact fixture qualification remains unchanged because this adapter is still
+qualification-only and is not registered in production: 57 languages, 980
+coverage records, 1,565 invariants, 27 flows, 24 negatives, 25 diagnostics,
+28 edge kinds, 45 node kinds, graph digest
+`sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`,
+82 exact and 11 unresolved route resolutions, and byte-equivalent clean,
+warm, rebuild, restored, alternate-checkout, and source-unchanged outputs.
+This is an interop correctness increment, not a release leadership claim.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

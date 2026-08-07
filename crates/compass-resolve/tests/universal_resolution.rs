@@ -7829,6 +7829,145 @@ api.cjsPrivate();
 }
 
 #[test]
+fn javascript_commonjs_object_assign_resolves_proven_members_and_mutations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/base.ts",
+            br#"export default {
+    inherited() { return true; },
+    conflict() { return true; },
+};
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/derived.js",
+            br#"import base from "./base";
+module.exports = Object.assign({}, base, {
+    direct() { return base.inherited(); },
+    conflict() { return false; },
+});
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/mutated.js",
+            br#"import base from "./base";
+Object.assign(exports, base);
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/unknown.js",
+            br#"const source = getSource();
+module.exports = Object.assign({}, source, { direct() {} });
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.js",
+            br#"const derived = require("../lib/derived");
+derived.inherited();
+derived.direct();
+derived.conflict();
+const mutated = require("../lib/mutated");
+mutated.inherited();
+const unknown = require("../lib/unknown");
+unknown.direct();
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            let path = root.join(relative);
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let base_inherited = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "method" && declaration.name == "inherited")
+        .ok_or("missing base inherited method")?;
+    let derived_direct = batches[1]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "method" && declaration.name == "direct")
+        .ok_or("missing derived direct method")?;
+    let derived_conflict = batches[1]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "method" && declaration.name == "conflict")
+        .ok_or("missing derived conflict method")?;
+    let calls = batches[4]
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Calls)
+        .collect::<Vec<_>>();
+    let call = |name: &str| {
+        calls
+            .iter()
+            .find(|candidate| candidate.target_spelling == name)
+            .ok_or_else(|| format!("missing call {name}"))
+    };
+    let inherited = call("inherited")?;
+    let direct = call("direct")?;
+    let conflict = call("conflict")?;
+    let mutated_inherited = calls
+        .iter()
+        .filter(|candidate| candidate.target_spelling == "inherited")
+        .nth(1)
+        .ok_or("missing mutated inherited call")?;
+    let unknown_direct = calls
+        .iter()
+        .filter(|candidate| candidate.target_spelling == "direct")
+        .nth(1)
+        .ok_or("missing unknown direct call")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&inherited.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &base_inherited.id
+    ));
+    assert!(matches!(
+        index.resolve(&direct.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &derived_direct.id
+    ));
+    assert!(matches!(
+        index.resolve(&conflict.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &derived_conflict.id
+    ));
+    assert!(matches!(
+        index.resolve(&mutated_inherited.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &base_inherited.id
+    ));
+    assert!(matches!(
+        index.resolve(&unknown_direct.id),
+        compass_resolve::evidence::ResolutionDecision::Unresolved
+    ));
+    Ok(())
+}
+
+#[test]
 fn javascript_commonjs_require_callable_namespace_resolves_default_export()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

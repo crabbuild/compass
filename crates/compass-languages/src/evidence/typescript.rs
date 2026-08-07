@@ -2024,69 +2024,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     .or_else(|| child.child_by_field_name("expression"))
                     .or_else(|| first_named_child(child))
                     .map(unwrap_expression_node)?;
-                if argument.kind() != "identifier" {
-                    return None;
-                }
-                let name = node_text(self.source, argument);
-                let resolution = self.resolve_name(scope_id, &name, Namespace::Value);
-                match resolution {
-                    Some(Resolution::Local(source)) => {
-                        if source.kind != "variable"
-                            || !self.immutable_bindings.contains(&source.id)
-                            || !self
-                                .stable_structural_object_variables
-                                .contains(&source.qualified_name)
-                        {
-                            return None;
-                        }
-                        spreads.push(StructuralObjectSpread {
-                            source_qualified_name: source.qualified_name,
-                            source_variable_id: Some(source.id),
-                            range: range_for_node(self.source_file, child),
-                        });
-                    }
-                    Some(Resolution::Import(import))
-                        if import.imported_name == "default"
-                            && !import.type_only
-                            && import.namespace.accepts(Namespace::Value) =>
-                    {
-                        spreads.push(StructuralObjectSpread {
-                            source_qualified_name: import.target,
-                            source_variable_id: None,
-                            range: range_for_node(self.source_file, child),
-                        });
-                    }
-                    Some(Resolution::Import(import))
-                        if import.imported_name == "*"
-                            && !import.type_only
-                            && import.namespace == Namespace::Module =>
-                    {
-                        // A namespace import or a static `require()` binding
-                        // denotes the provider module object. Preserve that
-                        // owner identity so the resolver can project only
-                        // source-published exports; dynamic/indirect CommonJS
-                        // values still do not reach this branch.
-                        spreads.push(StructuralObjectSpread {
-                            source_qualified_name: import.target,
-                            source_variable_id: None,
-                            range: range_for_node(self.source_file, child),
-                        });
-                    }
-                    None => {
-                        // Static ES imports are hoisted, but the declaration
-                        // pass intentionally runs before the full import
-                        // emission pass. Recover only a default import from
-                        // the top-level syntax; named, namespace, dynamic,
-                        // and dynamic/indirect CommonJS sources stay opaque.
-                        let target = self.syntactic_default_import_target(object, &name)?;
-                        spreads.push(StructuralObjectSpread {
-                            source_qualified_name: target,
-                            source_variable_id: None,
-                            range: range_for_node(self.source_file, child),
-                        });
-                    }
-                    _ => return None,
-                }
+                spreads.push(self.structural_object_spread_source(
+                    scope_id,
+                    argument,
+                    range_for_node(self.source_file, child),
+                )?);
                 continue;
             }
             // A spread projection can reason about ordinary static properties
@@ -2096,6 +2038,70 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             member_property_name(self.source, key)?;
         }
         Some(spreads)
+    }
+
+    fn structural_object_spread_source(
+        &self,
+        scope_id: &str,
+        argument: Node<'tree>,
+        range: EvidenceRange,
+    ) -> Option<StructuralObjectSpread> {
+        let argument = unwrap_expression_node(argument);
+        if argument.kind() != "identifier" {
+            return None;
+        }
+        let name = node_text(self.source, argument);
+        let resolution = self.resolve_name(scope_id, &name, Namespace::Value);
+        match resolution {
+            Some(Resolution::Local(source)) => (source.kind == "variable"
+                && self.immutable_bindings.contains(&source.id)
+                && self
+                    .stable_structural_object_variables
+                    .contains(&source.qualified_name))
+            .then_some(StructuralObjectSpread {
+                source_qualified_name: source.qualified_name,
+                source_variable_id: Some(source.id),
+                range,
+            }),
+            Some(Resolution::Import(import))
+                if import.imported_name == "default"
+                    && !import.type_only
+                    && import.namespace.accepts(Namespace::Value) =>
+            {
+                Some(StructuralObjectSpread {
+                    source_qualified_name: import.target,
+                    source_variable_id: None,
+                    range,
+                })
+            }
+            Some(Resolution::Import(import))
+                if import.imported_name == "*"
+                    && !import.type_only
+                    && import.namespace == Namespace::Module =>
+            {
+                // A namespace import or a static `require()` binding denotes
+                // the provider module object. The resolver filters this owner
+                // through published exports, so private declarations never
+                // become namespace members by spelling alone.
+                Some(StructuralObjectSpread {
+                    source_qualified_name: import.target,
+                    source_variable_id: None,
+                    range,
+                })
+            }
+            None => {
+                // Declaration collection runs before import materialization.
+                // Recover only a source-anchored default import from syntax;
+                // named, namespace, dynamic, and indirect values stay opaque.
+                let target = self.syntactic_default_import_target(argument, &name)?;
+                Some(StructuralObjectSpread {
+                    source_qualified_name: target,
+                    source_variable_id: None,
+                    range,
+                })
+            }
+            _ => None,
+        }
     }
 
     fn syntactic_default_import_target(
@@ -3552,6 +3558,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             "call_expression" | "optional_call_expression" => {
                 self.emit_call(node, &scope_id, false)?;
                 self.emit_dynamic_import(node, &scope_id)?;
+                self.emit_commonjs_object_assign(&scope_id, node, false)?;
             }
             "new_expression" => self.emit_call(node, &scope_id, true)?,
             "member_expression" | "optional_member_expression" | "subscript_expression" => {
@@ -6079,6 +6086,14 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return Ok(());
         };
         let right = unwrap_expression_node(right);
+        if export_name == "default" && self.is_commonjs_object_assign(right) {
+            // `module.exports = Object.assign({}, source, { direct })` is a
+            // bounded object-owner composition. Keep the module owner as the
+            // destination and publish only source-proven operands; the
+            // helper intentionally rejects unknown or order-ambiguous shapes.
+            self.emit_commonjs_object_assign(scope_id, right, true)?;
+            return Ok(());
+        }
         if export_name == "default" && right.kind() == "object" {
             // `module.exports = { ... }` is a default module export plus a
             // bounded set of named properties. The declaration pass already
@@ -6122,6 +6137,132 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return Ok(());
         };
         self.emit_commonjs_reexport_binding(scope_id, &export_name, export_anchor, resolution)
+    }
+
+    fn is_commonjs_object_assign(&self, node: Node<'tree>) -> bool {
+        let node = unwrap_expression_node(node);
+        if !matches!(node.kind(), "call_expression" | "optional_call_expression") {
+            return false;
+        }
+        node.child_by_field_name("function")
+            .or_else(|| first_named_child(node))
+            .is_some_and(|function| {
+                node_text(self.source, function).replace(char::is_whitespace, "") == "Object.assign"
+            })
+    }
+
+    /// Publish the source-proven subset of a CommonJS `Object.assign` object
+    /// composition.  Supported shapes are deliberately narrow:
+    /// `Object.assign({}, source, { direct })` and
+    /// `Object.assign(module.exports, source)`.  Every source operand must be
+    /// an immutable object owner or an explicit module namespace; an unknown,
+    /// mutable, computed, or out-of-order operand suppresses the projection.
+    fn emit_commonjs_object_assign(
+        &mut self,
+        scope_id: &str,
+        node: Node<'tree>,
+        assigned_to_module: bool,
+    ) -> Result<(), EvidenceError> {
+        let node = unwrap_expression_node(node);
+        if !self.is_commonjs_object_assign(node) {
+            return Ok(());
+        }
+        let Some(arguments) = node
+            .child_by_field_name("arguments")
+            .or_else(|| first_named_child_kind(node, "arguments"))
+        else {
+            return Ok(());
+        };
+        let mut cursor = arguments.walk();
+        let arguments = arguments
+            .named_children(&mut cursor)
+            .filter(|argument| !argument.kind().contains("comment"))
+            .map(unwrap_expression_node)
+            .collect::<Vec<_>>();
+        let Some((target, sources)) = arguments.split_first() else {
+            return Ok(());
+        };
+        let target_is_empty_object = target.kind() == "object"
+            && target
+                .named_children(&mut target.walk())
+                .all(|child| child.kind().contains("comment"));
+        let target_text = node_text(self.source, *target).replace(char::is_whitespace, "");
+        let target_is_module = matches!(target_text.as_str(), "module.exports" | "exports");
+        // When an assignment wraps a mutating `Object.assign(module.exports,
+        // ...)`, the nested call is visited separately by `emit_nodes`. Let
+        // that call publish the owner once instead of duplicating bindings.
+        if assigned_to_module && target_is_module {
+            return Ok(());
+        }
+        if (!assigned_to_module && !target_is_module) || sources.is_empty() {
+            return Ok(());
+        }
+        if assigned_to_module && !target_is_empty_object && !target_is_module {
+            return Ok(());
+        }
+
+        let mut spreads = Vec::new();
+        let mut trailing_direct_object = None;
+        for (index, source) in sources.iter().enumerate() {
+            if source.kind() == "object" {
+                // A direct object argument is safe only as the final
+                // assignment phase.  Supporting an object before a later
+                // source would require preserving overwrite precedence in
+                // the named-export index, so fail closed for that shape.
+                if index + 1 != sources.len() || object_literal_has_spread(*source) {
+                    return Ok(());
+                }
+                let mut property_cursor = source.walk();
+                for property in source
+                    .named_children(&mut property_cursor)
+                    .take(MAX_INLINE_OBJECT_PROPERTIES)
+                {
+                    let Some((key, _)) = commonjs_object_property(property) else {
+                        return Ok(());
+                    };
+                    if member_property_name(self.source, key).is_none() {
+                        return Ok(());
+                    }
+                }
+                trailing_direct_object = Some(*source);
+                continue;
+            }
+            let Some(spread) = self.structural_object_spread_source(
+                scope_id,
+                *source,
+                range_for_node(self.source_file, *source),
+            ) else {
+                return Ok(());
+            };
+            spreads.push(spread);
+        }
+        if spreads.is_empty() && trailing_direct_object.is_none() {
+            return Ok(());
+        }
+
+        // A CommonJS module object is the stable destination for both the
+        // assignment form and the mutating `Object.assign(exports, ...)`
+        // form.  Publishing its default owner lets namespace consumers use
+        // the same module-owner path as object-literal exports.
+        self.emit_commonjs_module_default_export(scope_id, node)?;
+        let destination = self.file_qualified_name.clone();
+        if !spreads.is_empty() {
+            self.structural_object_spreads
+                .entry(destination.clone())
+                .or_default()
+                .extend(spreads);
+            self.emit_structural_spread_member_aliases(scope_id, &destination)?;
+        }
+        if let Some(object) = trailing_direct_object {
+            let mut property_cursor = object.walk();
+            for property in object
+                .named_children(&mut property_cursor)
+                .take(MAX_INLINE_OBJECT_PROPERTIES)
+            {
+                self.emit_commonjs_object_property_export(scope_id, property)?;
+            }
+        }
+        Ok(())
     }
 
     fn commonjs_export_value_resolution(
