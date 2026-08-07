@@ -7125,6 +7125,112 @@ cycleValue();
 }
 
 #[test]
+fn typescript_export_assignment_resolves_import_equals_and_default_imports()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/api.ts",
+            br#"export function run(value: number) { return value; }
+export = run;
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/object-api.ts",
+            br#"export = { run: (value: number) => value };
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import api = require("../lib/api");
+import run from "../lib/api";
+import object = require("../lib/object-api");
+api(1);
+run(2);
+object.run(3);
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            let path = root.join(relative);
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let run = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "run" && declaration.kind == "function")
+        .ok_or("missing export-assignment declaration")?;
+    let object_run = batches[1]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "object-api.default.run")
+        .ok_or("missing object export-assignment member")?;
+    let calls = batches[2]
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Calls)
+        .collect::<Vec<_>>();
+    let import_equals_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "api")
+        .ok_or("missing import-equals call")?;
+    let default_import_call = calls
+        .iter()
+        .find(|candidate| {
+            candidate.target_spelling == "run"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.contains("../lib/api"))
+        })
+        .ok_or("missing default-import call")?;
+    let object_member_call = calls
+        .iter()
+        .find(|candidate| {
+            candidate.target_spelling == "run"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.contains("../lib/object-api"))
+        })
+        .ok_or("missing object import-equals member call")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    for (call, declaration) in [
+        (import_equals_call, &run.id),
+        (default_import_call, &run.id),
+        (object_member_call, &object_run.id),
+    ] {
+        assert!(matches!(
+            index.resolve(&call.id),
+            compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+                if declaration_id == declaration
+        ));
+    }
+    Ok(())
+}
+
+#[test]
 fn javascript_commonjs_object_exports_resolve_named_require_bindings()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

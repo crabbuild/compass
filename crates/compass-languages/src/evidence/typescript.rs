@@ -663,9 +663,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return Ok(());
         }
         if node.kind() == "export_statement"
-            && node_text(self.source, node)
-                .trim_start()
-                .starts_with("export default")
+            && {
+                let statement = node_text(self.source, node);
+                let statement = statement.trim_start();
+                statement.starts_with("export default") || statement.starts_with("export =")
+            }
             && let Some(exported) = first_named_child(node)
             && {
                 let exported = unwrap_expression_node(exported);
@@ -682,10 +684,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 &qualified_prefix,
                 "default",
             )?;
-            // A spread-free `export default { ... }` has one source-backed
-            // object identity. Publish its properties below that identity so
-            // `import value from "./module"; value.member()` can resolve to
-            // the exact provider declaration across files. Spreads are kept
+            // A spread-free default or export-assignment object has one
+            // source-backed identity. Publish its properties below that
+            // identity so `import value from "./module"; value.member()` or
+            // `import value = require("./module"); value.member()` can resolve
+            // to the exact provider declaration across files. Spreads are kept
             // outside this path because they can override any listed key.
             self.structural_object_variables
                 .insert(declaration.qualified_name.clone());
@@ -703,9 +706,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return Ok(());
         }
         if node.kind() == "export_statement"
-            && node_text(self.source, node)
-                .trim_start()
-                .starts_with("export default")
+            && {
+                let statement = node_text(self.source, node);
+                let statement = statement.trim_start();
+                statement.starts_with("export default") || statement.starts_with("export =")
+            }
             && let Some(exported) = first_named_child(node)
             && exported.child_by_field_name("name").is_none()
             && let Some((kind, namespace, creates_scope, scope_kind)) =
@@ -4116,7 +4121,12 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 .trim_start()
                 .starts_with("export default")
             {
-                self.emit_default_export(node, scope_id)?;
+                self.emit_default_export(node, scope_id, false)?;
+            } else if node_text(self.source, node)
+                .trim_start()
+                .starts_with("export =")
+            {
+                self.emit_default_export(node, scope_id, true)?;
             } else {
                 self.emit_named_export_declaration(node, scope_id)?;
             }
@@ -4213,6 +4223,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         &mut self,
         node: Node<'tree>,
         scope_id: &str,
+        export_assignment: bool,
     ) -> Result<(), EvidenceError> {
         let Some(exported) = first_named_child(node) else {
             return Ok(());
@@ -4259,7 +4270,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             "default",
             Some(&spelling),
             Some(scope_id),
-            Some("default"),
+            Some(if export_assignment {
+                "export_assignment"
+            } else {
+                "default"
+            }),
             range_for_node(self.source_file, anchor),
         )?;
         self.builder.relate(

@@ -1751,6 +1751,25 @@ Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
 gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
 cut remain open.
 
+### Execution checkpoint (2026-08-07, TypeScript export assignment)
+
+TypeScript `export = value` statements now publish a source-backed `default`
+reexport for local callable/value targets, including spread-free object
+assignment expressions whose members remain under `<module>.default`. Existing
+`import = require` bindings can therefore resolve direct callable assignments
+and exact object members, while ordinary default imports resolve the same
+provider declaration. Unsupported or ambiguous expressions remain unresolved.
+
+The focused candidate suite is now 99 tests and the universal resolver suite is
+now 171 tests. Regressions cover callable `export =` with both import-equals and
+default-import consumers, plus object-assignment member ownership. The native
+production registry remains unchanged; this is still a qualification-only
+universal path.
+
+Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
+gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
+cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

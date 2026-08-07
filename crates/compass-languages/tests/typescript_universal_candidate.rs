@@ -309,6 +309,53 @@ export type * from "./types";
 }
 
 #[test]
+fn typescript_candidate_publishes_export_assignment_default() {
+    let batch = candidate(
+        "src/api.ts",
+        br#"export function run() {}
+export = run;
+"#,
+    );
+    validate_evidence(&batch, EvidenceLimits::default()).expect("export assignment evidence");
+    let run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "run" && declaration.kind == "function")
+        .expect("export assignment target declaration");
+    let binding = batch
+        .bindings
+        .iter()
+        .find(|binding| {
+            binding.kind == compass_languages::BindingKind::Reexport
+                && binding.spelling == "default"
+        })
+        .expect("export assignment default binding");
+    assert_eq!(binding.qualified_target, "api.run");
+    assert_eq!(
+        binding.target_declaration_id.as_deref(),
+        Some(run.id.as_str())
+    );
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Reexports
+            && candidate.target_spelling == "default"
+    }));
+
+    let object = candidate(
+        "src/object-api.ts",
+        br#"export = { run: (value: number) => value };
+"#,
+    );
+    validate_evidence(&object, EvidenceLimits::default())
+        .expect("object export assignment evidence");
+    assert!(object.declarations.iter().any(|declaration| {
+        declaration.qualified_name == "object-api.default" && declaration.kind == "variable"
+    }));
+    assert!(object.declarations.iter().any(|declaration| {
+        declaration.qualified_name == "object-api.default.run" && declaration.kind == "property"
+    }));
+}
+
+#[test]
 fn javascript_commonjs_require_preserves_namespace_and_export_keys() {
     let source = br#"const api = require("./api");
 const {
