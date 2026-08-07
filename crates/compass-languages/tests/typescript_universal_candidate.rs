@@ -1467,6 +1467,38 @@ current.run();
 }
 
 #[test]
+fn javascript_const_this_alias_survives_a_closure_capture() {
+    let batch = candidate(
+        "src/const-this-alias.js",
+        br#"class CancelToken {
+    constructor() {
+        const token = this;
+        const later = () => token.subscribe();
+        later();
+    }
+    subscribe() {}
+}
+new CancelToken();
+"#,
+    );
+    let subscribe = batch
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration
+                .qualified_name
+                .ends_with(".CancelToken.subscribe")
+        })
+        .expect("CancelToken.subscribe declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "subscribe"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(subscribe.id.as_str())
+    }));
+}
+
+#[test]
 fn typescript_homomorphic_mapped_alias_preserves_nominal_member_targets() {
     let batch = candidate(
         "src/mapped-alias.ts",

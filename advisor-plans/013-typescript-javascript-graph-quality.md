@@ -1420,6 +1420,27 @@ structural/mapped/indexed semantics, compiler-target truth, release corpora,
 precision/Wilson, framework tiers, equivalent Graphify/SCIP scope, and the
 production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, immutable `this` alias closure slice)
+
+The native JavaScript flow path now preserves a narrow, source-proven receiver
+identity for immutable aliases captured by a closure:
+
+- `const token = this` (and equivalent `const` aliases to nominal receivers)
+  can retain the enclosing class receiver through a later closure call, so
+  `token.subscribe()`/similar members can resolve to the class declaration.
+- Mutable aliases, structural object aliases, and dynamic escape paths remain
+  barriers and fail closed. The implementation does not infer a receiver from
+  a spelling or choose among competing structural members.
+- A focused candidate regression covers the positive class pattern while the
+  existing mutable-closure negative remains intact.
+
+On the read-only Axios target-adjudication diagnostic, exact local target
+matches improved from 3,014/3,167 to 3,019/3,167 (missing 148, wrong 0); this
+is a diagnostic signal rather than a release precision/recall claim. Broader
+interprocedural flow, conditional structural exports, compiler-target truth,
+release corpora, precision/Wilson, framework tiers, equivalent Graphify/SCIP
+scope, and the production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

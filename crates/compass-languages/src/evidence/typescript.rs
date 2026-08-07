@@ -217,6 +217,11 @@ struct CandidateState<'source, 'tree> {
     /// Escape/dynamic barriers survive later local assignments because a
     /// captured binding or dynamic evaluator can observe the rebinding too.
     flow_escape_barriers: HashMap<String, Vec<usize>>,
+    /// `const` bindings whose receiver identity is source-proven and cannot
+    /// be rebound.  A stable nominal alias may be captured by a closure
+    /// without widening the receiver; mutable/structural aliases still take
+    /// the conservative escape barrier below.
+    immutable_bindings: HashSet<String>,
     structural_object_variables: HashSet<String>,
     return_object_functions: HashSet<String>,
     /// A local variable initialized from a source-visible function whose
@@ -339,6 +344,7 @@ pub(crate) fn extract_candidate_tree_evidence(
         flow_assignments: HashMap::new(),
         flow_assignment_barriers: HashMap::new(),
         flow_escape_barriers: HashMap::new(),
+        immutable_bindings: HashSet::new(),
         structural_object_variables: HashSet::new(),
         return_object_functions: HashSet::new(),
         variable_object_sources: HashMap::new(),
@@ -986,7 +992,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 if name.is_empty() {
                     continue;
                 }
-                self.add_declaration_at(
+                let declaration = self.add_declaration_at(
                     node,
                     name_node,
                     "variable",
@@ -995,6 +1001,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     &qualified_prefix,
                     &name,
                 )?;
+                if variable_binding_is_immutable(node, self.source) {
+                    self.immutable_bindings.insert(declaration.id);
+                }
             }
             // Prototype aliases must be available while the declaration pass
             // visits following assignments (`const proto = Ctor.prototype;
@@ -1742,7 +1751,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             "call_expression" | "optional_call_expression" => {
                 self.call_return_receiver(scope_id, value)
             }
-            "identifier" | "type_identifier" => self.receiver_target(scope_id, value),
+            "identifier" | "type_identifier" | "this" | "super" => {
+                self.receiver_target(scope_id, value)
+            }
             _ => None,
         }
     }
@@ -1856,6 +1867,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         &self.scope_for_node(node),
                         &declaration.scope_id,
                     )
+                    && !self.stable_immutable_nominal_alias(&declaration.id)
                 {
                     captured.insert(declaration.id.clone());
                 }
@@ -1871,6 +1883,34 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         for declaration_id in captured {
             self.record_flow_escape_barrier(&declaration_id, node.start_byte());
         }
+    }
+
+    /// A closure capture is an escape barrier for mutable or structural
+    /// bindings because a later write can change the receiver observed by the
+    /// closure. A `const` alias to one source-proven nominal receiver (most
+    /// notably `const token = this`) cannot be rebound, so retaining that
+    /// identity improves common JavaScript class patterns without selecting a
+    /// structural object by spelling alone.
+    fn stable_immutable_nominal_alias(&self, declaration_id: &str) -> bool {
+        if !self.immutable_bindings.contains(declaration_id) {
+            return false;
+        }
+        let Some(assignments) = self.flow_assignments.get(declaration_id) else {
+            return false;
+        };
+        let Some(assignment) = assignments
+            .iter()
+            .min_by_key(|assignment| assignment.start_byte)
+        else {
+            return false;
+        };
+        if self
+            .structural_object_variables
+            .contains(&assignment.receiver.qualified_name)
+        {
+            return false;
+        }
+        assignment.receiver.import.is_some() || !assignment.receiver.qualified_name.is_empty()
     }
 
     fn flow_assignment_is_straight_line(&self, node: Node<'tree>, scope_id: &str) -> bool {
@@ -8825,6 +8865,19 @@ fn is_non_nominal_union_member(name: &str) -> bool {
             | "true"
             | "false"
     )
+}
+
+fn variable_binding_is_immutable(node: Node<'_>, source: &[u8]) -> bool {
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    if parent.kind() != "lexical_declaration" {
+        return false;
+    }
+    node_text(source, parent)
+        .split_whitespace()
+        .next()
+        .is_some_and(|keyword| keyword == "const")
 }
 
 fn type_alias_union_targets(node: Node<'_>, source: &[u8]) -> Option<Vec<String>> {
