@@ -1042,6 +1042,228 @@ function use(shape: Shape, key: string) {
 }
 
 #[test]
+fn typescript_flow_sensitive_reassignment_selects_latest_nominal_receiver() {
+    let batch = candidate(
+        "src/reassignment.ts",
+        br#"class First { run() {} }
+class Second { run() {} }
+let current = new First();
+current = new Second();
+current.run();
+"#,
+    );
+    let first_run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".First.run"))
+        .expect("First.run declaration");
+    let second_run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Second.run"))
+        .expect("Second.run declaration");
+    let calls = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == compass_languages::CandidateRelation::Calls
+                && candidate.target_spelling == "run"
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        calls.iter().any(|candidate| {
+            candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(second_run.id.as_str())
+        }),
+        "latest source assignment should own the member call"
+    );
+    assert!(!calls.iter().any(|candidate| {
+        candidate.constraints.exact_target_declaration_id.as_deref() == Some(first_run.id.as_str())
+    }));
+}
+
+#[test]
+fn typescript_flow_sensitive_branch_assignment_fails_closed() {
+    let batch = candidate(
+        "src/branch-reassignment.ts",
+        br#"class First { run() {} }
+class Second { run() {} }
+let current = new First();
+if (flag) {
+    current = new Second();
+}
+current.run();
+"#,
+    );
+    assert!(!batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "run"
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+}
+
+#[test]
+fn typescript_flow_sensitive_unknown_assignment_blocks_stale_receiver() {
+    let batch = candidate(
+        "src/unknown-reassignment.ts",
+        br#"class First { run() {} }
+let current = new First();
+current = getUnknown();
+current.run();
+"#,
+    );
+    assert!(!batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "run"
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+}
+
+#[test]
+fn javascript_flow_sensitive_reassignment_selects_latest_nominal_receiver() {
+    let batch = candidate(
+        "src/reassignment.js",
+        br#"class First { run() {} }
+class Second { run() {} }
+let current = new First();
+current = new Second();
+current.run();
+"#,
+    );
+    let second_run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Second.run"))
+        .expect("Second.run declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "run"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(second_run.id.as_str())
+    }));
+}
+
+#[test]
+fn javascript_flow_sensitive_var_reassignment_inside_function_selects_latest_receiver() {
+    let batch = candidate(
+        "src/var-reassignment.js",
+        br#"class First { run() {} }
+class Second { run() {} }
+function use() {
+    var current = new First();
+    current = new Second();
+    current.run();
+}
+"#,
+    );
+    let second_run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Second.run"))
+        .expect("Second.run declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "run"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(second_run.id.as_str())
+    }));
+}
+
+#[test]
+fn typescript_flow_sensitive_reassignment_is_ordered_by_use_site() {
+    let batch = candidate(
+        "src/ordered-reassignment.ts",
+        br#"class First { run() {} }
+class Second { run() {} }
+let current = new First();
+current.run();
+current = new Second();
+current.run();
+"#,
+    );
+    let first_run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".First.run"))
+        .expect("First.run declaration");
+    let second_run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Second.run"))
+        .expect("Second.run declaration");
+    let calls = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == compass_languages::CandidateRelation::Calls
+                && candidate.target_spelling == "run"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|candidate| {
+                candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(first_run.id.as_str())
+            })
+            .count(),
+        1
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|candidate| {
+                candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(second_run.id.as_str())
+            })
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn typescript_flow_sensitive_compound_assignment_blocks_stale_receiver() {
+    let batch = candidate(
+        "src/compound-reassignment.ts",
+        br#"class First { run() {} }
+let current = new First();
+current += unknownValue;
+current.run();
+"#,
+    );
+    assert!(!batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "run"
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+}
+
+#[test]
+fn typescript_flow_sensitive_typed_call_assignment_uses_return_receiver() {
+    let batch = candidate(
+        "src/call-reassignment.ts",
+        br#"class First { run() {} }
+class Second { run() {} }
+function makeSecond(): Second { return new Second(); }
+let current = new First();
+current = makeSecond();
+current.run();
+"#,
+    );
+    let second_run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Second.run"))
+        .expect("Second.run declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "run"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(second_run.id.as_str())
+    }));
+}
+
+#[test]
 fn typescript_generic_index_signature_values_resolve_member_calls() {
     let batch = candidate(
         "src/generic-index-signature.ts",

@@ -7951,3 +7951,69 @@ export function use(shape: Shape, key: string) { shape[key].inspect(); }
     }));
     Ok(())
 }
+
+#[test]
+fn typescript_candidate_resolves_straight_line_reassignment_to_latest_member()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = "src/reassignment.ts";
+    let source = br#"class First { run() {} }
+class Second { run() {} }
+export function use() {
+    let current = new First();
+    current = new Second();
+    current.run();
+}
+"#;
+    let path = root.join(relative);
+    fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+    fs::write(&path, source)?;
+    let mut sources = HashMap::new();
+    sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
+    let mut extraction = extract(relative, source);
+    extraction.semantic_evidence = Some(
+        Engine::default().extract_source_universal_candidate_evidence(
+            Path::new(relative),
+            relative,
+            source,
+        )?,
+    );
+    let resolved = compass_resolve::resolve_with_root(&[extraction], &sources, root);
+    assert!(
+        resolved.error.is_none(),
+        "resolver error: {:?}",
+        resolved.error
+    );
+    let first_run = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file") == relative
+                && node.label() == ".run()"
+                && node.string("qualified_name").ends_with("First.run")
+        })
+        .ok_or("missing First.run member")?;
+    let second_run = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file") == relative
+                && node.label() == ".run()"
+                && node.string("qualified_name").ends_with("Second.run")
+        })
+        .ok_or("missing Second.run member")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.string("source_file") == relative
+            && edge.target == second_run.id
+            && edge.string("resolution_rule") == "exact-source-declaration"
+    }));
+    assert!(!resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.string("source_file") == relative
+            && edge.target == first_run.id
+            && edge.string("resolution_rule") == "exact-source-declaration"
+    }));
+    Ok(())
+}

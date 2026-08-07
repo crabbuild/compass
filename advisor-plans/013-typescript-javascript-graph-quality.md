@@ -872,6 +872,30 @@ recall, project-corpus qualification, and the production hard cut remain
 open. The candidate adapter remains absent from `UNIVERSAL_ADAPTERS` until the
 mandatory quality and exact-release qualification gates complete.
 
+### Execution checkpoint (2026-08-06, bounded local reassignment slice)
+
+The qualification-only ECMAScript candidate now carries a small, explicit
+flow-sensitive receiver fact set for local TypeScript and JavaScript variables:
+
+- A source-proven constructor or typed call result assigned in the variable's
+  binding scope is recorded with its exact source order. A later member use
+  selects the latest preceding fact, so a straight-line `new First()` followed
+  by `current = new Second(); current.run()` targets only `Second.run`.
+- The same rule works inside a function body and across the universal resolver
+  publication path. The source fact keeps imported/local receiver identity and
+  does not reopen terminal-name matching.
+- Branch/loop/try/with assignments, compound assignments, and unsupported
+  values create a bounded barrier. Older receiver facts cannot leak across the
+  barrier, so ambiguous or dynamically reassigned values remain unresolved.
+
+The slice adds TypeScript and JavaScript positive regressions, use-site ordering,
+branch/unknown/compound negative cases, and a resolver-level exact-target
+assertion. The TypeScript/JavaScript candidate suite is now 52 tests and the
+universal resolver suite is now 147 tests. Alias escape, `eval`, proxy/dynamic
+property mutation, interprocedural flow, and compiler differential recall remain
+open Phase 4 work; the candidate adapter remains absent from
+`UNIVERSAL_ADAPTERS` until the mandatory quality and exact-release gates pass.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for
