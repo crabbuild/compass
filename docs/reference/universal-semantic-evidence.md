@@ -17,12 +17,19 @@ the adapter actually emits. The batch contains six bounded collections:
 - `DeclarationFact` identifies a source-backed declaration and its existing
   graph node, kind, name, qualified name, optional module/package, lexical
   scope, signature, optional bounded canonical parameter-type vector, optional
-  complete-direct-base marker for Java types, and exact range.
+  complete-direct-base marker for Java types, and exact range. TypeScript and
+  JavaScript candidate evidence may additionally identify the declaration's
+  `namespace` as `value`, `type`, `namespace`, or `value_and_type`; legacy
+  adapters omit this optional field.
 - `ScopeFact` identifies a lexical scope, optional owning declaration, parent
   scope, and exact range.
 - `BindingFact` records an import, import alias, re-export, local alias,
   call-result, or package binding. Its target is qualified; a proven local
-  declaration may also be named directly. A call-result binding names the
+  declaration may also be named directly. TypeScript and JavaScript import
+  and re-export bindings may additionally carry a `namespace` identity and a
+  `typeOnly` marker. A type-only binding must identify the `type` or
+  `namespace` space; this prevents a type import from being resolved as a
+  runtime value. A call-result binding names the
   exact callable that initialized a receiver and may record the zero-based
   output selected by a destructuring assignment. It may preserve an exact
   nominal result type proven in the same file, reference an earlier

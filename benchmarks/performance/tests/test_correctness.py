@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from contextlib import closing
+import json
 from pathlib import Path
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 
@@ -12,12 +14,17 @@ from benchmarks.performance.compass.correctness import (
     index_graph,
 )
 from benchmarks.performance.compass.occurrences import (
+    _typescript_inventory_from_payload,
     independent_source_constructs,
     independent_source_inventory,
+    source_construct_inventory_sha256,
 )
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
+RESOLUTION_ORACLE = (
+    Path(__file__).resolve().parents[1] / "oracles" / "typescript-resolution-oracle.mjs"
+)
 
 
 def compare_documents(
@@ -50,6 +57,176 @@ class CorrectnessTests(unittest.TestCase):
         database = sqlite3.connect(":memory:")
         self.addCleanup(database.close)
         return database
+
+    def test_typescript_oracle_payload_preserves_unicode_byte_ranges(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "src" / "main.ts"
+            source.parent.mkdir()
+            contents = "const café = 1;\nrun(café);\n"
+            source.write_text(contents, encoding="utf-8")
+            start = len("const ".encode("utf-8"))
+            end = start + len("café".encode("utf-8"))
+            payload = {
+                "schema": "compass.typescript-source-oracle/1",
+                "provider": "typescript_compiler_api_5_9_3",
+                "metadata": {
+                    "compilerVersion": "5.9.3",
+                    "scriptSha256": "a" * 64,
+                    "nodeVersion": "v22.0.0",
+                },
+                "scannedFiles": 1,
+                "parsedFiles": 1,
+                "rejectedFiles": [],
+                "constructs": [
+                    {
+                        "sourceFile": "src/main.ts",
+                        "relation": "references",
+                        "capability": "references",
+                        "ownerQualifiedName": "src.main",
+                        "targetSpelling": "café",
+                        "qualifier": None,
+                        "startByte": start,
+                        "endByte": end,
+                        "startLine": 1,
+                    }
+                ],
+            }
+            inventory = _typescript_inventory_from_payload(payload, root)
+            source_bytes = source.read_bytes()
+
+        self.assertEqual(inventory.scanned_files, 1)
+        self.assertEqual(inventory.parsed_files, 1)
+        self.assertEqual(inventory.provider_metadata[0], ("compilerVersion", "5.9.3"))
+        construct = inventory.constructs[0]
+        self.assertEqual(
+            source_bytes[construct.start_byte : construct.end_byte],
+            "café".encode(),
+        )
+        self.assertEqual(
+            source_construct_inventory_sha256("typescript", inventory),
+            source_construct_inventory_sha256("typescript", inventory),
+        )
+
+    def test_typescript_oracle_payload_rejects_incomplete_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, "coverage does not account"):
+                _typescript_inventory_from_payload(
+                    {
+                        "schema": "compass.typescript-source-oracle/1",
+                        "provider": "typescript_compiler_api_5_9_3",
+                        "metadata": {
+                            "compilerVersion": "5.9.3",
+                            "scriptSha256": "a" * 64,
+                        },
+                        "scannedFiles": 2,
+                        "parsedFiles": 1,
+                        "rejectedFiles": [],
+                        "constructs": [],
+                    },
+                    root,
+                )
+
+    def test_typescript_resolution_oracle_is_pinned_and_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "node_modules" / "@example" / "pkg").mkdir(parents=True)
+            (root / "tsconfig.json").write_text(
+                '{"compilerOptions":{"module":"NodeNext",'
+                '"moduleResolution":"NodeNext"},"include":["src/**/*"]}',
+                encoding="utf-8",
+            )
+            (root / "node_modules" / "@example" / "pkg" / "package.json").write_text(
+                '{"name":"@example/pkg","exports":{".":{'
+                '"import":"./import.d.ts","require":"./require.d.cts"}}}',
+                encoding="utf-8",
+            )
+            (root / "node_modules" / "@example" / "pkg" / "import.d.ts").write_text(
+                "export declare const value: string;\n",
+                encoding="utf-8",
+            )
+            (root / "node_modules" / "@example" / "pkg" / "require.d.cts").write_text(
+                "export declare const value: string;\n",
+                encoding="utf-8",
+            )
+            (root / "src" / "importer.mts").write_text(
+                'const café = "🙂";\n'
+                'import { value } from "@example/pkg";\n'
+                'export const imported = value + café.length;\n',
+                encoding="utf-8",
+            )
+            (root / "src" / "consumer.cts").write_text(
+                'import packageValue = require("@example/pkg");\n'
+                'const { value } = require("@example/pkg");\n'
+                'export = packageValue || value;\n',
+                encoding="utf-8",
+            )
+            importer_source = (root / "src" / "importer.mts").read_bytes()
+            command = ("node", str(RESOLUTION_ORACLE), "--root", str(root))
+            first = subprocess.run(
+                command,
+                cwd=RESOLUTION_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            second = subprocess.run(
+                command,
+                cwd=RESOLUTION_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(first.stdout, second.stdout)
+            payload = json.loads(first.stdout)
+            trace = subprocess.run(
+                (
+                    str(RESOLUTION_ORACLE.parents[3] / "node_modules" / ".bin" / "tsc"),
+                    "--project",
+                    str(root / "tsconfig.json"),
+                    "--traceResolution",
+                    "--noEmit",
+                ),
+                cwd=RESOLUTION_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            trace_output = f"{trace.stdout}\n{trace.stderr}"
+            self.assertIn("Resolving module '@example/pkg'", trace_output)
+            self.assertIn("import.d.ts", trace_output)
+            self.assertIn("require.d.cts", trace_output)
+
+        self.assertEqual(payload["schema"], "compass.typescript-resolution-oracle/1")
+        self.assertEqual(payload["provider"], "typescript_compiler_api_5_9_3")
+        self.assertEqual(payload["scannedFiles"], 2)
+        self.assertEqual(payload["parsedFiles"], 2)
+        self.assertEqual(payload["rejectedFiles"], [])
+        resolutions = {
+            (item["sourceFile"], item["context"]): item for item in payload["resolutions"]
+        }
+        self.assertEqual(
+            resolutions[("src/importer.mts", "import")]["targetFile"],
+            "node_modules/@example/pkg/import.d.ts",
+        )
+        importer_resolution = resolutions[("src/importer.mts", "import")]
+        self.assertEqual(
+            importer_source[
+                importer_resolution["startByte"] : importer_resolution["endByte"]
+            ],
+            b'"@example/pkg"',
+        )
+        self.assertEqual(importer_resolution["startLine"], 2)
+        self.assertEqual(
+            resolutions[("src/consumer.cts", "require")]["targetFile"],
+            "node_modules/@example/pkg/require.d.cts",
+        )
+        self.assertTrue(payload["metadata"]["configDigest"])
+        self.assertRegex(payload["metadata"]["sourceDigest"], r"^[0-9a-f]{64}$")
 
     def test_compass_superset_passes_shared_fact_comparison(self) -> None:
         database = self.database()

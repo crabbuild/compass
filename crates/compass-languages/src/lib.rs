@@ -57,7 +57,7 @@ pub use evidence::{
     EvidenceDiagnostic, EvidenceError, EvidenceErrorCode, EvidenceLimits, EvidenceRange,
     HierarchyConstraint, LanguageCapability, OccurrenceFact, ReceiverDispatchStrategy,
     RelationshipCandidate, ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole,
-    UNIVERSAL_EVIDENCE_SCHEMA, range_for_node, validate_evidence,
+    SymbolNamespace, UNIVERSAL_EVIDENCE_SCHEMA, range_for_node, validate_evidence,
 };
 pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
 pub use frameworks::{
@@ -68,6 +68,7 @@ pub use frameworks::{
 };
 pub use html::{HtmlError, HtmlNormalization, normalize_html};
 pub use ids::{file_stem, make_id, normalize_id};
+pub use json_config::parse_jsonc;
 pub use program::{TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
 pub use project_evidence::{
     FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, ProjectEvidence, ProjectEvidenceIndex,

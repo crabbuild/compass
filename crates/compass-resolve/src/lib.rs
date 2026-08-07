@@ -17,7 +17,7 @@ use std::time::Instant;
 use ahash::{AHashMap, AHashSet};
 use compass_languages::{
     Extraction, RawCall, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord,
-    SemanticEvidenceBatch, file_stem, is_language_builtin_global, make_id,
+    SemanticEvidenceBatch, file_stem, is_language_builtin_global, make_id, parse_jsonc,
 };
 use compass_model::provenance::{
     EndpointRewriteEvidence, EndpointRewriteRule, append_endpoint_rewrite_evidence,
@@ -434,10 +434,24 @@ fn finish_resolution(
         .any(|source| matches!(extension(source).as_str(), "cs" | "razor" | "cshtml"));
     let has_php = sources.keys().any(|source| extension(source) == "php");
     if has_javascript {
+        if let Err(error) =
+            resolve_javascript_package_conditions(&mut merged, &canonical_root, sources)
+        {
+            merged.error.get_or_insert_with(|| {
+                format!("JavaScript package-condition resolution failed: {error}")
+            });
+        }
         if let Err(error) = resolve_javascript_workspace_modules(&mut merged, &canonical_root) {
             merged
                 .error
                 .get_or_insert_with(|| format!("JavaScript workspace resolution failed: {error}"));
+        }
+        if let Err(error) =
+            resolve_javascript_typescript_paths(&mut merged, &canonical_root, sources)
+        {
+            merged.error.get_or_insert_with(|| {
+                format!("TypeScript/JavaScript path resolution failed: {error}")
+            });
         }
         resolve_javascript_reexports(&mut merged);
     }
@@ -691,6 +705,15 @@ fn resolve_javascript_workspace_modules(
         if relation(edge) != "imports_from" {
             continue;
         }
+        // The importer-aware pass runs first and stamps every package edge it
+        // owns (including explicit Classic/Node10 misses). Do not let this
+        // legacy flattened workspace fallback overwrite a mode-specific
+        // decision or reintroduce a conditional branch.
+        if edge.attributes.contains_key("resolution_rule")
+            || edge.attributes.contains_key("module_resolution")
+        {
+            continue;
+        }
         let module = edge.string("module");
         let Some(candidates) = targets.get(&module) else {
             continue;
@@ -714,6 +737,2082 @@ fn resolve_javascript_workspace_modules(
         }
     }
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct JavascriptPackageManifest {
+    source: String,
+    name: String,
+    directory: PathBuf,
+    exports: Option<Value>,
+    imports: Option<Value>,
+    types_versions: Option<Value>,
+    types: Option<String>,
+    module: Option<String>,
+    main: Option<String>,
+}
+
+/// Resolve package exports with an importer-aware condition order.
+///
+/// The previous workspace pass intentionally kept only a unique flattened
+/// target. That is safe for simple packages, but it loses the distinction
+/// between import, require, types, and default branches. This pass evaluates
+/// the documented branch order without unioning mutually exclusive conditions
+/// and only publishes an admitted source target.
+fn resolve_javascript_package_conditions(
+    extraction: &mut Extraction,
+    root: &Path,
+    sources: &HashMap<String, String>,
+) -> Result<(), String> {
+    let (typescript_configs, referenced_configs) =
+        collect_typescript_configs(extraction, root, sources)?;
+    let mut file_by_source = BTreeMap::<String, (String, String)>::new();
+    let mut manifest_sources = BTreeSet::new();
+    for node in &extraction.nodes {
+        let source = string_attribute(node, "source_file");
+        if source.is_empty() {
+            continue;
+        }
+        if is_file_node(node, &source) {
+            file_by_source
+                .entry(source_key(&source, root))
+                .or_insert_with(|| (node.id.clone(), source.clone()));
+        }
+        if Path::new(&source)
+            .file_name()
+            .and_then(|name| name.to_str())
+            == Some("package.json")
+        {
+            manifest_sources.insert(source);
+        }
+    }
+    if manifest_sources.len() > MAX_JAVASCRIPT_PACKAGE_MANIFESTS {
+        return Err(format!(
+            "package manifest count {} exceeds limit {MAX_JAVASCRIPT_PACKAGE_MANIFESTS}",
+            manifest_sources.len()
+        ));
+    }
+    let mut manifests = Vec::new();
+    for source in manifest_sources {
+        let manifest_path = rooted_source_path(root, &source)?;
+        let Ok(contents) =
+            compass_files::read_source_lossy(&manifest_path, MAX_JAVASCRIPT_PACKAGE_BYTES)
+        else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&contents) else {
+            continue;
+        };
+        let Some(name) = value.get("name").and_then(Value::as_str).filter(|name| {
+            !name.is_empty()
+                && name.len() <= 4_096
+                && !name.contains(['\\', '\0'])
+                && !name
+                    .split('/')
+                    .any(|part| part.is_empty() || matches!(part, "." | ".."))
+        }) else {
+            continue;
+        };
+        let Some(directory) = manifest_path.parent().map(Path::to_path_buf) else {
+            continue;
+        };
+        manifests.push(JavascriptPackageManifest {
+            source,
+            name: name.to_owned(),
+            directory,
+            exports: value.get("exports").cloned(),
+            imports: value.get("imports").cloned(),
+            types_versions: value.get("typesVersions").cloned(),
+            types: value
+                .get("types")
+                .or_else(|| value.get("typings"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            module: value
+                .get("module")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            main: value.get("main").and_then(Value::as_str).map(str::to_owned),
+        });
+    }
+    manifests.sort_by(|left, right| left.source.cmp(&right.source));
+
+    let mut export_count = 0_usize;
+    for edge in &mut extraction.edges {
+        if relation(edge) != "imports_from" {
+            continue;
+        }
+        let module = edge.string("module");
+        if module.starts_with('#') {
+            let importer_path = root.join(source_key(&edge.string("source_file"), root));
+            let candidates = manifests
+                .iter()
+                .filter(|manifest| importer_path.starts_with(&manifest.directory))
+                .collect::<Vec<_>>();
+            let deepest = candidates
+                .iter()
+                .map(|manifest| manifest.directory.components().count())
+                .max();
+            let nearest = deepest.and_then(|depth| {
+                let mut nearest = candidates
+                    .into_iter()
+                    .filter(|manifest| manifest.directory.components().count() == depth)
+                    .collect::<Vec<_>>();
+                (nearest.len() == 1).then(|| nearest.pop()).flatten()
+            });
+            let Some(manifest) = nearest else {
+                continue;
+            };
+            let Some(imports) = manifest.imports.as_ref() else {
+                continue;
+            };
+            let importer = edge.string("source_file");
+            let config = select_typescript_path_config(
+                &typescript_configs,
+                &referenced_configs,
+                root,
+                &importer,
+            );
+            let resolution_mode = javascript_module_resolution_mode(config);
+            if let Some(module_resolution) =
+                config.and_then(|config| config.module_resolution.as_ref())
+            {
+                edge.attributes.insert(
+                    "module_resolution".to_owned(),
+                    Value::String(module_resolution.clone()),
+                );
+            }
+            if !resolution_mode.supports_conditional_exports() {
+                // Classic and Node10 resolution do not search package
+                // `imports` maps.
+                // Leave the raw import unresolved rather than applying a
+                // Node-style package rule to a compiler invocation that did
+                // not opt into it.
+                edge.attributes.insert(
+                    "resolution_rule".to_owned(),
+                    Value::String("package-imports-unsupported".to_owned()),
+                );
+                continue;
+            }
+            let conditions = javascript_package_condition_order(
+                edge.string("context").as_str(),
+                config.map_or(&[] as &[String], |config| {
+                    config.custom_conditions.as_slice()
+                }),
+            );
+            let condition_refs = conditions.iter().map(String::as_str).collect::<Vec<_>>();
+            let candidates =
+                resolve_javascript_package_export(imports, &module, &condition_refs, 0, None);
+            let Some((_, condition, target_source)) =
+                candidates.into_iter().find_map(|(target, condition)| {
+                    let target_path =
+                        javascript_package_target(&manifest.directory, root, &target)?;
+                    let importer_is_typescript = is_typescript_source(&edge.string("source_file"));
+                    let candidates = if importer_is_typescript {
+                        typescript_target_candidates(&target_path, &[])
+                    } else {
+                        vec![target_path]
+                    };
+                    candidates.into_iter().find_map(|candidate| {
+                        let key = source_key(&candidate.to_string_lossy(), root);
+                        file_by_source.contains_key(&key).then_some((
+                            target.clone(),
+                            condition.clone(),
+                            key,
+                        ))
+                    })
+                })
+            else {
+                continue;
+            };
+            export_count = export_count.saturating_add(1);
+            if export_count > MAX_JAVASCRIPT_PACKAGE_EXPORTS {
+                return Err(format!(
+                    "package condition resolution count exceeds {MAX_JAVASCRIPT_PACKAGE_EXPORTS}"
+                ));
+            }
+            let Some((target_id, original_source)) = file_by_source.get(&target_source) else {
+                continue;
+            };
+            if edge.target != *target_id {
+                edge.target.clone_from(target_id);
+                stamp_endpoint_rewrite(edge, EndpointRewriteRule::CanonicalImportTarget, 1.0);
+            }
+            edge.attributes.insert(
+                "target_file".to_owned(),
+                Value::String(original_source.clone()),
+            );
+            edge.attributes.insert(
+                "resolution_rule".to_owned(),
+                Value::String("package-imports".to_owned()),
+            );
+            edge.attributes
+                .insert("package_condition".to_owned(), Value::String(condition));
+            edge.attributes.insert(
+                "resolution_config".to_owned(),
+                Value::String(manifest.source.clone()),
+            );
+            continue;
+        }
+        let Some((package_name, subpath)) = javascript_package_specifier(&module) else {
+            continue;
+        };
+        let matching = manifests
+            .iter()
+            .filter(|manifest| manifest.name == package_name)
+            .collect::<Vec<_>>();
+        if matching.len() != 1 {
+            continue;
+        }
+        let manifest = matching[0];
+        let importer = edge.string("source_file");
+        let config = select_typescript_path_config(
+            &typescript_configs,
+            &referenced_configs,
+            root,
+            &importer,
+        );
+        let resolution_mode = javascript_module_resolution_mode(config);
+        if let Some(module_resolution) = config.and_then(|config| config.module_resolution.as_ref())
+        {
+            edge.attributes.insert(
+                "module_resolution".to_owned(),
+                Value::String(module_resolution.clone()),
+            );
+        }
+        if resolution_mode == JavascriptModuleResolution::Classic {
+            // Classic resolution has no package-name lookup. A project alias
+            // may still resolve this edge in the dedicated paths pass.
+            edge.attributes.insert(
+                "resolution_rule".to_owned(),
+                Value::String("package-classic-unresolved".to_owned()),
+            );
+            continue;
+        }
+        let conditions = javascript_package_condition_order(
+            edge.string("context").as_str(),
+            config.map_or(&[] as &[String], |config| {
+                config.custom_conditions.as_slice()
+            }),
+        );
+        let condition_refs = conditions.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut selected = if resolution_mode.supports_conditional_exports() {
+            manifest
+                .exports
+                .as_ref()
+                .and_then(|exports| {
+                    let candidates = resolve_javascript_package_export(
+                        exports,
+                        &subpath,
+                        &condition_refs,
+                        0,
+                        None,
+                    );
+                    (!candidates.is_empty()).then_some(candidates)
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let mut resolution_rule = "package-exports";
+        if selected.is_empty() && is_typescript_source(&edge.string("source_file")) {
+            selected =
+                javascript_types_versions_targets(manifest.types_versions.as_ref(), &subpath)
+                    .into_iter()
+                    .map(|target| (target, "typesVersions".to_owned()))
+                    .collect();
+            if !selected.is_empty() {
+                resolution_rule = "typesVersions";
+            }
+        }
+        if selected.is_empty() {
+            selected = javascript_package_legacy_target(manifest, &subpath, &conditions);
+            if !selected.is_empty() {
+                resolution_rule = "package-legacy";
+            }
+        }
+        let Some((_, condition, target_source)) =
+            selected.into_iter().find_map(|(target, condition)| {
+                let target_path = javascript_package_target(&manifest.directory, root, &target)?;
+                let importer_is_typescript = is_typescript_source(&edge.string("source_file"));
+                let candidates = if importer_is_typescript {
+                    typescript_target_candidates(&target_path, &[])
+                } else {
+                    vec![target_path]
+                };
+                candidates.into_iter().find_map(|candidate| {
+                    let key = source_key(&candidate.to_string_lossy(), root);
+                    file_by_source.contains_key(&key).then_some((
+                        target.clone(),
+                        condition.clone(),
+                        key,
+                    ))
+                })
+            })
+        else {
+            // A manifest was present and the compiler-mode decision was
+            // evaluated, but no admitted target survived. Preserve the
+            // unresolved result so the older flattened workspace pass cannot
+            // resurrect a different conditional branch later in the pipeline.
+            edge.attributes.insert(
+                "resolution_rule".to_owned(),
+                Value::String("package-unresolved".to_owned()),
+            );
+            continue;
+        };
+        export_count = export_count.saturating_add(1);
+        if export_count > MAX_JAVASCRIPT_PACKAGE_EXPORTS {
+            return Err(format!(
+                "package condition resolution count exceeds {MAX_JAVASCRIPT_PACKAGE_EXPORTS}"
+            ));
+        }
+        let Some((target_id, original_source)) = file_by_source.get(&target_source) else {
+            continue;
+        };
+        if edge.target != *target_id {
+            edge.target.clone_from(target_id);
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::CanonicalImportTarget, 1.0);
+        }
+        edge.attributes.insert(
+            "target_file".to_owned(),
+            Value::String(original_source.clone()),
+        );
+        edge.attributes.insert(
+            "resolution_rule".to_owned(),
+            Value::String(resolution_rule.to_owned()),
+        );
+        edge.attributes
+            .insert("package_condition".to_owned(), Value::String(condition));
+        edge.attributes.insert(
+            "resolution_config".to_owned(),
+            Value::String(manifest.source.clone()),
+        );
+    }
+    Ok(())
+}
+
+fn javascript_package_specifier(module: &str) -> Option<(String, String)> {
+    if module.is_empty() || module.len() > 4_096 || module.contains(['\\', '\0']) {
+        return None;
+    }
+    let parts = module.split('/').collect::<Vec<_>>();
+    let package_len = if parts.first()?.starts_with('@') {
+        if parts.len() < 2 {
+            return None;
+        }
+        2
+    } else {
+        1
+    };
+    if parts
+        .iter()
+        .any(|part| part.is_empty() || matches!(*part, "." | ".."))
+    {
+        return None;
+    }
+    let package = parts[..package_len].join("/");
+    let subpath = if parts.len() == package_len {
+        ".".to_owned()
+    } else {
+        format!("./{}", parts[package_len..].join("/"))
+    };
+    Some((package, subpath))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum JavascriptModuleResolution {
+    /// TypeScript's pre-Node package lookup. Non-relative package names are
+    /// not resolved through `node_modules` or package `imports`/`exports`.
+    Classic,
+    /// The Node10 resolver. Legacy `types`/`main`/`module` fields remain
+    /// available, but conditional package maps are not part of this mode.
+    Node10,
+    Node16,
+    NodeNext,
+    Bundler,
+    /// No explicit mode was found in the admitted project. Preserve the
+    /// historical Compass behavior while recording no invented config value.
+    Inferred,
+}
+
+impl JavascriptModuleResolution {
+    const fn supports_conditional_exports(self) -> bool {
+        matches!(
+            self,
+            Self::Node16 | Self::NodeNext | Self::Bundler | Self::Inferred
+        )
+    }
+}
+
+fn javascript_module_resolution_mode(
+    config: Option<&TypeScriptPathConfig>,
+) -> JavascriptModuleResolution {
+    let Some(config) = config else {
+        return JavascriptModuleResolution::Inferred;
+    };
+    match config.module_resolution.as_deref() {
+        Some("classic") => JavascriptModuleResolution::Classic,
+        Some("node") | Some("node10") => JavascriptModuleResolution::Node10,
+        Some("node16") => JavascriptModuleResolution::Node16,
+        Some("nodenext") => JavascriptModuleResolution::NodeNext,
+        Some("bundler") => JavascriptModuleResolution::Bundler,
+        // Unknown or omitted values are not silently reinterpreted as a
+        // different compiler mode. Omitted/unknown config keeps the existing
+        // conservative package behavior until an explicit mode is available.
+        _ => JavascriptModuleResolution::Inferred,
+    }
+}
+
+fn javascript_package_condition_order(context: &str, custom: &[String]) -> Vec<String> {
+    let mut conditions = vec!["types".to_owned()];
+    for condition in custom {
+        if !conditions.iter().any(|candidate| candidate == condition) {
+            conditions.push(condition.clone());
+        }
+    }
+    conditions.push(if context == "require" {
+        "require".to_owned()
+    } else {
+        "import".to_owned()
+    });
+    conditions.push("node".to_owned());
+    conditions.push("default".to_owned());
+    conditions
+}
+
+fn resolve_javascript_package_export(
+    value: &Value,
+    subpath: &str,
+    conditions: &[&str],
+    depth: usize,
+    wildcard: Option<&str>,
+) -> Vec<(String, String)> {
+    if depth > 32 {
+        return Vec::new();
+    }
+    match value {
+        Value::String(target) => vec![(
+            wildcard.map_or_else(|| target.clone(), |wildcard| target.replace('*', wildcard)),
+            "default".to_owned(),
+        )],
+        Value::Array(values) => values
+            .iter()
+            .flat_map(|value| {
+                resolve_javascript_package_export(value, subpath, conditions, depth + 1, wildcard)
+            })
+            .collect(),
+        Value::Object(entries) => {
+            let has_subpaths = entries
+                .keys()
+                .any(|key| key == "." || key.starts_with("./") || key.starts_with('#'));
+            if has_subpaths {
+                if let Some(value) = entries.get(subpath) {
+                    return resolve_javascript_package_export(
+                        value,
+                        subpath,
+                        conditions,
+                        depth + 1,
+                        wildcard,
+                    );
+                }
+                let mut patterns = entries
+                    .iter()
+                    .filter_map(|(pattern, value)| {
+                        let (prefix, suffix) = pattern.split_once('*')?;
+                        if !(pattern.starts_with("./") || pattern.starts_with('#'))
+                            || !subpath.starts_with(prefix)
+                            || !subpath.ends_with(suffix)
+                        {
+                            return None;
+                        }
+                        let end = subpath.len().saturating_sub(suffix.len());
+                        (end >= prefix.len()).then_some((
+                            prefix.len(),
+                            pattern,
+                            value,
+                            &subpath[prefix.len()..end],
+                        ))
+                    })
+                    .collect::<Vec<_>>();
+                patterns
+                    .sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(right.1)));
+                let Some((_, _, value, wildcard)) = patterns.first() else {
+                    return Vec::new();
+                };
+                return resolve_javascript_package_export(
+                    value,
+                    subpath,
+                    conditions,
+                    depth + 1,
+                    Some(wildcard),
+                );
+            }
+            // Conditional export objects are ordered by the package author;
+            // Node/TypeScript select the first active key in that source
+            // order, not the first condition in Compass' condition set. A
+            // condition set only says whether a key is active.
+            for (condition, value) in entries {
+                if !conditions.iter().any(|active| *active == condition) {
+                    continue;
+                }
+                let candidates = resolve_javascript_package_export(
+                    value,
+                    subpath,
+                    conditions,
+                    depth + 1,
+                    wildcard,
+                );
+                if !candidates.is_empty() {
+                    return candidates
+                        .into_iter()
+                        .map(|(target, _)| (target, condition.clone()))
+                        .collect();
+                }
+            }
+            Vec::new()
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn javascript_package_legacy_target(
+    manifest: &JavascriptPackageManifest,
+    subpath: &str,
+    conditions: &[String],
+) -> Vec<(String, String)> {
+    if subpath != "." {
+        // Node10 resolves a package subpath as a path under the package root
+        // when no conditional `exports` map applies. Keep the target relative
+        // and let the admitted-inventory probe perform extension/index
+        // substitution; never search outside the package directory.
+        return subpath
+            .strip_prefix("./")
+            .filter(|path| !path.is_empty())
+            .map(|path| (format!("./{path}"), "package-subpath".to_owned()))
+            .into_iter()
+            .collect();
+    }
+    let candidates = if conditions.iter().any(|condition| condition == "require") {
+        [
+            manifest.main.as_deref(),
+            manifest.module.as_deref(),
+            manifest.types.as_deref(),
+        ]
+    } else {
+        [
+            manifest.types.as_deref(),
+            manifest.module.as_deref(),
+            manifest.main.as_deref(),
+        ]
+    };
+    candidates
+        .into_iter()
+        .flatten()
+        .map(|target| {
+            let condition = if manifest.types.as_deref() == Some(target) {
+                "types"
+            } else if manifest.module.as_deref() == Some(target) {
+                "module"
+            } else {
+                "main"
+            };
+            (target.to_owned(), condition.to_owned())
+        })
+        .collect()
+}
+
+fn javascript_types_versions_targets(types_versions: Option<&Value>, subpath: &str) -> Vec<String> {
+    let Some(types_versions) = types_versions.and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    // A semver-aware selector would need the compiler's complete version
+    // range semantics. Support the deterministic catch-all form and a single
+    // explicitly supplied range; multiple unknown ranges remain unresolved.
+    let version_map = if let Some(value) = types_versions.get("*") {
+        value.as_object()
+    } else if types_versions.len() == 1 {
+        types_versions.values().next().and_then(Value::as_object)
+    } else {
+        None
+    };
+    let Some(version_map) = version_map else {
+        return Vec::new();
+    };
+    let request = subpath.strip_prefix("./").unwrap_or(subpath);
+    let request = if request == "." { "" } else { request };
+    let mut matching = version_map
+        .iter()
+        .filter_map(|(pattern, value)| {
+            let wildcard = if let Some((prefix, suffix)) = pattern.split_once('*') {
+                if !request.starts_with(prefix) || !request.ends_with(suffix) {
+                    return None;
+                }
+                let end = request.len().saturating_sub(suffix.len());
+                (end >= prefix.len()).then(|| request[prefix.len()..end].to_owned())
+            } else {
+                (pattern == request).then(String::new)
+            }?;
+            Some((pattern.len(), pattern, value, wildcard))
+        })
+        .collect::<Vec<_>>();
+    matching.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(right.1)));
+    if matching
+        .get(1)
+        .is_some_and(|candidate| candidate.0 == matching[0].0)
+    {
+        return Vec::new();
+    }
+    let Some((_, _, value, wildcard)) = matching.first() else {
+        return Vec::new();
+    };
+    let targets = match value {
+        Value::String(value) => vec![value.clone()],
+        Value::Array(values) => values
+            .iter()
+            .take(256)
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    };
+    targets
+        .into_iter()
+        .filter(|target| {
+            !target.is_empty()
+                && target.len() <= 4_096
+                && !target.contains(['\\', '\0'])
+                && !Path::new(target).is_absolute()
+        })
+        .map(|target| {
+            let target = target.replace('*', wildcard);
+            if target.starts_with("./") {
+                target
+            } else {
+                format!("./{target}")
+            }
+        })
+        .collect()
+}
+
+fn is_typescript_source(source: &str) -> bool {
+    matches!(extension(source).as_str(), "ts" | "tsx" | "mts" | "cts")
+}
+
+const MAX_TYPESCRIPT_CONFIGS: usize = 256;
+const MAX_TYPESCRIPT_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_TYPESCRIPT_PATH_RULES: usize = 4_096;
+const MAX_TYPESCRIPT_PATH_TARGETS: usize = 4_096;
+const MAX_TYPESCRIPT_CONFIG_EXTENDS_DEPTH: usize = 32;
+const MAX_TYPESCRIPT_CONFIG_EXTENDS: usize = 64;
+const MAX_TYPESCRIPT_CONFIG_REFERENCES: usize = 1_024;
+const MAX_TYPESCRIPT_FILE_PATTERNS: usize = 4_096;
+const MAX_TYPESCRIPT_TYPE_ROOTS: usize = 256;
+const MAX_TYPESCRIPT_CUSTOM_CONDITIONS: usize = 256;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TypeScriptConfigKind {
+    TypeScript,
+    JavaScript,
+}
+
+#[derive(Clone, Debug)]
+struct TypeScriptPathRule {
+    pattern: String,
+    prefix: String,
+    suffix: String,
+    targets: Vec<TypeScriptPathTarget>,
+}
+
+#[derive(Clone, Debug)]
+struct TypeScriptPathTarget {
+    value: String,
+    base: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+struct TypeScriptFilePattern {
+    value: String,
+    base: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+struct TypeScriptPathConfig {
+    source: String,
+    directory: PathBuf,
+    base_url: Option<PathBuf>,
+    rules: Vec<TypeScriptPathRule>,
+    root_dirs: Vec<PathBuf>,
+    module: Option<String>,
+    module_resolution: Option<String>,
+    module_suffixes: Vec<String>,
+    kind: TypeScriptConfigKind,
+    allow_js: bool,
+    check_js: bool,
+    resolve_json_module: bool,
+    references: Vec<PathBuf>,
+    extends_sources: Vec<String>,
+    files: Option<Vec<TypeScriptFilePattern>>,
+    include: Option<Vec<TypeScriptFilePattern>>,
+    exclude: Option<Vec<TypeScriptFilePattern>>,
+    type_roots: Vec<PathBuf>,
+    custom_conditions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct TypeScriptConfigValues {
+    base_url: Option<PathBuf>,
+    paths: Option<Vec<TypeScriptPathRule>>,
+    root_dirs: Option<Vec<PathBuf>>,
+    module: Option<String>,
+    module_resolution: Option<String>,
+    module_suffixes: Option<Vec<String>>,
+    allow_js: Option<bool>,
+    check_js: Option<bool>,
+    resolve_json_module: Option<bool>,
+    references: Vec<PathBuf>,
+    extends_sources: Vec<String>,
+    files: Option<Vec<TypeScriptFilePattern>>,
+    include: Option<Vec<TypeScriptFilePattern>>,
+    exclude: Option<Vec<TypeScriptFilePattern>>,
+    type_roots: Option<Vec<PathBuf>>,
+    custom_conditions: Option<Vec<String>>,
+}
+
+impl TypeScriptConfigValues {
+    fn overlay(&mut self, child: Self) {
+        if child.base_url.is_some() {
+            self.base_url = child.base_url;
+        }
+        if child.paths.is_some() {
+            self.paths = child.paths;
+        }
+        if child.root_dirs.is_some() {
+            self.root_dirs = child.root_dirs;
+        }
+        if child.module.is_some() {
+            self.module = child.module;
+        }
+        if child.module_resolution.is_some() {
+            self.module_resolution = child.module_resolution;
+        }
+        if child.module_suffixes.is_some() {
+            self.module_suffixes = child.module_suffixes;
+        }
+        if child.allow_js.is_some() {
+            self.allow_js = child.allow_js;
+        }
+        if child.check_js.is_some() {
+            self.check_js = child.check_js;
+        }
+        if child.resolve_json_module.is_some() {
+            self.resolve_json_module = child.resolve_json_module;
+        }
+        if child.files.is_some() {
+            self.files = child.files;
+        }
+        if child.include.is_some() {
+            self.include = child.include;
+        }
+        if child.exclude.is_some() {
+            self.exclude = child.exclude;
+        }
+        if child.type_roots.is_some() {
+            self.type_roots = child.type_roots;
+        }
+        if child.custom_conditions.is_some() {
+            self.custom_conditions = child.custom_conditions;
+        }
+        self.references.extend(child.references);
+        self.extends_sources.extend(child.extends_sources);
+    }
+}
+
+/// Resolve TypeScript `compilerOptions.paths` and `baseUrl` using the source
+/// inventory already admitted by Compass. This is intentionally separate from
+/// package exports: a project alias is a compiler mapping and takes precedence
+/// over a same-spelled npm package, while unresolved or ambiguous mappings are
+/// left as the extractor emitted them.
+fn resolve_javascript_typescript_paths(
+    extraction: &mut Extraction,
+    root: &Path,
+    sources: &HashMap<String, String>,
+) -> Result<(), String> {
+    let (configs, referenced_configs) = collect_typescript_configs(extraction, root, sources)?;
+    if configs.is_empty() {
+        return Ok(());
+    }
+
+    let mut file_by_source = BTreeMap::<String, (String, String)>::new();
+    let mut source_by_file = HashMap::<String, String>::new();
+    for node in &extraction.nodes {
+        let source = string_attribute(node, "source_file");
+        if !is_file_node(node, &source) {
+            continue;
+        }
+        let key = source_key(&source, root);
+        if !is_safe_relative_source(&key) {
+            continue;
+        }
+        file_by_source
+            .entry(key)
+            .or_insert_with(|| (node.id.clone(), source.clone()));
+        source_by_file.entry(node.id.clone()).or_insert(source);
+    }
+
+    for edge in &mut extraction.edges {
+        if relation(edge) != "imports_from" {
+            continue;
+        }
+        let module = edge.string("module");
+        if module.is_empty() || module.len() > 4_096 {
+            continue;
+        }
+        let importer = {
+            let source = edge.string("source_file");
+            if source.is_empty() {
+                source_by_file
+                    .get(&edge.source)
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                source
+            }
+        };
+        let config = select_typescript_path_config(&configs, &referenced_configs, root, &importer);
+        let resolved = if module.starts_with('.') {
+            resolve_typescript_relative_module(config, &importer, &module, &file_by_source, root)
+        } else {
+            let Some(config) = config else {
+                continue;
+            };
+            resolve_typescript_module(config, &module, &file_by_source, root)
+        };
+        let Some((target, rule)) = resolved else {
+            continue;
+        };
+        let Some((target_id, target_source)) = file_by_source.get(&target) else {
+            continue;
+        };
+        if edge.target != *target_id {
+            edge.target.clone_from(target_id);
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::CanonicalImportTarget, 1.0);
+        }
+        edge.attributes.insert(
+            "target_file".to_owned(),
+            Value::String(target_source.clone()),
+        );
+        edge.attributes
+            .insert("resolution_rule".to_owned(), Value::String(rule.to_owned()));
+        if let Some(config) = config {
+            edge.attributes.insert(
+                "resolution_config".to_owned(),
+                Value::String(config.source.clone()),
+            );
+            if let Some(module_resolution) = &config.module_resolution {
+                edge.attributes.insert(
+                    "module_resolution".to_owned(),
+                    Value::String(module_resolution.clone()),
+                );
+            }
+            if let Some(module) = &config.module {
+                edge.attributes
+                    .insert("module_kind".to_owned(), Value::String(module.clone()));
+            }
+            if !config.references.is_empty() {
+                let references = config
+                    .references
+                    .iter()
+                    .map(|reference| Value::String(source_key(&reference.to_string_lossy(), root)))
+                    .collect::<Vec<_>>();
+                edge.attributes.insert(
+                    "resolution_project_references".to_owned(),
+                    Value::Array(references),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_typescript_configs(
+    extraction: &Extraction,
+    root: &Path,
+    sources: &HashMap<String, String>,
+) -> Result<(Vec<TypeScriptPathConfig>, BTreeSet<String>), String> {
+    let mut config_sources = BTreeSet::new();
+    for source in sources.keys() {
+        let key = source_key(source, root);
+        if is_typescript_config_source(&key) && is_safe_relative_source(&key) {
+            config_sources.insert(key);
+        }
+    }
+    for node in &extraction.nodes {
+        let source = string_attribute(node, "source_file");
+        let key = source_key(&source, root);
+        if is_typescript_config_source(&key) && is_safe_relative_source(&key) {
+            config_sources.insert(key);
+        }
+    }
+    if config_sources.len() > MAX_TYPESCRIPT_CONFIGS {
+        return Err(format!(
+            "TypeScript project configuration count {} exceeds limit {MAX_TYPESCRIPT_CONFIGS}",
+            config_sources.len()
+        ));
+    }
+
+    let mut configs = Vec::new();
+    let mut config_cache = HashMap::<String, Option<TypeScriptConfigValues>>::new();
+    for source in config_sources {
+        let Some(contents) = read_typescript_config_source(root, &source, sources)? else {
+            continue;
+        };
+        if let Some(config) =
+            parse_typescript_path_config(root, &source, &contents, sources, &mut config_cache)?
+        {
+            configs.push(config);
+        }
+    }
+    configs.sort_by(|left, right| left.source.cmp(&right.source));
+    let referenced_configs = configs
+        .iter()
+        .flat_map(|config| config.extends_sources.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    Ok((configs, referenced_configs))
+}
+
+fn is_typescript_config_source(source: &str) -> bool {
+    let Some(name) = Path::new(source)
+        .file_name()
+        .and_then(|value| value.to_str())
+    else {
+        return false;
+    };
+    let lower = name.to_ascii_lowercase();
+    (lower == "tsconfig.json" || (lower.starts_with("tsconfig.") && lower.ends_with(".json")))
+        || (lower == "jsconfig.json"
+            || (lower.starts_with("jsconfig.") && lower.ends_with(".json")))
+}
+
+fn is_safe_relative_source(source: &str) -> bool {
+    let path = Path::new(source);
+    !path.is_absolute()
+        && !path
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+}
+
+fn read_typescript_config_source(
+    root: &Path,
+    source: &str,
+    sources: &HashMap<String, String>,
+) -> Result<Option<String>, String> {
+    let mut in_memory = sources
+        .iter()
+        .filter(|(candidate, _)| source_key(candidate, root) == source)
+        .collect::<Vec<_>>();
+    in_memory.sort_by_key(|(candidate, _)| *candidate);
+    if let Some((_, contents)) = in_memory.first() {
+        if in_memory
+            .iter()
+            .skip(1)
+            .any(|(_, candidate)| *candidate != *contents)
+        {
+            return Err(format!(
+                "multiple in-memory contents disagree for TypeScript config {source:?}"
+            ));
+        }
+        if contents.is_empty() {
+            return Ok(None);
+        }
+        if contents.len() as u64 <= MAX_TYPESCRIPT_CONFIG_BYTES {
+            return Ok(Some((*contents).clone()));
+        }
+        return Err(format!(
+            "TypeScript config {source:?} exceeds {MAX_TYPESCRIPT_CONFIG_BYTES} bytes"
+        ));
+    }
+    let path = root.join(source);
+    let canonical = match std::fs::canonicalize(&path) {
+        Ok(path) => path,
+        Err(_) => return Ok(None),
+    };
+    if !canonical.starts_with(root) {
+        return Ok(None);
+    }
+    match compass_files::read_source_lossy(&canonical, MAX_TYPESCRIPT_CONFIG_BYTES) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(_) => Ok(None),
+    }
+}
+
+fn parse_typescript_path_config(
+    root: &Path,
+    source: &str,
+    contents: &str,
+    sources: &HashMap<String, String>,
+    cache: &mut HashMap<String, Option<TypeScriptConfigValues>>,
+) -> Result<Option<TypeScriptPathConfig>, String> {
+    let mut stack = Vec::new();
+    let Some(values) =
+        load_typescript_config_values(root, source, contents, sources, cache, &mut stack, 0)?
+    else {
+        return Ok(None);
+    };
+    let config_path = root.join(source);
+    let Some(directory) = config_path.parent() else {
+        return Ok(None);
+    };
+    let kind = Path::new(source)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map_or(TypeScriptConfigKind::TypeScript, |name| {
+            if name.to_ascii_lowercase().starts_with("jsconfig.") {
+                TypeScriptConfigKind::JavaScript
+            } else {
+                TypeScriptConfigKind::TypeScript
+            }
+        });
+    let has_project_metadata = values.base_url.is_some()
+        || values.paths.as_ref().is_some_and(|paths| !paths.is_empty())
+        || values
+            .root_dirs
+            .as_ref()
+            .is_some_and(|roots| !roots.is_empty())
+        || values.module.is_some()
+        || values.module_resolution.is_some()
+        || values.module_suffixes.is_some()
+        || values.allow_js.is_some()
+        || values.check_js.is_some()
+        || values.resolve_json_module.is_some()
+        || !values.references.is_empty()
+        || values.files.as_ref().is_some_and(|files| !files.is_empty())
+        || values
+            .include
+            .as_ref()
+            .is_some_and(|include| !include.is_empty())
+        || values
+            .exclude
+            .as_ref()
+            .is_some_and(|exclude| !exclude.is_empty())
+        || values
+            .type_roots
+            .as_ref()
+            .is_some_and(|roots| !roots.is_empty())
+        || values
+            .custom_conditions
+            .as_ref()
+            .is_some_and(|conditions| !conditions.is_empty());
+    if !has_project_metadata {
+        return Ok(None);
+    }
+    let mut references = values.references;
+    references.sort();
+    references.dedup();
+    let mut extends_sources = values.extends_sources;
+    extends_sources.sort();
+    extends_sources.dedup();
+    let mut type_roots = values.type_roots.unwrap_or_default();
+    type_roots.sort();
+    type_roots.dedup();
+    let custom_conditions = values
+        .custom_conditions
+        .unwrap_or_default()
+        .into_iter()
+        .fold(Vec::new(), |mut conditions, condition| {
+            if !conditions.contains(&condition) {
+                conditions.push(condition);
+            }
+            conditions
+        });
+    Ok(Some(TypeScriptPathConfig {
+        source: source.to_owned(),
+        directory: directory.to_path_buf(),
+        base_url: values.base_url,
+        rules: values.paths.unwrap_or_default(),
+        root_dirs: values.root_dirs.unwrap_or_default(),
+        module: values.module,
+        module_resolution: values.module_resolution,
+        module_suffixes: values.module_suffixes.unwrap_or_default(),
+        kind,
+        allow_js: values.allow_js.unwrap_or(false),
+        check_js: values.check_js.unwrap_or(false),
+        resolve_json_module: values.resolve_json_module.unwrap_or(false),
+        references,
+        extends_sources,
+        files: values.files,
+        include: values.include,
+        exclude: values.exclude,
+        type_roots,
+        custom_conditions,
+    }))
+}
+
+fn load_typescript_config_values(
+    root: &Path,
+    source: &str,
+    contents: &str,
+    sources: &HashMap<String, String>,
+    cache: &mut HashMap<String, Option<TypeScriptConfigValues>>,
+    stack: &mut Vec<String>,
+    depth: usize,
+) -> Result<Option<TypeScriptConfigValues>, String> {
+    if depth > MAX_TYPESCRIPT_CONFIG_EXTENDS_DEPTH {
+        return Err(format!(
+            "TypeScript config extends depth exceeds {MAX_TYPESCRIPT_CONFIG_EXTENDS_DEPTH}"
+        ));
+    }
+    if let Some(cached) = cache.get(source) {
+        return Ok(cached.clone());
+    }
+    if stack.iter().any(|candidate| candidate == source) {
+        return Err(format!(
+            "TypeScript config extends cycle includes {source:?}"
+        ));
+    }
+    let Some(value) = parse_jsonc(contents) else {
+        cache.insert(source.to_owned(), None);
+        return Ok(None);
+    };
+    let Some(object) = value.as_object() else {
+        cache.insert(source.to_owned(), None);
+        return Ok(None);
+    };
+    stack.push(source.to_owned());
+    let extends = typescript_config_extends(object)?;
+    let mut values = TypeScriptConfigValues::default();
+    for base in extends {
+        let base_source = resolve_typescript_extends_source(root, source, &base, sources)?
+            .ok_or_else(|| {
+                format!("TypeScript config {source:?} extends missing config {base:?}")
+            })?;
+        let base_contents = read_typescript_config_source(root, &base_source, sources)?
+            .ok_or_else(|| {
+                format!("TypeScript config {source:?} extends unreadable config {base_source:?}")
+            })?;
+        let base_values = load_typescript_config_values(
+            root,
+            &base_source,
+            &base_contents,
+            sources,
+            cache,
+            stack,
+            depth.saturating_add(1),
+        )?
+        .ok_or_else(|| {
+            format!("TypeScript config {source:?} extends invalid config {base_source:?}")
+        })?;
+        values.overlay(base_values);
+        values.extends_sources.push(base_source);
+    }
+    let local = parse_typescript_config_values(root, source, object, values.base_url.as_ref())?;
+    values.overlay(local);
+    stack.pop();
+    cache.insert(source.to_owned(), Some(values.clone()));
+    Ok(Some(values))
+}
+
+fn typescript_config_extends(
+    object: &serde_json::Map<String, Value>,
+) -> Result<Vec<String>, String> {
+    let Some(value) = object.get("extends") else {
+        return Ok(Vec::new());
+    };
+    let values = match value {
+        Value::String(value) => vec![Some(value.clone())],
+        Value::Array(values) => values
+            .iter()
+            .map(|value| value.as_str().map(str::to_owned))
+            .collect::<Vec<_>>(),
+        _ => return Err("TypeScript config extends must be a string or array".to_owned()),
+    };
+    if values.len() > MAX_TYPESCRIPT_CONFIG_EXTENDS {
+        return Err(format!(
+            "TypeScript config extends count exceeds {MAX_TYPESCRIPT_CONFIG_EXTENDS}"
+        ));
+    }
+    values
+        .into_iter()
+        .map(|value| {
+            let Some(value) = value.filter(|value| !value.is_empty()) else {
+                return Err(
+                    "TypeScript config extends entries must be non-empty strings".to_owned(),
+                );
+            };
+            if value.len() > 4_096 || value.contains('\0') {
+                return Err(
+                    "TypeScript config extends entry is too long or contains NUL".to_owned(),
+                );
+            }
+            Ok(value.to_owned())
+        })
+        .collect()
+}
+
+fn resolve_typescript_extends_source(
+    root: &Path,
+    source: &str,
+    extends: &str,
+    sources: &HashMap<String, String>,
+) -> Result<Option<String>, String> {
+    let source_directory = root
+        .join(source)
+        .parent()
+        .map_or_else(|| root.to_path_buf(), Path::to_path_buf);
+    let mut candidates = Vec::new();
+    let mut push_candidate = |candidate: PathBuf| {
+        let candidate = lexical_path(&candidate);
+        if !candidate.starts_with(root) {
+            return;
+        }
+        let key = source_key(&candidate.to_string_lossy(), root);
+        if is_safe_relative_source(&key) && !candidates.contains(&key) {
+            candidates.push(key);
+        }
+    };
+    if extends.starts_with('.') || extends.starts_with('/') {
+        let Some(path) = safe_typescript_config_path(&source_directory, root, extends) else {
+            return Ok(None);
+        };
+        push_candidate(path.clone());
+        if path.extension().is_none() {
+            push_candidate(path.with_extension("json"));
+        }
+    } else {
+        let mut directory = source_directory;
+        for _ in 0..MAX_TYPESCRIPT_CONFIG_EXTENDS_DEPTH {
+            let package = directory.join("node_modules").join(extends);
+            push_candidate(package.clone());
+            if package.extension().is_none() {
+                push_candidate(package.with_extension("json"));
+            }
+            push_candidate(package.join("tsconfig.json"));
+            if directory == root {
+                break;
+            }
+            let Some(parent) = directory.parent() else {
+                break;
+            };
+            if !parent.starts_with(root) {
+                break;
+            }
+            directory = parent.to_path_buf();
+        }
+    }
+    for candidate in candidates {
+        if read_typescript_config_source(root, &candidate, sources)?.is_some() {
+            return Ok(Some(candidate));
+        }
+    }
+    Ok(None)
+}
+
+fn parse_typescript_config_values(
+    root: &Path,
+    source: &str,
+    object: &serde_json::Map<String, Value>,
+    inherited_base_url: Option<&PathBuf>,
+) -> Result<TypeScriptConfigValues, String> {
+    let config_path = root.join(source);
+    let Some(directory) = config_path.parent() else {
+        return Ok(TypeScriptConfigValues::default());
+    };
+    let options = object.get("compilerOptions").and_then(Value::as_object);
+    let local_base_url = options
+        .and_then(|options| options.get("baseUrl"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 4_096)
+        .and_then(|value| safe_typescript_config_path(directory, root, value));
+    let effective_path_base = local_base_url
+        .clone()
+        .or_else(|| inherited_base_url.cloned())
+        .unwrap_or_else(|| directory.to_path_buf());
+    let mut values = TypeScriptConfigValues {
+        base_url: local_base_url,
+        ..TypeScriptConfigValues::default()
+    };
+    values.files = parse_typescript_file_patterns(object.get("files"), "files", directory)?;
+    values.include = parse_typescript_file_patterns(object.get("include"), "include", directory)?;
+    values.exclude = parse_typescript_file_patterns(object.get("exclude"), "exclude", directory)?;
+    if let Some(options) = options {
+        if let Some(paths) = options.get("paths") {
+            let Some(paths) = paths.as_object() else {
+                return Err("TypeScript compilerOptions.paths must be an object".to_owned());
+            };
+            if paths.len() > MAX_TYPESCRIPT_PATH_RULES {
+                return Err(format!(
+                    "TypeScript path rule count {} exceeds limit {MAX_TYPESCRIPT_PATH_RULES}",
+                    paths.len()
+                ));
+            }
+            let mut rules = Vec::new();
+            let mut target_count = 0_usize;
+            for (pattern, targets) in paths {
+                if pattern.is_empty() || pattern.len() > 4_096 || pattern.matches('*').count() > 1 {
+                    continue;
+                }
+                let target_values = match targets {
+                    Value::Array(values) => values.iter().collect::<Vec<_>>(),
+                    Value::String(_) => vec![targets],
+                    _ => Vec::new(),
+                };
+                let mut normalized_targets = Vec::new();
+                for target in target_values {
+                    let Some(target) = target.as_str() else {
+                        continue;
+                    };
+                    if target.is_empty()
+                        || target.len() > 4_096
+                        || target.matches('*').count() > 1
+                        || safe_typescript_config_path(&effective_path_base, root, target).is_none()
+                    {
+                        continue;
+                    }
+                    normalized_targets.push(TypeScriptPathTarget {
+                        value: target.to_owned(),
+                        base: effective_path_base.clone(),
+                    });
+                    target_count = target_count.saturating_add(1);
+                    if target_count > MAX_TYPESCRIPT_PATH_TARGETS {
+                        return Err(format!(
+                            "TypeScript path target count exceeds limit {MAX_TYPESCRIPT_PATH_TARGETS}"
+                        ));
+                    }
+                }
+                if normalized_targets.is_empty() {
+                    continue;
+                }
+                let (prefix, suffix) = pattern.split_once('*').map_or_else(
+                    || (pattern.as_str(), ""),
+                    |(prefix, suffix)| (prefix, suffix),
+                );
+                rules.push(TypeScriptPathRule {
+                    pattern: pattern.clone(),
+                    prefix: prefix.to_owned(),
+                    suffix: suffix.to_owned(),
+                    targets: normalized_targets,
+                });
+            }
+            rules.sort_by(|left, right| {
+                right
+                    .prefix
+                    .len()
+                    .cmp(&left.prefix.len())
+                    .then_with(|| left.pattern.cmp(&right.pattern))
+            });
+            values.paths = Some(rules);
+        }
+        values.root_dirs = options.get("rootDirs").map(|value| {
+            value
+                .as_array()
+                .map(|roots| {
+                    roots
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .filter_map(|root_dir| {
+                            safe_typescript_config_path(directory, root, root_dir)
+                        })
+                        .take(256)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        });
+        values.module = options
+            .get("module")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty() && value.len() <= 128)
+            .map(str::to_ascii_lowercase);
+        values.module_resolution = options
+            .get("moduleResolution")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty() && value.len() <= 128)
+            .map(str::to_ascii_lowercase);
+        values.module_suffixes = options.get("moduleSuffixes").map(|value| {
+            value
+                .as_array()
+                .map(|suffixes| {
+                    suffixes
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .filter(|suffix| suffix.len() <= 128)
+                        .map(str::to_owned)
+                        .take(256)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        });
+        values.allow_js = options.get("allowJs").and_then(Value::as_bool);
+        values.check_js = options.get("checkJs").and_then(Value::as_bool);
+        values.resolve_json_module = options.get("resolveJsonModule").and_then(Value::as_bool);
+        values.type_roots = parse_typescript_path_array(
+            options.get("typeRoots"),
+            "compilerOptions.typeRoots",
+            directory,
+            root,
+            MAX_TYPESCRIPT_TYPE_ROOTS,
+        )?;
+        values.custom_conditions = parse_typescript_string_array(
+            options.get("customConditions"),
+            "compilerOptions.customConditions",
+            MAX_TYPESCRIPT_CUSTOM_CONDITIONS,
+        )?;
+    }
+    if let Some(references) = object.get("references") {
+        let Some(references) = references.as_array() else {
+            return Err("TypeScript config references must be an array".to_owned());
+        };
+        if references.len() > MAX_TYPESCRIPT_CONFIG_REFERENCES {
+            return Err(format!(
+                "TypeScript project reference count exceeds {MAX_TYPESCRIPT_CONFIG_REFERENCES}"
+            ));
+        }
+        for reference in references {
+            let Some(path) = reference
+                .as_object()
+                .and_then(|reference| reference.get("path"))
+                .and_then(Value::as_str)
+                .filter(|path| !path.is_empty() && path.len() <= 4_096)
+            else {
+                continue;
+            };
+            if let Some(path) = safe_typescript_config_path(directory, root, path) {
+                values.references.push(path);
+            }
+        }
+    }
+    Ok(values)
+}
+
+fn parse_typescript_file_patterns(
+    value: Option<&Value>,
+    key: &str,
+    base: &Path,
+) -> Result<Option<Vec<TypeScriptFilePattern>>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let Some(values) = value.as_array() else {
+        return Err(format!("TypeScript config {key} must be an array"));
+    };
+    if values.len() > MAX_TYPESCRIPT_FILE_PATTERNS {
+        return Err(format!(
+            "TypeScript config {key} count exceeds {MAX_TYPESCRIPT_FILE_PATTERNS}"
+        ));
+    }
+    let mut patterns = Vec::with_capacity(values.len());
+    for value in values {
+        let Some(value) = value.as_str() else {
+            return Err(format!("TypeScript config {key} entries must be strings"));
+        };
+        let normalized = value.replace('\\', "/");
+        if normalized.is_empty()
+            || normalized.len() > 4_096
+            || normalized.contains('\0')
+            || Path::new(&normalized).is_absolute()
+        {
+            return Err(format!(
+                "TypeScript config {key} contains an invalid pattern"
+            ));
+        }
+        patterns.push(TypeScriptFilePattern {
+            value: normalized,
+            base: base.to_path_buf(),
+        });
+    }
+    Ok(Some(patterns))
+}
+
+fn parse_typescript_path_array(
+    value: Option<&Value>,
+    key: &str,
+    base: &Path,
+    root: &Path,
+    limit: usize,
+) -> Result<Option<Vec<PathBuf>>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let Some(values) = value.as_array() else {
+        return Err(format!("TypeScript config {key} must be an array"));
+    };
+    if values.len() > limit {
+        return Err(format!("TypeScript config {key} count exceeds {limit}"));
+    }
+    let mut paths = Vec::with_capacity(values.len());
+    for value in values {
+        let Some(value) = value.as_str().filter(|value| !value.is_empty()) else {
+            return Err(format!("TypeScript config {key} entries must be strings"));
+        };
+        if value.len() > 4_096 || value.contains('\0') {
+            return Err(format!("TypeScript config {key} contains an invalid path"));
+        }
+        let Some(path) = safe_typescript_config_path(base, root, value) else {
+            return Err(format!(
+                "TypeScript config {key} path escapes the workspace"
+            ));
+        };
+        paths.push(path);
+    }
+    Ok(Some(paths))
+}
+
+fn parse_typescript_string_array(
+    value: Option<&Value>,
+    key: &str,
+    limit: usize,
+) -> Result<Option<Vec<String>>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let Some(values) = value.as_array() else {
+        return Err(format!("TypeScript config {key} must be an array"));
+    };
+    if values.len() > limit {
+        return Err(format!("TypeScript config {key} count exceeds {limit}"));
+    }
+    let mut output = Vec::with_capacity(values.len());
+    for value in values {
+        let Some(value) = value.as_str().filter(|value| !value.is_empty()) else {
+            return Err(format!("TypeScript config {key} entries must be strings"));
+        };
+        if value.len() > 256 || value.contains(['\\', '\0']) {
+            return Err(format!(
+                "TypeScript config {key} contains an invalid condition"
+            ));
+        }
+        output.push(value.to_owned());
+    }
+    Ok(Some(output))
+}
+
+fn safe_typescript_config_path(base: &Path, root: &Path, value: &str) -> Option<PathBuf> {
+    if value.contains('\0') {
+        return None;
+    }
+    // TypeScript project files commonly use Windows separators even when the
+    // graph is qualified on another host. Normalize only the configuration
+    // spelling; source inventory paths remain platform-native and bounded.
+    let normalized = value.replace('\\', "/");
+    let path = Path::new(&normalized);
+    let candidate = if path.is_absolute() {
+        lexical_path(path)
+    } else {
+        lexical_path(&base.join(path))
+    };
+    candidate.starts_with(root).then_some(candidate)
+}
+
+fn select_typescript_path_config<'a>(
+    configs: &'a [TypeScriptPathConfig],
+    referenced_configs: &BTreeSet<String>,
+    root: &Path,
+    importer: &str,
+) -> Option<&'a TypeScriptPathConfig> {
+    let importer_key = source_key(importer, root);
+    if !is_safe_relative_source(&importer_key) {
+        return None;
+    }
+    let importer_path = root.join(&importer_key);
+    let importer_extension = extension(importer);
+    let mut candidates = configs
+        .iter()
+        .filter(|config| {
+            !referenced_configs.contains(&config.source)
+                && importer_path.starts_with(&config.directory)
+                && typescript_config_applies(config, &importer_extension)
+                && typescript_config_owns_source(config, &importer_key, root, false)
+        })
+        .collect::<Vec<_>>();
+    let deepest = candidates
+        .iter()
+        .map(|config| config.directory.components().count())
+        .max()?;
+    candidates.retain(|config| config.directory.components().count() == deepest);
+    if candidates.len() == 1 {
+        return candidates.pop();
+    }
+    // Two configs at the same project depth are not interchangeable. A
+    // compiler invocation selects one explicitly; Compass has no such command
+    // context, so it preserves the import rather than guessing.
+    None
+}
+
+fn typescript_config_applies(config: &TypeScriptPathConfig, extension: &str) -> bool {
+    let javascript = matches!(extension, "js" | "jsx" | "mjs" | "cjs");
+    match config.kind {
+        TypeScriptConfigKind::JavaScript => javascript,
+        TypeScriptConfigKind::TypeScript => !javascript || config.allow_js || config.check_js,
+    }
+}
+
+fn typescript_config_owns_source(
+    config: &TypeScriptPathConfig,
+    source: &str,
+    root: &Path,
+    allow_missing_extension: bool,
+) -> bool {
+    let source_key = source_key(source, root);
+    if !is_safe_relative_source(&source_key) {
+        return false;
+    }
+    let source_path = root.join(&source_key);
+    let extension = extension(&source_key);
+    if !allow_missing_extension
+        && !typescript_config_applies(config, &extension)
+        && !extension.is_empty()
+    {
+        return false;
+    }
+
+    let explicitly_included = config.files.as_ref().map_or_else(
+        || {
+            config.include.as_ref().is_none_or(|patterns| {
+                patterns
+                    .iter()
+                    .any(|pattern| typescript_pattern_matches(pattern, &source_path, false))
+            })
+        },
+        |patterns| {
+            patterns
+                .iter()
+                .any(|pattern| typescript_pattern_matches(pattern, &source_path, true))
+        },
+    );
+    if !explicitly_included {
+        return false;
+    }
+
+    if config.exclude.as_ref().is_some_and(|patterns| {
+        patterns
+            .iter()
+            .any(|pattern| typescript_pattern_matches(pattern, &source_path, false))
+    }) {
+        return false;
+    }
+
+    // TypeScript's default exclude keeps dependency trees out of a project
+    // when the config did not supply an explicit exclude list. Preserve this
+    // boundary even when the source inventory contains vendored files.
+    if config.exclude.is_none()
+        && source_path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(value)
+                    if matches!(
+                        value.to_str(),
+                        Some("node_modules") | Some("bower_components") | Some("jspm_packages")
+                    )
+            )
+        })
+    {
+        return false;
+    }
+    true
+}
+
+fn typescript_pattern_matches(
+    pattern: &TypeScriptFilePattern,
+    source: &Path,
+    exact_file: bool,
+) -> bool {
+    let Ok(relative) = source.strip_prefix(&pattern.base) else {
+        return false;
+    };
+    let relative = relative
+        .to_string_lossy()
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .to_owned();
+    let pattern_value = pattern.value.trim_start_matches("./");
+    if !exact_file
+        && !pattern_value.contains(['*', '?'])
+        && (relative == pattern_value || relative.starts_with(&format!("{pattern_value}/")))
+    {
+        return true;
+    }
+    glob_path_matches(pattern_value, &relative)
+}
+
+fn glob_path_matches(pattern: &str, path: &str) -> bool {
+    let pattern_parts = pattern
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let path_parts = path
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    fn matches_segment(pattern: &str, value: &str) -> bool {
+        let pattern = pattern.as_bytes();
+        let value = value.as_bytes();
+        let mut table = vec![vec![false; value.len() + 1]; pattern.len() + 1];
+        table[0][0] = true;
+        for index in 0..pattern.len() {
+            for value_index in 0..=value.len() {
+                if !table[index][value_index] {
+                    continue;
+                }
+                match pattern[index] {
+                    b'*' => {
+                        table[index + 1][value_index] = true;
+                        if value_index < value.len() {
+                            table[index][value_index + 1] = true;
+                        }
+                    }
+                    b'?' if value_index < value.len() => {
+                        table[index + 1][value_index + 1] = true;
+                    }
+                    byte if value_index < value.len() && byte == value[value_index] => {
+                        table[index + 1][value_index + 1] = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        table[pattern.len()][value.len()]
+    }
+    fn matches_parts(pattern: &[&str], path: &[&str]) -> bool {
+        if pattern.is_empty() {
+            return path.is_empty();
+        }
+        if pattern[0] == "**" {
+            return matches_parts(&pattern[1..], path)
+                || (!path.is_empty() && matches_parts(pattern, &path[1..]));
+        }
+        !path.is_empty()
+            && matches_segment(pattern[0], path[0])
+            && matches_parts(&pattern[1..], &path[1..])
+    }
+    matches_parts(&pattern_parts, &path_parts)
+}
+
+fn resolve_typescript_module(
+    config: &TypeScriptPathConfig,
+    module: &str,
+    file_by_source: &BTreeMap<String, (String, String)>,
+    root: &Path,
+) -> Option<(String, &'static str)> {
+    let mut matching = config
+        .rules
+        .iter()
+        .filter_map(|rule| {
+            let wildcard = if rule.pattern.contains('*') {
+                if !module.starts_with(&rule.prefix) || !module.ends_with(&rule.suffix) {
+                    return None;
+                }
+                let end = module.len().saturating_sub(rule.suffix.len());
+                (end >= rule.prefix.len()).then(|| module[rule.prefix.len()..end].to_owned())
+            } else {
+                (rule.pattern == module).then(String::new)
+            }?;
+            Some((rule, wildcard))
+        })
+        .collect::<Vec<_>>();
+    if let Some(longest_prefix) = matching.iter().map(|(rule, _)| rule.prefix.len()).max() {
+        matching.retain(|(rule, _)| rule.prefix.len() == longest_prefix);
+    }
+    if !matching.is_empty() {
+        if matching.len() != 1 {
+            return None;
+        }
+        let (rule, wildcard) = matching.pop()?;
+        for target in &rule.targets {
+            let substituted = if rule.pattern.contains('*') {
+                target.value.replace('*', &wildcard)
+            } else {
+                target.value.clone()
+            };
+            if let Some(source) = resolve_typescript_target(
+                &target.base,
+                &substituted,
+                file_by_source,
+                root,
+                config.resolve_json_module,
+                &config.module_suffixes,
+            ) && typescript_config_owns_source(config, &source, root, true)
+            {
+                return Some((source, "typescript-paths"));
+            }
+        }
+        return None;
+    }
+    if let Some(base_url) = config.base_url.as_ref()
+        && let Some(source) = resolve_typescript_target(
+            base_url,
+            module,
+            file_by_source,
+            root,
+            config.resolve_json_module,
+            &config.module_suffixes,
+        )
+        && typescript_config_owns_source(config, &source, root, true)
+    {
+        return Some((source, "typescript-base-url"));
+    }
+    resolve_typescript_type_root_module(config, module, file_by_source, root)
+}
+
+fn resolve_typescript_type_root_module(
+    config: &TypeScriptPathConfig,
+    module: &str,
+    file_by_source: &BTreeMap<String, (String, String)>,
+    root: &Path,
+) -> Option<(String, &'static str)> {
+    if config.type_roots.is_empty() || module.is_empty() || module.starts_with('#') {
+        return None;
+    }
+    let mut package_names = vec![module.to_owned()];
+    if let Some((scope, package)) = module
+        .strip_prefix('@')
+        .and_then(|module| module.split_once('/'))
+        && !scope.is_empty()
+        && !package.is_empty()
+    {
+        package_names.push(format!("{scope}__{package}"));
+    }
+    for type_root in &config.type_roots {
+        for package_name in &package_names {
+            if let Some(source) = resolve_typescript_target(
+                type_root,
+                package_name,
+                file_by_source,
+                root,
+                config.resolve_json_module,
+                &config.module_suffixes,
+            ) && typescript_config_owns_source(config, &source, root, true)
+            {
+                return Some((source, "typescript-type-roots"));
+            }
+            // A typeRoots entry is commonly the parent of an `@types`
+            // directory, while some projects point directly at that folder.
+            // Try the explicit package path only when it differs from the
+            // direct candidate to preserve deterministic target order.
+            if !type_root.ends_with("@types") {
+                let at_types = format!("@types/{package_name}");
+                if let Some(source) = resolve_typescript_target(
+                    type_root,
+                    &at_types,
+                    file_by_source,
+                    root,
+                    config.resolve_json_module,
+                    &config.module_suffixes,
+                ) && typescript_config_owns_source(config, &source, root, true)
+                {
+                    return Some((source, "typescript-type-roots"));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn resolve_typescript_relative_module(
+    config: Option<&TypeScriptPathConfig>,
+    importer: &str,
+    module: &str,
+    file_by_source: &BTreeMap<String, (String, String)>,
+    root: &Path,
+) -> Option<(String, &'static str)> {
+    let importer_key = source_key(importer, root);
+    if !is_safe_relative_source(&importer_key) {
+        return None;
+    }
+    let importer_path = root.join(&importer_key);
+    let importer_directory = importer_path.parent().unwrap_or(root);
+    let raw_module = module.replace('\\', "/");
+    let direct = lexical_path(&importer_directory.join(&raw_module));
+    if !direct.starts_with(root) {
+        return None;
+    }
+    let mut bases = vec![(direct, "typescript-relative")];
+    if let Some(config) = config
+        && !config.root_dirs.is_empty()
+    {
+        let mut virtual_relative = None;
+        let mut importer_root = None;
+        for root_dir in &config.root_dirs {
+            if let Ok(relative) = importer_path.strip_prefix(root_dir) {
+                virtual_relative = Some(relative.to_path_buf());
+                importer_root = Some(root_dir);
+                break;
+            }
+        }
+        if let (Some(relative), Some(importer_root)) = (virtual_relative, importer_root) {
+            let virtual_parent = relative.parent().unwrap_or_else(|| Path::new(""));
+            for root_dir in &config.root_dirs {
+                if root_dir == importer_root {
+                    continue;
+                }
+                let candidate = lexical_path(&root_dir.join(virtual_parent).join(&raw_module));
+                if candidate.starts_with(root) {
+                    bases.push((candidate, "typescript-root-dirs"));
+                }
+            }
+        }
+    }
+    let module_suffixes =
+        config.map_or(&[] as &[String], |config| config.module_suffixes.as_slice());
+    for (base, rule) in bases {
+        let candidates = typescript_target_candidates(&base, module_suffixes);
+        for candidate in candidates {
+            if config.is_some_and(|config| {
+                !config.resolve_json_module
+                    && candidate
+                        .extension()
+                        .and_then(|value| value.to_str())
+                        .is_some_and(|value| value.eq_ignore_ascii_case("json"))
+            }) {
+                continue;
+            }
+            let key = source_key(&candidate.to_string_lossy(), root);
+            if file_by_source.contains_key(&key)
+                && config
+                    .is_none_or(|config| typescript_config_owns_source(config, &key, root, true))
+            {
+                return Some((key, rule));
+            }
+        }
+    }
+    None
+}
+
+fn resolve_typescript_target(
+    base: &Path,
+    target: &str,
+    file_by_source: &BTreeMap<String, (String, String)>,
+    root: &Path,
+    resolve_json_module: bool,
+    module_suffixes: &[String],
+) -> Option<String> {
+    let target = safe_typescript_config_path(base, root, target)?;
+    let candidates = typescript_target_candidates(&target, module_suffixes);
+    for candidate in candidates {
+        if !resolve_json_module
+            && candidate
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case("json"))
+        {
+            continue;
+        }
+        let key = source_key(&candidate.to_string_lossy(), root);
+        if file_by_source.contains_key(&key) {
+            return Some(key);
+        }
+    }
+    None
+}
+
+fn typescript_target_candidates(path: &Path, module_suffixes: &[String]) -> Vec<PathBuf> {
+    let mut base_candidates = Vec::new();
+    let mut push = |candidate: PathBuf| {
+        if !base_candidates.contains(&candidate) {
+            base_candidates.push(candidate);
+        }
+    };
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "js" => {
+            push(path.with_extension("ts"));
+            push(path.with_extension("tsx"));
+            push(path.with_extension("d.ts"));
+            push(path.to_path_buf());
+            push(path.with_extension("jsx"));
+        }
+        "jsx" => {
+            push(path.with_extension("tsx"));
+            push(path.with_extension("d.ts"));
+            push(path.to_path_buf());
+        }
+        "mjs" => {
+            push(path.with_extension("mts"));
+            push(path.with_extension("d.mts"));
+            push(path.to_path_buf());
+        }
+        "cjs" => {
+            push(path.with_extension("cts"));
+            push(path.with_extension("d.cts"));
+            push(path.to_path_buf());
+        }
+        _ if !extension.is_empty() => push(path.to_path_buf()),
+        _ => {
+            push(path.to_path_buf());
+            for extension in [
+                "ts", "tsx", "d.ts", "mts", "d.mts", "cts", "d.cts", "js", "jsx", "mjs", "cjs",
+            ] {
+                push(path.with_file_name(format!(
+                    "{}.{extension}",
+                    path.file_name()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or_default()
+                )));
+            }
+        }
+    }
+    for index in [
+        "index.ts",
+        "index.tsx",
+        "index.d.ts",
+        "index.mts",
+        "index.d.mts",
+        "index.cts",
+        "index.d.cts",
+        "index.js",
+        "index.jsx",
+        "index.mjs",
+        "index.cjs",
+    ] {
+        push(path.join(index));
+    }
+    let suffixes = if module_suffixes.is_empty() {
+        vec![String::new()]
+    } else {
+        module_suffixes.to_vec()
+    };
+    let mut candidates = Vec::new();
+    for suffix in suffixes {
+        for candidate in &base_candidates {
+            let candidate = add_typescript_module_suffix(candidate, &suffix);
+            if !candidates.contains(&candidate) {
+                candidates.push(candidate);
+            }
+        }
+    }
+    candidates
+}
+
+fn add_typescript_module_suffix(path: &Path, suffix: &str) -> PathBuf {
+    if suffix.is_empty() {
+        return path.to_path_buf();
+    }
+    let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+        return path.to_path_buf();
+    };
+    let (stem, extension) = [".d.mts", ".d.cts", ".d.ts"]
+        .into_iter()
+        .find_map(|extension| {
+            file_name
+                .strip_suffix(extension)
+                .map(|stem| (stem, extension))
+        })
+        .or_else(|| {
+            file_name.rsplit_once('.').map(|(stem, extension)| {
+                (
+                    stem,
+                    &file_name[file_name.len().saturating_sub(extension.len() + 1)..],
+                )
+            })
+        })
+        .unwrap_or((file_name, ""));
+    let replacement = if extension.is_empty() {
+        format!("{stem}{suffix}")
+    } else {
+        format!("{stem}{suffix}{extension}")
+    };
+    path.with_file_name(replacement)
 }
 
 fn rooted_source_path(root: &Path, source: &str) -> Result<PathBuf, String> {
@@ -835,14 +2934,15 @@ fn resolve_javascript_workspace_symbols(extraction: &mut Extraction) {
     let mut package_roots = HashMap::<(String, String), Vec<String>>::new();
     let mut reexports = HashMap::<String, Vec<String>>::new();
     for edge in &extraction.edges {
-        if relation(edge) == "imports_from" && file_ids.contains(&edge.target) {
+        if relation(edge) == "imports_from"
+            && file_ids.contains(&edge.target)
+            && !edge.string("module").is_empty()
+        {
             let module = edge.string("module");
-            if !module.starts_with('.') && !module.is_empty() {
-                package_roots
-                    .entry((edge.source.clone(), module))
-                    .or_default()
-                    .push(edge.target.clone());
-            }
+            package_roots
+                .entry((edge.source.clone(), module))
+                .or_default()
+                .push(edge.target.clone());
         }
         if relation(edge) == "re_exports"
             && file_ids.contains(&edge.source)
@@ -893,7 +2993,7 @@ fn resolve_javascript_workspace_symbols(extraction: &mut Extraction) {
         }
         let module = edge.string("module");
         let imported_name = edge.string("imported_name");
-        if module.starts_with('.') || module.is_empty() || imported_name.is_empty() {
+        if module.is_empty() || imported_name.is_empty() {
             continue;
         }
         let Some(roots) = package_roots.get(&(edge.source.clone(), module)) else {

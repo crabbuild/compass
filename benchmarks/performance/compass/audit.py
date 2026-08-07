@@ -421,6 +421,11 @@ def _source_oracle_candidates(
         "scannedFiles": inventory.scanned_files,
         "parsedFiles": inventory.parsed_files,
         "rejectedFiles": list(inventory.rejected_files),
+        **(
+            {"providerMetadata": dict(inventory.provider_metadata)}
+            if inventory.provider_metadata
+            else {}
+        ),
         "inventorySha256": source_construct_inventory_sha256(adapter, inventory),
         "complete": (
             has_independent_source_provider(adapter)

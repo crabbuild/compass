@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::model::{
     BindingFact, CandidateRelation, DeclarationFact, EvidenceRange, HierarchyConstraint,
     LanguageCapability, OccurrenceFact, RelationshipCandidate, ScopeFact, SemanticEvidenceBatch,
-    SemanticRole,
+    SemanticRole, SymbolNamespace,
 };
 
 /// Hard resource ceilings for a single adapter evidence batch.
@@ -365,6 +365,30 @@ fn validate_fact(
             require_capability(&fact.id, fact.kind.required_capability(), capabilities)?;
             if fact.spelling.is_empty() || fact.qualified_target.is_empty() {
                 return Err(invalid_fact(&fact.id, "binding identity is empty"));
+            }
+            if fact.type_only
+                && !matches!(
+                    fact.kind,
+                    crate::BindingKind::Import
+                        | crate::BindingKind::ImportAlias
+                        | crate::BindingKind::Reexport
+                )
+            {
+                return Err(invalid_fact(
+                    &fact.id,
+                    "only import and re-export bindings may be type-only",
+                ));
+            }
+            if fact.type_only
+                && !matches!(
+                    fact.namespace,
+                    Some(SymbolNamespace::Type | SymbolNamespace::Namespace)
+                )
+            {
+                return Err(invalid_fact(
+                    &fact.id,
+                    "type-only bindings must identify the type or namespace symbol space",
+                ));
             }
             if fact.output_index.is_some() && fact.kind != crate::BindingKind::CallResult {
                 return Err(invalid_fact(

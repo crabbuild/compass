@@ -7,8 +7,12 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import selectors
+import subprocess
+import time
 import tokenize
 
 
@@ -52,6 +56,7 @@ class SourceConstructInventory:
     scanned_files: int
     parsed_files: int
     rejected_files: tuple[str, ...]
+    provider_metadata: tuple[tuple[str, str], ...] = ()
 
 
 SourceConstructParser = Callable[
@@ -65,6 +70,7 @@ class ConstructProvider:
     identity: str
     suffixes: tuple[str, ...]
     parse: SourceConstructParser
+    collect: Callable[[Path], SourceConstructInventory] | None = None
 
 
 def _python_statement_spans(path: Path) -> StatementSpans:
@@ -274,12 +280,288 @@ def _python_constructs(root: Path, path: Path) -> tuple[SourceConstruct, ...] | 
     return tuple(sorted(set(constructs), key=_source_construct_key))
 
 
+_TYPESCRIPT_ORACLE_SCHEMA = "compass.typescript-source-oracle/1"
+_TYPESCRIPT_ORACLE_PROVIDER = "typescript_compiler_api_5_9_3"
+_TYPESCRIPT_ORACLE_SCRIPT = (
+    Path(__file__).resolve().parents[1] / "oracles" / "typescript-source-oracle.mjs"
+)
+_TYPESCRIPT_ORACLE_TIMEOUT_SECONDS = 90.0
+_TYPESCRIPT_ORACLE_OUTPUT_BYTES = 64 * 1024 * 1024
+
+
+def _bounded_node_oracle(root: Path) -> bytes:
+    """Run the independent compiler oracle with bounded pipes and duration."""
+
+    if not _TYPESCRIPT_ORACLE_SCRIPT.is_file():
+        raise RuntimeError(f"TypeScript source oracle is missing: {_TYPESCRIPT_ORACLE_SCRIPT}")
+    command = (
+        "node",
+        str(_TYPESCRIPT_ORACLE_SCRIPT),
+        "--root",
+        str(root),
+    )
+    process = subprocess.Popen(
+        command,
+        cwd=_TYPESCRIPT_ORACLE_SCRIPT.parents[3],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=False,
+    )
+    assert process.stdout is not None
+    assert process.stderr is not None
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+    output = bytearray()
+    error = bytearray()
+    started = time.monotonic()
+    limit_error: str | None = None
+    try:
+        while selector.get_map():
+            remaining = _TYPESCRIPT_ORACLE_TIMEOUT_SECONDS - (
+                time.monotonic() - started
+            )
+            if remaining <= 0:
+                limit_error = (
+                    "TypeScript source oracle exceeded "
+                    f"{_TYPESCRIPT_ORACLE_TIMEOUT_SECONDS:.0f}s"
+                )
+                process.kill()
+                break
+            events = selector.select(min(remaining, 0.25))
+            for key, _ in events:
+                chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    key.fileobj.close()
+                    continue
+                if key.data == "stdout":
+                    output.extend(chunk)
+                    if len(output) > _TYPESCRIPT_ORACLE_OUTPUT_BYTES:
+                        limit_error = (
+                            "TypeScript source oracle output exceeds "
+                            f"{_TYPESCRIPT_ORACLE_OUTPUT_BYTES} bytes"
+                        )
+                        process.kill()
+                        break
+                else:
+                    error.extend(chunk)
+            if limit_error is not None:
+                break
+    finally:
+        selector.close()
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        process.stdout.close()
+        process.stderr.close()
+    if limit_error is not None:
+        raise RuntimeError(limit_error)
+    if process.returncode != 0:
+        detail = error.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            "TypeScript source oracle failed"
+            + (f": {detail[:2_000]}" if detail else "")
+        )
+    return bytes(output)
+
+
+def _safe_oracle_file(value: object, context: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise RuntimeError(f"{context} must be a non-empty relative path")
+    relative = Path(value.replace("\\", "/"))
+    if relative.is_absolute() or ".." in relative.parts:
+        raise RuntimeError(f"{context} escapes the source root")
+    normalized = relative.as_posix()
+    if normalized in {"", "."} or any(part in {"", "."} for part in relative.parts):
+        raise RuntimeError(f"{context} is not normalized")
+    return normalized
+
+
+def _oracle_construct(value: object, index: int) -> SourceConstruct:
+    if not isinstance(value, dict):
+        raise RuntimeError(f"oracle constructs[{index}] must be an object")
+    required = {
+        "sourceFile",
+        "relation",
+        "capability",
+        "ownerQualifiedName",
+        "targetSpelling",
+        "qualifier",
+        "startByte",
+        "endByte",
+        "startLine",
+    }
+    if set(value) != required:
+        raise RuntimeError(f"oracle constructs[{index}] has an invalid schema")
+    source_file = _safe_oracle_file(value["sourceFile"], f"constructs[{index}].sourceFile")
+    text_values = (
+        ("relation", value["relation"]),
+        ("capability", value["capability"]),
+        ("ownerQualifiedName", value["ownerQualifiedName"]),
+        ("targetSpelling", value["targetSpelling"]),
+    )
+    if any(not isinstance(item, str) or not item for _, item in text_values):
+        raise RuntimeError(f"oracle constructs[{index}] has invalid text fields")
+    qualifier = value["qualifier"]
+    if qualifier is not None and (not isinstance(qualifier, str) or not qualifier):
+        raise RuntimeError(f"oracle constructs[{index}].qualifier is invalid")
+    start_byte = value["startByte"]
+    end_byte = value["endByte"]
+    start_line = value["startLine"]
+    if (
+        isinstance(start_byte, bool)
+        or not isinstance(start_byte, int)
+        or isinstance(end_byte, bool)
+        or not isinstance(end_byte, int)
+        or isinstance(start_line, bool)
+        or not isinstance(start_line, int)
+        or start_byte < 0
+        or end_byte <= start_byte
+        or start_line <= 0
+    ):
+        raise RuntimeError(f"oracle constructs[{index}] has an invalid source range")
+    return SourceConstruct(
+        source_file,
+        value["relation"],
+        value["capability"],
+        value["ownerQualifiedName"],
+        value["targetSpelling"],
+        qualifier,
+        start_byte,
+        end_byte,
+        start_line,
+    )
+
+
+def _typescript_inventory_from_payload(
+    payload: object,
+    root: Path,
+) -> SourceConstructInventory:
+    root = root.resolve()
+    if not isinstance(payload, dict):
+        raise RuntimeError("TypeScript source oracle output must be an object")
+    required = {
+        "schema",
+        "provider",
+        "metadata",
+        "scannedFiles",
+        "parsedFiles",
+        "rejectedFiles",
+        "constructs",
+    }
+    if set(payload) != required:
+        raise RuntimeError("TypeScript source oracle output has an invalid schema")
+    if payload["schema"] != _TYPESCRIPT_ORACLE_SCHEMA:
+        raise RuntimeError(f"unsupported TypeScript source oracle schema: {payload['schema']!r}")
+    if payload["provider"] != _TYPESCRIPT_ORACLE_PROVIDER:
+        raise RuntimeError(
+            "TypeScript source oracle provider mismatch: "
+            f"expected {_TYPESCRIPT_ORACLE_PROVIDER!r}, observed {payload['provider']!r}"
+        )
+    metadata = payload["metadata"]
+    if not isinstance(metadata, dict) or any(
+        not isinstance(key, str)
+        or not key
+        or not isinstance(value, str)
+        or not value
+        for key, value in metadata.items()
+    ):
+        raise RuntimeError("TypeScript source oracle metadata is invalid")
+    compiler_version = metadata.get("compilerVersion")
+    script_sha256 = metadata.get("scriptSha256")
+    if compiler_version != "5.9.3" or not re.fullmatch(r"[0-9a-f]{64}", script_sha256 or ""):
+        raise RuntimeError("TypeScript source oracle metadata is not pinned")
+    scanned = payload["scannedFiles"]
+    parsed = payload["parsedFiles"]
+    if (
+        isinstance(scanned, bool)
+        or not isinstance(scanned, int)
+        or isinstance(parsed, bool)
+        or not isinstance(parsed, int)
+        or scanned < 0
+        or parsed < 0
+        or parsed > scanned
+    ):
+        raise RuntimeError("TypeScript source oracle coverage counts are invalid")
+    rejected = payload["rejectedFiles"]
+    if not isinstance(rejected, list):
+        raise RuntimeError("TypeScript source oracle rejectedFiles must be an array")
+    rejected_files = tuple(
+        sorted({_safe_oracle_file(value, "rejectedFiles[]") for value in rejected})
+    )
+    constructs = payload["constructs"]
+    if not isinstance(constructs, list):
+        raise RuntimeError("TypeScript source oracle constructs must be an array")
+    parsed_constructs = tuple(
+        sorted(
+            {_oracle_construct(value, index) for index, value in enumerate(constructs)},
+            key=_source_construct_key,
+        )
+    )
+    for construct in parsed_constructs:
+        path = (root / construct.source_file).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError as error:
+            raise RuntimeError(
+                f"oracle construct escapes the source root: {construct.source_file}"
+            ) from error
+        if not path.is_file():
+            raise RuntimeError(f"oracle construct source is missing: {construct.source_file}")
+        if construct.end_byte > path.stat().st_size:
+            raise RuntimeError(
+                f"oracle construct range exceeds source: {construct.source_file}"
+            )
+    if len(rejected_files) != scanned - parsed:
+        raise RuntimeError(
+            "TypeScript source oracle coverage does not account for every scanned file"
+        )
+    return SourceConstructInventory(
+        parsed_constructs,
+        scanned,
+        parsed,
+        rejected_files,
+        tuple(sorted(metadata.items())),
+    )
+
+
+def _typescript_compiler_inventory(root: Path) -> SourceConstructInventory:
+    try:
+        payload = json.loads(_bounded_node_oracle(root).decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"invalid TypeScript source oracle output: {error}") from error
+    return _typescript_inventory_from_payload(payload, root)
+
+
+def _collector_only_construct_parser(
+    _root: Path,
+    _path: Path,
+) -> tuple[SourceConstruct, ...] | None:
+    """Placeholder for providers whose parser runs once per project root."""
+
+    return None
+
+
 DEFAULT_STATEMENT_PROVIDERS: Mapping[str, StatementProvider] = {
     ".py": _python_statement_spans,
 }
 
 DEFAULT_CONSTRUCT_PROVIDERS: Mapping[str, ConstructProvider] = {
     "python": ConstructProvider("python_ast", (".py",), _python_constructs),
+    "typescript": ConstructProvider(
+        _TYPESCRIPT_ORACLE_PROVIDER,
+        (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".d.ts"),
+        _collector_only_construct_parser,
+        _typescript_compiler_inventory,
+    ),
+    "javascript": ConstructProvider(
+        _TYPESCRIPT_ORACLE_PROVIDER,
+        (".js", ".jsx", ".mjs", ".cjs"),
+        _collector_only_construct_parser,
+        _typescript_compiler_inventory,
+    ),
 }
 
 
@@ -316,6 +598,8 @@ def independent_source_inventory(
     provider = providers.get(language.casefold())
     if provider is None:
         return SourceConstructInventory((), 0, 0, ())
+    if provider.collect is not None:
+        return provider.collect(root)
     constructs: list[SourceConstruct] = []
     scanned = 0
     parsed = 0
@@ -357,6 +641,11 @@ def source_construct_inventory_sha256(
         "scannedFiles": inventory.scanned_files,
         "parsedFiles": inventory.parsed_files,
         "rejectedFiles": list(inventory.rejected_files),
+        **(
+            {"providerMetadata": dict(inventory.provider_metadata)}
+            if inventory.provider_metadata
+            else {}
+        ),
         "constructs": [
             {
                 "sourceFile": construct.source_file,

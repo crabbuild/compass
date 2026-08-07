@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use compass_graph::build_from_extraction;
-use compass_languages::{Engine, RawCall};
+use compass_languages::{CandidateRelation, Engine, RawCall};
 use compass_resolve::evidence::{UniversalResolutionIndex, UniversalResolutionLimits};
 use serde_json::Map;
 
@@ -5160,6 +5160,1433 @@ export const wrappedDate = consume(ZonedDate);
 }
 
 #[test]
+fn javascript_package_exports_choose_import_and_require_conditions()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let package = directory.path().join("packages/conditional/package.json");
+    let import_target = directory.path().join("packages/conditional/src/import.ts");
+    let require_target = directory
+        .path()
+        .join("packages/conditional/src/require.cjs");
+    let wildcard_target = directory
+        .path()
+        .join("packages/conditional/src/features/button.ts");
+    let typescript_consumer = directory.path().join("app/consumer.ts");
+    let javascript_consumer = directory.path().join("app/consumer.cjs");
+    let package_source = br##"{
+        "name": "@example/conditional",
+        "exports": {
+            ".": {
+                "import": "./src/import.ts",
+                "require": "./src/require.cjs",
+                "default": "./src/fallback.js"
+            },
+            "./features/*": {
+                "import": "./src/features/*.ts"
+            },
+            "./fallback": ["./src/features/missing.ts", "./src/features/button.ts"]
+        }
+    }"##;
+    let import_source = br#"export const imported = true;"#;
+    let require_source = br#"module.exports = { required: true };"#;
+    let wildcard_source = br#"export const button = true;"#;
+    let typescript_source = br#"import { imported } from "@example/conditional";
+import { button } from "@example/conditional/features/button";
+import { button as fallback } from "@example/conditional/fallback";
+export const value = imported && button && fallback;
+"#;
+    let javascript_source = br#"const { required } = require("@example/conditional");
+module.exports = required;
+"#;
+    for (path, source) in [
+        (&package, package_source.as_slice()),
+        (&import_target, import_source.as_slice()),
+        (&require_target, require_source.as_slice()),
+        (&wildcard_target, wildcard_source.as_slice()),
+        (&typescript_consumer, typescript_source.as_slice()),
+        (&javascript_consumer, javascript_source.as_slice()),
+    ] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            package.to_str().ok_or("non-UTF-8 fixture path")?,
+            package_source,
+        ),
+        extract(
+            import_target.to_str().ok_or("non-UTF-8 fixture path")?,
+            import_source,
+        ),
+        extract(
+            require_target.to_str().ok_or("non-UTF-8 fixture path")?,
+            require_source,
+        ),
+        extract(
+            wildcard_target.to_str().ok_or("non-UTF-8 fixture path")?,
+            wildcard_source,
+        ),
+        extract(
+            typescript_consumer
+                .to_str()
+                .ok_or("non-UTF-8 fixture path")?,
+            typescript_source,
+        ),
+        extract(
+            javascript_consumer
+                .to_str()
+                .ok_or("non-UTF-8 fixture path")?,
+            javascript_source,
+        ),
+    ];
+    let sources = [
+        (&package, package_source.as_slice()),
+        (&import_target, import_source.as_slice()),
+        (&require_target, require_source.as_slice()),
+        (&wildcard_target, wildcard_source.as_slice()),
+        (&typescript_consumer, typescript_source.as_slice()),
+        (&javascript_consumer, javascript_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, directory.path());
+    assert_eq!(resolved.error, None);
+    let import_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == import_target.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing import condition target")?;
+    let require_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == require_target.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing require condition target")?;
+    let wildcard_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == wildcard_target.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing wildcard target")?;
+    let module_edges = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "imports_from")
+        .collect::<Vec<_>>();
+    assert!(module_edges.iter().any(|edge| {
+        edge.string("source_file") == typescript_consumer.to_string_lossy()
+            && edge.target == import_id
+            && edge.string("package_condition") == "import"
+            && edge.string("resolution_rule") == "package-exports"
+    }));
+    assert!(module_edges.iter().any(|edge| {
+        edge.string("source_file") == typescript_consumer.to_string_lossy()
+            && edge.target == wildcard_id
+            && edge.string("package_condition") == "import"
+    }));
+    assert!(module_edges.iter().any(|edge| {
+        edge.string("source_file") == typescript_consumer.to_string_lossy()
+            && edge.string("module") == "@example/conditional/fallback"
+            && edge.target == wildcard_id
+            && edge.string("package_condition") == "default"
+    }));
+    assert!(
+        module_edges.iter().any(|edge| {
+            edge.string("source_file") == javascript_consumer.to_string_lossy()
+                && edge.target == require_id
+                && edge.string("context") == "require"
+                && edge.string("package_condition") == "require"
+        }),
+        "module_edges={module_edges:#?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn typescript_paths_aliases_resolve_extension_substitution_and_named_symbols()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let config = root.join("tsconfig.json");
+    let implementation = root.join("src/api.ts");
+    let consumer = root.join("app/consumer.ts");
+    for path in [&config, &implementation, &consumer] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+    }
+    let config_source = br#"{
+        // JSONC is accepted by TypeScript project configuration.
+        "compilerOptions": {
+            "baseUrl": ".",
+            "paths": { "@/*": ["./src/*",], },
+        },
+    }"#;
+    let implementation_source = br#"export class Widget { run() {} }"#;
+    let consumer_source = br#"import { Widget } from "@/api.js";
+export function make() { return new Widget(); }
+"#;
+    for (path, source) in [
+        (&config, config_source.as_slice()),
+        (&implementation, implementation_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            implementation.to_str().ok_or("non-UTF-8 fixture path")?,
+            implementation_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&config, config_source.as_slice()),
+        (&implementation, implementation_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let implementation_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == implementation.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing implementation file")?;
+    let declaration_id = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.label() == "Widget"
+                && node.string("source_file") == implementation.to_string_lossy()
+        })
+        .map(|node| node.id.clone())
+        .ok_or("missing Widget declaration")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "imports_from"
+            && edge.string("module") == "@/api.js"
+            && edge.target == implementation_id
+            && edge.string("resolution_rule") == "typescript-paths"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "imports"
+            && edge.target == declaration_id
+            && edge.string("local_name") == "Widget"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == declaration_id
+            && edge.string("source_file") == consumer.to_string_lossy()
+    }));
+    Ok(())
+}
+
+#[test]
+fn javascript_jsconfig_base_url_resolves_bare_module() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let config = root.join("jsconfig.json");
+    let implementation = root.join("src/api.js");
+    let consumer = root.join("app/consumer.js");
+    for path in [&config, &implementation, &consumer] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+    }
+    let config_source = br#"{"compilerOptions":{"baseUrl":"."}}"#;
+    let implementation_source = br#"export function api() { return true; }"#;
+    let consumer_source = br#"import { api } from "src/api";
+export const value = api();
+"#;
+    for (path, source) in [
+        (&config, config_source.as_slice()),
+        (&implementation, implementation_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            implementation.to_str().ok_or("non-UTF-8 fixture path")?,
+            implementation_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&config, config_source.as_slice()),
+        (&implementation, implementation_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let implementation_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == implementation.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing JavaScript implementation file")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "imports_from"
+            && edge.string("module") == "src/api"
+            && edge.target == implementation_id
+            && edge.string("resolution_rule") == "typescript-base-url"
+    }));
+    Ok(())
+}
+
+#[test]
+fn typescript_paths_choose_nearest_config_and_ordered_fallbacks()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let root_config = root.join("tsconfig.json");
+    let nested_config = root.join("app/tsconfig.json");
+    let first = root.join("app/src/first.ts");
+    let second = root.join("app/src/second.ts");
+    let consumer = root.join("app/consumer.ts");
+    for path in [&root_config, &nested_config, &first, &second, &consumer] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+    }
+    let root_config_source = br#"{
+        "compilerOptions": { "paths": { "@/*": ["./wrong/*"] } }
+    }"#;
+    let nested_config_source = br#"{
+        "compilerOptions": {
+            "baseUrl": ".",
+            "paths": { "@/*": ["./missing/*", "./src/*"] }
+        }
+    }"#;
+    let first_source = br#"export const first = true;"#;
+    let second_source = br#"export const second = true;"#;
+    let consumer_source = br#"import { second } from "@/second.js";
+export const value = second;
+"#;
+    for (path, source) in [
+        (&root_config, root_config_source.as_slice()),
+        (&nested_config, nested_config_source.as_slice()),
+        (&first, first_source.as_slice()),
+        (&second, second_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            first.to_str().ok_or("non-UTF-8 fixture path")?,
+            first_source,
+        ),
+        extract(
+            second.to_str().ok_or("non-UTF-8 fixture path")?,
+            second_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&root_config, root_config_source.as_slice()),
+        (&nested_config, nested_config_source.as_slice()),
+        (&first, first_source.as_slice()),
+        (&second, second_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let second_file_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == second.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing second file")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "imports_from"
+            && edge.string("module") == "@/second.js"
+            && edge.target == second_file_id
+            && edge.string("resolution_config") == "app/tsconfig.json"
+    }));
+    Ok(())
+}
+
+#[test]
+fn typescript_paths_leave_same_depth_config_ambiguity_unresolved()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let first_config = root.join("app/tsconfig.json");
+    let second_config = root.join("app/tsconfig.alt.json");
+    let first = root.join("app/one.ts");
+    let second = root.join("app/two.ts");
+    let consumer = root.join("app/consumer.ts");
+    for path in [&first_config, &second_config, &first, &second, &consumer] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+    }
+    let first_config_source = br#"{"compilerOptions":{"paths":{"@/shared":["./one.ts"]}}}"#;
+    let second_config_source = br#"{"compilerOptions":{"paths":{"@/shared":["./two.ts"]}}}"#;
+    let first_source = br#"export const one = true;"#;
+    let second_source = br#"export const two = true;"#;
+    let consumer_source = br#"import { one } from "@/shared";
+export const value = one;
+"#;
+    for (path, source) in [
+        (&first_config, first_config_source.as_slice()),
+        (&second_config, second_config_source.as_slice()),
+        (&first, first_source.as_slice()),
+        (&second, second_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            first.to_str().ok_or("non-UTF-8 fixture path")?,
+            first_source,
+        ),
+        extract(
+            second.to_str().ok_or("non-UTF-8 fixture path")?,
+            second_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&first_config, first_config_source.as_slice()),
+        (&second_config, second_config_source.as_slice()),
+        (&first, first_source.as_slice()),
+        (&second, second_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let file_ids = resolved
+        .nodes
+        .iter()
+        .filter(|node| {
+            [first.to_string_lossy(), second.to_string_lossy()]
+                .iter()
+                .any(|source| node.string("source_file") == *source)
+        })
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    let import = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.string("relation") == "imports_from" && edge.string("module") == "@/shared"
+        })
+        .ok_or("missing ambiguous import")?;
+    assert!(!file_ids.contains(import.target.as_str()));
+    assert!(import.string("resolution_rule").is_empty());
+    Ok(())
+}
+
+#[test]
+fn typescript_config_extends_inherits_paths_and_project_metadata()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let base = root.join("tsconfig.base.json");
+    let config = root.join("tsconfig.json");
+    let implementation = root.join("src/api.ts");
+    let consumer = root.join("app/consumer.ts");
+    for path in [&base, &config, &implementation, &consumer] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+    }
+    let base_source = br#"{
+        "compilerOptions": {
+            "baseUrl": "..",
+            "paths": { "@/*": ["src/*"] },
+            "module": "NodeNext",
+            "moduleResolution": "NodeNext"
+        }
+    }"#;
+    let config_source = br#"{
+        "extends": "./tsconfig.base.json",
+        "compilerOptions": { "allowJs": true },
+        "references": [{ "path": "./src" }]
+    }"#;
+    let implementation_source = br#"export class Widget {}"#;
+    let consumer_source = br#"import { Widget } from "@/api.js";
+export const value = new Widget();
+"#;
+    for (path, source) in [
+        (&base, base_source.as_slice()),
+        (&config, config_source.as_slice()),
+        (&implementation, implementation_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            implementation.to_str().ok_or("non-UTF-8 fixture path")?,
+            implementation_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&base, base_source.as_slice()),
+        (&config, config_source.as_slice()),
+        (&implementation, implementation_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let implementation_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == implementation.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing inherited implementation")?;
+    let import = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.string("relation") == "imports_from"
+                && edge.string("source_file") == consumer.to_string_lossy()
+        })
+        .ok_or("missing inherited alias import")?;
+    assert_eq!(import.target, implementation_id);
+    assert_eq!(import.string("resolution_rule"), "typescript-paths");
+    assert_eq!(import.string("resolution_config"), "tsconfig.json");
+    assert_eq!(import.string("module_resolution"), "nodenext");
+    assert_eq!(import.string("module_kind"), "nodenext");
+    assert_eq!(
+        import.attributes.get("resolution_project_references"),
+        Some(&serde_json::json!(["src"]))
+    );
+    Ok(())
+}
+
+#[test]
+fn typescript_relative_imports_use_module_suffixes_and_root_dirs()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let config = root.join("tsconfig.json");
+    let consumer = root.join("src/app/consumer.ts");
+    let suffixed = root.join("src/app/feature.ios.ts");
+    let generated = root.join("generated/app/runtime.ts");
+    let config_source = br#"{
+        "compilerOptions": {
+            "module": "ESNext",
+            "moduleResolution": "Bundler",
+            "moduleSuffixes": [".ios", ""],
+            "rootDirs": ["src", "generated"]
+        }
+    }"#;
+    let consumer_source = br#"import { feature } from "./feature.js";
+import { runtime } from "./runtime.js";
+export const value = feature + runtime;
+"#;
+    let suffixed_source = br#"export const feature = 1;"#;
+    let generated_source = br#"export const runtime = 2;"#;
+    for (path, source) in [
+        (&config, config_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+        (&suffixed, suffixed_source.as_slice()),
+        (&generated, generated_source.as_slice()),
+    ] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            suffixed.to_str().ok_or("non-UTF-8 fixture path")?,
+            suffixed_source,
+        ),
+        extract(
+            generated.to_str().ok_or("non-UTF-8 fixture path")?,
+            generated_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&config, config_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+        (&suffixed, suffixed_source.as_slice()),
+        (&generated, generated_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let suffixed_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == suffixed.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing suffixed target")?;
+    let generated_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == generated.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing rootDirs target")?;
+    let imports = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "imports_from"
+                && edge.string("source_file") == consumer.to_string_lossy()
+        })
+        .collect::<Vec<_>>();
+    assert!(imports.iter().any(|edge| {
+        edge.target == suffixed_id && edge.string("resolution_rule") == "typescript-relative"
+    }));
+    assert!(imports.iter().any(|edge| {
+        edge.target == generated_id && edge.string("resolution_rule") == "typescript-root-dirs"
+    }));
+    assert!(imports.iter().all(|edge| {
+        edge.string("module_resolution") == "bundler"
+            && edge.string("module_kind") == "esnext"
+            && edge.string("resolution_config") == "tsconfig.json"
+    }));
+    Ok(())
+}
+
+#[test]
+fn javascript_relative_named_imports_repoint_to_the_unique_export()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let target = root.join("src/target.ts");
+    let consumer = root.join("src/consumer.ts");
+    let target_source = br#"export function greet() { return "hello"; }"#;
+    let consumer_source = br#"import { greet } from "./target.js";
+export function run() { return greet(); }
+"#;
+    for (path, source) in [
+        (&target, target_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            target.to_str().ok_or("non-UTF-8 fixture path")?,
+            target_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&target, target_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let greet = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.label() == "greet()" && node.string("source_file") == target.to_string_lossy()
+        })
+        .ok_or("missing greet declaration")?;
+    let import = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.string("relation") == "imports"
+                && edge.string("module") == "./target.js"
+                && edge.string("local_name") == "greet"
+        })
+        .ok_or("missing relative named import")?;
+    assert_eq!(import.target, greet.id);
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == greet.id
+            && edge.string("source_file") == consumer.to_string_lossy()
+    }));
+    Ok(())
+}
+
+#[test]
+fn javascript_package_imports_use_the_nearest_package_and_type_condition()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let package = root.join("packages/toolkit/package.json");
+    let implementation = root.join("packages/toolkit/src/internal/tool.ts");
+    let consumer = root.join("packages/toolkit/src/consumer.ts");
+    let package_source = br##"{
+  "name": "@example/toolkit",
+  "imports": {
+    "#internal/*": {
+      "types": "./src/internal/*.ts",
+      "default": "./src/internal/*.js"
+    }
+  }
+}"##;
+    let implementation_source = br#"export function tool() { return 1; }"#;
+    let consumer_source = br##"import { tool } from "#internal/tool";
+export const value = tool();
+"##;
+    for (path, source) in [
+        (&package, package_source.as_slice()),
+        (&implementation, implementation_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            package.to_str().ok_or("non-UTF-8 fixture path")?,
+            package_source,
+        ),
+        extract(
+            implementation.to_str().ok_or("non-UTF-8 fixture path")?,
+            implementation_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&package, package_source.as_slice()),
+        (&implementation, implementation_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let implementation_id = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.label() == "tool()"
+                && node.string("source_file") == implementation.to_string_lossy()
+        })
+        .map(|node| node.id.clone())
+        .ok_or("missing package-import target")?;
+    let module_import = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.string("relation") == "imports_from" && edge.string("module") == "#internal/tool"
+        })
+        .ok_or("missing package imports edge")?;
+    assert_eq!(module_import.string("resolution_rule"), "package-imports");
+    assert_eq!(module_import.string("package_condition"), "types");
+    let import = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.string("relation") == "imports"
+                && edge.string("module") == "#internal/tool"
+                && edge.string("local_name") == "tool"
+        })
+        .ok_or("missing named package import")?;
+    assert_eq!(import.target, implementation_id);
+    Ok(())
+}
+
+#[test]
+fn typescript_package_types_versions_selects_the_admitted_declaration_target()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let package = root.join("packages/typed/package.json");
+    let declaration = root.join("packages/typed/types/index.ts");
+    let consumer = root.join("app/consumer.ts");
+    let package_source = br#"{
+  "name": "@example/typed",
+  "types": "./src/index.d.ts",
+  "typesVersions": { "*": { "*": ["types/*"] } }
+}"#;
+    let declaration_source = br#"export function helper(): string { return "ok"; }"#;
+    let consumer_source = br#"import { helper } from "@example/typed";
+export const value = helper();
+"#;
+    for (path, source) in [
+        (&package, package_source.as_slice()),
+        (&declaration, declaration_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            package.to_str().ok_or("non-UTF-8 fixture path")?,
+            package_source,
+        ),
+        extract(
+            declaration.to_str().ok_or("non-UTF-8 fixture path")?,
+            declaration_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&package, package_source.as_slice()),
+        (&declaration, declaration_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let module_import = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.string("relation") == "imports_from" && edge.string("module") == "@example/typed"
+        })
+        .ok_or("missing package import")?;
+    assert_eq!(module_import.string("resolution_rule"), "typesVersions");
+    let helper = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            matches!(node.label(), "helper()" | "helper")
+                && node.string("source_file") == declaration.to_string_lossy()
+        })
+        .ok_or("missing typesVersions declaration")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "imports"
+            && edge.target == helper.id
+            && edge.string("local_name") == "helper"
+    }));
+    Ok(())
+}
+
+#[test]
+fn typescript_include_exclude_ownership_blocks_out_of_project_alias_targets()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let config = root.join("tsconfig.json");
+    let allowed = root.join("src/allowed.ts");
+    let excluded = root.join("src/excluded.ts");
+    let consumer = root.join("src/consumer.ts");
+    let config_source = br#"{
+  "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"] } },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/excluded.ts"]
+}"#;
+    let allowed_source = br#"export const allowed = true;"#;
+    let excluded_source = br#"export const excluded = true;"#;
+    let consumer_source = br#"import { allowed } from "@/allowed";
+import { excluded } from "@/excluded";
+export const value = allowed && excluded;
+"#;
+    for (path, source) in [
+        (&config, config_source.as_slice()),
+        (&allowed, allowed_source.as_slice()),
+        (&excluded, excluded_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            allowed.to_str().ok_or("non-UTF-8 fixture path")?,
+            allowed_source,
+        ),
+        extract(
+            excluded.to_str().ok_or("non-UTF-8 fixture path")?,
+            excluded_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&config, config_source.as_slice()),
+        (&allowed, allowed_source.as_slice()),
+        (&excluded, excluded_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let allowed_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == allowed.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing allowed target")?;
+    let excluded_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == excluded.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing excluded target")?;
+    let imports = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "imports_from"
+                && edge.string("source_file") == consumer.to_string_lossy()
+        })
+        .collect::<Vec<_>>();
+    assert!(imports.iter().any(|edge| {
+        edge.string("module") == "@/allowed"
+            && edge.target == allowed_id
+            && edge.string("resolution_rule") == "typescript-paths"
+    }));
+    let excluded_import = imports
+        .iter()
+        .find(|edge| edge.string("module") == "@/excluded")
+        .ok_or("missing excluded import")?;
+    assert_ne!(excluded_import.target, excluded_id);
+    assert!(excluded_import.string("resolution_rule").is_empty());
+    Ok(())
+}
+
+#[test]
+fn typescript_type_roots_resolve_admitted_declaration_packages()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let config = root.join("tsconfig.json");
+    let declaration = root.join("types/ambient/index.d.ts");
+    let consumer = root.join("src/consumer.ts");
+    let config_source = br#"{
+  "compilerOptions": { "typeRoots": ["types"] }
+}"#;
+    let declaration_source = br#"export const ambient = true;"#;
+    let consumer_source = br#"import { ambient } from "ambient";
+export const value = ambient;
+"#;
+    for (path, source) in [
+        (&config, config_source.as_slice()),
+        (&declaration, declaration_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            declaration.to_str().ok_or("non-UTF-8 fixture path")?,
+            declaration_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&config, config_source.as_slice()),
+        (&declaration, declaration_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let declaration_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == declaration.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing typeRoots declaration")?;
+    let import = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.string("relation") == "imports_from" && edge.string("module") == "ambient"
+        })
+        .ok_or("missing typeRoots import")?;
+    assert_eq!(import.target, declaration_id);
+    assert_eq!(import.string("resolution_rule"), "typescript-type-roots");
+    Ok(())
+}
+
+#[test]
+fn typescript_custom_conditions_are_selected_before_default_package_exports()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let config = root.join("tsconfig.json");
+    let package = root.join("packages/conditional/package.json");
+    let browser = root.join("packages/conditional/browser.ts");
+    let fallback = root.join("packages/conditional/fallback.ts");
+    let consumer = root.join("src/consumer.ts");
+    let config_source = br#"{
+  "compilerOptions": { "customConditions": ["browser"] }
+}"#;
+    let package_source = br#"{
+  "name": "@example/conditional",
+  "exports": { ".": { "browser": "./browser.ts", "default": "./fallback.ts" } }
+}"#;
+    let browser_source = br#"export const selected = "browser";"#;
+    let fallback_source = br#"export const selected = "fallback";"#;
+    let consumer_source = br#"import { selected } from "@example/conditional";
+export const value = selected;
+"#;
+    for (path, source) in [
+        (&config, config_source.as_slice()),
+        (&package, package_source.as_slice()),
+        (&browser, browser_source.as_slice()),
+        (&fallback, fallback_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            package.to_str().ok_or("non-UTF-8 fixture path")?,
+            package_source,
+        ),
+        extract(
+            browser.to_str().ok_or("non-UTF-8 fixture path")?,
+            browser_source,
+        ),
+        extract(
+            fallback.to_str().ok_or("non-UTF-8 fixture path")?,
+            fallback_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&config, config_source.as_slice()),
+        (&package, package_source.as_slice()),
+        (&browser, browser_source.as_slice()),
+        (&fallback, fallback_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let browser_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == browser.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing custom-condition target")?;
+    let import = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.string("relation") == "imports_from"
+                && edge.string("module") == "@example/conditional"
+        })
+        .ok_or("missing custom-condition import")?;
+    assert_eq!(import.target, browser_id);
+    assert_eq!(import.string("package_condition"), "browser");
+    Ok(())
+}
+
+#[test]
+fn package_export_condition_selection_preserves_manifest_key_order()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let config = root.join("tsconfig.json");
+    let package = root.join("packages/ordered/package.json");
+    let browser = root.join("packages/ordered/browser.ts");
+    let fallback = root.join("packages/ordered/fallback.ts");
+    let consumer = root.join("src/consumer.ts");
+    let config_source = br#"{
+  "compilerOptions": { "customConditions": ["browser"] }
+}"#;
+    // `default` is intentionally before `browser`: conditional exports are
+    // ordered by the manifest, so the active default branch wins and Compass
+    // must not reorder keys according to its condition preference.
+    let package_source = br#"{
+  "name": "@example/ordered",
+  "exports": { ".": { "default": "./fallback.ts", "browser": "./browser.ts" } }
+}"#;
+    let browser_source = br#"export const selected = "browser";"#;
+    let fallback_source = br#"export const selected = "fallback";"#;
+    let consumer_source = br#"import { selected } from "@example/ordered";
+export const value = selected;
+"#;
+    for (path, source) in [
+        (&config, config_source.as_slice()),
+        (&package, package_source.as_slice()),
+        (&browser, browser_source.as_slice()),
+        (&fallback, fallback_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            package.to_str().ok_or("non-UTF-8 fixture path")?,
+            package_source,
+        ),
+        extract(
+            browser.to_str().ok_or("non-UTF-8 fixture path")?,
+            browser_source,
+        ),
+        extract(
+            fallback.to_str().ok_or("non-UTF-8 fixture path")?,
+            fallback_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&config, config_source.as_slice()),
+        (&package, package_source.as_slice()),
+        (&browser, browser_source.as_slice()),
+        (&fallback, fallback_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let fallback_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == fallback.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing ordered fallback target")?;
+    let import = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.string("relation") == "imports_from" && edge.string("module") == "@example/ordered"
+        })
+        .ok_or("missing ordered package import")?;
+    assert_eq!(import.target, fallback_id);
+    assert_eq!(import.string("package_condition"), "default");
+    Ok(())
+}
+
+#[test]
+fn javascript_package_resolution_mode_respects_node10_and_classic()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let package = root.join("packages/mode/package.json");
+    let conditional = root.join("packages/mode/conditional.ts");
+    let legacy = root.join("packages/mode/legacy.ts");
+    let node10_config = root.join("node10/tsconfig.json");
+    let node10_consumer = root.join("node10/consumer.ts");
+    let classic_config = root.join("classic/tsconfig.json");
+    let classic_consumer = root.join("classic/consumer.ts");
+    let package_source = br#"{
+  "name": "@example/mode",
+  "exports": { ".": "./conditional.ts" },
+  "main": "./legacy.ts"
+}"#;
+    let conditional_source = br#"export const selected = "conditional";"#;
+    let legacy_source = br#"export const selected = "legacy";"#;
+    let node10_config_source = br#"{
+  "compilerOptions": { "moduleResolution": "node10" }
+}"#;
+    let node10_consumer_source = br#"import { selected } from "@example/mode";
+export const value = selected;
+"#;
+    let classic_config_source = br#"{
+  "compilerOptions": { "moduleResolution": "classic" }
+}"#;
+    let classic_consumer_source = br#"import { selected } from "@example/mode";
+export const value = selected;
+"#;
+    for (path, source) in [
+        (&package, package_source.as_slice()),
+        (&conditional, conditional_source.as_slice()),
+        (&legacy, legacy_source.as_slice()),
+        (&node10_config, node10_config_source.as_slice()),
+        (&node10_consumer, node10_consumer_source.as_slice()),
+        (&classic_config, classic_config_source.as_slice()),
+        (&classic_consumer, classic_consumer_source.as_slice()),
+    ] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            package.to_str().ok_or("non-UTF-8 fixture path")?,
+            package_source,
+        ),
+        extract(
+            conditional.to_str().ok_or("non-UTF-8 fixture path")?,
+            conditional_source,
+        ),
+        extract(
+            legacy.to_str().ok_or("non-UTF-8 fixture path")?,
+            legacy_source,
+        ),
+        extract(
+            node10_consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            node10_consumer_source,
+        ),
+        extract(
+            classic_consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            classic_consumer_source,
+        ),
+    ];
+    let sources = [
+        (&package, package_source.as_slice()),
+        (&conditional, conditional_source.as_slice()),
+        (&legacy, legacy_source.as_slice()),
+        (&node10_config, node10_config_source.as_slice()),
+        (&node10_consumer, node10_consumer_source.as_slice()),
+        (&classic_config, classic_config_source.as_slice()),
+        (&classic_consumer, classic_consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let legacy_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == legacy.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing legacy package target")?;
+    let conditional_id = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == conditional.to_string_lossy())
+        .map(|node| node.id.clone())
+        .ok_or("missing conditional package target")?;
+    let node10_import = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.string("relation") == "imports_from"
+                && edge.string("source_file") == node10_consumer.to_string_lossy()
+        })
+        .ok_or("missing Node10 package import")?;
+    assert_eq!(node10_import.target, legacy_id);
+    assert_ne!(node10_import.target, conditional_id);
+    assert_eq!(node10_import.string("resolution_rule"), "package-legacy");
+    assert_eq!(node10_import.string("package_condition"), "main");
+    assert_eq!(node10_import.string("module_resolution"), "node10");
+
+    let classic_import = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.string("relation") == "imports_from"
+                && edge.string("source_file") == classic_consumer.to_string_lossy()
+        })
+        .ok_or("missing Classic package import")?;
+    assert_ne!(classic_import.target, legacy_id);
+    assert_ne!(classic_import.target, conditional_id);
+    assert!(classic_import.attributes.get("target_file").is_none());
+    assert_eq!(
+        classic_import.string("resolution_rule"),
+        "package-classic-unresolved"
+    );
+    assert_eq!(classic_import.string("module_resolution"), "classic");
+    Ok(())
+}
+
+#[test]
+fn typescript_config_extends_cycles_fail_closed_with_diagnostic()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let first = root.join("tsconfig.json");
+    let second = root.join("tsconfig.other.json");
+    let implementation = root.join("src/api.ts");
+    let consumer = root.join("src/consumer.ts");
+    let first_source = br#"{
+        "extends": "./tsconfig.other.json",
+        "compilerOptions": { "paths": { "@/*": ["src/*"] } }
+    }"#;
+    let second_source = br#"{
+        "extends": "./tsconfig.json",
+        "compilerOptions": { "baseUrl": "." }
+    }"#;
+    let implementation_source = br#"export const api = true;"#;
+    let consumer_source = br#"import { api } from "@/api";
+export const value = api;
+"#;
+    for (path, source) in [
+        (&first, first_source.as_slice()),
+        (&second, second_source.as_slice()),
+        (&implementation, implementation_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let extractions = [
+        extract(
+            implementation.to_str().ok_or("non-UTF-8 fixture path")?,
+            implementation_source,
+        ),
+        extract(
+            consumer.to_str().ok_or("non-UTF-8 fixture path")?,
+            consumer_source,
+        ),
+    ];
+    let sources = [
+        (&first, first_source.as_slice()),
+        (&second, second_source.as_slice()),
+        (&implementation, implementation_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ]
+    .into_iter()
+    .map(|(path, source)| {
+        Ok((
+            path.to_str().ok_or("non-UTF-8 fixture path")?.to_owned(),
+            String::from_utf8(source.to_vec())?,
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    let error = resolved.error.as_deref().unwrap_or_default();
+    assert!(error.contains("extends cycle"), "error={error:?}");
+    let import = resolved
+        .edges
+        .iter()
+        .find(|edge| edge.string("relation") == "imports_from" && edge.string("module") == "@/api")
+        .ok_or("missing cyclic import")?;
+    assert!(import.string("resolution_rule").is_empty());
+    Ok(())
+}
+
+#[test]
 fn duplicate_typescript_workspace_package_names_remain_unresolved()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
@@ -5224,4 +6651,68 @@ new Widget();
             && edge.string("source_file") == consumer.to_string_lossy())
     }));
     Ok(())
+}
+
+#[test]
+fn typescript_candidate_preserves_dynamic_member_as_unresolved() {
+    let source = br#"class Known { run() {} }
+const value = getValue();
+value.run();
+new Known().run();
+function exact(value: string) {}
+exact();
+"#;
+    let batch = Engine::default()
+        .extract_source_universal_candidate_evidence(
+            Path::new("src/dynamic.ts"),
+            "src/dynamic.ts",
+            source,
+        )
+        .expect("candidate evidence");
+    let dynamic_id = batch
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "run"
+                && candidate.constraints.exact_target_declaration_id.is_none()
+                && candidate.constraints.qualified_name.is_none()
+        })
+        .map(|candidate| candidate.id.clone())
+        .expect("dynamic call candidate");
+    let known_id = batch
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "run"
+                && candidate.constraints.exact_target_declaration_id.is_some()
+        })
+        .map(|candidate| candidate.id.clone())
+        .expect("known nominal call candidate");
+    let arity_mismatch_id = batch
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "exact"
+                && candidate.constraints.argument_count == Some(0)
+                && candidate.constraints.exact_target_declaration_id.is_none()
+        })
+        .map(|candidate| candidate.id.clone())
+        .expect("arity-mismatch candidate");
+    let index = UniversalResolutionIndex::new(&[batch], UniversalResolutionLimits::default())
+        .expect("candidate resolution index");
+    assert_eq!(
+        index.resolve(&dynamic_id),
+        compass_resolve::evidence::ResolutionDecision::Unresolved
+    );
+    assert!(matches!(
+        index.resolve(&known_id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { .. }
+    ));
+    assert_eq!(
+        index.resolve(&arity_mismatch_id),
+        compass_resolve::evidence::ResolutionDecision::Unresolved
+    );
 }

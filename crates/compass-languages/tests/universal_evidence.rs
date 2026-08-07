@@ -25,6 +25,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
         adapter: AdapterIdentity {
             id: "compass.python".to_owned(),
             language: "python".to_owned(),
+            dialect: None,
             version: 1,
             evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA.to_owned(),
             profile: UniversalAdapterProfile::UniversalCandidate,
@@ -45,6 +46,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
             kind: "function".to_owned(),
             name: "caller".to_owned(),
             qualified_name: "example.caller".to_owned(),
+            namespace: None,
             module_or_package: Some("example".to_owned()),
             scope_id: None,
             signature: None,
@@ -71,6 +73,8 @@ fn valid_batch() -> SemanticEvidenceBatch {
             kind: BindingKind::ImportAlias,
             spelling: "helper".to_owned(),
             qualified_target: "tools.execute".to_owned(),
+            namespace: None,
+            type_only: false,
             target_declaration_id: None,
             scope_id: Some("scope:caller".to_owned()),
             output_index: None,
@@ -158,6 +162,25 @@ fn unknown_fields_are_rejected_at_nested_boundaries() {
     let error =
         serde_json::from_value::<SemanticEvidenceBatch>(encoded).expect_err("unknown field");
     assert!(error.to_string().contains("unknown field"));
+}
+
+#[test]
+fn type_only_bindings_require_type_or_namespace_identity() {
+    let mut batch = valid_batch();
+    batch.bindings[0].type_only = true;
+    batch.bindings[0].namespace = Some(compass_languages::SymbolNamespace::Value);
+    assert_code(&batch, EvidenceErrorCode::InvalidFact);
+
+    batch.bindings[0].namespace = Some(compass_languages::SymbolNamespace::Type);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("typed import identity");
+}
+
+#[test]
+fn legacy_bindings_without_symbol_identity_remain_valid() {
+    let batch = valid_batch();
+    assert!(batch.bindings[0].namespace.is_none());
+    assert!(!batch.bindings[0].type_only);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("legacy evidence remains valid");
 }
 
 #[test]

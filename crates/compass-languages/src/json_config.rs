@@ -7,6 +7,112 @@ use tree_sitter::Node;
 
 use crate::make_id;
 
+/// Parse the bounded JSON-with-comments dialect used by TypeScript project
+/// configuration. This intentionally accepts only comments and trailing
+/// commas; it does not implement a general JavaScript evaluator.
+///
+/// The parser is deliberately fail-closed: unterminated strings/comments and
+/// any value outside JSON after comment/trailing-comma normalization return
+/// `None`. Callers remain responsible for applying their own byte limits.
+#[must_use]
+pub fn parse_jsonc(source: &str) -> Option<Value> {
+    let mut without_comments = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    let mut in_string = false;
+    let mut escaped = false;
+    while let Some(character) = chars.next() {
+        if in_string {
+            without_comments.push(character);
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if character == '"' {
+            in_string = true;
+            without_comments.push(character);
+            continue;
+        }
+        if character == '/' && chars.peek() == Some(&'/') {
+            chars.next();
+            for next in chars.by_ref() {
+                if matches!(next, '\n' | '\r') {
+                    without_comments.push(next);
+                    break;
+                }
+            }
+            continue;
+        }
+        if character == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            let mut terminated = false;
+            let mut previous = '\0';
+            for next in chars.by_ref() {
+                if matches!(next, '\n' | '\r') {
+                    without_comments.push(next);
+                }
+                if previous == '*' && next == '/' {
+                    terminated = true;
+                    break;
+                }
+                previous = next;
+            }
+            if !terminated {
+                return None;
+            }
+            continue;
+        }
+        without_comments.push(character);
+    }
+    if in_string {
+        return None;
+    }
+
+    let mut normalized = String::with_capacity(without_comments.len());
+    let characters = without_comments.chars().collect::<Vec<_>>();
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut index = 0;
+    while index < characters.len() {
+        let character = characters[index];
+        if in_string {
+            normalized.push(character);
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if character == '"' {
+            in_string = true;
+            normalized.push(character);
+            index += 1;
+            continue;
+        }
+        if character == ',' {
+            let mut lookahead = index + 1;
+            while lookahead < characters.len() && characters[lookahead].is_whitespace() {
+                lookahead += 1;
+            }
+            if lookahead < characters.len() && matches!(characters[lookahead], ']' | '}') {
+                index += 1;
+                continue;
+            }
+        }
+        normalized.push(character);
+        index += 1;
+    }
+    serde_json::from_str(&normalized).ok()
+}
+
 const CONFIG_NAMES: &[&str] = &[
     "package.json",
     "tsconfig.json",
@@ -434,4 +540,44 @@ fn string_text(node: Node<'_>, source: &[u8]) -> String {
 
 fn text<'source>(node: Node<'_>, source: &'source [u8]) -> &'source str {
     node.utf8_text(source).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod jsonc_tests {
+    use super::parse_jsonc;
+    use serde_json::Value;
+
+    #[test]
+    fn accepts_comments_and_trailing_commas_inside_jsonc() {
+        let parsed = parse_jsonc(
+            r#"{
+                // Comment text may contain slash characters.
+                "url": "https://example.test/*",
+                "paths": {"@/*": ["src/*",],},
+            }"#,
+        );
+        assert_eq!(
+            parsed
+                .as_ref()
+                .and_then(|value| value.get("url"))
+                .and_then(Value::as_str),
+            Some("https://example.test/*")
+        );
+        assert_eq!(
+            parsed
+                .as_ref()
+                .and_then(|value| value.get("paths"))
+                .and_then(|value| value.get("@/*"))
+                .and_then(Value::as_array)
+                .and_then(|values| values.first())
+                .and_then(Value::as_str),
+            Some("src/*")
+        );
+    }
+
+    #[test]
+    fn rejects_unterminated_comments_and_strings() {
+        assert!(parse_jsonc("{/*").is_none());
+        assert!(parse_jsonc("{\"value\":\"unterminated").is_none());
+    }
 }

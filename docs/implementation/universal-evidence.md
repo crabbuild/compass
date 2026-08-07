@@ -135,10 +135,25 @@ Version-1 descriptors contain:
 
 - adapter ID
 - source language
+- optional parser dialect provenance (for example `ts` or `tsx`)
 - adapter version
 - evidence schema
 - publication profile
 - capability claims
+
+The shared fact model also has additive optional identity metadata for
+TypeScript/JavaScript qualification: declarations and bindings may carry a
+value/type/namespace symbol-space tag, and import/re-export bindings may mark
+`typeOnly`. Legacy producers omit these fields; their stable IDs do not gain an
+identity component until a producer explicitly emits one. A type-only binding
+must use the type or namespace space and is rejected otherwise.
+
+The TypeScript/JavaScript candidate also records exact module-specifier and
+binding anchors for imports, resolves JSX member tags through proven namespace
+receivers, treats `this` and private member identifiers as nominal source
+evidence, and accepts only literal computed members. Dynamic member keys and
+unproven `super` receivers remain unresolved; these semantics are qualification
+evidence until the production hard cut is approved.
 
 The architectural profile names are `Direct`, `UniversalCandidate`, and
 `UniversalComplete`. A historical compatibility evidence type still serializes

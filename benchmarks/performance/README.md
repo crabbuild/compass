@@ -138,6 +138,51 @@ rule does not relax body references or endpoint conflicts.
 
 ## Source-grounded quality audit
 
+TypeScript and JavaScript source recall uses the independent compiler oracle in
+`benchmarks/performance/oracles/typescript-source-oracle.mjs`. It is a pinned
+developer-side tool, not a Compass runtime dependency. Run `npm ci` before the
+first TypeScript/JavaScript audit so the lockfile's TypeScript 5.9.3 package is
+available. The provider records exact UTF-8 byte ranges and fails closed when a
+source file cannot be parsed or bounded.
+
+Module/import target qualification uses the companion
+`benchmarks/performance/oracles/typescript-resolution-oracle.mjs`. It resolves
+imports, reexports, dynamic imports, `import type`, `import =`, and literal
+`require()` sites under each discovered project configuration. Its output
+records the selected module mode, exact source range, target or explicit
+external/unresolved/ambiguous outcome, and configuration/source digests. The
+resolver fixture suite cross-checks representative decisions against
+`tsc --traceResolution`; neither oracle is used by normal Compass builds.
+
+The Rust-side candidate seam has one opt-in compiler differential fixture. Run
+it from a checkout with the pinned Node dependencies installed:
+
+```bash
+CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923 \
+  cargo test -p compass-languages --test typescript_oracle_differential \
+  --locked -- --ignored
+```
+
+The test compares exact source-byte coverage for a mixed TSX fixture. It is
+ignored by ordinary workspace tests so native Compass remains Node-free.
+
+For developer-only same-file target adjudication on a pinned real corpus, use
+the separate checker oracle and keep the candidate adapter out of production:
+
+```bash
+RUST_MIN_STACK=33554432 \
+COMPASS_TS_QUALIFICATION_ROOT=/Volumes/Workspace/Github/<owner>/<pinned-corpus> \
+CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
+  cargo test -p compass-languages --test typescript_target_differential \
+  checker_oracle_adjudicates_local_candidate_targets --locked -- --ignored --nocapture
+```
+
+The report separates exact local targets, missing targets, wrong targets,
+external positives, and unresolved/ambiguous outcomes by capability. It is an
+adjudication instrument rather than a release claim: accepted labels, Wilson
+intervals, cross-file/project strata, framework tiers, and an equivalent
+Graphify/SCIP comparison must be frozen before an adapter can be registered.
+
 Create an unjudged candidate set from a comparator database without rerunning
 either graph producer:
 

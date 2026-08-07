@@ -1367,6 +1367,134 @@ function health() { return "ok"; }
 }
 
 #[test]
+fn javascript_callback_values_are_references_without_invocation_evidence()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("callbacks.ts");
+    fs::write(
+        &path,
+        r#"
+function register(_callback) {}
+function callback() {}
+const handlers = [callback];
+register(callback);
+"#,
+    )?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let stem = path.with_extension("").to_string_lossy().replace('\\', "/");
+    let callback_id = make_id(&[&stem, "callback"]);
+    let callback_edges = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.target == callback_id)
+        .collect::<Vec<_>>();
+    assert!(
+        callback_edges.iter().any(|edge| {
+            edge.string("relation") == "references" && edge.string("context") == "argument"
+        }),
+        "callback id={callback_id}; callback edges={callback_edges:?}"
+    );
+    assert!(
+        callback_edges.iter().any(|edge| {
+            edge.string("relation") == "references" && edge.string("context") == "collection"
+        }),
+        "callback edges={callback_edges:?}"
+    );
+    assert!(
+        callback_edges
+            .iter()
+            .all(|edge| edge.string("relation") != "indirect_call")
+    );
+    Ok(())
+}
+
+#[test]
+fn javascript_typescript_import_kinds_commonjs_exports_and_jsx_references()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let target = directory.path().join("target.ts");
+    let consumer = directory.path().join("consumer.tsx");
+    let common_js = directory.path().join("loader.cjs");
+    fs::write(
+        &target,
+        "export default function render() {}\nexport const value = 1;\nexport class Button {}\n",
+    )?;
+    fs::write(
+        &consumer,
+        r#"import render, * as UI from "./target.js";
+import { Button } from "./target.js";
+import type { Button as ButtonType } from "./target.js";
+export function App(value: ButtonType) {
+  return <UI.Button value={value} onClick={render} />;
+}
+const local = Button;
+"#,
+    )?;
+    fs::write(
+        &common_js,
+        "function handler() {}\nmodule.exports = { handler };\nexports.named = handler;\n",
+    )?;
+
+    let mut engine = Engine::default();
+    let consumer_facts = engine.extract(&consumer)?;
+    let import_edges = consumer_facts
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "imports")
+        .collect::<Vec<_>>();
+    assert!(import_edges.iter().any(|edge| {
+        edge.string("imported_name") == "default"
+            && edge.string("import_kind") == "default"
+            && edge.string("local_name") == "render"
+    }));
+    assert!(import_edges.iter().any(|edge| {
+        edge.string("imported_name") == "*"
+            && edge.string("import_kind") == "namespace"
+            && edge.string("local_name") == "UI"
+    }));
+    assert!(import_edges.iter().any(|edge| {
+        edge.string("imported_name") == "Button"
+            && edge
+                .attributes
+                .get("type_only")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            && edge.string("local_name") == "ButtonType"
+    }));
+    assert!(
+        consumer_facts.edges.iter().any(|edge| {
+            edge.string("relation") == "references" && edge.string("context") == "jsx"
+        }),
+        "edges={:#?}",
+        consumer_facts.edges
+    );
+
+    let common_js_facts = engine.extract(&common_js)?;
+    let handler = make_id(&[&common_js.with_extension("").to_string_lossy(), "handler"]);
+    let commonjs_exports = common_js_facts
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "exports"
+                && edge.target == handler
+                && edge.string("module_format") == "commonjs"
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        commonjs_exports
+            .iter()
+            .any(|edge| edge.string("export_name") == "handler")
+    );
+    assert!(
+        commonjs_exports
+            .iter()
+            .any(|edge| edge.string("export_name") == "named")
+    );
+    Ok(())
+}
+
+#[test]
 fn dart_exports_have_explicit_resource_targets() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("exports.dart");
