@@ -2137,6 +2137,38 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             || self.stable_immutable_structural_alias(declaration_id)
     }
 
+    /// Preserve a nominal receiver after an unknown call/escape when the
+    /// binding itself is immutable and its source assignment is still the
+    /// unique proven value. An escape may mutate a property, but it cannot
+    /// rebind a `const` alias to a different receiver. Structural aliases do
+    /// not use this recovery because their property identity depends on the
+    /// exact object value that may have escaped.
+    fn stable_nominal_flow_receiver_at(
+        &self,
+        declaration_id: &str,
+        use_start_byte: usize,
+    ) -> Option<ReceiverTarget> {
+        if !self.immutable_bindings.contains(declaration_id) {
+            return None;
+        }
+        let assignment = self
+            .flow_assignments
+            .get(declaration_id)
+            .into_iter()
+            .flat_map(|assignments| assignments.iter())
+            .filter(|assignment| assignment.start_byte <= use_start_byte)
+            .max_by_key(|assignment| assignment.start_byte)?;
+        if assignment.receiver.import.is_some()
+            || assignment.receiver.qualified_name.is_empty()
+            || self
+                .structural_object_variables
+                .contains(&assignment.receiver.qualified_name)
+        {
+            return None;
+        }
+        Some(assignment.receiver.clone())
+    }
+
     fn flow_assignment_is_straight_line(&self, node: Node<'tree>, scope_id: &str) -> bool {
         let mut current = node.parent();
         while let Some(ancestor) = current {
@@ -5584,14 +5616,18 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         argument_types: &[Option<String>],
     ) -> Option<Resolution> {
         let object = object?;
-        let receiver = self.receiver_target(scope_id, object)?;
         let property_name = member_property_name(self.source, property)?;
-        if self.flow_member_write_barrier_before(
-            scope_id,
-            object,
-            &property_name,
-            property.start_byte(),
-        ) {
+        let nominal_write_receiver = self.nominal_member_write_receiver(scope_id, object, property);
+        let nominal_write = nominal_write_receiver.is_some();
+        let receiver = nominal_write_receiver.or_else(|| self.receiver_target(scope_id, object))?;
+        if !nominal_write
+            && self.flow_member_write_barrier_before(
+                scope_id,
+                object,
+                &property_name,
+                property.start_byte(),
+            )
+        {
             return None;
         }
         let projection = decode_utility_projection(&receiver.qualified_name);
@@ -5830,6 +5866,75 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             namespace: Namespace::Value,
             type_only: import.type_only,
         }))
+    }
+
+    /// A plain assignment to a source-proven nominal receiver is itself a
+    /// member occurrence. Keep the declaration target for that write while
+    /// retaining property-scoped barriers for later reads. Structural object
+    /// writes stay conservative because a write can replace the only source
+    /// value that gave the property its identity.
+    fn nominal_member_write_receiver(
+        &self,
+        scope_id: &str,
+        object: Node<'tree>,
+        property: Node<'tree>,
+    ) -> Option<ReceiverTarget> {
+        let member = property.parent()?;
+        if !matches!(
+            member.kind(),
+            "member_expression" | "optional_member_expression" | "subscript_expression"
+        ) {
+            return None;
+        }
+        let assignment = member.parent()?;
+        if assignment.kind() != "assignment_expression"
+            || assignment
+                .child_by_field_name("left")
+                .is_none_or(|left| left.id() != member.id())
+        {
+            return None;
+        }
+        let right = assignment.child_by_field_name("right")?;
+        let operator = self
+            .source
+            .get(member.end_byte()..right.start_byte())
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())?;
+        if operator.trim() != "=" {
+            return None;
+        }
+        if let Some(receiver) = self.receiver_target(scope_id, object)
+            && receiver.import.is_none()
+            && !self.receiver_is_flow_sensitive(&receiver)
+        {
+            return Some(receiver);
+        }
+        if !matches!(
+            object.kind(),
+            "identifier" | "type_identifier" | "jsx_identifier"
+        ) {
+            return None;
+        }
+        let name = rightmost_identifier(object)?;
+        let Resolution::Local(variable) =
+            self.resolve_name(scope_id, &node_text(self.source, name), Namespace::Value)?
+        else {
+            return None;
+        };
+        if !self.immutable_bindings.contains(&variable.id) {
+            return None;
+        }
+        let receiver = self
+            .flow_assignments
+            .get(&variable.id)
+            .into_iter()
+            .flat_map(|assignments| assignments.iter())
+            .filter(|assignment| assignment.start_byte <= property.start_byte())
+            .max_by_key(|assignment| assignment.start_byte)
+            .map(|assignment| assignment.receiver.clone())?;
+        (receiver.import.is_none()
+            && !self.receiver_is_flow_sensitive(&receiver)
+            && !receiver.qualified_name.is_empty())
+        .then_some(receiver)
     }
 
     fn receiver_is_flow_sensitive(&self, receiver: &ReceiverTarget) -> bool {
@@ -6531,6 +6636,12 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         }
                         if self.flow_assignment_barrier_before(&declaration.id, object.start_byte())
                         {
+                            if let Some(receiver) = self.stable_nominal_flow_receiver_at(
+                                &declaration.id,
+                                object.start_byte(),
+                            ) {
+                                return Some(receiver);
+                            }
                             return None;
                         }
 

@@ -1517,6 +1517,32 @@ evidence rather than a release precision/recall claim. Conditional structural
 exports, compiler-target truth, release corpora, precision/Wilson, framework
 tiers, equivalent Graphify/SCIP scope, and the production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, nominal member-write and escape recovery)
+
+The JavaScript flow path now preserves exact member identity for a stricter
+nominal-only slice:
+
+- Plain `=` writes on a source-proven nominal receiver publish the exact member
+  declaration. Structural object writes, computed/dynamic keys, and compound
+  assignments continue to use mutation barriers and fail closed.
+- An immutable nominal alias can retain its receiver identity after an unknown
+  call or other escape. This recovers class-member reads/writes without
+  treating an escaped structural object as stable; nested member receivers are
+  explicitly excluded from the fallback to prevent outer-owner substitution.
+- Regressions cover direct and static nominal writes, compound-write negatives,
+  unknown-call escape reads, and a nested-receiver wrong-target negative.
+
+The focused candidate suite is now 89 tests and the universal resolver suite
+remains 166 tests. On the read-only Axios target-adjudication diagnostic, exact
+local target matches improved from 3,047/3,167 to 3,051/3,167 (116 missing,
+0 wrong); members are 388/503 and calls remain 1,544/1,545. The fixture gate
+remains byte-identical with 57 languages, 980 coverage records, 1,565
+invariants, 27 flows, 24 negatives, 25 diagnostics, 28 edge kinds, and 45
+node kinds. This is diagnostic evidence rather than a release precision/recall
+claim. Conditional structural exports, compiler-target truth, release corpora,
+precision/Wilson, framework tiers, equivalent Graphify/SCIP scope, and the
+production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

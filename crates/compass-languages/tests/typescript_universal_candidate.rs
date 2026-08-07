@@ -1701,6 +1701,176 @@ new Service();
 }
 
 #[test]
+fn javascript_nominal_member_writes_keep_exact_source_targets() {
+    let source = br#"class Service {
+    constructor() {
+        this.kind = 'initial';
+    }
+}
+const service = new Service();
+service.kind = 'updated';
+"#;
+    let batch = candidate("src/nominal-member-write.js", source);
+    let write_start = source
+        .windows(b"service.kind".len())
+        .rposition(|window| window == b"service.kind")
+        .expect("service.kind write")
+        .saturating_add(b"service.".len());
+    let write_has_exact_target = batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "kind"
+            && candidate
+                .occurrence_id
+                .as_ref()
+                .and_then(|occurrence_id| {
+                    batch
+                        .occurrences
+                        .iter()
+                        .find(|occurrence| occurrence.id == *occurrence_id)
+                })
+                .is_some_and(|occurrence| occurrence.range.start_byte == write_start as u64)
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    });
+    assert!(
+        write_has_exact_target,
+        "nominal assignment write lost its exact target: {:#?}",
+        batch.candidates
+    );
+
+    let compound_source = br#"class Service {
+    constructor() {
+        this.kind = 1;
+    }
+}
+const service = new Service();
+service.kind += 1;
+"#;
+    let compound = candidate("src/nominal-member-compound.js", compound_source);
+    let compound_start = compound_source
+        .windows(b"service.kind".len())
+        .rposition(|window| window == b"service.kind")
+        .expect("compound service.kind write")
+        .saturating_add(b"service.".len());
+    assert!(!compound.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "kind"
+            && candidate
+                .occurrence_id
+                .as_ref()
+                .and_then(|occurrence_id| {
+                    compound
+                        .occurrences
+                        .iter()
+                        .find(|occurrence| occurrence.id == *occurrence_id)
+                })
+                .is_some_and(|occurrence| occurrence.range.start_byte == compound_start as u64)
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+
+    let static_source = br#"class Service {
+    static from() {
+        const service = new Service();
+        service.kind = 'updated';
+        return service;
+    }
+    constructor() {
+        this.kind = 'initial';
+    }
+}
+Service.from();
+"#;
+    let static_batch = candidate("src/nominal-static-write.js", static_source);
+    let static_start = static_source
+        .windows(b"service.kind".len())
+        .rposition(|window| window == b"service.kind")
+        .expect("static service.kind write")
+        .saturating_add(b"service.".len());
+    assert!(static_batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "kind"
+            && candidate
+                .occurrence_id
+                .as_ref()
+                .and_then(|occurrence_id| {
+                    static_batch
+                        .occurrences
+                        .iter()
+                        .find(|occurrence| occurrence.id == *occurrence_id)
+                })
+                .is_some_and(|occurrence| occurrence.range.start_byte == static_start as u64)
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+
+    let escaped_source = br#"class Service {
+    constructor() {
+        this.kind = 'initial';
+    }
+}
+function consume(value) {
+    return value;
+}
+const service = new Service();
+consume(service);
+service.kind;
+"#;
+    let escaped = candidate("src/nominal-escape-read.js", escaped_source);
+    let escaped_start = escaped_source
+        .windows(b"service.kind".len())
+        .rposition(|window| window == b"service.kind")
+        .expect("escaped service.kind read")
+        .saturating_add(b"service.".len());
+    assert!(escaped.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "kind"
+            && candidate
+                .occurrence_id
+                .as_ref()
+                .and_then(|occurrence_id| {
+                    escaped
+                        .occurrences
+                        .iter()
+                        .find(|occurrence| occurrence.id == *occurrence_id)
+                })
+                .is_some_and(|occurrence| occurrence.range.start_byte == escaped_start as u64)
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+
+    let nested_source = br#"class Service {
+    constructor() {
+        this.kind = 'initial';
+    }
+}
+function consume(value) {
+    return value;
+}
+const service = new Service();
+consume(service);
+service.nested.kind = 'unknown';
+"#;
+    let nested = candidate("src/nominal-nested-escape-write.js", nested_source);
+    let nested_start = nested_source
+        .windows(b"service.nested.kind".len())
+        .rposition(|window| window == b"service.nested.kind")
+        .expect("nested escaped service.kind write")
+        .saturating_add(b"service.nested.".len());
+    assert!(!nested.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "kind"
+            && candidate
+                .occurrence_id
+                .as_ref()
+                .and_then(|occurrence_id| {
+                    nested
+                        .occurrences
+                        .iter()
+                        .find(|occurrence| occurrence.id == *occurrence_id)
+                })
+                .is_some_and(|occurrence| occurrence.range.start_byte == nested_start as u64)
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+}
+
+#[test]
 fn typescript_homomorphic_mapped_alias_preserves_nominal_member_targets() {
     let batch = candidate(
         "src/mapped-alias.ts",
