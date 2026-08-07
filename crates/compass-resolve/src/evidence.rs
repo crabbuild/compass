@@ -2118,6 +2118,80 @@ impl UniversalResolutionIndex {
             context.type_arguments,
         );
         let substituted = typescript_utility_receiver_type(&substituted).unwrap_or(substituted);
+        if let Some((base, property)) = typescript_literal_indexed_type(&substituted) {
+            let base_contexts = self.typescript_member_type_contexts(
+                language,
+                module,
+                base,
+                TypeScriptMemberContext {
+                    owner_signature: None,
+                    type_arguments: &[],
+                    index_selector: None,
+                },
+                candidate,
+            );
+            let mut indexed_contexts = BTreeSet::new();
+            for (owner_slot, owner_type_arguments) in base_contexts {
+                let Some(owner) = self.declaration(owner_slot) else {
+                    continue;
+                };
+                let Some(members) = self.members_by_owner.get(&(
+                    owner.language.clone(),
+                    owner.qualified_name.clone(),
+                    property.clone(),
+                )) else {
+                    continue;
+                };
+                if members.len() != 1 {
+                    continue;
+                }
+                let Some(&member_slot) = members.first() else {
+                    continue;
+                };
+                let Some(member) = self.declaration(member_slot) else {
+                    continue;
+                };
+                let Some(signature) = member.signature.as_deref() else {
+                    continue;
+                };
+                let direct_property_type = (member.kind == "property"
+                    && !signature.contains("|params:")
+                    && !signature.contains("|return:"))
+                .then_some(signature.trim());
+                if let Some(value_type) = typescript_value_type(signature).or(direct_property_type)
+                {
+                    let owner_parameters = typescript_generic_parameter_names(
+                        owner.signature.as_deref().unwrap_or_default(),
+                    );
+                    let value_type = typescript_substitute_type_parameters(
+                        value_type,
+                        &owner_parameters,
+                        &owner_type_arguments,
+                    );
+                    let member_module =
+                        typescript_source_module_keys(&member.range.source_file, &self.root)
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| module.to_owned());
+                    indexed_contexts.extend(self.typescript_member_type_contexts(
+                        language,
+                        &member_module,
+                        &value_type,
+                        TypeScriptMemberContext {
+                            owner_signature: Some(signature),
+                            type_arguments: &[],
+                            index_selector: None,
+                        },
+                        candidate,
+                    ));
+                } else if typescript_callable_parameter_types(signature).is_some()
+                    || typescript_callable_return_type(signature).is_some()
+                {
+                    indexed_contexts.insert((member_slot, Vec::new()));
+                }
+            }
+            return indexed_contexts;
+        }
         let substituted = match context.index_selector {
             Some("") => match typescript_array_element_type(&substituted) {
                 Some(element) => element.to_owned(),
@@ -5578,6 +5652,30 @@ fn typescript_indexed_member_segment(value: &str) -> Option<(String, Option<Stri
     (!value.is_empty()).then(|| (value.to_owned(), None))
 }
 
+fn typescript_literal_indexed_type(value: &str) -> Option<(&str, String)> {
+    let value = value.trim();
+    if !value.ends_with(']') {
+        return None;
+    }
+    let open = value.rfind('[')?;
+    let base = value.get(..open)?.trim();
+    let raw_property = value
+        .get(open.saturating_add(1)..value.len().saturating_sub(1))?
+        .trim();
+    let property = raw_property
+        .strip_prefix('"')
+        .and_then(|property| property.strip_suffix('"'))
+        .or_else(|| {
+            raw_property
+                .strip_prefix('\'')
+                .and_then(|property| property.strip_suffix('\''))
+        })?;
+    if base.is_empty() || property.is_empty() || property.len() > 1024 {
+        return None;
+    }
+    Some((base, property.to_owned()))
+}
+
 fn typescript_generic_parameter_names(signature: &str) -> Vec<String> {
     let signature = signature
         .trim()
@@ -5904,6 +6002,18 @@ fn typescript_substitute_type_parameters(
     if let Some(element) = type_name.strip_suffix("[]") {
         let substituted = typescript_substitute_type_parameters(element, parameters, arguments);
         let substituted = format!("{substituted}[]");
+        return if substituted.len() <= 1024 {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
+    }
+    if let Some((base, _)) = typescript_literal_indexed_type(type_name)
+        && let Some(open) = type_name.rfind('[')
+    {
+        let substituted_base = typescript_substitute_type_parameters(base, parameters, arguments);
+        let suffix = type_name.get(open..).unwrap_or_default();
+        let substituted = format!("{substituted_base}{suffix}");
         return if substituted.len() <= 1024 {
             substituted
         } else {

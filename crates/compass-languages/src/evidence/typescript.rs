@@ -6855,6 +6855,35 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     type_arguments: None,
                 });
             }
+            if let Some((base, property)) = indexed_type_parts(normalized) {
+                let base_receiver = self.resolve_declared_type_receiver(scope_id, base)?;
+                // A compiler-selected indexed access can be projected from a
+                // local nominal declaration when the key is a literal and
+                // exactly one source member owns it. Imported and computed
+                // projections require project-wide checker evidence and stay
+                // unresolved rather than inheriting a terminal-name match.
+                if base_receiver.import.is_some() {
+                    return None;
+                }
+                let qualified_name = format!("{}.{}", base_receiver.qualified_name, property);
+                let ids = self.declarations_by_qualified.get(&qualified_name)?;
+                let declarations = ids
+                    .iter()
+                    .filter_map(|id| self.declarations.get(id))
+                    .collect::<Vec<_>>();
+                let [declaration] = declarations.as_slice() else {
+                    return None;
+                };
+                if declaration.declared_type_name.is_some() {
+                    return self.member_value_receiver(scope_id, &base_receiver, declaration);
+                }
+                return Some(ReceiverTarget {
+                    qualified_name: declaration.qualified_name.clone(),
+                    import: None,
+                    scope_id: self.member_scope_for_declaration(declaration),
+                    type_arguments: None,
+                });
+            }
             if let Some((utility, base, arguments)) = utility_type_parts(normalized)
                 && matches!(utility, "Pick" | "Omit")
             {
@@ -8075,17 +8104,32 @@ fn direct_type_reference_name(node: Node<'_>, source: &[u8]) -> Option<String> {
     } else {
         annotation
     };
+    let normalized_type_text = node_text(source, type_node);
+    if indexed_type_parts(&normalized_type_text).is_some()
+        || normalized_type_text
+            .strip_prefix("keyof")
+            .is_some_and(|rest| !rest.trim().is_empty())
+    {
+        if normalized_type_text.len() <= MAX_TYPE_SHAPE_BYTES {
+            return Some(normalized_type_text);
+        }
+        return None;
+    }
     if matches!(type_node.kind(), "array_type" | "tuple_type") {
         let normalized = normalize_type_text(source, type_node);
         if !normalized.is_empty() && normalized.len() <= MAX_TYPE_SHAPE_BYTES {
             return Some(normalized);
         }
     }
-    if type_node.kind() == "conditional_type" {
+    if matches!(
+        type_node.kind(),
+        "conditional_type" | "indexed_access_type" | "keyof_type"
+    ) {
         let normalized = node_text(source, type_node);
         if !normalized.is_empty()
             && normalized.len() <= MAX_TYPE_SHAPE_BYTES
-            && conditional_type_parts(&normalized).is_some()
+            && (type_node.kind() != "conditional_type"
+                || conditional_type_parts(&normalized).is_some())
         {
             return Some(normalized);
         }
@@ -8758,8 +8802,22 @@ fn indexed_type_parts(type_name: &str) -> Option<(&str, String)> {
     }
     let open = type_name.rfind('[')?;
     let base = type_name.get(..open)?.trim();
-    let property = type_name.get(open + 1..type_name.len() - 1)?.trim();
-    let property = property.trim_matches(['"', '\'']);
+    let raw_property = type_name.get(open + 1..type_name.len() - 1)?.trim();
+    let property = raw_property
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            raw_property
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .or_else(|| {
+            (!raw_property.is_empty()
+                && raw_property
+                    .chars()
+                    .all(|character| character.is_ascii_digit()))
+            .then_some(raw_property)
+        })?;
     if base.is_empty() || property.is_empty() || property.len() > MAX_TYPE_SHAPE_BYTES {
         return None;
     }

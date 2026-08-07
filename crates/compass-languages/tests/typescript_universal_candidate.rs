@@ -502,6 +502,72 @@ use((value, ctx) => ctx.issues);
 }
 
 #[test]
+fn typescript_literal_indexed_type_aliases_resolve_nominal_receivers() {
+    let batch = candidate(
+        "src/indexed-alias.ts",
+        br#"interface Nested { run(): void }
+interface Item { nested: Nested; inspect(): void }
+type NestedAlias = Item["nested"];
+function use(value: NestedAlias) {
+    value.run();
+}
+function dynamic<T>(value: Item, key: T) {
+    value[key];
+}
+"#,
+    );
+    let run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Nested.run"))
+        .expect("Nested.run declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "run"
+            && candidate.constraints.exact_target_declaration_id.as_deref() == Some(run.id.as_str())
+    }));
+    // A computed generic key is not a source-proven property and must remain
+    // unresolved even when the receiver has a nominal annotation.
+    assert!(!batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "key"
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+}
+
+#[test]
+fn typescript_indexed_type_alias_ambiguity_does_not_choose_a_union_member() {
+    let batch = candidate(
+        "src/indexed-ambiguous.ts",
+        br#"interface First { run(): void }
+interface Second { run(): void }
+type Ambiguous = First | Second;
+type Maybe = Ambiguous["run"];
+function use(value: Maybe) {
+    value();
+}
+"#,
+    );
+    let first_run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".First.run"))
+        .expect("First.run declaration");
+    let second_run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Second.run"))
+        .expect("Second.run declaration");
+    assert!(!batch.candidates.iter().any(|candidate| {
+        candidate
+            .constraints
+            .exact_target_declaration_id
+            .as_deref()
+            .is_some_and(|id| id == first_run.id || id == second_run.id)
+    }));
+}
+
+#[test]
 fn typescript_member_call_return_types_resolve_chained_members() {
     let batch = candidate(
         "src/member_return.ts",

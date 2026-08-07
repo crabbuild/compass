@@ -1244,6 +1244,34 @@ scope/declaration inventories, broader conditional/keyof semantics, framework
 tiers, accepted precision/Wilson gates, equivalent Graphify/SCIP scope, and the
 production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, bounded literal indexed-access slice)
+
+The qualification-only TypeScript candidate and resolver now follow a bounded
+literal indexed-access type alias when the source proves a unique nominal
+property:
+
+- Local aliases such as `type Nested = Item["nested"]` preserve the selected
+  member's declaration identity and let downstream calls resolve to the exact
+  source method. Imported generic aliases such as `NestedOf<T> = T["nested"]`
+  substitute an explicit cross-file nominal argument and resolve the selected
+  member through the project export index.
+- Computed keys, dynamic generic keys, union projections with competing owners,
+  duplicate members, imported candidate-side projections, and unsupported
+  structural shapes remain unresolved. Numeric access continues through the
+  existing bounded array/tuple path; the new object projection accepts only
+  quoted string keys.
+- Type substitution is bounded to the existing type-shape limit and preserves
+  the original indexed suffix, so generic aliases cannot silently widen into a
+  terminal-name match. Candidate and resolver evidence retain existing source
+  anchors, direction, multiplicity, and deterministic ordering.
+
+The focused TypeScript candidate suite is now 83 tests and the universal
+resolver suite is now 162 tests. The candidate adapter remains absent from
+`UNIVERSAL_ADAPTERS`. Broader `keyof`/mapped/indexed evaluation, distributive
+conditional semantics, project-manifest corpora, compiler-backed scope and
+declaration inventories, framework tiers, accepted precision/Wilson gates,
+equivalent Graphify/SCIP scope, and the production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

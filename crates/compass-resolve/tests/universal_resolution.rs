@@ -7833,6 +7833,123 @@ function object(value: ChooseObject<Item>) { value.inspect(); }
 }
 
 #[test]
+fn typescript_candidate_publishes_literal_indexed_alias_member_calls()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"interface Nested { inspect(): void }
+interface Item { nested: Nested }
+type NestedAlias = Item["nested"];
+export function use(value: NestedAlias) { value.inspect(); }
+"#;
+    let relative = "src/indexed-alias.ts";
+    let mut extraction = extract(relative, source);
+    extraction.semantic_evidence = Some(
+        Engine::default().extract_source_universal_candidate_evidence(
+            Path::new(relative),
+            relative,
+            source,
+        )?,
+    );
+    let resolved = compass_resolve::resolve(
+        &[extraction],
+        &HashMap::from([(relative.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(
+        resolved.error.is_none(),
+        "resolver error: {:?}",
+        resolved.error
+    );
+    let inspect = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == relative && node.label() == ".inspect()")
+        .ok_or("missing indexed alias Nested.inspect member")?;
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "calls"
+                && edge.string("source_file") == relative
+                && edge.target == inspect.id
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].string("resolution_rule"),
+        "exact-source-declaration"
+    );
+    Ok(())
+}
+
+#[test]
+fn typescript_candidate_resolves_imported_generic_indexed_alias_member_calls()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/item.ts",
+            br#"export interface Nested { inspect(): void }
+export interface Item { nested: Nested }
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/types.ts",
+            br#"export type NestedOf<T> = T["nested"];
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import type { NestedOf } from "../lib/types";
+import type { Item } from "../lib/item";
+export function use(value: NestedOf<Item>) { value.inspect(); }
+"#
+            .as_slice(),
+        ),
+    ];
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
+        let mut extraction = extract(relative, source);
+        extraction.semantic_evidence = Some(
+            Engine::default().extract_source_universal_candidate_evidence(
+                Path::new(relative),
+                relative,
+                source,
+            )?,
+        );
+        extractions.push(extraction);
+    }
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert!(
+        resolved.error.is_none(),
+        "resolver error: {:?}",
+        resolved.error
+    );
+    let inspect = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == "lib/item.ts" && node.label() == ".inspect()")
+        .ok_or("missing imported indexed alias Nested.inspect member")?;
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "calls"
+                && edge.string("source_file") == "app/consumer.ts"
+                && edge.target == inspect.id
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    Ok(())
+}
+
+#[test]
 fn typescript_candidate_resolves_imported_array_and_tuple_member_chains()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
