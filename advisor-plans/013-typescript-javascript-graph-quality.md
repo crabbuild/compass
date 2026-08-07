@@ -976,6 +976,31 @@ is now 150 tests. The production candidate adapter remains absent from
 return evidence, framework/compiler tiers, equivalent Graphify/SCIP scope,
 and the production hard cut remain open.
 
+### Execution checkpoint (2026-08-06, bounded utility/conditional receiver slice)
+
+The qualification-only TypeScript/JavaScript path now normalizes a small,
+source-spelled set of standard utility wrappers after generic substitution:
+
+- `NonNullable<T | undefined>` removes only non-nominal/nullish union arms
+  when exactly one nominal receiver remains. `Awaited<Promise<T>>` and
+  `Awaited<PromiseLike<T>>` unwrap bounded promise layers, while
+  `Partial<T>`, `Required<T>`, and `Readonly<T>` preserve the underlying
+  nominal declaration identity.
+- The same normalization runs in the shared cross-file member resolver, so
+  generic properties such as `Box<T>.nullable: NonNullable<T|undefined>`
+  retain the imported `Item.inspect` target after `Box<Item>` substitution.
+- Multiple nominal union arms, arbitrary structural wrappers, and unsupported
+  conditional forms fail closed. Top-level union substitution is recursive but
+  bounded by the existing shape/depth limits.
+
+The slice adds three direct candidate regressions and expands the imported
+array/tuple resolver fixture to six exact utility/indexed member calls; the
+focused candidate suite is now 70 tests and the universal resolver suite is
+now 150 tests. Imported callable-return evidence, richer conditional/mapped
+modifier semantics, accepted precision/Wilson gates, framework/compiler tiers,
+equivalent Graphify/SCIP scope, and the production hard cut remain open. The
+candidate adapter remains absent from `UNIVERSAL_ADAPTERS`.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

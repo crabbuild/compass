@@ -7795,6 +7795,9 @@ fn typescript_candidate_resolves_imported_array_and_tuple_member_chains()
             br#"export interface Box<T> {
     values: T[];
     pair: [T, string];
+    nullable: NonNullable<T | undefined>;
+    awaited: Awaited<Promise<T>>;
+    readonlyValue: Readonly<T>;
 }
 "#
             .as_slice(),
@@ -7807,6 +7810,9 @@ export function use(values: Item[], box: Box<Item>) {
     values[0].inspect();
     box.values[0].inspect();
     box.pair[0].inspect();
+    box.nullable.inspect();
+    box.awaited.inspect();
+    box.readonlyValue.inspect();
 }
 "#
             .as_slice(),
@@ -7852,7 +7858,7 @@ export function use(values: Item[], box: Box<Item>) {
             .iter()
             .filter(|edge| edge.target == inspect.id)
             .count(),
-        3
+        6
     );
     assert!(
         calls

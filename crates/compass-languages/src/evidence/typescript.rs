@@ -6378,6 +6378,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     type_arguments: None,
                 });
             }
+            if let Some(unwrapped) = candidate_utility_receiver_type(normalized) {
+                current = unwrapped;
+                continue;
+            }
             let (lookup_name, type_arguments) = generic_type_parts(normalized)
                 .map(|(base, arguments)| (base.to_owned(), Some(arguments)))
                 .unwrap_or_else(|| (normalized.to_owned(), None));
@@ -7670,6 +7674,80 @@ fn candidate_type_mentions_parameter(type_name: &str, parameters: &[String]) -> 
         .any(|token| parameters.iter().any(|parameter| parameter == token))
 }
 
+fn candidate_utility_receiver_type(type_name: &str) -> Option<String> {
+    candidate_utility_receiver_type_at_depth(type_name, 0)
+}
+
+fn candidate_utility_receiver_type_at_depth(type_name: &str, depth: u32) -> Option<String> {
+    if depth > MAX_TYPE_SHAPE_DEPTH {
+        return None;
+    }
+    let (base, arguments) = generic_type_parts(type_name)?;
+    if arguments.len() != 1 {
+        return None;
+    }
+    let argument = arguments[0].trim();
+    match base {
+        "NonNullable" => {
+            let members = split_top_level_union(argument)?;
+            let nominal = members
+                .into_iter()
+                .map(str::trim)
+                .filter(|member| !is_non_nominal_union_member(member))
+                .collect::<Vec<_>>();
+            let [nominal] = nominal.as_slice() else {
+                return None;
+            };
+            Some((*nominal).to_owned())
+        }
+        "Awaited" => {
+            if let Some((promise, nested)) = generic_type_parts(argument)
+                && matches!(promise, "Promise" | "PromiseLike")
+                && nested.len() == 1
+            {
+                return candidate_utility_receiver_type_at_depth(
+                    &format!("Awaited<{}>", nested[0]),
+                    depth + 1,
+                )
+                .or_else(|| Some(nested[0].clone()));
+            }
+            Some(argument.to_owned())
+        }
+        "Partial" | "Required" | "Readonly" => Some(argument.to_owned()),
+        _ => None,
+    }
+}
+
+fn split_top_level_union(input: &str) -> Option<Vec<&str>> {
+    let mut members = Vec::new();
+    let mut start = 0_usize;
+    let mut depth = 0_u32;
+    for (index, character) in input.char_indices() {
+        match character {
+            '<' | '{' | '(' | '[' => depth = depth.checked_add(1)?,
+            '>' | '}' | ')' | ']' => depth = depth.checked_sub(1)?,
+            '|' if depth == 0 => {
+                let member = input.get(start..index)?.trim();
+                if member.is_empty() {
+                    return None;
+                }
+                members.push(member);
+                start = index.saturating_add(character.len_utf8());
+            }
+            _ => {}
+        }
+        if members.len() >= MAX_INLINE_OBJECT_PROPERTIES {
+            return None;
+        }
+    }
+    let member = input.get(start..)?.trim();
+    if member.is_empty() {
+        return None;
+    }
+    members.push(member);
+    Some(members)
+}
+
 fn mapped_type_source_name(node: Node<'_>, source: &[u8]) -> Option<String> {
     if node.kind() != "type_alias_declaration" {
         return None;
@@ -7775,6 +7853,22 @@ fn substitute_candidate_type_parameters(
             })
             .collect::<Vec<_>>();
         let substituted = format!("[{}]", substituted.join(","));
+        return if substituted.len() <= MAX_TYPE_SHAPE_BYTES {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
+    }
+    if let Some(members) = split_top_level_union(type_name)
+        && members.len() > 1
+    {
+        let substituted = members
+            .iter()
+            .map(|member| {
+                substitute_candidate_type_parameters(member, parameters, arguments, depth + 1)
+            })
+            .collect::<Vec<_>>()
+            .join("|");
         return if substituted.len() <= MAX_TYPE_SHAPE_BYTES {
             substituted
         } else {

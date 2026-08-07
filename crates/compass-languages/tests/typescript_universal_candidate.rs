@@ -1588,6 +1588,81 @@ function use() { choose(new Item(), new Other()).inspect(); }
 }
 
 #[test]
+fn typescript_non_nullable_receiver_preserves_nominal_member_target() {
+    let batch = candidate(
+        "src/non-nullable-receiver.ts",
+        br#"class Item { inspect(): void {} }
+function use(value: NonNullable<Item | undefined>) { value.inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(inspect.id.as_str())
+    }));
+}
+
+#[test]
+fn typescript_awaited_and_readonly_receivers_preserve_nominal_member_targets() {
+    let batch = candidate(
+        "src/utility-receivers.ts",
+        br#"class Item { inspect(): void {} }
+function useAwaited(value: Awaited<Promise<Item>>) { value.inspect(); }
+function useReadonly(value: Readonly<Item>) { value.inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    let calls = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == compass_languages::CandidateRelation::Calls
+                && candidate.target_spelling == "inspect"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2);
+    assert!(calls.iter().all(|candidate| {
+        candidate.constraints.exact_target_declaration_id.as_deref() == Some(inspect.id.as_str())
+    }));
+}
+
+#[test]
+fn typescript_non_nullable_multi_nominal_union_fails_closed() {
+    let batch = candidate(
+        "src/non-nullable-ambiguous.ts",
+        br#"class First { inspect(): void {} }
+class Second { inspect(): void {} }
+function use(value: NonNullable<First | Second | undefined>) { value.inspect(); }
+"#,
+    );
+    let inspect_calls = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == compass_languages::CandidateRelation::Calls
+                && candidate.target_spelling == "inspect"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(inspect_calls.len(), 1);
+    assert!(
+        inspect_calls[0]
+            .constraints
+            .exact_target_declaration_id
+            .is_none()
+    );
+}
+
+#[test]
 fn typescript_generic_index_signature_values_resolve_member_calls() {
     let batch = candidate(
         "src/generic-index-signature.ts",

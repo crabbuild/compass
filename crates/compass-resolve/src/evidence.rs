@@ -1617,6 +1617,7 @@ impl UniversalResolutionIndex {
             &generic_parameters,
             context.type_arguments,
         );
+        let substituted = typescript_utility_receiver_type(&substituted).unwrap_or(substituted);
         let substituted = match context.index_selector {
             Some("") => match typescript_array_element_type(&substituted) {
                 Some(element) => element.to_owned(),
@@ -4842,6 +4843,100 @@ fn typescript_array_element_type(value: &str) -> Option<String> {
     arguments.first().cloned()
 }
 
+fn typescript_utility_receiver_type(value: &str) -> Option<String> {
+    typescript_utility_receiver_type_at_depth(value, 0)
+}
+
+fn typescript_utility_receiver_type_at_depth(value: &str, depth: u32) -> Option<String> {
+    if depth > 32 {
+        return None;
+    }
+    let (base, arguments) = typescript_generic_type_parts(value)?;
+    if arguments.len() != 1 {
+        return None;
+    }
+    let argument = arguments[0].trim();
+    match base {
+        "NonNullable" => {
+            let members = typescript_split_top_level_union(argument)?;
+            let nominal = members
+                .into_iter()
+                .map(str::trim)
+                .filter(|member| !typescript_non_nominal_union_member(member))
+                .collect::<Vec<_>>();
+            let [nominal] = nominal.as_slice() else {
+                return None;
+            };
+            Some((*nominal).to_owned())
+        }
+        "Awaited" => {
+            if let Some((promise, nested)) = typescript_generic_type_parts(argument)
+                && matches!(promise, "Promise" | "PromiseLike")
+                && nested.len() == 1
+            {
+                return typescript_utility_receiver_type_at_depth(
+                    &format!("Awaited<{}>", nested[0]),
+                    depth.saturating_add(1),
+                )
+                .or_else(|| Some(nested[0].clone()));
+            }
+            Some(argument.to_owned())
+        }
+        "Partial" | "Required" | "Readonly" => Some(argument.to_owned()),
+        _ => None,
+    }
+}
+
+fn typescript_non_nominal_union_member(value: &str) -> bool {
+    matches!(
+        value,
+        "any"
+            | "unknown"
+            | "never"
+            | "void"
+            | "undefined"
+            | "null"
+            | "string"
+            | "number"
+            | "boolean"
+            | "bigint"
+            | "symbol"
+            | "object"
+            | "true"
+            | "false"
+    )
+}
+
+fn typescript_split_top_level_union(value: &str) -> Option<Vec<&str>> {
+    let mut members = Vec::new();
+    let mut start = 0_usize;
+    let mut depth = 0_u32;
+    for (index, character) in value.char_indices() {
+        match character {
+            '<' | '{' | '(' | '[' => depth = depth.checked_add(1)?,
+            '>' | '}' | ')' | ']' => depth = depth.checked_sub(1)?,
+            '|' if depth == 0 => {
+                let member = value.get(start..index)?.trim();
+                if member.is_empty() {
+                    return None;
+                }
+                members.push(member);
+                start = index.saturating_add(character.len_utf8());
+            }
+            _ => {}
+        }
+        if members.len() >= 64 {
+            return None;
+        }
+    }
+    let member = value.get(start..)?.trim();
+    if member.is_empty() {
+        return None;
+    }
+    members.push(member);
+    Some(members)
+}
+
 fn typescript_tuple_elements(value: &str) -> Option<Vec<&str>> {
     let value = value.trim();
     if !value.starts_with('[') || !value.ends_with(']') {
@@ -5008,6 +5103,20 @@ fn typescript_substitute_type_parameters(
             .map(|element| typescript_substitute_type_parameters(element, parameters, arguments))
             .collect::<Vec<_>>();
         let substituted = format!("[{}]", substituted.join(","));
+        return if substituted.len() <= 1024 {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
+    }
+    if let Some(members) = typescript_split_top_level_union(type_name)
+        && members.len() > 1
+    {
+        let substituted = members
+            .iter()
+            .map(|member| typescript_substitute_type_parameters(member, parameters, arguments))
+            .collect::<Vec<_>>()
+            .join("|");
         return if substituted.len() <= 1024 {
             substituted
         } else {
