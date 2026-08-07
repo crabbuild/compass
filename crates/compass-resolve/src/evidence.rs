@@ -1398,20 +1398,12 @@ impl UniversalResolutionIndex {
             self.typescript_export_slots(language, module, &path.root_export, candidate, true);
         let mut targets = BTreeSet::new();
         for root_slot in root_targets {
-            let Some(root) = self.declaration(root_slot) else {
-                continue;
-            };
-            let generic_parameters = root
-                .signature
-                .as_deref()
-                .map(typescript_generic_parameter_names)
-                .unwrap_or_default();
-            let mut owners = BTreeSet::from([root_slot]);
+            let mut owners = BTreeSet::from([(root_slot, path.type_arguments.clone())]);
             for (index, member_name) in path.members.iter().enumerate() {
                 let final_member = index.saturating_add(1) == path.members.len();
                 let mut next_owners = BTreeSet::new();
-                for owner_slot in owners.iter().copied() {
-                    let Some(owner) = self.declaration(owner_slot) else {
+                for (owner_slot, owner_type_arguments) in owners.iter() {
+                    let Some(owner) = self.declaration(*owner_slot) else {
                         continue;
                     };
                     let Some(members) = self.members_by_owner.get(&(
@@ -1428,7 +1420,7 @@ impl UniversalResolutionIndex {
                                 .filter(|slot| {
                                     self.typescript_declaration_allowed_slot(**slot, candidate)
                                 })
-                                .copied(),
+                                .map(|slot| (*slot, Vec::new())),
                         );
                     } else {
                         let typed_members = members
@@ -1440,12 +1432,12 @@ impl UniversalResolutionIndex {
                         let [type_name] = typed_members.as_slice() else {
                             continue;
                         };
-                        next_owners.extend(self.typescript_member_type_slots(
+                        next_owners.extend(self.typescript_member_type_contexts(
                             language,
                             module,
                             type_name,
-                            &generic_parameters,
-                            &path.type_arguments,
+                            owner.signature.as_deref(),
+                            owner_type_arguments,
                             candidate,
                         ));
                     }
@@ -1456,7 +1448,7 @@ impl UniversalResolutionIndex {
                 }
                 owners = next_owners;
             }
-            targets.extend(owners);
+            targets.extend(owners.into_iter().map(|(slot, _)| slot));
             if targets.len() > self.limits.candidates_per_lookup {
                 break;
             }
@@ -1464,25 +1456,28 @@ impl UniversalResolutionIndex {
         targets
     }
 
-    fn typescript_member_type_slots(
+    fn typescript_member_type_contexts(
         &self,
         language: &str,
         module: &str,
         type_name: &str,
-        generic_parameters: &[String],
+        owner_signature: Option<&str>,
         type_arguments: &[String],
         candidate: &RelationshipCandidate,
-    ) -> BTreeSet<DeclarationSlot> {
+    ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
         let type_name = type_name.trim();
         if type_name.is_empty() || type_name.len() > 1024 {
             return BTreeSet::new();
         }
+        let generic_parameters = owner_signature
+            .map(typescript_generic_parameter_names)
+            .unwrap_or_default();
         let substituted = generic_parameters
             .iter()
             .position(|parameter| parameter == type_name)
             .and_then(|index| type_arguments.get(index))
             .map_or_else(|| type_name.to_owned(), |argument| argument.clone());
-        let (base, _) = typescript_generic_type_parts(&substituted)
+        let (base, nested_type_arguments) = typescript_generic_type_parts(&substituted)
             .unwrap_or((substituted.as_str(), Vec::new()));
         let (qualified_module, exported) = split_typescript_module_qualified(base);
         if exported.is_empty() {
@@ -1501,15 +1496,16 @@ impl UniversalResolutionIndex {
         }
         modules.sort_unstable();
         modules.dedup();
-        let mut slots = BTreeSet::new();
+        let mut contexts = BTreeSet::new();
         for module in modules {
-            slots
-                .extend(self.typescript_export_slots(language, &module, exported, candidate, true));
-            if slots.len() > self.limits.candidates_per_lookup {
+            for slot in self.typescript_export_slots(language, &module, exported, candidate, true) {
+                contexts.insert((slot, nested_type_arguments.clone()));
+            }
+            if contexts.len() > self.limits.candidates_per_lookup {
                 break;
             }
         }
-        slots
+        contexts
     }
 
     fn typescript_export_slots(

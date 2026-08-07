@@ -6056,15 +6056,37 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     fn canonical_type_arguments(&self, scope_id: &str, arguments: &[String]) -> Vec<String> {
         arguments
             .iter()
-            .map(|argument| {
-                self.resolve_name(scope_id, strip_type_arguments(argument), Namespace::Both)
-                    .and_then(|resolution| resolution.qualified_target())
-                    .filter(|qualified| {
-                        !qualified.is_empty() && qualified.len() <= MAX_TYPE_SHAPE_BYTES
-                    })
-                    .unwrap_or_else(|| argument.clone())
-            })
+            .map(|argument| self.canonical_type_argument(scope_id, argument, 0))
             .collect()
+    }
+
+    fn canonical_type_argument(&self, scope_id: &str, argument: &str, depth: u32) -> String {
+        let argument = argument.trim();
+        if argument.is_empty()
+            || argument.len() > MAX_TYPE_SHAPE_BYTES
+            || depth > MAX_TYPE_SHAPE_DEPTH
+        {
+            return argument.to_owned();
+        }
+        if let Some((base, nested_arguments)) = generic_type_parts(argument) {
+            let base = self.canonical_type_name(scope_id, base);
+            let nested_arguments = nested_arguments
+                .iter()
+                .map(|nested| self.canonical_type_argument(scope_id, nested, depth + 1))
+                .collect::<Vec<_>>();
+            let canonical = format!("{base}<{}>", nested_arguments.join(","));
+            if canonical.len() <= MAX_TYPE_SHAPE_BYTES {
+                return canonical;
+            }
+        }
+        self.canonical_type_name(scope_id, argument)
+    }
+
+    fn canonical_type_name(&self, scope_id: &str, type_name: &str) -> String {
+        self.resolve_name(scope_id, strip_type_arguments(type_name), Namespace::Both)
+            .and_then(|resolution| resolution.qualified_target())
+            .filter(|qualified| !qualified.is_empty() && qualified.len() <= MAX_TYPE_SHAPE_BYTES)
+            .unwrap_or_else(|| type_name.to_owned())
     }
 
     /// Return the child scope owned by a nominal declaration when one exists.

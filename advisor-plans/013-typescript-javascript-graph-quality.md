@@ -825,6 +825,27 @@ production hard cut remain open. The candidate adapter remains absent from
 `UNIVERSAL_ADAPTERS` until the mandatory quality and exact-release
 qualification gates complete.
 
+### Execution checkpoint (2026-08-06, recursive nested generic member-chain slice)
+
+The generic member-chain resolver now carries a bounded concrete type context
+for each owner hop instead of reusing only the root instantiation. Nested
+nominal arguments are recursively canonicalized in the existing
+`DeclarationFact.signature`/qualified-path evidence (for example,
+`Box<../lib/types::Wrapper<../lib/item::Item>>`), then propagated through
+`Box<T>.item` to `Wrapper<U>.value` before resolving the final `Item.inspect`
+member. This keeps the mechanism source-backed and deterministic without
+introducing a compiler or runtime type-system dependency.
+
+Three resolver regressions cover the positive cross-module chain, duplicate
+`Item.inspect` ambiguity, and a primitive `Box<string>` negative. The
+universal resolver suite is now 140 tests and the TypeScript candidate suite
+remains 44 tests. Unsupported structural, mapped, conditional, indexed,
+overload-dependent, or over-limit shapes still fail closed; framework tiers,
+compiler differential recall, project-corpus qualification, and the production
+hard cut remain open. The candidate adapter remains absent from
+`UNIVERSAL_ADAPTERS` until the mandatory quality and exact-release
+qualification gates complete.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

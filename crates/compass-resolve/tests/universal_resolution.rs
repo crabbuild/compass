@@ -7385,3 +7385,196 @@ export function use(box: Box<Item>) { box.item.inspect(); }
     }));
     Ok(())
 }
+
+#[test]
+fn typescript_candidate_resolves_nested_imported_generic_member_chain()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/item.ts",
+            br#"export interface Item { inspect(): void }
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/types.ts",
+            br#"export interface Wrapper<U> { value: U }
+export interface Box<T> { item: T }
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import type { Box, Wrapper } from "../lib/types";
+import type { Item } from "../lib/item";
+export function use(box: Box<Wrapper<Item>>) { box.item.value.inspect(); }
+"#
+            .as_slice(),
+        ),
+    ];
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
+        let mut extraction = extract(relative, source);
+        extraction.semantic_evidence = Some(
+            Engine::default().extract_source_universal_candidate_evidence(
+                Path::new(relative),
+                relative,
+                source,
+            )?,
+        );
+        extractions.push(extraction);
+    }
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert!(
+        resolved.error.is_none(),
+        "resolver error: {:?}",
+        resolved.error
+    );
+    let inspect = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == "lib/item.ts" && node.label() == ".inspect()")
+        .ok_or("missing nested imported generic member")?;
+    let consumer_evidence = extractions
+        .iter()
+        .filter_map(|extraction| extraction.semantic_evidence.as_ref())
+        .find(|evidence| {
+            evidence
+                .declarations
+                .iter()
+                .any(|declaration| declaration.range.source_file == "app/consumer.ts")
+        })
+        .ok_or("missing nested consumer evidence")?;
+    let nested_call = consumer_evidence
+        .candidates
+        .iter()
+        .find(|candidate| candidate.relation == CandidateRelation::Calls)
+        .ok_or("missing nested generic call candidate")?;
+    assert_eq!(
+        nested_call.constraints.qualified_name.as_deref(),
+        Some("../lib/types::Box<../lib/types::Wrapper<../lib/item::Item>>.item.value.inspect")
+    );
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.string("source_file") == "app/consumer.ts"
+            && edge.target == inspect.id
+            && edge.string("resolution_rule") == "member-binding"
+    }));
+    Ok(())
+}
+
+#[test]
+fn typescript_candidate_keeps_nested_generic_member_ambiguity_unresolved()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/item.ts",
+            br#"export interface Item { inspect(): void }
+export interface Item { inspect(): void }
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/types.ts",
+            br#"export interface Wrapper<U> { value: U }
+export interface Box<T> { item: T }
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import type { Box, Wrapper } from "../lib/types";
+import type { Item } from "../lib/item";
+export function use(box: Box<Wrapper<Item>>) { box.item.value.inspect(); }
+"#
+            .as_slice(),
+        ),
+    ];
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
+        let mut extraction = extract(relative, source);
+        extraction.semantic_evidence = Some(
+            Engine::default().extract_source_universal_candidate_evidence(
+                Path::new(relative),
+                relative,
+                source,
+            )?,
+        );
+        extractions.push(extraction);
+    }
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert!(
+        resolved.error.is_none(),
+        "resolver error: {:?}",
+        resolved.error
+    );
+    assert!(!resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls" && edge.string("source_file") == "app/consumer.ts"
+    }));
+    Ok(())
+}
+
+#[test]
+fn typescript_candidate_does_not_invent_nested_generic_primitive_members()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/types.ts",
+            br#"export interface Box<T> { item: T }
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import type { Box } from "../lib/types";
+export function use(box: Box<string>) { box.item.inspect(); }
+"#
+            .as_slice(),
+        ),
+    ];
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
+        let mut extraction = extract(relative, source);
+        extraction.semantic_evidence = Some(
+            Engine::default().extract_source_universal_candidate_evidence(
+                Path::new(relative),
+                relative,
+                source,
+            )?,
+        );
+        extractions.push(extraction);
+    }
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert!(
+        resolved.error.is_none(),
+        "resolver error: {:?}",
+        resolved.error
+    );
+    assert!(!resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.string("source_file") == "app/consumer.ts"
+            && edge.string("resolution_rule") == "member-binding"
+    }));
+    Ok(())
+}
