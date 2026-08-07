@@ -743,6 +743,34 @@ mapped/indexed shapes, framework tiers, compiler differential recall, and the
 accepted precision/leadership scorecard remain open. The candidate adapter is
 still not registered in `UNIVERSAL_ADAPTERS`.
 
+### Execution checkpoint (2026-08-06, project-resolver handoff slice)
+
+The qualification-only TypeScript/JavaScript universal path now consumes the
+same bounded project decisions that Compass already applies to its shared
+resolver. Before universal evidence is materialized, the resolver retains a
+read-only buffer of admitted `imports_from` decisions and applies the existing
+project rules for `compilerOptions.paths`, `baseUrl`, `rootDirs`, package
+`exports`/`imports`, `typesVersions`, workspace packages, and importer-aware
+conditions. The universal index receives only those exact target files, keyed
+by normalized importer plus the raw module specifier; target module keys are
+bounded and duplicate realizations remain ambiguous rather than being guessed.
+
+Universal construction/import edges that use this handoff publish the explicit
+`project-module-binding` rule, while member calls retain `member-binding` and
+the original source occurrence/provenance. No terminal-name matching,
+unbounded filesystem search, Graphify runtime, compiler runtime, or network
+dependency was added. The shared-resolution regression proves a `paths` alias
+from `app/consumer.ts` to `src/api.ts` reaches both `Widget` construction and
+`Widget.run()` with exact source-backed targets. The owned and borrowed merge
+paths both pass the same project-edge handoff.
+
+This closes the first universal/project-module integration gap, not the Plan
+013 release gate. Declaration merging, generic instantiation, mapped/indexed
+shapes, framework/compiler strata, hand-labeled precision and recall, and the
+production hard cut remain open. The candidate adapter remains absent from
+`UNIVERSAL_ADAPTERS` until those gates and the exact-release qualification
+complete.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

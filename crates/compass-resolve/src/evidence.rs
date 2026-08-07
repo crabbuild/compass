@@ -42,6 +42,7 @@ pub enum ResolutionRule {
     ExactSourceDeclaration,
     ExactLexicalDeclaration,
     ExplicitBinding,
+    ProjectModuleBinding,
     MemberBinding,
     DeferredReceiver,
     WildcardBinding,
@@ -110,6 +111,7 @@ struct TypeScriptReexportTarget {
 type DeclarationSlot = u32;
 type TypeScriptModuleIndex = AHashMap<(String, String, String), Vec<DeclarationSlot>>;
 type TypeScriptReexportIndex = AHashMap<(String, String, String), Vec<TypeScriptReexportTarget>>;
+type TypeScriptProjectModuleIndex = AHashMap<(String, String), Vec<String>>;
 
 struct TypeScriptExportWalk<'a> {
     candidate: &'a RelationshipCandidate,
@@ -173,6 +175,10 @@ pub struct UniversalResolutionIndex {
     /// spelling. Resolution follows this bounded table rather than selecting
     /// a terminal name from an unrelated source file.
     typescript_reexport_targets: TypeScriptReexportIndex,
+    /// Project/module resolver decisions keyed by importer and raw module
+    /// specifier. Values are normalized source-module keys and are retained
+    /// only when the existing bounded project resolver admitted a target.
+    typescript_project_modules: TypeScriptProjectModuleIndex,
     root: std::path::PathBuf,
     direct_bases: AHashMap<(String, String), DirectBaseSet>,
     direct_subtypes: AHashMap<(String, String), DirectSubtypeSet>,
@@ -226,21 +232,47 @@ impl UniversalResolutionIndex {
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
-        Self::new_with_inventory_owned_impl(batches, inventory_nodes, root, limits, true)
+        Self::new_with_inventory_owned_impl(batches, inventory_nodes, &[], root, limits, true)
     }
 
-    pub(crate) fn new_with_prevalidated_inventory_owned(
+    pub(crate) fn new_with_project_inventory_owned(
         batches: Vec<SemanticEvidenceBatch>,
         inventory_nodes: &[NodeRecord],
+        project_edges: &[EdgeRecord],
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
-        Self::new_with_inventory_owned_impl(batches, inventory_nodes, root, limits, false)
+        Self::new_with_inventory_owned_impl(
+            batches,
+            inventory_nodes,
+            project_edges,
+            root,
+            limits,
+            true,
+        )
+    }
+
+    pub(crate) fn new_with_prevalidated_project_inventory_owned(
+        batches: Vec<SemanticEvidenceBatch>,
+        inventory_nodes: &[NodeRecord],
+        project_edges: &[EdgeRecord],
+        root: &Path,
+        limits: UniversalResolutionLimits,
+    ) -> Result<Self, String> {
+        Self::new_with_inventory_owned_impl(
+            batches,
+            inventory_nodes,
+            project_edges,
+            root,
+            limits,
+            false,
+        )
     }
 
     fn new_with_inventory_owned_impl(
         batches: Vec<SemanticEvidenceBatch>,
         inventory_nodes: &[NodeRecord],
+        project_edges: &[EdgeRecord],
         root: &Path,
         limits: UniversalResolutionLimits,
         validate_batches: bool,
@@ -337,8 +369,22 @@ impl UniversalResolutionIndex {
             return Err("universal declaration slot count exceeds u32".to_owned());
         }
         let definition_ranges = unique_definition_ranges(&declarations, &scopes);
+        let typescript_project_modules = typescript_project_module_index(
+            project_edges,
+            inventory_nodes,
+            root,
+            limits.candidates,
+            limits.candidates_per_lookup,
+        )?;
         let (typescript_modules, typescript_export_aliases, typescript_reexport_targets) =
-            typescript_module_indices(&declarations, &declaration_ids, &bindings, &scopes, root);
+            typescript_module_indices(
+                &declarations,
+                &declaration_ids,
+                &bindings,
+                &scopes,
+                root,
+                &typescript_project_modules,
+            );
         for (name, count, limit) in [
             ("declarations", declarations.len(), limits.declarations),
             ("bindings", bindings.len(), limits.bindings),
@@ -876,6 +922,7 @@ impl UniversalResolutionIndex {
             typescript_modules,
             typescript_export_aliases,
             typescript_reexport_targets,
+            typescript_project_modules,
             root: root.to_path_buf(),
             direct_bases,
             direct_subtypes,
@@ -1218,8 +1265,26 @@ impl UniversalResolutionIndex {
         } else {
             return None;
         };
-        let keys =
-            typescript_import_module_keys(&occurrence.range.source_file, &module, &self.root);
+        let (keys, project_resolved) = self
+            .typescript_project_modules
+            .get(&(
+                typescript_project_importer_key(&occurrence.range.source_file, &self.root)?,
+                module.clone(),
+            ))
+            .cloned()
+            .map_or_else(
+                || {
+                    (
+                        typescript_import_module_keys(
+                            &occurrence.range.source_file,
+                            &module,
+                            &self.root,
+                        ),
+                        false,
+                    )
+                },
+                |keys| (keys, true),
+            );
         if keys.is_empty() {
             return None;
         }
@@ -1281,6 +1346,8 @@ impl UniversalResolutionIndex {
             candidate,
             if member_owner_export.is_some() {
                 ResolutionRule::MemberBinding
+            } else if project_resolved {
+                ResolutionRule::ProjectModuleBinding
             } else {
                 ResolutionRule::ExplicitBinding
             },
@@ -4419,12 +4486,122 @@ fn source_directory(source_file: &str, root: &Path) -> Option<String> {
     (!directory.is_empty()).then_some(directory)
 }
 
+fn typescript_project_importer_key(source_file: &str, root: &Path) -> Option<String> {
+    let relative = typescript_relative_path(source_file, root)?;
+    let key = relative.to_str()?.to_owned();
+    (!key.is_empty() && key.len() <= 4_096).then_some(key)
+}
+
+fn typescript_project_module_keys(
+    project_modules: &TypeScriptProjectModuleIndex,
+    importer: &str,
+    module: &str,
+    root: &Path,
+) -> Option<Vec<String>> {
+    let importer = typescript_project_importer_key(importer, root)?;
+    project_modules
+        .get(&(importer, module.to_owned()))
+        .filter(|keys| !keys.is_empty())
+        .cloned()
+}
+
+fn typescript_project_module_index(
+    edges: &[EdgeRecord],
+    inventory_nodes: &[NodeRecord],
+    root: &Path,
+    entry_limit: usize,
+    candidates_per_lookup: usize,
+) -> Result<TypeScriptProjectModuleIndex, String> {
+    if edges.is_empty() {
+        return Ok(TypeScriptProjectModuleIndex::new());
+    }
+    let mut source_by_node = BTreeMap::<String, BTreeSet<String>>::new();
+    for node in inventory_nodes {
+        let source = node.string("source_file");
+        if !source.is_empty() {
+            source_by_node
+                .entry(node.id.clone())
+                .or_default()
+                .insert(source);
+        }
+    }
+    let max_targets = candidate_storage_limit(candidates_per_lookup);
+    let mut targets = BTreeMap::<(String, String), BTreeSet<String>>::new();
+    for edge in edges {
+        if edge.attributes.get("relation").and_then(Value::as_str) != Some("imports_from") {
+            continue;
+        }
+        let module = edge.string("module");
+        if module.is_empty() || module.len() > 4_096 || module.contains(['\\', '\0']) {
+            continue;
+        }
+        let importer = {
+            let source = edge.string("source_file");
+            if source.is_empty() {
+                unique_inventory_source(&source_by_node, &edge.source)
+                    .unwrap_or_default()
+                    .to_owned()
+            } else {
+                source
+            }
+        };
+        let Some(importer) = typescript_project_importer_key(&importer, root) else {
+            continue;
+        };
+        let target_source = {
+            let source = edge.string("target_file");
+            if source.is_empty() {
+                unique_inventory_source(&source_by_node, &edge.target)
+                    .unwrap_or_default()
+                    .to_owned()
+            } else {
+                source
+            }
+        };
+        let Some(target_keys) = (!target_source.is_empty())
+            .then(|| typescript_source_module_keys(&target_source, root))
+            .filter(|keys| !keys.is_empty())
+        else {
+            continue;
+        };
+        let key = (importer, module);
+        if !targets.contains_key(&key) && targets.len() >= entry_limit {
+            return Err(format!(
+                "TypeScript project module entry count exceeds limit {entry_limit}"
+            ));
+        }
+        let values = targets.entry(key).or_default();
+        for target_key in target_keys {
+            if values.contains(&target_key) || values.len() < max_targets {
+                values.insert(target_key);
+            }
+        }
+    }
+    Ok(targets
+        .into_iter()
+        .filter_map(|(key, values)| {
+            (!values.is_empty()).then_some((key, values.into_iter().collect()))
+        })
+        .collect())
+}
+
+fn unique_inventory_source<'a>(
+    source_by_node: &'a BTreeMap<String, BTreeSet<String>>,
+    node_id: &str,
+) -> Option<&'a str> {
+    let sources = source_by_node.get(node_id)?;
+    let mut values = sources.iter();
+    let source = values.next()?;
+    values.next().is_none().then_some(source.as_str())
+}
+
 fn typescript_module_indices(
     declarations: &AHashMap<String, DeclarationFact>,
     declaration_ids: &[String],
     bindings: &AHashMap<String, BindingFact>,
     scopes: &AHashMap<String, compass_languages::ScopeFact>,
     root: &Path,
+    project_modules: &TypeScriptProjectModuleIndex,
 ) -> (
     TypeScriptModuleIndex,
     TypeScriptModuleIndex,
@@ -4510,8 +4687,15 @@ fn typescript_module_indices(
         if !matches!(owner.language.as_str(), "typescript" | "javascript") {
             continue;
         }
-        let target_modules =
-            typescript_import_module_keys(&owner.range.source_file, target_module, root);
+        let target_modules = typescript_project_module_keys(
+            project_modules,
+            &owner.range.source_file,
+            target_module,
+            root,
+        )
+        .unwrap_or_else(|| {
+            typescript_import_module_keys(&owner.range.source_file, target_module, root)
+        });
         if target_modules.is_empty() {
             continue;
         }
@@ -5505,6 +5689,7 @@ const fn resolution_rule_name(rule: ResolutionRule) -> &'static str {
         ResolutionRule::ExactSourceDeclaration => "exact-source-declaration",
         ResolutionRule::ExactLexicalDeclaration => "exact-lexical-declaration",
         ResolutionRule::ExplicitBinding => "explicit-binding",
+        ResolutionRule::ProjectModuleBinding => "project-module-binding",
         ResolutionRule::MemberBinding => "member-binding",
         ResolutionRule::DeferredReceiver => "deferred-receiver",
         ResolutionRule::WildcardBinding => "wildcard-binding",

@@ -7116,3 +7116,95 @@ new Widget();
     ));
     Ok(())
 }
+
+#[test]
+fn typescript_candidate_consumes_project_path_targets_in_shared_resolution()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "tsconfig.json",
+            br#"{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"] }
+  }
+}
+"#
+            .as_slice(),
+        ),
+        (
+            "src/api.ts",
+            br#"export class Widget { run() {} }
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import { Widget } from "@/api";
+new Widget().run();
+"#
+            .as_slice(),
+        ),
+    ];
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
+        let mut extraction = extract(relative, source);
+        if relative.ends_with(".ts") {
+            extraction.semantic_evidence = Some(
+                Engine::default().extract_source_universal_candidate_evidence(
+                    Path::new(relative),
+                    relative,
+                    source,
+                )?,
+            );
+        }
+        extractions.push(extraction);
+    }
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    let owned = compass_resolve::resolve_owned_with_root(extractions, &sources, root);
+    for resolved in [&resolved, &owned] {
+        assert!(
+            resolved.error.is_none(),
+            "resolver error: {:?}",
+            resolved.error
+        );
+        let calls = resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.string("source_file") == "app/consumer.ts"
+                    && edge.string("relation") == "calls"
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            calls.iter().any(|edge| {
+                edge.string("resolution_rule") == "project-module-binding"
+                    && resolved.nodes.iter().any(|node| {
+                        node.id == edge.target
+                            && node.string("source_file") == "src/api.ts"
+                            && node.label() == "Widget"
+                    })
+            }),
+            "project construction target missing: {calls:#?}"
+        );
+        assert!(
+            calls.iter().any(|edge| {
+                edge.string("resolution_rule") == "member-binding"
+                    && resolved.nodes.iter().any(|node| {
+                        node.id == edge.target
+                            && node.string("source_file") == "src/api.ts"
+                            && node.label() == ".run()"
+                    })
+            }),
+            "project member target missing: {calls:#?}"
+        );
+    }
+    Ok(())
+}

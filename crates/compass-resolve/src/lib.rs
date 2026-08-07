@@ -250,9 +250,17 @@ pub fn resolve_with_root(
         .iter()
         .filter_map(|extraction| extraction.semantic_evidence.clone())
         .collect::<Vec<_>>();
+    let mut project_edges = Vec::new();
     let mut merged = Extraction::default();
     for extraction in extractions {
         if extraction.semantic_evidence.is_some() {
+            project_edges.extend(
+                extraction
+                    .edges
+                    .iter()
+                    .filter(|edge| relation(edge) == "imports_from")
+                    .cloned(),
+            );
             let allowed = universal_allowed_node_ids(extraction);
             merged.nodes.extend(
                 extraction
@@ -296,6 +304,7 @@ pub fn resolve_with_root(
         evidence_batches,
         sources,
         root,
+        project_edges,
         false,
     )
 }
@@ -337,10 +346,18 @@ fn resolve_owned_with_root_impl(
     let language_facts = members::collect_language_call_facts_owned(extractions);
     profile_internal("resolver language fact collection", &mut profile_started);
     let mut evidence_batches = Vec::new();
+    let mut project_edges = Vec::new();
     let mut merged = Extraction::default();
     for extraction in extractions.iter_mut() {
         let universal = extraction.semantic_evidence.take();
         if universal.is_some() {
+            project_edges.extend(
+                extraction
+                    .edges
+                    .iter()
+                    .filter(|edge| relation(edge) == "imports_from")
+                    .cloned(),
+            );
             let mut allowed = universal
                 .as_ref()
                 .into_iter()
@@ -386,6 +403,7 @@ fn resolve_owned_with_root_impl(
         evidence_batches,
         sources,
         root,
+        project_edges,
         evidence_prevalidated,
     )
 }
@@ -418,6 +436,7 @@ fn finish_resolution(
     evidence_batches: Vec<SemanticEvidenceBatch>,
     sources: &HashMap<String, String>,
     root: &Path,
+    project_edges: Vec<EdgeRecord>,
     evidence_prevalidated: bool,
 ) -> Extraction {
     let mut profile_started = Instant::now();
@@ -433,6 +452,19 @@ fn finish_resolution(
         .keys()
         .any(|source| matches!(extension(source).as_str(), "cs" | "razor" | "cshtml"));
     let has_php = sources.keys().any(|source| extension(source) == "php");
+    let mut project_resolution = (!project_edges.is_empty()).then(|| Extraction {
+        nodes: merged
+            .nodes
+            .iter()
+            .filter(|node| {
+                let source = string_attribute(node, "source_file");
+                is_file_node(node, &source)
+            })
+            .cloned()
+            .collect(),
+        edges: project_edges,
+        ..Extraction::default()
+    });
     if has_javascript {
         if let Err(error) =
             resolve_javascript_package_conditions(&mut merged, &canonical_root, sources)
@@ -454,6 +486,28 @@ fn finish_resolution(
             });
         }
         resolve_javascript_reexports(&mut merged);
+        if let Some(project) = project_resolution.as_mut() {
+            if let Err(error) =
+                resolve_javascript_package_conditions(project, &canonical_root, sources)
+            {
+                merged.error.get_or_insert_with(|| {
+                    format!("JavaScript project package-condition resolution failed: {error}")
+                });
+            }
+            if let Err(error) = resolve_javascript_workspace_modules(project, &canonical_root) {
+                merged.error.get_or_insert_with(|| {
+                    format!("JavaScript project workspace resolution failed: {error}")
+                });
+            }
+            if let Err(error) =
+                resolve_javascript_typescript_paths(project, &canonical_root, sources)
+            {
+                merged.error.get_or_insert_with(|| {
+                    format!("JavaScript project path resolution failed: {error}")
+                });
+            }
+            resolve_javascript_reexports(project);
+        }
     }
     profile_internal(
         "resolver JavaScript workspace modules",
@@ -461,17 +515,22 @@ fn finish_resolution(
     );
     profile_internal("resolver JavaScript re-exports", &mut profile_started);
     if !evidence_batches.is_empty() {
+        let project_edges = project_resolution
+            .as_ref()
+            .map_or(&[][..], |project| project.edges.as_slice());
         let index = if evidence_prevalidated {
-            evidence::UniversalResolutionIndex::new_with_prevalidated_inventory_owned(
+            evidence::UniversalResolutionIndex::new_with_prevalidated_project_inventory_owned(
                 evidence_batches,
                 &merged.nodes,
+                project_edges,
                 &canonical_root,
                 evidence::UniversalResolutionLimits::default(),
             )
         } else {
-            evidence::UniversalResolutionIndex::new_with_inventory_owned(
+            evidence::UniversalResolutionIndex::new_with_project_inventory_owned(
                 evidence_batches,
                 &merged.nodes,
+                project_edges,
                 &canonical_root,
                 evidence::UniversalResolutionLimits::default(),
             )
