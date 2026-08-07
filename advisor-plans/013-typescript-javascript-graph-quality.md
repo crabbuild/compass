@@ -1465,6 +1465,33 @@ structural exports, compiler-target truth, release corpora, precision/Wilson,
 framework tiers, equivalent Graphify/SCIP scope, and the production hard cut
 remain open.
 
+### Execution checkpoint (2026-08-07, inline structural assignment receivers)
+
+The native JavaScript flow path now preserves a bounded, source-qualified
+identity for immutable aliases initialized from a plain assignment expression
+whose value is an exact object literal:
+
+- `const state = (this[key] = { inspect() {} })` publishes the object members
+  under `state`, then carries that identity through later closures and
+  property-scoped mutation barriers. Computed member keys remain opaque; the
+  alias is tied to the local declaration, not to a guessed `key` spelling.
+- Separate inline assignments in one callable retain separate qualified
+  identities, so `first.inspect()` cannot select the later `second.inspect()`
+  declaration merely because both objects share a property name.
+- Object spreads, queried-member overwrites, mutable aliases, unsupported
+  non-declarator assignment shapes, and dynamic escapes remain unresolved or
+  fail closed. Direct object-literal behavior is unchanged.
+
+The focused candidate suite remains 88 tests, including inline assignment
+positive, unrelated-write, overwrite, spread, and distinct-object regressions;
+the universal resolver suite remains 166 tests. On the read-only Axios
+target-adjudication diagnostic, exact local target matches improved from
+3,045/3,167 to 3,046/3,167 (121 missing, 0 wrong); members are 383/503 and
+calls remain 1,544/1,545. This is diagnostic evidence rather than a release
+precision/recall claim. Conditional structural exports, compiler-target truth,
+release corpora, precision/Wilson, framework tiers, equivalent Graphify/SCIP
+scope, and the production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

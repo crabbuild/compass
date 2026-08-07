@@ -1549,6 +1549,105 @@ later();
             && candidate.target_spelling == "inspect"
             && candidate.constraints.exact_target_declaration_id.is_some()
     }));
+
+    let inline = candidate(
+        "src/inline-structural-closure.js",
+        br#"const key = Symbol('state');
+class Service {
+    constructor() {
+        const state = (this[key] = { inspect() {}, other: 0 });
+        state.other = 1;
+        const later = () => state.inspect();
+        later();
+    }
+}
+new Service();
+"#,
+    );
+    let inline_inspect = inline
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.name == "inspect"
+                && declaration
+                    .qualified_name
+                    .ends_with(".Service.constructor.state.inspect")
+        })
+        .expect("inline state.inspect declaration");
+    assert!(inline.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(inline_inspect.id.as_str())
+    }));
+
+    let inline_overwritten = candidate(
+        "src/inline-structural-overwrite.js",
+        br#"const key = Symbol('state');
+class Service {
+    constructor() {
+        const state = (this[key] = { inspect() {} });
+        state.inspect = replacement;
+        state.inspect();
+    }
+}
+new Service();
+"#,
+    );
+    assert!(!inline_overwritten.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+
+    let separate = candidate(
+        "src/inline-structural-separate.js",
+        br#"const firstKey = Symbol('first');
+const secondKey = Symbol('second');
+class Service {
+    constructor() {
+        const first = (this[firstKey] = { inspect() { return 1; } });
+        const second = (this[secondKey] = { inspect() { return 2; } });
+        first.inspect();
+        second.inspect();
+    }
+}
+new Service();
+"#,
+    );
+    let first_inspect = separate
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration
+                .qualified_name
+                .ends_with(".Service.constructor.first.inspect")
+        })
+        .expect("first inline inspect declaration");
+    let second_inspect = separate
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration
+                .qualified_name
+                .ends_with(".Service.constructor.second.inspect")
+        })
+        .expect("second inline inspect declaration");
+    let separate_calls = separate
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "inspect"
+        })
+        .collect::<Vec<_>>();
+    assert!(separate_calls.iter().any(|candidate| {
+        candidate.constraints.exact_target_declaration_id.as_deref()
+            == Some(first_inspect.id.as_str())
+    }));
+    assert!(separate_calls.iter().any(|candidate| {
+        candidate.constraints.exact_target_declaration_id.as_deref()
+            == Some(second_inspect.id.as_str())
+    }));
 }
 
 #[test]

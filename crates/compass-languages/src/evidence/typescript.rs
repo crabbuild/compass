@@ -796,7 +796,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 return Ok(());
             }
         }
-        let mut object_literal_value_id = None;
+        let mut object_literal_value = None;
         if node.kind() == "assignment_expression"
             && let Some(left) = node.child_by_field_name("left")
             && matches!(
@@ -869,7 +869,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 {
                     self.structural_object_variables
                         .insert(qualified_name.clone());
-                    object_literal_value_id = Some(right.id());
+                    object_literal_value = Some(right);
                     let mut cursor = right.walk();
                     for child in right.named_children(&mut cursor) {
                         self.collect_declarations(
@@ -893,7 +893,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 self.resolve_name(&scope_id, &node_text(self.source, left), Namespace::Value)
             && variable.kind == "variable"
         {
-            object_literal_value_id = Some(value.id());
+            object_literal_value = Some(value);
             self.structural_object_variables
                 .insert(variable.qualified_name.clone());
             let mut cursor = value.walk();
@@ -909,31 +909,30 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         if node.kind() == "variable_declarator"
             && let Some(name_node) = node.child_by_field_name("name")
         {
-            let object_literal_prefix = node
+            let binding_object_literal_value = node
                 .child_by_field_name("value")
-                .map(unwrap_expression_node)
-                .filter(|value| value.kind() == "object")
-                .and_then(|_| {
-                    // A typed identifier can contain a nested object type
-                    // (`const value: { key: string } = { key: ... }`).
-                    // Walking that annotation as a binding pattern would
-                    // collect `key` as an additional variable and lose the
-                    // receiver prefix, collapsing unrelated object members.
-                    let names = if name_node.kind() == "identifier" {
-                        vec![(node_text(self.source, name_node), name_node)]
+                .and_then(|value| self.object_literal_value_for_binding(value));
+            let object_literal_prefix = binding_object_literal_value.and_then(|_| {
+                // A typed identifier can contain a nested object type
+                // (`const value: { key: string } = { key: ... }`).
+                // Walking that annotation as a binding pattern would
+                // collect `key` as an additional variable and lose the
+                // receiver prefix, collapsing unrelated object members.
+                let names = if name_node.kind() == "identifier" {
+                    vec![(node_text(self.source, name_node), name_node)]
+                } else {
+                    let mut names = Vec::new();
+                    collect_pattern_names(name_node, self.source, &mut names);
+                    names
+                };
+                (names.len() == 1).then(|| {
+                    if qualified_prefix.is_empty() {
+                        names[0].0.clone()
                     } else {
-                        let mut names = Vec::new();
-                        collect_pattern_names(name_node, self.source, &mut names);
-                        names
-                    };
-                    (names.len() == 1).then(|| {
-                        if qualified_prefix.is_empty() {
-                            names[0].0.clone()
-                        } else {
-                            format!("{qualified_prefix}.{}", names[0].0)
-                        }
-                    })
-                });
+                        format!("{qualified_prefix}.{}", names[0].0)
+                    }
+                })
+            });
             if let Some(value) = node.child_by_field_name("value")
                 && is_callable_node(value)
                 && name_node.kind() == "identifier"
@@ -1019,17 +1018,14 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             // after their constructor.
             self.infer_variable_prototype_source(node, &scope_id);
             if let Some(prefix) = object_literal_prefix.as_deref()
-                && let Some(value) = node
-                    .child_by_field_name("value")
-                    .map(unwrap_expression_node)
-                && value.kind() == "object"
+                && let Some(value) = binding_object_literal_value
             {
                 self.structural_object_variables.insert(prefix.to_owned());
                 if !object_literal_has_spread(value) {
                     self.stable_structural_object_variables
                         .insert(prefix.to_owned());
                 }
-                object_literal_value_id = Some(value.id());
+                object_literal_value = Some(value);
                 let mut cursor = value.walk();
                 for child in value.named_children(&mut cursor) {
                     self.collect_declarations(
@@ -1043,7 +1039,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         }
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
-            if Some(child.id()) == object_literal_value_id {
+            if object_literal_value.is_some_and(|object| node_is_descendant_or_same(object, child))
+            {
                 continue;
             }
             self.collect_declarations(
@@ -1745,7 +1742,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     }
 
     fn flow_receiver_for_value(
-        &self,
+        &mut self,
         scope_id: &str,
         value: Node<'tree>,
     ) -> Option<ReceiverTarget> {
@@ -1760,6 +1757,27 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return self.receiver_target(scope_id, value);
         }
         match value.kind() {
+            "assignment_expression" => {
+                let left = value.child_by_field_name("left");
+                let right = value
+                    .child_by_field_name("right")
+                    .map(unwrap_expression_node);
+                let is_plain_assignment = left.zip(right).is_some_and(|(left, right)| {
+                    self.source
+                        .get(left.end_byte()..right.start_byte())
+                        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                        .is_some_and(|operator| operator.trim() == "=")
+                });
+                if is_plain_assignment
+                    && let Some(right) = right
+                    && right.kind() == "object"
+                    && !object_literal_has_spread(right)
+                    && let Some(receiver) = self.flow_inline_object_receiver(scope_id, value)
+                {
+                    return Some(receiver);
+                }
+                right.and_then(|right| self.flow_receiver_for_value(scope_id, right))
+            }
             "new_expression" => self.receiver_target(scope_id, value),
             "call_expression" | "optional_call_expression" => {
                 self.call_return_receiver(scope_id, value)
@@ -1769,6 +1787,67 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             }
             _ => None,
         }
+    }
+
+    fn object_literal_value_for_binding(&self, value: Node<'tree>) -> Option<Node<'tree>> {
+        let value = unwrap_expression_node(value);
+        if value.kind() == "object" {
+            return Some(value);
+        }
+        if value.kind() != "assignment_expression" {
+            return None;
+        }
+        let left = value.child_by_field_name("left")?;
+        let right = value
+            .child_by_field_name("right")
+            .map(unwrap_expression_node)?;
+        let operator = self
+            .source
+            .get(left.end_byte()..right.start_byte())
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())?;
+        (operator.trim() == "=" && right.kind() == "object").then_some(right)
+    }
+
+    fn flow_inline_object_receiver(
+        &self,
+        scope_id: &str,
+        assignment: Node<'tree>,
+    ) -> Option<ReceiverTarget> {
+        let mut current = assignment.parent();
+        for _ in 0..=MAX_TYPE_SHAPE_DEPTH {
+            let Some(ancestor) = current else {
+                break;
+            };
+            if ancestor.kind() == "variable_declarator"
+                && ancestor
+                    .child_by_field_name("value")
+                    .map(unwrap_expression_node)
+                    .is_some_and(|value| value.id() == assignment.id())
+                && let Some(name) = ancestor.child_by_field_name("name")
+                && name.kind() == "identifier"
+            {
+                let name = node_text(self.source, name);
+                let Resolution::Local(variable) =
+                    self.resolve_name(scope_id, &name, Namespace::Value)?
+                else {
+                    return None;
+                };
+                if self
+                    .structural_object_variables
+                    .contains(&variable.qualified_name)
+                {
+                    return Some(ReceiverTarget {
+                        qualified_name: variable.qualified_name,
+                        import: None,
+                        scope_id: Some(variable.scope_id),
+                        type_arguments: None,
+                    });
+                }
+                return None;
+            }
+            current = ancestor.parent();
+        }
+        None
     }
 
     fn record_flow_call_argument_escapes(&mut self, node: Node<'tree>, scope_id: &str) {
