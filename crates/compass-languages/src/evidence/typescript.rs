@@ -252,6 +252,11 @@ struct CandidateState<'source, 'tree> {
     /// spelling.
     property_alias_values: HashMap<String, String>,
     callable_property_aliases: HashSet<String>,
+    /// Variable aliases to source-proven callable values. These are kept
+    /// separate from receiver aliases: passing a callback through an
+    /// unknown API is a reference to the callable binding, not an indirect
+    /// call to a guessed handler.
+    callable_variable_aliases: HashSet<String>,
     /// Variable aliases to a source member/function value. These are retained
     /// only to recover a source-declared return type at a subsequent call
     /// site (for example `const stringType = ZodString.create`).
@@ -344,6 +349,7 @@ pub(crate) fn extract_candidate_tree_evidence(
         constructor_name_hints: HashSet::new(),
         property_alias_values: HashMap::new(),
         callable_property_aliases: HashSet::new(),
+        callable_variable_aliases: HashSet::new(),
         variable_alias_values: HashMap::new(),
         this_receivers: HashMap::new(),
         base_targets: HashMap::new(),
@@ -1275,31 +1281,80 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             .iter()
             .map(|(declaration_id, target)| (declaration_id.clone(), target.clone()))
             .collect::<Vec<_>>();
-        for (declaration_id, target) in aliases {
-            let Some(property) = self.declarations.get(&declaration_id) else {
-                continue;
-            };
-            let property_scope = property.scope_id.clone();
-            let callable = match self.resolve_name(&property_scope, &target, Namespace::Value) {
-                Some(Resolution::Local(target)) => {
-                    target.callable_shape
-                        || matches!(
-                            target.kind.as_str(),
-                            "class" | "constructor" | "function" | "method"
-                        )
+        let variable_aliases = self
+            .variable_alias_values
+            .iter()
+            .map(|(declaration_id, target)| (declaration_id.clone(), target.clone()))
+            .collect::<Vec<_>>();
+        // A short fixed point handles a bounded alias chain (`a -> b -> fn`)
+        // without turning callback classification into whole-program data
+        // flow. The same budget bounds both source syntax and work here.
+        for _ in 0..MAX_INLINE_OBJECT_PROPERTIES {
+            let mut changed = false;
+            for (declaration_id, target) in aliases.iter().chain(variable_aliases.iter()) {
+                let Some(declaration) = self.declarations.get(declaration_id) else {
+                    continue;
+                };
+                let callable = self.callable_alias_target(&declaration.scope_id, target);
+                let destination = if declaration.kind == "property" {
+                    &mut self.callable_property_aliases
+                } else {
+                    &mut self.callable_variable_aliases
+                };
+                if callable && destination.insert(declaration_id.clone()) {
+                    changed = true;
                 }
-                // Overloaded local functions have multiple declarations and
-                // intentionally resolve as ambiguous at a call site.  An
-                // alias to that overloaded set is nevertheless source-proven
-                // callable, so accept it only when every visible candidate
-                // is a callable declaration.
-                None => self.visible_callable_alias_target(&property_scope, &target),
-                Some(Resolution::Import(_)) => false,
-            };
-            if callable {
-                self.callable_property_aliases.insert(declaration_id);
+            }
+            if !changed {
+                break;
             }
         }
+    }
+
+    fn callable_alias_target(&self, scope_id: &str, target: &str) -> bool {
+        if let Some((base, property)) = target.rsplit_once('.') {
+            let Some(receiver) = self.resolve_name(scope_id, base, Namespace::Value) else {
+                return false;
+            };
+            let qualified_name = match receiver {
+                Resolution::Local(declaration) => {
+                    format!("{}.{}", declaration.qualified_name, property)
+                }
+                // An imported member may be callable, but this per-file
+                // candidate has no source declaration proof for its shape.
+                // The project resolver may still resolve an explicit call;
+                // callback references stay conservative here.
+                Resolution::Import(_) => return false,
+            };
+            let Some(ids) = self.declarations_by_qualified.get(&qualified_name) else {
+                return false;
+            };
+            return ids.len() == 1 && ids.iter().all(|id| self.proven_callable_declaration(id));
+        }
+        match self.resolve_name(scope_id, target, Namespace::Value) {
+            Some(Resolution::Local(declaration)) => {
+                self.proven_callable_declaration(&declaration.id)
+            }
+            // Overloaded local functions have no unique `Resolution`, but
+            // every visible declaration can still prove that the alias is a
+            // callable value. The alias itself remains a unique local
+            // binding, so its reference target is not ambiguous.
+            None => self.visible_callable_alias_target(scope_id, target),
+            Some(Resolution::Import(_)) => false,
+        }
+    }
+
+    fn proven_callable_declaration(&self, declaration_id: &str) -> bool {
+        let Some(declaration) = self.declarations.get(declaration_id) else {
+            return false;
+        };
+        declaration.callable_shape
+            || self.callable_property_aliases.contains(declaration_id)
+            || self.callable_variable_aliases.contains(declaration_id)
+            || matches!(
+                declaration.kind.as_str(),
+                "class" | "constructor" | "function" | "method"
+            )
     }
 
     fn visible_callable_alias_target(&self, scope_id: &str, name: &str) -> bool {
@@ -1318,13 +1373,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 })
                 .collect::<Vec<_>>();
             if !candidates.is_empty() {
-                return candidates.iter().all(|candidate| {
-                    candidate.callable_shape
-                        || matches!(
-                            candidate.kind.as_str(),
-                            "class" | "constructor" | "function" | "method"
-                        )
-                });
+                return candidates
+                    .iter()
+                    .all(|candidate| self.proven_callable_declaration(&candidate.id));
             }
             current = self.scope_parents.get(&scope).cloned().flatten();
         }
@@ -4701,9 +4752,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return Ok(());
         };
         let is_callable = match &resolution {
-            Resolution::Local(declaration) => {
-                matches!(declaration.kind.as_str(), "function" | "method" | "class")
-            }
+            Resolution::Local(declaration) => self.proven_callable_declaration(&declaration.id),
             Resolution::Import(import) => {
                 import.imported_name == "default" || import.imported_name == "*"
             }
@@ -5807,6 +5856,40 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         Some(receiver.clone())
     }
 
+    /// Narrow a local union by a positive literal `in` guard
+    /// (`if ("run" in value) { value.run() }`). Only a unique union
+    /// constituent that declares the guarded property is accepted; if two
+    /// constituents expose it, the runtime test does not choose one and the
+    /// receiver remains unresolved.
+    fn flow_narrowed_in_receiver(
+        &self,
+        scope_id: &str,
+        object: Node<'tree>,
+        declaration: &DeclarationInfo,
+    ) -> Option<ReceiverTarget> {
+        let variable_type = self.variable_types.get(&declaration.id)?;
+        let targets = self.type_alias_union_targets.get(variable_type)?;
+        let guard_property = self.positive_in_property_guard(object, declaration.name.as_str())?;
+        let mut matches = Vec::new();
+        for target_name in targets {
+            let receiver = self.resolve_declared_type_receiver(scope_id, target_name)?;
+            if receiver.import.is_some() {
+                continue;
+            }
+            let qualified_name = format!("{}.{}", receiver.qualified_name, guard_property);
+            let Some(ids) = self.declarations_by_qualified.get(&qualified_name) else {
+                continue;
+            };
+            if ids.len() == 1 {
+                matches.push(receiver);
+            }
+        }
+        let [receiver] = matches.as_slice() else {
+            return None;
+        };
+        Some(receiver.clone())
+    }
+
     /// Narrow a local union by a direct string-literal discriminant guard
     /// (`if (value.kind === "ready") { value.data }`).  This is deliberately
     /// limited to a single strict equality in the positive branch and to
@@ -5872,6 +5955,57 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 let prefix = format!("{variable_name}.");
                 if let Some(property) = compact.strip_prefix(&prefix)
                     && !property.is_empty()
+                    && property.chars().all(|character| {
+                        character == '_' || character == '$' || character.is_ascii_alphanumeric()
+                    })
+                {
+                    return Some(property.to_owned());
+                }
+            }
+            current = ancestor.parent();
+        }
+        None
+    }
+
+    fn positive_in_property_guard(
+        &self,
+        object: Node<'tree>,
+        variable_name: &str,
+    ) -> Option<String> {
+        let mut current = object.parent();
+        for _ in 0..=MAX_TYPE_SHAPE_DEPTH {
+            let Some(ancestor) = current else {
+                break;
+            };
+            if ancestor.kind() == "if_statement"
+                && let Some(consequence) = ancestor.child_by_field_name("consequence")
+                && node_is_descendant_or_same(object, consequence)
+                && let Some(condition) = ancestor.child_by_field_name("condition")
+            {
+                let compact = node_text(self.source, condition)
+                    .chars()
+                    .filter(|character| !character.is_ascii_whitespace())
+                    .collect::<String>();
+                let compact = compact
+                    .strip_prefix('(')
+                    .and_then(|value| value.strip_suffix(')'))
+                    .unwrap_or(&compact);
+                let suffix = format!("in{variable_name}");
+                let Some(literal) = compact.strip_suffix(&suffix) else {
+                    current = ancestor.parent();
+                    continue;
+                };
+                let property = literal
+                    .strip_prefix('"')
+                    .and_then(|value| value.strip_suffix('"'))
+                    .or_else(|| {
+                        literal
+                            .strip_prefix('\'')
+                            .and_then(|value| value.strip_suffix('\''))
+                    })
+                    .unwrap_or_default();
+                if !property.is_empty()
+                    && property.len() <= MAX_TYPE_SHAPE_BYTES
                     && property.chars().all(|character| {
                         character == '_' || character == '$' || character.is_ascii_alphanumeric()
                     })
@@ -6067,6 +6201,12 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
 
                         if let Some(receiver) =
                             self.flow_narrowed_union_receiver(scope_id, object, &declaration)
+                        {
+                            return Some(receiver);
+                        }
+
+                        if let Some(receiver) =
+                            self.flow_narrowed_in_receiver(scope_id, object, &declaration)
                         {
                             return Some(receiver);
                         }

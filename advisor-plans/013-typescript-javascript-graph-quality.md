@@ -1138,6 +1138,35 @@ absent from `UNIVERSAL_ADAPTERS`. Conditional/mapped modifier semantics, richer
 interprocedural flow, framework/compiler tiers, accepted precision/Wilson gates,
 equivalent Graphify/SCIP scope, and the production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, callable-value references and `in` narrowing)
+
+The qualification-only ECMAScript candidate now preserves source-proven
+callable values as references when they flow through ordinary JavaScript and
+TypeScript containers or unknown APIs:
+
+- Callable local variables and bounded alias chains (`const alias2 = alias`)
+  publish exact `references` candidates for direct arguments, array/object
+  values, and later uses. The candidate does not invent `indirect_call`; an
+  alias remains a reference to its own source binding until a versioned API or
+  framework contract proves invocation semantics.
+- Callable aliases are classified through a small fixed point bounded by the
+  existing inline-property budget. Member aliases require one unique local
+  source declaration; imported member shapes remain unresolved at the
+  per-file boundary. Non-callable values, conditional mixtures, duplicate
+  owners, and dynamic containers remain unclassified.
+- Positive literal `in` guards narrow a union receiver only when exactly one
+  source constituent owns the guarded property. Shared-property, unknown-key,
+  imported, and unsupported guard forms remain unresolved; the parser range and
+  occurrence are still preserved.
+
+The focused candidate suite is now 77 tests and the universal resolver suite is
+159 tests, including resolver publication checks for callable references with
+no indirect-call edge and candidate checks for unique/ambiguous `in` guards.
+The candidate adapter remains absent from `UNIVERSAL_ADAPTERS`. Conditional and
+mapped modifier semantics beyond the bounded utility/union rules, richer
+interprocedural flow, framework/compiler tiers, accepted precision/Wilson gates,
+equivalent Graphify/SCIP scope, and the production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

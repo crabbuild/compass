@@ -8854,3 +8854,72 @@ export function use() {
     }));
     Ok(())
 }
+
+#[test]
+fn typescript_callable_values_materialize_as_references_not_indirect_calls()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = "src/callback-values.ts";
+    let source = br#"function onValue(value: string) {}
+const alias = onValue;
+const alias2 = alias;
+const handlers = [onValue, alias2];
+consume(onValue);
+consume(alias2);
+consume(handlers[0]);
+"#;
+    let path = root.join(relative);
+    fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+    fs::write(&path, source)?;
+    let mut sources = HashMap::new();
+    sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
+    let mut extraction = extract(relative, source);
+    extraction.semantic_evidence = Some(
+        Engine::default().extract_source_universal_candidate_evidence(
+            Path::new(relative),
+            relative,
+            source,
+        )?,
+    );
+    let resolved = compass_resolve::resolve_with_root(&[extraction], &sources, root);
+    assert!(
+        resolved.error.is_none(),
+        "resolver error: {:?}",
+        resolved.error
+    );
+    let on_value = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file") == relative
+                && node.string("qualified_name").ends_with(".onValue")
+                && node.string("symbol_kind") == "function"
+        })
+        .ok_or("missing callable declaration")?;
+    let alias2 = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file") == relative
+                && node.string("qualified_name").ends_with(".alias2")
+                && node.string("symbol_kind") == "variable"
+        })
+        .ok_or("missing callable alias declaration")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "references"
+            && edge.string("source_file") == relative
+            && edge.target == on_value.id
+            && edge.string("resolution_rule") == "exact-source-declaration"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "references"
+            && edge.string("source_file") == relative
+            && edge.target == alias2.id
+            && edge.string("resolution_rule") == "exact-source-declaration"
+    }));
+    assert!(!resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "indirect_call" && edge.string("source_file") == relative
+    }));
+    Ok(())
+}

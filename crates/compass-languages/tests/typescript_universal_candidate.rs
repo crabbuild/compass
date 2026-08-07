@@ -874,6 +874,41 @@ function read(result: Result) {
 }
 
 #[test]
+fn typescript_in_guards_resolve_the_unique_union_member_owner() {
+    let batch = candidate(
+        "src/in-guard.ts",
+        br#"type Ready = { run(): void };
+type Pending = { wait(): void };
+type State = Ready | Pending;
+function use(state: State) {
+    if ("run" in state) state.run();
+    if ("missing" in state) state.run();
+}
+"#,
+    );
+    let run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Ready.run"))
+        .expect("Ready.run declaration");
+    let runs = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "run"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(runs.len(), 2);
+    assert!(runs.iter().any(|candidate| {
+        candidate.constraints.exact_target_declaration_id.as_deref() == Some(run.id.as_str())
+    }));
+    assert!(
+        runs.iter()
+            .any(|candidate| { candidate.constraints.exact_target_declaration_id.is_none() })
+    );
+}
+
+#[test]
 fn typescript_string_discriminant_guards_resolve_exact_branch_members() {
     let batch = candidate(
         "src/string-discriminated.ts",
@@ -2486,6 +2521,65 @@ fn candidate_declares_for_of_bindings_with_exact_source_anchors() {
             .declarations
             .iter()
             .any(|declaration| { declaration.kind == "variable" && declaration.name == "error" })
+    );
+}
+
+#[test]
+fn javascript_callable_values_are_references_not_indirect_calls() {
+    let source = br#"function onValue(value) {}
+const alias = onValue;
+const alias2 = alias;
+const list = [onValue, alias2];
+const object = { handler: alias };
+consume(onValue);
+consume(alias2);
+consume(list[0]);
+consume(object.handler);
+const nonCallable = 1;
+consume(nonCallable);
+const maybe = Math.random() ? onValue : nonCallable;
+consume(maybe);
+"#;
+    let batch = candidate("src/callback-values.js", source);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("callback value evidence");
+
+    let on_value = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "onValue" && declaration.kind == "function")
+        .expect("callable source declaration");
+    let alias2 = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "alias2" && declaration.kind == "variable")
+        .expect("second callable alias");
+    let non_callable = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "nonCallable")
+        .expect("non-callable value");
+
+    let references_to = |target: &str| {
+        batch
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.relation == CandidateRelation::References
+                    && candidate.constraints.exact_target_declaration_id.as_deref() == Some(target)
+            })
+            .count()
+    };
+    assert!(
+        references_to(&on_value.id) >= 2,
+        "onValue callback references"
+    );
+    assert!(references_to(&alias2.id) >= 2, "alias2 callback references");
+    assert_eq!(references_to(&non_callable.id), 0);
+    assert!(
+        !batch
+            .candidates
+            .iter()
+            .any(|candidate| candidate.relation == CandidateRelation::IndirectCalls)
     );
 }
 
