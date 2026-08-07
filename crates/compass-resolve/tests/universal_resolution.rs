@@ -7806,7 +7806,11 @@ function object(value: ChooseObject<Item>) { value.inspect(); }
             String::from_utf8(source.to_vec())?,
         )]),
     );
-    assert!(resolved.error.is_none(), "resolver error: {:?}", resolved.error);
+    assert!(
+        resolved.error.is_none(),
+        "resolver error: {:?}",
+        resolved.error
+    );
     let inspect = resolved
         .nodes
         .iter()
@@ -7820,9 +7824,11 @@ function object(value: ChooseObject<Item>) { value.inspect(); }
         .filter(|edge| edge.string("relation") == "calls" && edge.target == inspect.id)
         .collect::<Vec<_>>();
     assert_eq!(calls.len(), 3);
-    assert!(calls.iter().all(|edge| {
-        edge.string("source_file") == "src/conditional.ts"
-    }));
+    assert!(
+        calls
+            .iter()
+            .all(|edge| { edge.string("source_file") == "src/conditional.ts" })
+    );
     Ok(())
 }
 
