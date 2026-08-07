@@ -1648,6 +1648,56 @@ new Service();
         candidate.constraints.exact_target_declaration_id.as_deref()
             == Some(second_inspect.id.as_str())
     }));
+
+    let chained = candidate(
+        "src/inline-structural-chained.js",
+        br#"const key = Symbol('state');
+class Service {
+    constructor() {
+        const state = (this[key] = this[key] = { inspect() {}, other: 0 });
+        state.other = 1;
+        const later = () => state.inspect();
+        later();
+    }
+}
+new Service();
+"#,
+    );
+    let chained_inspect = chained
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.name == "inspect"
+                && declaration
+                    .qualified_name
+                    .ends_with(".Service.constructor.state.inspect")
+        })
+        .expect("chained inline state.inspect declaration");
+    assert!(chained.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(chained_inspect.id.as_str())
+    }));
+
+    let chained_compound = candidate(
+        "src/inline-structural-chained-compound.js",
+        br#"const key = Symbol('state');
+class Service {
+    constructor() {
+        const state = (this[key] = this[key] += { inspect() {} });
+        const later = () => state.inspect();
+        later();
+    }
+}
+new Service();
+"#,
+    );
+    assert!(!chained_compound.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
 }
 
 #[test]

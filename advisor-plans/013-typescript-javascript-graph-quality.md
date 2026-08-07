@@ -1492,6 +1492,31 @@ precision/recall claim. Conditional structural exports, compiler-target truth,
 release corpora, precision/Wilson, framework tiers, equivalent Graphify/SCIP
 scope, and the production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, chained inline structural assignments)
+
+The same source-qualified inline receiver slice now accepts a bounded chain of
+plain assignments when every link ends in one spread-free object literal:
+
+- `const state = (this[key] = this[key] = { inspect() {} })` keeps the local
+  declaration as the structural identity, so nested assignment syntax does not
+  collapse separate objects or force a spelling-based receiver guess.
+- Compound links, dynamic/non-declarator assignments, object spreads, queried
+  overwrites, mutable aliases, and unsupported escapes remain unresolved or
+  fail closed. The chain is depth-bounded and checks each operator directly
+  from source bytes.
+- A regression covers the positive chained receiver and a compound-assignment
+  negative. The fixture qualification gate remains byte-identical (57
+  languages, 980 coverage records, 1,565 invariants, 27 flows, 24 negatives,
+  25 diagnostics, 28 edge kinds, and 45 node kinds).
+
+The focused candidate suite remains 88 tests and the universal resolver suite
+remains 166 tests. On the read-only Axios target-adjudication diagnostic, exact
+local target matches improved from 3,046/3,167 to 3,047/3,167 (120 missing,
+0 wrong); members are 384/503 and calls remain 1,544/1,545. This is diagnostic
+evidence rather than a release precision/recall claim. Conditional structural
+exports, compiler-target truth, release corpora, precision/Wilson, framework
+tiers, equivalent Graphify/SCIP scope, and the production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

@@ -1769,9 +1769,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         .is_some_and(|operator| operator.trim() == "=")
                 });
                 if is_plain_assignment
-                    && let Some(right) = right
-                    && right.kind() == "object"
-                    && !object_literal_has_spread(right)
+                    && self
+                        .object_literal_value_for_binding(value)
+                        .is_some_and(|object| !object_literal_has_spread(object))
                     && let Some(receiver) = self.flow_inline_object_receiver(scope_id, value)
                 {
                     return Some(receiver);
@@ -1790,22 +1790,59 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     }
 
     fn object_literal_value_for_binding(&self, value: Node<'tree>) -> Option<Node<'tree>> {
-        let value = unwrap_expression_node(value);
-        if value.kind() == "object" {
-            return Some(value);
+        let mut value = unwrap_expression_node(value);
+        for _ in 0..=MAX_TYPE_SHAPE_DEPTH {
+            if value.kind() == "object" {
+                return Some(value);
+            }
+            if value.kind() != "assignment_expression" {
+                return None;
+            }
+            let left = value.child_by_field_name("left")?;
+            let right = value
+                .child_by_field_name("right")
+                .map(unwrap_expression_node)?;
+            let operator = self
+                .source
+                .get(left.end_byte()..right.start_byte())
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())?;
+            if operator.trim() != "=" {
+                return None;
+            }
+            value = right;
         }
-        if value.kind() != "assignment_expression" {
-            return None;
+        None
+    }
+
+    fn assignment_chain_contains(&self, root: Node<'tree>, target_id: usize) -> bool {
+        let mut current = unwrap_expression_node(root);
+        for _ in 0..=MAX_TYPE_SHAPE_DEPTH {
+            if current.id() == target_id {
+                return true;
+            }
+            if current.kind() != "assignment_expression" {
+                return false;
+            }
+            let left = current.child_by_field_name("left");
+            let right = current
+                .child_by_field_name("right")
+                .map(unwrap_expression_node);
+            let Some((left, right)) = left.zip(right) else {
+                return false;
+            };
+            let Some(operator) = self
+                .source
+                .get(left.end_byte()..right.start_byte())
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+            else {
+                return false;
+            };
+            if operator.trim() != "=" {
+                return false;
+            }
+            current = right;
         }
-        let left = value.child_by_field_name("left")?;
-        let right = value
-            .child_by_field_name("right")
-            .map(unwrap_expression_node)?;
-        let operator = self
-            .source
-            .get(left.end_byte()..right.start_byte())
-            .and_then(|bytes| std::str::from_utf8(bytes).ok())?;
-        (operator.trim() == "=" && right.kind() == "object").then_some(right)
+        false
     }
 
     fn flow_inline_object_receiver(
@@ -1822,7 +1859,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 && ancestor
                     .child_by_field_name("value")
                     .map(unwrap_expression_node)
-                    .is_some_and(|value| value.id() == assignment.id())
+                    .is_some_and(|value| {
+                        self.object_literal_value_for_binding(value)
+                            .is_some_and(|object| !object_literal_has_spread(object))
+                            && self.assignment_chain_contains(value, assignment.id())
+                    })
                 && let Some(name) = ancestor.child_by_field_name("name")
                 && name.kind() == "identifier"
             {
