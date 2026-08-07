@@ -924,6 +924,32 @@ framework tiers, compiler differential recall, and the production hard cut
 remain open. The candidate adapter stays out of `UNIVERSAL_ADAPTERS` until the
 mandatory precision, determinism, qualification, and exact-release gates pass.
 
+### Execution checkpoint (2026-08-06, bounded sequence-index slice)
+
+The qualification-only TypeScript/JavaScript path now carries source-proven
+element receivers through common array and tuple indexing:
+
+- Postfix arrays (Item[]), Array<Item>, and ReadonlyArray<Item> preserve
+  the nominal element receiver for literal or dynamic homogeneous indexes.
+  Generic properties such as Box<T>.values: T[] substitute the concrete
+  Box<Item> argument before resolving values[0].inspect().
+- Fixed tuples preserve a literal numeric element ([Item, string][0]) and
+  generic tuple properties substitute the owner argument before selection.
+  Out-of-range, optional/rest, and dynamic tuple indexes fail closed rather
+  than selecting a union member by position.
+- Imported chains retain a bounded values[0]/pair[0] path marker for the
+  shared resolver. The resolver distinguishes genuine index-signature metadata
+  from generic interface signatures, expands indexed intermediate properties,
+  and keeps exact member-binding provenance for all three imported array/
+  tuple calls in the regression fixture.
+
+The slice adds six direct candidate regressions and one cross-file resolver
+regression; the focused candidate suite is now 62 tests and the universal
+resolver suite is now 149 tests. Arbitrary structural indexed access,
+conditional/mapped modifier semantics, alias escape, dynamic mutation,
+framework tiers, compiler differential recall, and the production hard cut
+remain open. The candidate adapter remains absent from UNIVERSAL_ADAPTERS.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

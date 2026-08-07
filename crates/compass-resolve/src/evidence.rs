@@ -110,6 +110,12 @@ struct TypeScriptMemberPath {
     members: Vec<String>,
 }
 
+struct TypeScriptMemberContext<'a> {
+    owner_signature: Option<&'a str>,
+    type_arguments: &'a [String],
+    index_selector: Option<&'a str>,
+}
+
 /// Compact slot into the declaration table used by secondary indexes.
 ///
 /// Declaration IDs are long, repeated strings on corpus-scale Java and
@@ -1399,7 +1405,12 @@ impl UniversalResolutionIndex {
             self.typescript_export_slots(language, module, &path.root_export, candidate, true);
         let mut targets = BTreeSet::new();
         for root_slot in root_targets {
-            let mut owners = if path.indexed {
+            let has_index_signature = self
+                .declaration(root_slot)
+                .and_then(|declaration| declaration.signature.as_deref())
+                .and_then(typescript_index_value_type)
+                .is_some();
+            let mut owners = if path.indexed && has_index_signature {
                 self.typescript_index_value_contexts(
                     language,
                     module,
@@ -1416,7 +1427,13 @@ impl UniversalResolutionIndex {
                     candidate,
                 )
             };
-            for (index, member_name) in path.members.iter().enumerate() {
+            for (index, raw_member_name) in path.members.iter().enumerate() {
+                let Some((member_name, index_selector)) =
+                    typescript_indexed_member_segment(raw_member_name)
+                else {
+                    owners.clear();
+                    break;
+                };
                 let final_member = index.saturating_add(1) == path.members.len();
                 let mut next_owners = BTreeSet::new();
                 for (owner_slot, owner_type_arguments) in owners.clone() {
@@ -1461,8 +1478,11 @@ impl UniversalResolutionIndex {
                                 language,
                                 module,
                                 type_name,
-                                owner.signature.as_deref(),
-                                &owner_type_arguments,
+                                TypeScriptMemberContext {
+                                    owner_signature: owner.signature.as_deref(),
+                                    type_arguments: &owner_type_arguments,
+                                    index_selector: index_selector.as_deref(),
+                                },
                                 candidate,
                             ));
                         }
@@ -1503,8 +1523,11 @@ impl UniversalResolutionIndex {
             language,
             module,
             type_name,
-            Some(signature),
-            type_arguments,
+            TypeScriptMemberContext {
+                owner_signature: Some(signature),
+                type_arguments,
+                index_selector: None,
+            },
             candidate,
         )
     }
@@ -1552,8 +1575,11 @@ impl UniversalResolutionIndex {
                     language,
                     &alias_module,
                     &substituted,
-                    Some(signature),
-                    &arguments,
+                    TypeScriptMemberContext {
+                        owner_signature: Some(signature),
+                        type_arguments: &arguments,
+                        index_selector: substituted.strip_suffix("[]").map(|_| ""),
+                    },
                     candidate,
                 );
                 if contexts.is_empty() {
@@ -1575,19 +1601,39 @@ impl UniversalResolutionIndex {
         language: &str,
         module: &str,
         type_name: &str,
-        owner_signature: Option<&str>,
-        type_arguments: &[String],
+        context: TypeScriptMemberContext<'_>,
         candidate: &RelationshipCandidate,
     ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
         let type_name = type_name.trim();
         if type_name.is_empty() || type_name.len() > 1024 {
             return BTreeSet::new();
         }
-        let generic_parameters = owner_signature
+        let generic_parameters = context
+            .owner_signature
             .map(typescript_generic_parameter_names)
             .unwrap_or_default();
-        let substituted =
-            typescript_substitute_type_parameters(type_name, &generic_parameters, type_arguments);
+        let substituted = typescript_substitute_type_parameters(
+            type_name,
+            &generic_parameters,
+            context.type_arguments,
+        );
+        let substituted = match context.index_selector {
+            Some("") => match typescript_array_element_type(&substituted) {
+                Some(element) => element.to_owned(),
+                None => return BTreeSet::new(),
+            },
+            Some(index) => {
+                if let Some(element) = typescript_array_element_type(&substituted) {
+                    element
+                } else {
+                    match typescript_tuple_element_type(&substituted, index) {
+                        Some(element) => element,
+                        None => return BTreeSet::new(),
+                    }
+                }
+            }
+            None => substituted,
+        };
         let (base, nested_type_arguments) = typescript_generic_type_parts(&substituted)
             .unwrap_or((substituted.as_str(), Vec::new()));
         let (qualified_module, exported) = split_typescript_module_qualified(base);
@@ -4783,6 +4829,91 @@ fn typescript_generic_type_parts(value: &str) -> Option<(&str, Vec<String>)> {
     (parts.len() <= 64).then_some((base, parts))
 }
 
+fn typescript_array_element_type(value: &str) -> Option<String> {
+    let value = value.trim();
+    if let Some(element) = value.strip_suffix("[]") {
+        let element = element.trim();
+        return (!element.is_empty() && element.len() <= 1024).then(|| element.to_owned());
+    }
+    let (base, arguments) = typescript_generic_type_parts(value)?;
+    if !matches!(base, "Array" | "ReadonlyArray") || arguments.len() != 1 {
+        return None;
+    }
+    arguments.first().cloned()
+}
+
+fn typescript_tuple_elements(value: &str) -> Option<Vec<&str>> {
+    let value = value.trim();
+    if !value.starts_with('[') || !value.ends_with(']') {
+        return None;
+    }
+    let inner = value.get(1..value.len().saturating_sub(1))?.trim();
+    if inner.is_empty() || inner.len() > 1024 {
+        return None;
+    }
+    let mut elements = Vec::new();
+    let mut start = 0_usize;
+    let mut depth = 0_u32;
+    for (index, character) in inner.char_indices() {
+        match character {
+            '<' | '[' | '(' | '{' => depth = depth.saturating_add(1),
+            '>' | ']' | ')' | '}' => depth = depth.checked_sub(1)?,
+            ',' if depth == 0 => {
+                let element = inner.get(start..index)?.trim();
+                if element.is_empty() || element.len() > 1024 {
+                    return None;
+                }
+                elements.push(element);
+                start = index.saturating_add(1);
+            }
+            _ => {}
+        }
+        if elements.len() >= 64 {
+            return None;
+        }
+    }
+    if depth != 0 {
+        return None;
+    }
+    let element = inner.get(start..)?.trim();
+    if element.is_empty() || element.len() > 1024 {
+        return None;
+    }
+    elements.push(element);
+    Some(elements)
+}
+
+fn typescript_tuple_element_type(value: &str, index: &str) -> Option<String> {
+    let index = index.parse::<usize>().ok()?;
+    let element = typescript_tuple_elements(value)?.get(index)?.trim();
+    if element.is_empty() || element.starts_with("...") || element.ends_with('?') {
+        return None;
+    }
+    Some(element.to_owned())
+}
+
+fn typescript_indexed_member_segment(value: &str) -> Option<(String, Option<String>)> {
+    let value = value.trim();
+    if let Some(base) = value.strip_suffix("[]") {
+        let base = base.trim();
+        return (!base.is_empty()).then(|| (base.to_owned(), Some(String::new())));
+    }
+    if let Some(open) = value.rfind('[')
+        && value.ends_with(']')
+    {
+        let base = value.get(..open)?.trim();
+        let index = value.get(open.saturating_add(1)..value.len().saturating_sub(1))?;
+        if base.is_empty()
+            || index.is_empty()
+            || !index.chars().all(|character| character.is_ascii_digit())
+        {
+            return None;
+        }
+        return Some((base.to_owned(), Some(index.to_owned())));
+    }
+    (!value.is_empty()).then(|| (value.to_owned(), None))
+}
+
 fn typescript_generic_parameter_names(signature: &str) -> Vec<String> {
     let signature = signature
         .trim()
@@ -4813,6 +4944,15 @@ fn typescript_generic_parameter_names(signature: &str) -> Vec<String> {
 }
 
 fn typescript_type_alias_target(signature: &str) -> Option<&str> {
+    let alias_separator = signature.find('=');
+    if let Some(index_separator) = signature.find("|index=")
+        && alias_separator.is_none_or(|separator| separator >= index_separator)
+    {
+        // `index=` is declaration-shape metadata, not an alias target. A
+        // generic interface such as `<T>|index=T` must not be expanded as if
+        // its whole receiver were the indexed value.
+        return None;
+    }
     let (parameters, target) = signature.trim().split_once('=')?;
     let parameters = parameters.trim();
     let target = target
@@ -4852,6 +4992,27 @@ fn typescript_substitute_type_parameters(
         && let Some(argument) = arguments.get(index)
     {
         return argument.clone();
+    }
+    if let Some(element) = type_name.strip_suffix("[]") {
+        let substituted = typescript_substitute_type_parameters(element, parameters, arguments);
+        let substituted = format!("{substituted}[]");
+        return if substituted.len() <= 1024 {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
+    }
+    if let Some(elements) = typescript_tuple_elements(type_name) {
+        let substituted = elements
+            .iter()
+            .map(|element| typescript_substitute_type_parameters(element, parameters, arguments))
+            .collect::<Vec<_>>();
+        let substituted = format!("[{}]", substituted.join(","));
+        return if substituted.len() <= 1024 {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
     }
     let Some((base, nested)) = typescript_generic_type_parts(type_name) else {
         return type_name.to_owned();

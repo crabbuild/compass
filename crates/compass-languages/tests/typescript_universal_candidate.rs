@@ -1355,6 +1355,129 @@ function use(value: Nested) { value.inspect(); }
 }
 
 #[test]
+fn typescript_array_index_receiver_preserves_nominal_element_members() {
+    let batch = candidate(
+        "src/array-index.ts",
+        br#"interface Item { inspect(): void }
+function use(values: Item[]) { values[0].inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(inspect.id.as_str())
+    }));
+}
+
+#[test]
+fn typescript_tuple_index_receiver_preserves_nominal_element_members() {
+    let batch = candidate(
+        "src/tuple-index.ts",
+        br#"interface Item { inspect(): void }
+type Pair = [Item, string];
+function use(pair: Pair) { pair[0].inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(inspect.id.as_str())
+    }));
+}
+
+#[test]
+fn typescript_generic_array_member_chain_substitutes_element_receiver() {
+    let batch = candidate(
+        "src/generic-array-index.ts",
+        br#"interface Item { inspect(): void }
+interface Box<T> { values: T[] }
+function use(box: Box<Item>) { box.values[0].inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(inspect.id.as_str())
+    }));
+}
+
+#[test]
+fn typescript_standard_array_container_preserves_nominal_element_members() {
+    let batch = candidate(
+        "src/readonly-array-index.ts",
+        br#"interface Item { inspect(): void }
+function use(values: ReadonlyArray<Item>) { values[0].inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(inspect.id.as_str())
+    }));
+}
+
+#[test]
+fn typescript_dynamic_tuple_index_fails_closed() {
+    let batch = candidate(
+        "src/dynamic-tuple-index.ts",
+        br#"interface Item { inspect(): void }
+function use(pair: [Item, string], index: number) { pair[index].inspect(); }
+"#,
+    );
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.is_none()
+    }));
+}
+
+#[test]
+fn typescript_generic_tuple_member_chain_substitutes_element_receiver() {
+    let batch = candidate(
+        "src/generic-tuple-index.ts",
+        br#"interface Item { inspect(): void }
+interface Box<T> { pair: [T, string] }
+function use(box: Box<Item>) { box.pair[0].inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(inspect.id.as_str())
+    }));
+}
+
+#[test]
 fn typescript_generic_index_signature_values_resolve_member_calls() {
     let batch = candidate(
         "src/generic-index-signature.ts",

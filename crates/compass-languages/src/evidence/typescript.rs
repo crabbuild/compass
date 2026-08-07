@@ -6053,18 +6053,26 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 let nested =
                     self.receiver_target(scope_id, object.child_by_field_name("object")?)?;
                 if object.kind() == "subscript_expression"
-                    && let Some(indexed) = self.index_value_receiver(scope_id, &nested)
+                    && let Some(indexed) = self.index_value_receiver(
+                        scope_id,
+                        &nested,
+                        member_property_name(self.source, property).as_deref(),
+                    )
                 {
                     return Some(indexed);
                 }
                 if object.kind() == "subscript_expression" && nested.import.is_some() {
-                    let qualified_name = format!(
-                        "{}[]",
-                        typescript_receiver_with_type_arguments(
-                            &nested.qualified_name,
-                            nested.type_arguments.as_deref(),
-                        )
+                    let receiver = typescript_receiver_with_type_arguments(
+                        &nested.qualified_name,
+                        nested.type_arguments.as_deref(),
                     );
+                    let suffix = member_property_name(self.source, property)
+                        .filter(|index| {
+                            !index.is_empty()
+                                && index.chars().all(|character| character.is_ascii_digit())
+                        })
+                        .map_or_else(|| "[]".to_owned(), |index| format!("[{index}]"));
+                    let qualified_name = format!("{receiver}{suffix}");
                     return Some(ReceiverTarget {
                         qualified_name,
                         import: nested.import,
@@ -6238,11 +6246,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let [(_declaration, order)] = candidates.as_slice() else {
             return None;
         };
-        let index = order.iter().position(|name| name == type_name)?;
-        arguments
-            .get(index)
-            .cloned()
-            .filter(|argument| !argument.is_empty() && argument.len() <= MAX_TYPE_SHAPE_BYTES)
+        let substituted = substitute_candidate_type_parameters(type_name, order, arguments, 0);
+        (substituted != type_name
+            && !substituted.is_empty()
+            && substituted.len() <= MAX_TYPE_SHAPE_BYTES)
+            .then_some(substituted)
     }
 
     fn member_value_receiver(
@@ -6269,12 +6277,17 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         &self,
         scope_id: &str,
         receiver: &ReceiverTarget,
+        index: Option<&str>,
     ) -> Option<ReceiverTarget> {
         if receiver.import.is_some() {
             return None;
         }
-        let type_name = self.index_value_types.get(&receiver.qualified_name)?;
-        self.resolve_declared_type_receiver(scope_id, type_name)
+        let type_name = self
+            .index_value_types
+            .get(&receiver.qualified_name)
+            .cloned()
+            .or_else(|| indexed_sequence_element_type_name(&receiver.qualified_name, index))?;
+        self.resolve_declared_type_receiver(scope_id, &type_name)
     }
 
     fn resolve_declared_type_receiver(
@@ -6291,6 +6304,16 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 || !seen.insert(normalized.to_owned())
             {
                 return None;
+            }
+            if indexed_sequence_element_type_name(normalized, None).is_some()
+                || tuple_type_element_count(normalized).is_some()
+            {
+                return Some(ReceiverTarget {
+                    qualified_name: normalized.to_owned(),
+                    import: None,
+                    scope_id: None,
+                    type_arguments: None,
+                });
             }
             let (lookup_name, type_arguments) = generic_type_parts(normalized)
                 .map(|(base, arguments)| (base.to_owned(), Some(arguments)))
@@ -7429,6 +7452,12 @@ fn direct_type_reference_name(node: Node<'_>, source: &[u8]) -> Option<String> {
     } else {
         annotation
     };
+    if matches!(type_node.kind(), "array_type" | "tuple_type") {
+        let normalized = normalize_type_text(source, type_node);
+        if !normalized.is_empty() && normalized.len() <= MAX_TYPE_SHAPE_BYTES {
+            return Some(normalized);
+        }
+    }
     let generic_text = (type_node.kind() == "generic_type")
         .then(|| normalize_type_text(source, type_node))
         .filter(|text| !text.is_empty());
@@ -7451,6 +7480,56 @@ fn direct_type_reference_name(node: Node<'_>, source: &[u8]) -> Option<String> {
         _ => return None,
     };
     (!type_name.is_empty()).then_some(type_name)
+}
+
+/// Return a source-preserved element type for a bounded array-like shape.
+/// This is intentionally limited to postfix arrays and the standard generic
+/// array containers; arbitrary structural/indexed expressions remain
+/// unresolved rather than being treated as arrays by spelling alone.
+fn array_element_type_name(type_name: &str) -> Option<String> {
+    let type_name = type_name.trim();
+    if let Some(element) = type_name.strip_suffix("[]") {
+        let element = element.trim();
+        return (!element.is_empty() && element.len() <= MAX_TYPE_SHAPE_BYTES)
+            .then(|| element.to_owned());
+    }
+    let (base, arguments) = generic_type_parts(type_name)?;
+    if !matches!(base, "Array" | "ReadonlyArray") || arguments.len() != 1 {
+        return None;
+    }
+    Some(arguments[0].clone())
+}
+
+fn tuple_type_elements(type_name: &str) -> Option<Vec<&str>> {
+    let type_name = type_name.trim();
+    if !type_name.starts_with('[') || !type_name.ends_with(']') {
+        return None;
+    }
+    let inner = type_name.get(1..type_name.len().saturating_sub(1))?.trim();
+    if inner.is_empty() {
+        return None;
+    }
+    split_top_level_arguments(inner)
+}
+
+fn tuple_type_element_count(type_name: &str) -> Option<usize> {
+    tuple_type_elements(type_name).map(|elements| elements.len())
+}
+
+fn tuple_element_type_name(type_name: &str, index: &str) -> Option<String> {
+    let index = index.parse::<usize>().ok()?;
+    let element = tuple_type_elements(type_name)?.get(index)?.trim();
+    if element.is_empty() || element.starts_with("...") || element.ends_with('?') {
+        return None;
+    }
+    (element.len() <= MAX_TYPE_SHAPE_BYTES).then(|| element.to_owned())
+}
+
+fn indexed_sequence_element_type_name(type_name: &str, index: Option<&str>) -> Option<String> {
+    if let Some(element) = array_element_type_name(type_name) {
+        return Some(element);
+    }
+    index.and_then(|index| tuple_element_type_name(type_name, index))
 }
 
 fn mapped_type_source_name(node: Node<'_>, source: &[u8]) -> Option<String> {
@@ -7539,6 +7618,30 @@ fn substitute_candidate_type_parameters(
         && let Some(argument) = arguments.get(index)
     {
         return argument.clone();
+    }
+    if let Some(element) = type_name.strip_suffix("[]") {
+        let substituted =
+            substitute_candidate_type_parameters(element, parameters, arguments, depth + 1);
+        let substituted = format!("{substituted}[]");
+        return if substituted.len() <= MAX_TYPE_SHAPE_BYTES {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
+    }
+    if let Some(elements) = tuple_type_elements(type_name) {
+        let substituted = elements
+            .iter()
+            .map(|element| {
+                substitute_candidate_type_parameters(element, parameters, arguments, depth + 1)
+            })
+            .collect::<Vec<_>>();
+        let substituted = format!("[{}]", substituted.join(","));
+        return if substituted.len() <= MAX_TYPE_SHAPE_BYTES {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
     }
     let Some((base, nested)) = generic_type_parts(type_name) else {
         return type_name.to_owned();
@@ -7705,7 +7808,23 @@ fn property_literal_value(node: Node<'_>, source: &[u8]) -> Option<String> {
 }
 
 fn index_value_type(node: Node<'_>, source: &[u8]) -> Option<String> {
-    let text = node_text(source, node);
+    let container = node
+        .child_by_field_name("value")
+        .or_else(|| node.child_by_field_name("body"))
+        .or_else(|| (node.kind() == "object_type").then_some(node))?;
+    let container = if container.kind() == "type_annotation" {
+        first_named_child(container)?
+    } else {
+        container
+    };
+    let mut cursor = container.walk();
+    let index_signature = container
+        .named_children(&mut cursor)
+        .find(|child| child.kind() == "index_signature")?;
+    if contains_node_kind(index_signature, "mapped_type_clause") {
+        return None;
+    }
+    let text = node_text(source, index_signature);
     if text.len() > MAX_TYPE_SHAPE_BYTES {
         return None;
     }
