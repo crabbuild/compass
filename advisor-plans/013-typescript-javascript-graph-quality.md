@@ -1001,6 +1001,34 @@ modifier semantics, accepted precision/Wilson gates, framework/compiler tiers,
 equivalent Graphify/SCIP scope, and the production hard cut remain open. The
 candidate adapter remains absent from `UNIVERSAL_ADAPTERS`.
 
+### Execution checkpoint (2026-08-06, imported callable-return evidence slice)
+
+The qualification-only TypeScript/JavaScript path now carries bounded
+source-proven call-result evidence across project files:
+
+- Imported direct calls publish a length-limited `#call<...>` path marker with
+  only known argument shapes. Unknown arguments, oversized markers, and
+  dynamic call results remain unresolved; the marker is never eligible for a
+  fabricated external target.
+- Callable declarations publish fixed parameter and return metadata alongside
+  their existing generic parameter prefix. The shared resolver uses that
+  metadata for direct nominal returns and bounded generic inference through
+  direct parameters, postfix arrays, and matching generic containers.
+- Imported calls such as `make(value).inspect()`,
+  `identity(value).inspect()`, and `box(value).value.inspect()` now resolve
+  to the exact `Item.inspect` declaration when the source evidence is unique.
+  Duplicate exported declarations remain unresolved instead of selecting a
+  first candidate.
+
+The slice adds one direct candidate regression and two cross-file resolver
+regressions; the focused candidate suite is now 71 tests and the universal
+resolver suite is now 152 tests. Imported callable member-method returns,
+explicit generic-call arguments without inferable value arguments, richer
+conditional/mapped modifier semantics, accepted precision/Wilson gates,
+framework/compiler tiers, equivalent Graphify/SCIP scope, and the production
+hard cut remain open. The candidate adapter remains absent from
+`UNIVERSAL_ADAPTERS`.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

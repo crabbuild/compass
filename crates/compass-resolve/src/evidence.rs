@@ -106,6 +106,8 @@ struct TypeScriptReexportTarget {
 struct TypeScriptMemberPath {
     root_export: String,
     type_arguments: Vec<String>,
+    call_result: bool,
+    call_argument_types: Vec<String>,
     indexed: bool,
     members: Vec<String>,
 }
@@ -1325,7 +1327,10 @@ impl UniversalResolutionIndex {
         let mut targets = BTreeSet::new();
         for key in keys {
             if let Some(path) = member_path.as_ref()
-                && (path.indexed || path.members.len() > 1 || !path.type_arguments.is_empty())
+                && (path.call_result
+                    || path.indexed
+                    || path.members.len() > 1
+                    || !path.type_arguments.is_empty())
             {
                 targets.extend(self.typescript_member_chain_slots(language, &key, path, candidate));
                 continue;
@@ -1410,7 +1415,15 @@ impl UniversalResolutionIndex {
                 .and_then(|declaration| declaration.signature.as_deref())
                 .and_then(typescript_index_value_type)
                 .is_some();
-            let mut owners = if path.indexed && has_index_signature {
+            let mut owners = if path.call_result {
+                self.typescript_callable_return_contexts(
+                    language,
+                    module,
+                    root_slot,
+                    &path.call_argument_types,
+                    candidate,
+                )
+            } else if path.indexed && has_index_signature {
                 self.typescript_index_value_contexts(
                     language,
                     module,
@@ -1500,6 +1513,69 @@ impl UniversalResolutionIndex {
             }
         }
         targets
+    }
+
+    /// Resolve the nominal receiver produced by an imported callable result.
+    /// Only source-published fixed parameters and direct/container generic
+    /// inference are accepted; overloads, contextual inference, and
+    /// structural assignability remain unresolved.
+    fn typescript_callable_return_contexts(
+        &self,
+        language: &str,
+        module: &str,
+        callable_slot: DeclarationSlot,
+        call_argument_types: &[String],
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
+        let Some(callable) = self.declaration(callable_slot) else {
+            return BTreeSet::new();
+        };
+        let Some(signature) = callable.signature.as_deref() else {
+            return BTreeSet::new();
+        };
+        let Some(return_type) = typescript_callable_return_type(signature) else {
+            return BTreeSet::new();
+        };
+        let parameters = typescript_generic_parameter_names(signature);
+        let mut type_arguments = parameters.clone();
+        if let Some(parameter_types) = typescript_callable_parameter_types(signature) {
+            if parameter_types.len() != call_argument_types.len() {
+                return BTreeSet::new();
+            }
+            for (parameter_type, argument_type) in
+                parameter_types.iter().zip(call_argument_types.iter())
+            {
+                if !typescript_infer_type_arguments(
+                    parameter_type,
+                    argument_type,
+                    &parameters,
+                    &mut type_arguments,
+                ) {
+                    return BTreeSet::new();
+                }
+            }
+        } else if !parameters.is_empty()
+            && typescript_type_mentions_parameter(return_type, &parameters)
+        {
+            return BTreeSet::new();
+        }
+        if !parameters.is_empty()
+            && typescript_type_mentions_parameter(return_type, &parameters)
+            && type_arguments == parameters
+        {
+            return BTreeSet::new();
+        }
+        self.typescript_member_type_contexts(
+            language,
+            module,
+            return_type,
+            TypeScriptMemberContext {
+                owner_signature: Some(signature),
+                type_arguments: &type_arguments,
+                index_selector: None,
+            },
+            candidate,
+        )
     }
 
     fn typescript_index_value_contexts(
@@ -4713,11 +4789,38 @@ fn typescript_member_path(qualified: &str, target_spelling: &str) -> Option<Type
         return None;
     }
     let root_segment = segments.first()?;
-    let indexed = root_segment.ends_with("[]");
-    let root_segment = root_segment
+    let mut indexed = root_segment.ends_with("[]");
+    let mut root_segment = root_segment
         .strip_suffix("[]")
         .unwrap_or(root_segment)
         .trim();
+    let (call_result, call_argument_types) = if let Some(marker) = root_segment.find("#call<") {
+        let base = root_segment.get(..marker)?.trim();
+        let marker_payload = root_segment.get(marker.saturating_add("#call<".len())..)?;
+        let marker_payload = marker_payload.strip_suffix('>')?;
+        if base.is_empty() || marker_payload.is_empty() {
+            return None;
+        }
+        let marker_arguments = if marker_payload == "__none" {
+            Vec::new()
+        } else {
+            let wrapped = format!("Call<{marker_payload}>");
+            let (_, arguments) = typescript_generic_type_parts(&wrapped)?;
+            arguments
+        };
+        let marker_end = marker.saturating_add("#call<".len()) + marker_payload.len() + 1;
+        let suffix = root_segment.get(marker_end..).unwrap_or_default();
+        if !suffix.is_empty() {
+            if suffix != "[]" {
+                return None;
+            }
+            indexed = true;
+        }
+        root_segment = base;
+        (true, marker_arguments)
+    } else {
+        (false, Vec::new())
+    };
     let (root_export, type_arguments) = typescript_generic_type_parts(root_segment).map_or_else(
         || (root_segment.to_owned(), Vec::new()),
         |(base, arguments)| (base.to_owned(), arguments),
@@ -4728,6 +4831,8 @@ fn typescript_member_path(qualified: &str, target_spelling: &str) -> Option<Type
     Some(TypeScriptMemberPath {
         root_export,
         type_arguments,
+        call_result,
+        call_argument_types,
         indexed,
         members: segments.into_iter().skip(1).collect(),
     })
@@ -5036,6 +5141,95 @@ fn typescript_generic_parameter_names(signature: &str) -> Vec<String> {
         }
     }
     names
+}
+
+fn typescript_callable_return_type(signature: &str) -> Option<&str> {
+    let (_, return_type) = signature.rsplit_once("|return:")?;
+    let return_type = return_type.trim();
+    (!return_type.is_empty() && return_type.len() <= 1024).then_some(return_type)
+}
+
+fn typescript_callable_parameter_types(signature: &str) -> Option<Vec<String>> {
+    let (_, parameters) = signature.split_once("|params:")?;
+    let parameters = parameters
+        .split_once("|return:")
+        .map_or(parameters, |(parameters, _)| parameters)
+        .trim();
+    if parameters.is_empty() {
+        return Some(Vec::new());
+    }
+    let wrapped = format!("Parameters<{parameters}>");
+    typescript_generic_type_parts(&wrapped).map(|(_, arguments)| arguments)
+}
+
+fn typescript_infer_type_arguments(
+    parameter: &str,
+    argument: &str,
+    parameters: &[String],
+    arguments: &mut [String],
+) -> bool {
+    let parameter = parameter.trim();
+    let argument = argument.trim();
+    if parameter.is_empty() || argument.is_empty() {
+        return true;
+    }
+    if let Some(index) = parameters.iter().position(|name| name == parameter) {
+        let Some(slot) = arguments.get_mut(index) else {
+            return true;
+        };
+        if slot
+            == parameters
+                .get(index)
+                .map(String::as_str)
+                .unwrap_or_default()
+        {
+            slot.clone_from(&argument.to_owned());
+            return true;
+        }
+        return slot == argument;
+    }
+    if let (Some(parameter_element), Some(argument_element)) =
+        (parameter.strip_suffix("[]"), argument.strip_suffix("[]"))
+    {
+        return typescript_infer_type_arguments(
+            parameter_element,
+            argument_element,
+            parameters,
+            arguments,
+        );
+    }
+    let Some((parameter_base, parameter_arguments)) = typescript_generic_type_parts(parameter)
+    else {
+        return true;
+    };
+    let Some((argument_base, argument_arguments)) = typescript_generic_type_parts(argument) else {
+        return true;
+    };
+    if parameter_base != argument_base || parameter_arguments.len() != argument_arguments.len() {
+        return true;
+    }
+    for (parameter_argument, argument_argument) in
+        parameter_arguments.iter().zip(argument_arguments.iter())
+    {
+        if !typescript_infer_type_arguments(
+            parameter_argument,
+            argument_argument,
+            parameters,
+            arguments,
+        ) {
+            return false;
+        }
+    }
+    true
+}
+
+fn typescript_type_mentions_parameter(type_name: &str, parameters: &[String]) -> bool {
+    type_name
+        .split(|character: char| {
+            !(character == '_' || character == '$' || character.is_ascii_alphanumeric())
+        })
+        .filter(|token| !token.is_empty())
+        .any(|token| parameters.iter().any(|parameter| parameter == token))
 }
 
 fn typescript_type_alias_target(signature: &str) -> Option<&str> {

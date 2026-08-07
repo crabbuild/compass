@@ -2602,6 +2602,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 "external".to_owned(),
             ),
         };
+        let allow_external = target_kind == "external"
+            && qualified_name
+                .as_deref()
+                .is_none_or(|qualified| !qualified.contains("#call<"));
         let occurrence_id = self.builder.occur_with_context(
             role,
             &owner,
@@ -2623,7 +2627,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 .iter()
                 .map(|kind| (*kind).to_owned())
                 .collect(),
-            allow_external: target_kind == "external",
+            allow_external,
             ..ResolutionConstraint::default()
         };
         if relation == CandidateRelation::Extends {
@@ -6143,6 +6147,36 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             let target = rightmost_identifier(function)?;
             self.resolve_name(scope_id, &node_text(self.source, target), Namespace::Value)
         }?;
+        if let Resolution::Import(import) = &resolution {
+            // Carry a bounded, source-proven call-result marker across the
+            // file boundary.  The resolver can use the imported callable's
+            // published signature to recover its nominal return receiver;
+            // unknown argument shapes deliberately remain unresolved.
+            let argument_types = self.call_argument_types(call, scope_id);
+            if argument_types.iter().any(Option::is_none) {
+                return None;
+            }
+            let argument_types = argument_types.into_iter().flatten().collect::<Vec<_>>();
+            let marker_arguments = if argument_types.is_empty() {
+                "__none".to_owned()
+            } else {
+                argument_types.join(",")
+            };
+            if marker_arguments.len() > MAX_TYPE_SHAPE_BYTES {
+                return None;
+            }
+            let receiver = import_target_without_namespace(&import.target);
+            let qualified_name = format!("{receiver}#call<{marker_arguments}>");
+            if qualified_name.len() > MAX_TYPE_SHAPE_BYTES {
+                return None;
+            }
+            return Some(ReceiverTarget {
+                qualified_name,
+                import: Some(import.clone()),
+                scope_id: None,
+                type_arguments: None,
+            });
+        }
         let Resolution::Local(declaration) = resolution else {
             return None;
         };
@@ -7268,6 +7302,7 @@ fn callable_parameter_types(node: Node<'_>, source: &[u8]) -> Option<Vec<String>
     if !matches!(
         node.kind(),
         "function_declaration"
+            | "function_signature"
             | "generator_function_declaration"
             | "method_definition"
             | "method_signature"
@@ -7470,10 +7505,34 @@ fn typescript_declaration_signature(node: Node<'_>, kind: &str, source: &[u8]) -
     {
         return Some(type_name);
     }
-    let generic_prefix = callable_type_parameter_order(node, source)
+    let callable_value = callable_value_node(node);
+    let generic_parameter_order = callable_type_parameter_order(node, source)
+        .or_else(|| callable_value.and_then(|value| callable_type_parameter_order(value, source)));
+    let generic_prefix = generic_parameter_order
         .filter(|parameters| !parameters.is_empty())
         .map(|parameters| format!("<{}>", parameters.join(",")))
         .unwrap_or_default();
+    if matches!(kind, "function" | "method") {
+        let parameter_types = callable_parameter_types(node, source)
+            .or_else(|| callable_value.and_then(|value| callable_parameter_types(value, source)));
+        let return_type = callable_return_type_name(node, source);
+        if parameter_types.is_some() || return_type.is_some() {
+            let mut signature = generic_prefix.clone();
+            if let Some(parameter_types) = parameter_types {
+                signature.push_str("|params:");
+                signature.push_str(&parameter_types.join(","));
+            }
+            if let Some(return_type) = return_type {
+                signature.push_str("|return:");
+                signature.push_str(&return_type);
+            }
+            if signature.len() <= MAX_TYPE_SHAPE_BYTES
+                && (signature.contains("|params:") || signature.contains("|return:"))
+            {
+                return Some(signature);
+            }
+        }
+    }
     if kind == "type_alias"
         && let Some(target) = direct_type_reference_name(node, source)
     {

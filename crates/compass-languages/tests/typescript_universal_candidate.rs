@@ -1511,6 +1511,52 @@ function use() {
 }
 
 #[test]
+fn typescript_imported_callable_return_publishes_bounded_marker() {
+    let batch = candidate(
+        "src/imported-call.ts",
+        br#"import { make } from "./factory";
+class Item { inspect(): void {} }
+function use(value: Item) { make(value).inspect(); }
+"#,
+    );
+    let use_declaration = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "use")
+        .expect("use declaration");
+    assert_eq!(use_declaration.signature.as_deref(), Some("|params:Item"));
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    let call = batch
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "inspect"
+        })
+        .expect("imported callable return member call");
+    assert_eq!(
+        call.constraints.exact_target_declaration_id, None,
+        "cross-file call result must be resolved by the project resolver"
+    );
+    assert!(
+        call.constraints
+            .qualified_name
+            .as_deref()
+            .is_some_and(|qualified| qualified.contains("#call<"))
+    );
+    assert!(!call.constraints.allow_external);
+    let local_call = batch.candidates.iter().find(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id == Some(inspect.id.clone())
+    });
+    assert!(local_call.is_none());
+}
+
+#[test]
 fn typescript_generic_function_array_return_preserves_element_receiver() {
     let batch = candidate(
         "src/generic-return-array.ts",
