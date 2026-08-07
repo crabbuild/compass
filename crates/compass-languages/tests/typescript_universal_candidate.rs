@@ -29,7 +29,7 @@ new App();
     let batch = candidate("src/app.ts", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("valid evidence");
     assert_eq!(batch.adapter.language, "typescript");
-    assert_eq!(batch.adapter.version, 3);
+    assert_eq!(batch.adapter.version, 4);
     assert_eq!(batch.adapter.dialect.as_deref(), Some("ts"));
     assert!(
         batch
@@ -120,7 +120,7 @@ export async function load() { return import("./lazy.js"); }
 "#;
     let batch = candidate("src/render.jsx", source);
     assert_eq!(batch.adapter.language, "javascript");
-    assert_eq!(batch.adapter.version, 3);
+    assert_eq!(batch.adapter.version, 4);
     assert_eq!(batch.adapter.dialect.as_deref(), Some("jsx"));
     assert!(
         batch
@@ -248,13 +248,42 @@ export default { ...base, isString: value => true };
 "#,
     );
     validate_evidence(&spread, EvidenceLimits::default()).expect("spread default evidence");
+    let spread_default = spread
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "spread-default.default")
+        .expect("proven spread default owner");
+    assert!(
+        spread
+            .declarations
+            .iter()
+            .any(|declaration| declaration.qualified_name == "spread-default.default.isString")
+    );
     assert!(
         !spread
             .declarations
             .iter()
-            .any(|declaration| declaration.qualified_name == "spread-default.default")
+            .any(|declaration| declaration.qualified_name == "spread-default.default.isNumber")
     );
-    assert!(!spread.bindings.iter().any(|binding| {
+    assert!(spread.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Reexport
+            && binding.spelling == "default"
+            && binding.target_declaration_id.as_deref() == Some(spread_default.id.as_str())
+    }));
+
+    let unknown = candidate(
+        "src/unknown-spread-default.js",
+        br#"const base = getBase();
+export default { ...base, isString: value => true };
+"#,
+    );
+    assert!(
+        !unknown
+            .declarations
+            .iter()
+            .any(|declaration| declaration.qualified_name == "unknown-spread-default.default")
+    );
+    assert!(!unknown.bindings.iter().any(|binding| {
         binding.kind == compass_languages::BindingKind::Reexport && binding.spelling == "default"
     }));
 }
@@ -1813,6 +1842,87 @@ later();
 "#,
     );
     assert!(!spread.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+
+    let proven_spread = candidate(
+        "src/const-structural-proven-spread.js",
+        br#"const base = { inspect() {} };
+const config = { ...base };
+config.inspect();
+"#,
+    );
+    let base_inspect = proven_spread
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.qualified_name == "const-structural-proven-spread.base.inspect"
+        })
+        .expect("proven spread source member");
+    assert!(proven_spread.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(base_inspect.id.as_str())
+    }));
+
+    let overridden = candidate(
+        "src/const-structural-spread-order.js",
+        br#"const base = { inspect() {} };
+const config = { inspect() { return 'local'; }, ...base };
+config.inspect();
+"#,
+    );
+    let base_target = overridden
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.qualified_name == "const-structural-spread-order.base.inspect"
+        })
+        .expect("spread override source member");
+    let config_target = overridden
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.qualified_name == "const-structural-spread-order.config.inspect"
+        })
+        .expect("spread override destination member");
+    assert!(overridden.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(base_target.id.as_str())
+    }));
+    assert!(!overridden.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(config_target.id.as_str())
+    }));
+
+    let unknown = candidate(
+        "src/const-structural-unknown-spread.js",
+        br#"const base = getBase();
+const config = { ...base };
+config.inspect();
+"#,
+    );
+    assert!(!unknown.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+
+    let ambiguous = candidate(
+        "src/const-structural-ambiguous-spread.js",
+        br#"const base = { inspect() {}, inspect(value) {} };
+const config = { ...base };
+config.inspect();
+"#,
+    );
+    assert!(!ambiguous.candidates.iter().any(|candidate| {
         candidate.relation == CandidateRelation::Calls
             && candidate.target_spelling == "inspect"
             && candidate.constraints.exact_target_declaration_id.is_some()
@@ -3411,6 +3521,28 @@ fn javascript_flow_assignment_object_literal_selects_exact_members() {
             && candidate.target_spelling == "username"
             && candidate.constraints.exact_target_declaration_id.as_deref()
                 == Some(username.id.as_str())
+    }));
+
+    let spread = candidate(
+        "src/object-spread-reassignment.js",
+        br#"const base = { username: 'user' };
+let auth;
+auth = { ...base };
+auth.username;
+"#,
+    );
+    let base_username = spread
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.qualified_name == "object-spread-reassignment.base.username"
+        })
+        .expect("spread assignment member declaration");
+    assert!(spread.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "username"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(base_username.id.as_str())
     }));
 }
 

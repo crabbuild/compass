@@ -6878,6 +6878,7 @@ utils.isNumber(1);
 utils.isString('value');
 named(2);
 spread.isString('value');
+spread.isNumber(1);
 "#
             .as_slice(),
         ),
@@ -6905,6 +6906,11 @@ spread.isString('value');
         .iter()
         .find(|declaration| declaration.qualified_name == "utils.default.isString")
         .ok_or("missing default object isString declaration")?;
+    let spread_string = batches[1]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "spread-default.default.isString")
+        .ok_or("missing spread-default direct member declaration")?;
     let number_call = batches[2]
         .candidates
         .iter()
@@ -6939,6 +6945,19 @@ spread.isString('value');
                     .is_some_and(|qualified| qualified.contains("spread-default.js::default"))
         })
         .ok_or("missing spread-default member call")?;
+    let spread_number_call = batches[2]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "isNumber"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.contains("spread-default.js::default"))
+        })
+        .ok_or("missing spread-default inherited member call")?;
     let named_call = batches[2]
         .candidates
         .iter()
@@ -6962,8 +6981,13 @@ spread.isString('value');
         compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
             if declaration_id == &utils_string.id
     ));
-    assert!(!matches!(
+    assert!(matches!(
         index.resolve(&spread_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &spread_string.id
+    ));
+    assert!(!matches!(
+        index.resolve(&spread_number_call.id),
         compass_resolve::evidence::ResolutionDecision::Resolved { .. }
     ));
     assert!(!matches!(

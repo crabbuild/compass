@@ -64,7 +64,7 @@ const JAVASCRIPT_CAPABILITIES: &[LanguageCapability] = &[
 static TYPESCRIPT_PROFILE: AdapterProfile = AdapterProfile {
     id: "compass.typescript.candidate",
     language: "typescript",
-    version: 3,
+    version: 4,
     evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA,
     profile: crate::UniversalAdapterProfile::UniversalCandidate,
     capabilities: TYPESCRIPT_CAPABILITIES,
@@ -73,7 +73,7 @@ static TYPESCRIPT_PROFILE: AdapterProfile = AdapterProfile {
 static JAVASCRIPT_PROFILE: AdapterProfile = AdapterProfile {
     id: "compass.javascript.candidate",
     language: "javascript",
-    version: 3,
+    version: 4,
     evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA,
     profile: crate::UniversalAdapterProfile::UniversalCandidate,
     capabilities: JAVASCRIPT_CAPABILITIES,
@@ -150,6 +150,13 @@ enum Resolution {
     Import(ImportInfo),
 }
 
+enum StructuralSpreadDecision {
+    NotApplicable,
+    Resolved(Box<DeclarationInfo>),
+    KnownAbsent,
+    Unresolved,
+}
+
 impl Resolution {
     fn qualified_target(&self) -> Option<String> {
         match self {
@@ -183,6 +190,13 @@ struct ReceiverTarget {
 struct FlowAssignment {
     start_byte: usize,
     receiver: ReceiverTarget,
+}
+
+#[derive(Clone)]
+struct StructuralObjectSpread {
+    source_qualified_name: String,
+    source_variable_id: String,
+    start_byte: usize,
 }
 
 #[derive(Clone)]
@@ -247,6 +261,11 @@ struct CandidateState<'source, 'tree> {
     immutable_bindings: HashSet<String>,
     structural_object_variables: HashSet<String>,
     stable_structural_object_variables: HashSet<String>,
+    /// Source-proven local object spreads.  The entries are present only when
+    /// every spread operand is an immutable, spread-free object with static
+    /// keys.  Keeping the source identities instead of copying declarations
+    /// preserves one source-backed member target across the merge.
+    structural_object_spreads: HashMap<String, Vec<StructuralObjectSpread>>,
     return_object_functions: HashSet<String>,
     /// A local variable initialized from a source-visible function whose
     /// return value is an object.  Store the declaration identity rather than
@@ -373,6 +392,7 @@ pub(crate) fn extract_candidate_tree_evidence(
         immutable_bindings: HashSet::new(),
         structural_object_variables: HashSet::new(),
         stable_structural_object_variables: HashSet::new(),
+        structural_object_spreads: HashMap::new(),
         return_object_functions: HashSet::new(),
         variable_object_sources: HashMap::new(),
         variable_inline_type_receivers: HashMap::new(),
@@ -671,7 +691,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             && let Some(exported) = first_named_child(node)
             && {
                 let exported = unwrap_expression_node(exported);
-                exported.kind() == "object" && !object_literal_has_spread(exported)
+                exported.kind() == "object"
+                    && (!object_literal_has_spread(exported)
+                        || self.object_literal_spread_export_is_safe(&scope_id, exported))
             }
         {
             let exported = unwrap_expression_node(exported);
@@ -684,16 +706,24 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 &qualified_prefix,
                 "default",
             )?;
-            // A spread-free default or export-assignment object has one
-            // source-backed identity. Publish its properties below that
+            // A source-complete default or export-assignment object has one
+            // source-backed identity. Publish its direct properties below that
             // identity so `import value from "./module"; value.member()` or
             // `import value = require("./module"); value.member()` can resolve
-            // to the exact provider declaration across files. Spreads are kept
-            // outside this path because they can override any listed key.
+            // to the exact provider declaration across files. Proven local
+            // spreads are admitted only when direct properties follow every
+            // spread; unknown and potentially overriding shapes stay opaque.
             self.structural_object_variables
                 .insert(declaration.qualified_name.clone());
             self.stable_structural_object_variables
                 .insert(declaration.qualified_name.clone());
+            if object_literal_has_spread(exported) {
+                self.record_structural_object_spreads(
+                    &scope_id,
+                    &declaration.qualified_name,
+                    exported,
+                );
+            }
             let mut cursor = exported.walk();
             for child in exported.named_children(&mut cursor) {
                 self.collect_declarations(
@@ -969,6 +999,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             object_literal_value = Some(value);
             self.structural_object_variables
                 .insert(variable.qualified_name.clone());
+            if object_literal_has_spread(value) {
+                self.record_structural_object_spreads(&scope_id, &variable.qualified_name, value);
+            }
             let mut cursor = value.walk();
             for child in value.named_children(&mut cursor) {
                 self.collect_declarations(
@@ -1097,6 +1130,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 if !object_literal_has_spread(value) {
                     self.stable_structural_object_variables
                         .insert(prefix.to_owned());
+                } else {
+                    self.record_structural_object_spreads(&scope_id, prefix, value);
                 }
                 object_literal_value = Some(value);
                 let mut cursor = value.walk();
@@ -1870,6 +1905,102 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         }
     }
 
+    /// Record a bounded object-spread projection when every spread operand is
+    /// a source-proven immutable object.  The projection intentionally keeps
+    /// only local source identities; imported, computed, conditional, and
+    /// dynamic operands remain opaque so a later override cannot be guessed.
+    fn record_structural_object_spreads(
+        &mut self,
+        scope_id: &str,
+        destination: &str,
+        object: Node<'tree>,
+    ) {
+        let Some(spreads) = self.structural_object_spread_sources(scope_id, object) else {
+            return;
+        };
+        if spreads.is_empty() {
+            return;
+        }
+        self.structural_object_spreads
+            .insert(destination.to_owned(), spreads);
+    }
+
+    fn object_literal_spread_export_is_safe(&self, scope_id: &str, object: Node<'tree>) -> bool {
+        if self
+            .structural_object_spread_sources(scope_id, object)
+            .is_none_or(|sources| sources.is_empty())
+        {
+            return false;
+        }
+        let mut saw_spread = false;
+        let mut cursor = object.walk();
+        for child in object
+            .named_children(&mut cursor)
+            .take(MAX_INLINE_OBJECT_PROPERTIES)
+        {
+            if child.kind() == "spread_element" {
+                saw_spread = true;
+                continue;
+            }
+            let Some((key, _)) = commonjs_object_property(child) else {
+                return false;
+            };
+            if member_property_name(self.source, key).is_none() || !saw_spread {
+                return false;
+            }
+        }
+        saw_spread
+    }
+
+    fn structural_object_spread_sources(
+        &self,
+        scope_id: &str,
+        object: Node<'tree>,
+    ) -> Option<Vec<StructuralObjectSpread>> {
+        let mut spreads = Vec::new();
+        let mut cursor = object.walk();
+        for child in object
+            .named_children(&mut cursor)
+            .take(MAX_INLINE_OBJECT_PROPERTIES)
+        {
+            if child.kind() == "spread_element" {
+                let argument = child
+                    .child_by_field_name("argument")
+                    .or_else(|| child.child_by_field_name("expression"))
+                    .or_else(|| first_named_child(child))
+                    .map(unwrap_expression_node)?;
+                if argument.kind() != "identifier" {
+                    return None;
+                }
+                let name = node_text(self.source, argument);
+                let resolution = self.resolve_name(scope_id, &name, Namespace::Value)?;
+                let Resolution::Local(source) = resolution else {
+                    return None;
+                };
+                if source.kind != "variable"
+                    || !self.immutable_bindings.contains(&source.id)
+                    || !self
+                        .stable_structural_object_variables
+                        .contains(&source.qualified_name)
+                {
+                    return None;
+                }
+                spreads.push(StructuralObjectSpread {
+                    source_qualified_name: source.qualified_name,
+                    source_variable_id: source.id,
+                    start_byte: child.start_byte(),
+                });
+                continue;
+            }
+            // A spread projection can reason about ordinary static properties
+            // and methods.  A computed or malformed key would make the
+            // property inventory incomplete, so reject the whole projection.
+            let (key, _) = commonjs_object_property(child)?;
+            member_property_name(self.source, key)?;
+        }
+        Some(spreads)
+    }
+
     fn object_literal_value_for_binding(&self, value: Node<'tree>) -> Option<Node<'tree>> {
         let mut value = unwrap_expression_node(value);
         for _ in 0..=MAX_TYPE_SHAPE_DEPTH {
@@ -1976,8 +2107,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     /// (`let value; value = { member() {} }`).  Declaration collection has
     /// already indexed the object literal under the binding's qualified name;
     /// this helper only carries that source identity into the bounded
-    /// straight-line flow fact.  Spreads remain unresolved because their
-    /// property inventory is not source-complete.
+    /// straight-line flow fact.  A spread is admitted only when declaration
+    /// collection recorded a complete local spread projection for the same
+    /// destination; unknown spread values remain unresolved.
     fn flow_object_assignment_receiver(
         &self,
         scope_id: &str,
@@ -1990,7 +2122,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let right = assignment
             .child_by_field_name("right")
             .map(unwrap_expression_node)?;
-        if right.kind() != "object" || object_literal_has_spread(right) {
+        if right.kind() != "object" {
             return None;
         }
         let name = node_text(self.source, left);
@@ -2002,6 +2134,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             || !self
                 .structural_object_variables
                 .contains(&variable.qualified_name)
+            || (object_literal_has_spread(right)
+                && !self
+                    .structural_object_spreads
+                    .contains_key(&variable.qualified_name))
         {
             return None;
         }
@@ -4229,7 +4365,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return Ok(());
         };
         let exported_value = unwrap_expression_node(exported);
-        if exported_value.kind() == "object" && !object_literal_has_spread(exported_value) {
+        if exported_value.kind() == "object"
+            && (!object_literal_has_spread(exported_value)
+                || self.object_literal_spread_export_is_safe(scope_id, exported_value))
+        {
             return self.emit_default_object_export(scope_id, exported_value);
         }
         let (spelling, anchor) = if let Some(target_node) = default_export_target_node(node) {
@@ -4300,12 +4439,13 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         Ok(())
     }
 
-    /// Publish a spread-free ES default object as a source-backed value owner.
+    /// Publish a source-complete ES default object as a source-backed value owner.
     /// Its member declarations are collected under `<module>.default`, which
     /// lets the shared resolver follow `import value from "./module"` without
-    /// treating the default object as an external namespace. A spread default
-    /// intentionally stays unresolved because a later spread can replace any
-    /// listed property.
+    /// treating the default object as an external namespace. A proven local
+    /// spread is admitted only for direct properties after the spread; source
+    /// properties inherited through the spread remain unresolved until a
+    /// dedicated member-alias contract can preserve their original identity.
     fn emit_default_object_export(
         &mut self,
         scope_id: &str,
@@ -6495,6 +6635,19 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let receiver = self
             .typed_member_receiver(scope_id, lookup_receiver.clone())
             .unwrap_or(lookup_receiver);
+        match self.structural_spread_member_decision(
+            &receiver.qualified_name,
+            &property_name,
+            property.start_byte(),
+        ) {
+            StructuralSpreadDecision::Resolved(declaration) => {
+                return Some(Resolution::Local(*declaration));
+            }
+            StructuralSpreadDecision::KnownAbsent | StructuralSpreadDecision::Unresolved => {
+                return None;
+            }
+            StructuralSpreadDecision::NotApplicable => {}
+        }
         if let Some(name_node) = rightmost_identifier(object)
             && let Some(Resolution::Local(variable)) = self.resolve_name(
                 scope_id,
@@ -6714,6 +6867,137 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             type_only: import.type_only,
             callable_namespace: false,
         }))
+    }
+
+    /// Resolve a member through a source-proven local object spread.  The
+    /// object literal declaration pass records direct members under the
+    /// destination owner and retains the spread operands separately.  This
+    /// helper evaluates those operands from left to right, so a later direct
+    /// property or spread wins exactly as it does at runtime.  It only walks
+    /// the bounded source identities recorded above; any ambiguity or write
+    /// barrier turns into an unresolved decision rather than a name match.
+    fn structural_spread_member_decision(
+        &self,
+        receiver_qualified_name: &str,
+        property_name: &str,
+        use_start_byte: usize,
+    ) -> StructuralSpreadDecision {
+        let Some(spreads) = self.structural_object_spreads.get(receiver_qualified_name) else {
+            return StructuralSpreadDecision::NotApplicable;
+        };
+        let mut visiting = HashSet::new();
+        match self.structural_spread_member_target(
+            receiver_qualified_name,
+            property_name,
+            spreads,
+            use_start_byte,
+            &mut visiting,
+        ) {
+            Ok(Some(declaration)) => StructuralSpreadDecision::Resolved(Box::new(declaration)),
+            Ok(None) => StructuralSpreadDecision::KnownAbsent,
+            Err(()) => StructuralSpreadDecision::Unresolved,
+        }
+    }
+
+    fn structural_spread_member_target(
+        &self,
+        receiver_qualified_name: &str,
+        property_name: &str,
+        spreads: &[StructuralObjectSpread],
+        use_start_byte: usize,
+        visiting: &mut HashSet<String>,
+    ) -> Result<Option<DeclarationInfo>, ()> {
+        if !visiting.insert(receiver_qualified_name.to_owned()) {
+            return Err(());
+        }
+        let qualified_name = format!("{receiver_qualified_name}.{property_name}");
+        let direct = self
+            .declarations_by_qualified
+            .get(&qualified_name)
+            .into_iter()
+            .flat_map(|ids| ids.iter())
+            .filter_map(|id| self.declarations.get(id))
+            .filter(|declaration| {
+                declaration.range_start_byte <= use_start_byte
+                    && matches!(
+                        declaration.kind.as_str(),
+                        "property" | "method" | "field" | "variable" | "function" | "class"
+                    )
+            })
+            .map(|declaration| (declaration.range_start_byte, declaration.clone()))
+            .collect::<Vec<_>>();
+        let mut events = direct;
+        for spread in spreads {
+            if spread.start_byte > use_start_byte {
+                continue;
+            }
+            if self
+                .flow_member_write_barriers
+                .get(&(spread.source_variable_id.clone(), property_name.to_owned()))
+                .is_some_and(|barriers| barriers.iter().any(|start| *start <= spread.start_byte))
+            {
+                return Err(());
+            }
+            let source_spreads = self
+                .structural_object_spreads
+                .get(&spread.source_qualified_name);
+            let source_is_stable = self
+                .stable_structural_object_variables
+                .contains(&spread.source_qualified_name);
+            let target = if let Some(source_spreads) = source_spreads {
+                self.structural_spread_member_target(
+                    &spread.source_qualified_name,
+                    property_name,
+                    source_spreads,
+                    use_start_byte,
+                    visiting,
+                )?
+            } else if source_is_stable {
+                let declarations = self
+                    .declarations_by_qualified
+                    .get(&format!(
+                        "{}.{}",
+                        spread.source_qualified_name, property_name
+                    ))
+                    .into_iter()
+                    .flat_map(|ids| ids.iter())
+                    .filter_map(|id| self.declarations.get(id))
+                    .filter(|declaration| {
+                        declaration.range_start_byte <= use_start_byte
+                            && matches!(
+                                declaration.kind.as_str(),
+                                "property" | "method" | "field" | "variable" | "function" | "class"
+                            )
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                match declarations.as_slice() {
+                    [] => None,
+                    [declaration] => Some(declaration.clone()),
+                    _ => return Err(()),
+                }
+            } else {
+                return Err(());
+            };
+            if let Some(target) = target {
+                events.push((spread.start_byte, target));
+            }
+        }
+        visiting.remove(receiver_qualified_name);
+        if events.is_empty() {
+            return Ok(None);
+        }
+        let latest_start = events.iter().map(|(start, _)| *start).max().ok_or(())?;
+        let latest = events
+            .into_iter()
+            .filter(|(start, _)| *start == latest_start)
+            .map(|(_, declaration)| declaration)
+            .collect::<Vec<_>>();
+        (latest.len() == 1)
+            .then(|| latest.into_iter().next())
+            .flatten()
+            .ok_or(())
+            .map(Some)
     }
 
     /// A plain assignment to a source-proven nominal receiver is itself a
