@@ -1634,6 +1634,27 @@ Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
 gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
 cut remain open.
 
+### Execution checkpoint (2026-08-07, primitive structural member-write slice)
+
+The candidate now preserves the declared property identity for a narrow,
+source-proven primitive write on a stable spread-free structural object, such as
+`state.flag = true`. This is intentionally narrower than general mutation:
+callable- or object-valued replacements, aliases, calls, spreads, dynamic and
+compound writes, and conditional/ambiguous flow remain behind the existing
+fail-closed barriers. The regression exercises both the exact `response.request`
+read and the exact `internals.isCaptured` literal write found in real Axios
+shapes.
+
+The focused candidate suite is now 95 tests and the universal resolver suite
+remains 168 tests. On the pinned Axios checker diagnostic at the same corpus
+realization, exact local target matches improved to 3,053/3,167 (114 missing,
+0 wrong; 390/503 member matches and 1,544/1,545 call matches). This is
+diagnostic evidence only, not a release precision or leadership claim.
+
+Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
+gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
+cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

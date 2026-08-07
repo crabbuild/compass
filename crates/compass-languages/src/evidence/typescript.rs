@@ -1949,6 +1949,60 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         })
     }
 
+    /// A source-proven spread-free object can retain the declaration identity
+    /// for a primitive literal member write (`state.flag = true`). This is
+    /// narrower than ordinary structural writes: replacing a callable or
+    /// object-valued member with an alias/call still invalidates the prior
+    /// target, while a literal data write remains an access to the declared
+    /// property itself. The check is intentionally independent of the
+    /// property-write barrier because that barrier protects later reads after
+    /// a potentially identity-changing overwrite.
+    fn structural_literal_member_write(
+        &self,
+        scope_id: &str,
+        object: Node<'tree>,
+        property: Node<'tree>,
+    ) -> bool {
+        let Some(member) = property.parent() else {
+            return false;
+        };
+        let Some(assignment) = member.parent() else {
+            return false;
+        };
+        if assignment.kind() != "assignment_expression"
+            || assignment
+                .child_by_field_name("left")
+                .is_none_or(|left| left.id() != member.id())
+        {
+            return false;
+        }
+        let Some(right) = assignment
+            .child_by_field_name("right")
+            .map(unwrap_expression_node)
+        else {
+            return false;
+        };
+        if !matches!(
+            right.kind(),
+            "true" | "false" | "null" | "number" | "string"
+        ) {
+            return false;
+        }
+        let Some(name_node) = rightmost_identifier(object) else {
+            return false;
+        };
+        let name = node_text(self.source, name_node);
+        let Some(Resolution::Local(variable)) =
+            self.resolve_name(scope_id, &name, Namespace::Value)
+        else {
+            return false;
+        };
+        variable.kind == "variable"
+            && self
+                .stable_structural_object_variables
+                .contains(&variable.qualified_name)
+    }
+
     fn record_flow_call_argument_escapes(&mut self, node: Node<'tree>, scope_id: &str) {
         let Some(arguments) = node
             .child_by_field_name("arguments")
@@ -5907,8 +5961,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let property_name = member_property_name(self.source, property)?;
         let nominal_write_receiver = self.nominal_member_write_receiver(scope_id, object, property);
         let nominal_write = nominal_write_receiver.is_some();
+        let literal_structural_write =
+            self.structural_literal_member_write(scope_id, object, property);
         let receiver = nominal_write_receiver.or_else(|| self.receiver_target(scope_id, object))?;
         if !nominal_write
+            && !literal_structural_write
             && self.flow_member_write_barrier_before(
                 scope_id,
                 object,

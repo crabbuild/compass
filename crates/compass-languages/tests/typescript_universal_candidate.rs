@@ -3333,6 +3333,65 @@ api.remove();
 }
 
 #[test]
+fn javascript_object_flow_member_reads_and_literal_writes_resolve_exact_targets() {
+    let batch = candidate(
+        "src/object-flow-debug.js",
+        br#"const response = { request: requestValue, data: null };
+const later = () => {
+    response.data = responseValue;
+    return response.request;
+};
+later();
+
+const key = Symbol('internals');
+class Stream {
+    constructor() {
+        const internals = (this[key] = { isCaptured: false });
+        this.on('newListener', () => {
+            if (!internals.isCaptured) {
+                internals.isCaptured = true;
+            }
+        });
+    }
+}
+new Stream();
+"#,
+    );
+    let request = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "object-flow-debug.response.request")
+        .expect("response.request declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "request"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(request.id.as_str())
+    }));
+    let is_captured = batch
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.qualified_name
+                == "object-flow-debug.Stream.constructor.internals.isCaptured"
+        })
+        .expect("internals.isCaptured declaration");
+    assert_eq!(
+        batch
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.relation == CandidateRelation::AccessesMember
+                    && candidate.target_spelling == "isCaptured"
+                    && candidate.constraints.exact_target_declaration_id.as_deref()
+                        == Some(is_captured.id.as_str())
+            })
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn candidate_emits_curated_external_builtin_evidence_and_respects_shadowing() {
     let batch = candidate(
         "src/builtins.ts",
