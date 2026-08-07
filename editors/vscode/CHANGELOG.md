@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Follow the visible `current-snapshot` and `snapshots/` output protocol without
+  breaking activation for fresh or mixed multi-root workspaces. Missing output
+  remains ready for initialization, while invalid or incomplete snapshots are
+  isolated to the affected repository and expose their failure reason.
 - Keep large repository file trees and selected-path lists inside bounded,
   keyboard-focusable scroll panes during Compass initialization.
 - Replace manual path entry in initialization with a bounded repository tree

@@ -35,9 +35,20 @@ export class SessionRegistry {
 
   async refresh(): Promise<void> {
     await Promise.all(this.all().map(async (session) => {
+      const recoveringFromResolutionError = session.graphError !== undefined;
+      let materialized = false;
+      try {
+        const graphPath = session.findGraphPath();
+        materialized = graphPath !== undefined && await exists(graphPath);
+        session.graphError = undefined;
+      } catch (error) {
+        session.graphError = message(error);
+        session.graphState = session.activeWriter ? "building" : "failed";
+        return;
+      }
       session.graphState = refreshedGraphState(
-        session.graphState,
-        await exists(session.graphPath),
+        recoveringFromResolutionError ? "not-materialized" : session.graphState,
+        materialized,
         session.activeWriter !== undefined
       );
     }));
@@ -60,4 +71,8 @@ async function exists(file: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
