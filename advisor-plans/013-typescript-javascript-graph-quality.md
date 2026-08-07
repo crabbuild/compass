@@ -1441,6 +1441,30 @@ interprocedural flow, conditional structural exports, compiler-target truth,
 release corpora, precision/Wilson, framework tiers, equivalent Graphify/SCIP
 scope, and the production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, property-scoped immutable receiver flow)
+
+The JavaScript flow path now distinguishes receiver identity from property
+mutation for source-proven immutable aliases:
+
+- `const` aliases to nominal receivers and exact object-literal receivers can
+  cross a closure without widening to unresolved solely because an unrelated
+  property is written.
+- Member writes are tracked by `(binding, property)` under the existing
+  bounded limit. A write to `token._listeners` does not erase a proven
+  `token.subscribe` receiver, while `token.subscribe = replacement` remains a
+  fail-closed barrier. Dynamic keys, mutable aliases, calls/returns, and other
+  unsupported escapes retain the conservative whole-binding barrier.
+- Candidate regressions cover both class `this` aliases and structural object
+  aliases; the existing mutable and overwrite negatives remain unresolved.
+
+On the read-only Axios target-adjudication diagnostic, exact local target
+matches improved from 3,023/3,167 to 3,045/3,167 (122 missing, 0 wrong). The
+member stratum is 382/503 and the call stratum is 1,544/1,545. This remains
+diagnostic evidence rather than a release precision/recall claim. Conditional
+structural exports, compiler-target truth, release corpora, precision/Wilson,
+framework tiers, equivalent Graphify/SCIP scope, and the production hard cut
+remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

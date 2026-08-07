@@ -1473,6 +1473,7 @@ fn javascript_const_this_alias_survives_a_closure_capture() {
         br#"class CancelToken {
     constructor() {
         const token = this;
+        token._listeners = null;
         const later = () => token.subscribe();
         later();
     }
@@ -1495,6 +1496,58 @@ new CancelToken();
             && candidate.target_spelling == "subscribe"
             && candidate.constraints.exact_target_declaration_id.as_deref()
                 == Some(subscribe.id.as_str())
+    }));
+}
+
+#[test]
+fn javascript_const_structural_alias_uses_property_scoped_mutation_barriers() {
+    let batch = candidate(
+        "src/const-structural-closure.js",
+        br#"const config = {
+    inspect() {}
+};
+config.other = 1;
+const later = () => config.inspect();
+later();
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "inspect")
+        .expect("config.inspect declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(inspect.id.as_str())
+    }));
+
+    let overwritten = candidate(
+        "src/const-structural-overwrite.js",
+        br#"const config = { inspect() {} };
+config.inspect = replacement;
+config.inspect();
+"#,
+    );
+    assert!(!overwritten.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+
+    let spread = candidate(
+        "src/const-structural-spread.js",
+        br#"const base = { inspect() {} };
+const config = { ...base };
+const later = () => config.inspect();
+later();
+"#,
+    );
+    assert!(!spread.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.is_some()
     }));
 }
 

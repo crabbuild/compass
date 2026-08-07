@@ -217,12 +217,17 @@ struct CandidateState<'source, 'tree> {
     /// Escape/dynamic barriers survive later local assignments because a
     /// captured binding or dynamic evaluator can observe the rebinding too.
     flow_escape_barriers: HashMap<String, Vec<usize>>,
+    /// Property-specific writes on an immutable source-proven receiver alias.
+    /// A write to an unrelated property does not erase the receiver identity,
+    /// while a write to the queried member remains a fail-closed barrier.
+    flow_member_write_barriers: HashMap<(String, String), Vec<usize>>,
     /// `const` bindings whose receiver identity is source-proven and cannot
-    /// be rebound.  A stable nominal alias may be captured by a closure
-    /// without widening the receiver; mutable/structural aliases still take
-    /// the conservative escape barrier below.
+    /// be rebound. Stable nominal and exact object-literal aliases may be
+    /// captured by a closure; mutable/unsupported aliases still take the
+    /// conservative escape barrier below.
     immutable_bindings: HashSet<String>,
     structural_object_variables: HashSet<String>,
+    stable_structural_object_variables: HashSet<String>,
     return_object_functions: HashSet<String>,
     /// A local variable initialized from a source-visible function whose
     /// return value is an object.  Store the declaration identity rather than
@@ -344,8 +349,10 @@ pub(crate) fn extract_candidate_tree_evidence(
         flow_assignments: HashMap::new(),
         flow_assignment_barriers: HashMap::new(),
         flow_escape_barriers: HashMap::new(),
+        flow_member_write_barriers: HashMap::new(),
         immutable_bindings: HashSet::new(),
         structural_object_variables: HashSet::new(),
+        stable_structural_object_variables: HashSet::new(),
         return_object_functions: HashSet::new(),
         variable_object_sources: HashMap::new(),
         variable_inline_type_receivers: HashMap::new(),
@@ -1018,6 +1025,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 && value.kind() == "object"
             {
                 self.structural_object_variables.insert(prefix.to_owned());
+                if !object_literal_has_spread(value) {
+                    self.stable_structural_object_variables
+                        .insert(prefix.to_owned());
+                }
                 object_literal_value_id = Some(value.id());
                 let mut cursor = value.walk();
                 for child in value.named_children(&mut cursor) {
@@ -1703,11 +1714,13 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     "member_expression" | "optional_member_expression" | "subscript_expression"
                 ) && let Some(object) = left.child_by_field_name("object")
                 {
-                    self.record_flow_value_escape(
+                    self.record_flow_member_write(
                         &scope_id,
                         object,
                         current.start_byte(),
-                        "dynamic member write",
+                        member_property_node(left)
+                            .and_then(|property| member_property_name(self.source, property))
+                            .as_deref(),
                     );
                 }
             }
@@ -1822,6 +1835,80 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         }
     }
 
+    fn record_flow_member_write(
+        &mut self,
+        scope_id: &str,
+        object: Node<'tree>,
+        start_byte: usize,
+        property_name: Option<&str>,
+    ) {
+        let value = unwrap_expression_node(object);
+        let Some(property_name) = property_name.filter(|name| !name.is_empty()) else {
+            self.record_flow_value_escape(scope_id, value, start_byte, "dynamic member write");
+            return;
+        };
+        let Some(name_node) = rightmost_identifier(value) else {
+            self.record_flow_value_escape(scope_id, value, start_byte, "dynamic member write");
+            return;
+        };
+        let name = node_text(self.source, name_node);
+        let Some(Resolution::Local(declaration)) =
+            self.resolve_name(scope_id, &name, Namespace::Value)
+        else {
+            self.record_flow_value_escape(scope_id, value, start_byte, "dynamic member write");
+            return;
+        };
+        if !matches!(declaration.kind.as_str(), "variable" | "parameter") {
+            self.record_flow_value_escape(scope_id, value, start_byte, "dynamic member write");
+            return;
+        }
+        if self.stable_immutable_receiver_alias(&declaration.id) {
+            self.record_flow_member_write_barrier(&declaration.id, property_name, start_byte);
+        } else {
+            self.record_flow_escape_barrier(&declaration.id, start_byte);
+        }
+    }
+
+    fn record_flow_member_write_barrier(
+        &mut self,
+        variable_id: &str,
+        property_name: &str,
+        start_byte: usize,
+    ) {
+        let barriers = self
+            .flow_member_write_barriers
+            .entry((variable_id.to_owned(), property_name.to_owned()))
+            .or_default();
+        if barriers.len() < MAX_INLINE_OBJECT_PROPERTIES {
+            barriers.push(start_byte);
+        } else if let Some(latest) = barriers.last_mut()
+            && *latest < start_byte
+        {
+            *latest = start_byte;
+        }
+    }
+
+    fn flow_member_write_barrier_before(
+        &self,
+        scope_id: &str,
+        object: Node<'tree>,
+        property_name: &str,
+        use_start_byte: usize,
+    ) -> bool {
+        let Some(name_node) = rightmost_identifier(object) else {
+            return false;
+        };
+        let name = node_text(self.source, name_node);
+        let Some(Resolution::Local(declaration)) =
+            self.resolve_name(scope_id, &name, Namespace::Value)
+        else {
+            return false;
+        };
+        self.flow_member_write_barriers
+            .get(&(declaration.id, property_name.to_owned()))
+            .is_some_and(|barriers| barriers.iter().any(|start| *start <= use_start_byte))
+    }
+
     fn record_flow_scope_barriers(&mut self, scope_id: &str, start_byte: usize, _reason: &str) {
         let mut visible = self
             .declarations
@@ -1867,7 +1954,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         &self.scope_for_node(node),
                         &declaration.scope_id,
                     )
-                    && !self.stable_immutable_nominal_alias(&declaration.id)
+                    && !self.stable_immutable_receiver_alias(&declaration.id)
                 {
                     captured.insert(declaration.id.clone());
                 }
@@ -1911,6 +1998,23 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return false;
         }
         assignment.receiver.import.is_some() || !assignment.receiver.qualified_name.is_empty()
+    }
+
+    fn stable_immutable_structural_alias(&self, declaration_id: &str) -> bool {
+        if !self.immutable_bindings.contains(declaration_id) {
+            return false;
+        }
+        self.declarations
+            .get(declaration_id)
+            .is_some_and(|declaration| {
+                self.stable_structural_object_variables
+                    .contains(&declaration.qualified_name)
+            })
+    }
+
+    fn stable_immutable_receiver_alias(&self, declaration_id: &str) -> bool {
+        self.stable_immutable_nominal_alias(declaration_id)
+            || self.stable_immutable_structural_alias(declaration_id)
     }
 
     fn flow_assignment_is_straight_line(&self, node: Node<'tree>, scope_id: &str) -> bool {
@@ -5362,6 +5466,14 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let object = object?;
         let receiver = self.receiver_target(scope_id, object)?;
         let property_name = member_property_name(self.source, property)?;
+        if self.flow_member_write_barrier_before(
+            scope_id,
+            object,
+            &property_name,
+            property.start_byte(),
+        ) {
+            return None;
+        }
         let projection = decode_utility_projection(&receiver.qualified_name);
         if let Some((utility, _, keys)) = projection.as_ref()
             && ((utility == "Pick" && !keys.contains(&property_name))
@@ -8878,6 +8990,12 @@ fn variable_binding_is_immutable(node: Node<'_>, source: &[u8]) -> bool {
         .split_whitespace()
         .next()
         .is_some_and(|keyword| keyword == "const")
+}
+
+fn object_literal_has_spread(node: Node<'_>) -> bool {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .any(|child| child.kind() == "spread_element")
 }
 
 fn type_alias_union_targets(node: Node<'_>, source: &[u8]) -> Option<Vec<String>> {
