@@ -260,6 +260,55 @@ export default { ...base, isString: value => true };
 }
 
 #[test]
+fn typescript_candidate_publishes_wildcard_barrel_reexports() {
+    let batch = candidate(
+        "src/index.ts",
+        br#"export * from "./values";
+export * as values from "./values";
+export type * from "./types";
+"#,
+    );
+    validate_evidence(&batch, EvidenceLimits::default()).expect("wildcard reexport evidence");
+
+    let wildcard = batch
+        .bindings
+        .iter()
+        .find(|binding| {
+            binding.kind == compass_languages::BindingKind::Reexport
+                && binding.spelling == "*"
+                && binding.qualified_target == "./values::*"
+        })
+        .expect("wildcard reexport binding");
+    assert_eq!(wildcard.namespace, Some(SymbolNamespace::Namespace));
+    assert!(!wildcard.type_only);
+    let alias = batch
+        .bindings
+        .iter()
+        .find(|binding| {
+            binding.kind == compass_languages::BindingKind::Reexport
+                && binding.spelling == "values"
+                && binding.qualified_target == "./values::*"
+        })
+        .expect("namespace reexport alias");
+    assert_eq!(alias.namespace, Some(SymbolNamespace::Namespace));
+    assert!(!alias.type_only);
+    assert!(batch.occurrences.iter().any(|occurrence| {
+        occurrence.spelling == "*" && occurrence.context.as_deref() == Some("wildcard")
+    }));
+
+    let type_only = batch
+        .bindings
+        .iter()
+        .find(|binding| {
+            binding.kind == compass_languages::BindingKind::Reexport
+                && binding.spelling == "*"
+                && binding.qualified_target == "./types::*"
+        })
+        .expect("type-only wildcard reexport binding");
+    assert!(type_only.type_only);
+}
+
+#[test]
 fn javascript_commonjs_require_preserves_namespace_and_export_keys() {
     let source = br#"const api = require("./api");
 const {

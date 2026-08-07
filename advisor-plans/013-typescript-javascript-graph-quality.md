@@ -1732,6 +1732,25 @@ Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
 gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
 cut remain open.
 
+### Execution checkpoint (2026-08-07, ES wildcard barrel reexports)
+
+The ECMAScript candidate now emits bounded `export * from "./module"` and
+`export * as namespace from "./module"` bindings, including `export type *`.
+The resolver follows wildcard reexports transitively through barrel chains,
+resolves namespace-alias members through the provider module owner, and
+fail-closes on duplicate exports and cyclic barrels. Reexport traversal remains
+depth- and candidate-bounded; it never selects the first surviving target.
+
+The focused candidate suite is now 98 tests and the universal resolver suite is
+now 170 tests. New regressions assert exact transitive `run` resolution,
+namespace-alias member resolution, duplicate wildcard ambiguity, and cyclic
+wildcard non-resolution. The native production registry remains unchanged; this
+is still a qualification-only universal path.
+
+Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
+gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
+cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

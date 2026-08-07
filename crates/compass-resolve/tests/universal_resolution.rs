@@ -6974,6 +6974,157 @@ spread.isString('value');
 }
 
 #[test]
+fn typescript_wildcard_barrels_resolve_transitively_and_fail_closed()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/values.js",
+            br#"export function run(value) { return value; }
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/middle.js",
+            br#"export * from "./values.js";
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/outer.js",
+            br#"export * from "./middle.js";
+export * as values from "./values.js";
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/left.js",
+            br#"export function same() {}
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/right.js",
+            br#"export function same() {}
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/ambiguous.js",
+            br#"export * from "./left.js";
+export * from "./right.js";
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/cycle-a.js",
+            br#"export * from "./cycle-b.js";
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/cycle-b.js",
+            br#"export * from "./cycle-a.js";
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.js",
+            br#"import { run } from '../lib/outer.js';
+import { values } from '../lib/outer.js';
+import { same } from '../lib/ambiguous.js';
+import { cycleValue } from '../lib/cycle-a.js';
+run(1);
+values.run(2);
+same();
+cycleValue();
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            let path = root.join(relative);
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let run = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "run" && declaration.kind == "function")
+        .ok_or("missing wildcard provider declaration")?;
+    let calls = batches[8]
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Calls)
+        .collect::<Vec<_>>();
+    let run_call = calls
+        .iter()
+        .find(|candidate| {
+            candidate.target_spelling == "run"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| !qualified.contains("values"))
+        })
+        .ok_or("missing transitive wildcard call")?;
+    let namespace_call = calls
+        .iter()
+        .find(|candidate| {
+            candidate.target_spelling == "run"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.contains("values"))
+        })
+        .ok_or("missing namespace reexport member call")?;
+    let same_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "same")
+        .ok_or("missing ambiguous wildcard call")?;
+    let cycle_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "cycleValue")
+        .ok_or("missing cyclic wildcard call")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&run_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &run.id
+    ));
+    assert!(matches!(
+        index.resolve(&namespace_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &run.id
+    ));
+    assert!(!matches!(
+        index.resolve(&same_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { .. }
+    ));
+    assert!(!matches!(
+        index.resolve(&cycle_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { .. }
+    ));
+    Ok(())
+}
+
+#[test]
 fn javascript_commonjs_object_exports_resolve_named_require_bindings()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

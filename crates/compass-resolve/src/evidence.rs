@@ -2524,6 +2524,12 @@ impl UniversalResolutionIndex {
         }
         for target_language in typescript_language_family(language) {
             let target_language = *target_language;
+            // An export-star namespace alias carries a reexport target whose
+            // exported spelling is a wildcard. Treat that spelling as the
+            // provider module owner so \`ns.member\` can use the same exact
+            // member index as a namespace import. Ordinary wildcard barrel
+            // traversal still requests the concrete exported name below.
+            let direct_export = if exported == "*" { "module" } else { exported };
             for (direct_module_index, index) in [
                 (true, &self.typescript_modules),
                 (false, &self.typescript_export_aliases),
@@ -2531,7 +2537,7 @@ impl UniversalResolutionIndex {
                 if let Some(values) = index.get(&(
                     target_language.to_owned(),
                     module.to_owned(),
-                    exported.to_owned(),
+                    direct_export.to_owned(),
                 )) {
                     let remaining = candidate_storage_limit(self.limits.candidates_per_lookup)
                         .saturating_sub(walk.slots.len());
@@ -2550,10 +2556,14 @@ impl UniversalResolutionIndex {
                                         return false;
                                     }
                                     if walk.allow_type_owner {
-                                        self.typescript_declaration_allowed_owner_slot(
-                                            **slot,
-                                            walk.candidate,
-                                        )
+                                        (exported == "*"
+                                            && self.declaration(**slot).is_some_and(
+                                                |declaration| declaration.kind == "module",
+                                            ))
+                                            || self.typescript_declaration_allowed_owner_slot(
+                                                **slot,
+                                                walk.candidate,
+                                            )
                                     } else {
                                         self.typescript_declaration_allowed_slot(
                                             **slot,

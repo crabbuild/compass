@@ -3855,6 +3855,67 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 ..ResolutionConstraint::default()
             },
         )?;
+        if reexport
+            && bindings.is_empty()
+            && (statement_text.trim_start().starts_with("export *")
+                || statement_text.trim_start().starts_with("export type *"))
+        {
+            // An export-star statement is represented as a wildcard
+            // reexport binding. The resolver expands this bounded edge only
+            // for a requested named export, preserving barrel cycles and
+            // duplicate targets as unresolved/ambiguous rather than selecting
+            // an arbitrary declaration. An export-star namespace alias uses the same module
+            // namespace target but publishes the explicit alias name.
+            let namespace_export = first_named_child_kind(node, "namespace_export");
+            let alias = namespace_export
+                .and_then(first_identifier_node)
+                .map(|identifier| node_text(self.source, identifier))
+                .filter(|name| !name.is_empty());
+            let export_name = alias.as_deref().unwrap_or("*");
+            let anchor = namespace_export.unwrap_or(node);
+            let target = format!("{module}::*");
+            let binding_id = self.builder.bind_with_identity(
+                BindingKind::Reexport,
+                export_name,
+                &target,
+                None,
+                Some(scope_id),
+                Some(SymbolNamespace::Namespace),
+                type_only,
+                range_for_node(self.source_file, anchor),
+            )?;
+            let occurrence_id = self.builder.occur_with_context(
+                SemanticRole::Reexport,
+                &owner,
+                export_name,
+                None,
+                Some(scope_id),
+                Some(if alias.is_some() {
+                    "namespace_alias"
+                } else if type_only {
+                    "type_only_wildcard"
+                } else {
+                    "wildcard"
+                }),
+                range_for_node(self.source_file, anchor),
+            )?;
+            self.builder.relate(
+                CandidateRelation::Reexports,
+                &owner,
+                Some(&occurrence_id),
+                Some(&binding_id),
+                export_name,
+                ResolutionConstraint {
+                    exact_language: Some(self.language.to_owned()),
+                    module_or_package: Some(module),
+                    qualified_name: Some(target),
+                    allowed_target_kinds: vec!["module".to_owned()],
+                    allow_external: true,
+                    ..ResolutionConstraint::default()
+                },
+            )?;
+            return Ok(());
+        }
         if bindings.is_empty() {
             return Ok(());
         }
