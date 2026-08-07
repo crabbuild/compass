@@ -23,6 +23,11 @@ const PROVIDER = "typescript_compiler_api_5_9_3";
 const MAX_FILES = 20_000;
 const MAX_SOURCE_BYTES = 128 * 1024 * 1024;
 const MAX_CONSTRUCTS = 500_000;
+const MAX_CONFIGS = 256;
+const MAX_CONFIG_BYTES = 2 * 1024 * 1024;
+const MAX_DIAGNOSTICS = 10_000;
+const MAX_PROJECT_FILE_REFERENCES = 100_000;
+const MAX_PROJECT_DEPTH = 32;
 const SOURCE_SUFFIXES = [
   ".ts",
   ".tsx",
@@ -60,9 +65,10 @@ function parseArguments(argv) {
   if (argv.length !== 2 || argv[0] !== "--root" || !argv[1]) {
     fail("usage: typescript-source-oracle.mjs --root PATH");
   }
-  const root = path.resolve(argv[1]);
+  let root;
   let stat;
   try {
+    root = fs.realpathSync.native(path.resolve(argv[1]));
     stat = fs.statSync(root);
   } catch (error) {
     fail(`source root is unavailable: ${error.message}`);
@@ -85,8 +91,25 @@ function isSourceFile(fileName) {
   return SOURCE_SUFFIXES.some((suffix) => fileName.endsWith(suffix));
 }
 
-function collectSourceFiles(root) {
+function isConfigFile(fileName) {
+  const lower = fileName.toLowerCase();
+  return (
+    lower === "tsconfig.json" ||
+    (lower.startsWith("tsconfig.") && lower.endsWith(".json")) ||
+    lower === "jsconfig.json" ||
+    (lower.startsWith("jsconfig.") && lower.endsWith(".json"))
+  );
+}
+
+function isExcludedPath(root, fileName) {
+  const relative = path.relative(root, path.resolve(fileName));
+  if (!relative || relative === ".") return false;
+  return relative.split(path.sep).some((part) => EXCLUDED_DIRECTORIES.has(part));
+}
+
+function collectFiles(root) {
   const files = [];
+  const configs = [];
   const rejected = [];
   const stack = [root];
   while (stack.length > 0) {
@@ -106,22 +129,184 @@ function collectSourceFiles(root) {
         continue;
       }
       const fileName = path.join(directory, entry.name);
-      if (!isSourceFile(entry.name)) {
+      if (entry.isSymbolicLink()) {
+        if (isSourceFile(entry.name)) rejected.push(relativePath(root, fileName));
         continue;
       }
+      if (isConfigFile(entry.name)) configs.push(fileName);
+      if (!isSourceFile(entry.name)) continue;
       const relative = relativePath(root, fileName);
       files.push(fileName);
-      if (files.length > MAX_FILES) {
+      if (files.length + configs.length > MAX_FILES + MAX_CONFIGS) {
         fail(`source file count exceeds ${MAX_FILES}`);
-      }
-      if (entry.isSymbolicLink()) {
-        rejected.push(relative);
       }
     }
   }
   files.sort((left, right) => relativePath(root, left).localeCompare(relativePath(root, right), "en"));
+  configs.sort((left, right) => relativePath(root, left).localeCompare(relativePath(root, right), "en"));
   rejected.sort();
-  return { files, rejected };
+  return { files, configs, rejected };
+}
+
+function diagnosticText(diagnostic) {
+  return ts.flattenDiagnosticMessageText(diagnostic.messageText, " ");
+}
+
+function insideRoot(root, fileName) {
+  const absolute = path.resolve(fileName);
+  return absolute === root || absolute.startsWith(`${root}${path.sep}`);
+}
+
+function safeRead(root, fileName, limit) {
+  const absolute = path.resolve(fileName);
+  if (!insideRoot(root, absolute) || isExcludedPath(root, absolute)) return undefined;
+  let stat;
+  try {
+    stat = fs.lstatSync(absolute);
+  } catch {
+    return undefined;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > limit) return undefined;
+  try {
+    return fs.readFileSync(absolute);
+  } catch {
+    return undefined;
+  }
+}
+
+function safeFileExists(root, fileName) {
+  const absolute = path.resolve(fileName);
+  if (!insideRoot(root, absolute) || isExcludedPath(root, absolute)) return false;
+  try {
+    const stat = fs.lstatSync(absolute);
+    return stat.isFile() && !stat.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+function isBaseConfiguration(configFile, config) {
+  const basename = path.basename(configFile).toLowerCase();
+  if (basename === "tsconfig.json" || basename === "jsconfig.json") return false;
+  if (!config || typeof config !== "object" || Array.isArray(config)) return false;
+  return (
+    !("files" in config) &&
+    !("include" in config) &&
+    !("references" in config)
+  );
+}
+
+function makeConfigHost(root) {
+  const readFile = (fileName) => {
+    const raw = safeRead(root, fileName, MAX_CONFIG_BYTES);
+    return raw === undefined ? undefined : raw.toString("utf8");
+  };
+  return {
+    useCaseSensitiveFileNames: true,
+    onUnRecoverableConfigFileDiagnostic: () => {},
+    readDirectory(directory, extensions, excludes, includes, depth) {
+      if (!insideRoot(root, directory) || isExcludedPath(root, directory)) return [];
+      return ts.sys
+        .readDirectory(directory, extensions, excludes, includes, depth)
+        .filter((fileName) => insideRoot(root, fileName) && !isExcludedPath(root, fileName));
+    },
+    fileExists: (fileName) => safeFileExists(root, fileName),
+    readFile,
+  };
+}
+
+function projectReferenceConfig(root, reference, baseDirectory) {
+  if (typeof reference !== "string" || reference.length === 0) return null;
+  let candidate = path.resolve(baseDirectory, reference);
+  if (!insideRoot(root, candidate) || isExcludedPath(root, candidate)) return null;
+  try {
+    if (fs.statSync(candidate).isDirectory()) candidate = path.join(candidate, "tsconfig.json");
+  } catch {
+    return null;
+  }
+  return isConfigFile(path.basename(candidate)) ? candidate : null;
+}
+
+function parseProjects(root, discoveredConfigs, diagnostics) {
+  if (discoveredConfigs.length > MAX_CONFIGS) {
+    fail(`project configuration count exceeds ${MAX_CONFIGS}`);
+  }
+  const host = makeConfigHost(root);
+  const queue = discoveredConfigs.map((configFile) => ({ configFile, depth: 0 }));
+  const queued = new Set(discoveredConfigs);
+  const projects = [];
+  let projectFileReferences = 0;
+  while (queue.length > 0) {
+    const item = queue.shift();
+    const configFile = item.configFile;
+    const raw = safeRead(root, configFile, MAX_CONFIG_BYTES);
+    if (raw === undefined) {
+      diagnostics.push({
+        file: relativePath(root, configFile),
+        message: "config is unreadable or exceeds the configured limit",
+      });
+      continue;
+    }
+    const read = ts.readConfigFile(configFile, host.readFile);
+    if (read.error) {
+      diagnostics.push({ file: relativePath(root, configFile), message: diagnosticText(read.error) });
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = ts.parseJsonConfigFileContent(
+        read.config,
+        host,
+        path.dirname(configFile),
+        {},
+        configFile,
+      );
+    } catch (error) {
+      diagnostics.push({ file: relativePath(root, configFile), message: String(error) });
+      continue;
+    }
+    const baseConfiguration = isBaseConfiguration(configFile, read.config);
+    for (const error of parsed.errors ?? []) {
+      diagnostics.push({ file: relativePath(root, configFile), message: diagnosticText(error) });
+      if (diagnostics.length >= MAX_DIAGNOSTICS) {
+        fail(`diagnostic count exceeds ${MAX_DIAGNOSTICS}`);
+      }
+    }
+    if (baseConfiguration) continue;
+    const fileNames = [...new Set(parsed.fileNames.map((fileName) => path.resolve(fileName)))]
+      .filter((fileName) => insideRoot(root, fileName) && !isExcludedPath(root, fileName) && isSourceFile(fileName))
+      .sort((left, right) => relativePath(root, left).localeCompare(relativePath(root, right), "en"));
+    projectFileReferences += fileNames.length;
+    if (projectFileReferences > MAX_PROJECT_FILE_REFERENCES) {
+      fail(`project file references exceed ${MAX_PROJECT_FILE_REFERENCES}`);
+    }
+    projects.push({
+      configFile,
+      directory: path.dirname(configFile),
+      fileNames,
+      configDigest: sha256(raw),
+      references: (parsed.projectReferences ?? [])
+        .map((reference) =>
+          projectReferenceConfig(
+            root,
+            reference.path ?? reference.sourceFile,
+            path.dirname(configFile),
+          ),
+        )
+        .filter((reference) => reference !== null),
+    });
+    for (const reference of projects.at(-1).references) {
+      if (queued.has(reference)) continue;
+      queued.add(reference);
+      if (item.depth + 1 > MAX_PROJECT_DEPTH) {
+        fail(`project reference depth exceeds ${MAX_PROJECT_DEPTH}`);
+      }
+      queue.push({ configFile: reference, depth: item.depth + 1 });
+      if (queued.size > MAX_CONFIGS) fail(`project configuration count exceeds ${MAX_CONFIGS}`);
+    }
+  }
+  projects.sort((left, right) => relativePath(root, left.configFile).localeCompare(relativePath(root, right.configFile), "en"));
+  return projects;
 }
 
 function byteOffsets(text) {
@@ -233,7 +418,7 @@ function scriptKind(fileName) {
   return ts.getScriptKindFromFileName(fileName);
 }
 
-function parseFile(root, fileName, raw, constructs) {
+function parseFile(root, fileName, raw, constructs, diagnostics) {
   const text = raw.toString("utf8");
   const sourceFile = ts.createSourceFile(
     fileName,
@@ -243,6 +428,15 @@ function parseFile(root, fileName, raw, constructs) {
     scriptKind(fileName),
   );
   if (sourceFile.parseDiagnostics && sourceFile.parseDiagnostics.length > 0) {
+    for (const diagnostic of sourceFile.parseDiagnostics) {
+      diagnostics.push({
+        file: relativePath(root, fileName),
+        message: diagnosticText(diagnostic),
+      });
+      if (diagnostics.length >= MAX_DIAGNOSTICS) {
+        fail(`diagnostic count exceeds ${MAX_DIAGNOSTICS}`);
+      }
+    }
     return false;
   }
   const offsets = byteOffsets(text);
@@ -370,12 +564,25 @@ function parseFile(root, fileName, raw, constructs) {
 
 function main() {
   const root = parseArguments(process.argv.slice(2));
-  const { files, rejected: initialRejected } = collectSourceFiles(root);
-  const rejected = new Set(initialRejected);
+  const { files: discoveredFiles, configs, rejected: initialRejected } = collectFiles(root);
+  const diagnostics = [];
+  const projects = parseProjects(root, configs, diagnostics);
+  const discovered = new Set(discoveredFiles);
+  const selected = projects.length > 0
+    ? [...new Set(projects.flatMap((project) => project.fileNames))]
+        .filter((fileName) => discovered.has(fileName))
+    : discoveredFiles;
+  selected.sort((left, right) => relativePath(root, left).localeCompare(relativePath(root, right), "en"));
+  if (selected.length > MAX_FILES) fail(`source file count exceeds ${MAX_FILES}`);
+  const selectedSet = new Set(selected);
+  const rejected = new Set(
+    initialRejected.filter((fileName) => selectedSet.has(path.resolve(root, fileName))),
+  );
   const constructs = [];
   let totalBytes = 0;
   let parsedFiles = 0;
-  for (const fileName of files) {
+  const sourceDigest = crypto.createHash("sha256");
+  for (const fileName of selected) {
     const relative = relativePath(root, fileName);
     if (rejected.has(relative)) continue;
     let raw;
@@ -394,7 +601,8 @@ function main() {
     if (totalBytes > MAX_SOURCE_BYTES) {
       fail(`source byte count exceeds ${MAX_SOURCE_BYTES}`);
     }
-    if (parseFile(root, fileName, raw, constructs)) parsedFiles += 1;
+    sourceDigest.update(relative).update("\0").update(raw);
+    if (parseFile(root, fileName, raw, constructs, diagnostics)) parsedFiles += 1;
     else rejected.add(relative);
   }
   constructs.sort((left, right) => {
@@ -407,7 +615,17 @@ function main() {
     }
     return 0;
   });
+  diagnostics.sort((left, right) => {
+    if (left.file < right.file) return -1;
+    if (left.file > right.file) return 1;
+    return left.message.localeCompare(right.message, "en");
+  });
   const script = fs.readFileSync(fileURLToPath(import.meta.url));
+  const configDigest = sha256(
+    projects
+      .map((project) => `${relativePath(root, project.configFile)}\0${project.configDigest}`)
+      .join("\n"),
+  );
   const payload = {
     schema: SCHEMA,
     provider: PROVIDER,
@@ -416,10 +634,26 @@ function main() {
       nodeVersion: process.version,
       scriptSha256: sha256(script),
       platform: `${process.platform}/${process.arch}`,
+      configDigest,
+      sourceDigest: sourceDigest.digest("hex"),
+      projectMode: projects.length > 0 ? "project" : configs.length > 0 ? "fallback" : "tree",
+      diagnosticCount: String(diagnostics.length),
     },
-    scannedFiles: files.length,
+    scannedFiles: selected.length,
     parsedFiles,
     rejectedFiles: [...rejected].sort(),
+    projects: projects.map((project) => ({
+      configFile: relativePath(root, project.configFile),
+      fileCount: project.fileNames.filter((fileName) => selectedSet.has(fileName)).length,
+      files: project.fileNames
+        .filter((fileName) => selectedSet.has(fileName))
+        .map((fileName) => relativePath(root, fileName)),
+      references: project.references
+        .map((reference) => relativePath(root, reference))
+        .sort(),
+      configDigest: project.configDigest,
+    })),
+    diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS),
     constructs,
   };
   process.stdout.write(`${JSON.stringify(payload)}\n`);

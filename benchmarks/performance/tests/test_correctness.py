@@ -25,6 +25,9 @@ FIXTURES = Path(__file__).parent / "fixtures"
 RESOLUTION_ORACLE = (
     Path(__file__).resolve().parents[1] / "oracles" / "typescript-resolution-oracle.mjs"
 )
+SOURCE_ORACLE = (
+    Path(__file__).resolve().parents[1] / "oracles" / "typescript-source-oracle.mjs"
+)
 
 
 def compare_documents(
@@ -227,6 +230,172 @@ class CorrectnessTests(unittest.TestCase):
         )
         self.assertTrue(payload["metadata"]["configDigest"])
         self.assertRegex(payload["metadata"]["sourceDigest"], r"^[0-9a-f]{64}$")
+
+    def test_typescript_source_oracle_honors_project_boundaries_and_references(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "packages" / "lib" / "src").mkdir(parents=True)
+            (root / "tsconfig.base.json").write_text(
+                json.dumps({"compilerOptions": {"strict": True}}),
+                encoding="utf-8",
+            )
+            (root / "tsconfig.json").write_text(
+                json.dumps(
+                    {
+                        "compilerOptions": {
+                            "composite": True,
+                            "module": "NodeNext",
+                            "moduleResolution": "NodeNext",
+                            "target": "ES2022",
+                        },
+                        "include": ["src/**/*"],
+                        "exclude": ["src/excluded.ts"],
+                        "references": [{"path": "packages/lib"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "packages" / "lib" / "tsconfig.json").write_text(
+                json.dumps(
+                    {
+                        "compilerOptions": {"composite": True, "target": "ES2022"},
+                        "include": ["src/**/*"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "src" / "main.ts").write_text(
+                "const café = '🙂';\nrun(café);\n",
+                encoding="utf-8",
+            )
+            (root / "src" / "bad.ts").write_text("const = ;\n", encoding="utf-8")
+            (root / "src" / "excluded.ts").write_text("ignored();\n", encoding="utf-8")
+            (root / "outside.ts").write_text("notInAProject();\n", encoding="utf-8")
+            (root / "packages" / "lib" / "src" / "lib.ts").write_text(
+                "export const library = 1;\n",
+                encoding="utf-8",
+            )
+            command = ("node", str(SOURCE_ORACLE), "--root", str(root))
+            first = subprocess.run(
+                command,
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            second = subprocess.run(
+                command,
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(first.stdout, second.stdout)
+            payload = json.loads(first.stdout)
+            source_bytes = (root / "src" / "main.ts").read_bytes()
+
+        self.assertEqual(payload["scannedFiles"], 3)
+        self.assertEqual(payload["parsedFiles"], 2)
+        self.assertEqual(payload["rejectedFiles"], ["src/bad.ts"])
+        self.assertEqual(payload["metadata"]["projectMode"], "project")
+        self.assertRegex(payload["metadata"]["configDigest"], r"^[0-9a-f]{64}$")
+        self.assertRegex(payload["metadata"]["sourceDigest"], r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            [project["configFile"] for project in payload["projects"]],
+            ["packages/lib/tsconfig.json", "tsconfig.json"],
+        )
+        self.assertEqual(
+            payload["projects"][1]["references"], ["packages/lib/tsconfig.json"]
+        )
+        self.assertEqual(
+            sorted(file_name for project in payload["projects"] for file_name in project["files"]),
+            ["packages/lib/src/lib.ts", "src/bad.ts", "src/main.ts"],
+        )
+        self.assertTrue(
+            any(diagnostic["file"] == "src/bad.ts" for diagnostic in payload["diagnostics"])
+        )
+        self.assertFalse(any(construct["sourceFile"] == "outside.ts" for construct in payload["constructs"]))
+        cafe_construct = next(
+            construct
+            for construct in payload["constructs"]
+            if construct["sourceFile"] == "src/main.ts"
+            and construct["targetSpelling"] == "café"
+        )
+        self.assertEqual(
+            source_bytes[cafe_construct["startByte"] : cafe_construct["endByte"]],
+            "café".encode(),
+        )
+
+    def test_typescript_source_oracle_reports_invalid_config_and_follows_cycles_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "tsconfig.json").write_text("{ invalid", encoding="utf-8")
+            (root / "src" / "main.ts").write_text("run();\n", encoding="utf-8")
+            fallback = subprocess.run(
+                ("node", str(SOURCE_ORACLE), "--root", str(root)),
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(fallback.returncode, 0, fallback.stderr)
+            fallback_payload = json.loads(fallback.stdout)
+            self.assertEqual(fallback_payload["metadata"]["projectMode"], "fallback")
+            self.assertEqual(fallback_payload["scannedFiles"], 1)
+            self.assertEqual(fallback_payload["parsedFiles"], 1)
+            self.assertEqual(
+                [diagnostic["file"] for diagnostic in fallback_payload["diagnostics"]],
+                ["tsconfig.json"],
+            )
+
+            (root / "tsconfig.json").unlink()
+            (root / "a").mkdir()
+            (root / "b").mkdir()
+            (root / "a" / "tsconfig.json").write_text(
+                json.dumps(
+                    {
+                        "compilerOptions": {"composite": True},
+                        "include": ["src/**/*"],
+                        "references": [{"path": "../b"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "b" / "tsconfig.json").write_text(
+                json.dumps(
+                    {
+                        "compilerOptions": {"composite": True},
+                        "include": ["src/**/*"],
+                        "references": [{"path": "../a"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "a" / "src").mkdir()
+            (root / "b" / "src").mkdir()
+            (root / "a" / "src" / "a.ts").write_text("export const a = 1;\n", encoding="utf-8")
+            (root / "b" / "src" / "b.ts").write_text("export const b = 1;\n", encoding="utf-8")
+            cycled = subprocess.run(
+                ("node", str(SOURCE_ORACLE), "--root", str(root)),
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(cycled.returncode, 0, cycled.stderr)
+            cycled_payload = json.loads(cycled.stdout)
+
+        self.assertEqual(cycled_payload["metadata"]["projectMode"], "project")
+        self.assertEqual(
+            [project["configFile"] for project in cycled_payload["projects"]],
+            ["a/tsconfig.json", "b/tsconfig.json"],
+        )
+        self.assertEqual(cycled_payload["scannedFiles"], 2)
+        self.assertEqual(cycled_payload["parsedFiles"], 2)
 
     def test_compass_superset_passes_shared_fact_comparison(self) -> None:
         database = self.database()

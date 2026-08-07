@@ -1209,10 +1209,39 @@ source-proven subset of conditional and mapped receiver types:
   occurrence multiplicity, and published declaration identities are unchanged.
 
 The focused candidate suite is now 81 tests and the universal resolver suite
-remains 159 tests. The candidate adapter remains absent from
+remains 160 tests. The candidate adapter remains absent from
 `UNIVERSAL_ADAPTERS`. Broader distributive conditional semantics, indexed/keyof
 evaluation, richer interprocedural flow, framework/compiler tiers,
 accepted precision/Wilson gates, equivalent Graphify/SCIP scope, and the
+production hard cut remain open.
+
+### Execution checkpoint (2026-08-07, project-aware compiler source-oracle slice)
+
+The independent TypeScript/JavaScript source oracle now honors the compiler's
+bounded project model before measuring source recall:
+
+- It discovers `tsconfig*.json` and `jsconfig*.json`, parses their include/
+  exclude/file selections, follows in-root project references, and guards
+  project count, reference depth, project-file references, source bytes, facts,
+  and diagnostics with explicit limits. Cycles are visited once and do not
+  recurse indefinitely.
+- The payload records project scopes, configuration/source digests, a
+  `projectMode` (`project`, `fallback`, or `tree`), deterministic diagnostics,
+  and exact UTF-8 ranges. Parser/configuration failures remain rejected or
+  diagnosed coverage; an entirely invalid configuration set falls back to the
+  bounded source tree rather than silently reporting an empty project.
+- The Python inventory validator accepts and validates the optional project and
+  diagnostics sections while preserving the existing v1 source-construct
+  contract. A regression fixture covers include/exclude boundaries, project
+  references, syntax rejection, deterministic repeated output, and Unicode
+  byte ranges.
+
+The source oracle remains qualification-only and emits source constructs, not
+targets; its output is still a deterministic JSON payload rather than the final
+JSONL evidence stream described by Phase 0. The candidate adapter remains
+absent from `UNIVERSAL_ADAPTERS`. Project-manifest corpora, compiler-backed
+scope/declaration inventories, broader conditional/keyof semantics, framework
+tiers, accepted precision/Wilson gates, equivalent Graphify/SCIP scope, and the
 production hard cut remain open.
 
 ## Outcome

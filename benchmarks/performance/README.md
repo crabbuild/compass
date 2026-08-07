@@ -142,8 +142,14 @@ TypeScript and JavaScript source recall uses the independent compiler oracle in
 `benchmarks/performance/oracles/typescript-source-oracle.mjs`. It is a pinned
 developer-side tool, not a Compass runtime dependency. Run `npm ci` before the
 first TypeScript/JavaScript audit so the lockfile's TypeScript 5.9.3 package is
-available. The provider records exact UTF-8 byte ranges and fails closed when a
-source file cannot be parsed or bounded.
+available. The provider discovers bounded `tsconfig*.json`/`jsconfig*.json`
+projects, follows in-root project references with cycle/depth limits, and uses
+the compiler-selected file set. It records project scopes, configuration/source
+digests, exact UTF-8 byte ranges, and bounded diagnostics; malformed or
+unbounded files are explicit rejected coverage rather than silent omissions.
+When every discovered configuration is invalid it reports the diagnostics and
+falls back to the bounded source tree so a broken config cannot masquerade as a
+perfectly empty project.
 
 Module/import target qualification uses the companion
 `benchmarks/performance/oracles/typescript-resolution-oracle.mjs`. It resolves

@@ -451,7 +451,8 @@ def _typescript_inventory_from_payload(
         "rejectedFiles",
         "constructs",
     }
-    if set(payload) != required:
+    optional = {"projects", "diagnostics"}
+    if not required.issubset(payload) or set(payload) - required - optional:
         raise RuntimeError("TypeScript source oracle output has an invalid schema")
     if payload["schema"] != _TYPESCRIPT_ORACLE_SCHEMA:
         raise RuntimeError(f"unsupported TypeScript source oracle schema: {payload['schema']!r}")
@@ -473,6 +474,19 @@ def _typescript_inventory_from_payload(
     script_sha256 = metadata.get("scriptSha256")
     if compiler_version != "5.9.3" or not re.fullmatch(r"[0-9a-f]{64}", script_sha256 or ""):
         raise RuntimeError("TypeScript source oracle metadata is not pinned")
+    for digest_name in ("configDigest", "sourceDigest"):
+        if digest_name in metadata and not re.fullmatch(
+            r"[0-9a-f]{64}", metadata[digest_name]
+        ):
+            raise RuntimeError(
+                f"TypeScript source oracle metadata {digest_name} is invalid"
+            )
+    project_mode = metadata.get("projectMode")
+    if project_mode is not None and project_mode not in {"project", "fallback", "tree"}:
+        raise RuntimeError("TypeScript source oracle metadata projectMode is invalid")
+    diagnostic_count = metadata.get("diagnosticCount")
+    if diagnostic_count is not None and not re.fullmatch(r"[0-9]+", diagnostic_count):
+        raise RuntimeError("TypeScript source oracle metadata diagnosticCount is invalid")
     scanned = payload["scannedFiles"]
     parsed = payload["parsedFiles"]
     if (
@@ -518,6 +532,83 @@ def _typescript_inventory_from_payload(
         raise RuntimeError(
             "TypeScript source oracle coverage does not account for every scanned file"
         )
+    projects = payload.get("projects")
+    if projects is not None:
+        if not isinstance(projects, list):
+            raise RuntimeError("TypeScript source oracle projects must be an array")
+        for index, project in enumerate(projects):
+            if not isinstance(project, dict):
+                raise RuntimeError(f"oracle projects[{index}] must be an object")
+            if set(project) != {"configFile", "fileCount", "files", "references", "configDigest"}:
+                raise RuntimeError(f"oracle projects[{index}] has an invalid schema")
+            config_file = _safe_oracle_file(
+                project["configFile"], f"projects[{index}].configFile"
+            )
+            config_path = (root / config_file).resolve()
+            try:
+                config_path.relative_to(root)
+            except ValueError as error:
+                raise RuntimeError(
+                    f"oracle project config escapes the source root: {config_file}"
+                ) from error
+            if not config_path.is_file():
+                raise RuntimeError(f"oracle project config is missing: {config_file}")
+            file_count = project["fileCount"]
+            if isinstance(file_count, bool) or not isinstance(file_count, int) or file_count < 0:
+                raise RuntimeError(f"oracle projects[{index}].fileCount is invalid")
+            if not isinstance(project["files"], list) or len(project["files"]) != file_count:
+                raise RuntimeError(f"oracle projects[{index}].files is invalid")
+            project_files: set[str] = set()
+            for file_index, file_name in enumerate(project["files"]):
+                normalized_file = _safe_oracle_file(
+                    file_name, f"projects[{index}].files[{file_index}]"
+                )
+                if normalized_file in project_files:
+                    raise RuntimeError(f"oracle projects[{index}].files is not unique")
+                project_files.add(normalized_file)
+                source_path = (root / normalized_file).resolve()
+                try:
+                    source_path.relative_to(root)
+                except ValueError as error:
+                    raise RuntimeError(
+                        f"oracle project file escapes the source root: {normalized_file}"
+                    ) from error
+                if not source_path.is_file():
+                    raise RuntimeError(
+                        f"oracle project file is missing: {normalized_file}"
+                    )
+            if not isinstance(project["references"], list):
+                raise RuntimeError(f"oracle projects[{index}].references is invalid")
+            for reference_index, reference in enumerate(project["references"]):
+                normalized_reference = _safe_oracle_file(
+                    reference, f"projects[{index}].references[{reference_index}]"
+                )
+                reference_path = (root / normalized_reference).resolve()
+                try:
+                    reference_path.relative_to(root)
+                except ValueError as error:
+                    raise RuntimeError(
+                        f"oracle project reference escapes the source root: {normalized_reference}"
+                    ) from error
+                if not reference_path.is_file():
+                    raise RuntimeError(
+                        f"oracle project reference is missing: {normalized_reference}"
+                    )
+            if not re.fullmatch(r"[0-9a-f]{64}", project["configDigest"]):
+                raise RuntimeError(f"oracle projects[{index}].configDigest is invalid")
+    diagnostics = payload.get("diagnostics")
+    if diagnostics is not None:
+        if not isinstance(diagnostics, list):
+            raise RuntimeError("TypeScript source oracle diagnostics must be an array")
+        for index, diagnostic in enumerate(diagnostics):
+            if (
+                not isinstance(diagnostic, dict)
+                or set(diagnostic) != {"file", "message"}
+                or not isinstance(diagnostic["message"], str)
+                or not diagnostic["message"]
+            ):
+                raise RuntimeError(f"oracle diagnostics[{index}] has an invalid schema")
+            _safe_oracle_file(diagnostic["file"], f"diagnostics[{index}].file")
     return SourceConstructInventory(
         parsed_constructs,
         scanned,
