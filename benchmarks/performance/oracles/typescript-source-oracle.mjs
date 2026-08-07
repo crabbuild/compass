@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const SCHEMA = "compass.typescript-source-oracle/1";
-const JSONL_SCHEMA = "compass.typescript-source-oracle-jsonl/1";
+const JSONL_SCHEMA = "compass.typescript-source-oracle-jsonl/2";
 const PROVIDER = "typescript_compiler_api_5_9_3";
 const MAX_FILES = 20_000;
 const MAX_SOURCE_BYTES = 128 * 1024 * 1024;
@@ -29,6 +29,7 @@ const MAX_CONFIG_BYTES = 2 * 1024 * 1024;
 const MAX_DIAGNOSTICS = 10_000;
 const MAX_PROJECT_FILE_REFERENCES = 100_000;
 const MAX_PROJECT_DEPTH = 32;
+const MAX_TYPED_FACTS = 500_000;
 const SOURCE_SUFFIXES = [
   ".ts",
   ".tsx",
@@ -409,6 +410,101 @@ function targetQualifier(sourceFile, node) {
   return null;
 }
 
+function nodeRange(sourceFile, offsets, node) {
+  if (!node) return null;
+  const start = node.getStart(sourceFile, false);
+  const end = node.getEnd();
+  if (!(end > start) || end > offsets.length - 1) return null;
+  return {
+    startByte: offsets[start],
+    endByte: offsets[end],
+    startLine: sourceFile.getLineAndCharacterOfPosition(start).line + 1,
+  };
+}
+
+function declarationKind(node) {
+  if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)) return "function";
+  if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) return "class";
+  if (ts.isInterfaceDeclaration(node)) return "interface";
+  if (ts.isTypeAliasDeclaration(node)) return "type_alias";
+  if (ts.isEnumDeclaration(node)) return "enum";
+  if (ts.isModuleDeclaration(node)) return "namespace";
+  if (ts.isMethodDeclaration(node)) return "method";
+  if (ts.isMethodSignature(node)) return "method_signature";
+  if (ts.isConstructorDeclaration(node)) return "constructor";
+  if (ts.isGetAccessorDeclaration(node)) return "getter";
+  if (ts.isSetAccessorDeclaration(node)) return "setter";
+  if (ts.isPropertyDeclaration(node)) return "property";
+  if (ts.isPropertySignature(node)) return "property_signature";
+  if (ts.isParameter(node)) return "parameter";
+  if (ts.isTypeParameterDeclaration(node)) return "type_parameter";
+  if (ts.isVariableDeclaration(node)) return "variable";
+  return null;
+}
+
+function declarationNamespace(kind) {
+  if (kind === "class" || kind === "enum") return "value_and_type";
+  if (
+    kind === "interface" ||
+    kind === "type_alias" ||
+    kind === "method_signature" ||
+    kind === "property_signature" ||
+    kind === "type_parameter"
+  ) {
+    return "type";
+  }
+  if (kind === "namespace") return "namespace";
+  return "value";
+}
+
+function declarationParameters(node) {
+  if (!node || !Array.isArray(node.parameters)) {
+    return {
+      parameterCount: null,
+      minimumParameterCount: null,
+      hasRestParameter: false,
+    };
+  }
+  let minimumParameterCount = 0;
+  let hasRestParameter = false;
+  for (const parameter of node.parameters) {
+    if (parameter.dotDotDotToken) {
+      hasRestParameter = true;
+      continue;
+    }
+    if (!parameter.questionToken && !parameter.initializer) minimumParameterCount += 1;
+  }
+  return {
+    parameterCount: node.parameters.length,
+    minimumParameterCount,
+    hasRestParameter,
+  };
+}
+
+function declarationQualifiedName(root, sourceFile, node) {
+  const name = declarationName(sourceFile, node);
+  const owner = ownerName(root, sourceFile, node);
+  return name ? `${owner}.${name}` : owner;
+}
+
+function scopeKind(node) {
+  if (ts.isSourceFile(node)) return "module";
+  if (ts.isClassLike(node)) return "class";
+  if (ts.isFunctionLike(node)) return "function";
+  if (ts.isModuleDeclaration(node)) return "namespace";
+  if (ts.isCatchClause(node)) return "catch";
+  if (ts.isCaseBlock(node)) return "switch";
+  if (ts.isBlock(node) || ts.isModuleBlock(node)) return "block";
+  return null;
+}
+
+function callTargetKind(node) {
+  if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) return "direct";
+  if (ts.isPropertyAccessExpression(node)) return "member";
+  if (ts.isElementAccessExpression(node)) return "computed_literal";
+  return "dynamic";
+}
+
 function isDeclarationName(node) {
   const parent = node.parent;
   if (!parent) return false;
@@ -424,7 +520,7 @@ function scriptKind(fileName) {
   return ts.getScriptKindFromFileName(fileName);
 }
 
-function parseFile(root, fileName, raw, constructs, diagnostics) {
+function parseFile(root, fileName, raw, constructs, diagnostics, typedFacts) {
   const text = raw.toString("utf8");
   const sourceFile = ts.createSourceFile(
     fileName,
@@ -446,6 +542,95 @@ function parseFile(root, fileName, raw, constructs, diagnostics) {
     return false;
   }
   const offsets = byteOffsets(text);
+  const relative = relativePath(root, fileName);
+  const scopes = typedFacts.scopes;
+  const declarations = typedFacts.declarations;
+  const calls = typedFacts.calls;
+  const scopeStack = [];
+  const addScope = (node) => {
+    const kind = scopeKind(node);
+    if (!kind) return false;
+    const range = ts.isSourceFile(node)
+      ? (text.length > 0
+        ? { startByte: 0, endByte: Buffer.byteLength(text, "utf8"), startLine: 1 }
+        : null)
+      : nodeRange(sourceFile, offsets, node);
+    if (!range) return false;
+    if (scopes.length >= MAX_TYPED_FACTS) {
+      fail(`scope count exceeds ${MAX_TYPED_FACTS}`);
+    }
+    const scopeId = `${relative}:${kind}:${range.startByte}:${range.endByte}`;
+    scopes.push({
+      sourceFile: relative,
+      scopeId,
+      kind,
+      ownerQualifiedName: ts.isSourceFile(node)
+        ? moduleName(root, sourceFile.fileName)
+        : declarationQualifiedName(root, sourceFile, node),
+      parentScopeId: scopeStack.length > 0 ? scopeStack.at(-1).scopeId : null,
+      ...range,
+    });
+    scopeStack.push({ scopeId });
+    return true;
+  };
+
+  const addDeclaration = (node) => {
+    const kind = declarationKind(node);
+    if (
+      !kind ||
+      !node.name ||
+      !(ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name))
+    ) {
+      return;
+    }
+    const range = nodeRange(sourceFile, offsets, node.name);
+    if (!range) return;
+    if (declarations.length >= MAX_TYPED_FACTS) {
+      fail(`declaration count exceeds ${MAX_TYPED_FACTS}`);
+    }
+    const parameters = declarationParameters(node);
+    declarations.push({
+      sourceFile: relative,
+      kind,
+      name: node.name.text,
+      qualifiedName: declarationQualifiedName(root, sourceFile, node),
+      ownerQualifiedName: ownerName(root, sourceFile, node),
+      namespace: declarationNamespace(kind),
+      ...range,
+      ...parameters,
+    });
+  };
+
+  const addCall = (node, relation) => {
+    const target = targetNode(node.expression);
+    const targetRange = nodeRange(sourceFile, offsets, target);
+    const callRange = nodeRange(sourceFile, offsets, node);
+    if (!target || !targetRange || !callRange) return;
+    const targetSpelling = identifierText(sourceFile, target);
+    if (!targetSpelling) return;
+    if (calls.length >= MAX_TYPED_FACTS) {
+      fail(`call count exceeds ${MAX_TYPED_FACTS}`);
+    }
+    const argumentsList = Array.isArray(node.arguments) ? node.arguments : [];
+    calls.push({
+      sourceFile: relative,
+      relation,
+      kind: relation === "instantiates" ? "construction" : "call",
+      ownerQualifiedName: ownerName(root, sourceFile, node),
+      targetSpelling,
+      qualifier: targetQualifier(sourceFile, node.expression)
+        ? nodeText(sourceFile, targetQualifier(sourceFile, node.expression)) || null
+        : null,
+      targetKind: callTargetKind(node.expression),
+      ...targetRange,
+      callStartByte: callRange.startByte,
+      callEndByte: callRange.endByte,
+      argumentCount: argumentsList.length,
+      hasSpreadArgument: argumentsList.some((argument) => Boolean(argument.dotDotDotToken)),
+      optional: Boolean(node.questionDotToken),
+    });
+  };
+
   const add = (
     relation,
     capability,
@@ -456,28 +641,26 @@ function parseFile(root, fileName, raw, constructs, diagnostics) {
   ) => {
     const target = targetNode(node);
     if (!target) return;
-    const start = target.getStart(sourceFile, false);
-    const end = target.getEnd();
-    if (!(end > start) || end > offsets.length - 1) return;
+    const range = nodeRange(sourceFile, offsets, target);
+    if (!range) return;
     const targetSpelling = spelling ?? identifierText(sourceFile, target);
     if (!targetSpelling) return;
     if (constructs.length >= MAX_CONSTRUCTS) {
       fail(`construct count exceeds ${MAX_CONSTRUCTS}`);
     }
     constructs.push({
-      sourceFile: relativePath(root, fileName),
+      sourceFile: relative,
       relation,
       capability,
       ownerQualifiedName: ownerName(root, sourceFile, ownerNode),
       targetSpelling,
       qualifier: qualifierNode ? nodeText(sourceFile, qualifierNode) || null : null,
-      startByte: offsets[start],
-      endByte: offsets[end],
-      startLine: sourceFile.getLineAndCharacterOfPosition(start).line + 1,
+      ...range,
     });
   };
 
   const visit = (node) => {
+    const pushedScope = addScope(node);
     if (ts.isImportDeclaration(node) && node.moduleSpecifier) {
       add("imports", "imports", node.moduleSpecifier, null, node.moduleSpecifier.text);
       if (node.importClause?.namedBindings && ts.isNamedImports(node.importClause.namedBindings)) {
@@ -499,8 +682,10 @@ function parseFile(root, fileName, raw, constructs, diagnostics) {
       add("imports", "imports", node.moduleReference.expression, null, node.moduleReference.expression.text);
     } else if (ts.isCallExpression(node)) {
       add("calls", "calls", node.expression, targetQualifier(sourceFile, node.expression));
+      addCall(node, "calls");
     } else if (ts.isNewExpression(node)) {
       add("instantiates", "construction", node.expression, targetQualifier(sourceFile, node.expression));
+      addCall(node, "instantiates");
     } else if (ts.isPropertyAccessExpression(node)) {
       add("accesses", "members", node.name, node.expression);
     } else if (ts.isElementAccessExpression(node) && node.argumentExpression && (ts.isStringLiteral(node.argumentExpression) || ts.isNumericLiteral(node.argumentExpression))) {
@@ -560,9 +745,11 @@ function parseFile(root, fileName, raw, constructs, diagnostics) {
       node.name &&
       (ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name))
     ) {
+      addDeclaration(node);
       add("declares", "declarations", node.name, null, null, node);
     }
     ts.forEachChild(node, visit);
+    if (pushedScope) scopeStack.pop();
   };
   visit(sourceFile);
   return true;
@@ -585,6 +772,11 @@ function main() {
     initialRejected.filter((fileName) => selectedSet.has(path.resolve(root, fileName))),
   );
   const constructs = [];
+  const typedFacts = {
+    scopes: [],
+    declarations: [],
+    calls: [],
+  };
   let totalBytes = 0;
   let parsedFiles = 0;
   const sourceDigest = crypto.createHash("sha256");
@@ -608,7 +800,7 @@ function main() {
       fail(`source byte count exceeds ${MAX_SOURCE_BYTES}`);
     }
     sourceDigest.update(relative).update("\0").update(raw);
-    if (parseFile(root, fileName, raw, constructs, diagnostics)) parsedFiles += 1;
+    if (parseFile(root, fileName, raw, constructs, diagnostics, typedFacts)) parsedFiles += 1;
     else rejected.add(relative);
   }
   constructs.sort((left, right) => {
@@ -621,6 +813,42 @@ function main() {
     }
     return 0;
   });
+  const sortByFields = (values, fields) => {
+    values.sort((left, right) => {
+      for (const field of fields) {
+        const leftValue = left[field] ?? "";
+        const rightValue = right[field] ?? "";
+        if (leftValue < rightValue) return -1;
+        if (leftValue > rightValue) return 1;
+      }
+      return 0;
+    });
+  };
+  sortByFields(typedFacts.scopes, [
+    "sourceFile",
+    "startByte",
+    "endByte",
+    "kind",
+    "scopeId",
+    "parentScopeId",
+  ]);
+  sortByFields(typedFacts.declarations, [
+    "sourceFile",
+    "startByte",
+    "endByte",
+    "kind",
+    "qualifiedName",
+    "namespace",
+  ]);
+  sortByFields(typedFacts.calls, [
+    "sourceFile",
+    "startByte",
+    "endByte",
+    "callStartByte",
+    "callEndByte",
+    "relation",
+    "targetSpelling",
+  ]);
   diagnostics.sort((left, right) => {
     if (left.file < right.file) return -1;
     if (left.file > right.file) return 1;
@@ -661,6 +889,9 @@ function main() {
     })),
     diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS),
     constructs,
+    scopes: typedFacts.scopes,
+    declarations: typedFacts.declarations,
+    calls: typedFacts.calls,
   };
   if (!jsonl) {
     process.stdout.write(`${JSON.stringify(payload)}\n`);
@@ -685,11 +916,17 @@ function main() {
       projectCount: payload.projects.length,
       diagnosticCount: payload.diagnostics.length,
       constructCount: payload.constructs.length,
+      scopeCount: payload.scopes.length,
+      declarationCount: payload.declarations.length,
+      callCount: payload.calls.length,
     },
     ...payload.projects.map((project) => ({ recordType: "project", ...project })),
     ...coverage,
     ...payload.diagnostics.map((diagnostic) => ({ recordType: "diagnostic", ...diagnostic })),
     ...payload.constructs.map((construct) => ({ recordType: "construct", ...construct })),
+    ...payload.scopes.map((scope) => ({ recordType: "scope", ...scope })),
+    ...payload.declarations.map((declaration) => ({ recordType: "declaration", ...declaration })),
+    ...payload.calls.map((call) => ({ recordType: "call", ...call })),
     {
       schema: JSONL_SCHEMA,
       provider: PROVIDER,
@@ -700,6 +937,9 @@ function main() {
       projectCount: payload.projects.length,
       diagnosticCount: payload.diagnostics.length,
       constructCount: payload.constructs.length,
+      scopeCount: payload.scopes.length,
+      declarationCount: payload.declarations.length,
+      callCount: payload.calls.length,
       sourceDigest: payload.metadata.sourceDigest,
       configDigest: payload.metadata.configDigest,
     },

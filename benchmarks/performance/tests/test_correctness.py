@@ -334,7 +334,11 @@ class CorrectnessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "src").mkdir()
-            (root / "src" / "main.ts").write_text("export function run(): void {}\n", encoding="utf-8")
+            (root / "src" / "main.ts").write_text(
+                'export function run(café: string): string { return café; }\n'
+                'const result = run(café);\n',
+                encoding="utf-8",
+            )
             (root / "src" / "bad.ts").write_text("const = ;\n", encoding="utf-8")
             command = ("node", str(SOURCE_ORACLE), "--root", str(root), "--jsonl")
             first = subprocess.run(
@@ -359,14 +363,49 @@ class CorrectnessTests(unittest.TestCase):
             payload = _typescript_payload_from_jsonl(first.stdout)
             inventory = _typescript_inventory_from_payload(payload, root)
             provider_inventory = independent_source_inventory(root, "typescript")
+            source_bytes = (root / "src" / "main.ts").read_bytes()
+            tampered_records = [json.loads(line) for line in lines]
+            tampered_records[-1]["callCount"] += 1
+            with self.assertRaisesRegex(RuntimeError, "footer count callCount"):
+                _typescript_payload_from_jsonl(
+                    "\n".join(json.dumps(record) for record in tampered_records).encode()
+                )
+            payload["scopes"][1]["parentScopeId"] = "missing-scope"
+            with self.assertRaisesRegex(RuntimeError, "scope parent"):
+                _typescript_inventory_from_payload(payload, root)
 
         self.assertEqual(inventory.scanned_files, 2)
         self.assertEqual(inventory.parsed_files, 1)
         self.assertEqual(inventory.rejected_files, ("src/bad.ts",))
         self.assertEqual(provider_inventory, inventory)
+        header = json.loads(lines[0])
         footer = json.loads(lines[-1])
         self.assertEqual(footer["constructCount"], len(inventory.constructs))
         self.assertEqual(footer["scannedFiles"], inventory.scanned_files)
+        self.assertEqual(header["scopeCount"], len(payload["scopes"]))
+        self.assertEqual(header["declarationCount"], len(payload["declarations"]))
+        self.assertEqual(header["callCount"], len(payload["calls"]))
+        self.assertGreaterEqual(len(payload["scopes"]), 2)
+        self.assertTrue(any(scope["kind"] == "module" for scope in payload["scopes"]))
+        run = next(
+            declaration
+            for declaration in payload["declarations"]
+            if declaration["name"] == "run"
+        )
+        self.assertEqual(run["kind"], "function")
+        self.assertEqual(run["parameterCount"], 1)
+        cafe = next(
+            declaration
+            for declaration in payload["declarations"]
+            if declaration["name"] == "café"
+        )
+        self.assertEqual(source_bytes[cafe["startByte"] : cafe["endByte"]], "café".encode())
+        call = next(call for call in payload["calls"] if call["targetSpelling"] == "run")
+        self.assertEqual(source_bytes[call["startByte"] : call["endByte"]], b"run")
+        self.assertEqual(
+            source_bytes[call["callStartByte"] : call["callEndByte"]],
+            "run(café)".encode(),
+        )
 
     def test_typescript_source_oracle_reports_invalid_config_and_follows_cycles_once(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

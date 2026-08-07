@@ -281,13 +281,14 @@ def _python_constructs(root: Path, path: Path) -> tuple[SourceConstruct, ...] | 
 
 
 _TYPESCRIPT_ORACLE_SCHEMA = "compass.typescript-source-oracle/1"
-_TYPESCRIPT_ORACLE_JSONL_SCHEMA = "compass.typescript-source-oracle-jsonl/1"
+_TYPESCRIPT_ORACLE_JSONL_SCHEMA = "compass.typescript-source-oracle-jsonl/2"
 _TYPESCRIPT_ORACLE_PROVIDER = "typescript_compiler_api_5_9_3"
 _TYPESCRIPT_ORACLE_SCRIPT = (
     Path(__file__).resolve().parents[1] / "oracles" / "typescript-source-oracle.mjs"
 )
 _TYPESCRIPT_ORACLE_TIMEOUT_SECONDS = 90.0
 _TYPESCRIPT_ORACLE_OUTPUT_BYTES = 64 * 1024 * 1024
+_TYPESCRIPT_ORACLE_MAX_TYPED_FACTS = 500_000
 
 
 def _bounded_node_oracle(root: Path) -> bytes:
@@ -437,6 +438,154 @@ def _oracle_construct(value: object, index: int) -> SourceConstruct:
     )
 
 
+def _oracle_typed_range(value: Mapping[str, object], context: str) -> tuple[int, int, int]:
+    start_byte = value.get("startByte")
+    end_byte = value.get("endByte")
+    start_line = value.get("startLine")
+    if (
+        isinstance(start_byte, bool)
+        or not isinstance(start_byte, int)
+        or isinstance(end_byte, bool)
+        or not isinstance(end_byte, int)
+        or isinstance(start_line, bool)
+        or not isinstance(start_line, int)
+        or start_byte < 0
+        or end_byte <= start_byte
+        or start_line <= 0
+    ):
+        raise RuntimeError(f"{context} has an invalid source range")
+    return start_byte, end_byte, start_line
+
+
+def _oracle_declaration(value: object, index: int) -> Mapping[str, object]:
+    context = f"oracle declarations[{index}]"
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{context} must be an object")
+    required = {
+        "sourceFile",
+        "kind",
+        "name",
+        "qualifiedName",
+        "ownerQualifiedName",
+        "namespace",
+        "startByte",
+        "endByte",
+        "startLine",
+        "parameterCount",
+        "minimumParameterCount",
+        "hasRestParameter",
+    }
+    if set(value) != required:
+        raise RuntimeError(f"{context} has an invalid schema")
+    _safe_oracle_file(value["sourceFile"], f"{context}.sourceFile")
+    for field in ("kind", "name", "qualifiedName", "ownerQualifiedName", "namespace"):
+        if not isinstance(value[field], str) or not value[field]:
+            raise RuntimeError(f"{context}.{field} is invalid")
+    _oracle_typed_range(value, context)
+    for field in ("parameterCount", "minimumParameterCount"):
+        count = value[field]
+        if (
+            count is not None
+            and (isinstance(count, bool) or not isinstance(count, int) or count < 0)
+        ):
+            raise RuntimeError(f"{context}.{field} is invalid")
+    if value["parameterCount"] is None and value["minimumParameterCount"] is not None:
+        raise RuntimeError(f"{context} has a minimum parameter count without a parameter count")
+    if (
+        value["parameterCount"] is not None
+        and value["minimumParameterCount"] is not None
+        and value["minimumParameterCount"] > value["parameterCount"]
+    ):
+        raise RuntimeError(f"{context} has an invalid parameter count relationship")
+    if not isinstance(value["hasRestParameter"], bool):
+        raise RuntimeError(f"{context}.hasRestParameter is invalid")
+    return value
+
+
+def _oracle_scope(value: object, index: int) -> Mapping[str, object]:
+    context = f"oracle scopes[{index}]"
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{context} must be an object")
+    required = {
+        "sourceFile",
+        "scopeId",
+        "kind",
+        "ownerQualifiedName",
+        "parentScopeId",
+        "startByte",
+        "endByte",
+        "startLine",
+    }
+    if set(value) != required:
+        raise RuntimeError(f"{context} has an invalid schema")
+    _safe_oracle_file(value["sourceFile"], f"{context}.sourceFile")
+    for field in ("scopeId", "kind", "ownerQualifiedName"):
+        if not isinstance(value[field], str) or not value[field]:
+            raise RuntimeError(f"{context}.{field} is invalid")
+    parent = value["parentScopeId"]
+    if parent is not None and (not isinstance(parent, str) or not parent):
+        raise RuntimeError(f"{context}.parentScopeId is invalid")
+    _oracle_typed_range(value, context)
+    return value
+
+
+def _oracle_call(value: object, index: int) -> Mapping[str, object]:
+    context = f"oracle calls[{index}]"
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{context} must be an object")
+    required = {
+        "sourceFile",
+        "relation",
+        "kind",
+        "ownerQualifiedName",
+        "targetSpelling",
+        "qualifier",
+        "targetKind",
+        "startByte",
+        "endByte",
+        "startLine",
+        "callStartByte",
+        "callEndByte",
+        "argumentCount",
+        "hasSpreadArgument",
+        "optional",
+    }
+    if set(value) != required:
+        raise RuntimeError(f"{context} has an invalid schema")
+    _safe_oracle_file(value["sourceFile"], f"{context}.sourceFile")
+    for field in ("relation", "kind", "ownerQualifiedName", "targetSpelling", "targetKind"):
+        if not isinstance(value[field], str) or not value[field]:
+            raise RuntimeError(f"{context}.{field} is invalid")
+    qualifier = value["qualifier"]
+    if qualifier is not None and (not isinstance(qualifier, str) or not qualifier):
+        raise RuntimeError(f"{context}.qualifier is invalid")
+    start_byte, end_byte, _ = _oracle_typed_range(value, context)
+    call_start = value["callStartByte"]
+    call_end = value["callEndByte"]
+    if (
+        isinstance(call_start, bool)
+        or not isinstance(call_start, int)
+        or isinstance(call_end, bool)
+        or not isinstance(call_end, int)
+        or call_start < start_byte
+        or call_end < call_start
+        or call_end < end_byte
+        or call_end <= call_start
+    ):
+        raise RuntimeError(f"{context} has an invalid call range")
+    argument_count = value["argumentCount"]
+    if (
+        isinstance(argument_count, bool)
+        or not isinstance(argument_count, int)
+        or argument_count < 0
+    ):
+        raise RuntimeError(f"{context}.argumentCount is invalid")
+    for field in ("hasSpreadArgument", "optional"):
+        if not isinstance(value[field], bool):
+            raise RuntimeError(f"{context}.{field} is invalid")
+    return value
+
+
 def _typescript_inventory_from_payload(
     payload: object,
     root: Path,
@@ -453,7 +602,7 @@ def _typescript_inventory_from_payload(
         "rejectedFiles",
         "constructs",
     }
-    optional = {"projects", "diagnostics"}
+    optional = {"projects", "diagnostics", "scopes", "declarations", "calls"}
     if not required.issubset(payload) or set(payload) - required - optional:
         raise RuntimeError("TypeScript source oracle output has an invalid schema")
     if payload["schema"] != _TYPESCRIPT_ORACLE_SCHEMA:
@@ -530,6 +679,87 @@ def _typescript_inventory_from_payload(
             raise RuntimeError(
                 f"oracle construct range exceeds source: {construct.source_file}"
             )
+    typed_records: dict[str, list[Mapping[str, object]]] = {}
+    for field, validator in (
+        ("scopes", _oracle_scope),
+        ("declarations", _oracle_declaration),
+        ("calls", _oracle_call),
+    ):
+        values = payload.get(field)
+        if values is None:
+            continue
+        if not isinstance(values, list):
+            raise RuntimeError(f"TypeScript source oracle {field} must be an array")
+        if len(values) > _TYPESCRIPT_ORACLE_MAX_TYPED_FACTS:
+            raise RuntimeError(
+                f"TypeScript source oracle {field} exceeds the configured limit"
+            )
+        typed_records[field] = [validator(value, index) for index, value in enumerate(values)]
+    scope_ids: set[str] = set()
+    scopes_by_id: dict[str, Mapping[str, object]] = {}
+    for scope in typed_records.get("scopes", []):
+        scope_id = scope["scopeId"]
+        if scope_id in scope_ids:
+            raise RuntimeError(f"TypeScript source oracle scope {scope_id!r} is duplicated")
+        scope_ids.add(scope_id)
+        scopes_by_id[scope_id] = scope
+    for scope in typed_records.get("scopes", []):
+        parent = scope["parentScopeId"]
+        if parent is not None:
+            if parent not in scope_ids:
+                raise RuntimeError(
+                    f"TypeScript source oracle scope parent {parent!r} is missing"
+                )
+            parent_scope = scopes_by_id[parent]
+            if parent_scope["sourceFile"] != scope["sourceFile"]:
+                raise RuntimeError(
+                    f"TypeScript source oracle scope parent {parent!r} crosses source files"
+                )
+            parent_start, parent_end, _ = _oracle_typed_range(
+                parent_scope, f"scope parent {parent!r}"
+            )
+            start_byte, end_byte, _ = _oracle_typed_range(
+                scope, f"oracle scope {scope['scopeId']!r}"
+            )
+            if parent_start > start_byte or parent_end < end_byte:
+                raise RuntimeError(
+                    f"TypeScript source oracle scope parent {parent!r} does not enclose child"
+                )
+    for scope in typed_records.get("scopes", []):
+        chain: set[str] = set()
+        current = scope["scopeId"]
+        while current is not None:
+            if current in chain:
+                raise RuntimeError(
+                    f"TypeScript source oracle scope parent cycle at {current!r}"
+                )
+            if current not in scopes_by_id:
+                raise RuntimeError(
+                    f"TypeScript source oracle scope parent {current!r} is missing"
+                )
+            chain.add(current)
+            current = scopes_by_id[current]["parentScopeId"]
+    for field, values in typed_records.items():
+        for index, record in enumerate(values):
+            source_file = record["sourceFile"]
+            source_path = (root / source_file).resolve()
+            try:
+                source_path.relative_to(root)
+            except ValueError as error:
+                raise RuntimeError(
+                    f"oracle {field}[{index}] escapes the source root: {source_file}"
+                ) from error
+            if not source_path.is_file():
+                raise RuntimeError(f"oracle {field}[{index}] source is missing: {source_file}")
+            _, end_byte, _ = _oracle_typed_range(record, f"oracle {field}[{index}]")
+            if end_byte > source_path.stat().st_size:
+                raise RuntimeError(
+                    f"oracle {field}[{index}] range exceeds source: {source_file}"
+                )
+            if field == "calls" and record["callEndByte"] > source_path.stat().st_size:
+                raise RuntimeError(
+                    f"oracle calls[{index}] call range exceeds source: {source_file}"
+                )
     if len(rejected_files) != scanned - parsed:
         raise RuntimeError(
             "TypeScript source oracle coverage does not account for every scanned file"
@@ -659,6 +889,9 @@ def _typescript_payload_from_jsonl(raw: bytes) -> dict[str, object]:
     projects: list[dict[str, object]] = []
     diagnostics: list[dict[str, object]] = []
     constructs: list[dict[str, object]] = []
+    scopes: list[dict[str, object]] = []
+    declarations: list[dict[str, object]] = []
+    calls: list[dict[str, object]] = []
     files: list[dict[str, object]] = []
     for index, record in enumerate(records[1:-1], 1):
         record_type = record.get("recordType")
@@ -672,6 +905,14 @@ def _typescript_payload_from_jsonl(raw: bytes) -> dict[str, object]:
             constructs.append(
                 {key: value for key, value in record.items() if key != "recordType"}
             )
+        elif record_type == "scope":
+            scopes.append({key: value for key, value in record.items() if key != "recordType"})
+        elif record_type == "declaration":
+            declarations.append(
+                {key: value for key, value in record.items() if key != "recordType"}
+            )
+        elif record_type == "call":
+            calls.append({key: value for key, value in record.items() if key != "recordType"})
         elif record_type == "file":
             files.append(record)
         else:
@@ -687,6 +928,7 @@ def _typescript_payload_from_jsonl(raw: bytes) -> dict[str, object]:
     if len(files) != scanned:
         raise RuntimeError("TypeScript source oracle JSONL file coverage is incomplete")
     file_names: set[str] = set()
+    file_statuses: dict[str, str] = {}
     rejected: list[str] = []
     for index, record in enumerate(files):
         if set(record) != {"recordType", "file", "status"}:
@@ -700,6 +942,9 @@ def _typescript_payload_from_jsonl(raw: bytes) -> dict[str, object]:
             raise RuntimeError(f"TypeScript source oracle JSONL file {file_name} has invalid status")
         if status == "rejected":
             rejected.append(file_name)
+        file_statuses[file_name] = status
+    if list(file_statuses) != sorted(file_statuses):
+        raise RuntimeError("TypeScript source oracle JSONL files are not deterministically ordered")
     if len(rejected) != scanned - parsed:
         raise RuntimeError("TypeScript source oracle JSONL coverage counts are inconsistent")
     footer_counts = {
@@ -708,6 +953,9 @@ def _typescript_payload_from_jsonl(raw: bytes) -> dict[str, object]:
         "projectCount": len(projects),
         "diagnosticCount": len(diagnostics),
         "constructCount": len(constructs),
+        "scopeCount": len(scopes),
+        "declarationCount": len(declarations),
+        "callCount": len(calls),
     }
     for key, expected in footer_counts.items():
         if footer.get(key) != expected:
@@ -718,6 +966,28 @@ def _typescript_payload_from_jsonl(raw: bytes) -> dict[str, object]:
         raise RuntimeError("TypeScript source oracle JSONL header counts are inconsistent")
     if header.get("constructCount") != len(constructs):
         raise RuntimeError("TypeScript source oracle JSONL construct count is inconsistent")
+    for field, values, validator in (
+        ("scopes", scopes, _oracle_scope),
+        ("declarations", declarations, _oracle_declaration),
+        ("calls", calls, _oracle_call),
+    ):
+        for index, value in enumerate(values):
+            validator(value, index)
+            source_file = value["sourceFile"]
+            if source_file not in file_statuses:
+                raise RuntimeError(
+                    f"TypeScript source oracle JSONL {field}[{index}] has an unscanned source"
+                )
+            if file_statuses[source_file] != "parsed":
+                raise RuntimeError(
+                    f"TypeScript source oracle JSONL {field}[{index}] belongs to a rejected source"
+                )
+    if header.get("scopeCount") != len(scopes):
+        raise RuntimeError("TypeScript source oracle JSONL scope count is inconsistent")
+    if header.get("declarationCount") != len(declarations):
+        raise RuntimeError("TypeScript source oracle JSONL declaration count is inconsistent")
+    if header.get("callCount") != len(calls):
+        raise RuntimeError("TypeScript source oracle JSONL call count is inconsistent")
     if footer.get("rejectedFiles") != sorted(rejected):
         raise RuntimeError("TypeScript source oracle JSONL rejected file set is inconsistent")
     for digest_name in ("sourceDigest", "configDigest"):
@@ -735,6 +1005,9 @@ def _typescript_payload_from_jsonl(raw: bytes) -> dict[str, object]:
         "projects": projects,
         "diagnostics": diagnostics,
         "constructs": constructs,
+        "scopes": scopes,
+        "declarations": declarations,
+        "calls": calls,
     }
 
 

@@ -1319,10 +1319,56 @@ record-oriented JSONL mode used by the Python audit inventory:
   its source inventory.
 
 The source oracle is still source-occurrence evidence rather than target truth.
-The final scope/declaration/call JSONL contract, compiler-backed target
-adjudication, four release corpora, accepted precision/Wilson gates, framework
-tiers, equivalent Graphify/SCIP scope, and the production hard cut remain
-open.
+Compiler-backed target adjudication, four release corpora, accepted
+precision/Wilson gates, framework tiers, equivalent Graphify/SCIP scope, and
+the production hard cut remain open.
+
+### Execution checkpoint (2026-08-07, typed source-oracle fact stream)
+
+The JSONL source-oracle contract now publishes bounded typed records in
+addition to the compatibility construct inventory:
+
+- `scope` records carry deterministic source-local IDs, lexical kind, exact
+  UTF-8 range, owner identity, and a validated parent scope. Duplicate IDs,
+  missing parents, path escapes, and range overflow fail closed.
+- `declaration` records carry source-backed kind/name/qualified identity,
+  explicit value/type/namespace space, exact name range, and bounded callable
+  parameter metadata (total/minimum/rest). Non-callable declarations use an
+  explicit null parameter shape rather than implying a callable signature.
+- `call` records carry the exact callee anchor plus full call-expression range,
+  direct/member/computed/dynamic target kind, owner, relation, argument count,
+  spread and optional-call flags. The range validator proves that the callee
+  lies inside the full call expression and inside its source file.
+- Header/footer counts cover every typed record under
+  `compass.typescript-source-oracle-jsonl/2`; repeated output is byte-identical,
+  and the Python audit reconstructs the legacy inventory only after validating
+  the typed stream.
+
+This closes the source-oracle scope/declaration/call stream contract, but not
+target adjudication or semantic quality: compiler-backed target truth, four
+release corpora, accepted precision/Wilson gates, framework tiers, equivalent
+Graphify/SCIP scope, and the production hard cut remain open.
+
+### Execution checkpoint (2026-08-07, imported literal utility projections)
+
+The shared TypeScript resolver now carries source-proven literal `Pick`/`Omit`
+projections through imported type aliases:
+
+- A simple member path rooted at a type alias now enters the bounded alias-chain
+  resolver, so non-generic aliases such as `Picked = Pick<Item, "enabled">`
+  are expanded instead of being treated as terminal external owners.
+- Literal key sets, including bounded unions of string/quoted-template keys,
+  select only the projected member. `Pick` excludes unlisted members and `Omit`
+  excludes listed members; every surviving target keeps the normal
+  `member-binding`/source provenance path.
+- Imported bases and re-exported aliases remain source-inventory bounded.
+  Dynamic, structural, competing, and unsupported key spaces do not enter this
+  branch and remain unresolved rather than widening to a nominal base.
+
+The universal resolver suite is now 164 tests, including positive and negative
+cross-file `Pick`/`Omit` projection calls. This is still below the full
+value-space `keyof`, arbitrary mapped/indexed, compiler-target, corpus,
+precision/Wilson, framework, comparator, and production-hard-cut gates.
 
 ## Outcome
 

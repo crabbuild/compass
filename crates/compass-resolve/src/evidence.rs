@@ -1390,12 +1390,23 @@ impl UniversalResolutionIndex {
         let mut source_member_target_seen = false;
         let mut targets = BTreeSet::new();
         for key in keys {
-            if let Some(path) = member_path.as_ref()
-                && (path.call_result
+            let expand_member_chain = member_path.as_ref().is_some_and(|path| {
+                path.call_result
                     || path.indexed
                     || path.members.len() > 1
-                    || !path.type_arguments.is_empty())
-            {
+                    || !path.type_arguments.is_empty()
+                    || self
+                        .typescript_export_slots(language, &key, &path.root_export, candidate, true)
+                        .iter()
+                        .any(|slot| {
+                            self.declaration(*slot)
+                                .is_some_and(|declaration| declaration.kind == "type_alias")
+                        })
+            });
+            if expand_member_chain {
+                let Some(path) = member_path.as_ref() else {
+                    continue;
+                };
                 source_member_target_seen |= !self
                     .typescript_export_slots(language, &key, &path.root_export, candidate, true)
                     .is_empty();
@@ -2206,6 +2217,29 @@ impl UniversalResolutionIndex {
                 // this resolver branch deliberately narrow: literal Pick or
                 // Omit sets need member-level projection metadata, while a
                 // broad structural key expression must not widen a receiver.
+                return self.typescript_member_type_contexts(
+                    language,
+                    module,
+                    base,
+                    TypeScriptMemberContext {
+                        owner_signature: None,
+                        type_arguments: &[],
+                        index_selector: None,
+                    },
+                    candidate,
+                );
+            }
+            if let Some(key_names) = typescript_literal_key_names(keys) {
+                let selected = key_names.contains(candidate.target_spelling.as_str());
+                if (utility == "Pick" && !selected) || (utility == "Omit" && selected) {
+                    return BTreeSet::new();
+                }
+                // A literal projection is safe to resolve through its nominal
+                // base: the current member candidate is the only downstream
+                // property being adjudicated, and the key-set check above
+                // prevents a projected-away member from inheriting the base.
+                // This works across imported aliases while remaining bounded;
+                // dynamic and structural key spaces still fail closed.
                 return self.typescript_member_type_contexts(
                     language,
                     module,
@@ -5710,6 +5744,28 @@ fn typescript_keyof_type_base(value: &str) -> Option<&str> {
         .filter(|character| character.is_whitespace())?;
     let base = rest.trim();
     (!base.is_empty()).then_some(base)
+}
+
+fn typescript_literal_key_names(value: &str) -> Option<BTreeSet<String>> {
+    let mut names = BTreeSet::new();
+    for key in value.split('|').map(str::trim) {
+        let key = key
+            .strip_prefix('"')
+            .and_then(|key| key.strip_suffix('"'))
+            .or_else(|| {
+                key.strip_prefix('\'')
+                    .and_then(|key| key.strip_suffix('\''))
+            })
+            .or_else(|| key.strip_prefix('`').and_then(|key| key.strip_suffix('`')))?;
+        if key.is_empty() || key.len() > 1024 {
+            return None;
+        }
+        names.insert(key.to_owned());
+        if names.len() > 256 {
+            return None;
+        }
+    }
+    (!names.is_empty()).then_some(names)
 }
 
 fn typescript_generic_parameter_names(signature: &str) -> Vec<String> {
