@@ -5,9 +5,18 @@
 Compass turns source code and project artifacts into a graph you can search,
 query, visualize, compare across Git history, and share with development tools.
 
-![High-level Compass workspace graph with package dependencies and subsystem filters](docs/assets/screenshots/code-graph-workspace-overview.png)
-
-*Start at the package map, filter by subsystem, then select any node to inspect its dependencies and source.*
+```text
+large codebase
+     |
+     v
+  Compass  ----->  architecture map
+     |           \-> dependency and impact answers
+     |            \-> exact CompassQL results
+     |             \-> historical graph diffs
+     |              \-> focused context for assistants
+     v
+less searching, smaller context, traceable evidence
+```
 
 [Get started](docs/getting-started.md) ·
 [Read the documentation](docs/README.md) ·
@@ -22,6 +31,10 @@ cursor-rooted call graphs, architecture flow, queries, and exact Git evolution.
 ## Put Compass in your daily loop
 
 Build the graph once, open it in a browser or VS Code, and keep it synchronized while you work:
+
+![High-level Compass workspace graph with package dependencies and subsystem filters](docs/assets/screenshots/code-graph-workspace-overview.png)
+
+*Start at the package map, filter by subsystem, then select any node to inspect its dependencies and source.*
 
 ```bash
 compass init
