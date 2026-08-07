@@ -2092,6 +2092,30 @@ the new capability. Candidate and focused oracle coverage now stand at 109 and
 the resolver suite remains 180; broad corpus, target-adjudication, framework,
 competitor, production hard-cut, and leadership gates remain open.
 
+### Execution checkpoint (2026-08-07, TypeScript import-type query recovery)
+
+The pinned tree-sitter parser still recovers indexed TypeScript import-type
+queries such as `(typeof import("./items").items)[number]` through the
+byte-preserving parser mask. The candidate now combines that bounded original
+source scan with parser-proven `import("...").Member` type-query nodes and
+emits the exact quoted module literal as an `imports` candidate with
+`import_type` context. It suppresses the competing `dynamic_import`
+interpretation only in TypeScript/TSX type positions, preserves the enclosing
+lexical owner, and records a bounded diagnostic when the query limit is
+exceeded. The source evidence is intentionally target-neutral; project module
+resolution remains the resolver's responsibility.
+
+The independent TypeScript 5.9.3 oracle correctness test now asserts
+`import_type` JSONL records and exact UTF-8 ranges, while the ignored compiler
+differential fixture includes an import-type query. Candidate coverage is now
+112 tests, including the JavaScript `typeof import()` runtime negative and a
+bounded-query diagnostic case; the
+resolver suite is now 181 with a module-target resolution assertion, and the
+focused oracle suite covers the new construct. Parser-mask elimination for
+this pinned grammar, complete
+member/type-query target adjudication, broad corpus, framework, competitor,
+production hard-cut, and leadership gates remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

@@ -10,7 +10,7 @@ use std::path::Path;
 
 use tree_sitter::Node;
 
-use super::build::{EvidenceBuilder, range_for_node};
+use super::build::{EvidenceBuilder, range_for_byte_span, range_for_node};
 use super::model::{
     BindingKind, CandidateRelation, EvidenceRange, HierarchyConstraint, LanguageCapability,
     ResolutionConstraint, SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
@@ -22,6 +22,7 @@ const MAX_TRAVERSAL_DEPTH: usize = 512;
 const MAX_INLINE_OBJECT_PROPERTIES: usize = 256;
 const MAX_TYPE_SHAPE_DEPTH: u32 = 32;
 const MAX_TYPE_SHAPE_BYTES: usize = 16 * 1024;
+const MAX_IMPORT_TYPE_QUERIES: usize = 256;
 
 const TYPESCRIPT_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::Declarations,
@@ -142,6 +143,18 @@ struct ImportInfo {
     namespace: Namespace,
     type_only: bool,
     callable_namespace: bool,
+}
+
+/// A source-backed TypeScript `import("...")` or `typeof import("...")`
+/// type query. The pinned tree-sitter grammar still recovers some indexed
+/// forms through the parser mask in `engine.rs`; retaining the literal module
+/// span lets the candidate preserve the compiler-visible import without
+/// guessing a value call.
+#[derive(Clone, Debug)]
+struct ImportTypeQuery {
+    module: String,
+    module_start_byte: usize,
+    module_end_byte: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -439,6 +452,7 @@ pub(crate) fn extract_candidate_tree_evidence(
     state.infer_variable_types(root, 0);
     state.collect_flow_assignment_facts(root, 0);
     state.emit_nodes(root, 0)?;
+    state.emit_import_type_queries(root)?;
     if parser_recovered {
         state.builder.diagnose(
             "partial_parser_recovery",
@@ -5416,6 +5430,15 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         if node_text(self.source, function) != "import" {
             return Ok(());
         }
+        if self.language == "typescript"
+            && (is_typeof_import_query_call(self.source, function.start_byte())
+                || is_typescript_import_type_query_node(node))
+        {
+            // A TypeScript import-type query is not a runtime dynamic import.
+            // The source/AST fallback below emits its import fact even when
+            // the pinned parser recovers the query.
+            return Ok(());
+        }
         let Some(arguments) = node.child_by_field_name("arguments") else {
             return Ok(());
         };
@@ -5450,6 +5473,87 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 ..ResolutionConstraint::default()
             },
         )?;
+        Ok(())
+    }
+
+    fn emit_import_type_queries(&mut self, root: Node<'tree>) -> Result<(), EvidenceError> {
+        if self.language != "typescript" {
+            return Ok(());
+        }
+        let (mut queries, mut truncated) = collect_import_type_queries(self.source);
+        let mut parser_queries = Vec::new();
+        if queries.len() < MAX_IMPORT_TYPE_QUERIES {
+            truncated |= collect_import_type_query_nodes(
+                root,
+                self.source,
+                0,
+                &mut parser_queries,
+                MAX_IMPORT_TYPE_QUERIES.saturating_sub(queries.len()),
+            );
+        }
+        for query in parser_queries {
+            if queries.iter().any(|existing| {
+                existing.module_start_byte == query.module_start_byte
+                    && existing.module_end_byte == query.module_end_byte
+            }) {
+                continue;
+            }
+            if queries.len() >= MAX_IMPORT_TYPE_QUERIES {
+                truncated = true;
+                break;
+            }
+            queries.push(query);
+        }
+        if truncated {
+            self.builder.diagnose(
+                "import_type_query_limit",
+                None,
+                Some(range_for_node(self.source_file, root)),
+                "bounded TypeScript import-type query extraction reached its limit; remaining queries were left unresolved",
+            )?;
+        }
+        for query in queries {
+            let module = query.module;
+            let scope_id = deepest_node_at_byte(root, query.module_start_byte)
+                .map(|node| self.scope_for_node(node))
+                .unwrap_or_else(|| self.root_scope.clone());
+            let owner = self.owner_for_scope(&scope_id);
+            let fact_key = format!(
+                "import_type:{}:{}",
+                query.module_start_byte, query.module_end_byte
+            );
+            if !self.emitted_facts.insert(fact_key) {
+                continue;
+            }
+            let occurrence_id = self.builder.occur_with_context(
+                SemanticRole::Import,
+                &owner,
+                &module,
+                None,
+                Some(&scope_id),
+                Some("import_type"),
+                range_for_byte_span(
+                    self.source_file,
+                    self.source,
+                    query.module_start_byte,
+                    query.module_end_byte,
+                ),
+            )?;
+            self.builder.relate(
+                CandidateRelation::Imports,
+                &owner,
+                Some(&occurrence_id),
+                None,
+                &module,
+                ResolutionConstraint {
+                    exact_language: Some(self.language.to_owned()),
+                    module_or_package: Some(module.clone()),
+                    allowed_target_kinds: vec!["module".to_owned()],
+                    allow_external: true,
+                    ..ResolutionConstraint::default()
+                },
+            )?;
+        }
         Ok(())
     }
 
@@ -12726,6 +12830,250 @@ fn is_jsx_value_reference_node(node: Node<'_>) -> bool {
         return false;
     }
     !is_type_reference_node(node)
+}
+
+fn is_typeof_import_query_call(source: &[u8], import_start_byte: usize) -> bool {
+    let prefix = &source[..import_start_byte.min(source.len())];
+    let mut end = prefix.len();
+    while end > 0 && prefix[end - 1].is_ascii_whitespace() {
+        end = end.saturating_sub(1);
+    }
+    let start = prefix[..end]
+        .iter()
+        .rposition(|byte| !is_identifier_byte(*byte))
+        .map_or(0, |position| position.saturating_add(1));
+    prefix.get(start..end) == Some(b"typeof")
+}
+
+fn collect_import_type_queries(source: &[u8]) -> (Vec<ImportTypeQuery>, bool) {
+    let mut queries = Vec::new();
+    let mut truncated = false;
+    let mut index = 0;
+    while index < source.len() {
+        match source[index] {
+            b'/' if source.get(index.saturating_add(1)) == Some(&b'/') => {
+                index = skip_line_comment(source, index.saturating_add(2));
+            }
+            b'/' if source.get(index.saturating_add(1)) == Some(&b'*') => {
+                index = skip_block_comment(source, index.saturating_add(2));
+            }
+            b'\'' | b'"' | b'`' => {
+                index = skip_string_literal(source, index);
+            }
+            _ if keyword_at(source, index, b"typeof") => {
+                let mut cursor = skip_ascii_whitespace(source, index.saturating_add(6));
+                if !keyword_at(source, cursor, b"import") {
+                    index = index.saturating_add(6);
+                    continue;
+                }
+                cursor = skip_ascii_whitespace(source, cursor.saturating_add(6));
+                if source.get(cursor) != Some(&b'(') {
+                    index = index.saturating_add(6);
+                    continue;
+                }
+                cursor = skip_ascii_whitespace(source, cursor.saturating_add(1));
+                let Some(&quote) = source.get(cursor) else {
+                    index = index.saturating_add(6);
+                    continue;
+                };
+                if !matches!(quote, b'\'' | b'"') {
+                    index = index.saturating_add(6);
+                    continue;
+                }
+                let module_start_byte = cursor;
+                let Some(module_end_byte) = scan_quoted_literal(source, cursor, quote) else {
+                    index = index.saturating_add(6);
+                    continue;
+                };
+                let close = skip_ascii_whitespace(source, module_end_byte);
+                if source.get(close) != Some(&b')') {
+                    index = index.saturating_add(6);
+                    continue;
+                }
+                let module = source
+                    .get(module_start_byte.saturating_add(1)..module_end_byte.saturating_sub(1))
+                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                    .unwrap_or_default()
+                    .to_owned();
+                if !module.is_empty() && module.len() <= MAX_TYPE_SHAPE_BYTES {
+                    if queries.len() >= MAX_IMPORT_TYPE_QUERIES {
+                        truncated = true;
+                        break;
+                    }
+                    queries.push(ImportTypeQuery {
+                        module,
+                        module_start_byte,
+                        module_end_byte,
+                    });
+                }
+                index = close.saturating_add(1);
+            }
+            _ => index = index.saturating_add(1),
+        }
+    }
+    (queries, truncated)
+}
+
+fn collect_import_type_query_nodes<'tree>(
+    root: Node<'tree>,
+    source: &[u8],
+    depth: usize,
+    output: &mut Vec<ImportTypeQuery>,
+    limit: usize,
+) -> bool {
+    if depth > MAX_TRAVERSAL_DEPTH {
+        return false;
+    }
+    if output.len() >= limit {
+        return true;
+    }
+    if root.kind() == "call_expression"
+        && is_typescript_import_type_query_node(root)
+        && root
+            .child_by_field_name("function")
+            .or_else(|| first_named_child(root))
+            .is_some_and(|function| node_text(source, function) == "import")
+        && let Some(arguments) = root.child_by_field_name("arguments")
+        && let Some(module_node) = first_named_child_kind(arguments, "string")
+    {
+        let module = string_literal(source, module_node);
+        if !module.is_empty() && module.len() <= MAX_TYPE_SHAPE_BYTES {
+            output.push(ImportTypeQuery {
+                module,
+                module_start_byte: module_node.start_byte(),
+                module_end_byte: module_node.end_byte(),
+            });
+            if output.len() >= limit {
+                return true;
+            }
+        }
+    }
+    let mut cursor = root.walk();
+    for child in root.named_children(&mut cursor) {
+        if collect_import_type_query_nodes(child, source, depth.saturating_add(1), output, limit) {
+            return true;
+        }
+    }
+    false
+}
+
+fn deepest_node_at_byte<'tree>(root: Node<'tree>, byte: usize) -> Option<Node<'tree>> {
+    if byte < root.start_byte() || byte >= root.end_byte() {
+        return None;
+    }
+    let mut current = root;
+    loop {
+        let mut cursor = current.walk();
+        let Some(child) = current
+            .named_children(&mut cursor)
+            .find(|child| byte >= child.start_byte() && byte < child.end_byte())
+        else {
+            return Some(current);
+        };
+        current = child;
+    }
+}
+
+fn is_typescript_import_type_query_node(node: Node<'_>) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if matches!(
+            parent.kind(),
+            "type_query"
+                | "type_alias_declaration"
+                | "type_annotation"
+                | "return_type"
+                | "type_arguments"
+                | "type_parameters"
+                | "generic_type"
+                | "object_type"
+                | "conditional_type"
+                | "extends_type_clause"
+                | "implements_clause"
+        ) {
+            return true;
+        }
+        if matches!(
+            parent.kind(),
+            "program"
+                | "statement_block"
+                | "expression_statement"
+                | "arguments"
+                | "formal_parameters"
+                | "variable_declarator"
+                | "lexical_declaration"
+                | "return_statement"
+        ) {
+            return false;
+        }
+        current = parent.parent();
+    }
+    false
+}
+
+fn keyword_at(source: &[u8], start: usize, keyword: &[u8]) -> bool {
+    let end = start.saturating_add(keyword.len());
+    source.get(start..end) == Some(keyword)
+        && (start == 0 || !is_identifier_byte(source[start.saturating_sub(1)]))
+        && (end >= source.len() || !is_identifier_byte(source[end]))
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$') || byte >= 0x80
+}
+
+fn skip_ascii_whitespace(source: &[u8], mut index: usize) -> usize {
+    while source.get(index).is_some_and(u8::is_ascii_whitespace) {
+        index = index.saturating_add(1);
+    }
+    index
+}
+
+fn skip_line_comment(source: &[u8], mut index: usize) -> usize {
+    while let Some(byte) = source.get(index) {
+        index = index.saturating_add(1);
+        if *byte == b'\n' {
+            break;
+        }
+    }
+    index
+}
+
+fn skip_block_comment(source: &[u8], mut index: usize) -> usize {
+    while index < source.len() {
+        if source.get(index..index.saturating_add(2)) == Some(b"*/") {
+            return index.saturating_add(2);
+        }
+        index = index.saturating_add(1);
+    }
+    source.len()
+}
+
+fn skip_string_literal(source: &[u8], start: usize) -> usize {
+    let Some(&quote) = source.get(start) else {
+        return source.len();
+    };
+    let mut index = start.saturating_add(1);
+    while index < source.len() {
+        match source[index] {
+            b'\\' => index = index.saturating_add(2),
+            byte if byte == quote => return index.saturating_add(1),
+            _ => index = index.saturating_add(1),
+        }
+    }
+    source.len()
+}
+
+fn scan_quoted_literal(source: &[u8], start: usize, quote: u8) -> Option<usize> {
+    let mut index = start.saturating_add(1);
+    while index < source.len() {
+        match source[index] {
+            b'\\' => index = index.saturating_add(2),
+            byte if byte == quote => return Some(index.saturating_add(1)),
+            _ => index = index.saturating_add(1),
+        }
+    }
+    None
 }
 
 fn module_name(path: &Path, source_file: &str) -> String {

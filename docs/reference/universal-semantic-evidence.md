@@ -107,6 +107,12 @@ the adapter actually emits. The batch contains six bounded collections:
   for local, imported, and unresolved values, while excluding prop names,
   member-property spellings, and call callees. This preserves callback
   arguments and object/receiver values without inventing indirect calls.
+  TypeScript `import("...")` and `typeof import("...")` type queries retain
+  the exact module literal as an `imports` candidate with `import_type`
+  context. This remains a type-space dependency rather than a runtime
+  dynamic-import call, including indexed queries that the pinned parser
+  recovers through its byte-preserving mask; bounded comments, strings, and
+  query counts fail closed.
 - `EvidenceDiagnostic` records a bounded extraction problem without creating
   a graph fact.
 

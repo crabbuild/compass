@@ -8638,7 +8638,7 @@ fn rust_use_binding_range(
     )
 }
 
-fn range_for_byte_span(
+pub(super) fn range_for_byte_span(
     source_file: &str,
     source: &[u8],
     start_byte: usize,

@@ -61,6 +61,8 @@ fn pinned_compiler_constructs_have_candidate_source_coverage() {
          }\n\
          function parse(value: string) { return value; }\n\
          function parse(value: number) { return value; }\n\
+         type Item = (typeof import('./ui').Button)[number];\n\
+         type Plain = import('./ui').Button;\n\
          export { Child, parse };\n\
          new Child().render('ok');\n\
          const instance = new Child();\n\

@@ -804,6 +804,117 @@ module.exports = { run, ...other };
 }
 
 #[test]
+fn typescript_candidate_preserves_typeof_import_queries_without_dynamic_calls() {
+    let source = br#"const load = () => import("./runtime");
+// typeof import("./ignored");
+const text = "typeof import('./ignored-string')";
+type Item = (typeof import("./items").items)[number];
+type Simple = typeof import("./simple").items;
+type Plain = import("./plain").Item;
+"#;
+    let batch = candidate("src/import-type.ts", source);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("valid evidence");
+
+    let type_imports = batch
+        .occurrences
+        .iter()
+        .filter(|occurrence| {
+            occurrence.role == SemanticRole::Import
+                && occurrence.context.as_deref() == Some("import_type")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(type_imports.len(), 3);
+    let type_import = type_imports
+        .iter()
+        .find(|occurrence| occurrence.spelling == "./items")
+        .copied()
+        .expect("indexed type-query import occurrence");
+    let start = usize::try_from(type_import.range.start_byte).expect("start byte");
+    let end = usize::try_from(type_import.range.end_byte).expect("end byte");
+    assert_eq!(&source[start..end], br#""./items""#);
+    assert_eq!(type_import.spelling, "./items");
+    let relation = batch
+        .candidates
+        .iter()
+        .find(|candidate| candidate.occurrence_id.as_deref() == Some(type_import.id.as_str()))
+        .expect("type-query import candidate");
+    assert_eq!(relation.relation, CandidateRelation::Imports);
+    assert_eq!(relation.target_spelling, "./items");
+    assert_eq!(
+        relation.constraints.module_or_package.as_deref(),
+        Some("./items")
+    );
+    assert_eq!(
+        batch
+            .occurrences
+            .iter()
+            .filter(|occurrence| occurrence.context.as_deref() == Some("import_type"))
+            .count(),
+        3
+    );
+    assert_eq!(
+        batch
+            .occurrences
+            .iter()
+            .filter(|occurrence| occurrence.context.as_deref() == Some("dynamic_import"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn javascript_typeof_import_remains_a_dynamic_import() {
+    let batch = candidate(
+        "src/runtime-probe.js",
+        br#"const probe = typeof import("./runtime");
+"#,
+    );
+    validate_evidence(&batch, EvidenceLimits::default()).expect("valid JavaScript evidence");
+    assert_eq!(
+        batch
+            .occurrences
+            .iter()
+            .filter(|occurrence| occurrence.context.as_deref() == Some("dynamic_import"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        batch
+            .occurrences
+            .iter()
+            .filter(|occurrence| occurrence.context.as_deref() == Some("import_type"))
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn typescript_import_type_query_inventory_is_bounded_and_diagnosed() {
+    let mut source = String::new();
+    for index in 0..257 {
+        source.push_str(&format!(
+            "type Item{index} = typeof import(\"./module{index}\").Item;\n"
+        ));
+    }
+    let batch = candidate("src/import-type-limit.ts", source.as_bytes());
+    validate_evidence(&batch, EvidenceLimits::default()).expect("valid bounded evidence");
+    assert!(
+        batch
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "import_type_query_limit")
+    );
+    assert!(
+        batch
+            .occurrences
+            .iter()
+            .filter(|occurrence| occurrence.context.as_deref() == Some("import_type"))
+            .count()
+            <= 256
+    );
+}
+
+#[test]
 fn javascript_commonjs_object_spread_publishes_bounded_owner_aliases() {
     let source = br#"const base = { inherited() {} };
 module.exports = { ...base, direct() {} };

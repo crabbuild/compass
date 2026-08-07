@@ -6718,6 +6718,73 @@ exact();
 }
 
 #[test]
+fn typescript_candidate_resolves_typeof_import_query_as_module_dependency()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let items_path = root.join("lib/items.ts");
+    let consumer_path = root.join("src/types.ts");
+    fs::create_dir_all(items_path.parent().ok_or("items parent")?)?;
+    fs::create_dir_all(consumer_path.parent().ok_or("consumer parent")?)?;
+    let items_source = br#"export interface Item { value: string }
+"#;
+    let consumer_source = br#"type Item = (typeof import("../lib/items").Item)["value"];
+type Plain = import("../lib/items").Item;
+"#;
+    fs::write(&items_path, items_source)?;
+    fs::write(&consumer_path, consumer_source)?;
+    let items_batch = Engine::default().extract_source_universal_candidate_evidence(
+        &items_path,
+        "lib/items.ts",
+        items_source,
+    )?;
+    let consumer_batch = Engine::default().extract_source_universal_candidate_evidence(
+        &consumer_path,
+        "src/types.ts",
+        consumer_source,
+    )?;
+    let module = items_batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "module")
+        .ok_or("missing imported module declaration")?;
+    let module_id = module.id.clone();
+    let import_candidate_ids = consumer_batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Imports
+                && candidate
+                    .occurrence_id
+                    .as_deref()
+                    .and_then(|id| {
+                        consumer_batch
+                            .occurrences
+                            .iter()
+                            .find(|occurrence| occurrence.id == id)
+                    })
+                    .is_some_and(|occurrence| occurrence.context.as_deref() == Some("import_type"))
+        })
+        .map(|candidate| candidate.id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(import_candidate_ids.len(), 2);
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &[items_batch, consumer_batch],
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    for import_candidate_id in import_candidate_ids {
+        assert!(matches!(
+            index.resolve(&import_candidate_id),
+            compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+                if declaration_id == &module_id
+        ));
+    }
+    Ok(())
+}
+
+#[test]
 fn typescript_candidate_resolves_relative_and_default_imports_across_files()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

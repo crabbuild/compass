@@ -480,6 +480,44 @@ class CorrectnessTests(unittest.TestCase):
                 if "callEndByte" in record:
                     self.assertLessEqual(record["callEndByte"], source_size)
 
+    def test_typescript_source_oracle_records_import_type_queries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_path = root / "src" / "types.ts"
+            source_path.parent.mkdir()
+            source = (
+                'type Item = (typeof import("./items").items)[number];\n'
+                'type Plain = import("./plain").Item;\n'
+            )
+            source_path.write_text(source, encoding="utf-8")
+            (root / "src" / "runtime.js").write_text(
+                'const probe = typeof import("./runtime");\n', encoding="utf-8"
+            )
+            result = subprocess.run(
+                ("node", str(SOURCE_ORACLE), "--root", str(root), "--jsonl"),
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            payload = _typescript_payload_from_jsonl(result.stdout)
+            imports = [item for item in payload["imports"] if item["kind"] == "import_type"]
+            self.assertEqual(len(imports), 2)
+            record = next(item for item in imports if item["moduleSpecifier"] == "./items")
+            self.assertEqual(record["sourceFile"], "src/types.ts")
+            self.assertTrue(record["isTypeOnly"])
+            start = record["startByte"]
+            end = record["endByte"]
+            self.assertEqual(source.encode("utf-8")[start:end], b'"./items"')
+            plain = next(item for item in imports if item["moduleSpecifier"] == "./plain")
+            self.assertFalse(plain["isTypeOnly"])
+            dynamic = [
+                item
+                for item in payload["imports"]
+                if item["kind"] == "dynamic" and item["sourceFile"] == "src/runtime.js"
+            ]
+            self.assertEqual(len(dynamic), 1)
+
     def test_typescript_source_oracle_records_decorator_occurrences_without_factory_calls(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
