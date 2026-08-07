@@ -701,6 +701,42 @@ Object.defineProperty(exports, 'getter', { get: () => getRun() });
 }
 
 #[test]
+fn javascript_commonjs_export_star_publishes_only_proven_barrel_aliases() {
+    let source = br#"function __createBinding() {}
+function __exportStar(m, exports) {
+    for (const p in m) {
+        if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) {
+            __createBinding(exports, m, p);
+        }
+    }
+}
+__exportStar(require("./source"), exports);
+const tslib = require("tslib");
+tslib.__exportStar(require("./tslib-source"), module.exports);
+__exportStar(require(moduleName), exports);
+__exportStar(require("./wrong-target"), other);
+{
+    function __exportStar(m, exports) { return m; }
+    __exportStar(require("./lookalike"), exports);
+}
+"#;
+    let batch = candidate("src/barrel.cjs", source);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("exportStar evidence");
+    let aliases = batch
+        .bindings
+        .iter()
+        .filter(|binding| {
+            binding.kind == compass_languages::BindingKind::Member && binding.spelling == "*"
+        })
+        .map(|binding| binding.qualified_target.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        aliases,
+        std::collections::BTreeSet::from(["./source::*", "./tslib-source::*"])
+    );
+}
+
+#[test]
 fn javascript_static_this_factory_tracks_new_instance_members() {
     let batch = candidate(
         "src/factory.js",

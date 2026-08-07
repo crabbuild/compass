@@ -1564,6 +1564,35 @@ impl UniversalResolutionIndex {
                 owner_targets =
                     self.typescript_export_slots(language, &key, "default", candidate, true);
             }
+            if owner_targets.is_empty()
+                && !is_member_candidate
+                && exported != "*"
+                && exported != "default"
+            {
+                // Project a named import through a bounded CommonJS barrel
+                // owner alias when no direct export slot exists.
+                let module_targets =
+                    self.typescript_export_slots(language, &key, "*", candidate, true);
+                for owner_slot in module_targets {
+                    let Some(owner) = self.declaration(owner_slot) else {
+                        continue;
+                    };
+                    if self
+                        .typescript_member_aliases
+                        .contains_key(&(owner.language.clone(), owner.qualified_name.clone()))
+                    {
+                        structural_alias_seen = true;
+                        if let Ok(Some(alias_members)) = self.typescript_structural_member_slots(
+                            owner_slot,
+                            &exported,
+                            candidate,
+                            &mut BTreeSet::new(),
+                        ) {
+                            targets.extend(alias_members);
+                        }
+                    }
+                }
+            }
             source_member_target_seen |= !owner_targets.is_empty();
             if member_owner_export.is_some() || structural_namespace_owner {
                 for owner_slot in &owner_targets {
@@ -1653,6 +1682,9 @@ impl UniversalResolutionIndex {
         }
         let targets = targets.into_iter().collect::<Vec<_>>();
         if is_member_candidate && structural_alias_seen && targets.is_empty() {
+            return Some(ResolutionDecision::Unresolved);
+        }
+        if !is_member_candidate && structural_alias_seen && targets.is_empty() {
             return Some(ResolutionDecision::Unresolved);
         }
         if is_member_candidate

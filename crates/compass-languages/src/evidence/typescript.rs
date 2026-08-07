@@ -313,6 +313,11 @@ struct CandidateState<'source, 'tree> {
     /// only to recover a source-declared return type at a subsequent call
     /// site (for example `const stringType = ZodString.create`).
     variable_alias_values: HashMap<String, String>,
+    /// Local declarations whose bodies match the bounded TypeScript/Babel
+    /// `__exportStar` helper shape.  Keeping the proof on the declaration
+    /// identity avoids treating an arbitrary user function with the same
+    /// spelling as a module reexport primitive.
+    commonjs_export_star_helpers: HashSet<String>,
     this_receivers: HashMap<String, String>,
     /// Direct `extends` targets proven while emitting the class heritage.
     /// Values are retained only for classes with one source-visible base; an
@@ -408,6 +413,7 @@ pub(crate) fn extract_candidate_tree_evidence(
         callable_property_aliases: HashSet::new(),
         callable_variable_aliases: HashSet::new(),
         variable_alias_values: HashMap::new(),
+        commonjs_export_star_helpers: HashSet::new(),
         this_receivers: HashMap::new(),
         base_targets: HashMap::new(),
         implements_targets: HashMap::new(),
@@ -1354,6 +1360,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         };
         self.declarations
             .insert(declaration_id, declaration.clone());
+        if name == "__exportStar" && commonjs_export_star_helper_shape(node, self.source) {
+            self.commonjs_export_star_helpers
+                .insert(declaration.id.clone());
+        }
         if kind == "property"
             && let Some(value) = node.child_by_field_name("value")
         {
@@ -3560,6 +3570,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 self.emit_dynamic_import(node, &scope_id)?;
                 self.emit_commonjs_object_assign(&scope_id, node, false)?;
                 self.emit_commonjs_define_property(&scope_id, node)?;
+                self.emit_commonjs_export_star(&scope_id, node)?;
             }
             "new_expression" => self.emit_call(node, &scope_id, true)?,
             "member_expression" | "optional_member_expression" | "subscript_expression" => {
@@ -6336,6 +6347,129 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return Ok(());
         };
         self.emit_commonjs_reexport_binding(scope_id, &export_name, *key, resolution)
+    }
+
+    /// Publish the bounded module-owner alias produced by the standard
+    /// TypeScript/Babel CommonJS barrel helper:
+    /// __exportStar(require("./source"), exports) (or the equivalent
+    /// tslib.__exportStar call). The helper itself must be source-proven or
+    /// come from the tslib package; a same-named arbitrary function remains
+    /// an ordinary call. Only a literal, direct require() and the canonical
+    /// exports/module.exports destination are admitted.
+    fn emit_commonjs_export_star(
+        &mut self,
+        scope_id: &str,
+        node: Node<'tree>,
+    ) -> Result<(), EvidenceError> {
+        let node = unwrap_expression_node(node);
+        if !matches!(node.kind(), "call_expression" | "optional_call_expression") {
+            return Ok(());
+        }
+        let Some(function) = node
+            .child_by_field_name("function")
+            .or_else(|| first_named_child(node))
+        else {
+            return Ok(());
+        };
+        if !self.is_commonjs_export_star_helper(scope_id, function) {
+            return Ok(());
+        }
+        let Some(arguments) = node
+            .child_by_field_name("arguments")
+            .or_else(|| first_named_child_kind(node, "arguments"))
+        else {
+            return Ok(());
+        };
+        let mut cursor = arguments.walk();
+        let arguments = arguments
+            .named_children(&mut cursor)
+            .filter(|argument| !argument.kind().contains("comment"))
+            .map(unwrap_expression_node)
+            .collect::<Vec<_>>();
+        let [source, destination] = arguments.as_slice() else {
+            return Ok(());
+        };
+        let Some((module, module_anchor)) = self.commonjs_static_require_module(scope_id, *source)
+        else {
+            return Ok(());
+        };
+        let destination_text =
+            node_text(self.source, *destination).replace(char::is_whitespace, "");
+        if (destination_text == "exports" && !self.is_unshadowed_name(scope_id, "exports"))
+            || (destination_text == "module.exports"
+                && !self.is_unshadowed_name(scope_id, "module"))
+            || !matches!(destination_text.as_str(), "exports" | "module.exports")
+        {
+            return Ok(());
+        }
+        let source_target = format!("{module}::*");
+        self.builder.bind_with_identity(
+            BindingKind::Member,
+            "*",
+            &source_target,
+            None,
+            Some(scope_id),
+            Some(SymbolNamespace::Value),
+            false,
+            range_for_node(self.source_file, module_anchor),
+        )?;
+        Ok(())
+    }
+
+    fn is_commonjs_export_star_helper(&self, scope_id: &str, function: Node<'tree>) -> bool {
+        let function = unwrap_expression_node(function);
+        let property = member_property_node(function);
+        if property
+            .and_then(|property| member_property_name(self.source, property))
+            .as_deref()
+            != Some("__exportStar")
+            && (function.kind() != "identifier"
+                || node_text(self.source, function) != "__exportStar")
+        {
+            return false;
+        }
+        let resolution = if let Some(object) = function.child_by_field_name("object") {
+            self.resolve_name(scope_id, &node_text(self.source, object), Namespace::Value)
+        } else {
+            self.resolve_name(scope_id, "__exportStar", Namespace::Value)
+        };
+        match resolution {
+            Some(Resolution::Local(declaration)) => {
+                self.commonjs_export_star_helpers.contains(&declaration.id)
+            }
+            Some(Resolution::Import(import)) => {
+                import.module == "tslib"
+                    && (import.imported_name == "*" || import.imported_name == "__exportStar")
+            }
+            None => false,
+        }
+    }
+
+    fn commonjs_static_require_module(
+        &self,
+        scope_id: &str,
+        node: Node<'tree>,
+    ) -> Option<(String, Node<'tree>)> {
+        if !self.is_unshadowed_name(scope_id, "require") {
+            return None;
+        }
+        let call = direct_require_call(node, self.source)?;
+        let arguments = call
+            .child_by_field_name("arguments")
+            .or_else(|| first_named_child_kind(call, "arguments"))?;
+        let mut cursor = arguments.walk();
+        let arguments = arguments
+            .named_children(&mut cursor)
+            .filter(|argument| !argument.kind().contains("comment"))
+            .collect::<Vec<_>>();
+        let [module_node] = arguments.as_slice() else {
+            return None;
+        };
+        if module_node.kind() != "string" {
+            return None;
+        }
+        let module = string_literal(self.source, *module_node);
+        (!module.is_empty()).then_some((module, *module_node))
     }
 
     fn commonjs_descriptor_value_resolution(
@@ -9520,6 +9654,16 @@ fn commonjs_export_name<'tree>(left: Node<'tree>, source: &[u8]) -> Option<(Stri
     }
     let name = member_property_name(source, property)?;
     (!name.is_empty() && name.len() <= MAX_TYPE_SHAPE_BYTES).then_some((name, property))
+}
+
+fn commonjs_export_star_helper_shape(node: Node<'_>, source: &[u8]) -> bool {
+    let text = node_text(source, node);
+    if text.is_empty() || text.len() > MAX_TYPE_SHAPE_BYTES {
+        return false;
+    }
+    let has_default_guard = text.contains("\"default\"") || text.contains("'default'");
+    let has_binding_call = text.contains("__createBinding") || text.contains("createBinding");
+    text.contains("for") && has_default_guard && has_binding_call && text.contains("hasOwnProperty")
 }
 
 fn commonjs_object_property<'tree>(

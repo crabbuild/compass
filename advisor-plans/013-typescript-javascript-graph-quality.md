@@ -1973,6 +1973,32 @@ targets while leaving an unknown export unresolved. The focused suites are
 qualification-only correctness slice; the production adapter is still not
 registered and no release-leadership claim is implied.
 
+### Execution checkpoint (2026-08-07, bounded CommonJS `__exportStar` barrels)
+
+The CommonJS bridge now recognizes the source-proven barrel form
+`__exportStar(require("./source"), exports)` and the equivalent
+`tslib.__exportStar` call. A helper is admitted only when its local declaration
+contains the bounded TypeScript/Babel export-star guard shape or its binding
+comes from `tslib`; the require argument must be a static string and the
+destination must be the unshadowed `exports` or `module.exports` object. The
+adapter emits a source-range-backed `Member("*")` owner alias rather than
+inventing one binding per unknown property.
+
+The shared resolver projects both named imports/destructured `require()`
+bindings and namespace member accesses through that alias. Direct destination
+exports retain precedence; private source declarations, dynamic require
+arguments, wrong destinations, lookalike helpers, and unresolved source
+members remain unresolved. Candidate and resolver coverage now includes local
+and `tslib` helpers plus all negative forms; the focused suites are 104
+candidate tests and 178 universal resolver tests. Exact fixture qualification
+remains unchanged because the adapter is still qualification-only: 57
+languages, 980 coverage records, 1,565 invariants, 27 flows, 24 negatives,
+25 diagnostics, 28 edge kinds, 45 node kinds, graph digest
+`sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`,
+82 exact and 11 unresolved route resolutions, and byte-equivalent clean,
+warm, rebuild, restored, alternate-checkout, and source-unchanged outputs.
+This is an interop correctness increment, not a production or leadership claim.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

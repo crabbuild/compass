@@ -8068,6 +8068,91 @@ api.unknown();
 }
 
 #[test]
+fn javascript_commonjs_export_star_resolves_named_and_namespace_members()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/source.js",
+            br#"function inherited() {}
+exports.inherited = inherited;
+function privateThing() {}
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/barrel.cjs",
+            br#"const tslib = require("tslib");
+tslib.__exportStar(require("./source"), exports);
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.js",
+            br#"const { inherited, privateThing } = require("../lib/barrel");
+const api = require("../lib/barrel");
+inherited();
+privateThing();
+api.inherited();
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            let path = root.join(relative);
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let inherited = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "function" && declaration.name == "inherited")
+        .ok_or("missing source inherited declaration")?;
+    let calls = batches[2]
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Calls)
+        .collect::<Vec<_>>();
+    let inherited_calls = calls
+        .iter()
+        .filter(|candidate| candidate.target_spelling == "inherited")
+        .collect::<Vec<_>>();
+    assert_eq!(inherited_calls.len(), 2);
+    let private_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "privateThing")
+        .ok_or("missing privateThing call")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    for call in inherited_calls {
+        assert!(matches!(
+            index.resolve(&call.id),
+            compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+                if declaration_id == &inherited.id
+        ));
+    }
+    assert!(matches!(
+        index.resolve(&private_call.id),
+        compass_resolve::evidence::ResolutionDecision::Unresolved
+    ));
+    Ok(())
+}
+
+#[test]
 fn javascript_commonjs_require_callable_namespace_resolves_default_export()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

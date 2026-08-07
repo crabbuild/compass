@@ -51,11 +51,17 @@ the adapter actually emits. The batch contains six bounded collections:
   source, or bounded `Object.assign` composition. CommonJS
   `Object.defineProperty(exports, "name", { value/get: ... })` reexports are
   likewise admitted only for a static key and source-proven value/getter
-  return; `__esModule`, dynamic descriptors, and shadowed CommonJS globals are
-  not exported. This is not a wildcard export: the resolver follows it only
-  when the target owner and requested member are independently source-proven,
-  direct destination properties retain precedence, and otherwise it preserves
-  an unresolved or ambiguous result.
+ return; `__esModule`, dynamic descriptors, and shadowed CommonJS globals are
+  not exported. The same bounded owner-alias path admits
+  `__exportStar(require("./source"), exports)` and `tslib.__exportStar` only
+  when the helper is source-proven or imported from `tslib`, the require
+  argument is a static string, and the destination is the unshadowed
+  CommonJS export object. Named imports and namespace members may project a
+  requested source-published property through that alias; direct destination
+  properties retain precedence, and unknown, dynamic, lookalike-helper, or
+  ambiguous cases remain unresolved. None of these aliases is a wildcard
+  export: the resolver follows them only when the target owner and requested
+  member are independently source-proven.
 - `OccurrenceFact` records one exact use site and its role, owner, spelling,
   optional qualifier, lexical scope, and range. Repeated uses are separate
   occurrences.
