@@ -1264,6 +1264,97 @@ current.run();
 }
 
 #[test]
+fn typescript_homomorphic_mapped_alias_preserves_nominal_member_targets() {
+    let batch = candidate(
+        "src/mapped-alias.ts",
+        br#"interface Item { inspect(): void }
+type Copy = { [K in keyof Item]: Item[K] };
+function use(value: Copy) { value.inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    assert!(
+        batch.candidates.iter().any(|candidate| {
+            candidate.relation == compass_languages::CandidateRelation::Calls
+                && candidate.target_spelling == "inspect"
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(inspect.id.as_str())
+        }),
+        "declarations: {:#?}\ncandidates: {:#?}",
+        batch.declarations,
+        batch.candidates
+    );
+}
+
+#[test]
+fn typescript_generic_homomorphic_mapped_alias_substitutes_nominal_target() {
+    let batch = candidate(
+        "src/generic-mapped-alias.ts",
+        br#"interface Item { inspect(): void }
+type Copy<T> = { [K in keyof T]: T[K] };
+function use(value: Copy<Item>) { value.inspect(); }
+"#,
+    );
+    let inspect = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Item.inspect"))
+        .expect("Item.inspect declaration");
+    assert!(
+        batch.candidates.iter().any(|candidate| {
+            candidate.relation == compass_languages::CandidateRelation::Calls
+                && candidate.target_spelling == "inspect"
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(inspect.id.as_str())
+        }),
+        "declarations: {:#?}\ncandidates: {:#?}",
+        batch.declarations,
+        batch.candidates
+    );
+}
+
+#[test]
+fn typescript_non_homomorphic_mapped_alias_fails_closed() {
+    let batch = candidate(
+        "src/non-homomorphic-mapped-alias.ts",
+        br#"interface Item { inspect(): void }
+type Getters<T> = { [K in keyof T as `get${Capitalize<string & K>}`]: () => T[K] };
+function use(value: Getters<Item>) { value.inspect(); }
+"#,
+    );
+    assert!(
+        batch.candidates.iter().any(|candidate| {
+            candidate.relation == compass_languages::CandidateRelation::Calls
+                && candidate.target_spelling == "inspect"
+                && candidate.constraints.exact_target_declaration_id.is_none()
+        }),
+        "declarations: {:#?}\ncandidates: {:#?}",
+        batch.declarations,
+        batch.candidates
+    );
+}
+
+#[test]
+fn typescript_nested_mapped_member_does_not_promote_outer_alias() {
+    let batch = candidate(
+        "src/nested-mapped-alias.ts",
+        br#"interface Item { inspect(): void }
+type Nested = { nested: { [K in keyof Item]: Item[K] } };
+function use(value: Nested) { value.inspect(); }
+"#,
+    );
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "inspect"
+            && candidate.constraints.exact_target_declaration_id.is_none()
+    }));
+}
+
+#[test]
 fn typescript_generic_index_signature_values_resolve_member_calls() {
     let batch = candidate(
         "src/generic-index-signature.ts",

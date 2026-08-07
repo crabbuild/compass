@@ -896,6 +896,34 @@ property mutation, interprocedural flow, and compiler differential recall remain
 open Phase 4 work; the candidate adapter remains absent from
 `UNIVERSAL_ADAPTERS` until the mandatory quality and exact-release gates pass.
 
+### Execution checkpoint (2026-08-06, homomorphic mapped-alias slice)
+
+The qualification-only TypeScript path now preserves a narrow, source-proven
+nominal identity for homomorphic mapped aliases without treating structural
+assignability as universal:
+
+- A mapped alias whose single object shape is exactly
+  `{ [K in keyof Item]: Item[K] }` publishes `Item` as its bounded nominal
+  source. The same rule substitutes an explicit generic argument for
+  `type Copy<T> = { [K in keyof T]: T[K] }`, including canonical module-local
+  identities produced by the existing generic receiver path.
+- The helper is deliberately strict: nested/additional object members,
+  key-remapping, computed transforms, unsupported value shapes, and ambiguous
+  canonical declarations do not produce a receiver target. Ordinary index
+  signatures keep their existing indexed-value behavior.
+- A direct TypeScript candidate regression covers non-generic and generic
+  aliases plus a key-remapped negative. A cross-file resolver regression proves
+  `Copy<Item>` reaches the exact imported `Item.inspect` declaration through the
+  existing `member-binding` publication rule. The focused candidate suite is
+  now 56 tests and the universal resolver suite is now 148 tests.
+
+This remains a bounded evidence slice, not compiler-equivalent mapped-type
+assignability: modifier-rich mapped types, conditional/infer transforms,
+indexed access beyond direct value shapes, alias escape, dynamic mutation,
+framework tiers, compiler differential recall, and the production hard cut
+remain open. The candidate adapter stays out of `UNIVERSAL_ADAPTERS` until the
+mandatory precision, determinism, qualification, and exact-release gates pass.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

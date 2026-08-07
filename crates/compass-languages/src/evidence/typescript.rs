@@ -6297,7 +6297,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 .unwrap_or_else(|| (normalized.to_owned(), None));
             let type_arguments =
                 type_arguments.map(|arguments| self.canonical_type_arguments(scope_id, &arguments));
-            let resolution = self.resolve_name(scope_id, &lookup_name, Namespace::Both)?;
+            let resolution = self
+                .resolve_name(scope_id, &lookup_name, Namespace::Both)
+                .or_else(|| self.resolve_qualified_type_name(&lookup_name))?;
             match resolution {
                 Resolution::Import(import) => {
                     return Some(ReceiverTarget {
@@ -6309,8 +6311,13 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 }
                 Resolution::Local(declaration) if declaration.kind == "type_alias" => {
                     if let Some(alias_target) = declaration.declared_type_name.as_deref() {
+                        let alias_target = self.substitute_type_alias_target(
+                            &declaration,
+                            alias_target,
+                            type_arguments.as_deref().unwrap_or(&[]),
+                        );
                         current.clear();
-                        current.push_str(alias_target);
+                        current.push_str(&alias_target);
                     } else {
                         return Some(ReceiverTarget {
                             qualified_name: declaration.qualified_name.clone(),
@@ -6347,6 +6354,48 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             }
         }
         None
+    }
+
+    /// Resolve a canonical module-qualified nominal name produced while
+    /// substituting an explicit generic argument (for example
+    /// `generic-mapped-alias.Item`).  Ordinary lexical lookup intentionally
+    /// accepts only source spellings; this narrow fallback keeps qualified
+    /// identities from being mistaken for unqualified bindings while still
+    /// allowing a same-file generic mapped alias to recover its concrete
+    /// member receiver.
+    fn resolve_qualified_type_name(&self, name: &str) -> Option<Resolution> {
+        let ids = self.declarations_by_qualified.get(name)?;
+        let declarations = ids
+            .iter()
+            .filter_map(|id| self.declarations.get(id))
+            .filter(|declaration| {
+                declaration.namespace.accepts(Namespace::Type)
+                    && matches!(
+                        declaration.kind.as_str(),
+                        "class" | "interface" | "enum" | "namespace" | "type_alias"
+                    )
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let [declaration] = declarations.as_slice() else {
+            return None;
+        };
+        Some(Resolution::Local(declaration.clone()))
+    }
+
+    fn substitute_type_alias_target(
+        &self,
+        declaration: &DeclarationInfo,
+        target: &str,
+        arguments: &[String],
+    ) -> String {
+        let Some(parameters) = self
+            .generic_parameter_order_by_declaration
+            .get(&declaration.id)
+        else {
+            return target.to_owned();
+        };
+        substitute_candidate_type_parameters(target, parameters, arguments, 0)
     }
 
     /// Canonicalize direct generic arguments when the source proves an
@@ -7359,6 +7408,11 @@ fn typescript_declaration_signature(node: Node<'_>, kind: &str, source: &[u8]) -
 }
 
 fn direct_type_reference_name(node: Node<'_>, source: &[u8]) -> Option<String> {
+    if node.kind() == "type_alias_declaration"
+        && let Some(mapped_source) = mapped_type_source_name(node, source)
+    {
+        return Some(mapped_source);
+    }
     let annotation = node
         .child_by_field_name("type")
         .or_else(|| first_named_child_kind(node, "type_annotation"))
@@ -7397,6 +7451,110 @@ fn direct_type_reference_name(node: Node<'_>, source: &[u8]) -> Option<String> {
         _ => return None,
     };
     (!type_name.is_empty()).then_some(type_name)
+}
+
+fn mapped_type_source_name(node: Node<'_>, source: &[u8]) -> Option<String> {
+    if node.kind() != "type_alias_declaration" {
+        return None;
+    }
+    let value = node
+        .child_by_field_name("value")
+        .or_else(|| first_named_child(node))?;
+    if value.kind() != "object_type" {
+        return None;
+    }
+    let mut mapped = None;
+    let mut cursor = value.walk();
+    for child in value.named_children(&mut cursor) {
+        if child.kind() != "index_signature"
+            || !contains_node_kind(child, "mapped_type_clause")
+            || mapped.replace(child).is_some()
+        {
+            // A mapped alias is accepted only when its object shape consists
+            // of one direct homomorphic index signature. Nested mapped
+            // members or additional properties would require structural
+            // assignability and must remain unresolved here.
+            return None;
+        }
+    }
+    let mapped = mapped?;
+    let compact = node_text(source, mapped)
+        .chars()
+        .filter(|character| !character.is_ascii_whitespace())
+        .collect::<String>();
+    if compact.len() > MAX_TYPE_SHAPE_BYTES {
+        return None;
+    }
+    let key_start = compact.find('[')?.saturating_add(1);
+    let in_offset = compact.get(key_start..)?.find("inkeyof")?;
+    let key = compact.get(key_start..key_start.saturating_add(in_offset))?;
+    if key.is_empty()
+        || !key.chars().all(|character| {
+            character == '_' || character == '$' || character.is_ascii_alphanumeric()
+        })
+    {
+        return None;
+    }
+    let source_start = key_start
+        .saturating_add(in_offset)
+        .saturating_add("inkeyof".len());
+    let source_end = compact
+        .get(source_start..)
+        .and_then(|value| value.find(']').map(|offset| source_start + offset))?;
+    let source_name = compact.get(source_start..source_end)?.trim();
+    if source_name.is_empty() || source_name.len() > MAX_TYPE_SHAPE_BYTES {
+        return None;
+    }
+    let colon = compact.get(source_end.saturating_add(1)..)?.find(':')?;
+    let value_start = source_end
+        .saturating_add(1)
+        .saturating_add(colon)
+        .saturating_add(1);
+    let value = compact
+        .get(value_start..)
+        .and_then(|value| value.strip_suffix('}'))
+        .unwrap_or_else(|| compact.get(value_start..).unwrap_or_default())
+        .trim_start_matches("readonly")
+        .trim();
+    let expected = format!("{}[{}]", source_name, key);
+    (value == expected).then(|| source_name.to_owned())
+}
+
+fn substitute_candidate_type_parameters(
+    type_name: &str,
+    parameters: &[String],
+    arguments: &[String],
+    depth: u32,
+) -> String {
+    let type_name = type_name.trim();
+    if type_name.is_empty()
+        || type_name.len() > MAX_TYPE_SHAPE_BYTES
+        || depth > MAX_TYPE_SHAPE_DEPTH
+    {
+        return type_name.to_owned();
+    }
+    if let Some(index) = parameters
+        .iter()
+        .position(|parameter| parameter == type_name)
+        && let Some(argument) = arguments.get(index)
+    {
+        return argument.clone();
+    }
+    let Some((base, nested)) = generic_type_parts(type_name) else {
+        return type_name.to_owned();
+    };
+    let nested = nested
+        .iter()
+        .map(|argument| {
+            substitute_candidate_type_parameters(argument, parameters, arguments, depth + 1)
+        })
+        .collect::<Vec<_>>();
+    let substituted = format!("{base}<{}>", nested.join(","));
+    if substituted.len() <= MAX_TYPE_SHAPE_BYTES {
+        substituted
+    } else {
+        type_name.to_owned()
+    }
 }
 
 /// Return the one nominal type preserved by an optional property union such
