@@ -95,6 +95,12 @@ struct RustImplTraitSet {
     complete: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TypeScriptReexportTarget {
+    module: String,
+    exported: String,
+}
+
 /// Compact slot into the declaration table used by secondary indexes.
 ///
 /// Declaration IDs are long, repeated strings on corpus-scale Java and
@@ -102,6 +108,14 @@ struct RustImplTraitSet {
 /// the universal resolver's transient memory, while the declaration table
 /// already provides the canonical ID for each slot.
 type DeclarationSlot = u32;
+type TypeScriptModuleIndex = AHashMap<(String, String, String), Vec<DeclarationSlot>>;
+type TypeScriptReexportIndex = AHashMap<(String, String, String), Vec<TypeScriptReexportTarget>>;
+
+struct TypeScriptExportWalk<'a> {
+    candidate: &'a RelationshipCandidate,
+    visiting: BTreeSet<(String, String, String)>,
+    slots: BTreeSet<DeclarationSlot>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolutionEvidence {
@@ -145,6 +159,21 @@ pub struct UniversalResolutionIndex {
     by_module_name: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
     by_scope_name: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
     by_source_directory_name: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
+    /// TypeScript/JavaScript source modules are indexed by the normalized
+    /// repository-relative module path rather than by a basename. This keeps
+    /// relative imports project-aware without allowing terminal-name lookup
+    /// to select a same-spelled declaration from another directory.
+    typescript_modules: TypeScriptModuleIndex,
+    /// Export aliases such as `export default Foo` and `export { Foo as Bar }`
+    /// retain the exact source declaration selected by the adapter. Re-export
+    /// chains without a local declaration remain unresolved until a later
+    /// module hop can prove one target.
+    typescript_export_aliases: TypeScriptModuleIndex,
+    /// Cross-file re-exports retain their normalized target module and export
+    /// spelling. Resolution follows this bounded table rather than selecting
+    /// a terminal name from an unrelated source file.
+    typescript_reexport_targets: TypeScriptReexportIndex,
+    root: std::path::PathBuf,
     direct_bases: AHashMap<(String, String), DirectBaseSet>,
     direct_subtypes: AHashMap<(String, String), DirectSubtypeSet>,
     members_by_owner: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
@@ -308,6 +337,8 @@ impl UniversalResolutionIndex {
             return Err("universal declaration slot count exceeds u32".to_owned());
         }
         let definition_ranges = unique_definition_ranges(&declarations, &scopes);
+        let (typescript_modules, typescript_export_aliases, typescript_reexport_targets) =
+            typescript_module_indices(&declarations, &declaration_ids, &bindings, &scopes, root);
         for (name, count, limit) in [
             ("declarations", declarations.len(), limits.declarations),
             ("bindings", bindings.len(), limits.bindings),
@@ -842,6 +873,10 @@ impl UniversalResolutionIndex {
             by_module_name,
             by_scope_name,
             by_source_directory_name,
+            typescript_modules,
+            typescript_export_aliases,
+            typescript_reexport_targets,
+            root: root.to_path_buf(),
             direct_bases,
             direct_subtypes,
             members_by_owner,
@@ -969,6 +1004,9 @@ impl UniversalResolutionIndex {
                 trait_qualified_name,
                 candidate,
             );
+        }
+        if let Some(decision) = self.resolve_typescript_import_candidate(language, candidate) {
+            return decision;
         }
         if let Some(decision) = self.resolve_explicit_binding(language, candidate) {
             return decision;
@@ -1126,6 +1164,230 @@ impl UniversalResolutionIndex {
             };
         }
         ResolutionDecision::Unresolved
+    }
+
+    fn resolve_typescript_import_candidate(
+        &self,
+        language: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        if !matches!(language, "typescript" | "javascript") {
+            return None;
+        }
+        let occurrence = self.occurrence(candidate)?;
+        let mut module_and_export = None;
+        if let Some(binding) = candidate
+            .binding_id
+            .as_deref()
+            .and_then(|binding_id| self.bindings.get(binding_id))
+            && matches!(
+                binding.kind,
+                compass_languages::BindingKind::Import
+                    | compass_languages::BindingKind::ImportAlias
+                    | compass_languages::BindingKind::Reexport
+            )
+            && let Some((module, exported)) = binding.qualified_target.rsplit_once("::")
+            && !module.is_empty()
+            && !exported.is_empty()
+        {
+            module_and_export = Some((module.to_owned(), exported.to_owned()));
+        } else if matches!(
+            candidate.relation,
+            CandidateRelation::Imports | CandidateRelation::Reexports
+        ) && let Some(qualified) = candidate.constraints.qualified_name.as_deref()
+            && let Some((module, exported)) = qualified.rsplit_once("::")
+            && !module.is_empty()
+            && !exported.is_empty()
+        {
+            module_and_export = Some((module.to_owned(), exported.to_owned()));
+        }
+
+        let (module, exported) = if let Some(module_and_export) = module_and_export {
+            module_and_export
+        } else if matches!(
+            candidate.relation,
+            CandidateRelation::Imports | CandidateRelation::Reexports
+        ) {
+            let module = candidate
+                .constraints
+                .module_or_package
+                .as_deref()
+                .filter(|module| !module.is_empty())?
+                .to_owned();
+            (module, "module".to_owned())
+        } else {
+            return None;
+        };
+        let keys =
+            typescript_import_module_keys(&occurrence.range.source_file, &module, &self.root);
+        if keys.is_empty() {
+            return None;
+        }
+        let member_owner_export = if matches!(
+            candidate.relation,
+            CandidateRelation::Calls
+                | CandidateRelation::IndirectCalls
+                | CandidateRelation::AccessesMember
+        ) {
+            candidate
+                .constraints
+                .qualified_name
+                .as_deref()
+                .and_then(|qualified| qualified.rsplit_once("::"))
+                .and_then(|(_, path)| {
+                    let (owner, member) =
+                        path.rsplit_once('.').or_else(|| path.rsplit_once("::"))?;
+                    (member == candidate.target_spelling && !owner.is_empty())
+                        .then_some(owner.to_owned())
+                })
+        } else {
+            None
+        };
+        let mut targets = BTreeSet::new();
+        for key in keys {
+            let owner_export = member_owner_export
+                .as_deref()
+                .unwrap_or(&exported)
+                .to_owned();
+            let owner_targets =
+                self.typescript_export_slots(language, &key, &owner_export, candidate);
+            if member_owner_export.is_some() {
+                for owner in owner_targets {
+                    let Some(owner) = self.declaration(owner) else {
+                        continue;
+                    };
+                    if let Some(members) = self.members_by_owner.get(&(
+                        owner.language.clone(),
+                        owner.qualified_name.clone(),
+                        candidate.target_spelling.clone(),
+                    )) {
+                        targets.extend(
+                            members
+                                .iter()
+                                .filter(|slot| {
+                                    self.typescript_declaration_allowed_slot(**slot, candidate)
+                                })
+                                .copied(),
+                        );
+                    }
+                }
+            } else {
+                targets.extend(owner_targets);
+            }
+        }
+        let targets = targets.into_iter().collect::<Vec<_>>();
+        self.unique_typescript_decision(
+            Some(&targets),
+            candidate,
+            if member_owner_export.is_some() {
+                ResolutionRule::MemberBinding
+            } else {
+                ResolutionRule::ExplicitBinding
+            },
+        )
+    }
+
+    fn typescript_export_slots(
+        &self,
+        language: &str,
+        module: &str,
+        exported: &str,
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<DeclarationSlot> {
+        const MAX_TYPESCRIPT_REEXPORT_DEPTH: usize = 64;
+        let mut walk = TypeScriptExportWalk {
+            candidate,
+            visiting: BTreeSet::new(),
+            slots: BTreeSet::new(),
+        };
+        self.collect_typescript_export_slots(
+            language,
+            module,
+            exported,
+            0,
+            MAX_TYPESCRIPT_REEXPORT_DEPTH,
+            &mut walk,
+        );
+        walk.slots
+    }
+
+    fn collect_typescript_export_slots(
+        &self,
+        language: &str,
+        module: &str,
+        exported: &str,
+        depth: usize,
+        max_depth: usize,
+        walk: &mut TypeScriptExportWalk<'_>,
+    ) {
+        if depth >= max_depth
+            || walk.slots.len() > self.limits.candidates_per_lookup
+            || !walk
+                .visiting
+                .insert((language.to_owned(), module.to_owned(), exported.to_owned()))
+        {
+            return;
+        }
+        for target_language in typescript_language_family(language) {
+            let target_language = *target_language;
+            for index in [&self.typescript_modules, &self.typescript_export_aliases] {
+                if let Some(values) = index.get(&(
+                    target_language.to_owned(),
+                    module.to_owned(),
+                    exported.to_owned(),
+                )) {
+                    let remaining = candidate_storage_limit(self.limits.candidates_per_lookup)
+                        .saturating_sub(walk.slots.len());
+                    if remaining > 0 {
+                        walk.slots.extend(
+                            values
+                                .iter()
+                                .filter(|slot| {
+                                    self.typescript_declaration_allowed_slot(**slot, walk.candidate)
+                                })
+                                .take(remaining)
+                                .copied(),
+                        );
+                    }
+                }
+            }
+            if exported != "default"
+                && let Some(values) = self.typescript_reexport_targets.get(&(
+                    target_language.to_owned(),
+                    module.to_owned(),
+                    "*".to_owned(),
+                ))
+            {
+                for target in values {
+                    self.collect_typescript_export_slots(
+                        target_language,
+                        &target.module,
+                        exported,
+                        depth.saturating_add(1),
+                        max_depth,
+                        walk,
+                    );
+                }
+            }
+            if let Some(values) = self.typescript_reexport_targets.get(&(
+                target_language.to_owned(),
+                module.to_owned(),
+                exported.to_owned(),
+            )) {
+                for target in values {
+                    self.collect_typescript_export_slots(
+                        target_language,
+                        &target.module,
+                        &target.exported,
+                        depth.saturating_add(1),
+                        max_depth,
+                        walk,
+                    );
+                }
+            }
+        }
+        walk.visiting
+            .remove(&(language.to_owned(), module.to_owned(), exported.to_owned()));
     }
 
     fn resolve_wildcard_binding(
@@ -2834,6 +3096,45 @@ impl UniversalResolutionIndex {
         }
     }
 
+    fn typescript_declaration_allowed_slot(
+        &self,
+        slot: DeclarationSlot,
+        candidate: &RelationshipCandidate,
+    ) -> bool {
+        let Some(target) = self.declaration(slot) else {
+            return false;
+        };
+        typescript_declaration_basic_allowed(target, candidate)
+    }
+
+    fn unique_typescript_decision(
+        &self,
+        ids: Option<&Vec<DeclarationSlot>>,
+        candidate: &RelationshipCandidate,
+        rule: ResolutionRule,
+    ) -> Option<ResolutionDecision> {
+        let ids = ids?;
+        let eligible = ids
+            .iter()
+            .filter(|slot| self.typescript_declaration_allowed_slot(**slot, candidate))
+            .take(self.limits.candidates_per_lookup.saturating_add(1))
+            .copied()
+            .collect::<Vec<_>>();
+        match eligible.as_slice() {
+            [only] => Some(ResolutionDecision::Resolved {
+                declaration_id: self.declaration_id(*only)?.to_owned(),
+                evidence: ResolutionEvidence {
+                    rule,
+                    candidate_count: 1,
+                },
+            }),
+            [] => None,
+            many => Some(ResolutionDecision::Ambiguous {
+                candidate_count: many.len(),
+            }),
+        }
+    }
+
     fn inventory_decision(
         &self,
         language: &str,
@@ -3910,6 +4211,35 @@ fn declaration_basic_allowed(target: &DeclarationFact, candidate: &RelationshipC
                 .contains(&target.kind))
 }
 
+fn typescript_language_family(language: &str) -> &'static [&'static str] {
+    match language {
+        "typescript" => &["typescript", "javascript"],
+        "javascript" => &["javascript", "typescript"],
+        _ => &[],
+    }
+}
+
+fn typescript_declaration_basic_allowed(
+    target: &DeclarationFact,
+    candidate: &RelationshipCandidate,
+) -> bool {
+    typescript_language_family(&candidate.language).contains(&target.language.as_str())
+        && candidate
+            .constraints
+            .argument_count
+            .is_none_or(|arguments| {
+                target.parameter_count.is_none_or(|parameters| {
+                    arguments == parameters
+                        || (target.variadic && arguments >= parameters.saturating_sub(1))
+                })
+            })
+        && (candidate.constraints.allowed_target_kinds.is_empty()
+            || candidate
+                .constraints
+                .allowed_target_kinds
+                .contains(&target.kind))
+}
+
 fn declaration_overloads<'a>(
     declarations: impl Iterator<Item = &'a DeclarationFact>,
 ) -> AHashMap<String, String> {
@@ -4087,6 +4417,244 @@ fn source_directory(source_file: &str, root: &Path) -> Option<String> {
         .trim_matches('/')
         .to_owned();
     (!directory.is_empty()).then_some(directory)
+}
+
+fn typescript_module_indices(
+    declarations: &AHashMap<String, DeclarationFact>,
+    declaration_ids: &[String],
+    bindings: &AHashMap<String, BindingFact>,
+    scopes: &AHashMap<String, compass_languages::ScopeFact>,
+    root: &Path,
+) -> (
+    TypeScriptModuleIndex,
+    TypeScriptModuleIndex,
+    TypeScriptReexportIndex,
+) {
+    let mut modules = TypeScriptModuleIndex::new();
+    for declaration in declarations
+        .values()
+        .filter(|declaration| matches!(declaration.language.as_str(), "typescript" | "javascript"))
+    {
+        let Some(slot) = declaration_slot(declaration_ids, &declaration.id) else {
+            continue;
+        };
+        for module in typescript_source_module_keys(&declaration.range.source_file, root) {
+            modules
+                .entry((
+                    declaration.language.clone(),
+                    module.clone(),
+                    declaration.name.clone(),
+                ))
+                .or_default()
+                .push(slot);
+            if declaration.kind == "module" {
+                modules
+                    .entry((declaration.language.clone(), module, "module".to_owned()))
+                    .or_default()
+                    .push(slot);
+            }
+        }
+    }
+
+    let mut export_aliases = TypeScriptModuleIndex::new();
+    for binding in bindings.values().filter(|binding| {
+        binding.kind == compass_languages::BindingKind::Reexport
+            && binding.target_declaration_id.is_some()
+    }) {
+        let Some(target) = binding.target_declaration_id.as_deref() else {
+            continue;
+        };
+        let Some(slot) = declaration_slot(declaration_ids, target) else {
+            continue;
+        };
+        let Some(owner) = binding
+            .scope_id
+            .as_deref()
+            .and_then(|scope_id| scopes.get(scope_id))
+            .and_then(|scope| scope.owner_declaration_id.as_deref())
+            .and_then(|declaration_id| declarations.get(declaration_id))
+        else {
+            continue;
+        };
+        if !matches!(owner.language.as_str(), "typescript" | "javascript") {
+            continue;
+        }
+        for module in typescript_source_module_keys(&owner.range.source_file, root) {
+            export_aliases
+                .entry((owner.language.clone(), module, binding.spelling.clone()))
+                .or_default()
+                .push(slot);
+        }
+    }
+    let mut reexport_targets = TypeScriptReexportIndex::new();
+    for binding in bindings.values().filter(|binding| {
+        binding.kind == compass_languages::BindingKind::Reexport
+            && binding.target_declaration_id.is_none()
+    }) {
+        let Some((target_module, target_export)) = binding.qualified_target.rsplit_once("::")
+        else {
+            continue;
+        };
+        if target_module.is_empty() || target_export.is_empty() {
+            continue;
+        }
+        let Some(owner) = binding
+            .scope_id
+            .as_deref()
+            .and_then(|scope_id| scopes.get(scope_id))
+            .and_then(|scope| scope.owner_declaration_id.as_deref())
+            .and_then(|declaration_id| declarations.get(declaration_id))
+        else {
+            continue;
+        };
+        if !matches!(owner.language.as_str(), "typescript" | "javascript") {
+            continue;
+        }
+        let target_modules =
+            typescript_import_module_keys(&owner.range.source_file, target_module, root);
+        if target_modules.is_empty() {
+            continue;
+        }
+        for owner_module in typescript_source_module_keys(&owner.range.source_file, root) {
+            let targets = reexport_targets
+                .entry((
+                    owner.language.clone(),
+                    owner_module,
+                    binding.spelling.clone(),
+                ))
+                .or_default();
+            for target_module in &target_modules {
+                targets.push(TypeScriptReexportTarget {
+                    module: target_module.clone(),
+                    exported: target_export.to_owned(),
+                });
+            }
+        }
+    }
+    for targets in reexport_targets.values_mut() {
+        targets.sort_unstable_by(|left, right| {
+            left.module
+                .cmp(&right.module)
+                .then_with(|| left.exported.cmp(&right.exported))
+        });
+        targets.dedup();
+    }
+    for index in [&mut modules, &mut export_aliases] {
+        sort_declaration_index(index, declaration_ids, usize::MAX);
+    }
+    (modules, export_aliases, reexport_targets)
+}
+
+fn typescript_source_module_keys(source_file: &str, root: &Path) -> Vec<String> {
+    let Some(relative) = typescript_relative_path(source_file, root) else {
+        return Vec::new();
+    };
+    let Some(module) = typescript_module_stem(&relative) else {
+        return Vec::new();
+    };
+    let mut keys = vec![module.clone()];
+    if relative
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("index"))
+        && let Some(parent) = module.rsplit_once('/').map(|(parent, _)| parent)
+    {
+        if !parent.is_empty() {
+            keys.push(parent.to_owned());
+        }
+    } else if relative
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("index"))
+    {
+        keys.push(String::new());
+    }
+    keys.sort();
+    keys.dedup();
+    keys.retain(|key| !key.is_empty());
+    keys
+}
+
+fn typescript_import_module_keys(importer: &str, module: &str, root: &Path) -> Vec<String> {
+    let mut keys = Vec::new();
+    if module.starts_with('.') {
+        if let Some(importer_path) = typescript_relative_path(importer, root) {
+            let base = importer_path.parent().unwrap_or_else(|| Path::new(""));
+            if let Some(joined) = normalize_relative_module_path(&base.join(module))
+                && let Some(key) = typescript_module_stem(&joined)
+            {
+                keys.push(key);
+                if joined
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("index"))
+                    && let Some(parent) = keys[0].rsplit_once('/').map(|(parent, _)| parent)
+                    && !parent.is_empty()
+                {
+                    keys.push(parent.to_owned());
+                }
+            }
+        }
+    } else if !module.is_empty() && !module.starts_with('#') {
+        let path = Path::new(module);
+        if let Some(key) = typescript_module_stem(path) {
+            keys.push(key);
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+fn typescript_relative_path(source_file: &str, root: &Path) -> Option<std::path::PathBuf> {
+    let path = Path::new(source_file);
+    let relative = if path.is_absolute() {
+        path.strip_prefix(root).ok()?.to_path_buf()
+    } else {
+        path.to_path_buf()
+    };
+    normalize_relative_module_path(&relative)
+}
+
+fn normalize_relative_module_path(path: &Path) -> Option<std::path::PathBuf> {
+    let mut components = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                components.pop()?;
+            }
+            std::path::Component::Normal(value) => components.push(value.to_owned()),
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    let mut normalized = std::path::PathBuf::new();
+    for component in components {
+        normalized.push(component);
+    }
+    Some(normalized)
+}
+
+fn typescript_module_stem(path: &Path) -> Option<String> {
+    let mut value = path.to_string_lossy().replace('\\', "/");
+    value = value.trim_start_matches("./").to_owned();
+    for extension in [
+        ".d.mts", ".d.cts", ".d.ts", ".mts", ".cts", ".tsx", ".jsx", ".mjs", ".cjs", ".ts", ".js",
+    ] {
+        if let Some(stem) = value.strip_suffix(extension) {
+            value = stem.to_owned();
+            break;
+        }
+    }
+    while value.ends_with('/') {
+        value.pop();
+    }
+    (!value.is_empty()
+        && !value.starts_with('/')
+        && !value
+            .split('/')
+            .any(|component| component.is_empty() || component == ".."))
+    .then_some(value)
 }
 
 fn read_go_module_path(root: &Path) -> Option<String> {

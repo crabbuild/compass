@@ -711,6 +711,38 @@ release sample, hand-labeled accepted records, Graphify/SCIP equivalent-scope
 results, framework strata, and production hard cut remain open. The candidate
 adapter remains absent from `UNIVERSAL_ADAPTERS`.
 
+### Execution checkpoint (2026-08-06, universal module-index and re-export slice)
+
+The qualification-only resolver now closes the first project-wide target gap
+without reintroducing terminal-name matching or a filesystem search:
+
+- `UniversalResolutionIndex` indexes TypeScript/JavaScript declarations by
+  normalized repository-relative module path and export spelling. Relative
+  imports use the importer directory, extension substitution, and directory
+  `index` aliases; `.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`, `.mjs`, and
+  `.cjs` realizations retain their source anchors.
+- Local default/local-export aliases and bounded cross-file re-export aliases
+  retain exact declaration slots. Re-export chains are followed through the
+  in-memory evidence table with a depth bound; cycles and missing hops remain
+  unresolved. `export *` never forwards `default` implicitly.
+- TypeScript/JavaScript interop is admitted only after an exact module/export
+  path proves the target. Imported member calls first resolve the exported
+  owner, then select the exact owner member; duplicate same-path realizations
+  across either semantic family stay ambiguous.
+- Six focused resolver regressions cover relative extension substitution,
+  default imports and members, cross-file re-export aliases, exact TS/JS
+  interop, terminal-name collision negatives, duplicate-module ambiguity, and
+  dynamic-member preservation. The candidate suite passes with deterministic
+  IDs and occurrence anchors.
+
+This slice is still below the Phase 3/4 and production hard-cut gates. The
+universal index does not yet consume the full project resolver for `paths`,
+`rootDirs`, package `exports`/`imports`, `typesVersions`, or all Node16/
+NodeNext/Bundler conditions; declaration merging, generic instantiation,
+mapped/indexed shapes, framework tiers, compiler differential recall, and the
+accepted precision/leadership scorecard remain open. The candidate adapter is
+still not registered in `UNIVERSAL_ADAPTERS`.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

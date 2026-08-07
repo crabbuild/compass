@@ -6716,3 +6716,403 @@ exact();
         compass_resolve::evidence::ResolutionDecision::Unresolved
     );
 }
+
+#[test]
+fn typescript_candidate_resolves_relative_and_default_imports_across_files()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/api.ts",
+            br#"export class Widget { run() {} }
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/default.ts",
+            br#"class DefaultWidget { run() {} }
+export default DefaultWidget;
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import { Widget } from "../lib/api.js";
+import DefaultWidget from "../lib/default";
+new Widget();
+new Widget().run();
+new DefaultWidget();
+new DefaultWidget().run();
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            let path = root.join(relative);
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let widget = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "Widget")
+        .ok_or("missing Widget declaration")?;
+    let default_widget = batches[1]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "DefaultWidget")
+        .ok_or("missing default declaration")?;
+    let widget_construct = batches[2]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Constructs
+                && candidate.target_spelling == "Widget"
+        })
+        .ok_or("missing Widget construction candidate")?;
+    let default_construct = batches[2]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Constructs
+                && candidate.target_spelling == "DefaultWidget"
+        })
+        .ok_or("missing default construction candidate")?;
+    let widget_member_call = batches[2]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "run"
+        })
+        .ok_or("missing imported member call candidate")?;
+    let default_member_call = batches[2]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "run"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.contains("default"))
+        })
+        .ok_or("missing default imported member call candidate")?;
+    let widget_run = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "run")
+        .ok_or("missing Widget.run declaration")?;
+    let default_run = batches[1]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "run")
+        .ok_or("missing DefaultWidget.run declaration")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&widget_construct.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &widget.id
+    ));
+    assert!(matches!(
+        index.resolve(&default_construct.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &default_widget.id
+    ));
+    let widget_member_decision = index.resolve(&widget_member_call.id);
+    assert!(matches!(
+        widget_member_decision,
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &widget_run.id
+    ));
+    assert!(matches!(
+        index.resolve(&default_member_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &default_run.id
+    ));
+    Ok(())
+}
+
+#[test]
+fn typescript_candidate_does_not_use_terminal_name_for_relative_imports()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "app/api.ts",
+            br#"export class Widget {}
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/api.ts",
+            br#"export class Widget {}
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import { Widget } from "./api";
+new Widget();
+"#
+            .as_slice(),
+        ),
+    ];
+    let mut batches = Vec::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        batches.push(
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)?,
+        );
+    }
+    let app_widget = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "Widget")
+        .ok_or("missing app Widget")?;
+    let lib_widget = batches[1]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "Widget")
+        .ok_or("missing lib Widget")?;
+    let construct = batches[2]
+        .candidates
+        .iter()
+        .find(|candidate| candidate.relation == CandidateRelation::Constructs)
+        .ok_or("missing construction candidate")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&construct.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &app_widget.id
+    ));
+    assert_ne!(app_widget.id, lib_widget.id);
+    Ok(())
+}
+
+#[test]
+fn typescript_candidate_resolves_exact_javascript_interop() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/runtime.js",
+            br#"export class Runtime { run() {} }
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import { Runtime } from "../lib/runtime.js";
+new Runtime().run();
+"#
+            .as_slice(),
+        ),
+    ];
+    let mut batches = Vec::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        batches.push(
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)?,
+        );
+    }
+    let runtime = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "Runtime")
+        .ok_or("missing JavaScript Runtime declaration")?;
+    assert_eq!(runtime.language, "javascript");
+    let run = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "run")
+        .ok_or("missing JavaScript Runtime.run declaration")?;
+    let construct = batches[1]
+        .candidates
+        .iter()
+        .find(|candidate| candidate.relation == CandidateRelation::Constructs)
+        .ok_or("missing interop construction candidate")?;
+    let call = batches[1]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "run"
+        })
+        .ok_or("missing interop member call candidate")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&construct.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &runtime.id
+    ));
+    assert!(matches!(
+        index.resolve(&call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &run.id
+    ));
+    Ok(())
+}
+
+#[test]
+fn typescript_candidate_follows_cross_file_reexport_aliases()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/api.ts",
+            br#"export class Widget { run() {} }
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/barrel.ts",
+            br#"export { Widget as PublicWidget } from "./api";
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import { PublicWidget } from "../lib/barrel";
+new PublicWidget().run();
+"#
+            .as_slice(),
+        ),
+    ];
+    let mut batches = Vec::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        batches.push(
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)?,
+        );
+    }
+    let widget = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "Widget")
+        .ok_or("missing re-exported Widget declaration")?;
+    let run = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "run")
+        .ok_or("missing re-exported Widget.run declaration")?;
+    let construct = batches[2]
+        .candidates
+        .iter()
+        .find(|candidate| candidate.relation == CandidateRelation::Constructs)
+        .ok_or("missing re-exported construction candidate")?;
+    let call = batches[2]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "run"
+        })
+        .ok_or("missing re-exported member call candidate")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&construct.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &widget.id
+    ));
+    assert!(matches!(
+        index.resolve(&call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &run.id
+    ));
+    Ok(())
+}
+
+#[test]
+fn typescript_candidate_keeps_duplicate_module_realizations_ambiguous()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "app/api.ts",
+            br#"export class Widget {}
+"#
+            .as_slice(),
+        ),
+        (
+            "app/api.js",
+            br#"export class Widget {}
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import { Widget } from "./api";
+new Widget();
+"#
+            .as_slice(),
+        ),
+    ];
+    let mut batches = Vec::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        batches.push(
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)?,
+        );
+    }
+    let construct = batches[2]
+        .candidates
+        .iter()
+        .find(|candidate| candidate.relation == CandidateRelation::Constructs)
+        .ok_or("missing construction candidate")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&construct.id),
+        compass_resolve::evidence::ResolutionDecision::Ambiguous { candidate_count } if candidate_count == 2
+    ));
+    Ok(())
+}
