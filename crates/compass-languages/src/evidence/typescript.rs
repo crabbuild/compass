@@ -1118,7 +1118,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             format!("{qualified_prefix}.{name}")
         };
         let graph_node_id = stable_graph_id(self.source_file, kind, name, node.start_byte());
-        let signature = typescript_declaration_signature(node, kind, self.source);
+        let signature = typescript_declaration_signature(node, kind, self.source)
+            .map(|signature| self.canonicalize_declaration_signature(scope_id, kind, &signature));
         let declaration_id = self.builder.declare_with_signature(
             kind,
             &graph_node_id,
@@ -5770,6 +5771,21 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 {
                     return Some(indexed);
                 }
+                if object.kind() == "subscript_expression" && nested.import.is_some() {
+                    let qualified_name = format!(
+                        "{}[]",
+                        typescript_receiver_with_type_arguments(
+                            &nested.qualified_name,
+                            nested.type_arguments.as_deref(),
+                        )
+                    );
+                    return Some(ReceiverTarget {
+                        qualified_name,
+                        import: nested.import,
+                        scope_id: nested.scope_id,
+                        type_arguments: None,
+                    });
+                }
                 let property_name = member_property_name(self.source, property)?;
                 // A namespace import (`import * as api`) exposes members with
                 // `module::member` identity.  A named/class import denotes a
@@ -6058,6 +6074,31 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             .iter()
             .map(|argument| self.canonical_type_argument(scope_id, argument, 0))
             .collect()
+    }
+
+    fn canonicalize_declaration_signature(
+        &self,
+        scope_id: &str,
+        kind: &str,
+        signature: &str,
+    ) -> String {
+        let has_index = signature.contains("|index=") || signature.starts_with("index=");
+        if (kind != "type_alias" && !has_index) || (!signature.contains('=') && !has_index) {
+            return signature.to_owned();
+        }
+        let mut canonical = signature.to_owned();
+        if let Some((prefix, target)) = canonical.split_once('=') {
+            let target = target
+                .split_once("|index=")
+                .map_or(target, |(target, _)| target);
+            let target = self.canonical_type_argument(scope_id, target, 0);
+            canonical = format!("{prefix}={target}");
+        }
+        if let Some((prefix, value)) = canonical.split_once("|index=") {
+            let value = self.canonical_type_argument(scope_id, value, 0);
+            canonical = format!("{prefix}|index={value}");
+        }
+        canonical
     }
 
     fn canonical_type_argument(&self, scope_id: &str, argument: &str, depth: u32) -> String {
@@ -6998,13 +7039,35 @@ fn typescript_declaration_signature(node: Node<'_>, kind: &str, source: &[u8]) -
     {
         return Some(type_name);
     }
-    if matches!(kind, "class" | "interface")
-        && let Some(parameters) = callable_type_parameter_order(node, source)
+    let generic_prefix = callable_type_parameter_order(node, source)
+        .filter(|parameters| !parameters.is_empty())
+        .map(|parameters| format!("<{}>", parameters.join(",")))
+        .unwrap_or_default();
+    if kind == "type_alias"
+        && let Some(target) = direct_type_reference_name(node, source)
     {
-        let signature = format!("<{}>", parameters.join(","));
+        let signature = format!("{generic_prefix}={target}");
         if signature.len() <= MAX_TYPE_SHAPE_BYTES {
             return Some(signature);
         }
+    }
+    if matches!(kind, "interface" | "type_alias")
+        && let Some(index_value) = index_value_type(node, source)
+    {
+        let signature = if generic_prefix.is_empty() {
+            format!("index={index_value}")
+        } else {
+            format!("{generic_prefix}|index={index_value}")
+        };
+        if signature.len() <= MAX_TYPE_SHAPE_BYTES {
+            return Some(signature);
+        }
+    }
+    if matches!(kind, "class" | "interface" | "type_alias")
+        && !generic_prefix.is_empty()
+        && generic_prefix.len() <= MAX_TYPE_SHAPE_BYTES
+    {
+        return Some(generic_prefix);
     }
     None
 }
@@ -7216,7 +7279,7 @@ fn index_value_type(node: Node<'_>, source: &[u8]) -> Option<String> {
     if value.is_empty() || value.len() > MAX_TYPE_SHAPE_BYTES {
         return None;
     }
-    Some(strip_type_arguments(value).to_owned())
+    Some(value.to_owned())
 }
 
 fn union_target_name(part: &str) -> Option<String> {

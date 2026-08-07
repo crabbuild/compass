@@ -846,6 +846,32 @@ hard cut remain open. The candidate adapter remains absent from
 `UNIVERSAL_ADAPTERS` until the mandatory quality and exact-release
 qualification gates complete.
 
+### Execution checkpoint (2026-08-06, generic alias and indexed-member slice)
+
+The shared TypeScript/JavaScript resolver now follows two additional
+source-backed declaration shapes without widening terminal-name matching:
+
+- Generic type aliases retain a bounded alias target shape (for example,
+  `Alias<T> = Box<T>`). Alias parameters are substituted recursively, imported
+  aliases are resolved through the alias module's exact import binding, and
+  alias cycles or unsupported targets remain unresolved.
+- Interface/type-alias index signatures publish a compact value-type shape.
+  Imported receivers preserve an indexed marker (`Shape<Item>[].inspect`) so
+  the resolver can select the unique source-backed value type for
+  `shape[key].inspect()`; generic `Shape<T>` index values carry the concrete
+  `T` context through the access.
+
+The slice adds positive regressions for an object alias, an alias to an
+imported generic nominal, ordinary and generic imported index signatures, plus
+ambiguity and primitive negative cases. The universal resolver suite is now
+146 tests and the TypeScript candidate suite remains 44 tests. The behavior is
+bounded by the existing member/export candidate limits and type-shape byte and
+depth limits; mapped/conditional/indexed access beyond a direct index value,
+overload-dependent substitutions, framework tiers, compiler differential
+recall, project-corpus qualification, and the production hard cut remain
+open. The candidate adapter remains absent from `UNIVERSAL_ADAPTERS` until the
+mandatory quality and exact-release qualification gates complete.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

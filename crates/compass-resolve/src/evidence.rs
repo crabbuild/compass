@@ -106,6 +106,7 @@ struct TypeScriptReexportTarget {
 struct TypeScriptMemberPath {
     root_export: String,
     type_arguments: Vec<String>,
+    indexed: bool,
     members: Vec<String>,
 }
 
@@ -1318,7 +1319,7 @@ impl UniversalResolutionIndex {
         let mut targets = BTreeSet::new();
         for key in keys {
             if let Some(path) = member_path.as_ref()
-                && (path.members.len() > 1 || !path.type_arguments.is_empty())
+                && (path.indexed || path.members.len() > 1 || !path.type_arguments.is_empty())
             {
                 targets.extend(self.typescript_member_chain_slots(language, &key, path, candidate));
                 continue;
@@ -1398,48 +1399,73 @@ impl UniversalResolutionIndex {
             self.typescript_export_slots(language, module, &path.root_export, candidate, true);
         let mut targets = BTreeSet::new();
         for root_slot in root_targets {
-            let mut owners = BTreeSet::from([(root_slot, path.type_arguments.clone())]);
+            let mut owners = if path.indexed {
+                self.typescript_index_value_contexts(
+                    language,
+                    module,
+                    root_slot,
+                    &path.type_arguments,
+                    candidate,
+                )
+            } else {
+                self.typescript_expand_type_alias_contexts(
+                    language,
+                    module,
+                    root_slot,
+                    path.type_arguments.clone(),
+                    candidate,
+                )
+            };
             for (index, member_name) in path.members.iter().enumerate() {
                 let final_member = index.saturating_add(1) == path.members.len();
                 let mut next_owners = BTreeSet::new();
-                for (owner_slot, owner_type_arguments) in owners.iter() {
-                    let Some(owner) = self.declaration(*owner_slot) else {
-                        continue;
-                    };
-                    let Some(members) = self.members_by_owner.get(&(
-                        owner.language.clone(),
-                        owner.qualified_name.clone(),
-                        member_name.clone(),
-                    )) else {
-                        continue;
-                    };
-                    if final_member {
-                        next_owners.extend(
-                            members
-                                .iter()
-                                .filter(|slot| {
-                                    self.typescript_declaration_allowed_slot(**slot, candidate)
-                                })
-                                .map(|slot| (*slot, Vec::new())),
-                        );
-                    } else {
-                        let typed_members = members
-                            .iter()
-                            .filter_map(|slot| self.declaration(*slot))
-                            .filter(|member| member.kind == "property")
-                            .filter_map(|member| member.signature.as_deref())
-                            .collect::<Vec<_>>();
-                        let [type_name] = typed_members.as_slice() else {
+                for (owner_slot, owner_type_arguments) in owners.clone() {
+                    let expanded_owners = self.typescript_expand_type_alias_contexts(
+                        language,
+                        module,
+                        owner_slot,
+                        owner_type_arguments,
+                        candidate,
+                    );
+                    for (owner_slot, owner_type_arguments) in expanded_owners {
+                        let Some(owner) = self.declaration(owner_slot) else {
                             continue;
                         };
-                        next_owners.extend(self.typescript_member_type_contexts(
-                            language,
-                            module,
-                            type_name,
-                            owner.signature.as_deref(),
-                            owner_type_arguments,
-                            candidate,
-                        ));
+                        let Some(members) = self.members_by_owner.get(&(
+                            owner.language.clone(),
+                            owner.qualified_name.clone(),
+                            member_name.clone(),
+                        )) else {
+                            continue;
+                        };
+                        if final_member {
+                            next_owners.extend(
+                                members
+                                    .iter()
+                                    .filter(|slot| {
+                                        self.typescript_declaration_allowed_slot(**slot, candidate)
+                                    })
+                                    .map(|slot| (*slot, Vec::new())),
+                            );
+                        } else {
+                            let typed_members = members
+                                .iter()
+                                .filter_map(|slot| self.declaration(*slot))
+                                .filter(|member| member.kind == "property")
+                                .filter_map(|member| member.signature.as_deref())
+                                .collect::<Vec<_>>();
+                            let [type_name] = typed_members.as_slice() else {
+                                continue;
+                            };
+                            next_owners.extend(self.typescript_member_type_contexts(
+                                language,
+                                module,
+                                type_name,
+                                owner.signature.as_deref(),
+                                &owner_type_arguments,
+                                candidate,
+                            ));
+                        }
                     }
                 }
                 if next_owners.is_empty() {
@@ -1454,6 +1480,94 @@ impl UniversalResolutionIndex {
             }
         }
         targets
+    }
+
+    fn typescript_index_value_contexts(
+        &self,
+        language: &str,
+        module: &str,
+        owner_slot: DeclarationSlot,
+        type_arguments: &[String],
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
+        let Some(owner) = self.declaration(owner_slot) else {
+            return BTreeSet::new();
+        };
+        let Some(signature) = owner.signature.as_deref() else {
+            return BTreeSet::new();
+        };
+        let Some(type_name) = typescript_index_value_type(signature) else {
+            return BTreeSet::new();
+        };
+        self.typescript_member_type_contexts(
+            language,
+            module,
+            type_name,
+            Some(signature),
+            type_arguments,
+            candidate,
+        )
+    }
+
+    fn typescript_expand_type_alias_contexts(
+        &self,
+        language: &str,
+        module: &str,
+        owner_slot: DeclarationSlot,
+        type_arguments: Vec<String>,
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
+        const MAX_ALIAS_DEPTH: usize = 16;
+        let mut current = BTreeSet::from([(owner_slot, type_arguments)]);
+        let mut seen = BTreeSet::new();
+        for _ in 0..=MAX_ALIAS_DEPTH {
+            let mut next = BTreeSet::new();
+            let mut expanded = false;
+            for (slot, arguments) in current {
+                if !seen.insert((slot, arguments.clone())) {
+                    continue;
+                }
+                let Some(owner) = self.declaration(slot) else {
+                    continue;
+                };
+                let Some(signature) = owner.signature.as_deref() else {
+                    next.insert((slot, arguments));
+                    continue;
+                };
+                let Some(alias_target) = typescript_type_alias_target(signature) else {
+                    next.insert((slot, arguments));
+                    continue;
+                };
+                let alias_module =
+                    typescript_source_module_keys(&owner.range.source_file, &self.root)
+                        .into_iter()
+                        .next()
+                        .unwrap_or_else(|| module.to_owned());
+                let substituted = typescript_substitute_type_parameters(
+                    alias_target,
+                    &typescript_generic_parameter_names(signature),
+                    &arguments,
+                );
+                let contexts = self.typescript_member_type_contexts(
+                    language,
+                    &alias_module,
+                    &substituted,
+                    Some(signature),
+                    &arguments,
+                    candidate,
+                );
+                if contexts.is_empty() {
+                    continue;
+                }
+                expanded = true;
+                next.extend(contexts);
+            }
+            if !expanded {
+                return next;
+            }
+            current = next;
+        }
+        BTreeSet::new()
     }
 
     fn typescript_member_type_contexts(
@@ -1472,11 +1586,8 @@ impl UniversalResolutionIndex {
         let generic_parameters = owner_signature
             .map(typescript_generic_parameter_names)
             .unwrap_or_default();
-        let substituted = generic_parameters
-            .iter()
-            .position(|parameter| parameter == type_name)
-            .and_then(|index| type_arguments.get(index))
-            .map_or_else(|| type_name.to_owned(), |argument| argument.clone());
+        let substituted =
+            typescript_substitute_type_parameters(type_name, &generic_parameters, type_arguments);
         let (base, nested_type_arguments) = typescript_generic_type_parts(&substituted)
             .unwrap_or((substituted.as_str(), Vec::new()));
         let (qualified_module, exported) = split_typescript_module_qualified(base);
@@ -1497,12 +1608,97 @@ impl UniversalResolutionIndex {
         modules.sort_unstable();
         modules.dedup();
         let mut contexts = BTreeSet::new();
+        let exported_name = exported
+            .rsplit_once('.')
+            .map_or(exported, |(_, name)| name)
+            .to_owned();
         for module in modules {
-            for slot in self.typescript_export_slots(language, &module, exported, candidate, true) {
+            for slot in
+                self.typescript_export_slots(language, &module, &exported_name, candidate, true)
+            {
+                if exported.contains('.')
+                    && self
+                        .declaration(slot)
+                        .is_none_or(|declaration| declaration.qualified_name != exported)
+                {
+                    continue;
+                }
                 contexts.insert((slot, nested_type_arguments.clone()));
             }
             if contexts.len() > self.limits.candidates_per_lookup {
                 break;
+            }
+        }
+        if qualified_module.is_none() && !exported.contains('.') {
+            let mut imported_contexts = BTreeSet::new();
+            for binding in self.bindings.values().filter(|binding| {
+                binding.language == language
+                    && binding.spelling == exported
+                    && matches!(
+                        binding.kind,
+                        compass_languages::BindingKind::Import
+                            | compass_languages::BindingKind::ImportAlias
+                            | compass_languages::BindingKind::Reexport
+                    )
+                    && binding.namespace.is_none_or(|namespace| {
+                        matches!(
+                            namespace,
+                            compass_languages::SymbolNamespace::Type
+                                | compass_languages::SymbolNamespace::ValueAndType
+                                | compass_languages::SymbolNamespace::Namespace
+                        )
+                    })
+            }) {
+                let Some(owner) = binding
+                    .scope_id
+                    .as_deref()
+                    .and_then(|scope_id| self.scopes.get(scope_id))
+                    .and_then(|scope| scope.owner_declaration_id.as_deref())
+                    .and_then(|declaration_id| self.declarations.get(declaration_id))
+                else {
+                    continue;
+                };
+                let owner_modules =
+                    typescript_source_module_keys(&owner.range.source_file, &self.root);
+                let mut module_candidates = vec![module.to_owned()];
+                module_candidates.extend(typescript_import_module_keys(
+                    &owner.range.source_file,
+                    module,
+                    &self.root,
+                ));
+                if !module_candidates
+                    .iter()
+                    .any(|candidate_module| owner_modules.contains(candidate_module))
+                {
+                    continue;
+                }
+                let Some((target_module, target_export)) =
+                    binding.qualified_target.rsplit_once("::")
+                else {
+                    continue;
+                };
+                let mut target_modules = vec![target_module.to_owned()];
+                target_modules.extend(typescript_import_module_keys(
+                    &owner.range.source_file,
+                    target_module,
+                    &self.root,
+                ));
+                target_modules.sort_unstable();
+                target_modules.dedup();
+                for target_module in target_modules {
+                    for slot in self.typescript_export_slots(
+                        language,
+                        &target_module,
+                        target_export,
+                        candidate,
+                        true,
+                    ) {
+                        imported_contexts.insert((slot, nested_type_arguments.clone()));
+                    }
+                }
+            }
+            if !imported_contexts.is_empty() {
+                contexts = imported_contexts;
             }
         }
         contexts
@@ -4470,8 +4666,13 @@ fn typescript_member_path(qualified: &str, target_spelling: &str) -> Option<Type
         return None;
     }
     let root_segment = segments.first()?;
+    let indexed = root_segment.ends_with("[]");
+    let root_segment = root_segment
+        .strip_suffix("[]")
+        .unwrap_or(root_segment)
+        .trim();
     let (root_export, type_arguments) = typescript_generic_type_parts(root_segment).map_or_else(
-        || (root_segment.clone(), Vec::new()),
+        || (root_segment.to_owned(), Vec::new()),
         |(base, arguments)| (base.to_owned(), arguments),
     );
     if root_export.is_empty() {
@@ -4480,6 +4681,7 @@ fn typescript_member_path(qualified: &str, target_spelling: &str) -> Option<Type
     Some(TypeScriptMemberPath {
         root_export,
         type_arguments,
+        indexed,
         members: segments.into_iter().skip(1).collect(),
     })
 }
@@ -4582,7 +4784,12 @@ fn typescript_generic_type_parts(value: &str) -> Option<(&str, Vec<String>)> {
 }
 
 fn typescript_generic_parameter_names(signature: &str) -> Vec<String> {
-    let signature = signature.trim();
+    let signature = signature
+        .trim()
+        .split(['=', '|'])
+        .next()
+        .unwrap_or_default()
+        .trim();
     if !signature.starts_with('<') || !signature.ends_with('>') {
         return Vec::new();
     }
@@ -4603,6 +4810,62 @@ fn typescript_generic_parameter_names(signature: &str) -> Vec<String> {
         }
     }
     names
+}
+
+fn typescript_type_alias_target(signature: &str) -> Option<&str> {
+    let (parameters, target) = signature.trim().split_once('=')?;
+    let parameters = parameters.trim();
+    let target = target
+        .split_once("|index=")
+        .map_or(target, |(target, _)| target);
+    if parameters.contains("|index=")
+        || (!parameters.is_empty() && !parameters.starts_with('<'))
+        || target.trim().is_empty()
+        || target.len() > 1024
+    {
+        return None;
+    }
+    Some(target.trim())
+}
+
+fn typescript_index_value_type(signature: &str) -> Option<&str> {
+    let value = signature
+        .trim()
+        .split_once("|index=")
+        .map(|(_, value)| value)
+        .or_else(|| signature.trim().strip_prefix("index="))?;
+    (!value.is_empty() && value.len() <= 1024).then_some(value.trim())
+}
+
+fn typescript_substitute_type_parameters(
+    type_name: &str,
+    parameters: &[String],
+    arguments: &[String],
+) -> String {
+    let type_name = type_name.trim();
+    if type_name.is_empty() || type_name.len() > 1024 {
+        return type_name.to_owned();
+    }
+    if let Some(index) = parameters
+        .iter()
+        .position(|parameter| parameter == type_name)
+        && let Some(argument) = arguments.get(index)
+    {
+        return argument.clone();
+    }
+    let Some((base, nested)) = typescript_generic_type_parts(type_name) else {
+        return type_name.to_owned();
+    };
+    let nested = nested
+        .iter()
+        .map(|argument| typescript_substitute_type_parameters(argument, parameters, arguments))
+        .collect::<Vec<_>>();
+    let substituted = format!("{base}<{}>", nested.join(","));
+    if substituted.len() <= 1024 {
+        substituted
+    } else {
+        type_name.to_owned()
+    }
 }
 
 fn typescript_declaration_basic_allowed(
