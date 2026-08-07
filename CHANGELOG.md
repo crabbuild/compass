@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.6 - 2026-08-06
+
 - Simplify every Compass-owned current-output path beneath `compass-out/`.
   Immutable build snapshots now live under `snapshots/`, the selector is
   `current-snapshot`, the SQLite query index is under
@@ -27,6 +29,10 @@
 
 - Keep the initialization repository tree and selected-path ledger inside
   bounded, independently scrollable panes so large file lists remain usable.
+
+- Keep VS Code activation resilient across fresh and mixed multi-root
+  workspaces by distinguishing missing current snapshots from
+  invalid/incomplete snapshots and surfacing repository-scoped refresh errors.
 
 ## 0.3.5 - 2026-08-06
 
