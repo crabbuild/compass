@@ -1110,7 +1110,7 @@ semantics, richer overload-aware generic substitution, alias escape/eval/proxy
 flow, framework/compiler tiers, accepted precision/Wilson gates, equivalent
 Graphify/SCIP scope, and the production hard cut remain open. The candidate
 adapter remains absent from `UNIVERSAL_ADAPTERS`. Fixture qualification stays
-byte-stable at Compass revision `1d8d5233b702559d8ae01c278473dc5459f8b48c`,
+byte-stable at Compass revision `24f937360cc80d6b62b633f2fdd2a367eb6529c3`,
 with 57 languages, 980 coverage records, 1,565 invariants, 27 flows, and
 graph digest `sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`.
 
