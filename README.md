@@ -38,7 +38,15 @@ compass install
 compass watch
 ```
 
-Run `compass watch` in a second terminal. Once installed, an assistant starts with `GRAPH_REPORT.md`, runs a focused Compass query, and opens only the source needed to verify its answer.
+Run `compass watch` in a second terminal. Once installed, an assistant runs `compass query "<question>"` before broad source searches. It reads `compass-out/GRAPH_REPORT.md` for repository-wide architecture context and opens only the source needed to verify its answer.
+
+Inside a Git repository, `compass install` detects supported assistants and always includes the portable Agent Skills integration. Confirm that the intended host appears under `Selected`. If it does not, select one or more platforms explicitly:
+
+```bash
+compass install --platform codex
+compass install --platform codex --platform claude
+compass install --all --dry-run
+```
 
 See [Connect a coding assistant](#connect-a-coding-assistant) for supported agents, explicit platform selection, upgrades, and uninstall.
 
@@ -310,25 +318,32 @@ Claude Code, Kiro, and Cline use their native skill roots. Use repeatable
 `--platform` flags when you want explicit selection:
 
 ```bash
+compass install --platform codex
 compass install --platform codex --platform claude
 compass install --all --dry-run
 compass install --user --format json
 ```
 
-The skill teaches assistants to use an existing Compass graph as the first
-navigation layer, request a focused subgraph, and open only the source files
-needed to verify an answer. Installation does not build a graph; on the first
-repository-wide architecture, dependency, history, or impact question, the
-assistant can run the local deterministic build and continue automatically.
+Check `Selected` in the command output. If it lists only `agents`, Compass did
+not detect a host-specific adapter. An explicit `--platform` selection bypasses
+detection. Start a new assistant session after installation. In Codex, review
+and trust the hook under `/hooks`; in Gemini CLI, run `/skills reload`.
+
+The skill teaches assistants to refresh an existing graph when it is stale,
+run a focused Compass query before broad source searches, and open only the
+source files needed to verify an answer. It reads `compass-out/GRAPH_REPORT.md`
+when repository-wide architecture context is useful. Installation does not
+build a graph; on the first architecture, dependency, history, or impact
+question, the assistant can run the local deterministic build and continue.
 
 ```text
-architecture question
-        |
-        v
-read GRAPH_REPORT.md
+coding question
         |
         v
 run a focused Compass query
+        |
+        v
+read GRAPH_REPORT.md for repository-wide context
         |
         v
 inspect the smallest useful source set
