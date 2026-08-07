@@ -1386,7 +1386,34 @@ impl UniversalResolutionIndex {
             .as_ref()
             .filter(|path| path.members.len() == 1)
             .map(|path| path.root_export.clone());
-        let is_member_candidate = member_path.is_some();
+        // A namespace import (`import * as api` or `const api =
+        // require("./api")`) carries the module target as `module::*`, while
+        // the source-grounded member occurrence is represented as
+        // `module::member`.  It is a direct export lookup, not a nominal
+        // owner/member lookup; preserve that distinction so an exact provider
+        // re-export can resolve without manufacturing a qualified external.
+        let namespace_member_export = (exported == "*")
+            .then(|| {
+                candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .and_then(|qualified| {
+                        let (qualified_module, path) = split_typescript_module_qualified(qualified);
+                        let segments = split_typescript_member_segments(path);
+                        let [member] = segments.as_slice() else {
+                            return None;
+                        };
+                        (qualified_module == Some(module.as_str())
+                            && member == &candidate.target_spelling)
+                            .then(|| member.clone())
+                    })
+            })
+            .flatten();
+        let commonjs_namespace_call = exported == "*"
+            && candidate.relation == CandidateRelation::Calls
+            && namespace_member_export.is_none();
+        let is_member_candidate = member_path.is_some() || namespace_member_export.is_some();
         let mut source_member_target_seen = false;
         let mut targets = BTreeSet::new();
         for key in keys {
@@ -1413,8 +1440,9 @@ impl UniversalResolutionIndex {
                 targets.extend(self.typescript_member_chain_slots(language, &key, path, candidate));
                 continue;
             }
-            let owner_export = member_owner_export
+            let owner_export = namespace_member_export
                 .as_deref()
+                .or(member_owner_export.as_deref())
                 .unwrap_or(&exported)
                 .to_owned();
             // A member candidate constrains the final target to
@@ -1423,13 +1451,35 @@ impl UniversalResolutionIndex {
             // internal owner lookup; member filtering below still uses the
             // original candidate, so an interface itself is never published
             // as the callable/access target.
-            let owner_targets = self.typescript_export_slots(
-                language,
-                &key,
-                &owner_export,
-                candidate,
-                member_owner_export.is_some(),
-            );
+            let namespace_alias_targets = namespace_member_export.as_ref().map(|_| {
+                self.typescript_export_alias_slots(
+                    language,
+                    &key,
+                    &owner_export,
+                    candidate,
+                    member_owner_export.is_some(),
+                )
+            });
+            let mut owner_targets = namespace_alias_targets
+                .filter(|targets| !targets.is_empty())
+                .unwrap_or_else(|| {
+                    self.typescript_export_slots(
+                        language,
+                        &key,
+                        &owner_export,
+                        candidate,
+                        member_owner_export.is_some(),
+                    )
+                });
+            if owner_targets.is_empty() && commonjs_namespace_call {
+                // A direct CommonJS require can return a callable
+                // `module.exports = fn`.  The namespace binding is retained
+                // for member access, but a direct call may resolve through the
+                // provider's source-grounded default export. Object-valued
+                // defaults remain filtered by the candidate's callable kinds.
+                owner_targets =
+                    self.typescript_export_slots(language, &key, "default", candidate, true);
+            }
             source_member_target_seen |= !owner_targets.is_empty();
             if member_owner_export.is_some() {
                 for owner_slot in &owner_targets {
@@ -2410,6 +2460,38 @@ impl UniversalResolutionIndex {
             &mut walk,
         );
         walk.slots
+    }
+
+    fn typescript_export_alias_slots(
+        &self,
+        language: &str,
+        module: &str,
+        exported: &str,
+        candidate: &RelationshipCandidate,
+        allow_type_owner: bool,
+    ) -> BTreeSet<DeclarationSlot> {
+        let mut slots = BTreeSet::new();
+        for target_language in typescript_language_family(language) {
+            if let Some(values) = self.typescript_export_aliases.get(&(
+                (*target_language).to_owned(),
+                module.to_owned(),
+                exported.to_owned(),
+            )) {
+                slots.extend(
+                    values
+                        .iter()
+                        .filter(|slot| {
+                            if allow_type_owner {
+                                self.typescript_declaration_allowed_owner_slot(**slot, candidate)
+                            } else {
+                                self.typescript_declaration_allowed_slot(**slot, candidate)
+                            }
+                        })
+                        .copied(),
+                );
+            }
+        }
+        slots
     }
 
     fn collect_typescript_export_slots(

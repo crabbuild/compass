@@ -1568,6 +1568,38 @@ Conditional structural exports beyond the bounded spread-free form,
 compiler-target truth, release corpora, precision/Wilson, framework tiers,
 equivalent Graphify/SCIP scope, and the production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, CommonJS require binding and namespace slice)
+
+The candidate and resolver now preserve the two CommonJS import shapes that
+were previously conflated:
+
+- A direct binding such as `const api = require("./api")` is published as a
+  source-anchored `module::*` namespace binding. Direct namespace members use
+  the exact provider export slot; a callable `module.exports = fn` default is
+  selected only for a direct callable require, while object-valued defaults do
+  not become callable by assumption.
+- Object destructuring preserves the source export key, including aliases and
+  bounded static string/number keys (`run: execute` becomes `module::run`, not
+  `module::execute`). Nested, rest, computed, array, malformed, and indirect
+  require patterns remain unresolved rather than being flattened into guessed
+  imports. Assignment defaults are accepted only when their bound value is a
+  direct identifier.
+- Namespace export-slot lookup prefers an exact source-backed re-export alias
+  when a CommonJS object property and a same-named declaration coexist; this
+  avoids publishing both the property declaration and the actual exported
+  target. Ordinary ES namespace members continue through the same exact
+  module/export path, while direct calls through non-callable ES namespaces
+  remain unresolved.
+- The candidate adapter versions advanced to 3 for the binding identity
+  change. Focused coverage is now 91 candidate tests and 168 universal
+  resolver tests, including aliased named requires, namespace member calls,
+  callable CommonJS defaults, and dynamic/nested negative patterns.
+
+Fixture qualification, compiler-source-oracle recall, release-corpus
+precision/Wilson gates, framework tiers, equivalent Graphify/SCIP scope, and
+the production hard cut remain open; this is an interop correctness slice, not
+a best-in-class release claim.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

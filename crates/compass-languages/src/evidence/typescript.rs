@@ -64,7 +64,7 @@ const JAVASCRIPT_CAPABILITIES: &[LanguageCapability] = &[
 static TYPESCRIPT_PROFILE: AdapterProfile = AdapterProfile {
     id: "compass.typescript.candidate",
     language: "typescript",
-    version: 2,
+    version: 3,
     evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA,
     profile: crate::UniversalAdapterProfile::UniversalCandidate,
     capabilities: TYPESCRIPT_CAPABILITIES,
@@ -73,7 +73,7 @@ static TYPESCRIPT_PROFILE: AdapterProfile = AdapterProfile {
 static JAVASCRIPT_PROFILE: AdapterProfile = AdapterProfile {
     id: "compass.javascript.candidate",
     language: "javascript",
-    version: 2,
+    version: 3,
     evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA,
     profile: crate::UniversalAdapterProfile::UniversalCandidate,
     capabilities: JAVASCRIPT_CAPABILITIES,
@@ -141,6 +141,7 @@ struct ImportInfo {
     imported_name: String,
     namespace: Namespace,
     type_only: bool,
+    callable_namespace: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -3526,6 +3527,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         imported_name: binding.imported_name.clone(),
                         namespace,
                         type_only: binding.type_only,
+                        callable_namespace: false,
                     },
                 );
             }
@@ -3646,6 +3648,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 imported_name: "*".to_owned(),
                 namespace: Namespace::Both,
                 type_only: false,
+                callable_namespace: true,
             },
         );
         let occurrence_id = self.builder.occur_with_context(
@@ -4444,7 +4447,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let Some(value) = node.child_by_field_name("value") else {
             return Ok(());
         };
-        let Some(call) = find_require_call(value, self.source) else {
+        let value = unwrap_expression_node(value);
+        let Some(call) = direct_require_call(value, self.source) else {
             return Ok(());
         };
         let Some(arguments) = call.child_by_field_name("arguments") else {
@@ -4460,10 +4464,97 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let Some(name_node) = node.child_by_field_name("name") else {
             return Ok(());
         };
-        let mut names = Vec::new();
-        collect_pattern_names(name_node, self.source, &mut names);
-        for (name, anchor) in names {
-            self.add_import_binding(scope_id, &name, &name, &module, anchor, false, "require")?;
+        self.emit_require_pattern_bindings(scope_id, name_node, &module, 0)
+    }
+
+    fn emit_require_pattern_bindings(
+        &mut self,
+        scope_id: &str,
+        pattern: Node<'tree>,
+        module: &str,
+        depth: usize,
+    ) -> Result<(), EvidenceError> {
+        if depth >= MAX_TYPE_SHAPE_DEPTH as usize {
+            return Ok(());
+        }
+        match pattern.kind() {
+            // `const api = require("./api")` binds the module namespace.  A
+            // namespace target supports both callable CommonJS modules and
+            // source-grounded member access without pretending that the local
+            // spelling is an exported symbol.
+            "identifier" => {
+                let local_name = node_text(self.source, pattern);
+                if !local_name.is_empty() {
+                    self.add_import_binding(
+                        scope_id,
+                        &local_name,
+                        "*",
+                        module,
+                        pattern,
+                        false,
+                        "require",
+                    )?;
+                }
+            }
+            "object_pattern" => {
+                let mut cursor = pattern.walk();
+                for child in pattern
+                    .named_children(&mut cursor)
+                    .take(MAX_INLINE_OBJECT_PROPERTIES)
+                {
+                    match child.kind() {
+                        "shorthand_property_identifier_pattern" => {
+                            let name = node_text(self.source, child);
+                            if !name.is_empty() {
+                                self.add_import_binding(
+                                    scope_id, &name, &name, module, child, false, "require",
+                                )?;
+                            }
+                        }
+                        "pair_pattern" => {
+                            let Some(key) = child.child_by_field_name("key") else {
+                                continue;
+                            };
+                            let Some(value) = child.child_by_field_name("value") else {
+                                continue;
+                            };
+                            let Some(imported_name) =
+                                static_require_property_name(self.source, key)
+                            else {
+                                // Computed or malformed keys do not prove a
+                                // stable CommonJS export spelling.
+                                continue;
+                            };
+                            let Some((local_name, anchor)) =
+                                direct_require_binding_identifier(value, self.source)
+                            else {
+                                // Nested patterns and rest/default objects
+                                // need object-shape and flow evidence that a
+                                // single module binding cannot provide.
+                                continue;
+                            };
+                            self.add_import_binding(
+                                scope_id,
+                                &local_name,
+                                &imported_name,
+                                module,
+                                anchor,
+                                false,
+                                "require",
+                            )?;
+                        }
+                        _ => {
+                            // Rest, nested, array, and dynamic patterns remain
+                            // unresolved rather than being flattened into
+                            // unrelated module exports.
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Array, rest, assignment, and malformed declarator patterns
+                // are intentionally not projected as named module bindings.
+            }
         }
         Ok(())
     }
@@ -4487,6 +4578,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         };
         let namespace = if type_only {
             Namespace::Type
+        } else if imported_name == "*" {
+            Namespace::Module
         } else {
             Namespace::Value
         };
@@ -4509,6 +4602,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 imported_name: imported_name.to_owned(),
                 namespace,
                 type_only,
+                callable_namespace: imported_name == "*" && context == "require",
             },
         );
         let owner = self.owner_for_scope(scope_id);
@@ -5058,7 +5152,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let is_callable = match &resolution {
             Resolution::Local(declaration) => self.proven_callable_declaration(&declaration.id),
             Resolution::Import(import) => {
-                import.imported_name == "default" || import.imported_name == "*"
+                import.imported_name == "default"
+                    || (import.imported_name == "*" && import.callable_namespace)
             }
         };
         if !is_callable {
@@ -5345,7 +5440,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 } else {
                     import.namespace.accepts(namespace)
                 };
-                if accepts {
+                if accepts && (import.imported_name != "*" || import.callable_namespace) {
                     return Some(Resolution::Import(import.clone()));
                 }
             }
@@ -6003,6 +6098,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             imported_name: property_name,
             namespace: Namespace::Value,
             type_only: import.type_only,
+            callable_namespace: false,
         }))
     }
 
@@ -6204,6 +6300,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 imported_name: property_name,
                 namespace: Namespace::Type,
                 type_only: import.type_only,
+                callable_namespace: false,
             })),
         }
     }
@@ -10035,6 +10132,47 @@ fn collect_pattern_names<'tree>(
     }
 }
 
+fn direct_require_call<'tree>(node: Node<'tree>, source: &[u8]) -> Option<Node<'tree>> {
+    let node = unwrap_expression_node(node);
+    (node.kind() == "call_expression"
+        && node
+            .child_by_field_name("function")
+            .is_some_and(|function| node_text(source, function) == "require"))
+    .then_some(node)
+}
+
+fn static_require_property_name(source: &[u8], node: Node<'_>) -> Option<String> {
+    let node = unwrap_expression_node(node);
+    let name = match node.kind() {
+        "identifier" | "property_identifier" | "private_property_identifier" | "number" => {
+            node_text(source, node)
+        }
+        "string" | "string_fragment" => string_literal(source, node),
+        _ => return None,
+    };
+    (!name.is_empty() && name.len() <= MAX_TYPE_SHAPE_BYTES).then_some(name)
+}
+
+fn direct_require_binding_identifier<'tree>(
+    node: Node<'tree>,
+    source: &[u8],
+) -> Option<(String, Node<'tree>)> {
+    let node = unwrap_expression_node(node);
+    if matches!(
+        node.kind(),
+        "identifier" | "shorthand_property_identifier_pattern"
+    ) {
+        let name = node_text(source, node);
+        return (!name.is_empty()).then_some((name, node));
+    }
+    if node.kind() == "assignment_pattern"
+        && let Some(left) = node.child_by_field_name("left")
+    {
+        return direct_require_binding_identifier(left, source);
+    }
+    None
+}
+
 fn collect_import_bindings<'tree>(
     source: &[u8],
     clause: Node<'tree>,
@@ -10591,19 +10729,6 @@ fn standard_library_type_target(name: &str) -> Option<(String, String)> {
         return Some(("node.global::Buffer".to_owned(), "@types/node".to_owned()));
     }
     None
-}
-
-fn find_require_call<'tree>(node: Node<'tree>, source: &[u8]) -> Option<Node<'tree>> {
-    if node.kind() == "call_expression"
-        && node
-            .child_by_field_name("function")
-            .is_some_and(|function| node_text(source, function) == "require")
-    {
-        return Some(node);
-    }
-    let mut cursor = node.walk();
-    node.named_children(&mut cursor)
-        .find_map(|child| find_require_call(child, source))
 }
 
 fn is_type_reference_node(node: Node<'_>) -> bool {

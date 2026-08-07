@@ -29,7 +29,7 @@ new App();
     let batch = candidate("src/app.ts", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("valid evidence");
     assert_eq!(batch.adapter.language, "typescript");
-    assert_eq!(batch.adapter.version, 2);
+    assert_eq!(batch.adapter.version, 3);
     assert_eq!(batch.adapter.dialect.as_deref(), Some("ts"));
     assert!(
         batch
@@ -120,7 +120,7 @@ export async function load() { return import("./lazy.js"); }
 "#;
     let batch = candidate("src/render.jsx", source);
     assert_eq!(batch.adapter.language, "javascript");
-    assert_eq!(batch.adapter.version, 2);
+    assert_eq!(batch.adapter.version, 3);
     assert_eq!(batch.adapter.dialect.as_deref(), Some("jsx"));
     assert!(
         batch
@@ -133,7 +133,8 @@ export async function load() { return import("./lazy.js"); }
         .iter()
         .find(|binding| binding.spelling == "helper")
         .expect("CommonJS binding");
-    assert_eq!(helper.namespace, Some(SymbolNamespace::Value));
+    assert_eq!(helper.namespace, Some(SymbolNamespace::Namespace));
+    assert_eq!(helper.qualified_target, "./helper::*");
     assert!(!helper.type_only);
     assert!(
         batch
@@ -210,6 +211,56 @@ export function render() { return <UI.Button />; }
         Some("./ui::Button")
     );
     assert!(jsx_member.binding_id.is_some());
+}
+
+#[test]
+fn javascript_commonjs_require_preserves_namespace_and_export_keys() {
+    let source = br#"const api = require("./api");
+const {
+    run: execute,
+    method,
+    "literal-name": literal,
+    [dynamic]: computed,
+...rest
+} = require("./api");
+const indirect = wrap(require("./api"));
+api.run();
+execute();
+method();
+"#;
+    let batch = candidate("src/consumer.js", source);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("valid require evidence");
+
+    let api = batch
+        .bindings
+        .iter()
+        .find(|binding| binding.spelling == "api")
+        .expect("direct require namespace binding");
+    assert_eq!(api.namespace, Some(SymbolNamespace::Namespace));
+    assert_eq!(api.qualified_target, "./api::*");
+
+    for (local, target) in [
+        ("execute", "./api::run"),
+        ("method", "./api::method"),
+        ("literal", "./api::literal-name"),
+    ] {
+        let actual = batch
+            .bindings
+            .iter()
+            .find(|binding| binding.spelling == local)
+            .map(|binding| binding.qualified_target.as_str());
+        assert_eq!(
+            actual,
+            Some(target),
+            "missing or incorrect require binding {local}"
+        );
+    }
+    assert!(!batch.bindings.iter().any(|binding| {
+        matches!(
+            binding.spelling.as_str(),
+            "computed" | "rest" | "dynamic" | "indirect"
+        )
+    }));
 }
 
 #[test]

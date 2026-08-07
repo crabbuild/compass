@@ -6866,9 +6866,11 @@ module.exports = {
         ),
         (
             "app/consumer.js",
-            br#"const { run, method } = require("../lib/cjs");
-run();
-method();
+            br#"const { run: execute, method: invoke } = require("../lib/cjs");
+execute();
+invoke();
+const api = require("../lib/cjs");
+api.run();
 "#
             .as_slice(),
         ),
@@ -6904,12 +6906,23 @@ method();
         .collect::<Vec<_>>();
     let run_call = calls
         .iter()
-        .find(|candidate| candidate.target_spelling == "run")
-        .ok_or("missing required run call")?;
+        .find(|candidate| candidate.target_spelling == "execute")
+        .ok_or("missing aliased required run call")?;
     let method_call = calls
         .iter()
-        .find(|candidate| candidate.target_spelling == "method")
-        .ok_or("missing required method call")?;
+        .find(|candidate| candidate.target_spelling == "invoke")
+        .ok_or("missing aliased required method call")?;
+    let api_run_call = calls
+        .iter()
+        .find(|candidate| {
+            candidate.target_spelling == "run"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.ends_with("::run"))
+        })
+        .ok_or("missing namespace require member call")?;
     let index = UniversalResolutionIndex::new_with_inventory(
         &batches,
         &[],
@@ -6925,6 +6938,69 @@ method();
         index.resolve(&method_call.id),
         compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
             if declaration_id == &method.id
+    ));
+    assert!(matches!(
+        index.resolve(&api_run_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &run.id
+    ));
+    Ok(())
+}
+
+#[test]
+fn javascript_commonjs_require_callable_namespace_resolves_default_export()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let provider = root.join("lib/callable.cjs");
+    let consumer = root.join("app/consumer.js");
+    let provider_source = br#"function run() {}
+module.exports = run;
+"#;
+    let consumer_source = br#"const fn = require("../lib/callable");
+fn();
+"#;
+    for (path, source) in [
+        (&provider, provider_source.as_slice()),
+        (&consumer, consumer_source.as_slice()),
+    ] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = [
+        Engine::default().extract_source_universal_candidate_evidence(
+            &provider,
+            "lib/callable.cjs",
+            provider_source,
+        )?,
+        Engine::default().extract_source_universal_candidate_evidence(
+            &consumer,
+            "app/consumer.js",
+            consumer_source,
+        )?,
+    ];
+    let run = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "function" && declaration.name == "run")
+        .ok_or("missing CommonJS callable declaration")?;
+    let call = batches[1]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "fn"
+        })
+        .ok_or("missing direct CommonJS callable call")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &run.id
     ));
     Ok(())
 }
