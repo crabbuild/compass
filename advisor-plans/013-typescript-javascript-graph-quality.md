@@ -1855,6 +1855,45 @@ does not establish a recall, precision, or leadership claim.
 Compiler-source-oracle recall, accepted-sample/Wilson gates, framework tiers,
 equivalent Graphify/SCIP scope, and the production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, CommonJS object-spread owner aliases)
+
+The qualification-only CommonJS path now carries the same bounded owner
+contract as safe ES default/export-assignment objects. For
+`module.exports = { ...base, direct }`, the adapter emits the module's exact
+default reexport, a source-range-backed `Member("*")` alias for each proven
+local or static default-import object source, and ordinary named reexports for
+direct properties after the spread. The resolver treats the module declaration
+as a structural owner only for this explicit marker, follows the source
+owner across the TypeScript/JavaScript language family, and gives direct
+properties precedence over inherited members.
+
+The slice remains deliberately fail-closed: dynamic, computed, mutable,
+conditional, namespace/require, and otherwise unproven spread operands do not
+publish a guessed member inventory. Missing or non-object source owners become
+unresolved, while two source owners that provide distinct declarations remain
+ambiguous. New candidate coverage validates the marker and target declaration;
+resolver coverage validates cross-file TS-default-to-JS-CommonJS inheritance,
+direct override precedence, competing sources, and non-object defaults. The
+focused suites are now 100 candidate tests and 174 universal resolver tests.
+
+At implementation head `dbf275cd3c40657af563fd130950425742bf5469`, fixture-only
+qualification passes with the unchanged 57-language/980-record/1,565-invariant
+contract, 27 flows, 24 negatives, 25 diagnostics, 28 edge kinds, and 45 node
+kinds. The graph digest remains
+`sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`,
+with 82 exact and 11 unresolved route resolutions; clean, warm, rebuild,
+restored, alternate-checkout, and source-fixture byte comparisons all pass.
+The unchanged digest is expected because this qualification-only adapter is
+not registered in production. The independent Axios diagnostic is unchanged
+at 3,054/3,167 exact local targets (113 missing, 0 wrong; 391/503 members,
+1,544/1,545 calls, and 228 accepted-candidate false positives); it is not a
+release recall or precision claim.
+
+Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
+gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
+cut remain open. This is an interop correctness slice, not a best-in-class
+release claim.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for
