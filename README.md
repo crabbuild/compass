@@ -30,19 +30,31 @@ cursor-rooted call graphs, architecture flow, queries, and exact Git evolution.
 
 ## Put Compass in your daily loop
 
-Build the graph once, open it in a browser or VS Code, and keep it synchronized while you work:
+Use Compass first as a local context layer for coding assistants. Build the graph, install the agent integration, and keep the graph synchronized while you work:
+
+```bash
+compass init
+compass install
+compass watch
+```
+
+Run `compass watch` in a second terminal. Once installed, an assistant starts with `GRAPH_REPORT.md`, runs a focused Compass query, and opens only the source needed to verify its answer.
+
+See [Connect a coding assistant](#connect-a-coding-assistant) for supported agents, explicit platform selection, upgrades, and uninstall.
+
+### Review the graph yourself
+
+Human graph exploration is optional. Run `compass export html`, or choose **Open Code Graph** in VS Code, when you want to inspect the architecture directly:
 
 ![High-level Compass workspace graph with package dependencies and subsystem filters](docs/assets/screenshots/code-graph-workspace-overview.png)
 
 *Start at the package map, filter by subsystem, then select any node to inspect its dependencies and source.*
 
 ```bash
-compass init
 compass export html
-compass watch
 ```
 
-Run `compass watch` in a second terminal. Refresh the browser after a build, or reopen the graph in VS Code.
+Refresh the browser after a build, or reopen the graph in VS Code.
 
 Use the graph from the right sidebar:
 
@@ -51,7 +63,7 @@ Use the graph from the right sidebar:
 3. Open the source card, or double-click a located node, to jump to the exact code.
 4. Filter communities or change the layout when you need a different level of detail.
 
-In VS Code, choose **Open Code Graph** instead of `compass export html`. Right-click inside a function to open callers, callees, impact, related symbols, or a path.
+Right-click inside a function in VS Code to open callers, callees, impact, related symbols, or a path.
 
 ## What Compass gives you
 
