@@ -1678,6 +1678,30 @@ Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
 gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
 cut remain open.
 
+### Execution checkpoint (2026-08-07, stable callable object assignments)
+
+Stable, spread-free structural objects now retain an exact source-backed member
+when a member assignment itself introduces a callable value, for example
+`validators.run = function run() {}` or `validators.check = (value) => value`.
+The recovery is declaration-anchored and requires a unique property declaration
+for the receiver-qualified name; non-callable writes, later overwrites, dynamic
+keys, spreads, aliases with unknown mutation, and ambiguous declarations remain
+behind the ordinary fail-closed mutation barrier. This keeps the positive path
+useful for callable registries without turning arbitrary property writes into
+guessed targets.
+
+The focused candidate suite is now 96 tests and the universal resolver suite
+remains 168 tests. The exact pinned Axios checker differential remains at
+3,054/3,167 expected local targets (113 missing, 0 wrong; 391/503 member
+matches and 1,544/1,545 call matches, with 226 false positives in the accepted
+local candidate set). The slice therefore adds covered source shapes and
+regression evidence without claiming a corpus recall increase; the Axios
+validator's earlier dynamic-key mutation correctly remains conservative.
+
+Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
+gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
+cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

@@ -1745,13 +1745,15 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     "member_expression" | "optional_member_expression" | "subscript_expression"
                 ) && let Some(object) = left.child_by_field_name("object")
                 {
+                    let property = member_property_node(left);
+                    let property_name =
+                        property.and_then(|property| member_property_name(self.source, property));
                     self.record_flow_member_write(
                         &scope_id,
                         object,
                         current.start_byte(),
-                        member_property_node(left)
-                            .and_then(|property| member_property_name(self.source, property))
-                            .as_deref(),
+                        property,
+                        property_name.as_deref(),
                     );
                 }
             }
@@ -2020,6 +2022,69 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 .contains(&variable.qualified_name)
     }
 
+    /// A stable spread-free object can publish a source-backed member when a
+    /// member assignment itself introduces that property (`registry.run =
+    /// function run() {}`). The declaration inventory must contain exactly
+    /// one property with the receiver-qualified name; otherwise the write
+    /// remains behind the ordinary mutation barrier.
+    fn structural_member_declaration_write(
+        &self,
+        scope_id: &str,
+        object: Node<'tree>,
+        property: Node<'tree>,
+    ) -> bool {
+        let Some(member) = property.parent() else {
+            return false;
+        };
+        let Some(assignment) = member.parent() else {
+            return false;
+        };
+        if assignment.kind() != "assignment_expression"
+            || assignment
+                .child_by_field_name("left")
+                .is_none_or(|left| left.id() != member.id())
+        {
+            return false;
+        }
+        let Some(right) = assignment
+            .child_by_field_name("right")
+            .map(unwrap_expression_node)
+        else {
+            return false;
+        };
+        if !is_callable_node(right) {
+            return false;
+        }
+        let Some(name_node) = rightmost_identifier(object) else {
+            return false;
+        };
+        let name = node_text(self.source, name_node);
+        let Some(Resolution::Local(variable)) =
+            self.resolve_name(scope_id, &name, Namespace::Value)
+        else {
+            return false;
+        };
+        if variable.kind != "variable"
+            || !self
+                .stable_structural_object_variables
+                .contains(&variable.qualified_name)
+        {
+            return false;
+        }
+        let Some(property_name) = member_property_name(self.source, property) else {
+            return false;
+        };
+        let qualified_name = format!("{}.{property_name}", variable.qualified_name);
+        self.declarations_by_qualified
+            .get(&qualified_name)
+            .and_then(|declarations| {
+                (declarations.len() == 1)
+                    .then(|| self.declarations.get(&declarations[0]))
+                    .flatten()
+            })
+            .is_some_and(|declaration| declaration.range_start_byte == property.start_byte())
+    }
+
     fn record_flow_call_argument_escapes(&mut self, node: Node<'tree>, scope_id: &str) {
         let Some(arguments) = node
             .child_by_field_name("arguments")
@@ -2089,6 +2154,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         scope_id: &str,
         object: Node<'tree>,
         start_byte: usize,
+        property: Option<Node<'tree>>,
         property_name: Option<&str>,
     ) {
         let value = unwrap_expression_node(object);
@@ -2112,7 +2178,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return;
         }
         if self.stable_immutable_receiver_alias(&declaration.id) {
-            self.record_flow_member_write_barrier(&declaration.id, property_name, start_byte);
+            if property.is_none_or(|property| {
+                !self.structural_member_declaration_write(scope_id, value, property)
+            }) {
+                self.record_flow_member_write_barrier(&declaration.id, property_name, start_byte);
+            }
         } else {
             self.record_flow_escape_barrier(&declaration.id, start_byte, Some(value));
         }
@@ -6105,9 +6175,12 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let nominal_write = nominal_write_receiver.is_some();
         let literal_structural_write =
             self.structural_literal_member_write(scope_id, object, property);
+        let structural_declaration_write =
+            self.structural_member_declaration_write(scope_id, object, property);
         let receiver = nominal_write_receiver.or_else(|| self.receiver_target(scope_id, object))?;
         if !nominal_write
             && !literal_structural_write
+            && !structural_declaration_write
             && self.flow_member_write_barrier_before(
                 scope_id,
                 object,

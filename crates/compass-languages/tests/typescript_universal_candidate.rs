@@ -3472,6 +3472,47 @@ response.request;
 }
 
 #[test]
+fn javascript_stable_object_property_assignments_resolve_exact_members() {
+    let batch = candidate(
+        "src/stable-object-assignment.js",
+        br#"const validators = {};
+validators.transitional = function transitional() {};
+validators.spelling = (value) => value;
+validators.transitional(false);
+validators.spelling('value');
+"#,
+    );
+    let transitional = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "transitional")
+        .expect("transitional property declaration");
+    let spelling = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "spelling")
+        .expect("spelling property declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "transitional"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(transitional.id.as_str())
+    }));
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "transitional"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(transitional.id.as_str())
+    }));
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "spelling"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(spelling.id.as_str())
+    }));
+}
+
+#[test]
 fn candidate_emits_curated_external_builtin_evidence_and_respects_shadowing() {
     let batch = candidate(
         "src/builtins.ts",
