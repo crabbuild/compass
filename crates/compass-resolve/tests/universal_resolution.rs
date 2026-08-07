@@ -8063,6 +8063,152 @@ export function use(value: Item) { make(value).inspect(); }
 }
 
 #[test]
+fn typescript_candidate_resolves_imported_callable_member_returns_and_explicit_generics()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/item.ts",
+            br#"export interface Item { inspect(): void }
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/factory.ts",
+            br#"import type { Item } from "./item";
+export class Factory {
+    static make(value: Item): Item { return value; }
+    static identity<T>(value: T): T { return value; }
+}
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import { Factory } from "../lib/factory";
+import type { Item } from "../lib/item";
+export function use(value: Item) {
+    Factory.make(value).inspect();
+    Factory.identity(value).inspect();
+    Factory.identity<Item>(value).inspect();
+    Factory.identity<Item>(unknownValue).inspect();
+}
+"#
+            .as_slice(),
+        ),
+    ];
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
+        let mut extraction = extract(relative, source);
+        extraction.semantic_evidence = Some(
+            Engine::default().extract_source_universal_candidate_evidence(
+                Path::new(relative),
+                relative,
+                source,
+            )?,
+        );
+        extractions.push(extraction);
+    }
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert!(
+        resolved.error.is_none(),
+        "resolver error: {:?}",
+        resolved.error
+    );
+    let inspect = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file") == "lib/item.ts" && node.label() == ".inspect()")
+        .ok_or("missing imported callable member return")?;
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "calls"
+                && edge.string("source_file") == "app/consumer.ts"
+                && edge.target == inspect.id
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 4);
+    assert!(
+        calls
+            .iter()
+            .all(|edge| edge.string("resolution_rule") == "member-binding")
+    );
+    Ok(())
+}
+
+#[test]
+fn typescript_candidate_keeps_ambiguous_imported_callable_member_returns_unresolved()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/item.ts",
+            br#"export interface Item { inspect(): void }
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/factory.ts",
+            br#"import type { Item } from "./item";
+export class Factory {
+    static make(value: Item): Item { return value; }
+}
+export class Factory {
+    static make(value: Item): Item { return value; }
+}
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.ts",
+            br#"import { Factory } from "../lib/factory";
+import type { Item } from "../lib/item";
+export function use(value: Item) { Factory.make(value).inspect(); }
+"#
+            .as_slice(),
+        ),
+    ];
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(&path, source)?;
+        sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
+        let mut extraction = extract(relative, source);
+        extraction.semantic_evidence = Some(
+            Engine::default().extract_source_universal_candidate_evidence(
+                Path::new(relative),
+                relative,
+                source,
+            )?,
+        );
+        extractions.push(extraction);
+    }
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert!(
+        resolved.error.is_none(),
+        "resolver error: {:?}",
+        resolved.error
+    );
+    assert!(!resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.string("source_file") == "app/consumer.ts"
+            && edge.string("resolution_rule") == "member-binding"
+    }));
+    Ok(())
+}
+
+#[test]
 fn typescript_candidate_resolves_imported_index_signature_member_chain()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

@@ -108,6 +108,8 @@ struct TypeScriptMemberPath {
     type_arguments: Vec<String>,
     call_result: bool,
     call_argument_types: Vec<String>,
+    call_type_arguments: Vec<String>,
+    call_member_index: Option<usize>,
     indexed: bool,
     members: Vec<String>,
 }
@@ -1408,6 +1410,9 @@ impl UniversalResolutionIndex {
         }
         let root_targets =
             self.typescript_export_slots(language, module, &path.root_export, candidate, true);
+        if path.call_member_index.is_some() && root_targets.len() != 1 {
+            return BTreeSet::new();
+        }
         let mut targets = BTreeSet::new();
         for root_slot in root_targets {
             let has_index_signature = self
@@ -1415,12 +1420,13 @@ impl UniversalResolutionIndex {
                 .and_then(|declaration| declaration.signature.as_deref())
                 .and_then(typescript_index_value_type)
                 .is_some();
-            let mut owners = if path.call_result {
+            let mut owners = if path.call_result && path.call_member_index.is_none() {
                 self.typescript_callable_return_contexts(
                     language,
                     module,
                     root_slot,
                     &path.call_argument_types,
+                    &path.call_type_arguments,
                     candidate,
                 )
             } else if path.indexed && has_index_signature {
@@ -1468,6 +1474,22 @@ impl UniversalResolutionIndex {
                         )) else {
                             continue;
                         };
+                        if path.call_result && path.call_member_index == Some(index) {
+                            let owner_module =
+                                typescript_source_module_keys(&owner.range.source_file, &self.root)
+                                    .into_iter()
+                                    .next()
+                                    .unwrap_or_else(|| module.to_owned());
+                            next_owners.extend(self.typescript_member_callable_return_contexts(
+                                language,
+                                &owner_module,
+                                members,
+                                &path.call_argument_types,
+                                &path.call_type_arguments,
+                                candidate,
+                            ));
+                            continue;
+                        }
                         if final_member {
                             next_owners.extend(
                                 members
@@ -1525,6 +1547,7 @@ impl UniversalResolutionIndex {
         module: &str,
         callable_slot: DeclarationSlot,
         call_argument_types: &[String],
+        call_type_arguments: &[String],
         candidate: &RelationshipCandidate,
     ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
         let Some(callable) = self.declaration(callable_slot) else {
@@ -1537,7 +1560,13 @@ impl UniversalResolutionIndex {
             return BTreeSet::new();
         };
         let parameters = typescript_generic_parameter_names(signature);
-        let mut type_arguments = parameters.clone();
+        let mut type_arguments = if call_type_arguments.is_empty() {
+            parameters.clone()
+        } else if call_type_arguments.len() == parameters.len() {
+            call_type_arguments.to_vec()
+        } else {
+            return BTreeSet::new();
+        };
         if let Some(parameter_types) = typescript_callable_parameter_types(signature) {
             if parameter_types.len() != call_argument_types.len() {
                 return BTreeSet::new();
@@ -1545,6 +1574,9 @@ impl UniversalResolutionIndex {
             for (parameter_type, argument_type) in
                 parameter_types.iter().zip(call_argument_types.iter())
             {
+                if argument_type == "__unknown" {
+                    continue;
+                }
                 if !typescript_infer_type_arguments(
                     parameter_type,
                     argument_type,
@@ -1554,7 +1586,8 @@ impl UniversalResolutionIndex {
                     return BTreeSet::new();
                 }
             }
-        } else if !parameters.is_empty()
+        } else if call_type_arguments.is_empty()
+            && !parameters.is_empty()
             && typescript_type_mentions_parameter(return_type, &parameters)
         {
             return BTreeSet::new();
@@ -1576,6 +1609,44 @@ impl UniversalResolutionIndex {
             },
             candidate,
         )
+    }
+
+    fn typescript_member_callable_return_contexts(
+        &self,
+        language: &str,
+        module: &str,
+        members: &[DeclarationSlot],
+        call_argument_types: &[String],
+        call_type_arguments: &[String],
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
+        let mut contexts = BTreeSet::new();
+        let callable_members = members
+            .iter()
+            .filter_map(|slot| {
+                self.declaration(*slot)
+                    .and_then(|declaration| declaration.signature.as_deref())
+                    .and_then(typescript_callable_return_type)
+                    .map(|_| *slot)
+            })
+            .collect::<Vec<_>>();
+        if callable_members.len() != 1 {
+            return BTreeSet::new();
+        }
+        for slot in callable_members {
+            contexts.extend(self.typescript_callable_return_contexts(
+                language,
+                module,
+                slot,
+                call_argument_types,
+                call_type_arguments,
+                candidate,
+            ));
+            if contexts.len() > self.limits.candidates_per_lookup {
+                break;
+            }
+        }
+        contexts
     }
 
     fn typescript_index_value_contexts(
@@ -4789,42 +4860,38 @@ fn typescript_member_path(qualified: &str, target_spelling: &str) -> Option<Type
         return None;
     }
     let root_segment = segments.first()?;
-    let mut indexed = root_segment.ends_with("[]");
-    let mut root_segment = root_segment
+    let indexed = root_segment.ends_with("[]");
+    let root_segment = root_segment
         .strip_suffix("[]")
         .unwrap_or(root_segment)
         .trim();
-    let (call_result, call_argument_types) = if let Some(marker) = root_segment.find("#call<") {
-        let base = root_segment.get(..marker)?.trim();
-        let marker_payload = root_segment.get(marker.saturating_add("#call<".len())..)?;
-        let marker_payload = marker_payload.strip_suffix('>')?;
-        if base.is_empty() || marker_payload.is_empty() {
-            return None;
-        }
-        let marker_arguments = if marker_payload == "__none" {
-            Vec::new()
+    let (root_base, mut call_result, mut call_argument_types, mut call_type_arguments) =
+        if let Some((base, arguments, type_arguments)) = typescript_call_result_marker(root_segment)
+        {
+            (base, true, arguments, type_arguments)
         } else {
-            let wrapped = format!("Call<{marker_payload}>");
-            let (_, arguments) = typescript_generic_type_parts(&wrapped)?;
-            arguments
+            (root_segment.to_owned(), false, Vec::new(), Vec::new())
         };
-        let marker_end = marker.saturating_add("#call<".len()) + marker_payload.len() + 1;
-        let suffix = root_segment.get(marker_end..).unwrap_or_default();
-        if !suffix.is_empty() {
-            if suffix != "[]" {
-                return None;
-            }
-            indexed = true;
-        }
-        root_segment = base;
-        (true, marker_arguments)
-    } else {
-        (false, Vec::new())
-    };
-    let (root_export, type_arguments) = typescript_generic_type_parts(root_segment).map_or_else(
-        || (root_segment.to_owned(), Vec::new()),
+    let (root_export, type_arguments) = typescript_generic_type_parts(&root_base).map_or_else(
+        || (root_base.clone(), Vec::new()),
         |(base, arguments)| (base.to_owned(), arguments),
     );
+    let mut members = segments.into_iter().skip(1).collect::<Vec<_>>();
+    let member_count = members.len();
+    let mut call_member_index = None;
+    for (index, member) in members.iter_mut().enumerate() {
+        let Some((base, arguments, type_arguments)) = typescript_call_result_marker(member) else {
+            continue;
+        };
+        if call_result || index.saturating_add(1) >= member_count {
+            return None;
+        }
+        *member = base;
+        call_result = true;
+        call_argument_types = arguments;
+        call_type_arguments = type_arguments;
+        call_member_index = Some(index);
+    }
     if root_export.is_empty() {
         return None;
     }
@@ -4833,9 +4900,53 @@ fn typescript_member_path(qualified: &str, target_spelling: &str) -> Option<Type
         type_arguments,
         call_result,
         call_argument_types,
+        call_type_arguments,
+        call_member_index,
         indexed,
-        members: segments.into_iter().skip(1).collect(),
+        members,
     })
+}
+
+fn typescript_call_result_marker(value: &str) -> Option<(String, Vec<String>, Vec<String>)> {
+    let value = value.trim();
+    let mut call_value = value;
+    let type_arguments = if let Some(marker) = call_value.find("#types<") {
+        let payload_start = marker.saturating_add("#types<".len());
+        let payload = call_value.get(payload_start..)?.strip_suffix('>')?;
+        let marker_end = payload_start
+            .saturating_add(payload.len())
+            .saturating_add(1);
+        if marker_end != call_value.len() || payload.is_empty() {
+            return None;
+        }
+        call_value = call_value.get(..marker)?.trim();
+        let wrapped = format!("Types<{payload}>");
+        let (_, arguments) = typescript_generic_type_parts(&wrapped)?;
+        arguments
+    } else {
+        Vec::new()
+    };
+    let marker = call_value.find("#call<")?;
+    let payload_start = marker.saturating_add("#call<".len());
+    let payload = call_value.get(payload_start..)?.strip_suffix('>')?;
+    let marker_end = payload_start
+        .saturating_add(payload.len())
+        .saturating_add(1);
+    if marker_end != call_value.len() || payload.is_empty() {
+        return None;
+    }
+    let base = call_value.get(..marker)?.trim();
+    if base.is_empty() {
+        return None;
+    }
+    let arguments = if payload == "__none" {
+        Vec::new()
+    } else {
+        let wrapped = format!("Call<{payload}>");
+        let (_, arguments) = typescript_generic_type_parts(&wrapped)?;
+        arguments
+    };
+    Some((base.to_owned(), arguments, type_arguments))
 }
 
 fn split_typescript_module_qualified(value: &str) -> (Option<&str>, &str) {

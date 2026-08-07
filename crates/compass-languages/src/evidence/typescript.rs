@@ -6152,21 +6152,48 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             // file boundary.  The resolver can use the imported callable's
             // published signature to recover its nominal return receiver;
             // unknown argument shapes deliberately remain unresolved.
+            let explicit_type_arguments = function
+                .child_by_field_name("type_arguments")
+                .or_else(|| call.child_by_field_name("type_arguments"))
+                .or_else(|| first_named_child_kind(function, "type_arguments"))
+                .and_then(|type_arguments| {
+                    let text = node_text(self.source, type_arguments);
+                    let inner = text.strip_prefix('<')?.strip_suffix('>')?;
+                    split_top_level_arguments(inner).map(|arguments| {
+                        self.canonical_type_arguments(
+                            scope_id,
+                            &arguments
+                                .into_iter()
+                                .map(str::trim)
+                                .map(ToOwned::to_owned)
+                                .collect::<Vec<_>>(),
+                        )
+                    })
+                })
+                .unwrap_or_default();
             let argument_types = self.call_argument_types(call, scope_id);
-            if argument_types.iter().any(Option::is_none) {
+            if explicit_type_arguments.is_empty() && argument_types.iter().any(Option::is_none) {
                 return None;
             }
-            let argument_types = argument_types.into_iter().flatten().collect::<Vec<_>>();
+            let argument_types = argument_types
+                .into_iter()
+                .map(|argument| argument.unwrap_or_else(|| "__unknown".to_owned()))
+                .collect::<Vec<_>>();
             let marker_arguments = if argument_types.is_empty() {
                 "__none".to_owned()
             } else {
                 argument_types.join(",")
             };
-            if marker_arguments.len() > MAX_TYPE_SHAPE_BYTES {
+            let marker_types = if explicit_type_arguments.is_empty() {
+                String::new()
+            } else {
+                format!("#types<{}>", explicit_type_arguments.join(","))
+            };
+            if marker_arguments.len() + marker_types.len() > MAX_TYPE_SHAPE_BYTES {
                 return None;
             }
             let receiver = import_target_without_namespace(&import.target);
-            let qualified_name = format!("{receiver}#call<{marker_arguments}>");
+            let qualified_name = format!("{receiver}#call<{marker_arguments}>{marker_types}");
             if qualified_name.len() > MAX_TYPE_SHAPE_BYTES {
                 return None;
             }

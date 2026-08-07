@@ -1029,6 +1029,31 @@ framework/compiler tiers, equivalent Graphify/SCIP scope, and the production
 hard cut remain open. The candidate adapter remains absent from
 `UNIVERSAL_ADAPTERS`.
 
+### Execution checkpoint (2026-08-06, imported callable-member and explicit-generic slice)
+
+Imported call-result evidence now covers one additional source-backed boundary:
+
+- Static or instance-like callable members such as
+  `Factory.make(value).inspect()` carry the call marker on the member segment,
+  then resolve the unique callable member signature before continuing the
+  nominal receiver chain.
+- Explicit generic call arguments are preserved in a bounded `#types<...>`
+  marker. They can prove a generic return even when a value argument is
+  unknown, while conflicting inferred value types and arity mismatches remain
+  unresolved.
+- Multiple imported owners or multiple callable member declarations fail
+  closed before their return contexts are merged, preserving ambiguity rather
+  than collapsing distinct owner paths onto one target.
+
+The slice adds one candidate regression and two cross-file resolver
+regressions; the focused candidate suite is now 72 tests and the universal
+resolver suite is now 154 tests. Conditional/mapped modifier semantics,
+framework/compiler tiers, accepted precision/Wilson gates, equivalent
+Graphify/SCIP scope, imported callable properties, alias escape/eval/proxy
+flow, overload-aware generic substitution beyond bounded source shapes, and
+the production hard cut remain open. The candidate adapter remains absent
+from `UNIVERSAL_ADAPTERS`.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

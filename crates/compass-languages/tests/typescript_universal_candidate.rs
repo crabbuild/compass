@@ -1557,6 +1557,31 @@ function use(value: Item) { make(value).inspect(); }
 }
 
 #[test]
+fn typescript_imported_callable_return_preserves_explicit_generic_marker() {
+    let batch = candidate(
+        "src/imported-explicit-call.ts",
+        br#"import { identity } from "./factory";
+class Item { inspect(): void {} }
+function use(value: Item) { identity<Item>(value).inspect(); }
+"#,
+    );
+    let call = batch
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "inspect"
+        })
+        .expect("explicit imported callable return member call");
+    assert!(
+        call.constraints
+            .qualified_name
+            .as_deref()
+            .is_some_and(|qualified| qualified.contains("#call<") && qualified.contains("#types<"))
+    );
+    assert!(!call.constraints.allow_external);
+}
+
+#[test]
 fn typescript_generic_function_array_return_preserves_element_receiver() {
     let batch = candidate(
         "src/generic-return-array.ts",
