@@ -1246,8 +1246,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             self.type_alias_union_targets
                 .insert(declaration.qualified_name.clone(), targets);
         }
-        if matches!(kind, "type_alias" | "interface")
-            && let Some(value_type) = index_value_type(node, self.source)
+        if matches!(
+            kind,
+            "type_alias" | "interface" | "parameter" | "variable" | "property"
+        ) && let Some(value_type) = index_value_type(node, self.source)
         {
             self.index_value_types
                 .insert(declaration.qualified_name.clone(), value_type);
@@ -2356,6 +2358,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         if !property_types.is_empty() {
             self.inline_object_property_types
                 .insert(variable_id, property_types);
+        }
+        if let Some(index_value) = index_value_type(object_type, self.source) {
+            self.index_value_types
+                .insert(variable.qualified_name.clone(), index_value);
         }
     }
 
@@ -6193,6 +6199,24 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                             });
                         }
 
+                        // Inline structural index signatures (for example,
+                        // `shape: { [key: string]: Item }`) have no nominal
+                        // type declaration to resolve. The bounded index-value
+                        // cache still proves the value type at this binding;
+                        // preserve the binding identity so a later dynamic
+                        // subscript can resolve only that source-proven value.
+                        if self
+                            .index_value_types
+                            .contains_key(&declaration.qualified_name)
+                        {
+                            return Some(ReceiverTarget {
+                                qualified_name: declaration.qualified_name.clone(),
+                                import: None,
+                                scope_id: Some(declaration.scope_id.clone()),
+                                type_arguments: None,
+                            });
+                        }
+
                         if let Some(qualified_name) =
                             self.variable_inline_type_receivers.get(&declaration.id)
                         {
@@ -6759,6 +6783,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         if receiver.import.is_some() {
             return None;
         }
+        if let Some(value_type) = typescript_structural_index_value(&receiver.qualified_name) {
+            return self.resolve_declared_type_receiver(scope_id, value_type);
+        }
         let type_name = self
             .index_value_types
             .get(&receiver.qualified_name)
@@ -6844,6 +6871,19 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 || !seen.insert(normalized.to_owned())
             {
                 return None;
+            }
+            if let Some(value_type) = typescript_inline_index_value_type(normalized) {
+                // Validate the value type through the same source-backed
+                // resolver used by nominal index signatures before retaining
+                // the structural marker. This prevents primitive, external,
+                // or ambiguous value shapes from becoming member targets.
+                self.resolve_declared_type_receiver(scope_id, &value_type)?;
+                return Some(ReceiverTarget {
+                    qualified_name: typescript_structural_index_receiver(&value_type),
+                    import: None,
+                    scope_id: None,
+                    type_arguments: None,
+                });
             }
             if indexed_sequence_element_type_name(normalized, None).is_some()
                 || tuple_type_element_count(normalized).is_some()
@@ -8146,6 +8186,13 @@ fn direct_type_reference_name(node: Node<'_>, source: &[u8]) -> Option<String> {
         annotation
     };
     let normalized_type_text = node_text(source, type_node);
+    if node.kind() != "type_alias_declaration"
+        && type_node.kind() == "object_type"
+        && contains_node_kind(type_node, "index_signature")
+        && normalized_type_text.len() <= MAX_TYPE_SHAPE_BYTES
+    {
+        return Some(normalize_type_text(source, type_node));
+    }
     if indexed_type_parts(&normalized_type_text).is_some()
         || keyof_type_base(&normalized_type_text).is_some()
     {
@@ -8245,6 +8292,61 @@ fn indexed_sequence_element_type_name(type_name: &str, index: Option<&str>) -> O
         return Some(element);
     }
     index.and_then(|index| tuple_element_type_name(type_name, index))
+}
+
+const TYPESCRIPT_STRUCTURAL_INDEX_PREFIX: &str = "__compass_structural_index__";
+
+fn typescript_structural_index_receiver(value_type: &str) -> String {
+    format!("{TYPESCRIPT_STRUCTURAL_INDEX_PREFIX}{value_type}")
+}
+
+fn typescript_structural_index_value(value: &str) -> Option<&str> {
+    let value = value.trim();
+    value
+        .strip_prefix(TYPESCRIPT_STRUCTURAL_INDEX_PREFIX)
+        .filter(|value_type| !value_type.is_empty() && value_type.len() <= MAX_TYPE_SHAPE_BYTES)
+}
+
+/// Extract one bounded string/number index-signature value from an inline
+/// object type such as `{[key:string]:Item}`. Mapped keys, multiple index
+/// signatures, and malformed/oversized shapes stay unresolved rather than
+/// widening a dynamic subscript to an arbitrary member.
+fn typescript_inline_index_value_type(value: &str) -> Option<String> {
+    let value = value.trim();
+    if !value.starts_with('{') || !value.ends_with('}') || value.len() > MAX_TYPE_SHAPE_BYTES {
+        return None;
+    }
+    let open = value.find('[')?;
+    let close = open.saturating_add(value.get(open..)?.find(']')?);
+    let key = value.get(open.saturating_add(1)..close)?.trim();
+    if key.is_empty() || key.contains(" in ") || key.starts_with("in ") {
+        return None;
+    }
+    let remainder = value.get(close.saturating_add(1)..)?.trim_start();
+    let colon = remainder.find(':')?;
+    let mut tail = remainder.get(colon.saturating_add(1)..)?.trim();
+    if tail.ends_with('}') {
+        tail = tail.get(..tail.len().saturating_sub(1))?.trim_end();
+    }
+    if tail.is_empty() || tail.contains('[') {
+        return None;
+    }
+    let mut depth = 0_u32;
+    let mut end = tail.len();
+    for (index, character) in tail.char_indices() {
+        match character {
+            '<' | '{' | '(' => depth = depth.saturating_add(1),
+            '>' | '}' | ')' => depth = depth.saturating_sub(1),
+            ';' | ',' if depth == 0 => {
+                end = index;
+                break;
+            }
+            _ => {}
+        }
+    }
+    let value_type = tail.get(..end)?.trim();
+    (!value_type.is_empty() && value_type.len() <= MAX_TYPE_SHAPE_BYTES)
+        .then(|| value_type.to_owned())
 }
 
 fn infer_candidate_type_arguments(
@@ -8797,6 +8899,8 @@ fn index_value_type(node: Node<'_>, source: &[u8]) -> Option<String> {
     let container = node
         .child_by_field_name("value")
         .or_else(|| node.child_by_field_name("body"))
+        .or_else(|| node.child_by_field_name("type"))
+        .or_else(|| node.child_by_field_name("type_annotation"))
         .or_else(|| (node.kind() == "object_type").then_some(node))?;
     let container = if container.kind() == "type_annotation" {
         first_named_child(container)?

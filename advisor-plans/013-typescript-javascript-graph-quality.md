@@ -1397,6 +1397,29 @@ cross-file `Pick`/`Omit` projection calls. This is still below the full
 value-space `keyof`, arbitrary mapped/indexed, compiler-target, corpus,
 precision/Wilson, framework, comparator, and production-hard-cut gates.
 
+### Execution checkpoint (2026-08-07, bounded inline structural index receivers)
+
+The native TypeScript/JavaScript candidate path now carries one additional
+source-proven structural shape across dynamic member access:
+
+- Inline index signatures on parameters, variables, and properties cache their
+  bounded value type (`{ [key: string]: Item }`) at the binding identity, so a
+  dynamic `shape[key].inspect()` can resolve to `Item` only when that value type
+  resolves to one source-backed nominal owner.
+- Imported interface and type-alias index signatures retain their existing
+  declaration-signature path; a regression fixture proves both forms resolve
+  the same cross-file member target with `member-binding` provenance.
+- Primitive, ambiguous, mapped, malformed, oversized, and otherwise
+  source-unproven value shapes remain unresolved. No terminal-name fallback or
+  arbitrary structural member selection is added.
+
+The universal resolver suite is now 166 tests, including the inline structural
+positive/negative case and the imported structural type-alias regression. This
+closes only the bounded inline index-receiver slice; broader arbitrary
+structural/mapped/indexed semantics, compiler-target truth, release corpora,
+precision/Wilson, framework tiers, equivalent Graphify/SCIP scope, and the
+production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for
