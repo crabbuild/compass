@@ -1954,6 +1954,25 @@ coverage records, 1,565 invariants, 27 flows, 24 negatives, 25 diagnostics,
 warm, rebuild, restored, alternate-checkout, and source-unchanged outputs.
 This is an interop correctness increment, not a release leadership claim.
 
+### Execution checkpoint (2026-08-07, bounded CommonJS `defineProperty` exports)
+
+The CommonJS bridge now recognizes source-proven transpiler output of the form
+`Object.defineProperty(exports, "name", { value: local })` and a bounded getter
+variant whose function/arrow body returns a source-visible value. Static string
+and numeric keys become exact named reexports anchored at the key; imported
+values and member expressions retain their normal source/module identity. The
+`__esModule` marker, identifier/computed keys, dynamic values, dynamic getters,
+shadowed `Object`/`exports`/`module`, and unsupported descriptor shapes remain
+ordinary calls without fabricated export edges.
+
+Regression coverage now includes direct value exports, imported getter exports,
+the `__esModule` marker, dynamic keys/values, and shadowed globals, plus a
+cross-file `require()` consumer that resolves the exact value and getter
+targets while leaving an unknown export unresolved. The focused suites are
+103 candidate tests and 177 universal resolver tests. This remains a
+qualification-only correctness slice; the production adapter is still not
+registered and no release-leadership claim is implied.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

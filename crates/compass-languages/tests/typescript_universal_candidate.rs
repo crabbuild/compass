@@ -651,6 +651,56 @@ module.exports = Object.assign({}, base, { direct() {} });
 }
 
 #[test]
+fn javascript_commonjs_define_property_publishes_source_proven_exports() {
+    let source = br#"import { imported } from './values.js';
+function run() {}
+Object.defineProperty(exports, 'run', { enumerable: true, value: run });
+Object.defineProperty(exports, 'imported', {
+    enumerable: true,
+    get: function () { return imported; },
+});
+Object.defineProperty(exports, '__esModule', { value: true });
+Object.defineProperty(exports, dynamic, { value: run });
+"#;
+    let batch = candidate("src/define-property.cjs", source);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("defineProperty export evidence");
+
+    let reexports = batch
+        .bindings
+        .iter()
+        .filter(|binding| binding.kind == compass_languages::BindingKind::Reexport)
+        .map(|binding| binding.spelling.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(reexports.contains("run"));
+    assert!(reexports.contains("imported"));
+    assert!(!reexports.contains("__esModule"));
+    assert!(!reexports.contains("dynamic"));
+
+    let shadowed = candidate(
+        "src/define-property-shadowed.cjs",
+        br#"function Object() {}
+function run() {}
+Object.defineProperty(exports, 'run', { value: run });
+"#,
+    );
+    assert!(!shadowed.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Reexport && binding.spelling == "run"
+    }));
+
+    let dynamic = candidate(
+        "src/define-property-dynamic.cjs",
+        br#"function run() {}
+Object.defineProperty(exports, 'run', { value: getRun() });
+Object.defineProperty(exports, 'getter', { get: () => getRun() });
+"#,
+    );
+    assert!(!dynamic.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Reexport
+            && matches!(binding.spelling.as_str(), "run" | "getter")
+    }));
+}
+
+#[test]
 fn javascript_static_this_factory_tracks_new_instance_members() {
     let batch = candidate(
         "src/factory.js",

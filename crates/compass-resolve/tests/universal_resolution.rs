@@ -7968,6 +7968,106 @@ unknown.direct();
 }
 
 #[test]
+fn javascript_commonjs_define_property_resolves_value_and_getter_exports()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/values.ts",
+            br#"export function imported() {}
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/define.cjs",
+            br#"import { imported } from "./values";
+function run() {}
+Object.defineProperty(exports, "run", { enumerable: true, value: run });
+Object.defineProperty(exports, "imported", {
+    enumerable: true,
+    get: function () { return imported; },
+});
+Object.defineProperty(exports, "__esModule", { value: true });
+Object.defineProperty(exports, "unknown", { value: getUnknown() });
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.js",
+            br#"const api = require("../lib/define");
+api.run();
+api.imported();
+api.unknown();
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            let path = root.join(relative);
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&path, relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let run = batches[1]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "function" && declaration.name == "run")
+        .ok_or("missing defineProperty run declaration")?;
+    let imported = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "function" && declaration.name == "imported")
+        .ok_or("missing imported declaration")?;
+    let calls = batches[2]
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Calls)
+        .collect::<Vec<_>>();
+    let run_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "run")
+        .ok_or("missing run call")?;
+    let imported_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "imported")
+        .ok_or("missing imported call")?;
+    let unknown_call = calls
+        .iter()
+        .find(|candidate| candidate.target_spelling == "unknown")
+        .ok_or("missing unknown call")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&run_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &run.id
+    ));
+    assert!(matches!(
+        index.resolve(&imported_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &imported.id
+    ));
+    assert!(matches!(
+        index.resolve(&unknown_call.id),
+        compass_resolve::evidence::ResolutionDecision::Unresolved
+    ));
+    Ok(())
+}
+
+#[test]
 fn javascript_commonjs_require_callable_namespace_resolves_default_export()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

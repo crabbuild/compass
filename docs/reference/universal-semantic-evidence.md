@@ -48,11 +48,14 @@ the adapter actually emits. The batch contains six bounded collections:
   with spelling `*` as a source-range-backed object-owner alias, including a
   CommonJS file-module owner for a proven `module.exports = { ...source }`
   shape, including a source-anchored namespace import, static `require()`
-  source, or bounded `Object.assign` composition. This is not a wildcard
-  export: the resolver follows it only when the target owner and requested
-  member are independently source-proven, direct destination properties
-  retain precedence, and otherwise it preserves an unresolved or ambiguous
-  result.
+  source, or bounded `Object.assign` composition. CommonJS
+  `Object.defineProperty(exports, "name", { value/get: ... })` reexports are
+  likewise admitted only for a static key and source-proven value/getter
+  return; `__esModule`, dynamic descriptors, and shadowed CommonJS globals are
+  not exported. This is not a wildcard export: the resolver follows it only
+  when the target owner and requested member are independently source-proven,
+  direct destination properties retain precedence, and otherwise it preserves
+  an unresolved or ambiguous result.
 - `OccurrenceFact` records one exact use site and its role, owner, spelling,
   optional qualifier, lexical scope, and range. Repeated uses are separate
   occurrences.

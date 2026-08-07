@@ -3559,6 +3559,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 self.emit_call(node, &scope_id, false)?;
                 self.emit_dynamic_import(node, &scope_id)?;
                 self.emit_commonjs_object_assign(&scope_id, node, false)?;
+                self.emit_commonjs_define_property(&scope_id, node)?;
             }
             "new_expression" => self.emit_call(node, &scope_id, true)?,
             "member_expression" | "optional_member_expression" | "subscript_expression" => {
@@ -6086,7 +6087,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return Ok(());
         };
         let right = unwrap_expression_node(right);
-        if export_name == "default" && self.is_commonjs_object_assign(right) {
+        if export_name == "default" && self.is_commonjs_object_assign(scope_id, right) {
             // `module.exports = Object.assign({}, source, { direct })` is a
             // bounded object-owner composition. Keep the module owner as the
             // destination and publish only source-proven operands; the
@@ -6139,9 +6140,12 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         self.emit_commonjs_reexport_binding(scope_id, &export_name, export_anchor, resolution)
     }
 
-    fn is_commonjs_object_assign(&self, node: Node<'tree>) -> bool {
+    fn is_commonjs_object_assign(&self, scope_id: &str, node: Node<'tree>) -> bool {
         let node = unwrap_expression_node(node);
         if !matches!(node.kind(), "call_expression" | "optional_call_expression") {
+            return false;
+        }
+        if !self.is_unshadowed_builtin(scope_id, "Object") {
             return false;
         }
         node.child_by_field_name("function")
@@ -6164,7 +6168,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         assigned_to_module: bool,
     ) -> Result<(), EvidenceError> {
         let node = unwrap_expression_node(node);
-        if !self.is_commonjs_object_assign(node) {
+        if !self.is_commonjs_object_assign(scope_id, node) {
             return Ok(());
         }
         let Some(arguments) = node
@@ -6188,6 +6192,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 .all(|child| child.kind().contains("comment"));
         let target_text = node_text(self.source, *target).replace(char::is_whitespace, "");
         let target_is_module = matches!(target_text.as_str(), "module.exports" | "exports");
+        if (target_text == "exports" && !self.is_unshadowed_name(scope_id, "exports"))
+            || (target_text == "module.exports" && !self.is_unshadowed_name(scope_id, "module"))
+        {
+            return Ok(());
+        }
         // When an assignment wraps a mutating `Object.assign(module.exports,
         // ...)`, the nested call is visited separately by `emit_nodes`. Let
         // that call publish the owner once instead of duplicating bindings.
@@ -6263,6 +6272,136 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             }
         }
         Ok(())
+    }
+
+    /// Recover a named CommonJS export emitted through the standard
+    /// `Object.defineProperty(exports, "name", { value/get: ... })` helper.
+    /// This is common in TypeScript/ESM transpilation. Only a static key and
+    /// a source-proven value/getter return are published; descriptor flags,
+    /// computed keys, dynamic getters, and the `__esModule` marker remain
+    /// ordinary runtime evidence without becoming graph exports.
+    fn emit_commonjs_define_property(
+        &mut self,
+        scope_id: &str,
+        node: Node<'tree>,
+    ) -> Result<(), EvidenceError> {
+        let node = unwrap_expression_node(node);
+        if !matches!(node.kind(), "call_expression" | "optional_call_expression")
+            || !self.is_unshadowed_builtin(scope_id, "Object")
+            || !node
+                .child_by_field_name("function")
+                .or_else(|| first_named_child(node))
+                .is_some_and(|function| {
+                    node_text(self.source, function).replace(char::is_whitespace, "")
+                        == "Object.defineProperty"
+                })
+        {
+            return Ok(());
+        }
+        let Some(arguments) = node
+            .child_by_field_name("arguments")
+            .or_else(|| first_named_child_kind(node, "arguments"))
+        else {
+            return Ok(());
+        };
+        let mut cursor = arguments.walk();
+        let arguments = arguments
+            .named_children(&mut cursor)
+            .filter(|argument| !argument.kind().contains("comment"))
+            .map(unwrap_expression_node)
+            .collect::<Vec<_>>();
+        let [target, key, descriptor] = arguments.as_slice() else {
+            return Ok(());
+        };
+        let target_text = node_text(self.source, *target).replace(char::is_whitespace, "");
+        if !matches!(target_text.as_str(), "module.exports" | "exports")
+            || descriptor.kind() != "object"
+        {
+            return Ok(());
+        }
+        if (target_text == "exports" && !self.is_unshadowed_name(scope_id, "exports"))
+            || (target_text == "module.exports" && !self.is_unshadowed_name(scope_id, "module"))
+        {
+            return Ok(());
+        }
+        let export_name = match key.kind() {
+            "string" | "string_fragment" | "number" => string_literal(self.source, *key),
+            _ => return Ok(()),
+        };
+        if export_name.is_empty() || export_name == "__esModule" {
+            return Ok(());
+        }
+        let Some(resolution) = self.commonjs_descriptor_value_resolution(scope_id, *descriptor)
+        else {
+            return Ok(());
+        };
+        self.emit_commonjs_reexport_binding(scope_id, &export_name, *key, resolution)
+    }
+
+    fn commonjs_descriptor_value_resolution(
+        &self,
+        scope_id: &str,
+        descriptor: Node<'tree>,
+    ) -> Option<Resolution> {
+        let mut cursor = descriptor.walk();
+        for property in descriptor
+            .named_children(&mut cursor)
+            .take(MAX_INLINE_OBJECT_PROPERTIES)
+        {
+            let Some((key, value)) = commonjs_object_property(property) else {
+                continue;
+            };
+            let Some(name) = member_property_name(self.source, key) else {
+                continue;
+            };
+            if name == "value"
+                && let Some(value) = value.map(unwrap_expression_node)
+                && let Some(resolution) = self.commonjs_export_value_resolution(scope_id, value)
+            {
+                return Some(resolution);
+            }
+            if name == "get"
+                && let Some(getter) = value.map(unwrap_expression_node)
+                && let Some(return_value) = self.commonjs_getter_return_value(getter)
+                && let Some(resolution) =
+                    self.commonjs_export_value_resolution(scope_id, return_value)
+            {
+                return Some(resolution);
+            }
+        }
+        None
+    }
+
+    fn commonjs_getter_return_value(&self, getter: Node<'tree>) -> Option<Node<'tree>> {
+        let getter = unwrap_expression_node(getter);
+        let body = getter
+            .child_by_field_name("body")
+            .or_else(|| first_named_child_kind(getter, "statement_block"))
+            .map(unwrap_expression_node)?;
+        if body.kind() != "statement_block" {
+            return Some(body);
+        }
+        self.commonjs_direct_return_value(body, 0)
+    }
+
+    fn commonjs_direct_return_value(&self, node: Node<'tree>, depth: usize) -> Option<Node<'tree>> {
+        if depth > MAX_TRAVERSAL_DEPTH {
+            return None;
+        }
+        if node.kind() == "return_statement" {
+            return return_value_node(node).map(unwrap_expression_node);
+        }
+        if depth > 0
+            && matches!(
+                node.kind(),
+                "arrow_function" | "function" | "function_expression" | "generator_function"
+            )
+        {
+            return None;
+        }
+        let mut cursor = node.walk();
+        node.named_children(&mut cursor)
+            .find_map(|child| self.commonjs_direct_return_value(child, depth + 1))
     }
 
     fn commonjs_export_value_resolution(
