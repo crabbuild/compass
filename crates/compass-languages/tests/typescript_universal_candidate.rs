@@ -29,7 +29,7 @@ new App();
     let batch = candidate("src/app.ts", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("valid evidence");
     assert_eq!(batch.adapter.language, "typescript");
-    assert_eq!(batch.adapter.version, 4);
+    assert_eq!(batch.adapter.version, 5);
     assert_eq!(batch.adapter.dialect.as_deref(), Some("ts"));
     assert!(
         batch
@@ -120,7 +120,7 @@ export async function load() { return import("./lazy.js"); }
 "#;
     let batch = candidate("src/render.jsx", source);
     assert_eq!(batch.adapter.language, "javascript");
-    assert_eq!(batch.adapter.version, 4);
+    assert_eq!(batch.adapter.version, 5);
     assert_eq!(batch.adapter.dialect.as_deref(), Some("jsx"));
     assert!(
         batch
@@ -269,6 +269,38 @@ export default { ...base, isString: value => true };
         binding.kind == compass_languages::BindingKind::Reexport
             && binding.spelling == "default"
             && binding.target_declaration_id.as_deref() == Some(spread_default.id.as_str())
+    }));
+    let base = spread
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "spread-default.base")
+        .expect("spread source declaration");
+    assert!(spread.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Member
+            && binding.spelling == "*"
+            && binding.qualified_target == "spread-default.base"
+            && binding.target_declaration_id.as_deref() == Some(base.id.as_str())
+            && binding.scope_id.as_ref().is_some_and(|scope_id| {
+                spread
+                    .scopes
+                    .iter()
+                    .any(|scope| scope.id == *scope_id && scope.kind == "object")
+            })
+    }));
+
+    let imported = candidate(
+        "src/imported-spread-default.js",
+        br#"import base from './base.js';
+export default { ...base, isString: value => true };
+"#,
+    );
+    validate_evidence(&imported, EvidenceLimits::default())
+        .expect("imported spread default evidence");
+    assert!(imported.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Member
+            && binding.spelling == "*"
+            && binding.qualified_target == "./base.js::default"
+            && binding.target_declaration_id.is_none()
     }));
 
     let unknown = candidate(

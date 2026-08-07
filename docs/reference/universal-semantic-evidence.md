@@ -24,7 +24,7 @@ the adapter actually emits. The batch contains six bounded collections:
 - `ScopeFact` identifies a lexical scope, optional owning declaration, parent
   scope, and exact range.
 - `BindingFact` records an import, import alias, re-export, local alias,
-  call-result, or package binding. Its target is qualified; a proven local
+  call-result, member, or package binding. Its target is qualified; a proven local
   declaration may also be named directly. TypeScript and JavaScript import
   and re-export bindings may additionally carry a `namespace` identity and a
   `typeOnly` marker. A type-only binding must identify the `type` or
@@ -44,6 +44,11 @@ the adapter actually emits. The batch contains six bounded collections:
   resolves to an exact source declaration or an explicitly qualified external
   identity. An unresolved prelude or imported spelling must not be
   reinterpreted as a repository-local type.
+  The qualification-only TypeScript/JavaScript adapter may use a member binding
+  with spelling `*` as a source-range-backed object-owner alias. This is not a
+  wildcard export: the resolver follows it only when the target owner and
+  requested member are independently source-proven, and otherwise preserves
+  an unresolved or ambiguous result.
 - `OccurrenceFact` records one exact use site and its role, owner, spelling,
   optional qualifier, lexical scope, and range. Repeated uses are separate
   occurrences.

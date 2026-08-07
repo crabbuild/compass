@@ -6864,7 +6864,7 @@ export default { isNumber, isString };
         ),
         (
             "lib/spread-default.js",
-            br#"const base = { isNumber: value => true };
+            br#"import base from './utils.js';
 export default { ...base, isString: value => true };
 "#
             .as_slice(),
@@ -6986,12 +6986,182 @@ spread.isNumber(1);
         compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
             if declaration_id == &spread_string.id
     ));
-    assert!(!matches!(
+    assert!(matches!(
         index.resolve(&spread_number_call.id),
-        compass_resolve::evidence::ResolutionDecision::Resolved { .. }
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &utils_number.id
     ));
     assert!(!matches!(
         index.resolve(&named_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { .. }
+    ));
+    Ok(())
+}
+
+#[test]
+fn javascript_default_object_spread_aliases_preserve_precedence_and_ambiguity()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/left.ts",
+            br#"export default { isNumber: value => true };
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/right.js",
+            br#"export default { isNumber: value => false };
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/ambiguous.js",
+            br#"import left from './left.ts';
+import right from './right.js';
+export default { ...left, ...right, isString: value => true };
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/override.js",
+            br#"import left from './left.ts';
+export default { ...left, isNumber: value => false };
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/cross.js",
+            br#"import left from './left.ts';
+export default { ...left, isString: value => true };
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/function.js",
+            br#"export default function callable(value) { return value; }
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/function-spread.js",
+            br#"import callable from './function.js';
+export default { ...callable, isString: value => true };
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.js",
+            br#"import ambiguous from '../lib/ambiguous.js';
+import override from '../lib/override.js';
+import cross from '../lib/cross.js';
+import functionSpread from '../lib/function-spread.js';
+ambiguous.isNumber(1);
+override.isNumber(1);
+cross.isNumber(1);
+functionSpread.callable(1);
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&root.join(relative), relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let ambiguous_call = batches[7]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "isNumber"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.contains("ambiguous.js::default"))
+        })
+        .ok_or("missing ambiguous spread call")?;
+    let override_call = batches[7]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "isNumber"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.contains("override.js::default"))
+        })
+        .ok_or("missing override spread call")?;
+    let function_call = batches[7]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "callable"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.contains("function-spread.js::default"))
+        })
+        .ok_or("missing non-object spread call")?;
+    let override_member = batches[3]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "override.default.isNumber")
+        .ok_or("missing direct override member")?;
+    let cross_call = batches[7]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "isNumber"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.contains("cross.js::default"))
+        })
+        .ok_or("missing cross-language spread call")?;
+    let left_member = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "left.default.isNumber")
+        .ok_or("missing cross-language source member")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(!matches!(
+        index.resolve(&ambiguous_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { .. }
+    ));
+    assert!(matches!(
+        index.resolve(&override_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &override_member.id
+    ));
+    assert!(matches!(
+        index.resolve(&cross_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &left_member.id
+    ));
+    assert!(!matches!(
+        index.resolve(&function_call.id),
         compass_resolve::evidence::ResolutionDecision::Resolved { .. }
     ));
     Ok(())

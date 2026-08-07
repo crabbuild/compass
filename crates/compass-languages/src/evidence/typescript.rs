@@ -12,8 +12,8 @@ use tree_sitter::Node;
 
 use super::build::{EvidenceBuilder, range_for_node};
 use super::model::{
-    BindingKind, CandidateRelation, HierarchyConstraint, LanguageCapability, ResolutionConstraint,
-    SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
+    BindingKind, CandidateRelation, EvidenceRange, HierarchyConstraint, LanguageCapability,
+    ResolutionConstraint, SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits};
 use crate::{AdapterProfile, UNIVERSAL_EVIDENCE_SCHEMA, make_id};
@@ -64,7 +64,7 @@ const JAVASCRIPT_CAPABILITIES: &[LanguageCapability] = &[
 static TYPESCRIPT_PROFILE: AdapterProfile = AdapterProfile {
     id: "compass.typescript.candidate",
     language: "typescript",
-    version: 4,
+    version: 5,
     evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA,
     profile: crate::UniversalAdapterProfile::UniversalCandidate,
     capabilities: TYPESCRIPT_CAPABILITIES,
@@ -73,7 +73,7 @@ static TYPESCRIPT_PROFILE: AdapterProfile = AdapterProfile {
 static JAVASCRIPT_PROFILE: AdapterProfile = AdapterProfile {
     id: "compass.javascript.candidate",
     language: "javascript",
-    version: 4,
+    version: 5,
     evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA,
     profile: crate::UniversalAdapterProfile::UniversalCandidate,
     capabilities: JAVASCRIPT_CAPABILITIES,
@@ -195,8 +195,12 @@ struct FlowAssignment {
 #[derive(Clone)]
 struct StructuralObjectSpread {
     source_qualified_name: String,
-    source_variable_id: String,
-    start_byte: usize,
+    /// A local source keeps its exact declaration identity so property writes
+    /// can invalidate the projection. Imported default-object sources have no
+    /// local declaration ID and are validated by the project resolver through
+    /// the published default-object owner.
+    source_variable_id: Option<String>,
+    range: EvidenceRange,
 }
 
 #[derive(Clone)]
@@ -717,18 +721,40 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 .insert(declaration.qualified_name.clone());
             self.stable_structural_object_variables
                 .insert(declaration.qualified_name.clone());
+            // Give a source-backed object export its own owner scope.  Direct
+            // members then use the ordinary owner index, and member-alias
+            // bindings can identify this exact synthetic default object
+            // without overloading the surrounding module scope.
+            let object_scope = self.builder.open_scope(
+                "object",
+                Some(&declaration.id),
+                Some(&scope_id),
+                range_for_node(self.source_file, exported),
+            )?;
+            self.scope_by_node
+                .insert(exported.id(), object_scope.clone());
+            self.scope_parents
+                .insert(object_scope.clone(), Some(scope_id.clone()));
+            self.scope_owners
+                .insert(object_scope.clone(), declaration.id.clone());
+            self.scope_kinds
+                .insert(object_scope.clone(), "object".to_owned());
             if object_literal_has_spread(exported) {
                 self.record_structural_object_spreads(
-                    &scope_id,
+                    &object_scope,
                     &declaration.qualified_name,
                     exported,
                 );
+                self.emit_structural_spread_member_aliases(
+                    &object_scope,
+                    &declaration.qualified_name,
+                )?;
             }
             let mut cursor = exported.walk();
             for child in exported.named_children(&mut cursor) {
                 self.collect_declarations(
                     child,
-                    scope_id.clone(),
+                    object_scope.clone(),
                     declaration.qualified_name.clone(),
                     depth + 1,
                 )?;
@@ -1925,6 +1951,35 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             .insert(destination.to_owned(), spreads);
     }
 
+    /// Publish a bounded owner-alias marker for every source-proven spread in
+    /// a default/export-assignment object.  The `*` spelling is intentionally
+    /// reserved here for the member index: it means that the destination
+    /// object inherits a member inventory from the qualified source owner,
+    /// not that the object exports an unknown wildcard name.  The resolver
+    /// validates the source as another object owner before using this marker.
+    fn emit_structural_spread_member_aliases(
+        &mut self,
+        object_scope_id: &str,
+        destination: &str,
+    ) -> Result<(), EvidenceError> {
+        let Some(spreads) = self.structural_object_spreads.get(destination).cloned() else {
+            return Ok(());
+        };
+        for spread in spreads {
+            self.builder.bind_with_identity(
+                BindingKind::Member,
+                "*",
+                &spread.source_qualified_name,
+                spread.source_variable_id.as_deref(),
+                Some(object_scope_id),
+                Some(SymbolNamespace::Value),
+                false,
+                spread.range,
+            )?;
+        }
+        Ok(())
+    }
+
     fn object_literal_spread_export_is_safe(&self, scope_id: &str, object: Node<'tree>) -> bool {
         if self
             .structural_object_spread_sources(scope_id, object)
@@ -1973,23 +2028,49 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     return None;
                 }
                 let name = node_text(self.source, argument);
-                let resolution = self.resolve_name(scope_id, &name, Namespace::Value)?;
-                let Resolution::Local(source) = resolution else {
-                    return None;
-                };
-                if source.kind != "variable"
-                    || !self.immutable_bindings.contains(&source.id)
-                    || !self
-                        .stable_structural_object_variables
-                        .contains(&source.qualified_name)
-                {
-                    return None;
+                let resolution = self.resolve_name(scope_id, &name, Namespace::Value);
+                match resolution {
+                    Some(Resolution::Local(source)) => {
+                        if source.kind != "variable"
+                            || !self.immutable_bindings.contains(&source.id)
+                            || !self
+                                .stable_structural_object_variables
+                                .contains(&source.qualified_name)
+                        {
+                            return None;
+                        }
+                        spreads.push(StructuralObjectSpread {
+                            source_qualified_name: source.qualified_name,
+                            source_variable_id: Some(source.id),
+                            range: range_for_node(self.source_file, child),
+                        });
+                    }
+                    Some(Resolution::Import(import))
+                        if import.imported_name == "default"
+                            && !import.type_only
+                            && import.namespace.accepts(Namespace::Value) =>
+                    {
+                        spreads.push(StructuralObjectSpread {
+                            source_qualified_name: import.target,
+                            source_variable_id: None,
+                            range: range_for_node(self.source_file, child),
+                        });
+                    }
+                    None => {
+                        // Static ES imports are hoisted, but the declaration
+                        // pass intentionally runs before the full import
+                        // emission pass. Recover only a default import from
+                        // the top-level syntax; named, namespace, dynamic,
+                        // and CommonJS sources stay opaque.
+                        let target = self.syntactic_default_import_target(object, &name)?;
+                        spreads.push(StructuralObjectSpread {
+                            source_qualified_name: target,
+                            source_variable_id: None,
+                            range: range_for_node(self.source_file, child),
+                        });
+                    }
+                    _ => return None,
                 }
-                spreads.push(StructuralObjectSpread {
-                    source_qualified_name: source.qualified_name,
-                    source_variable_id: source.id,
-                    start_byte: child.start_byte(),
-                });
                 continue;
             }
             // A spread projection can reason about ordinary static properties
@@ -1999,6 +2080,52 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             member_property_name(self.source, key)?;
         }
         Some(spreads)
+    }
+
+    fn syntactic_default_import_target(
+        &self,
+        node: Node<'tree>,
+        local_name: &str,
+    ) -> Option<String> {
+        let mut root = node;
+        while let Some(parent) = root.parent() {
+            root = parent;
+        }
+        let mut cursor = root.walk();
+        for child in root.named_children(&mut cursor) {
+            if child.kind() != "import_statement" {
+                continue;
+            }
+            let Some(module_node) = first_named_child_kind(child, "string") else {
+                continue;
+            };
+            let module = string_literal(self.source, module_node);
+            if module.is_empty() {
+                continue;
+            }
+            let Some(clause) = first_named_child_kind(child, "import_clause") else {
+                continue;
+            };
+            let statement_type_only = node_text(self.source, child)
+                .trim_start()
+                .starts_with("import type");
+            let mut bindings = Vec::new();
+            collect_import_bindings(
+                self.source,
+                clause,
+                false,
+                statement_type_only,
+                &mut bindings,
+            );
+            if bindings.iter().any(|binding| {
+                binding.local_name == local_name
+                    && binding.imported_name == "default"
+                    && !binding.type_only
+            }) {
+                return Some(format!("{module}::default"));
+            }
+        }
+        None
     }
 
     fn object_literal_value_for_binding(&self, value: Node<'tree>) -> Option<Node<'tree>> {
@@ -6928,13 +7055,15 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             .collect::<Vec<_>>();
         let mut events = direct;
         for spread in spreads {
-            if spread.start_byte > use_start_byte {
+            let spread_start = usize::try_from(spread.range.start_byte).unwrap_or(usize::MAX);
+            if spread_start > use_start_byte {
                 continue;
             }
-            if self
-                .flow_member_write_barriers
-                .get(&(spread.source_variable_id.clone(), property_name.to_owned()))
-                .is_some_and(|barriers| barriers.iter().any(|start| *start <= spread.start_byte))
+            if let Some(source_variable_id) = spread.source_variable_id.as_deref()
+                && self
+                    .flow_member_write_barriers
+                    .get(&(source_variable_id.to_owned(), property_name.to_owned()))
+                    .is_some_and(|barriers| barriers.iter().any(|start| *start <= spread_start))
             {
                 return Err(());
             }
@@ -6980,7 +7109,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 return Err(());
             };
             if let Some(target) = target {
-                events.push((spread.start_byte, target));
+                events.push((spread_start, target));
             }
         }
         visiting.remove(receiver_qualified_name);

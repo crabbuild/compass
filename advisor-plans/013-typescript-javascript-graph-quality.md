@@ -1809,6 +1809,42 @@ and does not claim a recall or leadership increase.
 Compiler-source-oracle recall, accepted-sample/Wilson gates, framework tiers,
 equivalent Graphify/SCIP scope, and the production hard cut remain open.
 
+### Execution checkpoint (2026-08-07, cross-file object-spread owner aliases)
+
+The qualification-only ECMAScript path now preserves inherited members of a
+safe default/export-assignment object across module boundaries. Each accepted
+synthetic object export owns an `object` scope and emits a source-range-backed
+`Member("*")` owner alias for its proven spread sources. The marker is an
+owner relationship, not a wildcard export: the shared resolver follows it only
+when the source resolves to a bounded object owner, then selects the source
+member declaration without cloning it. Direct destination properties remain
+the first lookup and therefore override inherited properties exactly when they
+follow the spread.
+
+Imported default spreads are admitted at the candidate boundary only as a
+qualified source marker; resolver validation rejects missing, non-object,
+ambiguous, cyclic, or otherwise incomplete source owners. Multiple source
+owners that produce competing declarations remain unresolved. Local source
+write barriers and the existing source-order/escape checks remain fail-closed.
+This closes the previous cross-file gap for cases such as
+`import base from "./base"; export default { ...base, direct };` while keeping
+unknown dynamic spreads opaque. The resolver also keeps this owner contract
+language-family aware, so a TypeScript provider and JavaScript consumer (or
+the reverse) still require the same exact source proof.
+
+The focused candidate suite remains 99 tests and the universal resolver suite
+is now 172 tests. New regressions cover local and imported owner markers,
+cross-file inherited member publication, direct-property precedence, competing
+spread sources, and spreading a non-object default. Candidate adapter versions
+advanced to 5 so the qualification-only evidence cache cannot reuse the prior
+owner-less spread realization.
+
+The exact-HEAD fixture qualification and the read-only Axios differential need
+to be rerun at the implementation head before this checkpoint is treated as a
+measured release baseline. Compiler-source-oracle recall, accepted-sample/
+Wilson gates, framework tiers, equivalent Graphify/SCIP scope, and the
+production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for
