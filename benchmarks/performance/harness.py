@@ -31,6 +31,10 @@ from benchmarks.performance.compass.audit import (
     export_comparison_candidates,
     run_audit,
 )
+from benchmarks.performance.compass.typescript_scorecard import (
+    scorecard_result,
+    write_scorecard_result,
+)
 from benchmarks.performance.compass.config import load_suite
 from benchmarks.performance.compass.correctness import compare_graphs, index_graph
 from benchmarks.performance.compass.model import (
@@ -573,6 +577,24 @@ def audit_candidates(args: argparse.Namespace) -> int:
     return 0
 
 
+def typescript_scorecard(args: argparse.Namespace) -> int:
+    if args.output is None:
+        result = scorecard_result(args.scorecard)
+        print(
+            json.dumps(
+                result,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+        )
+    else:
+        result = write_scorecard_result(args.scorecard, args.output)
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        print(args.output)
+    return 0 if result["passed"] else 1
+
+
 def _common(parser: argparse.ArgumentParser, *, execution: bool = False) -> None:
     parser.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     parser.add_argument("--workspace", type=Path, default=DEFAULT_WORKSPACE)
@@ -628,6 +650,12 @@ def build_parser() -> argparse.ArgumentParser:
     candidate_parser.add_argument("--name", required=True)
     candidate_parser.add_argument("--adapter", required=True)
     candidate_parser.add_argument("--output", type=Path, required=True)
+    scorecard_parser = subparsers.add_parser(
+        "typescript-scorecard",
+        help="evaluate an explicitly adjudicated TypeScript/JavaScript scorecard",
+    )
+    scorecard_parser.add_argument("--scorecard", type=Path, required=True)
+    scorecard_parser.add_argument("--output", type=Path)
     return parser
 
 
@@ -655,6 +683,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return audit(args)
         if args.command == "audit-candidates":
             return audit_candidates(args)
+        if args.command == "typescript-scorecard":
+            return typescript_scorecard(args)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

@@ -15,22 +15,35 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use compass_languages::{CandidateRelation, Engine, SemanticEvidenceBatch};
-use serde::Deserialize;
+use compass_languages::{CandidateRelation, Engine, SemanticEvidenceBatch, make_id};
+use serde::{Deserialize, Serialize};
 
 const ORACLE_SCHEMA: &str = "compass.typescript-target-oracle/1";
 const ORACLE_PROVIDER: &str = "typescript_checker_api_5_9_3";
 const MAX_ORACLE_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+const TARGET_REPORT_SCHEMA: &str = "compass.typescript-target-adjudication/1";
+const MAX_TARGET_REPORT_OUTPUT_BYTES: usize = 128 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OraclePayload {
     schema: String,
     provider: String,
+    metadata: Option<OracleMetadata>,
     scanned_files: usize,
     parsed_files: usize,
     rejected_files: Vec<serde_json::Value>,
     constructs: Vec<OracleConstruct>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OracleMetadata {
+    compiler_version: Option<String>,
+    node_version: Option<String>,
+    script_sha256: Option<String>,
+    platform: Option<String>,
+    source_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -50,17 +63,74 @@ struct OracleConstruct {
 
 type SourceKey = (String, String, String, u64, u64);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 enum CandidateTarget {
     Local {
+        #[serde(rename = "sourceFile")]
         source_file: String,
+        #[serde(rename = "startByte")]
         start: u64,
+        #[serde(rename = "endByte")]
         end: u64,
     },
     External {
+        #[serde(rename = "qualifiedName")]
         qualified_name: String,
     },
     Unresolved,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TargetAdjudicationRecord {
+    id: String,
+    source_file: String,
+    relation: String,
+    capability: String,
+    target_spelling: String,
+    start_byte: u64,
+    end_byte: u64,
+    oracle_resolution_kind: String,
+    oracle_target_file: Option<String>,
+    oracle_target_start_byte: Option<u64>,
+    oracle_target_end_byte: Option<u64>,
+    observed: Vec<CandidateTarget>,
+    automatic_outcome: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TargetAdjudicationStratum {
+    relation: String,
+    capability: String,
+    expected_local: usize,
+    correct: usize,
+    missing: usize,
+    wrong: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TargetAdjudicationReport {
+    schema: &'static str,
+    provider: &'static str,
+    candidate_adapter: &'static str,
+    metadata: Option<OracleMetadata>,
+    scanned_files: usize,
+    parsed_files: usize,
+    rejected_files: Vec<serde_json::Value>,
+    supported_constructs: usize,
+    expected_local: usize,
+    correct: usize,
+    missing: usize,
+    wrong: usize,
+    positive: usize,
+    positive_correct: usize,
+    false_positive: usize,
+    external_positive: usize,
+    strata: Vec<TargetAdjudicationStratum>,
+    records: Vec<TargetAdjudicationRecord>,
 }
 
 #[test]
@@ -78,6 +148,7 @@ fn checker_oracle_adjudicates_local_candidate_targets() {
     let oracle = run_oracle(&root);
     assert_eq!(oracle.schema, ORACLE_SCHEMA);
     assert_eq!(oracle.provider, ORACLE_PROVIDER);
+    assert!(oracle.metadata.is_some(), "oracle metadata is required");
     assert_eq!(oracle.scanned_files, oracle.parsed_files);
     assert!(oracle.rejected_files.is_empty(), "oracle rejected files");
 
@@ -273,6 +344,108 @@ fn checker_oracle_adjudicates_local_candidate_targets() {
             }
         }
     }
+    let records = supported
+        .iter()
+        .map(|construct| {
+            let key = source_key(construct);
+            let observed_targets = observed.get(&key).cloned().unwrap_or_default();
+            let expected_target = construct
+                .target_file
+                .as_deref()
+                .zip(construct.target_start_byte)
+                .zip(construct.target_end_byte)
+                .map(|((file, start), end)| (file, start, end));
+            let has_exact_target = expected_target.is_some_and(|(file, start, end)| {
+                observed_targets.iter().any(|target| {
+                    matches!(
+                        target,
+                        CandidateTarget::Local {
+                            source_file,
+                            start: observed_start,
+                            end: observed_end,
+                        } if source_file == file
+                            && *observed_start == start
+                            && *observed_end == end
+                    )
+                })
+            });
+            let has_local_target = observed_targets
+                .iter()
+                .any(|target| matches!(target, CandidateTarget::Local { .. }));
+            let automatic_outcome = if has_exact_target {
+                "correct"
+            } else if expected_target.is_some() && has_local_target {
+                "wrong"
+            } else if expected_target.is_some() {
+                "missing"
+            } else if has_local_target {
+                "false_positive"
+            } else if observed_targets.is_empty() {
+                "no_candidate"
+            } else {
+                "no_local_target"
+            };
+            TargetAdjudicationRecord {
+                id: make_id(&[
+                    "typescript-target-record",
+                    &construct.source_file,
+                    &construct.relation,
+                    &construct.capability,
+                    &construct.start_byte.to_string(),
+                    &construct.end_byte.to_string(),
+                ]),
+                source_file: construct.source_file.clone(),
+                relation: construct.relation.clone(),
+                capability: construct.capability.clone(),
+                target_spelling: construct.target_spelling.clone(),
+                start_byte: construct.start_byte,
+                end_byte: construct.end_byte,
+                oracle_resolution_kind: construct.resolution_kind.clone(),
+                oracle_target_file: construct.target_file.clone(),
+                oracle_target_start_byte: construct.target_start_byte,
+                oracle_target_end_byte: construct.target_end_byte,
+                observed: observed_targets,
+                automatic_outcome: automatic_outcome.to_owned(),
+            }
+        })
+        .collect::<Vec<_>>();
+    if let Some(destination) = env::var_os("COMPASS_TS_TARGET_REPORT") {
+        write_target_report(
+            &PathBuf::from(destination),
+            &TargetAdjudicationReport {
+                schema: TARGET_REPORT_SCHEMA,
+                provider: ORACLE_PROVIDER,
+                candidate_adapter: "compass.ecmascript.candidate",
+                metadata: oracle.metadata.clone(),
+                scanned_files: oracle.scanned_files,
+                parsed_files: oracle.parsed_files,
+                rejected_files: oracle.rejected_files.clone(),
+                supported_constructs: supported.len(),
+                expected_local: expected.len(),
+                correct,
+                missing,
+                wrong,
+                positive,
+                positive_correct,
+                false_positive,
+                external_positive,
+                strata: by_stratum
+                    .iter()
+                    .map(
+                        |((relation, capability), counts)| TargetAdjudicationStratum {
+                            relation: relation.clone(),
+                            capability: capability.clone(),
+                            expected_local: counts[0],
+                            correct: counts[1],
+                            missing: counts[2],
+                            wrong: counts[3],
+                        },
+                    )
+                    .collect(),
+                records,
+            },
+        );
+    }
     eprintln!(
         "TypeScript/JavaScript checker target adjudication: correct={correct} expected_local={} missing={missing} wrong={wrong} positive={positive} positive_correct={positive_correct} false_positive={false_positive} external_positive={external_positive} supported={} strata={by_stratum:?} wrong_examples={wrong_examples:?} false_positive_examples={false_positive_examples:?} missing_examples={missing_examples:?}",
         expected.len(),
@@ -282,6 +455,34 @@ fn checker_oracle_adjudicates_local_candidate_targets() {
     // useful for regressions while Plan 013's accepted-sample labels and
     // Wilson interval policy are still being assembled.
     assert!(correct.saturating_add(missing).saturating_add(wrong) == expected.len());
+}
+
+fn write_target_report(destination: &Path, report: &TargetAdjudicationReport) {
+    assert!(
+        !destination.as_os_str().is_empty(),
+        "COMPASS_TS_TARGET_REPORT must not be empty"
+    );
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    assert!(
+        parent.is_dir(),
+        "target report parent directory does not exist: {parent:?}"
+    );
+    let encoded = serde_json::to_vec(report).expect("target adjudication report JSON");
+    assert!(
+        encoded.len() <= MAX_TARGET_REPORT_OUTPUT_BYTES,
+        "target adjudication report exceeds bounded output limit"
+    );
+    let file_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("target report file name must be valid UTF-8");
+    let temporary = destination.with_file_name(format!(".{file_name}.tmp"));
+    fs::write(&temporary, &encoded).expect("write target adjudication report");
+    fs::rename(&temporary, destination).expect("publish target adjudication report");
+    eprintln!(
+        "TypeScript/JavaScript target adjudication report: {}",
+        destination.display()
+    );
 }
 
 fn run_oracle(root: &Path) -> OraclePayload {

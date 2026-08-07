@@ -676,6 +676,41 @@ The next actionable phases remain open:
    only after source recall, target precision, determinism, compatibility, and
    product-boundary checks pass together.
 
+### Execution checkpoint (2026-08-06, target-report and scorecard slice)
+
+The qualification path now preserves enough evidence to turn the checker
+diagnostic into a reviewed, machine-checkable scorecard without treating the
+checker as Compass runtime behavior:
+
+- The ignored target differential accepts `COMPASS_TS_TARGET_REPORT` and
+  atomically writes `compass.typescript-target-adjudication/1`. The report pins
+  the checker metadata and script digest, records exact source/target byte
+  ranges, preserves every candidate observation, emits automatic outcomes by
+  capability, and is bounded to 128 MiB. Normal native tests and builds do not
+  write it.
+- `benchmarks/performance/compass/typescript_scorecard.py` validates the
+  reviewed `compass.typescript-target-scorecard/1` contract. Every record must
+  have an explicit `accepted`/`source_oracle` pool, a manually entered
+  `judgmentSource: "manual"`, and a judgment (with a review reason for every
+  non-correct label); missing labels, unsafe paths, duplicate or unsorted IDs,
+  stale provider metadata, and undeclared strata fail closed. Automatic checker
+  outcomes may be retained as context but can never become scorecard labels.
+- The scorecard computes deterministic precision, 95% Wilson bounds, recall,
+  target-cluster concentration, corpus/relation/capability strata, critical
+  semantic violations, and separate production versus leadership thresholds.
+  Leadership mode additionally requires equivalent-scope, adjudicated Graphify
+  and SCIP TypeScript comparator entries. Diagnostic mode cannot be eligible
+  for a public quality claim.
+- `python3 benchmarks/performance/harness.py typescript-scorecard` exposes the
+  evaluator as a reproducible developer command. A synthetic one-file target
+  report was generated successfully with exact observations; no real-corpus
+  labels or competitor result has been promoted into the scorecard.
+
+This closes the measurement contract but not the quality gate. The four-corpus
+release sample, hand-labeled accepted records, Graphify/SCIP equivalent-scope
+results, framework strata, and production hard cut remain open. The candidate
+adapter remains absent from `UNIVERSAL_ADAPTERS`.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

@@ -59,3 +59,35 @@ The harness reports exact local-target recall, wrong-target cases, unresolved
 cases, and local false positives by capability. These figures are
 adjudication evidence, not release thresholds until accepted samples, Wilson
 intervals, and framework/competitor strata are frozen in Plan 013.
+
+To persist the deterministic target evidence for later manual labeling, set an
+explicit report path. The report is atomically written only when this ignored
+qualification test is run; it is never produced by normal Compass builds:
+
+```bash
+COMPASS_TS_QUALIFICATION_ROOT=/Volumes/Workspace/Github/<owner>/<repository> \
+COMPASS_TS_TARGET_REPORT=/Volumes/Workspace/<run>/typescript-target-report.json \
+CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923 \
+cargo test -p compass-languages --test typescript_target_differential \
+  --locked -- --ignored --nocapture
+```
+
+The report schema is `compass.typescript-target-adjudication/1`. It includes the
+pinned compiler/oracle metadata, exact source ranges, oracle target ranges,
+candidate observations, automatic checker outcomes, and capability strata. It
+does not contain manual judgments. A reviewed scorecard must add explicit
+`accepted` and `source_oracle` pools, `judgmentSource: "manual"`, and a review
+reason for every non-correct label under
+`compass.typescript-target-scorecard/1`, then run:
+
+```bash
+python3 benchmarks/performance/harness.py typescript-scorecard \
+  --scorecard /Volumes/Workspace/<run>/typescript-scorecard.json \
+  --output /Volumes/Workspace/<run>/typescript-scorecard-result.json
+```
+
+The evaluator computes precision, 95% Wilson bounds, recall, target-cluster
+concentration, per-corpus/relation/capability strata, critical semantic
+violations, and the Plan 013 production or leadership gates. Diagnostic mode
+is useful before labels are complete but can never become eligible for a public
+quality claim.

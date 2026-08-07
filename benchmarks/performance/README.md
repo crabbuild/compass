@@ -183,6 +183,14 @@ adjudication instrument rather than a release claim: accepted labels, Wilson
 intervals, cross-file/project strata, framework tiers, and an equivalent
 Graphify/SCIP comparison must be frozen before an adapter can be registered.
 
+The target harness can persist its source-backed observations with
+`COMPASS_TS_TARGET_REPORT`; see
+`benchmarks/performance/oracles/README.md` for the report and reviewed
+`compass.typescript-target-scorecard/1` workflow. The scorecard evaluator is
+deliberately separate from the checker oracle: automatic checker outcomes are
+not accepted precision labels, and diagnostic scorecards are never eligible for
+a public quality claim.
+
 Create an unjudged candidate set from a comparator database without rerunning
 either graph producer:
 
