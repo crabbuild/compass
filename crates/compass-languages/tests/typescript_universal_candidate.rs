@@ -1264,6 +1264,108 @@ current.run();
 }
 
 #[test]
+fn typescript_flow_sensitive_local_alias_preserves_source_receiver() {
+    let batch = candidate(
+        "src/local-alias.ts",
+        br#"class First { run() {} }
+let current = new First();
+const alias = current;
+alias.run();
+"#,
+    );
+    let run = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".First.run"))
+        .expect("First.run declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Calls
+            && candidate.target_spelling == "run"
+            && candidate.constraints.exact_target_declaration_id.as_deref() == Some(run.id.as_str())
+    }));
+}
+
+#[test]
+fn javascript_flow_alias_escape_and_dynamic_mutation_fail_closed() {
+    let cases = [
+        (
+            "src/escaped-alias.js",
+            br#"class First { run() {} }
+let current = new First();
+consume(current);
+current.run();
+"#
+            .as_slice(),
+        ),
+        (
+            "src/eval-alias.js",
+            br#"class First { run() {} }
+let current = new First();
+eval("current = unknownValue");
+current.run();
+"#
+            .as_slice(),
+        ),
+        (
+            "src/proxy-alias.js",
+            br#"class First { run() {} }
+let current = new First();
+const wrapped = new Proxy(current, {});
+current.run();
+"#
+            .as_slice(),
+        ),
+        (
+            "src/member-write-alias.js",
+            br#"class First { run() {} }
+let current = new First();
+current.run = replacement;
+current.run();
+"#
+            .as_slice(),
+        ),
+        (
+            "src/closure-alias.js",
+            br#"class First { run() {} }
+let current = new First();
+function later() { current.run(); }
+current.run();
+"#
+            .as_slice(),
+        ),
+        (
+            "src/hoisted-closure-alias.js",
+            br#"class First { run() {} }
+function later() { current.run(); }
+let current = new First();
+current.run();
+"#
+            .as_slice(),
+        ),
+        (
+            "src/with-alias.js",
+            br#"class First { run() {} }
+let current = new First();
+with (scope) { current.run(); }
+current.run();
+"#
+            .as_slice(),
+        ),
+    ];
+    for (path, source) in cases {
+        let batch = candidate(path, source);
+        assert!(
+            !batch.candidates.iter().any(|candidate| {
+                candidate.relation == compass_languages::CandidateRelation::Calls
+                    && candidate.target_spelling == "run"
+                    && candidate.constraints.exact_target_declaration_id.is_some()
+            }),
+            "dynamic alias case unexpectedly resolved: {path}"
+        );
+    }
+}
+
+#[test]
 fn typescript_homomorphic_mapped_alias_preserves_nominal_member_targets() {
     let batch = candidate(
         "src/mapped-alias.ts",

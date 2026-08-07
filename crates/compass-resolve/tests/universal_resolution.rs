@@ -8404,6 +8404,9 @@ import type { Item } from "../lib/item";
 export function use(value: Item) {
     make(value).inspect();
     Factory.create(value).inspect();
+    const current = make(value);
+    const alias = current;
+    alias.inspect();
 }
 "#
             .as_slice(),
@@ -8459,7 +8462,7 @@ export function use(value: Item) {
                     && edge.string("resolution_rule") == "member-binding"
             })
             .count(),
-        2
+        3
     );
     assert!(!resolved.edges.iter().any(|edge| {
         edge.string("relation") == "calls"

@@ -5,7 +5,7 @@
 //! 013. The production extractor remains the compatibility path until this
 //! emitter has complete capability coverage and passes the hard-cut gates.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 use tree_sitter::Node;
@@ -214,6 +214,9 @@ struct CandidateState<'source, 'tree> {
     /// barriers so an older fact cannot survive an unproven mutation.
     flow_assignments: HashMap<String, Vec<FlowAssignment>>,
     flow_assignment_barriers: HashMap<String, Vec<(usize, String)>>,
+    /// Escape/dynamic barriers survive later local assignments because a
+    /// captured binding or dynamic evaluator can observe the rebinding too.
+    flow_escape_barriers: HashMap<String, Vec<usize>>,
     structural_object_variables: HashSet<String>,
     return_object_functions: HashSet<String>,
     /// A local variable initialized from a source-visible function whose
@@ -330,6 +333,7 @@ pub(crate) fn extract_candidate_tree_evidence(
         variable_types: HashMap::new(),
         flow_assignments: HashMap::new(),
         flow_assignment_barriers: HashMap::new(),
+        flow_escape_barriers: HashMap::new(),
         structural_object_variables: HashSet::new(),
         return_object_functions: HashSet::new(),
         variable_object_sources: HashMap::new(),
@@ -1534,12 +1538,30 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 continue;
             }
             let scope_id = self.scope_for_node(current);
+            if matches!(
+                current.kind(),
+                "call_expression" | "optional_call_expression" | "new_expression"
+            ) {
+                self.record_flow_call_argument_escapes(current, &scope_id);
+            }
+            if current.kind() == "with_statement" {
+                self.record_flow_scope_barriers(
+                    &scope_id,
+                    current.start_byte(),
+                    "dynamic with scope",
+                );
+            }
+            if is_callable_node(current) {
+                self.record_flow_closure_captures(current, &scope_id);
+            }
             if current.kind() == "variable_declarator"
                 && let Some(name_node) = current.child_by_field_name("name")
                 && let Some(value) = current.child_by_field_name("value")
             {
                 let value = unwrap_expression_node(value);
-                if let Some(receiver) = self.flow_receiver_for_value(&scope_id, value) {
+                if name_node.kind() == "identifier"
+                    && let Some(receiver) = self.flow_receiver_for_value(&scope_id, value)
+                {
                     let mut names = Vec::new();
                     collect_pattern_names(name_node, self.source, &mut names);
                     for (name, _) in names {
@@ -1565,54 +1587,79 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 current.kind(),
                 "assignment_expression" | "augmented_assignment_expression"
             ) && let Some(left) = current.child_by_field_name("left")
-                && left.kind() == "identifier"
             {
-                let name = node_text(self.source, left);
-                if let Some(Resolution::Local(variable)) =
-                    self.resolve_name(&scope_id, &name, Namespace::Value)
-                    && variable.kind == "variable"
-                {
-                    let right = current.child_by_field_name("right");
-                    let operator = right
-                        .and_then(|right| {
-                            self.source
-                                .get(left.end_byte()..right.start_byte())
-                                .and_then(|bytes| std::str::from_utf8(bytes).ok())
-                        })
-                        .map(str::trim)
-                        .unwrap_or_default();
-                    let straight_line = self
-                        .flow_scope_is_compatible(&variable.scope_id, &scope_id)
-                        && self.flow_assignment_is_straight_line(left, &scope_id);
-                    let receiver = right
-                        .map(unwrap_expression_node)
-                        .and_then(|right| self.flow_receiver_for_value(&scope_id, right));
-                    if straight_line && operator == "=" {
-                        if let Some(receiver) = receiver {
-                            self.record_flow_assignment(
-                                &variable.id,
-                                current.start_byte(),
-                                receiver,
-                            );
+                if left.kind() == "identifier" {
+                    let name = node_text(self.source, left);
+                    if let Some(Resolution::Local(variable)) =
+                        self.resolve_name(&scope_id, &name, Namespace::Value)
+                        && variable.kind == "variable"
+                    {
+                        let right = current.child_by_field_name("right");
+                        let operator = right
+                            .and_then(|right| {
+                                self.source
+                                    .get(left.end_byte()..right.start_byte())
+                                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                            })
+                            .map(str::trim)
+                            .unwrap_or_default();
+                        let straight_line = self
+                            .flow_scope_is_compatible(&variable.scope_id, &scope_id)
+                            && self.flow_assignment_is_straight_line(left, &scope_id);
+                        let receiver = right
+                            .map(unwrap_expression_node)
+                            .and_then(|right| self.flow_receiver_for_value(&scope_id, right));
+                        if straight_line && operator == "=" {
+                            if let Some(receiver) = receiver {
+                                self.record_flow_assignment(
+                                    &variable.id,
+                                    current.start_byte(),
+                                    receiver,
+                                );
+                            } else {
+                                self.record_flow_assignment_barrier(
+                                    &variable.id,
+                                    current.start_byte(),
+                                    "unsupported local assignment value",
+                                );
+                            }
                         } else {
                             self.record_flow_assignment_barrier(
                                 &variable.id,
                                 current.start_byte(),
-                                "unsupported local assignment value",
+                                if straight_line {
+                                    "compound local assignment"
+                                } else {
+                                    "conditional or out-of-scope local assignment"
+                                },
                             );
                         }
-                    } else {
-                        self.record_flow_assignment_barrier(
-                            &variable.id,
-                            current.start_byte(),
-                            if straight_line {
-                                "compound local assignment"
-                            } else {
-                                "conditional or out-of-scope local assignment"
-                            },
-                        );
                     }
                 }
+                if matches!(
+                    left.kind(),
+                    "member_expression" | "optional_member_expression" | "subscript_expression"
+                ) && let Some(object) = left.child_by_field_name("object")
+                {
+                    self.record_flow_value_escape(
+                        &scope_id,
+                        object,
+                        current.start_byte(),
+                        "dynamic member write",
+                    );
+                }
+            }
+            if current.kind() == "return_statement"
+                && let Some(value) = current
+                    .child_by_field_name("argument")
+                    .or_else(|| current.child_by_field_name("value"))
+            {
+                self.record_flow_value_escape(
+                    &scope_id,
+                    unwrap_expression_node(value),
+                    current.start_byte(),
+                    "returned local alias",
+                );
             }
             let mut cursor = current.walk();
             let children = current.named_children(&mut cursor).collect::<Vec<_>>();
@@ -1642,7 +1689,134 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             "call_expression" | "optional_call_expression" => {
                 self.call_return_receiver(scope_id, value)
             }
+            "identifier" | "type_identifier" => self.receiver_target(scope_id, value),
             _ => None,
+        }
+    }
+
+    fn record_flow_call_argument_escapes(&mut self, node: Node<'tree>, scope_id: &str) {
+        let Some(arguments) = node
+            .child_by_field_name("arguments")
+            .or_else(|| first_named_child_kind(node, "arguments"))
+        else {
+            return;
+        };
+        let mut cursor = arguments.walk();
+        for argument in arguments
+            .named_children(&mut cursor)
+            .filter(|argument| !argument.kind().contains("comment"))
+            .take(MAX_INLINE_OBJECT_PROPERTIES)
+        {
+            self.record_flow_value_escape(
+                scope_id,
+                unwrap_expression_node(argument),
+                node.start_byte(),
+                "passed to callable argument",
+            );
+        }
+        let function = node
+            .child_by_field_name("function")
+            .or_else(|| first_named_child(node));
+        let is_eval = function
+            .and_then(|function| rightmost_identifier(function))
+            .is_some_and(|identifier| {
+                node_text(self.source, identifier) == "eval"
+                    && self
+                        .resolve_name(scope_id, "eval", Namespace::Value)
+                        .is_none()
+            });
+        if is_eval {
+            self.record_flow_scope_barriers(scope_id, node.start_byte(), "dynamic eval");
+        }
+        let is_proxy = function
+            .and_then(|function| rightmost_identifier(function))
+            .is_some_and(|identifier| node_text(self.source, identifier) == "Proxy");
+        if is_proxy {
+            self.record_flow_scope_barriers(scope_id, node.start_byte(), "unsupported Proxy");
+        }
+    }
+
+    fn record_flow_value_escape(
+        &mut self,
+        scope_id: &str,
+        value: Node<'tree>,
+        start_byte: usize,
+        reason: &str,
+    ) {
+        let value = unwrap_expression_node(value);
+        if !matches!(value.kind(), "identifier" | "type_identifier") {
+            return;
+        }
+        let name = node_text(self.source, value);
+        let Some(Resolution::Local(declaration)) =
+            self.resolve_name(scope_id, &name, Namespace::Value)
+        else {
+            return;
+        };
+        if matches!(declaration.kind.as_str(), "variable" | "parameter") {
+            self.record_flow_assignment_barrier(&declaration.id, start_byte, reason);
+        }
+    }
+
+    fn record_flow_scope_barriers(&mut self, scope_id: &str, start_byte: usize, _reason: &str) {
+        let mut visible = self
+            .declarations
+            .values()
+            .filter(|declaration| matches!(declaration.kind.as_str(), "variable" | "parameter"))
+            .filter(|declaration| self.scope_is_descendant_or_same(scope_id, &declaration.scope_id))
+            .map(|declaration| (declaration.id.clone(), declaration.name.clone()))
+            .collect::<Vec<_>>();
+        visible.sort_unstable();
+        visible.truncate(MAX_INLINE_OBJECT_PROPERTIES);
+        for (declaration_id, name) in visible {
+            if self
+                .resolve_name(scope_id, &name, Namespace::Value)
+                .is_some_and(|resolution| {
+                    matches!(resolution, Resolution::Local(declaration) if declaration.id == declaration_id)
+                })
+            {
+                self.record_flow_escape_barrier(&declaration_id, start_byte);
+            }
+        }
+    }
+
+    fn record_flow_closure_captures(&mut self, node: Node<'tree>, scope_id: &str) {
+        let Some(body) = node
+            .child_by_field_name("body")
+            .or_else(|| first_named_child_kind(node, "statement_block"))
+        else {
+            return;
+        };
+        let mut pending = vec![(body, 0_usize)];
+        let mut captured = BTreeSet::new();
+        while let Some((current, depth)) = pending.pop() {
+            if depth > MAX_TRAVERSAL_DEPTH || captured.len() >= MAX_INLINE_OBJECT_PROPERTIES {
+                break;
+            }
+            if current.kind() == "identifier" {
+                let name = node_text(self.source, current);
+                if let Some(Resolution::Local(declaration)) =
+                    self.resolve_name(scope_id, &name, Namespace::Value)
+                    && matches!(declaration.kind.as_str(), "variable" | "parameter")
+                    && declaration.scope_id != self.scope_for_node(node)
+                    && self.scope_is_descendant_or_same(
+                        &self.scope_for_node(node),
+                        &declaration.scope_id,
+                    )
+                {
+                    captured.insert(declaration.id.clone());
+                }
+            }
+            let mut cursor = current.walk();
+            for child in current
+                .named_children(&mut cursor)
+                .take(MAX_INLINE_OBJECT_PROPERTIES)
+            {
+                pending.push((child, depth.saturating_add(1)));
+            }
+        }
+        for declaration_id in captured {
+            self.record_flow_escape_barrier(&declaration_id, node.start_byte());
         }
     }
 
@@ -1717,6 +1891,20 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         }
     }
 
+    fn record_flow_escape_barrier(&mut self, variable_id: &str, start_byte: usize) {
+        let barriers = self
+            .flow_escape_barriers
+            .entry(variable_id.to_owned())
+            .or_default();
+        if barriers.len() < MAX_INLINE_OBJECT_PROPERTIES {
+            barriers.push(start_byte);
+        } else if let Some(latest) = barriers.last_mut()
+            && *latest < start_byte
+        {
+            *latest = start_byte;
+        }
+    }
+
     fn record_flow_assignment(
         &mut self,
         variable_id: &str,
@@ -1738,6 +1926,13 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     }
 
     fn flow_receiver_at(&self, variable_id: &str, use_start_byte: usize) -> Option<ReceiverTarget> {
+        if self
+            .flow_escape_barriers
+            .get(variable_id)
+            .is_some_and(|barriers| barriers.iter().any(|start| *start <= use_start_byte))
+        {
+            return None;
+        }
         let latest_assignment = self
             .flow_assignments
             .get(variable_id)
@@ -1762,6 +1957,13 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     }
 
     fn flow_assignment_barrier_before(&self, variable_id: &str, use_start_byte: usize) -> bool {
+        if self
+            .flow_escape_barriers
+            .get(variable_id)
+            .is_some_and(|barriers| barriers.iter().any(|start| *start <= use_start_byte))
+        {
+            return true;
+        }
         let latest_assignment = self
             .flow_assignments
             .get(variable_id)

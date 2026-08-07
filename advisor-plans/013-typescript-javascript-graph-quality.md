@@ -1114,6 +1114,30 @@ byte-stable at Compass revision `24f937360cc80d6b62b633f2fdd2a367eb6529c3`,
 with 57 languages, 980 coverage records, 1,565 invariants, 27 flows, and
 graph digest `sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`.
 
+### Execution checkpoint (2026-08-07, bounded JavaScript alias-escape slice)
+
+The qualification-only ECMAScript candidate now carries source-proven local
+receiver identity through safe straight-line aliases:
+
+- `const alias = current` preserves the latest constructor, call-result, or
+  imported nominal receiver, including a cross-file callable-return chain.
+- Passing a tracked value to a callable argument, returning it, writing a
+  member, capturing it in a closure, entering `with`, invoking global `eval`,
+  or constructing an unsupported `Proxy` records an explicit flow barrier.
+  Barriers prevent stale exact member targets and dynamic/escaping cases remain
+  unresolved instead of becoming terminal-name calls.
+- Dynamic barriers are bounded by the existing traversal, per-variable fact,
+  visible-binding, and argument limits. Persistent barriers are used for
+  closure/dynamic-scope invalidation so later assignments cannot accidentally
+  restore a receiver whose binding remains observable through the escape.
+
+The focused candidate suite is now 75 tests and the universal resolver suite
+remains 158 tests; the overload fixture also proves an imported call-result can
+be aliased before its returned member is resolved. The candidate adapter remains
+absent from `UNIVERSAL_ADAPTERS`. Conditional/mapped modifier semantics, richer
+interprocedural flow, framework/compiler tiers, accepted precision/Wilson gates,
+equivalent Graphify/SCIP scope, and the production hard cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for
