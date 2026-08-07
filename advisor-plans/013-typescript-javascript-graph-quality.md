@@ -1084,6 +1084,36 @@ proxy flow, overload-aware generic substitution beyond bounded source shapes,
 and the production hard cut remain open. The candidate adapter remains absent
 from `UNIVERSAL_ADAPTERS`.
 
+### Execution checkpoint (2026-08-06, bounded imported-overload selection slice)
+
+The resolver now uses source-published callable parameter shapes to select a
+unique imported TypeScript/JavaScript overload when the call site carries an
+exact, bounded argument shape:
+
+- Direct imported functions, static members, and callable member chains can
+  match fixed parameters, imported type aliases, bounded array/generic
+  containers, and explicit generic arguments. Relative module-qualified types
+  are normalized against the declaration's source module before comparison.
+- Duplicate same-shape overloads, competing exact matches, arity mismatches,
+  unknown arguments without explicit generic evidence, and unsupported
+  assignability remain unresolved. Source-backed rejection cannot fall through
+  to lexical or terminal-name guesses, while JavaScript method signatures that
+  publish parameters without a return marker retain their existing resolution.
+- The overload matcher is bounded by the existing candidate and type-shape
+  limits; it emits no new external or deferred targets and preserves existing
+  member-binding provenance for unique matches.
+
+The focused candidate suite remains at 73 tests and the universal resolver
+suite is now 158 tests, including one positive imported-overload fixture and
+one ambiguity/mismatch/unknown negative fixture. Conditional/mapped modifier
+semantics, richer overload-aware generic substitution, alias escape/eval/proxy
+flow, framework/compiler tiers, accepted precision/Wilson gates, equivalent
+Graphify/SCIP scope, and the production hard cut remain open. The candidate
+adapter remains absent from `UNIVERSAL_ADAPTERS`. Fixture qualification stays
+byte-stable at Compass revision `1d8d5233b702559d8ae01c278473dc5459f8b48c`,
+with 57 languages, 980 coverage records, 1,565 invariants, 27 flows, and
+graph digest `sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

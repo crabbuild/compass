@@ -1387,6 +1387,7 @@ impl UniversalResolutionIndex {
             .filter(|path| path.members.len() == 1)
             .map(|path| path.root_export.clone());
         let is_member_candidate = member_path.is_some();
+        let mut source_member_target_seen = false;
         let mut targets = BTreeSet::new();
         for key in keys {
             if let Some(path) = member_path.as_ref()
@@ -1395,6 +1396,9 @@ impl UniversalResolutionIndex {
                     || path.members.len() > 1
                     || !path.type_arguments.is_empty())
             {
+                source_member_target_seen |= !self
+                    .typescript_export_slots(language, &key, &path.root_export, candidate, true)
+                    .is_empty();
                 targets.extend(self.typescript_member_chain_slots(language, &key, path, candidate));
                 continue;
             }
@@ -1415,6 +1419,7 @@ impl UniversalResolutionIndex {
                 candidate,
                 member_owner_export.is_some(),
             );
+            source_member_target_seen |= !owner_targets.is_empty();
             if member_owner_export.is_some() {
                 for owner_slot in &owner_targets {
                     let Some(owner) = self.declaration(*owner_slot) else {
@@ -1425,6 +1430,13 @@ impl UniversalResolutionIndex {
                         owner.qualified_name.clone(),
                         candidate.target_spelling.clone(),
                     )) {
+                        let members = members.iter().copied().collect::<BTreeSet<_>>();
+                        let members = if candidate.relation == CandidateRelation::Calls {
+                            let argument_types = typescript_candidate_argument_types(candidate);
+                            self.typescript_callable_overload_slots(&members, &argument_types, &[])
+                        } else {
+                            members
+                        };
                         targets.extend(
                             members
                                 .iter()
@@ -1479,6 +1491,13 @@ impl UniversalResolutionIndex {
             }
         }
         let targets = targets.into_iter().collect::<Vec<_>>();
+        if is_member_candidate
+            && candidate.relation == CandidateRelation::Calls
+            && targets.is_empty()
+            && source_member_target_seen
+        {
+            return Some(ResolutionDecision::Unresolved);
+        }
         self.unique_typescript_decision(
             Some(&targets),
             candidate,
@@ -1510,6 +1529,15 @@ impl UniversalResolutionIndex {
         }
         let root_targets =
             self.typescript_export_slots(language, module, &path.root_export, candidate, true);
+        let root_targets = if path.call_result && path.call_member_index.is_none() {
+            self.typescript_callable_overload_slots(
+                &root_targets,
+                &path.call_argument_types,
+                &path.call_type_arguments,
+            )
+        } else {
+            root_targets
+        };
         if path.call_member_index.is_some() && root_targets.len() != 1 {
             return BTreeSet::new();
         }
@@ -1763,15 +1791,22 @@ impl UniversalResolutionIndex {
         candidate: &RelationshipCandidate,
     ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
         let mut contexts = BTreeSet::new();
-        let callable_members = members
+        let member_slots = members
             .iter()
-            .filter_map(|slot| {
+            .copied()
+            .filter(|slot| {
                 self.declaration(*slot)
                     .and_then(|declaration| declaration.signature.as_deref())
                     .and_then(typescript_callable_return_type)
-                    .map(|_| *slot)
+                    .is_some()
             })
-            .collect::<Vec<_>>();
+            .take(self.limits.candidates_per_lookup.saturating_add(1))
+            .collect::<BTreeSet<_>>();
+        let callable_members = self.typescript_callable_overload_slots(
+            &member_slots,
+            call_argument_types,
+            call_type_arguments,
+        );
         if callable_members.len() != 1 {
             return BTreeSet::new();
         }
@@ -1789,6 +1824,182 @@ impl UniversalResolutionIndex {
             }
         }
         contexts
+    }
+
+    /// Select one source-proven callable overload when the call carries a
+    /// complete, exact argument shape.  TypeScript overload assignability is
+    /// intentionally not modeled here: unsupported unions, contextual
+    /// inference, optional/rest parameters, and competing exact matches stay
+    /// unresolved instead of being collapsed to a convenient declaration.
+    fn typescript_callable_overload_slots(
+        &self,
+        slots: &BTreeSet<DeclarationSlot>,
+        call_argument_types: &[String],
+        call_type_arguments: &[String],
+    ) -> BTreeSet<DeclarationSlot> {
+        let callable_slots = slots
+            .iter()
+            .filter(|slot| {
+                self.declaration(**slot)
+                    .and_then(|declaration| declaration.signature.as_deref())
+                    .is_some_and(|signature| {
+                        typescript_callable_return_type(signature).is_some()
+                            || typescript_callable_parameter_types(signature).is_some()
+                    })
+            })
+            .take(self.limits.candidates_per_lookup.saturating_add(1))
+            .copied()
+            .collect::<Vec<_>>();
+        if callable_slots.len() > self.limits.candidates_per_lookup {
+            return BTreeSet::new();
+        }
+        if callable_slots.len() <= 1 {
+            return slots.clone();
+        }
+        let matching = callable_slots
+            .iter()
+            .copied()
+            .filter(|slot| {
+                self.declaration(*slot).is_some_and(|declaration| {
+                    let normalized_argument_types = call_argument_types
+                        .iter()
+                        .map(|argument| {
+                            self.typescript_normalize_overload_type(
+                                &declaration.range.source_file,
+                                argument,
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let normalized_type_arguments = call_type_arguments
+                        .iter()
+                        .map(|argument| {
+                            self.typescript_normalize_overload_type(
+                                &declaration.range.source_file,
+                                argument,
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    typescript_callable_overload_matches(
+                        declaration,
+                        &normalized_argument_types,
+                        &normalized_type_arguments,
+                        &self.typescript_callable_parameter_aliases(declaration),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        match matching.as_slice() {
+            [only] => BTreeSet::from([*only]),
+            _ => BTreeSet::new(),
+        }
+    }
+
+    fn typescript_callable_parameter_aliases(
+        &self,
+        declaration: &DeclarationFact,
+    ) -> AHashMap<String, String> {
+        let mut aliases = AHashMap::<String, Vec<String>>::new();
+        let mut scope = declaration.scope_id.clone();
+        let mut visited = BTreeSet::new();
+        let mut resolved_spellings = BTreeSet::new();
+        while let Some(scope_id) = scope.filter(|scope_id| visited.insert(scope_id.clone())) {
+            let mut scope_spellings = BTreeSet::new();
+            for binding in self.bindings.values().filter(|binding| {
+                binding.language == declaration.language
+                    && binding.scope_id.as_deref() == Some(scope_id.as_str())
+                    && matches!(
+                        binding.kind,
+                        compass_languages::BindingKind::Import
+                            | compass_languages::BindingKind::ImportAlias
+                            | compass_languages::BindingKind::Reexport
+                    )
+                    && binding.namespace.is_none_or(|namespace| {
+                        matches!(
+                            namespace,
+                            compass_languages::SymbolNamespace::Type
+                                | compass_languages::SymbolNamespace::ValueAndType
+                                | compass_languages::SymbolNamespace::Namespace
+                        )
+                    })
+            }) {
+                if resolved_spellings.contains(&binding.spelling)
+                    && !scope_spellings.contains(&binding.spelling)
+                {
+                    continue;
+                }
+                if !scope_spellings.insert(binding.spelling.clone()) {
+                    let targets = aliases.entry(binding.spelling.clone()).or_default();
+                    if targets.len() < 2 {
+                        targets.push(self.typescript_normalize_overload_type(
+                            &declaration.range.source_file,
+                            &binding.qualified_target,
+                        ));
+                    }
+                    continue;
+                }
+                aliases.insert(
+                    binding.spelling.clone(),
+                    vec![self.typescript_normalize_overload_type(
+                        &declaration.range.source_file,
+                        &binding.qualified_target,
+                    )],
+                );
+            }
+            resolved_spellings.extend(scope_spellings);
+            scope = self
+                .scopes
+                .get(&scope_id)
+                .and_then(|scope| scope.parent_scope_id.clone());
+        }
+        aliases
+            .into_iter()
+            .filter_map(|(spelling, targets)| {
+                let [target] = targets.as_slice() else {
+                    return None;
+                };
+                Some((spelling, target.clone()))
+            })
+            .collect()
+    }
+
+    fn typescript_normalize_overload_type(&self, source_file: &str, value: &str) -> String {
+        self.typescript_normalize_overload_type_at_depth(source_file, value, 0)
+    }
+
+    fn typescript_normalize_overload_type_at_depth(
+        &self,
+        source_file: &str,
+        value: &str,
+        depth: usize,
+    ) -> String {
+        let value = value.trim();
+        if depth > 32 || value.is_empty() || value == "__unknown" || value.len() > 1024 {
+            return value.to_owned();
+        }
+        if let Some((base, arguments)) = typescript_generic_type_parts(value) {
+            let arguments = arguments
+                .iter()
+                .map(|argument| {
+                    self.typescript_normalize_overload_type_at_depth(
+                        source_file,
+                        argument,
+                        depth.saturating_add(1),
+                    )
+                })
+                .collect::<Vec<_>>();
+            return format!("{base}<{}>", arguments.join(","));
+        }
+        let (module, exported) = split_typescript_module_qualified(value);
+        let Some(module) = module else {
+            return value.to_owned();
+        };
+        let Some(key) = typescript_import_module_keys(source_file, module, &self.root)
+            .into_iter()
+            .next()
+        else {
+            return value.to_owned();
+        };
+        format!("{key}::{exported}")
     }
 
     fn typescript_index_value_contexts(
@@ -5418,6 +5629,156 @@ fn typescript_callable_parameter_types(signature: &str) -> Option<Vec<String>> {
     }
     let wrapped = format!("Parameters<{parameters}>");
     typescript_generic_type_parts(&wrapped).map(|(_, arguments)| arguments)
+}
+
+fn typescript_candidate_argument_types(candidate: &RelationshipCandidate) -> Vec<String> {
+    candidate
+        .constraints
+        .argument_types
+        .iter()
+        .map(|argument| argument.clone().unwrap_or_else(|| "__unknown".to_owned()))
+        .collect()
+}
+
+fn typescript_callable_overload_matches(
+    declaration: &DeclarationFact,
+    call_argument_types: &[String],
+    call_type_arguments: &[String],
+    parameter_aliases: &AHashMap<String, String>,
+) -> bool {
+    let Some(signature) = declaration.signature.as_deref() else {
+        return false;
+    };
+    let generic_parameters = typescript_generic_parameter_names(signature);
+    if !call_type_arguments.is_empty() && call_type_arguments.len() != generic_parameters.len() {
+        return false;
+    }
+    let mut inferred_arguments = if call_type_arguments.is_empty() {
+        generic_parameters.clone()
+    } else {
+        call_type_arguments.to_vec()
+    };
+    if let Some(parameter_types) = typescript_callable_parameter_types(signature) {
+        if parameter_types.len() != call_argument_types.len() {
+            return false;
+        }
+        for (parameter, argument) in parameter_types.iter().zip(call_argument_types) {
+            if argument == "__unknown" {
+                if call_type_arguments.is_empty()
+                    || generic_parameters.iter().all(|name| {
+                        !typescript_type_mentions_parameter(parameter, std::slice::from_ref(name))
+                    })
+                {
+                    return false;
+                }
+                continue;
+            }
+            if !typescript_callable_parameter_matches(
+                parameter,
+                argument,
+                &generic_parameters,
+                &mut inferred_arguments,
+                parameter_aliases,
+            ) {
+                return false;
+            }
+        }
+        return true;
+    }
+    declaration
+        .parameter_count
+        .and_then(|count| usize::try_from(count).ok())
+        .is_some_and(|count| {
+            count == call_argument_types.len()
+                && call_argument_types
+                    .iter()
+                    .all(|argument| argument != "__unknown")
+        })
+}
+
+fn typescript_callable_parameter_matches(
+    parameter: &str,
+    argument: &str,
+    generic_parameters: &[String],
+    inferred_arguments: &mut [String],
+    parameter_aliases: &AHashMap<String, String>,
+) -> bool {
+    typescript_callable_parameter_matches_at_depth(
+        parameter,
+        argument,
+        generic_parameters,
+        inferred_arguments,
+        parameter_aliases,
+        0,
+    )
+}
+
+fn typescript_callable_parameter_matches_at_depth(
+    parameter: &str,
+    argument: &str,
+    generic_parameters: &[String],
+    inferred_arguments: &mut [String],
+    parameter_aliases: &AHashMap<String, String>,
+    depth: usize,
+) -> bool {
+    if depth > 32 {
+        return false;
+    }
+    let parameter = parameter.trim();
+    let argument = argument.trim();
+    if parameter.is_empty() || argument.is_empty() {
+        return false;
+    }
+    if let Some(index) = generic_parameters.iter().position(|name| name == parameter) {
+        let Some(inferred) = inferred_arguments.get_mut(index) else {
+            return false;
+        };
+        if inferred == parameter {
+            inferred.clone_from(&argument.to_owned());
+            return true;
+        }
+        return inferred == argument;
+    }
+    if let Some(alias) = parameter_aliases.get(parameter) {
+        return alias == argument;
+    }
+    if parameter == argument {
+        return true;
+    }
+    if let (Some(parameter_element), Some(argument_element)) =
+        (parameter.strip_suffix("[]"), argument.strip_suffix("[]"))
+    {
+        return typescript_callable_parameter_matches_at_depth(
+            parameter_element,
+            argument_element,
+            generic_parameters,
+            inferred_arguments,
+            parameter_aliases,
+            depth.saturating_add(1),
+        );
+    }
+    let Some((parameter_base, parameter_arguments)) = typescript_generic_type_parts(parameter)
+    else {
+        return false;
+    };
+    let Some((argument_base, argument_arguments)) = typescript_generic_type_parts(argument) else {
+        return false;
+    };
+    parameter_base == argument_base
+        && parameter_arguments.len() == argument_arguments.len()
+        && parameter_arguments
+            .iter()
+            .zip(argument_arguments.iter())
+            .all(|(parameter_argument, argument_argument)| {
+                typescript_callable_parameter_matches_at_depth(
+                    parameter_argument,
+                    argument_argument,
+                    generic_parameters,
+                    inferred_arguments,
+                    parameter_aliases,
+                    depth.saturating_add(1),
+                )
+            })
 }
 
 fn typescript_infer_type_arguments(
