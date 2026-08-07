@@ -667,6 +667,46 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 .trim_start()
                 .starts_with("export default")
             && let Some(exported) = first_named_child(node)
+            && {
+                let exported = unwrap_expression_node(exported);
+                exported.kind() == "object" && !object_literal_has_spread(exported)
+            }
+        {
+            let exported = unwrap_expression_node(exported);
+            let declaration = self.add_declaration_at(
+                exported,
+                exported,
+                "variable",
+                Namespace::Value,
+                &scope_id,
+                &qualified_prefix,
+                "default",
+            )?;
+            // A spread-free `export default { ... }` has one source-backed
+            // object identity. Publish its properties below that identity so
+            // `import value from "./module"; value.member()` can resolve to
+            // the exact provider declaration across files. Spreads are kept
+            // outside this path because they can override any listed key.
+            self.structural_object_variables
+                .insert(declaration.qualified_name.clone());
+            self.stable_structural_object_variables
+                .insert(declaration.qualified_name.clone());
+            let mut cursor = exported.walk();
+            for child in exported.named_children(&mut cursor) {
+                self.collect_declarations(
+                    child,
+                    scope_id.clone(),
+                    declaration.qualified_name.clone(),
+                    depth + 1,
+                )?;
+            }
+            return Ok(());
+        }
+        if node.kind() == "export_statement"
+            && node_text(self.source, node)
+                .trim_start()
+                .starts_with("export default")
+            && let Some(exported) = first_named_child(node)
             && exported.child_by_field_name("name").is_none()
             && let Some((kind, namespace, creates_scope, scope_kind)) =
                 anonymous_declaration_shape(exported)
@@ -4011,8 +4051,13 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let Some(module_node) = first_named_child_kind(node, "string") else {
             if let Some(clause) = first_named_child_kind(node, "export_clause") {
                 self.emit_local_export_clause(clause, scope_id)?;
-            } else {
+            } else if node_text(self.source, node)
+                .trim_start()
+                .starts_with("export default")
+            {
                 self.emit_default_export(node, scope_id)?;
+            } else {
+                self.emit_named_export_declaration(node, scope_id)?;
             }
             return Ok(());
         };
@@ -4023,6 +4068,86 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         self.emit_import(node, scope_id, true)
     }
 
+    fn emit_named_export_declaration(
+        &mut self,
+        node: Node<'tree>,
+        scope_id: &str,
+    ) -> Result<(), EvidenceError> {
+        let Some(exported) = first_named_child(node) else {
+            return Ok(());
+        };
+        let mut names = Vec::new();
+        match exported.kind() {
+            "function_declaration"
+            | "generator_function_declaration"
+            | "class_declaration"
+            | "abstract_class_declaration"
+            | "interface_declaration"
+            | "type_alias_declaration"
+            | "enum_declaration"
+            | "internal_module"
+            | "module"
+            | "namespace_export" => {
+                if let Some(name) = exported
+                    .child_by_field_name("name")
+                    .or_else(|| first_identifier_node(exported))
+                {
+                    names.push((node_text(self.source, name), name));
+                }
+            }
+            "lexical_declaration" | "variable_declaration" => {
+                let mut cursor = exported.walk();
+                for declarator in exported.named_children(&mut cursor) {
+                    if declarator.kind() != "variable_declarator" {
+                        continue;
+                    }
+                    if let Some(pattern) = declarator.child_by_field_name("name") {
+                        collect_pattern_names(pattern, self.source, &mut names);
+                    }
+                }
+            }
+            _ => {}
+        }
+        for (name, anchor) in names {
+            if name.is_empty() {
+                continue;
+            }
+            for declaration in self.export_declarations(scope_id, &name, Namespace::Both) {
+                self.emit_reexport_target(scope_id, &name, anchor, &declaration, Some(&name))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn export_declarations(
+        &self,
+        scope_id: &str,
+        name: &str,
+        namespace: Namespace,
+    ) -> Vec<DeclarationInfo> {
+        let mut current = Some(scope_id.to_owned());
+        while let Some(scope) = current {
+            let declarations = self
+                .declarations_by_scope
+                .get(&scope)
+                .into_iter()
+                .flat_map(|ids| ids.iter())
+                .filter_map(|id| self.declarations.get(id))
+                .filter(|declaration| {
+                    declaration.name == name
+                        && declaration.namespace.accepts(namespace)
+                        && self.lexically_visible_unqualified(&scope, declaration)
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            if !declarations.is_empty() {
+                return declarations;
+            }
+            current = self.scope_parents.get(&scope).cloned().flatten();
+        }
+        Vec::new()
+    }
+
     fn emit_default_export(
         &mut self,
         node: Node<'tree>,
@@ -4031,6 +4156,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let Some(exported) = first_named_child(node) else {
             return Ok(());
         };
+        let exported_value = unwrap_expression_node(exported);
+        if exported_value.kind() == "object" && !object_literal_has_spread(exported_value) {
+            return self.emit_default_object_export(scope_id, exported_value);
+        }
         let (spelling, anchor) = if let Some(target_node) = default_export_target_node(node) {
             (node_text(self.source, target_node), target_node)
         } else if anonymous_declaration_shape(exported).is_some() {
@@ -4088,6 +4217,88 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     "interface".to_owned(),
                     "type_alias".to_owned(),
                     "enum".to_owned(),
+                ],
+                ..ResolutionConstraint::default()
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Publish a spread-free ES default object as a source-backed value owner.
+    /// Its member declarations are collected under `<module>.default`, which
+    /// lets the shared resolver follow `import value from "./module"` without
+    /// treating the default object as an external namespace. A spread default
+    /// intentionally stays unresolved because a later spread can replace any
+    /// listed property.
+    fn emit_default_object_export(
+        &mut self,
+        scope_id: &str,
+        object: Node<'tree>,
+    ) -> Result<(), EvidenceError> {
+        let qualified_name = format!("{}.default", self.file_qualified_name);
+        let Some(ids) = self.declarations_by_qualified.get(&qualified_name) else {
+            return Ok(());
+        };
+        let [declaration_id] = ids.as_slice() else {
+            return Ok(());
+        };
+        let Some(declaration) = self.declarations.get(declaration_id).cloned() else {
+            return Ok(());
+        };
+        self.emit_reexport_target(scope_id, "default", object, &declaration, None)
+    }
+
+    fn emit_reexport_target(
+        &mut self,
+        scope_id: &str,
+        export_name: &str,
+        anchor: Node<'tree>,
+        target: &DeclarationInfo,
+        local_name: Option<&str>,
+    ) -> Result<(), EvidenceError> {
+        if export_name.is_empty() || target.qualified_name.is_empty() {
+            return Ok(());
+        }
+        let owner = self.owner_for_scope(scope_id);
+        let binding_id = self.builder.bind_with_identity(
+            BindingKind::Reexport,
+            export_name,
+            &target.qualified_name,
+            Some(&target.id),
+            Some(scope_id),
+            Some(symbol_namespace(target.namespace)),
+            false,
+            range_for_node(self.source_file, anchor),
+        )?;
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::Reexport,
+            &owner,
+            export_name,
+            local_name,
+            Some(scope_id),
+            Some("declaration"),
+            range_for_node(self.source_file, anchor),
+        )?;
+        self.builder.relate(
+            CandidateRelation::Reexports,
+            &owner,
+            Some(&occurrence_id),
+            Some(&binding_id),
+            export_name,
+            ResolutionConstraint {
+                exact_language: Some(self.language.to_owned()),
+                qualified_name: Some(target.qualified_name.clone()),
+                allowed_target_kinds: vec![
+                    "module".to_owned(),
+                    "function".to_owned(),
+                    "class".to_owned(),
+                    "variable".to_owned(),
+                    "property".to_owned(),
+                    "method".to_owned(),
+                    "enum".to_owned(),
+                    "interface".to_owned(),
+                    "type_alias".to_owned(),
+                    "namespace".to_owned(),
                 ],
                 ..ResolutionConstraint::default()
             },

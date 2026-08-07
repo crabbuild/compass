@@ -185,6 +185,10 @@ pub struct UniversalResolutionIndex {
     /// relative imports project-aware without allowing terminal-name lookup
     /// to select a same-spelled declaration from another directory.
     typescript_modules: TypeScriptModuleIndex,
+    /// Declaration slots with an explicit source export binding. The module
+    /// index also retains private declarations for internal type expansion,
+    /// but ordinary value/module imports may select only this admitted set.
+    typescript_exported_declarations: AHashSet<DeclarationSlot>,
     /// Export aliases such as `export default Foo` and `export { Foo as Bar }`
     /// retain the exact source declaration selected by the adapter. Re-export
     /// chains without a local declaration remain unresolved until a later
@@ -404,6 +408,12 @@ impl UniversalResolutionIndex {
                 root,
                 &typescript_project_modules,
             );
+        let typescript_exported_declarations = bindings
+            .values()
+            .filter(|binding| binding.kind == compass_languages::BindingKind::Reexport)
+            .filter_map(|binding| binding.target_declaration_id.as_deref())
+            .filter_map(|id| declaration_slot(&declaration_ids, id))
+            .collect::<AHashSet<_>>();
         for (name, count, limit) in [
             ("declarations", declarations.len(), limits.declarations),
             ("bindings", bindings.len(), limits.bindings),
@@ -1000,6 +1010,7 @@ impl UniversalResolutionIndex {
             by_scope_name,
             by_source_directory_name,
             typescript_modules,
+            typescript_exported_declarations,
             typescript_export_aliases,
             typescript_reexport_targets,
             typescript_project_modules,
@@ -2513,7 +2524,10 @@ impl UniversalResolutionIndex {
         }
         for target_language in typescript_language_family(language) {
             let target_language = *target_language;
-            for index in [&self.typescript_modules, &self.typescript_export_aliases] {
+            for (direct_module_index, index) in [
+                (true, &self.typescript_modules),
+                (false, &self.typescript_export_aliases),
+            ] {
                 if let Some(values) = index.get(&(
                     target_language.to_owned(),
                     module.to_owned(),
@@ -2526,6 +2540,15 @@ impl UniversalResolutionIndex {
                             values
                                 .iter()
                                 .filter(|slot| {
+                                    if direct_module_index
+                                        && !walk.allow_type_owner
+                                        && !self.typescript_exported_declarations.contains(slot)
+                                        && self
+                                            .declaration(**slot)
+                                            .is_none_or(|declaration| declaration.kind != "module")
+                                    {
+                                        return false;
+                                    }
                                     if walk.allow_type_owner {
                                         self.typescript_declaration_allowed_owner_slot(
                                             **slot,

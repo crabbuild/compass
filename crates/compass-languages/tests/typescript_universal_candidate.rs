@@ -214,6 +214,52 @@ export function render() { return <UI.Button />; }
 }
 
 #[test]
+fn javascript_candidate_publishes_spread_free_default_object_members() {
+    let batch = candidate(
+        "src/utils.js",
+        br#"const isNumber = value => typeof value === 'number';
+const isString = value => typeof value === 'string';
+export default { isNumber, isString };
+"#,
+    );
+    validate_evidence(&batch, EvidenceLimits::default()).expect("default object evidence");
+    let default_object = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "default" && declaration.kind == "variable")
+        .expect("default object declaration");
+    assert_eq!(default_object.qualified_name, "utils.default");
+    let is_number = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "utils.default.isNumber")
+        .expect("default object member declaration");
+    assert_eq!(is_number.kind, "property");
+    assert!(batch.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Reexport
+            && binding.spelling == "default"
+            && binding.target_declaration_id.as_deref() == Some(default_object.id.as_str())
+    }));
+
+    let spread = candidate(
+        "src/spread-default.js",
+        br#"const base = { isNumber: value => true };
+export default { ...base, isString: value => true };
+"#,
+    );
+    validate_evidence(&spread, EvidenceLimits::default()).expect("spread default evidence");
+    assert!(
+        !spread
+            .declarations
+            .iter()
+            .any(|declaration| declaration.qualified_name == "spread-default.default")
+    );
+    assert!(!spread.bindings.iter().any(|binding| {
+        binding.kind == compass_languages::BindingKind::Reexport && binding.spelling == "default"
+    }));
+}
+
+#[test]
 fn javascript_commonjs_require_preserves_namespace_and_export_keys() {
     let source = br#"const api = require("./api");
 const {

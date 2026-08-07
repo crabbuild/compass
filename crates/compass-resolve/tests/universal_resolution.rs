@@ -6849,6 +6849,131 @@ new DefaultWidget().run();
 }
 
 #[test]
+fn javascript_default_object_exports_resolve_exact_imported_members()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "lib/utils.js",
+            br#"const isNumber = value => typeof value === 'number';
+const isString = value => typeof value === 'string';
+export default { isNumber, isString };
+"#
+            .as_slice(),
+        ),
+        (
+            "lib/spread-default.js",
+            br#"const base = { isNumber: value => true };
+export default { ...base, isString: value => true };
+"#
+            .as_slice(),
+        ),
+        (
+            "app/consumer.js",
+            br#"import utils from '../lib/utils.js';
+import { isNumber as named } from '../lib/utils.js';
+import spread from '../lib/spread-default.js';
+utils.isNumber(1);
+utils.isString('value');
+named(2);
+spread.isString('value');
+"#
+            .as_slice(),
+        ),
+    ];
+    for (relative, source) in files {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let batches = files
+        .iter()
+        .map(|(relative, source)| {
+            Engine::default()
+                .extract_source_universal_candidate_evidence(&root.join(relative), relative, source)
+                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let utils_number = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "utils.default.isNumber")
+        .ok_or("missing default object isNumber declaration")?;
+    let utils_string = batches[0]
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "utils.default.isString")
+        .ok_or("missing default object isString declaration")?;
+    let number_call = batches[2]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "isNumber"
+        })
+        .ok_or("missing imported default-object isNumber call")?;
+    let string_call = batches[2]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "isString"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.contains("utils.js::default"))
+        })
+        .ok_or("missing imported default-object isString call")?;
+    let spread_call = batches[2]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "isString"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.contains("spread-default.js::default"))
+        })
+        .ok_or("missing spread-default member call")?;
+    let named_call = batches[2]
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "named"
+        })
+        .ok_or("missing named-import call")?;
+    let index = UniversalResolutionIndex::new_with_inventory(
+        &batches,
+        &[],
+        root,
+        UniversalResolutionLimits::default(),
+    )?;
+    assert!(matches!(
+        index.resolve(&number_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &utils_number.id
+    ));
+    assert!(matches!(
+        index.resolve(&string_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
+            if declaration_id == &utils_string.id
+    ));
+    assert!(!matches!(
+        index.resolve(&spread_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { .. }
+    ));
+    assert!(!matches!(
+        index.resolve(&named_call.id),
+        compass_resolve::evidence::ResolutionDecision::Resolved { .. }
+    ));
+    Ok(())
+}
+
+#[test]
 fn javascript_commonjs_object_exports_resolve_named_require_bindings()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

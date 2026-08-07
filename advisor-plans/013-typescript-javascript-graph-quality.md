@@ -1702,6 +1702,36 @@ Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
 gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
 cut remain open.
 
+### Execution checkpoint (2026-08-07, ES default object export ownership)
+
+Spread-free ES default object literals now publish a source-backed `default`
+value owner and retain their exact property declarations beneath the stable
+`<module>.default` qualified identity. Cross-file default imports can therefore
+resolve `value.member()` and `value.member` to the provider property or method
+declaration. The adapter emits an explicit default reexport binding for the
+synthetic owner. Default objects containing spreads remain outside this path;
+their member resolution stays unresolved/external rather than assuming that a
+listed property survives an override. The candidate and resolver tests cover
+the positive source-backed members and the spread negative.
+
+Named declaration exports now also publish explicit source bindings for direct
+function, class, type, interface, enum, namespace, and variable declarations,
+including merged declaration slots. Ordinary value imports are admitted only
+through those explicit export bindings, while private declarations remain
+available to type-owner expansion; an invalid named import therefore stays
+external instead of selecting a same-file private helper.
+
+The focused candidate suite is now 97 tests and the universal resolver suite is
+now 169 tests. The pinned Axios per-file target differential remains
+3,054/3,167 exact local targets (113 missing, 0 wrong; 391/503 member matches,
+1,544/1,545 call matches, and 226 false positives); that differential is
+intentionally per-file and does not exercise cross-file resolver publication,
+so no Axios recall increase is claimed for this slice.
+
+Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
+gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
+cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for
