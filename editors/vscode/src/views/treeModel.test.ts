@@ -21,7 +21,8 @@ const available: SessionTreeSnapshot = {
   id: "repository-1",
   root: "/work/repo",
   graphState: "available",
-  capabilityError: undefined
+  capabilityError: undefined,
+  graphError: undefined
 };
 
 describe("buildWorkspaceTree", () => {
@@ -97,7 +98,8 @@ describe("buildWorkspaceTree", () => {
   it("offers one targeted retry after a failed graph build", () => {
     const nodes = buildWorkspaceTree(discovery, [{
       ...available,
-      graphState: "failed"
+      graphState: "failed",
+      graphError: "Invalid Compass active snapshot pointer"
     }]);
 
     expect(nodes.map((node) => node.label)).toEqual([
@@ -106,6 +108,7 @@ describe("buildWorkspaceTree", () => {
       "Explore"
     ]);
     expect(nodes[0]?.description).toBe("Build failed");
+    expect(nodes[0]?.tooltip).toContain("Invalid Compass active snapshot pointer");
     expect(nodes[1]?.command).toBe("compass.update");
     expect(commands(nodes).filter((command) => command === "compass.update")).toHaveLength(1);
   });

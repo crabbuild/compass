@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolvePublishedArtifact } from "./repositorySession";
+import { findPublishedArtifact, resolvePublishedArtifact } from "./repositorySession";
 
 const directories: string[] = [];
 
@@ -15,6 +15,7 @@ afterEach(async () => {
 describe("resolvePublishedArtifact", () => {
   it("requires a published snapshot", async () => {
     const output = await fixture();
+    expect(findPublishedArtifact(output, "graph.json")).toBeUndefined();
     expect(() => resolvePublishedArtifact(output, "graph.json")).toThrow(/current snapshot/i);
   });
 

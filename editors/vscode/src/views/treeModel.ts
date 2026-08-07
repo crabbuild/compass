@@ -21,6 +21,7 @@ export type SessionTreeSnapshot = {
   root: string;
   graphState: GraphState;
   capabilityError: string | undefined;
+  graphError: string | undefined;
   activeWriter?: unknown;
   watch?: unknown;
 };
@@ -191,7 +192,9 @@ function repositoryStatusNodes(
     repositoryId: session.id,
     label: path.basename(session.root) || session.root,
     description: graphStateLabel(session.graphState),
-    tooltip: session.root,
+    tooltip: session.graphError
+      ? `${session.root}\n${session.graphError}`
+      : session.root,
     icon: graphStateIcon(session.graphState),
     contextValue: repositoryContextValue(session)
   }));

@@ -8,6 +8,7 @@ export type GraphState = "available" | "not-materialized" | "building" | "failed
 export class RepositorySession {
   capabilities: CapabilityReport | undefined;
   capabilityError: string | undefined;
+  graphError: string | undefined;
   graphState: GraphState = "not-materialized";
   activeWriter: RunningCommand | undefined;
   watch: RunningCommand | undefined;
@@ -19,19 +20,33 @@ export class RepositorySession {
   ) {}
 
   get graphPath(): string {
-    return resolvePublishedArtifact(path.join(this.root, "compass-out"), "graph.json");
+    const outputDirectory = path.join(this.root, "compass-out");
+    return findPublishedArtifact(outputDirectory, "graph.json")
+      ?? missingSnapshotError(outputDirectory);
   }
 
   get programPath(): string {
-    return resolvePublishedArtifact(path.join(this.root, "compass-out"), "program.json");
+    const outputDirectory = path.join(this.root, "compass-out");
+    return findPublishedArtifact(outputDirectory, "program.json")
+      ?? missingSnapshotError(outputDirectory);
+  }
+
+  findGraphPath(): string | undefined {
+    return findPublishedArtifact(path.join(this.root, "compass-out"), "graph.json");
   }
 }
 
 export function resolvePublishedArtifact(outputDirectory: string, artifact: string): string {
+  return findPublishedArtifact(outputDirectory, artifact)
+    ?? missingSnapshotError(outputDirectory);
+}
+
+export function findPublishedArtifact(
+  outputDirectory: string,
+  artifact: string
+): string | undefined {
   const pointer = path.join(outputDirectory, "current-snapshot");
-  if (!existsSync(pointer)) {
-    throw new Error(`Missing Compass current snapshot pointer: ${pointer}`);
-  }
+  if (!existsSync(pointer)) return undefined;
   const snapshot = readFileSync(pointer, "utf8").trim();
   if (!/^snapshot-[^/\\]+$/.test(snapshot)) {
     throw new Error(`Invalid Compass active snapshot pointer: ${pointer}`);
@@ -44,4 +59,10 @@ export function resolvePublishedArtifact(outputDirectory: string, artifact: stri
     throw new Error(`Incomplete Compass active snapshot: ${active}`);
   }
   return path.join(active, artifact);
+}
+
+function missingSnapshotError(outputDirectory: string): never {
+  throw new Error(
+    `Missing Compass current snapshot pointer: ${path.join(outputDirectory, "current-snapshot")}`
+  );
 }
