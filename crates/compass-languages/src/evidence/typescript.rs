@@ -185,6 +185,23 @@ struct FlowAssignment {
     receiver: ReceiverTarget,
 }
 
+#[derive(Clone)]
+struct FlowEscapeBarrier {
+    start_byte: usize,
+    /// Branch containers and the selected body beneath each container. An
+    /// escape in one arm must not poison a use in a mutually exclusive arm,
+    /// while a use outside the branch remains conservative.
+    /// Function segments are compared as an execution-context prefix so
+    /// sibling callbacks do not become source-order barriers for one another.
+    control_path: Vec<FlowControlSegment>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FlowControlSegment {
+    Branch { container: usize, branch: usize },
+    Function(usize),
+}
+
 struct CandidateState<'source, 'tree> {
     source_file: &'source str,
     source: &'source [u8],
@@ -218,7 +235,7 @@ struct CandidateState<'source, 'tree> {
     flow_assignment_barriers: HashMap<String, Vec<(usize, String)>>,
     /// Escape/dynamic barriers survive later local assignments because a
     /// captured binding or dynamic evaluator can observe the rebinding too.
-    flow_escape_barriers: HashMap<String, Vec<usize>>,
+    flow_escape_barriers: HashMap<String, Vec<FlowEscapeBarrier>>,
     /// Property-specific writes on an immutable source-proven receiver alias.
     /// A write to an unrelated property does not erase the receiver identity,
     /// while a write to the queried member remains a fail-closed barrier.
@@ -2019,7 +2036,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             self.record_flow_value_escape(
                 scope_id,
                 unwrap_expression_node(argument),
-                node.start_byte(),
+                argument.start_byte(),
                 "passed to callable argument",
             );
         }
@@ -2050,7 +2067,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         scope_id: &str,
         value: Node<'tree>,
         start_byte: usize,
-        reason: &str,
+        _reason: &str,
     ) {
         let value = unwrap_expression_node(value);
         if !matches!(value.kind(), "identifier" | "type_identifier") {
@@ -2063,7 +2080,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return;
         };
         if matches!(declaration.kind.as_str(), "variable" | "parameter") {
-            self.record_flow_assignment_barrier(&declaration.id, start_byte, reason);
+            self.record_flow_escape_barrier(&declaration.id, start_byte, Some(value));
         }
     }
 
@@ -2097,7 +2114,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         if self.stable_immutable_receiver_alias(&declaration.id) {
             self.record_flow_member_write_barrier(&declaration.id, property_name, start_byte);
         } else {
-            self.record_flow_escape_barrier(&declaration.id, start_byte);
+            self.record_flow_escape_barrier(&declaration.id, start_byte, Some(value));
         }
     }
 
@@ -2158,7 +2175,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     matches!(resolution, Resolution::Local(declaration) if declaration.id == declaration_id)
                 })
             {
-                self.record_flow_escape_barrier(&declaration_id, start_byte);
+                self.record_flow_escape_barrier(&declaration_id, start_byte, None);
             }
         }
     }
@@ -2200,7 +2217,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             }
         }
         for declaration_id in captured {
-            self.record_flow_escape_barrier(&declaration_id, node.start_byte());
+            self.record_flow_escape_barrier(&declaration_id, node.start_byte(), Some(node));
         }
     }
 
@@ -2352,17 +2369,31 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         }
     }
 
-    fn record_flow_escape_barrier(&mut self, variable_id: &str, start_byte: usize) {
+    fn record_flow_escape_barrier(
+        &mut self,
+        variable_id: &str,
+        start_byte: usize,
+        path_node: Option<Node<'tree>>,
+    ) {
+        let control_path = path_node
+            .map(|node| self.flow_control_path(node))
+            .unwrap_or_default();
         let barriers = self
             .flow_escape_barriers
             .entry(variable_id.to_owned())
             .or_default();
         if barriers.len() < MAX_INLINE_OBJECT_PROPERTIES {
-            barriers.push(start_byte);
+            barriers.push(FlowEscapeBarrier {
+                start_byte,
+                control_path,
+            });
         } else if let Some(latest) = barriers.last_mut()
-            && *latest < start_byte
+            && latest.start_byte < start_byte
         {
-            *latest = start_byte;
+            *latest = FlowEscapeBarrier {
+                start_byte,
+                control_path,
+            };
         }
     }
 
@@ -2386,11 +2417,17 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         }
     }
 
-    fn flow_receiver_at(&self, variable_id: &str, use_start_byte: usize) -> Option<ReceiverTarget> {
+    fn flow_receiver_at(&self, variable_id: &str, use_node: Node<'tree>) -> Option<ReceiverTarget> {
+        let use_start_byte = use_node.start_byte();
         if self
             .flow_escape_barriers
             .get(variable_id)
-            .is_some_and(|barriers| barriers.iter().any(|start| *start <= use_start_byte))
+            .is_some_and(|barriers| {
+                barriers.iter().any(|barrier| {
+                    barrier.start_byte <= use_start_byte
+                        && self.flow_escape_barrier_applies(barrier, use_node)
+                })
+            })
         {
             return None;
         }
@@ -2417,11 +2454,17 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         latest_assignment.map(|assignment| assignment.receiver.clone())
     }
 
-    fn flow_assignment_barrier_before(&self, variable_id: &str, use_start_byte: usize) -> bool {
+    fn flow_assignment_barrier_before(&self, variable_id: &str, use_node: Node<'tree>) -> bool {
+        let use_start_byte = use_node.start_byte();
         if self
             .flow_escape_barriers
             .get(variable_id)
-            .is_some_and(|barriers| barriers.iter().any(|start| *start <= use_start_byte))
+            .is_some_and(|barriers| {
+                barriers.iter().any(|barrier| {
+                    barrier.start_byte <= use_start_byte
+                        && self.flow_escape_barrier_applies(barrier, use_node)
+                })
+            })
         {
             return true;
         }
@@ -2441,6 +2484,105 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             .map(|(start_byte, _)| *start_byte)
             .max()
             .is_some_and(|barrier| latest_assignment.is_none_or(|assignment| assignment <= barrier))
+    }
+
+    fn flow_escape_barrier_applies(
+        &self,
+        barrier: &FlowEscapeBarrier,
+        use_node: Node<'tree>,
+    ) -> bool {
+        if barrier.control_path.is_empty() {
+            return true;
+        }
+        let use_path = self.flow_control_path(use_node);
+        let barrier_functions = barrier
+            .control_path
+            .iter()
+            .filter_map(|segment| match segment {
+                FlowControlSegment::Function(function) => Some(*function),
+                FlowControlSegment::Branch { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        let use_functions = use_path
+            .iter()
+            .filter_map(|segment| match segment {
+                FlowControlSegment::Function(function) => Some(*function),
+                FlowControlSegment::Branch { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        if barrier_functions
+            .iter()
+            .zip(use_functions.iter())
+            .any(|(barrier_function, use_function)| barrier_function != use_function)
+        {
+            return false;
+        }
+        for segment in &barrier.control_path {
+            match *segment {
+                FlowControlSegment::Function(_) => {}
+                FlowControlSegment::Branch { container, branch } => {
+                    let Some(use_segment) = use_path.iter().find(|use_segment| {
+                        matches!(
+                            use_segment,
+                            FlowControlSegment::Branch {
+                                container: use_container,
+                                ..
+                            } if *use_container == container
+                        )
+                    }) else {
+                        continue;
+                    };
+                    if !matches!(
+                        use_segment,
+                        FlowControlSegment::Branch {
+                            branch: use_branch,
+                            ..
+                        } if *use_branch == branch
+                    ) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    fn flow_control_path(&self, node: Node<'tree>) -> Vec<FlowControlSegment> {
+        let mut path = Vec::new();
+        let mut child = node;
+        let mut current = child.parent();
+        while let Some(ancestor) = current {
+            if let Some(branch) = self.flow_branch_child(ancestor, child) {
+                path.push(FlowControlSegment::Branch {
+                    container: ancestor.id(),
+                    branch: branch.id(),
+                });
+            }
+            if is_callable_node(ancestor) {
+                path.push(FlowControlSegment::Function(ancestor.id()));
+            }
+            child = ancestor;
+            current = ancestor.parent();
+        }
+        path.reverse();
+        path
+    }
+
+    fn flow_branch_child(&self, ancestor: Node<'tree>, child: Node<'tree>) -> Option<Node<'tree>> {
+        let fields: &[&str] = match ancestor.kind() {
+            "if_statement" => &["consequence", "alternative"],
+            "switch_case" => &["body"],
+            "for_statement" | "for_in_statement" | "for_of_statement" | "while_statement"
+            | "do_statement" | "with_statement" => &["body"],
+            "try_statement" => &["body", "handler", "finalizer"],
+            "catch_clause" | "finally_clause" => &["body"],
+            "conditional_expression" | "ternary_expression" => &["consequence", "alternative"],
+            _ => &[],
+        };
+        fields
+            .iter()
+            .filter_map(|field| ancestor.child_by_field_name(field))
+            .find(|branch| branch.id() == child.id())
     }
 
     /// Propagate a source-visible callback parameter type through a call.
@@ -6976,13 +7118,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                             return Some(receiver);
                         }
 
-                        if let Some(receiver) =
-                            self.flow_receiver_at(&declaration.id, object.start_byte())
-                        {
+                        if let Some(receiver) = self.flow_receiver_at(&declaration.id, object) {
                             return Some(receiver);
                         }
-                        if self.flow_assignment_barrier_before(&declaration.id, object.start_byte())
-                        {
+                        if self.flow_assignment_barrier_before(&declaration.id, object) {
                             if let Some(receiver) = self.stable_nominal_flow_receiver_at(
                                 &declaration.id,
                                 object.start_byte(),

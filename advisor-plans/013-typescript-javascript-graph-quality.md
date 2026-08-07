@@ -1655,6 +1655,29 @@ Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
 gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
 cut remain open.
 
+### Execution checkpoint (2026-08-07, path-aware JavaScript escape barriers)
+
+Flow escape evidence now respects source evaluation order and bounded execution
+context. A callable argument escape is anchored at the argument occurrence,
+rather than the enclosing call, so a member read evaluated before a later object
+argument remains eligible. Escape barriers also retain a bounded branch/function
+path: a write or escape in one conditional arm or sibling callback no longer
+poisons a mutually exclusive use, while an outer or same-function use remains
+fail-closed. This recovers the Axios-shaped `response.request` read that occurs
+in one callback while a sibling callback passes the same structural object.
+
+The focused candidate suite remains 95 tests and the universal resolver suite
+remains 168 tests. On the pinned Axios checker diagnostic at the same corpus
+realization, exact local target matches improved to 3,054/3,167 (113 missing,
+0 wrong; 391/503 member matches and 1,544/1,545 call matches). Negative
+coverage confirms that a direct escape before a read and a nested escape called
+before a read remain unresolved. This is diagnostic evidence only, not a
+release precision or leadership claim.
+
+Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
+gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
+cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

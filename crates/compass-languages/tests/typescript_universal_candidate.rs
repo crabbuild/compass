@@ -3335,7 +3335,7 @@ api.remove();
 #[test]
 fn javascript_object_flow_member_reads_and_literal_writes_resolve_exact_targets() {
     let batch = candidate(
-        "src/object-flow-debug.js",
+        "src/object-flow.js",
         br#"const response = { request: requestValue, data: null };
 const later = () => {
     response.data = responseValue;
@@ -3360,7 +3360,7 @@ new Stream();
     let request = batch
         .declarations
         .iter()
-        .find(|declaration| declaration.qualified_name == "object-flow-debug.response.request")
+        .find(|declaration| declaration.qualified_name == "object-flow.response.request")
         .expect("response.request declaration");
     assert!(batch.candidates.iter().any(|candidate| {
         candidate.relation == CandidateRelation::AccessesMember
@@ -3372,8 +3372,7 @@ new Stream();
         .declarations
         .iter()
         .find(|declaration| {
-            declaration.qualified_name
-                == "object-flow-debug.Stream.constructor.internals.isCaptured"
+            declaration.qualified_name == "object-flow.Stream.constructor.internals.isCaptured"
         })
         .expect("internals.isCaptured declaration");
     assert_eq!(
@@ -3389,6 +3388,87 @@ new Stream();
             .count(),
         2
     );
+
+    let nested = candidate(
+        "src/object-flow-nested.js",
+        br#"function register(transport, data) {
+    transport.request({}, function handleResponse(res) {
+        const response = {
+            status: res.status,
+            headers: new Headers(res.headers),
+            request: res.request,
+        };
+        response.data = data;
+        if (streaming) {
+            settle(resolve, reject, response);
+        } else {
+            function handleStreamEnd() {
+                try {
+                    return consume(response.request, response);
+                } catch (err) {
+                    return err;
+                }
+            }
+            handleStreamEnd();
+        }
+    });
+}
+"#,
+    );
+    let nested_request = nested
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.qualified_name == "object-flow-nested.register.response.request"
+        })
+        .expect("nested response.request declaration");
+    assert!(nested.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "request"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(nested_request.id.as_str())
+    }));
+
+    let escaped = candidate(
+        "src/object-flow-escape.js",
+        br#"const response = { request: requestValue };
+consume(response);
+response.request;
+"#,
+    );
+    let escaped_request = escaped
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "object-flow-escape.response.request")
+        .expect("escaped response.request declaration");
+    assert!(!escaped.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "request"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(escaped_request.id.as_str())
+    }));
+
+    let nested_escape = candidate(
+        "src/object-flow-nested-escape.js",
+        br#"const response = { request: requestValue };
+const later = () => consume(response);
+later();
+response.request;
+"#,
+    );
+    let nested_escape_request = nested_escape
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.qualified_name == "object-flow-nested-escape.response.request"
+        })
+        .expect("nested escaped response.request declaration");
+    assert!(!nested_escape.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "request"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(nested_escape_request.id.as_str())
+    }));
 }
 
 #[test]
