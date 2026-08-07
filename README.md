@@ -28,6 +28,51 @@ Use Compass inside your editor with the first-party
 See the [VS Code extension guide](docs/guides/vscode.md) for current graphs,
 cursor-rooted call graphs, architecture flow, queries, and exact Git evolution.
 
+## Put Compass in your daily loop
+
+Use Compass first as a local context layer for coding assistants. Build the graph, install the agent integration, and keep the graph synchronized while you work:
+
+```bash
+compass init
+compass install
+compass watch
+```
+
+Run `compass watch` in a second terminal. Once installed, an assistant runs `compass query "<question>"` before broad source searches. It reads `compass-out/GRAPH_REPORT.md` for repository-wide architecture context and opens only the source needed to verify its answer.
+
+Inside a Git repository, `compass install` detects supported assistants and always includes the portable Agent Skills integration. Confirm that the intended host appears under `Selected`. If it does not, select one or more platforms explicitly:
+
+```bash
+compass install --platform codex
+compass install --platform codex --platform claude
+compass install --all --dry-run
+```
+
+See [Connect a coding assistant](#connect-a-coding-assistant) for supported agents, explicit platform selection, upgrades, and uninstall.
+
+### Review the graph yourself
+
+Human graph exploration is optional. Run `compass export html`, or choose **Open Code Graph** in VS Code, when you want to inspect the architecture directly:
+
+![High-level Compass workspace graph with package dependencies and subsystem filters](docs/assets/screenshots/code-graph-workspace-overview.png)
+
+*Start at the package map, filter by subsystem, then select any node to inspect its dependencies and source.*
+
+```bash
+compass export html
+```
+
+Refresh the browser after a build, or reopen the graph in VS Code.
+
+Use the graph from the right sidebar:
+
+1. Search for a symbol or file.
+2. Select a node to inspect its source, signature, community, evidence, and relationships.
+3. Open the source card, or double-click a located node, to jump to the exact code.
+4. Filter communities or change the layout when you need a different level of detail.
+
+Right-click inside a function in VS Code to open callers, callees, impact, related symbols, or a path.
+
 ## What Compass gives you
 
 | Need | Compass capability |
@@ -273,25 +318,32 @@ Claude Code, Kiro, and Cline use their native skill roots. Use repeatable
 `--platform` flags when you want explicit selection:
 
 ```bash
+compass install --platform codex
 compass install --platform codex --platform claude
 compass install --all --dry-run
 compass install --user --format json
 ```
 
-The skill teaches assistants to use an existing Compass graph as the first
-navigation layer, request a focused subgraph, and open only the source files
-needed to verify an answer. Installation does not build a graph; on the first
-repository-wide architecture, dependency, history, or impact question, the
-assistant can run the local deterministic build and continue automatically.
+Check `Selected` in the command output. If it lists only `agents`, Compass did
+not detect a host-specific adapter. An explicit `--platform` selection bypasses
+detection. Start a new assistant session after installation. In Codex, review
+and trust the hook under `/hooks`; in Gemini CLI, run `/skills reload`.
+
+The skill teaches assistants to refresh an existing graph when it is stale,
+run a focused Compass query before broad source searches, and open only the
+source files needed to verify an answer. It reads `compass-out/GRAPH_REPORT.md`
+when repository-wide architecture context is useful. Installation does not
+build a graph; on the first architecture, dependency, history, or impact
+question, the assistant can run the local deterministic build and continue.
 
 ```text
-architecture question
-        |
-        v
-read GRAPH_REPORT.md
+coding question
         |
         v
 run a focused Compass query
+        |
+        v
+read GRAPH_REPORT.md for repository-wide context
         |
         v
 inspect the smallest useful source set
