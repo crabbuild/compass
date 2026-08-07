@@ -526,6 +526,53 @@ class CorrectnessTests(unittest.TestCase):
         )
         self.assertTrue(any(call["targetSpelling"] == "nested" for call in payload["calls"]))
 
+    def test_typescript_source_oracle_records_jsx_value_and_spread_references(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = (
+                'const title = "Hello";\n'
+                'const props = { title };\n'
+                'function handle(label: string): void {}\n'
+                'export function View(label: string) {\n'
+                '  return <Button title={title} onClick={() => handle(label)} '
+                'data={user.name} {...props}>{title}</Button>;\n'
+                '}\n'
+            )
+            (root / "view.tsx").write_text(source, encoding="utf-8")
+            result = subprocess.run(
+                ("node", str(SOURCE_ORACLE), "--root", str(root), "--jsonl"),
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            payload = _typescript_payload_from_jsonl(result.stdout)
+
+        jsx_values = [
+            construct
+            for construct in payload["constructs"]
+            if construct["relation"] == "references"
+            and construct["capability"] == "jsx_values"
+        ]
+        self.assertGreaterEqual(len(jsx_values), 5)
+        self.assertEqual(
+            {construct["targetSpelling"] for construct in jsx_values},
+            {"title", "label", "props", "user"},
+        )
+        self.assertEqual(
+            {reference["kind"] for reference in payload["references"] if reference["kind"] in {
+                "jsx_value", "jsx_spread", "jsx_child"
+            }},
+            {"jsx_value", "jsx_spread", "jsx_child"},
+        )
+        source_bytes = source.encode("utf-8")
+        for construct in jsx_values:
+            self.assertEqual(
+                source_bytes[construct["startByte"] : construct["endByte"]],
+                construct["targetSpelling"].encode("utf-8"),
+            )
+        self.assertFalse(any(construct["targetSpelling"] == "onClick" for construct in jsx_values))
+
     def test_typescript_source_oracle_preserves_using_resource_declarations(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

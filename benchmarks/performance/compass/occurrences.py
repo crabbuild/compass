@@ -827,7 +827,14 @@ def _oracle_reference(value: object, index: int) -> Mapping[str, object]:
     }
     if set(value) != required:
         raise RuntimeError(f"{context} has an invalid schema")
-    if value["relation"] != "references" or value["kind"] not in {"identifier", "type", "jsx"}:
+    if value["relation"] != "references" or value["kind"] not in {
+        "identifier",
+        "type",
+        "jsx",
+        "jsx_value",
+        "jsx_spread",
+        "jsx_child",
+    }:
         raise RuntimeError(f"{context}.relation or kind is invalid")
     _safe_oracle_file(value["sourceFile"], f"{context}.sourceFile")
     for field in ("ownerQualifiedName", "targetSpelling"):

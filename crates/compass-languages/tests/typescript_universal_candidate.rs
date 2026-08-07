@@ -167,7 +167,9 @@ export function run() {
 #[test]
 fn javascript_candidate_emits_jsx_commonjs_and_dynamic_import_evidence() {
     let source = br#"const Button = () => null;
-export function render() { return <Button />; }
+const title = "Hello";
+const props = { title };
+export function render(value) { return <Button title={title} value={value} {...props} />; }
 const helper = require("./helper");
 module.exports = render;
 export async function load() { return import("./lazy.js"); }
@@ -195,6 +197,18 @@ export async function load() { return import("./lazy.js"); }
             .occurrences
             .iter()
             .any(|occurrence| { occurrence.context.as_deref() == Some("jsx") })
+    );
+    assert!(
+        batch
+            .occurrences
+            .iter()
+            .any(|occurrence| { occurrence.context.as_deref() == Some("jsx_value") })
+    );
+    assert!(
+        batch
+            .occurrences
+            .iter()
+            .any(|occurrence| { occurrence.context.as_deref() == Some("jsx_spread") })
     );
     assert!(
         batch
@@ -265,6 +279,88 @@ export function render() { return <UI.Button />; }
         Some("./ui::Button")
     );
     assert!(jsx_member.binding_id.is_some());
+}
+
+#[test]
+fn typescript_candidate_emits_jsx_value_and_spread_references() {
+    let source = br#"interface Props { title: string; onClick: () => void }
+const title = "Hello";
+const props = { title };
+function handle(label: string) {}
+export function View(label: string) {
+    return <Button title={title} onClick={() => handle(label)} data={user.name} {...props}>{title}</Button>;
+}
+"#;
+    let batch = candidate("src/view.tsx", source);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("JSX value evidence");
+
+    let declaration_id = |name: &str, kind: &str| {
+        batch
+            .declarations
+            .iter()
+            .find(|declaration| declaration.name == name && declaration.kind == kind)
+            .map(|declaration| declaration.id.as_str())
+    };
+    let occurrence_for = |spelling: &str, context: &str| {
+        batch
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.relation == CandidateRelation::References)
+            .filter_map(|candidate| {
+                let occurrence_id = candidate.occurrence_id.as_deref()?;
+                let occurrence = batch
+                    .occurrences
+                    .iter()
+                    .find(|occurrence| occurrence.id == occurrence_id)?;
+                (candidate.target_spelling == spelling
+                    && occurrence.context.as_deref() == Some(context))
+                .then_some((candidate, occurrence))
+            })
+            .next()
+    };
+
+    let title_id = declaration_id("title", "variable").expect("title declaration");
+    let (title_value, title_occurrence) =
+        occurrence_for("title", "jsx_value").expect("JSX title value reference");
+    assert_eq!(
+        title_value
+            .constraints
+            .exact_target_declaration_id
+            .as_deref(),
+        Some(title_id)
+    );
+    let title_start = usize::try_from(title_occurrence.range.start_byte).expect("title range");
+    assert_eq!(&source[title_start..title_start + 5], b"title");
+
+    let props_id = declaration_id("props", "variable").expect("props declaration");
+    let (props_spread, _) = occurrence_for("props", "jsx_spread").expect("JSX spread reference");
+    assert_eq!(
+        props_spread
+            .constraints
+            .exact_target_declaration_id
+            .as_deref(),
+        Some(props_id)
+    );
+
+    let (label_value, _) = occurrence_for("label", "jsx_value").expect("JSX callback argument");
+    let label_target = label_value
+        .constraints
+        .exact_target_declaration_id
+        .as_deref()
+        .and_then(|id| {
+            batch
+                .declarations
+                .iter()
+                .find(|declaration| declaration.id == id)
+        })
+        .expect("label exact target");
+    assert_eq!(label_target.name, "label");
+    assert_eq!(label_target.kind, "parameter");
+    assert!(occurrence_for("title", "jsx_child").is_some());
+    assert!(occurrence_for("user", "jsx_value").is_some());
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "handle"
+    }));
 }
 
 #[test]

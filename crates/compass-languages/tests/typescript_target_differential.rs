@@ -544,6 +544,7 @@ fn is_supported_construct(construct: &OracleConstruct) -> bool {
             | ("extends", "base_types")
             | ("implements", "base_types")
             | ("references", "jsx")
+            | ("references", "jsx_values")
             | ("references", "type_references")
     )
 }
@@ -619,6 +620,11 @@ fn relation_name(
         CandidateRelation::Extends => Some(("extends", "base_types")),
         CandidateRelation::Implements => Some(("implements", "base_types")),
         CandidateRelation::References if context == Some("jsx") => Some(("references", "jsx")),
+        CandidateRelation::References
+            if matches!(context, Some("jsx_value" | "jsx_spread" | "jsx_child")) =>
+        {
+            Some(("references", "jsx_values"))
+        }
         CandidateRelation::References => Some(("references", "type_references")),
         _ => None,
     }

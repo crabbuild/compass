@@ -137,6 +137,7 @@ fn supported_construct(construct: &OracleConstruct) -> bool {
             | ("extends", "base_types")
             | ("implements", "base_types")
             | ("references", "jsx")
+            | ("references", "jsx_values")
             | ("references", "type_references")
     )
 }
@@ -172,6 +173,14 @@ fn candidate_source_keys(batch: &SemanticEvidenceBatch) -> BTreeSet<(String, Str
             CandidateRelation::Implements => ("implements", "base_types"),
             CandidateRelation::References if occurrence.context.as_deref() == Some("jsx") => {
                 ("references", "jsx")
+            }
+            CandidateRelation::References
+                if matches!(
+                    occurrence.context.as_deref(),
+                    Some("jsx_value" | "jsx_spread" | "jsx_child")
+                ) =>
+            {
+                ("references", "jsx_values")
             }
             CandidateRelation::References => ("references", "type_references"),
             _ => continue,

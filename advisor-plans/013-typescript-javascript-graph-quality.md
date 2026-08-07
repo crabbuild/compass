@@ -2073,6 +2073,25 @@ slice: the universal adapter is unregistered, the legacy/native hard cut is
 open, and compiler-differential, framework, competitor, release-corpus, and
 leadership gates remain required.
 
+### Execution checkpoint (2026-08-07, JSX value/spread/child reference slice)
+
+JSX tags were already represented as component references, but prop values and
+spread expressions could disappear unless they happened to be proven callable.
+The candidate now walks pinned tree-sitter `jsx_expression` nodes and emits
+source-anchored value references for attribute values, spread attributes, and
+child expressions. It resolves unique local/import bindings, preserves
+targetless occurrences for unresolved values, retains callback arguments and
+receiver objects, and excludes prop names, member-property names, declaration
+patterns, and call callees. This keeps JSX value use evidence separate from
+`Calls` and avoids fabricating indirect calls.
+
+The independent TypeScript 5.9.3 source oracle now records matching
+`jsx_values` constructs and typed `jsx_value`, `jsx_spread`, and `jsx_child`
+references. The Python audit schema and ignored differential harness accept
+the new capability. Candidate and focused oracle coverage now stand at 109 and
+the resolver suite remains 180; broad corpus, target-adjudication, framework,
+competitor, production hard-cut, and leadership gates remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

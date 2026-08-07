@@ -224,6 +224,7 @@ fn supported_construct(construct: &OracleConstruct) -> bool {
         | ("implements", "base_types")
         | ("references", "type_references") => true,
         ("references", "jsx") => jsx_component,
+        ("references", "jsx_values") => true,
         _ => false,
     }
 }
@@ -288,6 +289,14 @@ fn candidate_key_names(
         CandidateRelation::Implements => Some(("implements", "base_types")),
         CandidateRelation::References if occurrence.context.as_deref() == Some("jsx") => {
             Some(("references", "jsx"))
+        }
+        CandidateRelation::References
+            if matches!(
+                occurrence.context.as_deref(),
+                Some("jsx_value" | "jsx_spread" | "jsx_child")
+            ) =>
+        {
+            Some(("references", "jsx_values"))
         }
         CandidateRelation::References => Some(("references", "type_references")),
         _ => None,

@@ -29,7 +29,9 @@ and count/digest mismatches.
 
 - `typescript-source-oracle.mjs` records source constructs for declarations
   (including `using`/`await using` resource bindings), imports/reexports,
-  calls, construction, members, bases, decorators, type references, and JSX.
+  calls, construction, members, bases, decorators, type references, JSX tags,
+  and JSX value/spread/child references. JSX prop names are not mistaken for
+  value uses, while nested callback arguments remain source-grounded.
   Decorator factories are not duplicated as ordinary calls, while calls nested
   in decorator arguments remain visible. It does not select graph targets. Its
   payload/JSONL stream includes project scopes, configuration/source digests,

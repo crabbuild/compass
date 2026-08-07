@@ -3621,6 +3621,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             "jsx_opening_element" | "jsx_self_closing_element" => {
                 self.emit_jsx(node, &scope_id)?;
             }
+            "jsx_expression" => {
+                self.emit_jsx_value_references(node, &scope_id)?;
+            }
             "decorator" => self.emit_decorator(node, &scope_id)?,
             "class_heritage" if self.language == "javascript" => {
                 self.emit_bases(node, &scope_id)?;
@@ -5781,6 +5784,109 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         )
     }
 
+    /// Emit value references contained in a JSX expression, including
+    /// attribute values, spread attributes, and child expressions. JSX
+    /// values are ordinary JavaScript expressions, but the generic identifier
+    /// walker intentionally only publishes proven callable references. Keep a
+    /// dedicated pass so a parameter, object, or imported value used as a
+    /// prop is preserved even when it is not itself callable.
+    fn emit_jsx_value_references(
+        &mut self,
+        node: Node<'tree>,
+        scope_id: &str,
+    ) -> Result<(), EvidenceError> {
+        let Some(context) = jsx_expression_context(node, self.source) else {
+            return Ok(());
+        };
+        let Some(expression) = first_named_child(node) else {
+            return Ok(());
+        };
+        self.walk_jsx_value_references(expression, scope_id, context, 0)
+    }
+
+    fn walk_jsx_value_references(
+        &mut self,
+        node: Node<'tree>,
+        scope_id: &str,
+        context: &str,
+        depth: usize,
+    ) -> Result<(), EvidenceError> {
+        if depth > MAX_TRAVERSAL_DEPTH {
+            return Ok(());
+        }
+        // A nested JSX element owns its own expression contexts. Do not let
+        // an outer child expression relabel the nested tag or its props.
+        if matches!(
+            node.kind(),
+            "jsx_element"
+                | "jsx_opening_element"
+                | "jsx_self_closing_element"
+                | "jsx_closing_element"
+        ) {
+            return Ok(());
+        }
+        if is_jsx_value_reference_node(node) {
+            self.emit_jsx_value_reference(node, scope_id, context)?;
+        }
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            self.walk_jsx_value_references(child, scope_id, context, depth + 1)?;
+        }
+        Ok(())
+    }
+
+    fn emit_jsx_value_reference(
+        &mut self,
+        node: Node<'tree>,
+        scope_id: &str,
+        context: &str,
+    ) -> Result<(), EvidenceError> {
+        if self.declaration_name_nodes.contains(&node.start_byte()) {
+            return Ok(());
+        }
+        let spelling = node_text(self.source, node);
+        if spelling.is_empty() {
+            return Ok(());
+        }
+        let allowed_kinds = &[
+            "class",
+            "enum",
+            "external",
+            "function",
+            "method",
+            "parameter",
+            "property",
+            "variable",
+        ];
+        if let Some(resolution) = self.resolve_name(scope_id, &spelling, Namespace::Value) {
+            return self.add_declaration_resolution(
+                node,
+                scope_id,
+                CandidateRelation::References,
+                SemanticRole::CallableReference,
+                &spelling,
+                None,
+                Some(context),
+                Namespace::Value,
+                resolution,
+                allowed_kinds,
+            );
+        }
+        self.add_unresolved_candidate(
+            node,
+            scope_id,
+            CandidateRelation::References,
+            SemanticRole::CallableReference,
+            &spelling,
+            None,
+            context,
+            None,
+            Vec::new(),
+            allowed_kinds,
+            None,
+        )
+    }
+
     fn emit_decorator(&mut self, node: Node<'tree>, scope_id: &str) -> Result<(), EvidenceError> {
         let allowed_kinds = &["function", "class", "variable", "property", "external"];
         if self.parser_recovered || node.has_error() {
@@ -6299,6 +6405,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         | "jsx_self_closing_element"
                 )
             })
+            || is_jsx_value_reference_node(node)
+            || is_jsx_attribute_name(node)
             || is_type_reference_node(node)
         {
             return Ok(());
@@ -12525,6 +12633,99 @@ fn is_type_reference_node(node: Node<'_>) -> bool {
         current = parent.parent();
     }
     false
+}
+
+fn jsx_expression_context<'a>(node: Node<'_>, source: &'a [u8]) -> Option<&'a str> {
+    if node.kind() != "jsx_expression" {
+        return None;
+    }
+    let parent = node.parent()?;
+    if node_text(source, node).trim_start().starts_with("{...")
+        || matches!(parent.kind(), "jsx_spread_attribute")
+    {
+        return Some("jsx_spread");
+    }
+    match parent.kind() {
+        "jsx_attribute" => Some("jsx_value"),
+        "jsx_element" => Some("jsx_child"),
+        "jsx_opening_element" | "jsx_self_closing_element" => Some("jsx_spread"),
+        _ => None,
+    }
+}
+
+fn is_jsx_attribute_name(node: Node<'_>) -> bool {
+    node.parent().is_some_and(|parent| {
+        parent.kind() == "jsx_attribute"
+            && first_named_child(parent).is_some_and(|name| name.id() == node.id())
+    })
+}
+
+fn is_jsx_value_reference_node(node: Node<'_>) -> bool {
+    if !matches!(node.kind(), "identifier" | "shorthand_property_identifier") {
+        return false;
+    }
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    let mut current = Some(parent);
+    let mut inside_expression = false;
+    while let Some(candidate) = current {
+        if candidate.kind() == "jsx_expression" {
+            inside_expression = true;
+            break;
+        }
+        if matches!(
+            candidate.kind(),
+            "jsx_element" | "jsx_opening_element" | "jsx_self_closing_element"
+        ) {
+            break;
+        }
+        current = candidate.parent();
+    }
+    if !inside_expression {
+        return false;
+    }
+    if is_jsx_attribute_name(node) {
+        return false;
+    }
+    if matches!(
+        parent.kind(),
+        "jsx_opening_element"
+            | "jsx_self_closing_element"
+            | "jsx_closing_element"
+            | "jsx_namespace_name"
+            | "import_clause"
+            | "namespace_import"
+            | "named_imports"
+            | "import_specifier"
+            | "export_clause"
+            | "export_specifier"
+    ) {
+        return false;
+    }
+    if matches!(
+        parent.kind(),
+        "member_expression" | "optional_member_expression" | "subscript_expression"
+    ) && parent
+        .child_by_field_name("property")
+        .or_else(|| parent.child_by_field_name("name"))
+        .or_else(|| parent.child_by_field_name("index"))
+        .is_some_and(|property| property.id() == node.id())
+    {
+        return false;
+    }
+    if matches!(
+        parent.kind(),
+        "call_expression" | "optional_call_expression" | "new_expression" | "decorator"
+    ) && parent
+        .child_by_field_name("function")
+        .or_else(|| parent.child_by_field_name("constructor"))
+        .or_else(|| first_named_child(parent))
+        .is_some_and(|callee| callee.id() == node.id())
+    {
+        return false;
+    }
+    !is_type_reference_node(node)
 }
 
 fn module_name(path: &Path, source_file: &str) -> String {

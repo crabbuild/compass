@@ -101,6 +101,12 @@ the adapter actually emits. The batch contains six bounded collections:
   initializer calls and subsequent references/members keep the same binding
   identity; contextual or malformed non-statement assignments remain
   unresolved rather than being promoted into declarations.
+  JSX attribute values, spread attributes, and child expressions are ordinary
+  value-reference contexts. The qualification-only TypeScript/JavaScript
+  adapter emits exact `jsx_value`, `jsx_spread`, and `jsx_child` occurrences
+  for local, imported, and unresolved values, while excluding prop names,
+  member-property spellings, and call callees. This preserves callback
+  arguments and object/receiver values without inventing indirect calls.
 - `EvidenceDiagnostic` records a bounded extraction problem without creating
   a graph fact.
 

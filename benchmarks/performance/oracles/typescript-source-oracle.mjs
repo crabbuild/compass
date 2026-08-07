@@ -543,6 +543,41 @@ function isDeclarationName(node) {
   return false;
 }
 
+function jsxValueContext(node) {
+  let current = node.parent;
+  while (current) {
+    if (ts.isJsxSpreadAttribute(current)) return "jsx_spread";
+    if (ts.isJsxExpression(current)) {
+      const owner = current.parent;
+      if (ts.isJsxAttribute(owner)) return "jsx_value";
+      if (ts.isJsxSpreadAttribute(owner)) return "jsx_spread";
+      if (ts.isJsxElement(owner)) return "jsx_child";
+      return null;
+    }
+    if (ts.isJsxElement(current) || ts.isJsxOpeningLikeElement(current)) return null;
+    current = current.parent;
+  }
+  return null;
+}
+
+function isJsxValueReference(node) {
+  if (!ts.isIdentifier(node)) return false;
+  const parent = node.parent;
+  if (!parent || isDeclarationName(node)) return false;
+  if (ts.isJsxAttribute(parent) && parent.name === node) return false;
+  if (ts.isJsxOpeningLikeElement(parent) || ts.isJsxClosingElement(parent)) return false;
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return false;
+  if (
+    (ts.isCallExpression(parent) || ts.isNewExpression(parent)) &&
+    parent.expression === node
+  ) {
+    return false;
+  }
+  if (ts.isTypeReferenceNode(parent) || ts.isExpressionWithTypeArguments(parent)) return false;
+  if (ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent)) return false;
+  return true;
+}
+
 function scriptKind(fileName) {
   return ts.getScriptKindFromFileName(fileName);
 }
@@ -1011,6 +1046,11 @@ function parseFile(root, fileName, raw, constructs, diagnostics, typedFacts) {
       addReferenceFact(node.tagName, "jsx", node.tagName);
     } else if (ts.isIdentifier(node) && !isDeclarationName(node)) {
       const parent = node.parent;
+      const jsxContext = jsxValueContext(node);
+      if (jsxContext && isJsxValueReference(node)) {
+        add("references", "jsx_values", node);
+        addReferenceFact(node, jsxContext, node);
+      }
       if (
         !ts.isCallExpression(parent) &&
         !ts.isNewExpression(parent) &&
