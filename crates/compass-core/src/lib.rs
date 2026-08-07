@@ -58,7 +58,7 @@ impl ExportInputs {
     pub fn load(graph_path: &Path) -> Result<Self, GraphError> {
         let document = GraphDocument::load(graph_path)?;
         let output_dir = graph_path.parent().unwrap_or_else(|| Path::new("."));
-        let analysis = read_json_value(&output_dir.join(".compass_analysis.json"));
+        let analysis = read_json_value(&output_dir.join("analysis.json"));
         let mut communities = analysis
             .as_ref()
             .and_then(|value| value.get("communities"))
@@ -91,7 +91,7 @@ impl ExportInputs {
             .cloned()
             .and_then(|value| serde_json::from_value(value).ok())
             .unwrap_or_default();
-        let labels = read_json_value(&output_dir.join(".compass_labels.json"))
+        let labels = read_json_value(&output_dir.join("labels.json"))
             .and_then(|value| value.as_object().map(parse_string_map))
             .unwrap_or_default();
         let report = fs::read_to_string(output_dir.join("GRAPH_REPORT.md")).unwrap_or_default();
@@ -186,16 +186,15 @@ impl LoadedGraph {
 pub fn default_graph_path() -> PathBuf {
     let output =
         PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()));
-    let requested = output.join("graph.json");
-    compass_files::BuildGuard::resolve_requested_artifact(&requested)
-        .unwrap_or_else(|_| output.join(".compass-invalid-active-generation"))
+    compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
+        .unwrap_or_else(|_| output.join("invalid-current-snapshot"))
 }
 
 fn load_learning_overlay(graph_path: &Path) -> HashMap<String, Map<String, Value>> {
     let sidecar = graph_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join(".compass_learning.json");
+        .join("learning.json");
     let Ok(bytes) = fs::read(sidecar) else {
         return HashMap::new();
     };
@@ -291,7 +290,7 @@ fn resolve_source_path(source: &str, graph_path: &Path) -> Option<PathBuf> {
         })
         .unwrap_or_else(|| "compass-out".into());
     let mut roots = Vec::new();
-    if let Ok(recorded) = fs::read_to_string(output_dir.join(".compass_root")) {
+    if let Ok(recorded) = fs::read_to_string(output_dir.join("source-root.txt")) {
         let recorded = recorded.trim();
         if !recorded.is_empty() {
             roots.push(PathBuf::from(recorded));

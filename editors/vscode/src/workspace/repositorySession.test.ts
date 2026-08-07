@@ -13,38 +13,38 @@ afterEach(async () => {
 });
 
 describe("resolvePublishedArtifact", () => {
-  it("falls back to the legacy root when no generation is published", async () => {
+  it("requires a published snapshot", async () => {
     const output = await fixture();
-    expect(resolvePublishedArtifact(output, "graph.json")).toBe(path.join(output, "graph.json"));
+    expect(() => resolvePublishedArtifact(output, "graph.json")).toThrow(/current snapshot/i);
   });
 
-  it("follows the sealed active generation", async () => {
+  it("follows the sealed active snapshot", async () => {
     const output = await fixture();
-    const generation = "generation-123";
-    await mkdir(path.join(output, ".compass-generations", generation), { recursive: true });
-    await writeFile(path.join(output, ".compass-active-generation"), generation);
+    const snapshot = "snapshot-123";
+    await mkdir(path.join(output, "snapshots", snapshot), { recursive: true });
+    await writeFile(path.join(output, "current-snapshot"), snapshot);
 
     expect(resolvePublishedArtifact(output, "graph.json")).toBe(
-      path.join(output, ".compass-generations", generation, "graph.json")
+      path.join(output, "snapshots", snapshot, "graph.json")
     );
   });
 
-  it("rejects malformed and incomplete generation pointers", async () => {
+  it("rejects malformed and incomplete snapshot pointers", async () => {
     const output = await fixture();
-    const generation = "generation-456";
-    const active = path.join(output, ".compass-generations", generation);
+    const snapshot = "snapshot-456";
+    const active = path.join(output, "snapshots", snapshot);
     await mkdir(active, { recursive: true });
-    await writeFile(path.join(active, ".compass-build-incomplete"), "1");
-    await writeFile(path.join(output, ".compass-active-generation"), generation);
+    await writeFile(path.join(active, "build-incomplete"), "1");
+    await writeFile(path.join(output, "current-snapshot"), snapshot);
     expect(() => resolvePublishedArtifact(output, "graph.json")).toThrow(/incomplete/i);
 
-    await writeFile(path.join(output, ".compass-active-generation"), "../escape");
+    await writeFile(path.join(output, "current-snapshot"), "../escape");
     expect(() => resolvePublishedArtifact(output, "graph.json")).toThrow(/invalid/i);
   });
 });
 
 async function fixture(): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), "compass-vscode-generation-"));
+  const directory = await mkdtemp(path.join(tmpdir(), "compass-vscode-snapshot-"));
   directories.push(directory);
   const output = path.join(directory, "compass-out");
   await mkdir(output);

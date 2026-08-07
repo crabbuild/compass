@@ -141,11 +141,11 @@ fn export_inputs_fall_back_to_node_communities_and_tolerate_partial_sidecars()
         r#"{"directed":false,"multigraph":false,"graph":{},"nodes":[{"id":"a","label":"A","community":0},{"id":"b","label":"B","community":"1"},{"id":"c","label":"C","community":"bad"}],"links":[]}"#,
     )?;
     fs::write(
-        output.join(".compass_analysis.json"),
+        output.join("analysis.json"),
         r#"{"communities":{"bad":"not-an-array"},"cohesion":{"0":0.75,"bad":1,"1":"wrong"},"gods":"wrong"}"#,
     )?;
     fs::write(
-        output.join(".compass_labels.json"),
+        output.join("labels.json"),
         r#"{"0":"Core","1":7,"bad":"ignored"}"#,
     )?;
     fs::write(output.join("GRAPH_REPORT.md"), "# Fixture\n")?;
@@ -176,11 +176,11 @@ fn loaded_graph_learning_overlay_marks_current_missing_and_unfingerprinted_sourc
         r#"{"directed":false,"multigraph":false,"graph":{},"nodes":[{"id":"a","label":"A"}],"links":[]}"#,
     )?;
     fs::write(
-        output.join(".compass_root"),
+        output.join("source-root.txt"),
         directory.path().to_string_lossy().as_bytes(),
     )?;
     fs::write(
-        output.join(".compass_learning.json"),
+        output.join("learning.json"),
         serde_json::to_vec(&serde_json::json!({
             "nodes": {
                 "current": {"source_file":"source.rs","code_fingerprint":fingerprint},
@@ -204,9 +204,9 @@ fn loaded_graph_learning_overlay_marks_current_missing_and_unfingerprinted_sourc
 
     let directed = LoadedGraph::load_directed(&graph)?;
     assert_eq!(directed.graph.node_count(), 1);
-    fs::write(output.join(".compass_learning.json"), "not json")?;
+    fs::write(output.join("learning.json"), "not json")?;
     assert!(LoadedGraph::load(&graph)?.overlay.is_empty());
-    fs::remove_file(output.join(".compass_learning.json"))?;
+    fs::remove_file(output.join("learning.json"))?;
     assert!(LoadedGraph::load(&graph)?.overlay.is_empty());
     Ok(())
 }
@@ -404,7 +404,7 @@ fn incremental_mixed_origin_nodes_use_fresh_ast_typed_data() -> Result<(), Box<d
         initial.output_dir.join("graph.json"),
         serde_json::to_vec_pretty(&initial_graph)?,
     )?;
-    fs::write(initial.output_dir.join(".compass_semantic_marker"), b"{}")?;
+    fs::write(initial.output_dir.join("semantic-marker.json"), b"{}")?;
 
     fs::write(
         &source,
@@ -498,7 +498,7 @@ fn incremental_mixed_origin_edges_use_fresh_ast_relationship_sites() -> Result<(
         initial.output_dir.join("graph.json"),
         serde_json::to_vec_pretty(&initial_graph)?,
     )?;
-    fs::write(initial.output_dir.join(".compass_semantic_marker"), b"{}")?;
+    fs::write(initial.output_dir.join("semantic-marker.json"), b"{}")?;
 
     fs::write(
         &source,

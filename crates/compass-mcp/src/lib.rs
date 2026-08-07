@@ -1235,7 +1235,7 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Strin
                 .path
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
-                .join(".compass_labels.json");
+                .join("labels.json");
             let labels = fs::read(&labels_path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<BTreeMap<usize, String>>(&bytes).ok())
@@ -1333,7 +1333,7 @@ mod tests {
     }
 
     #[test]
-    fn project_path_fails_closed_on_a_malformed_generation_pointer()
+    fn project_path_fails_closed_on_a_malformed_snapshot_pointer()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp = tempfile::tempdir()?;
         let default = temp.path().join("default.json");
@@ -1341,10 +1341,7 @@ mod tests {
         let project = temp.path().join("project");
         fs::create_dir_all(project.join("compass-out"))?;
         sample(&project.join("compass-out/graph.json"))?;
-        fs::write(
-            project.join("compass-out/.compass-active-generation"),
-            "../escape",
-        )?;
+        fs::write(project.join("compass-out/current-snapshot"), "../escape")?;
         let server = CompassMcp::new(default);
         let mut args = Map::new();
         args.insert(
@@ -1352,13 +1349,13 @@ mod tests {
             Value::String(project.to_string_lossy().into_owned()),
         );
         let result = server.invoke("graph_stats", args);
-        assert!(result.contains("generation"), "{result}");
+        assert!(result.contains("snapshot"), "{result}");
         assert!(!result.contains("Nodes: 2"), "{result}");
         Ok(())
     }
 
     #[test]
-    fn default_public_graph_tracks_generation_changes_and_fails_closed()
+    fn default_public_graph_tracks_snapshot_changes_and_fails_closed()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp = tempfile::tempdir()?;
         let output = temp.path().join("compass-out");
@@ -1368,7 +1365,7 @@ mod tests {
         let first = compass_files::BuildGuard::begin(&output)?;
         fs::write(
             first.staging_directory().join("graph.json"),
-            r#"{"directed":true,"nodes":[{"id":"generation-one"}],"links":[]}"#,
+            r#"{"directed":true,"nodes":[{"id":"snapshot-one"}],"links":[]}"#,
         )?;
         first.commit_with_artifacts(&["graph.json"])?;
 
@@ -1391,9 +1388,9 @@ mod tests {
                 .contains("Nodes: 3")
         );
 
-        fs::write(output.join(".compass-active-generation"), "../escape")?;
+        fs::write(output.join("current-snapshot"), "../escape")?;
         let malformed = server.invoke("graph_stats", Map::new());
-        assert!(malformed.contains("generation"), "{malformed}");
+        assert!(malformed.contains("snapshot"), "{malformed}");
         assert!(!malformed.contains("Nodes: 2"), "{malformed}");
         Ok(())
     }
@@ -1452,7 +1449,7 @@ mod tests {
         )?;
         fs::write(temp.path().join("GRAPH_REPORT.md"), "# Report\nBody\n")?;
         fs::write(
-            temp.path().join(".compass_labels.json"),
+            temp.path().join("labels.json"),
             r#"{"0":"Core","1":"Docs"}"#,
         )?;
         let server = CompassMcp::new(&graph);

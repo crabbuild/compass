@@ -56,13 +56,13 @@ import pathlib
 import sys
 
 output = pathlib.Path(sys.argv[1]) / "compass-out"
-pointer = output / ".compass-active-generation"
-generation = pointer.read_text().strip()
-if not generation.startswith("generation-") or "/" in generation or "\\" in generation:
-    raise SystemExit(f"invalid active generation {generation!r}")
-active = output / ".compass-generations" / generation
-if not active.is_dir() or (active / ".compass-build-incomplete").exists():
-    raise SystemExit(f"incomplete active generation {active}")
+pointer = output / "current-snapshot"
+snapshot = pointer.read_text().strip()
+if not snapshot.startswith("snapshot-") or "/" in snapshot or "\\" in snapshot:
+    raise SystemExit(f"invalid active snapshot {snapshot!r}")
+active = output / "snapshots" / snapshot
+if not active.is_dir() or (active / "build-incomplete").exists():
+    raise SystemExit(f"incomplete active snapshot {active}")
 print(active / "graph.json")
 PY
 }

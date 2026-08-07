@@ -2,8 +2,8 @@
 
 Compass uses its own executable, output directory, environment variable, and
 sidecars. Its output root now preserves the familiar flat artifact shape so
-file-based workflows can transition without learning Compass's hidden
-generation or store layout.
+file-based workflows can transition while Compass's snapshot and store
+layout remains visible and clearly owned.
 
 ## Install Compass
 
@@ -42,7 +42,7 @@ Scripts that open, copy, serve, mount, or archive these conventional filenames
 only need the executable and output-directory rename. The JSON schema and
 cache payloads remain Compass contracts: do not copy `graphify-out/cache/` or
 `graphify-out/manifest.json` into `compass-out/`. Compass rebuilds them from
-source while retaining its own internal generation and store protocols.
+source while retaining its own internal snapshot and store protocols.
 
 ## Opt into Program IR generation
 
@@ -65,6 +65,28 @@ graphify://... MCP resources     -> compass://...
 
 Compass does not fall back to the old names.
 
+## Hard cut to visible Compass output state
+
+Current output no longer hides Compass-owned files. The layout now uses
+`snapshots/`, `current-snapshot`, `store/`, and
+visible snapshot-local names such as `build-state.json` and
+`analysis.json`.
+
+Compass contains no compatibility reader, detector, or in-place migrator for
+the former hidden layout. Archive or remove the entire old output directory
+before running this version, then build it again:
+
+```bash
+mv compass-out compass-out-hidden-layout-backup
+compass update .
+```
+
+The history realization schema and SQLite store format remain at v1. Compass
+does not rewrite immutable realizations or map former hidden artifact paths.
+Use `compass history build` to recreate any revision that must materialize with
+the current visible artifact layout; archive the existing history database
+first only when it is needed for audit or rollback.
+
 ## Compass Store sidecar upgrades
 
 The `0.3.x` line supports the logical majors `compass.store/1`,
@@ -74,11 +96,11 @@ or corrupt `store.ref`, and redb or prototype files are rebuildable hard cuts;
 they are not migrated in place.
 
 The optimized immutable graph-index layout is also a hard cut from store files
-created by the pre-release per-generation/chunked-payload implementation. New
+created by the pre-release per-snapshot/chunked-payload implementation. New
 SQLite state lives at
-`compass-out/.compass-store/compass-store.sqlite3`; active generations contain
+`compass-out/store/store.sqlite3`; current snapshots contain
 only canonical `graph.json` and `store.ref`. Do not move an older database into
-that location or copy a newer database into a generation directory. Preserve
+that location or copy a newer database into a snapshot directory. Preserve
 `graph.json` and rebuild from source:
 
 ```bash
@@ -116,7 +138,7 @@ The script preserves existing sidecars in a timestamped rollback directory,
 restores them if `compass update --force` fails, and never replaces the JSON
 artifact. A normal `compass update --force --store sqlite` is also sufficient
 when the old sidecar has already been removed. Builds without `--store sqlite`
-now publish JSON only and remove store files from the new generation. Typed
+now publish JSON only and remove store files from the new snapshot. Typed
 queries use JSON by default; use `--engine store` to select a retained sidecar.
 
 Downgrades must validate the output with the target binary. Do not reuse a

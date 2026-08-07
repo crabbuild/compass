@@ -74,8 +74,8 @@ impl RealizationReader<'_> {
                     let path = text(path, "analysis sidecar")?;
                     let value = crate::artifacts::decode_typed(&bytes, "compass.analysis.sidecar")?;
                     match path.as_str() {
-                        ".compass_labels.json" => sink.labels(value)?,
-                        ".compass_analysis.json" => {}
+                        "labels.json" => sink.labels(value)?,
+                        "analysis.json" => {}
                         _ => {
                             return Err(HistoryError::InvalidArtifacts(format!(
                                 "unknown analysis sidecar {path}"

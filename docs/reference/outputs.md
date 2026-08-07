@@ -17,40 +17,59 @@ compass-out/
 ├── program.json                 # only with --program or --program-artifact
 ├── graph-overview.json          # clustered builds
 ├── cache/                       # Compass-owned disposable cache layout
-├── .compass-active-generation
-├── .compass-generations/<active>/
+├── current-snapshot
+├── snapshots/<current>/
 │   ├── graph.json
 │   ├── graph.html, report, manifest, and optional public artifacts
-│   └── store.ref                # with the default SQLite query index
-├── .compass-store/
-│   └── compass-store.sqlite3   # with the default SQLite query index
-└── optional sidecars and exports
+│   ├── store.ref                # with the default SQLite query index
+│   ├── build-state.json
+│   ├── output-stats.json
+│   ├── ast-fact-digests.json
+│   ├── analysis.json and labels.json  # clustered builds
+│   ├── labels.json.sig     # when label signatures are available
+│   ├── semantic-marker.json # semantic builds and history exports
+│   ├── learning.json       # learned reflection overlay, when present
+│   ├── cache/              # operation-specific disposable graph caches
+│   │   ├── graph.json.query-v1.cache
+│   │   ├── graph.json.affected-v1.cache
+│   │   ├── graph.json.traversal-v1.cache
+│   │   └── graph.json.<digest>.content-v1.cache
+│   └── source-root.txt
+├── store/
+│   └── store.sqlite3   # with the default SQLite query index
+├── root-artifacts-complete
+├── cached.json             # cache-check hits, when any
+├── uncached.txt            # cache-check misses
+├── obsidian/sync-manifest.json # when exporting an Obsidian vault
+└── source-inventory.json   # versioned-history export, when requested
 ```
 
 `--out DIR` or compatible `COMPASS_OUT` use can select another root.
 
 The ordinary files at the root are a stable, flat consumer façade. Compass
-publishes its immutable generation first, then materializes each root file by
+publishes its immutable snapshot first, then materializes each root file by
 atomic replacement; a completion marker makes an interrupted façade update
 self-repair on the next build. Compass-aware readers continue to resolve the
-active generation, while browsers, scripts, archive tools, and integrations
+current snapshot, while browsers, scripts, archive tools, and integrations
 can use literal paths such as `compass-out/graph.json` and
 `compass-out/graph.html`. Consumers that need a related set should read it only
 after the producing Compass command returns successfully.
 
-The `cache/` directory is already rooted beside these files for familiar
-incremental-build ergonomics, but its contents and encoding are private to
-Compass. Do not copy another product's cache or manifest into it. Future
-Compass storage and cache revisions can evolve independently without changing
-the flat public artifact paths.
+The output root already establishes Compass ownership, so entries beneath it
+use concise purpose-based names without repeating a `compass-` prefix. The
+`cache/` directory is rooted beside these files for familiar incremental-build
+ergonomics, but its contents and encoding are private to Compass. Do not copy
+another product's cache or manifest into it. Future storage and cache
+revisions can evolve independently without changing the flat public artifact
+paths.
 
 ## Authority table
 
 | Artifact | Authority | Consumer use |
 | --- | --- | --- |
 | `graph.json` | machine-readable graph snapshot | queries, integrations, export |
-| `.compass-store/compass-store.sqlite3` | bounded shared namespace/partition/key query index | default large-graph queries and explicit store-engine queries |
-| active generation `store.ref` | typed selector for the co-published store identity and snapshot | store-engine validation before query execution |
+| `store/store.sqlite3` | bounded shared namespace/partition/key query index | default large-graph queries and explicit store-engine queries |
+| current snapshot `store.ref` | typed selector for the co-published store identity and snapshot | store-engine validation before query execution |
 | `program.json` (optional) | provenance-aware Program IR | program inspection, semantic analysis |
 | `GRAPH_REPORT.md` | derived human orientation | architecture survey |
 | `graph.html` | derived optional visualization | interactive exploration |
@@ -60,11 +79,11 @@ the flat public artifact paths.
 
 Do not reconstruct graph truth from HTML when JSON is available.
 
-`.compass-store/compass-store.sqlite3` is the default local SQLite realization
-shared by retained graph generations. It is addressed through the `compass-store`
+`store/store.sqlite3` is the default local SQLite realization
+shared by retained graph snapshots. It is addressed through the `compass-store`
 namespace/partition/key contract and is not a public SQL schema. The file is
-not copied into a published generation; a new build writes immutable content,
-checkpoints it, and publishes a digest-bound generation reference. `graph.json`
+not copied into a published snapshot; a new build writes immutable content,
+checkpoints it, and publishes a digest-bound snapshot reference. `graph.json`
 remains the complete portable graph engine. Pass `--store json` during a build
 to omit the sidecar; `--engine json` forces the portable reader, while the
 default query engine uses the sidecar when it is present and fails closed if
@@ -161,7 +180,7 @@ The first three provide bounded examples. The summary contains exact omitted
 node, omitted edge, identity-collision, and capped-example counts. At most 100
 examples of each record category are stored.
 
-The private `.compass_output_stats.json` and sealed build state retain the same
+The Compass-owned `output-stats.json` and sealed build state retain the same
 counts so no-op and watch results preserve the partial status. They are
 operational state, not an alternative graph schema. Consumers should use graph
 diagnostics or typed query `incomplete_coverage` diagnostics.
@@ -497,7 +516,7 @@ with the publisher statistics and overview sidecars.
 
 For graphs larger than the default bounded in-memory reader cap, the command
 returns `quality_scope: "publisher-stats-only"`: counts and omission metadata
-come from `.compass_output_stats.json`, while record-level ratios are reported
+come from `output-stats.json`, while record-level ratios are reported
 as unavailable. This is an explicit safety boundary; use a prepared store or a
 bounded investigation with `COMPASS_MAX_GRAPH_BYTES` rather than silently
 allocating an unbounded JSON graph.

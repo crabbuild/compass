@@ -18,7 +18,7 @@ Upload the three artifacts plus:
 
 ```bash
 git rev-parse HEAD > compass-out/source-revision.txt
-compass --version > compass-out/compass-version.txt
+compass --version > compass-out/version.txt
 ```
 
 Treat graph artifacts with source-code confidentiality.
@@ -145,7 +145,7 @@ compass-out/
 ├── GRAPH_REPORT.md
 ├── manifest.json
 ├── source-revision.txt
-├── compass-version.txt
+├── version.txt
 ├── policy-result.json
 └── topology-diff.json
 ```

@@ -72,16 +72,16 @@ fn build_staging(staging: &Path, input: &HistoryBundleInput<'_>) -> Result<(), O
         write_bytes_atomic(staging.join("program.json"), program)?;
     }
     if let Some(value) = input.analysis {
-        write_json_atomic(staging.join(".compass_analysis.json"), value, false)?;
+        write_json_atomic(staging.join("analysis.json"), value, false)?;
     }
     if let Some(value) = input.labels {
-        write_json_atomic(staging.join(".compass_labels.json"), value, false)?;
+        write_json_atomic(staging.join("labels.json"), value, false)?;
     }
     if let Some(value) = input.manifest {
         write_json_atomic(staging.join("manifest.json"), value, false)?;
     }
     write_json_atomic(
-        staging.join(".compass_semantic_marker"),
+        staging.join("semantic-marker.json"),
         input.semantic_marker,
         false,
     )?;
@@ -168,12 +168,12 @@ fn render_v1(staging: &Path, input: &HistoryBundleInput<'_>) -> Result<(), Outpu
             &TreeOptions::default(),
         )?;
     }
-    if requested.contains(".compass_labels.json.sig") {
+    if requested.contains("labels.json.sig") {
         let signatures = community_member_signatures(&communities)
             .into_iter()
             .map(|(community, signature)| (community.to_string(), signature))
             .collect::<BTreeMap<_, _>>();
-        write_json_atomic(staging.join(".compass_labels.json.sig"), &signatures, false)?;
+        write_json_atomic(staging.join("labels.json.sig"), &signatures, false)?;
     }
     Ok(())
 }
@@ -185,7 +185,7 @@ fn validate_requests(requests: &[DerivedArtifactRequest]) -> Result<(), OutputEr
         if request.regeneration_version != SUPPORTED_HISTORY_RENDERER
             || !matches!(
                 request.relative_path.as_str(),
-                "GRAPH_REPORT.md" | "graph.html" | "GRAPH_TREE.html" | ".compass_labels.json.sig"
+                "GRAPH_REPORT.md" | "graph.html" | "GRAPH_TREE.html" | "labels.json.sig"
             )
         {
             return Err(OutputError::UnsupportedHistoryRenderer {
@@ -286,11 +286,11 @@ fn validate_sidecars(sidecars: &BTreeMap<String, Vec<u8>>) -> Result<(), OutputE
                 | "GRAPH_REPORT.md"
                 | "graph.html"
                 | "GRAPH_TREE.html"
-                | ".compass_analysis.json"
-                | ".compass_labels.json"
-                | ".compass_labels.json.sig"
+                | "analysis.json"
+                | "labels.json"
+                | "labels.json.sig"
                 | "manifest.json"
-                | ".compass_semantic_marker"
+                | "semantic-marker.json"
         ) {
             return Err(OutputError::UnsafeHistoryPath(relative.clone()));
         }
@@ -322,7 +322,7 @@ fn unique_staging(parent: &Path, name: &str) -> Result<PathBuf, OutputError> {
     for _ in 0..100 {
         let nonce = STAGING_NONCE.fetch_add(1, Ordering::Relaxed);
         let path = parent.join(format!(
-            ".{name}.compass-history-{}-{nonce}",
+            "{name}.history-staging-{}-{nonce}",
             std::process::id()
         ));
         match fs::create_dir(&path) {

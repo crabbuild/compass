@@ -1449,7 +1449,7 @@ pub fn garbage_collect_graph_snapshots<S: Store + ?Sized>(
     })
 }
 
-/// Check whether immutable graph manifests exceed the retained-generation
+/// Check whether immutable graph manifests exceed the retained-snapshot
 /// budget using a key-only bounded projection.
 pub fn graph_snapshot_needs_gc<S: Store + ?Sized>(
     store: &S,

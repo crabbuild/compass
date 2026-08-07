@@ -107,15 +107,15 @@ fn reflection_loads_memory_graph_context_writes_overlay_and_tracks_freshness()
         r#"{"directed":true,"multigraph":false,"graph":{},"nodes":[{"id":"node_a","label":"Alpha","source_file":"source.rs"},{"id":"node_b","label":"Duplicate"},{"id":"node_c","label":"Duplicate"}],"links":[]}"#,
     )?;
     fs::write(
-        output_dir.join(".compass_root"),
+        output_dir.join("source-root.txt"),
         root.to_string_lossy().as_bytes(),
     )?;
-    let analysis = output_dir.join(".compass_analysis.json");
+    let analysis = output_dir.join("analysis.json");
     fs::write(
         &analysis,
         r#"{"communities":{"0":["node_a"],"1":["node_b"],"2":[]}}"#,
     )?;
-    let labels = output_dir.join(".compass_labels.json");
+    let labels = output_dir.join("labels.json");
     fs::write(
         &labels,
         r#"{"0":"Core","1":true,"2":7,"3":{"name":"ignored"}}"#,
@@ -153,7 +153,7 @@ fn reflection_loads_memory_graph_context_writes_overlay_and_tracks_freshness()
     })?;
     assert_eq!(result.aggregate.total, 1);
     assert!(lessons.is_file());
-    assert!(output_dir.join(".compass_learning.json").is_file());
+    assert!(output_dir.join("learning.json").is_file());
     assert!(lessons_fresh(
         &lessons,
         &memory_dir,

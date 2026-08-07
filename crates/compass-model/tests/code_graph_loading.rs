@@ -172,12 +172,11 @@ fn strict_loading_uses_a_content_addressed_validated_cache()
     let cache_entries =
         fs::read_dir(directory.path().join("cache"))?.collect::<Result<Vec<_>, _>>()?;
     assert_eq!(cache_entries.len(), 1);
-    assert!(
-        cache_entries[0]
-            .file_name()
-            .to_string_lossy()
-            .contains(".graph.json.")
-    );
+    let cache_name = cache_entries[0].file_name();
+    let cache_name = cache_name.to_string_lossy();
+    assert!(cache_name.starts_with("graph.json."));
+    assert!(cache_name.ends_with(".content-v1.cache"));
+    assert!(!cache_name.contains("compass"));
     assert_eq!(GraphDocument::load(&graph_path)?, document());
     Ok(())
 }

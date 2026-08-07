@@ -719,7 +719,7 @@ fn attach_source_inventory(
     checkout: &Path,
     detected: &BTreeMap<String, Vec<String>>,
 ) -> Result<(), MaterializeError> {
-    const INVENTORY_PATH: &str = ".compass_source_inventory.json";
+    const INVENTORY_PATH: &str = "source-inventory.json";
     if completed
         .artifacts
         .authoritative_sidecars

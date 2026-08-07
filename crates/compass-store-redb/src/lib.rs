@@ -31,7 +31,7 @@ type RedbValue = &'static [u8];
 const REDB_KV: TableDefinition<RedbKey, RedbValue> = TableDefinition::new("compass.kv.v1");
 
 /// Conventional filename for an explicit redb local backend.
-pub const REDB_FILE_NAME: &str = "compass-store.redb";
+pub const REDB_FILE_NAME: &str = "store.redb";
 
 enum RedbDatabase {
     ReadWrite(Database),

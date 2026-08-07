@@ -62,12 +62,28 @@ A user-visible incompatible change requires:
 Versioned formats use Compass-owned identifiers. Consumers should reject
 unknown major versions instead of attempting legacy fallback behavior.
 
+Current output uses visible Compass-owned paths: `snapshots/`,
+`current-snapshot`, `root-artifacts-complete`, and
+`store/`. Snapshot-local state likewise uses concise names such as
+`build-state.json` and `analysis.json`. This is an unconditional hard cut:
+the runtime has no hidden-layout detector, compatibility reader, path mapping,
+or in-place migrator. Output created by an older layout must be archived or
+removed before rebuilding. Repository configuration under `.compass/` remains
+unchanged because it is not output state.
+
+Versioned history remains on realization schema 1, store-format root
+`compass/store-format/v1`, and the `compass/v1` realization-root namespace.
+The visible output-path cutover does not change those serialized contracts.
+Historical realizations containing former hidden artifact paths are not mapped
+or rewritten; rebuild those revisions when they must be materialized with the
+current visible artifact layout.
+
 The current local build publishes `graph.json` (`compass.graph/1`) directly
 under the selected output root by default. It also materializes
 `GRAPH_REPORT.md`, `manifest.json`, and optional `graph.html` at that stable
-root path. Compass retains an immutable generation behind those conventional
+root path. Compass retains an immutable snapshot behind those conventional
 paths as its coherent internal authority.
-Passing `--store sqlite` also publishes a validated `compass-store.sqlite3`
+Passing `--store sqlite` also publishes a validated `store.sqlite3`
 sidecar and typed `store.ref` selector. Typed code queries use JSON by default;
 `--engine store` explicitly selects and validates the sidecar. The SQLite file
 and reference are internal realizations of the backend-neutral `compass-store`
@@ -112,11 +128,11 @@ command accepts cloud credentials, endpoints, or TLS configuration.
 
 The default published location is `DIR/graph.json` under the selected
 `--out DIR` (default `compass-out/`). A `--store sqlite` build additionally
-publishes `store.ref` beside the active generation's `graph.json` and keeps the
-shared database at `DIR/.compass-store/compass-store.sqlite3`.
+publishes `store.ref` beside the current snapshot's `graph.json` and keeps the
+shared database at `DIR/store/store.sqlite3`.
 `compass store status|validate|backup|restore` are the supported operational
 surface. Backups are digest-bound directories and restores never overwrite an
-existing destination. Local publication retains two complete generations and
+existing destination. Local publication retains two complete snapshots and
 performs bounded reachability GC; remote leases, service quotas, and
 distributed GC remain deferred. The local API enforces bounded values, scans,
 transactions, graph sizes, and request work.

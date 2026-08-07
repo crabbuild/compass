@@ -8,10 +8,10 @@ const BACKUP_ARTIFACTS: &[&str] = &[
     "graph.json",
     "program.json",
     "GRAPH_REPORT.md",
-    ".compass_labels.json",
-    ".compass_analysis.json",
+    "labels.json",
+    "analysis.json",
     "manifest.json",
-    ".compass_semantic_marker",
+    "semantic-marker.json",
     "cost.json",
 ];
 
@@ -35,8 +35,8 @@ pub fn backup_if_protected(output_dir: &Path) -> BackupResult {
     if !graph_path.is_file() {
         return BackupResult::default();
     }
-    let semantic = output_dir.join(".compass_semantic_marker").exists();
-    let curated = labels_are_curated(&output_dir.join(".compass_labels.json"));
+    let semantic = output_dir.join("semantic-marker.json").exists();
+    let curated = labels_are_curated(&output_dir.join("labels.json"));
     if !semantic && !curated {
         return BackupResult::default();
     }
@@ -113,10 +113,7 @@ mod tests {
         fs::write(directory.path().join("graph.json"), "graph")?;
         fs::write(directory.path().join("program.json"), "program")?;
         fs::write(directory.path().join("GRAPH_REPORT.md"), "report")?;
-        fs::write(
-            directory.path().join(".compass_labels.json"),
-            r#"{"0":"Orders"}"#,
-        )?;
+        fs::write(directory.path().join("labels.json"), r#"{"0":"Orders"}"#)?;
         let first = backup_if_protected(directory.path());
         assert!(
             first

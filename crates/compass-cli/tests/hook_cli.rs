@@ -157,7 +157,7 @@ fn native_hook_refresh_honors_recorded_scan_root() -> Result<(), Box<dyn Error>>
     let output_root = root.join("compass-out");
     std::fs::create_dir_all(&output_root)?;
     std::fs::write(
-        output_root.join(".compass_root"),
+        output_root.join("source-root.txt"),
         source_root.to_string_lossy().as_bytes(),
     )?;
 

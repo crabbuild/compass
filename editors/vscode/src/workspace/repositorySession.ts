@@ -28,19 +28,20 @@ export class RepositorySession {
 }
 
 export function resolvePublishedArtifact(outputDirectory: string, artifact: string): string {
-  const legacy = path.join(outputDirectory, artifact);
-  const pointer = path.join(outputDirectory, ".compass-active-generation");
-  if (!existsSync(pointer)) return legacy;
-  const generation = readFileSync(pointer, "utf8").trim();
-  if (!/^generation-[^/\\]+$/.test(generation)) {
-    throw new Error(`Invalid Compass active generation pointer: ${pointer}`);
+  const pointer = path.join(outputDirectory, "current-snapshot");
+  if (!existsSync(pointer)) {
+    throw new Error(`Missing Compass current snapshot pointer: ${pointer}`);
   }
-  const active = path.join(outputDirectory, ".compass-generations", generation);
+  const snapshot = readFileSync(pointer, "utf8").trim();
+  if (!/^snapshot-[^/\\]+$/.test(snapshot)) {
+    throw new Error(`Invalid Compass active snapshot pointer: ${pointer}`);
+  }
+  const active = path.join(outputDirectory, "snapshots", snapshot);
   if (!statSync(active).isDirectory()) {
-    throw new Error(`Invalid Compass active generation directory: ${active}`);
+    throw new Error(`Invalid Compass active snapshot directory: ${active}`);
   }
-  if (existsSync(path.join(active, ".compass-build-incomplete"))) {
-    throw new Error(`Incomplete Compass active generation: ${active}`);
+  if (existsSync(path.join(active, "build-incomplete"))) {
+    throw new Error(`Incomplete Compass active snapshot: ${active}`);
   }
   return path.join(active, artifact);
 }

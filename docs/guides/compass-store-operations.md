@@ -27,7 +27,7 @@ The first local release declares these logical, machine-readable formats:
 | Graph document | `compass.graph/1` | Canonical `graph.json`, interchange, inspection, and recovery | Permanent compatible engine; unknown majors fail |
 | Store contract | `compass.store/1` | Namespace/partition/key values, limits, conditional writes, scans, and typed errors | Major changes require a new adapter contract |
 | Graph snapshot | `compass.store.graph-snapshot/1` | Immutable manifests, content digests, ordered index roots, and selector state | Same-major patch upgrades only in the first window |
-| Store reference | `compass.store.ref/1` | Binds `graph.json`, store snapshot, adapter, and generation digests | Validate before a store query |
+| Store reference | `compass.store.ref/1` | Binds `graph.json`, store snapshot, adapter, and snapshot digests | Validate before a store query |
 | Backup bundle | `compass.store.backup/1` | `manifest.json`, graph, reference, and a validated adapter copy | Restore only into a new directory |
 
 The SQLite table layout, redb file layout, WAL/SHM files, object-key spelling,
@@ -39,7 +39,7 @@ run the rebuild procedure, and retain the unchanged `graph.json`.
 
 | Backend | Local CLI | Credentials/network | Platforms | Status |
 | --- | --- | --- | --- | --- |
-| SQLite | Default sidecar `compass-store.sqlite3` (use `--store json` to opt out) | None; local file only | macOS, Linux, Windows | Released local adapter |
+| SQLite | Default sidecar `store.sqlite3` (use `--store json` to opt out) | None; local file only | macOS, Linux, Windows | Released local adapter |
 | redb | Explicit Rust adapter `compass-store-redb` | None; local file only | CI-supported native platforms | Library/conformance adapter; not selected by the CLI |
 | PostgreSQL | No released CLI adapter | Would require an explicit endpoint, credentials, TLS, and bounded client | Future service profile | Deferred |
 | DynamoDB | No released CLI adapter | Would require an explicit AWS boundary, credentials, TLS, retries, and quotas | Future service profile | Deferred |
@@ -53,21 +53,21 @@ contract and pass the same conformance and differential suites.
 For an output root `DIR` the published set is:
 
 ```text
-DIR/.compass-active-generation # BuildGuard publication pointer, when used
-DIR/.compass-generations/<generation>/graph.json
-DIR/.compass-generations/<generation>/store.ref  # with default storage or --store sqlite
-DIR/.compass-store/compass-store.sqlite3          # shared by store generations
+DIR/current-snapshot # BuildGuard publication pointer, when used
+DIR/snapshots/<snapshot>/graph.json
+DIR/snapshots/<snapshot>/store.ref  # with default storage or --store sqlite
+DIR/store/store.sqlite3          # shared by store snapshots
 ```
 
 `graph.json` is the portable authority. When SQLite is selected (the default),
 the canonical JSON artifact and a small digest-bound `store.ref` are published
-as one generation. The SQLite database has one stable location outside the
-generation directories; it is never copied into each generation. Immutable
+as one snapshot. The SQLite database has one stable location outside the
+snapshot directories; it is never copied into each snapshot. Immutable
 objects are prepared in bounded transactions, the WAL is checkpointed, and
-only then can the BuildGuard pointer select the generation. Readers validate
+only then can the BuildGuard pointer select the snapshot. Readers validate
 `store.ref`, open its immutable manifest, and remain pinned even if a later
-generation is published. A failed or interrupted update leaves the previous
-coherent generation selected. The JSON query index beneath the requested cache
+snapshot is published. A failed or interrupted update leaves the previous
+coherent snapshot selected. The JSON query index beneath the requested cache
 root is disposable and may be deleted at any time.
 
 New stores contain projected immutable graph indexes and their manifest; they
@@ -166,7 +166,7 @@ Redb backups use the library adapter's read-only reopen rule; they are not
 currently exposed by the CLI.
 
 The local publisher retains the active and immediately previous complete
-BuildGuard generations. After a successful store publication it marks the
+BuildGuard snapshots. After a successful store publication it marks the
 manifests and tree objects selected by those retained references, deletes
 unreachable entries in bounded transactions, performs bounded incremental
 page reclamation, and checkpoints the WAL. Staging and active references are

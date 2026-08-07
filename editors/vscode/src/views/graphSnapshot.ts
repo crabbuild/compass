@@ -20,12 +20,12 @@ export class CurrentGraphSnapshot {
       const sourceDirectory = path.dirname(sourceGraphPath);
       await Promise.all([
         this.copyOptional(
-          path.join(sourceDirectory, ".compass_analysis.json"),
-          path.join(directory, ".compass_analysis.json")
+          path.join(sourceDirectory, "analysis.json"),
+          path.join(directory, "analysis.json")
         ),
         this.copyOptional(
-          path.join(sourceDirectory, ".compass_labels.json"),
-          path.join(directory, ".compass_labels.json")
+          path.join(sourceDirectory, "labels.json"),
+          path.join(directory, "labels.json")
         )
       ]);
     } catch (error) {

@@ -36,18 +36,16 @@ fn explore_connects_symbols_and_groups_digest_verified_source()
 }
 
 #[test]
-fn explore_derives_repository_root_from_a_generation_graph()
--> Result<(), Box<dyn std::error::Error>> {
+fn explore_derives_repository_root_from_a_snapshot_graph() -> Result<(), Box<dyn std::error::Error>>
+{
     let directory = tempfile::tempdir()?;
-    let generation = directory
-        .path()
-        .join("compass-out/.compass-generations/generation-test");
-    fs::create_dir_all(&generation)?;
-    let graph_path = generation.join("graph.json");
+    let snapshot = directory.path().join("compass-out/snapshots/snapshot-test");
+    fs::create_dir_all(&snapshot)?;
+    let graph_path = snapshot.join("graph.json");
     support::write_graph(&graph_path)?;
     fs::create_dir_all(directory.path().join("src"))?;
     fs::rename(
-        generation.join("src/lib.rs"),
+        snapshot.join("src/lib.rs"),
         directory.path().join("src/lib.rs"),
     )?;
     let engine = open(&graph_path, None, &directory.path().join("cache"))?;

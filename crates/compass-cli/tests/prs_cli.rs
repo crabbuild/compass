@@ -58,7 +58,7 @@ exit 1
 }
 
 #[test]
-fn prs_impact_reads_only_the_active_generation_when_public_graph_is_absent()
+fn prs_impact_reads_only_the_current_snapshot_when_public_graph_is_absent()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let bin = directory.path().join("bin");
@@ -78,12 +78,10 @@ exit 1
 "#,
     )?;
     let output = directory.path().join("compass-out");
-    let generation = output
-        .join(".compass-generations")
-        .join("generation-current");
-    std::fs::create_dir_all(&generation)?;
+    let snapshot = output.join("snapshots").join("snapshot-current");
+    std::fs::create_dir_all(&snapshot)?;
     std::fs::write(
-        generation.join("graph.json"),
+        snapshot.join("graph.json"),
         serde_json::to_vec(&serde_json::json!({
             "directed":false,
             "multigraph":false,
@@ -97,10 +95,7 @@ exit 1
             "links":[]
         }))?,
     )?;
-    std::fs::write(
-        output.join(".compass-active-generation"),
-        "generation-current",
-    )?;
+    std::fs::write(output.join("current-snapshot"), "snapshot-current")?;
     let public = output.join("graph.json");
     assert!(!public.exists());
     let public_arg = public.to_string_lossy().into_owned();
@@ -123,10 +118,7 @@ exit 1
         String::from_utf8_lossy(&detail.stdout)
     );
 
-    std::fs::write(
-        output.join(".compass-active-generation"),
-        "../invalid-generation",
-    )?;
+    std::fs::write(output.join("current-snapshot"), "../invalid-snapshot")?;
     let malformed = Command::new(env!("CARGO_BIN_EXE_compass"))
         .current_dir(directory.path())
         .env("PATH", path)

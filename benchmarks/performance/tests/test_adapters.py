@@ -104,28 +104,28 @@ class AdapterTests(unittest.TestCase):
             self.assertFalse((checkout / "graphify-out").exists())
             self.assertEqual(source.read_text(), "pass\n")
 
-    def test_compass_active_generation_is_validated(self) -> None:
+    def test_compass_current_snapshot_is_validated(self) -> None:
         adapter = CompassAdapter(Path("/opt/compass"), revision("compass"))
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             compass_out = output / "compass-out"
-            active = compass_out / ".compass-generations" / "generation-123"
+            active = compass_out / "snapshots" / "snapshot-123"
             active.mkdir(parents=True)
-            (compass_out / ".compass-active-generation").write_text("generation-123\n")
+            (compass_out / "current-snapshot").write_text("snapshot-123\n")
             graph = active / "graph.json"
             graph.write_text("{}")
             self.assertEqual(adapter.graph_path(output), graph)
-            (active / ".compass-build-incomplete").touch()
+            (active / "build-incomplete").touch()
             with self.assertRaisesRegex(RuntimeError, "incomplete"):
                 adapter.graph_path(output)
 
-    def test_generation_pointer_cannot_escape(self) -> None:
+    def test_snapshot_pointer_cannot_escape(self) -> None:
         adapter = CompassAdapter(Path("/opt/compass"), revision("compass"))
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             compass_out = output / "compass-out"
             compass_out.mkdir()
-            (compass_out / ".compass-active-generation").write_text("../outside")
+            (compass_out / "current-snapshot").write_text("../outside")
             with self.assertRaisesRegex(RuntimeError, "invalid"):
                 adapter.graph_path(output)
 
@@ -141,14 +141,14 @@ class AdapterTests(unittest.TestCase):
             {"detect": 1.2, "deterministic_extract": 2.5, "total": 4.0},
         )
 
-    def test_compass_prunes_only_inactive_generations(self) -> None:
+    def test_compass_prunes_only_incurrent_snapshots(self) -> None:
         adapter = CompassAdapter(Path("/opt/compass"), revision("compass"))
         with tempfile.TemporaryDirectory() as directory:
             workspace = QualificationWorkspace.create(Path(directory) / "workspace")
             output = workspace.root / "artifacts" / "fixture"
-            generations = output / "compass-out" / ".compass-generations"
-            active = generations / "generation-active"
-            inactive = generations / "generation-inactive"
+            snapshots = output / "compass-out" / "snapshots"
+            active = snapshots / "snapshot-active"
+            inactive = snapshots / "snapshot-inactive"
             active.mkdir(parents=True)
             inactive.mkdir()
             graph = active / "graph.json"

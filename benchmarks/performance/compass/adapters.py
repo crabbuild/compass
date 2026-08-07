@@ -171,16 +171,16 @@ class CompassAdapter(ToolAdapter):
 
     def graph_path(self, output: Path) -> Path:
         compass_output = output / "compass-out"
-        pointer = compass_output / ".compass-active-generation"
+        pointer = compass_output / "current-snapshot"
         try:
-            generation = pointer.read_text(encoding="utf-8").strip()
+            snapshot = pointer.read_text(encoding="utf-8").strip()
         except OSError as error:
-            raise RuntimeError(f"missing Compass generation pointer: {pointer}") from error
-        if not generation.startswith("generation-") or Path(generation).name != generation:
-            raise RuntimeError(f"invalid Compass generation pointer: {generation!r}")
-        active = compass_output / ".compass-generations" / generation
-        if not active.is_dir() or (active / ".compass-build-incomplete").exists():
-            raise RuntimeError(f"incomplete Compass generation: {active}")
+            raise RuntimeError(f"missing Compass snapshot pointer: {pointer}") from error
+        if not snapshot.startswith("snapshot-") or Path(snapshot).name != snapshot:
+            raise RuntimeError(f"invalid Compass snapshot pointer: {snapshot!r}")
+        active = compass_output / "snapshots" / snapshot
+        if not active.is_dir() or (active / "build-incomplete").exists():
+            raise RuntimeError(f"incomplete Compass snapshot: {active}")
         graph = active / "graph.json"
         if not graph.is_file() or not graph.resolve().is_relative_to(output.resolve()):
             raise RuntimeError(f"invalid Compass graph artifact: {graph}")
@@ -195,11 +195,11 @@ class CompassAdapter(ToolAdapter):
         return evidence
 
     def prune_superseded_artifacts(self, output: Path, active_graph: Path) -> None:
-        generations = output / "compass-out" / ".compass-generations"
+        snapshots = output / "compass-out" / "snapshots"
         active = active_graph.parent.resolve()
-        if not generations.is_dir() or active.parent.resolve() != generations.resolve():
-            raise RuntimeError(f"active Compass generation is outside {generations}")
-        for candidate in generations.iterdir():
+        if not snapshots.is_dir() or active.parent.resolve() != snapshots.resolve():
+            raise RuntimeError(f"active Compass snapshot is outside {snapshots}")
+        for candidate in snapshots.iterdir():
             if candidate.is_dir() and candidate.resolve() != active:
                 guarded_remove(candidate)
 

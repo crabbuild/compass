@@ -119,15 +119,13 @@ pub(super) fn command_cache_check(frontend: Frontend, args: &[String]) -> Outcom
     }
     if (!nodes.is_empty() || !edges.is_empty() || !hyperedges.is_empty())
         && let Err(error) = write_compact_json(
-            &output.join(".compass_cached.json"),
+            &output.join("cached.json"),
             &json!({"nodes":nodes,"edges":edges,"hyperedges":hyperedges}),
         )
     {
         return Outcome::failure(format!("error: {error}"));
     }
-    if let Err(error) =
-        write_text_atomic(output.join(".compass_uncached.txt"), &uncached.join("\n"))
-    {
+    if let Err(error) = write_text_atomic(output.join("uncached.txt"), &uncached.join("\n")) {
         return Outcome::failure(format!("error: {error}"));
     }
     Outcome {

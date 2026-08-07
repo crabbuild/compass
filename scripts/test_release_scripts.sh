@@ -92,7 +92,7 @@ do
 done
 
 if tar -tzf "$test_root/dist-aarch64-apple-darwin/compass-aarch64-apple-darwin.tar.gz" \
-    | grep -Eiq '(^|/)(graph\.json|compass-store\.(sqlite3|redb)|store\.ref|\.compass|credentials|\.env)(/|$|\.)'; then
+    | grep -Eiq '(^|/)(graph\.json|store\.(sqlite3|redb)|store\.ref|\.compass|credentials|\.env)(/|$|\.)'; then
     echo "release archive contains local store state or credentials" >&2
     exit 1
 fi

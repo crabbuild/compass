@@ -46,9 +46,11 @@ Do not point two concurrent writers at one output directory.
 
 Successful builds materialize `graph.json`, `manifest.json`,
 `GRAPH_REPORT.md`, and optional `graph.html` directly under this root. These
-stable paths are the portable integration surface. Hidden generations, store
-references, and the encoding beneath `cache/` remain Compass-owned operational
-state and should be kept opaque.
+stable paths are the portable integration surface. Visible snapshot
+directories, store references, and the encoding beneath `cache/` remain
+Compass-owned operational state. Their visible names disclose what Compass
+created; consumers should still use documented commands and stable root
+artifacts instead of parsing implementation files directly.
 
 ## Compass Store configuration
 
@@ -57,8 +59,8 @@ query storage is enabled by default; passing `--store json` opts out. A SQLite
 build additionally publishes:
 
 ```text
-DIR/.compass-store/compass-store.sqlite3
-DIR/.compass-generations/<active>/store.ref
+DIR/store/store.sqlite3
+DIR/snapshots/<active>/store.ref
 ```
 
 `DIR` is `compass-out/` by default and can be set with `--out DIR` or the
@@ -72,15 +74,15 @@ service adapters, so no endpoint, credential, TLS, or cloud SDK configuration
 is read by local store commands.
 
 SQLite uses one shared local WAL-backed file and checkpoints it before
-publication and backup; complete generations are not database copies. Do not
+publication and backup; complete snapshots are not database copies. Do not
 run two writers against one output root. JSON query indexes beneath the cache
 root are disposable and may be deleted; the output root, including the shared
-database and generation references, must be kept together. Use
+database and snapshot references, must be kept together. Use
 `compass store status|validate` for
 health, `compass store backup` for a digest-bound copy, and `compass store
 restore` into a new directory for recovery. The store API enforces bounded
 namespace, partition, key, value, transaction, scan, and graph sizes. Local
-publication retains and collects two complete generations; distributed leases
+publication retains and collects two complete snapshots; distributed leases
 and hosted quotas are deferred. Local disk availability remains an operational
 limit. See the [operations guide](../guides/operations.md)
 for the support window and rebuild procedure.

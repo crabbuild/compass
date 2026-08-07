@@ -620,7 +620,7 @@ const PAGES: &[Page] = &[
         "diagnose quality",
         "Inspect typed graph evidence and publication quality",
         ["compass diagnose quality [OPTIONS]"],
-        "Options:\n  --graph <PATH>          Typed graph [default: compass-out/graph.json]\n  --json                  Emit compass.graph-quality/1 JSON\n\nChecks:\n  Evidence confidence, source anchors, external placeholders, publication omissions, identity collisions, and consistency with graph-overview.json and .compass_output_stats.json.\n\nExamples:\n  compass diagnose quality\n  compass diagnose quality --graph compass-out/graph.json --json"
+        "Options:\n  --graph <PATH>          Typed graph [default: compass-out/graph.json]\n  --json                  Emit compass.graph-quality/1 JSON\n\nChecks:\n  Evidence confidence, source anchors, external placeholders, publication omissions, identity collisions, and consistency with graph-overview.json and output-stats.json.\n\nExamples:\n  compass diagnose quality\n  compass diagnose quality --graph compass-out/graph.json --json"
     ),
     page!(
         "diagnose multigraph",

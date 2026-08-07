@@ -195,7 +195,10 @@ compass-out/
 ├── graph.json        machine-readable graph
 ├── GRAPH_REPORT.md   architecture and community summary
 ├── graph.html        interactive visualization when size permits
-└── manifest.json     incremental build state
+├── manifest.json     incremental build state
+├── snapshots/        coherent retained build snapshots
+├── current-snapshot  selected snapshot identifier
+└── store/            SQLite query index when enabled
 ```
 
 ### 4. Ask useful questions

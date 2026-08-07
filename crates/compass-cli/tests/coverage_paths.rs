@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use compass_cli::{Frontend, run, run_mcp, run_watch};
+use compass_files::BuildGuard;
 
 fn invoke(frontend: Frontend, arguments: &[&str]) -> compass_cli::Outcome {
     run(
@@ -76,44 +77,36 @@ fn diagnostic_node_count(graph: &Path) -> Result<usize, Box<dyn Error>> {
 }
 
 #[test]
-fn diagnose_rereads_the_active_generation_for_an_explicit_public_graph()
--> Result<(), Box<dyn Error>> {
+fn diagnose_rereads_the_current_snapshot_for_an_explicit_public_graph() -> Result<(), Box<dyn Error>>
+{
     let directory = tempfile::tempdir()?;
     let output = directory.path();
     let public = output.join("graph.json");
     write_diagnostic_graph(&public, 1)?;
-    let generations = output.join(".compass-generations");
-    let first = generations.join("generation-first");
-    let second = generations.join("generation-second");
+    let snapshots = output.join("snapshots");
+    let first = snapshots.join("snapshot-first");
+    let second = snapshots.join("snapshot-second");
     fs::create_dir_all(&first)?;
     fs::create_dir_all(&second)?;
     write_diagnostic_graph(&first.join("graph.json"), 2)?;
     write_diagnostic_graph(&second.join("graph.json"), 3)?;
 
-    fs::write(
-        output.join(".compass-active-generation"),
-        "generation-first",
-    )?;
+    fs::write(output.join("current-snapshot"), "snapshot-first")?;
     assert_eq!(diagnostic_node_count(&public)?, 2);
-    fs::write(
-        output.join(".compass-active-generation"),
-        "generation-second",
-    )?;
+    fs::write(output.join("current-snapshot"), "snapshot-second")?;
     assert_eq!(diagnostic_node_count(&public)?, 3);
     Ok(())
 }
 
 #[test]
-fn diagnose_uses_legacy_only_when_the_generation_pointer_is_absent() -> Result<(), Box<dyn Error>> {
+fn diagnose_accepts_a_standalone_graph_but_rejects_a_malformed_managed_pointer()
+-> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let public = directory.path().join("graph.json");
     write_diagnostic_graph(&public, 1)?;
     assert_eq!(diagnostic_node_count(&public)?, 1);
 
-    fs::write(
-        directory.path().join(".compass-active-generation"),
-        "../escape",
-    )?;
+    fs::write(directory.path().join("current-snapshot"), "../escape")?;
     let outcome = invoke_owned(
         Frontend::Compass,
         &[
@@ -125,7 +118,7 @@ fn diagnose_uses_legacy_only_when_the_generation_pointer_is_absent() -> Result<(
         ],
     );
     assert_ne!(outcome.code, 0);
-    assert!(outcome.stderr.contains("generation"), "{}", outcome.stderr);
+    assert!(outcome.stderr.contains("snapshot"), "{}", outcome.stderr);
     Ok(())
 }
 
@@ -633,9 +626,9 @@ fn completed_read_query_diagnostic_merge_tree_and_export_commands_run_end_to_end
     fs::create_dir_all(&output)?;
     let graph = output.join("graph.json");
     write_graph_fixture(&graph)?;
-    fs::write(output.join(".compass_labels.json"), r#"{"0":"Core"}"#)?;
+    fs::write(output.join("labels.json"), r#"{"0":"Core"}"#)?;
     fs::write(
-        output.join(".compass_analysis.json"),
+        output.join("analysis.json"),
         r#"{"communities":{"0":["n_transformer","n_attention","n_layernorm","n_concept_attn"]},"cohesion":{"0":0.75}}"#,
     )?;
     fs::write(output.join("GRAPH_REPORT.md"), "# Fixture\n")?;
@@ -797,15 +790,24 @@ fn split_value_read_export_and_cluster_forms_complete_against_a_real_graph()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let output = directory.path().join("compass-out");
-    fs::create_dir_all(&output)?;
-    let graph = output.join("graph.json");
-    write_graph_fixture(&graph)?;
-    fs::write(output.join(".compass_labels.json"), r#"{"0":"Core"}"#)?;
+    let guard = BuildGuard::begin(&output)?;
+    let snapshot = guard.staging_directory().to_path_buf();
+    write_graph_fixture(&snapshot.join("graph.json"))?;
+    fs::write(snapshot.join("labels.json"), r#"{"0":"Core"}"#)?;
     fs::write(
-        output.join(".compass_analysis.json"),
+        snapshot.join("analysis.json"),
         r#"{"communities":{"0":["n_transformer","n_attention"]},"cohesion":{"0":0.5}}"#,
     )?;
-    fs::write(output.join("GRAPH_REPORT.md"), "# Fixture\n")?;
+    fs::write(snapshot.join("GRAPH_REPORT.md"), "# Fixture\n")?;
+    let artifacts = [
+        "graph.json",
+        "labels.json",
+        "analysis.json",
+        "GRAPH_REPORT.md",
+    ];
+    guard.commit_with_artifacts(&artifacts)?;
+    BuildGuard::publish_root_artifacts(&output, &artifacts, true)?;
+    let graph = output.join("graph.json");
     let graph_text = graph.to_string_lossy().into_owned();
 
     for arguments in [

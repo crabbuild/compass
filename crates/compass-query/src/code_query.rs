@@ -1155,7 +1155,7 @@ fn default_repository_root(graph_path: &Path) -> PathBuf {
     if graph_directory
         .parent()
         .and_then(Path::file_name)
-        .is_some_and(|name| name == ".compass-generations")
+        .is_some_and(|name| name == "snapshots")
     {
         return graph_directory
             .ancestors()

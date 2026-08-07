@@ -124,7 +124,7 @@ fn trusted_graph_partition_does_not_duplicate_full_graph_as_metadata()
         !matches!(
             decode_segments(key).as_deref(),
             Ok([_, _, kind, path])
-                if kind == b"sidecar" && path == b".compass-history/graph.v1.json"
+                if kind == b"sidecar" && path == b"history/graph.v1.json"
         )
     }));
     assert!(partition.metadata.iter().all(|(key, _)| {
@@ -147,17 +147,21 @@ fn source_inventory_uses_one_decomposed_canonical_record() -> Result<(), Box<dyn
         "code_files": {"src/lib.rs": {"git_object": "fixture"}}
     }))?;
     let mut artifacts = empty_trusted_artifacts()?;
-    artifacts.authoritative_sidecars.insert(
-        ".compass_source_inventory.json".to_owned(),
-        inventory.clone(),
-    );
+    artifacts
+        .authoritative_sidecars
+        .insert("source-inventory.json".to_owned(), inventory.clone());
 
     let registry = artifacts.artifact_registry()?;
     let entry = registry
         .iter()
-        .find(|entry| entry.relative_path == ".compass_source_inventory.json")
+        .find(|entry| entry.relative_path == "source-inventory.json")
         .ok_or("source inventory registry entry missing")?;
     assert!(entry.storage.is_none());
+    assert!(
+        artifacts
+            .export_sidecars()
+            .contains_key("source-inventory.json")
+    );
 
     let partition = artifacts.partition(&completion())?;
     assert_eq!(GraphArtifacts::reconstruct(&partition)?, artifacts);
@@ -487,7 +491,7 @@ fn completed_seed_writes_normalized_marker_and_opaque_sidecars()
         vec![0, 1, 255]
     );
     let marker: serde_json::Value = serde_json::from_slice(&std::fs::read(
-        directory.path().join(".compass_semantic_marker"),
+        directory.path().join("semantic-marker.json"),
     )?)?;
     assert_eq!(marker["schema"], "compass.history.completion");
     assert_eq!(marker["semantic_files_expected"], 1);
@@ -574,8 +578,8 @@ fn registry_loading_verifies_builtin_opaque_derived_and_operational_artifacts()
     let opaque = vec![0, 1, 255];
     for (path, bytes) in [
         ("graph.json", graph.as_slice()),
-        (".compass_analysis.json", analysis.as_slice()),
-        (".compass_labels.json", labels.as_slice()),
+        ("analysis.json", analysis.as_slice()),
+        ("labels.json", labels.as_slice()),
         ("manifest.json", manifest.as_slice()),
         ("semantic/facts.bin", opaque.as_slice()),
     ] {
@@ -597,8 +601,8 @@ fn registry_loading_verifies_builtin_opaque_derived_and_operational_artifacts()
     };
     let mut registry = vec![
         authoritative("graph.json", &graph),
-        authoritative(".compass_analysis.json", &analysis),
-        authoritative(".compass_labels.json", &labels),
+        authoritative("analysis.json", &analysis),
+        authoritative("labels.json", &labels),
         authoritative("manifest.json", &manifest),
         authoritative("semantic/facts.bin", &opaque),
     ];

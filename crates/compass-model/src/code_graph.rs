@@ -1280,7 +1280,7 @@ fn content_cache_path(graph_path: &Path, digest: &str) -> PathBuf {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("cache")
-        .join(format!(".{file_name}.{digest}.compass-v1"))
+        .join(format!("{file_name}.{digest}.content-v1.cache"))
 }
 
 fn load_content_cache(path: &Path, digest: &str) -> Option<GraphDocument> {
@@ -1328,4 +1328,19 @@ fn write_content_cache(
         let _ = fs::remove_file(temporary);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::content_cache_path;
+
+    #[test]
+    fn content_cache_path_is_visible_and_scoped() {
+        assert_eq!(
+            content_cache_path(Path::new("compass-out/graph.json"), "abc123"),
+            Path::new("compass-out/cache/graph.json.abc123.content-v1.cache")
+        );
+    }
 }

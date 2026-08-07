@@ -35,13 +35,6 @@ fn native_update_emits_and_reports_program_analysis() -> Result<(), Box<dyn Erro
         BuildGuard::resolve_artifact(&directory.path().join("compass-out"), "program.json")?
             .is_file()
     );
-    assert!(
-        !directory
-            .path()
-            .join("compass-out/.compass_program.json")
-            .exists()
-    );
-
     let warm = run(Frontend::Compass, args);
     assert_eq!(warm.code, 0, "{}", warm.stderr);
     assert!(warm.stdout.contains(

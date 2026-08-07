@@ -94,7 +94,7 @@ fn store_status_backup_and_restore_are_end_to_end_validated() -> Result<(), Box<
     assert!(restored_validation.status.success());
     let restored_json: Value = serde_json::from_slice(&restored_validation.stdout)?;
     assert_eq!(restored_json["valid"], true);
-    let active_output = BuildGuard::resolve_active_directory(&output)?;
+    let active_output = BuildGuard::resolve_current_snapshot_directory(&output)?;
     assert_eq!(
         fs::read(active_output.join("graph.json"))?,
         fs::read(restored.join("graph.json"))?
@@ -114,9 +114,9 @@ fn store_validate_rejects_a_corrupt_sidecar_without_touching_graph_json()
         .output()?;
     assert!(init.status.success());
     let output = root.path().join("compass-out");
-    let active_output = BuildGuard::resolve_active_directory(&output)?;
+    let active_output = BuildGuard::resolve_current_snapshot_directory(&output)?;
     let graph = fs::read(active_output.join("graph.json"))?;
-    fs::write(active_output.join("compass-store.sqlite3"), b"corrupt")?;
+    fs::write(output.join("store/store.sqlite3"), b"corrupt")?;
     let result = Command::new(env!("CARGO_BIN_EXE_compass"))
         .args(["store", "validate", output.to_str().ok_or("output path")?])
         .output()?;

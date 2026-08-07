@@ -27,13 +27,15 @@ code-only realization and one or more semantic realizations with different
 provider/model configuration.
 
 History graph schema `networkx-node-link/v1` records automatic multigraph
-promotion. This release is a hard cutover for caches and operational state:
-Compass starts the new `cache/v1` namespace empty and never imports or reads
-legacy cache entries. The immutable realization schema itself is unchanged.
+promotion. History realization schema 1, store format v1, and `compass/v1`
+named roots remain unchanged. The visible artifact-name cutover does not add a
+new serialized schema. Compass does not translate dot-prefixed artifact
+registry entries or import legacy cache entries; rebuild an affected revision
+when it must materialize in the current layout.
 
 Before publication, Compass binds every detected code file to its exact Git
 blob ID and requires an AST completion stamp in the extraction manifest. The
-canonical `.compass_source_inventory.json` sidecar records that proof and
+canonical `source-inventory.json` sidecar records that proof and
 distinguishes files that legitimately produced no graph records. A missing
 stamp fails closed instead of publishing an apparently complete graph.
 

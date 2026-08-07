@@ -59,12 +59,12 @@ class AnalyzeTests(unittest.TestCase):
             )
 
             compass_out = workspace / "outputs" / "compass" / "sample" / "compass-out"
-            generation = compass_out / ".compass-generations" / "generation-1"
-            generation.mkdir(parents=True)
-            (compass_out / ".compass-active-generation").write_text(
-                "generation-1\n", encoding="utf-8"
+            snapshot = compass_out / "snapshots" / "snapshot-1"
+            snapshot.mkdir(parents=True)
+            (compass_out / "current-snapshot").write_text(
+                "snapshot-1\n", encoding="utf-8"
             )
-            shutil.copyfile(FIXTURES / "compass_graph.json", generation / "graph.json")
+            shutil.copyfile(FIXTURES / "compass_graph.json", snapshot / "graph.json")
 
             graphify_out = (
                 workspace / "outputs" / "graphify" / "sample" / "graphify-out"
