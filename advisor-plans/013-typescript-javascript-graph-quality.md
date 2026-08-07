@@ -1594,6 +1594,15 @@ were previously conflated:
   change. Focused coverage is now 91 candidate tests and 168 universal
   resolver tests, including aliased named requires, namespace member calls,
   callable CommonJS defaults, and dynamic/nested negative patterns.
+- At exact HEAD `46fbbbb71f59c72b07e7c4d6c6c9e704cbb301dc`, the fixture-only
+  qualification passes with the existing 57-language/980-record/1,565-
+  invariant contract, graph digest
+  `sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`,
+  and clean/warm/rebuild/restored/alternate-checkout byte equality. The
+  ignored Axios checker differential remains zero-wrong at 3,051/3,167 exact
+  local targets (116 missing; 226 false positives in the accepted local
+  candidate set); the remaining misses are same-file structural-flow cases,
+  not CommonJS export-slot failures.
 
 Fixture qualification, compiler-source-oracle recall, release-corpus
 precision/Wilson gates, framework tiers, equivalent Graphify/SCIP scope, and
