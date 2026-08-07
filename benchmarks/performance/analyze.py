@@ -130,10 +130,10 @@ def load_corpora(manifest_path: Path) -> list[dict[str, str | Path]]:
 
 def compass_graph(workspace: Path, name: str) -> Path:
     output = workspace / "outputs" / "compass" / name / "compass-out"
-    generation = (output / ".compass-active-generation").read_text(
+    snapshot = (output / "current-snapshot").read_text(
         encoding="utf-8"
     ).strip()
-    graph = output / ".compass-generations" / generation / "graph.json"
+    graph = output / "snapshots" / snapshot / "graph.json"
     if not graph.is_file():
         raise FileNotFoundError(graph)
     return graph

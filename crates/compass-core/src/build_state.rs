@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::CoreError;
 
-pub(crate) const BUILD_STATE_FILE: &str = ".compass_build_state.json";
+pub(crate) const BUILD_STATE_FILE: &str = "build-state.json";
 const BUILD_STATE_SCHEMA: &str = "compass.build-state/1";
 const HASH_BUFFER_BYTES: usize = 1024 * 1024;
 
@@ -94,14 +94,9 @@ pub(crate) struct BuildProfile {
     #[serde(default)]
     pub code_only: bool,
     pub program_analysis: bool,
-    #[serde(default = "legacy_graph_storage")]
     pub graph_storage: String,
     #[serde(default = "default_max_source_bytes")]
     pub max_source_bytes: u64,
-}
-
-fn legacy_graph_storage() -> String {
-    "sqlite".to_owned()
 }
 
 const fn default_max_source_bytes() -> u64 {
@@ -280,7 +275,7 @@ mod tests {
         let manifest = output.join("manifest.json");
         let graph = output.join("graph.json");
         let program = output.join("program.json");
-        let required = output.join(".compass_root");
+        let required = output.join("source-root.txt");
         fs::write(&manifest, b"manifest")?;
         fs::write(&graph, b"graph")?;
         fs::write(&program, b"program")?;

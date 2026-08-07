@@ -229,7 +229,7 @@ The build pipeline treats output as a set. Invalid individual node and edge
 records are deterministically quarantined and reported before the remaining
 graph passes strict validation. A partial graph is published with an explicit
 warning and exact omission summary. Document-level validation errors or an
-empty usable graph remain failures and cannot replace the active generation.
+empty usable graph remain failures and cannot replace the current snapshot.
 Write paths use temporary or staged artifacts and atomic replacement where the
 contract requires it.
 

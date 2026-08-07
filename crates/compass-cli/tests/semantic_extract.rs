@@ -7,6 +7,42 @@ use std::process::Command;
 use serde_json::Value;
 
 #[test]
+fn cache_check_publishes_only_visible_compass_output_names() -> Result<(), Box<dyn Error>> {
+    let corpus = tempfile::tempdir()?;
+    fs::write(corpus.path().join("main.rs"), "fn main() {}\n")?;
+    fs::write(corpus.path().join("files.txt"), "main.rs\n")?;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args([
+            "cache-check",
+            "files.txt",
+            "--root",
+            corpus.path().to_str().ok_or("non-UTF-8 corpus path")?,
+        ])
+        .current_dir(corpus.path())
+        .env_remove("COMPASS_OUT")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let compass_output = corpus.path().join("compass-out");
+    assert_eq!(
+        fs::read_to_string(compass_output.join("uncached.txt"))?,
+        "main.rs"
+    );
+    for entry in fs::read_dir(&compass_output)? {
+        let name = entry?.file_name();
+        let name = name.to_string_lossy();
+        assert!(!name.starts_with(".compass") && !name.starts_with("compass-"));
+    }
+    Ok(())
+}
+
+#[test]
 fn native_semantic_extract_uses_provider_then_runs_warm_without_network()
 -> Result<(), Box<dyn Error>> {
     let corpus = tempfile::tempdir()?;
@@ -115,7 +151,7 @@ fn native_semantic_extract_uses_provider_then_runs_warm_without_network()
         .map_err(|error| format!("provider failed: {error}"))?;
 
     let output = corpus.path().join("compass-out");
-    let active = compass_files::BuildGuard::resolve_active_directory(&output)?;
+    let active = compass_files::BuildGuard::resolve_current_snapshot_directory(&output)?;
     let graph: Value = serde_json::from_slice(&fs::read(active.join("graph.json"))?)?;
     assert!(
         graph["nodes"].as_array().is_some_and(|nodes| {
@@ -135,14 +171,12 @@ fn native_semantic_extract_uses_provider_then_runs_warm_without_network()
         }),
         "{graph:#}"
     );
-    let analysis: Value =
-        serde_json::from_slice(&fs::read(active.join(".compass_analysis.json"))?)?;
+    let analysis: Value = serde_json::from_slice(&fs::read(active.join("analysis.json"))?)?;
     assert_eq!(
         analysis["tokens"],
         serde_json::json!({"input":17,"output":9})
     );
-    let marker: Value =
-        serde_json::from_slice(&fs::read(active.join(".compass_semantic_marker"))?)?;
+    let marker: Value = serde_json::from_slice(&fs::read(active.join("semantic-marker.json"))?)?;
     assert_eq!(marker["output_tokens"], 9);
     let manifest: Value = serde_json::from_slice(&fs::read(active.join("manifest.json"))?)?;
     assert!(

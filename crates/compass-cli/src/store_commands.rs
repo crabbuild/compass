@@ -414,15 +414,22 @@ fn output_root(args: &[String]) -> Result<PathBuf, String> {
             .map_err(|error| error.to_string())?;
         return Ok(graph.parent().unwrap_or(Path::new(".")).to_path_buf());
     }
-    if candidate.join("graph.json").is_file() || candidate.join(STORE_FILE_NAME).is_file() {
-        return Ok(candidate);
-    }
     let output_container = if candidate.join("compass-out").is_dir() {
         candidate.join("compass-out")
     } else {
-        candidate
+        candidate.clone()
     };
-    BuildGuard::resolve_active_directory(&output_container).map_err(|error| error.to_string())
+    if output_container.join("current-snapshot").is_file()
+        || output_container.join("snapshots").is_dir()
+    {
+        return BuildGuard::resolve_current_snapshot_directory(&output_container)
+            .map_err(|error| error.to_string());
+    }
+    if candidate.join("graph.json").is_file() || candidate.join(STORE_FILE_NAME).is_file() {
+        return Ok(candidate);
+    }
+    BuildGuard::resolve_current_snapshot_directory(&output_container)
+        .map_err(|error| error.to_string())
 }
 
 fn positional(args: &[String]) -> Vec<String> {

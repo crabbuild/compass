@@ -275,7 +275,7 @@ fn main() -> Result<(), String> {
 
 fn run_sqlite(nodes: usize) -> Result<ReleaseReport, String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
-    let path = directory.path().join("compass-store.sqlite3");
+    let path = directory.path().join("store.sqlite3");
     let store = compass_store::SqliteStore::open(&path).map_err(|error| error.to_string())?;
     run_with_store("sqlite", nodes, directory, path, store)
 }

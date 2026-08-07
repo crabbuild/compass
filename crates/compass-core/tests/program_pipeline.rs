@@ -239,7 +239,6 @@ fn program_pipeline_is_deterministic_incremental_and_uses_program_json()
     let cold = build_local_graph(&options)?;
     let cold_output = cold.output_dir.join("program.json");
     assert!(cold_output.is_file());
-    assert!(!cold.output_dir.join(".compass_program.json").exists());
     assert_eq!(cold.program_modules, 1);
     assert!(cold.program_summaries >= 2);
     assert_eq!(cold.program_syntax_analyzed, 1);
@@ -323,7 +322,7 @@ fn program_pipeline_is_opt_in_at_the_core_api() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn disabling_program_analysis_removes_the_previous_generation_program() -> Result<(), Box<dyn Error>>
+fn disabling_program_analysis_removes_the_previous_snapshot_program() -> Result<(), Box<dyn Error>>
 {
     let directory = tempfile::tempdir()?;
     fs::write(directory.path().join("lib.rs"), "pub fn visible() {}\n")?;
@@ -356,9 +355,7 @@ fn invalid_explicit_artifact_does_not_replace_existing_program() -> Result<(), B
     let first = build_local_graph(&options)?;
     let program_path = first.output_dir.join("program.json");
     let before = fs::read(&program_path)?;
-    let pointer = directory
-        .path()
-        .join("compass-out/.compass-active-generation");
+    let pointer = directory.path().join("compass-out/current-snapshot");
     let active_before = fs::read_to_string(&pointer)?;
 
     options
@@ -628,16 +625,14 @@ fn malformed_discovered_scip_and_obstructed_output_fail_closed() -> Result<(), B
     let first = build_local_graph(&options)?;
     let program_path = first.output_dir.join("program.json");
     let before = fs::read(&program_path)?;
-    let pointer = directory
-        .path()
-        .join("compass-out/.compass-active-generation");
+    let pointer = directory.path().join("compass-out/current-snapshot");
     let active_before = fs::read_to_string(&pointer)?;
 
     fs::write(directory.path().join("index.scip"), [0x12, 0x05, 0x01])?;
     assert!(build_local_graph(&options).is_err());
     assert_eq!(fs::read(&program_path)?, before);
     assert_eq!(fs::read_to_string(&pointer)?, active_before);
-    assert!(!first.output_dir.join(".compass-build-incomplete").exists());
+    assert!(!first.output_dir.join("build-incomplete").exists());
 
     fs::remove_file(directory.path().join("index.scip"))?;
     fs::remove_file(&program_path)?;
@@ -645,6 +640,6 @@ fn malformed_discovered_scip_and_obstructed_output_fail_closed() -> Result<(), B
     assert!(build_local_graph(&options).is_err());
     assert!(program_path.is_dir());
     assert_eq!(fs::read_to_string(pointer)?, active_before);
-    assert!(!first.output_dir.join(".compass-build-incomplete").exists());
+    assert!(!first.output_dir.join("build-incomplete").exists());
     Ok(())
 }

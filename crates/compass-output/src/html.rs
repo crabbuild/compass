@@ -1033,7 +1033,7 @@ fn load_learning_overlay(output_path: &Path) -> BTreeMap<String, Value> {
     let path = output_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join(".compass_learning.json");
+        .join("learning.json");
     let raw = fs::read(path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
@@ -1088,7 +1088,7 @@ fn resolve_learning_source(source: &str, output_path: &Path) -> Option<std::path
     }
     let out = output_path.parent().unwrap_or_else(|| Path::new("."));
     let mut roots = Vec::new();
-    if let Ok(recorded) = fs::read_to_string(out.join(".compass_root")) {
+    if let Ok(recorded) = fs::read_to_string(out.join("source-root.txt")) {
         let recorded = recorded.trim();
         if !recorded.is_empty() {
             roots.push(std::path::PathBuf::from(recorded));
@@ -2542,7 +2542,7 @@ mod tests {
             Sha256::digest(fs::read(directory.path().join("source.rs"))?)
         );
         fs::write(
-            out.join(".compass_learning.json"),
+            out.join("learning.json"),
             serde_json::to_vec(&json!({"nodes":{"a":{
                 "status":"preferred","uses":2,"score":1.5,
                 "source_file":"source.rs","code_fingerprint":digest

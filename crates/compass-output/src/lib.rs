@@ -91,7 +91,7 @@ pub enum OutputError {
     )]
     EmptyWikiCommunities,
     #[error(
-        "all community node IDs are stale — none exist in the graph. Re-run `compass extract .` to regenerate .compass_analysis.json."
+        "all community node IDs are stale — none exist in the graph. Re-run `compass extract .` to regenerate analysis.json."
     )]
     StaleWikiCommunities,
     #[error("unsupported history renderer {version} for {path}")]

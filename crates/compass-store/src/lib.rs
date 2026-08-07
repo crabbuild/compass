@@ -28,9 +28,9 @@ pub const GRAPH_SNAPSHOT_SCHEMA_V1: &str = "compass.store.graph-snapshot/1";
 pub const STORE_REF_SCHEMA_V1: &str = "compass.store.ref/1";
 pub const STORE_RETENTION_SCHEMA_V1: &str = "compass.store.retention/1";
 pub const GRAPH_SCHEMA_V1: &str = "compass.graph/1";
-pub const STORE_FILE_NAME: &str = "compass-store.sqlite3";
+pub const STORE_FILE_NAME: &str = "store.sqlite3";
 pub const STORE_REF_FILE_NAME: &str = "store.ref";
-pub const STORE_DIRECTORY_NAME: &str = ".compass-store";
+pub const STORE_DIRECTORY_NAME: &str = "store";
 pub const KEY_ENCODING_V1: u8 = 1;
 pub const MAX_KEY_SEGMENTS: usize = 32;
 pub const MAX_NAMESPACE_BYTES: usize = 128;
@@ -649,7 +649,7 @@ pub struct SnapshotManifest {
 ///
 /// The reference is an application artifact rather than a SQLite implementation
 /// detail. It lets a reader validate that the selected database and snapshot are
-/// the ones published with the active generation before opening query state.
+/// the ones published with the active snapshot before opening query state.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StoreRef {
     pub schema: String,
@@ -725,27 +725,32 @@ impl StoreRef {
 
 /// Resolve the local SQLite realization selected by a graph artifact.
 ///
-/// Current build generations keep the database once under the output root and
+/// Current build snapshots keep the database once under the output root and
 /// publish only a small `store.ref` beside `graph.json`. An adjacent database
-/// remains supported for standalone restored bundles and older generations.
+/// remains supported only for standalone restored bundles.
 #[must_use]
 pub fn local_sqlite_store_path(graph_path: &Path) -> PathBuf {
     let graph_directory = graph_path.parent().unwrap_or_else(|| Path::new("."));
     let adjacent = graph_directory.join(STORE_FILE_NAME);
-    if adjacent.is_file() {
-        return adjacent;
+    let output_store = graph_directory
+        .join(STORE_DIRECTORY_NAME)
+        .join(STORE_FILE_NAME);
+    if graph_directory.join("current-snapshot").is_file()
+        || graph_directory.join("snapshots").is_dir()
+    {
+        return output_store;
     }
-    let Some(generations_directory) = graph_directory.parent() else {
+    let Some(snapshots_directory) = graph_directory.parent() else {
         return adjacent;
     };
-    if generations_directory
+    if snapshots_directory
         .file_name()
         .and_then(|name| name.to_str())
-        != Some(".compass-generations")
+        != Some("snapshots")
     {
         return adjacent;
     }
-    let Some(output_root) = generations_directory.parent() else {
+    let Some(output_root) = snapshots_directory.parent() else {
         return adjacent;
     };
     output_root.join(STORE_DIRECTORY_NAME).join(STORE_FILE_NAME)
@@ -930,7 +935,7 @@ impl SqliteStore {
         self.read_snapshot().map(|(manifest, _)| manifest)
     }
 
-    /// Flush all acknowledged WAL frames before a filesystem generation is
+    /// Flush all acknowledged WAL frames before a filesystem snapshot is
     /// committed.  The main database file is the only authoritative artifact
     /// named by `BuildGuard`; checkpointing makes it self-contained for copy,
     /// backup, and recovery operations.
@@ -1007,7 +1012,7 @@ impl SqliteStore {
     /// Restore a validated SQLite backup into a new path.
     ///
     /// Restores intentionally refuse to overwrite an existing path. A caller
-    /// that needs replacement must move the old generation aside first, which
+    /// that needs replacement must move the old snapshot aside first, which
     /// preserves a recoverable rollback copy.
     pub fn restore_from(
         backup: impl AsRef<Path>,
@@ -2512,9 +2517,34 @@ mod tests {
 
     use super::{
         GRAPH_SCHEMA_V1, ImmutableWrite, Key, KeyRange, MemoryStore, NamespaceId, PartitionKey,
-        ScanLimits, SqliteStore, Store, StoreError, VersionToken, WriteCondition,
-        decode_key_segments, encode_key_segments,
+        STORE_DIRECTORY_NAME, STORE_FILE_NAME, ScanLimits, SqliteStore, Store, StoreError,
+        VersionToken, WriteCondition, decode_key_segments, encode_key_segments,
+        local_sqlite_store_path,
     };
+
+    #[test]
+    fn visible_output_paths_resolve_the_shared_sqlite_store() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let output = directory.path().join("compass-out");
+        let snapshot = output.join("snapshots/snapshot-test");
+        fs::create_dir_all(&snapshot)?;
+        fs::write(output.join("current-snapshot"), "snapshot-test\n")?;
+        fs::write(
+            snapshot.join(STORE_FILE_NAME),
+            b"unmanaged snapshot-local store",
+        )?;
+        let expected = output.join(STORE_DIRECTORY_NAME).join(STORE_FILE_NAME);
+
+        assert_eq!(
+            local_sqlite_store_path(&output.join("graph.json")),
+            expected
+        );
+        assert_eq!(
+            local_sqlite_store_path(&snapshot.join("graph.json")),
+            expected
+        );
+        Ok(())
+    }
 
     #[test]
     fn namespace_partition_and_key_are_isolated_and_ordered() -> Result<(), Box<dyn Error>> {

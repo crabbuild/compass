@@ -157,7 +157,7 @@ fn current_snapshot_is_published_without_invoking_the_exact_builder()
         artifacts
             .artifacts
             .authoritative_sidecars
-            .get(".compass_source_inventory.json")
+            .get("source-inventory.json")
             .ok_or("source inventory was not published")?,
     )?;
     assert_eq!(inventory["schema"], "compass.history.source_inventory/1");

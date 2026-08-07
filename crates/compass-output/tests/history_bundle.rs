@@ -36,7 +36,7 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
         "GRAPH_REPORT.md",
         "graph.html",
         "GRAPH_TREE.html",
-        ".compass_labels.json.sig",
+        "labels.json.sig",
     ]
     .map(|path| DerivedArtifactRequest {
         relative_path: path.to_owned(),
@@ -63,7 +63,7 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
     assert!(destination.join("GRAPH_REPORT.md").is_file());
     assert!(destination.join("graph.html").is_file());
     assert!(destination.join("GRAPH_TREE.html").is_file());
-    assert!(destination.join(".compass_labels.json.sig").is_file());
+    assert!(destination.join("labels.json.sig").is_file());
     assert!(
         std::fs::read_to_string(destination.join("GRAPH_REPORT.md"))?
             .contains("# Graph Report - fixture")
@@ -75,9 +75,8 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
         std::fs::read_to_string(destination.join("GRAPH_TREE.html"))?
             .contains("compass tree viewer")
     );
-    let signatures: serde_json::Value = serde_json::from_slice(&std::fs::read(
-        destination.join(".compass_labels.json.sig"),
-    )?)?;
+    let signatures: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(destination.join("labels.json.sig"))?)?;
     assert!(signatures.get("0").is_some());
     assert_eq!(
         std::fs::read(destination.join("semantic/facts.bin"))?,

@@ -123,8 +123,7 @@ pub struct Outcome {
 }
 
 pub(crate) fn resolve_output_artifact(output: &Path, name: &str) -> Result<PathBuf, String> {
-    compass_files::BuildGuard::resolve_requested_artifact(&output.join(name))
-        .map_err(|error| error.to_string())
+    compass_files::BuildGuard::resolve_artifact(output, name).map_err(|error| error.to_string())
 }
 
 impl Outcome {
@@ -2309,7 +2308,7 @@ fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
         .find(|argument| !argument.starts_with('-'))
         .map_or_else(|| PathBuf::from("."), PathBuf::from);
     let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
-    let marker = launch_root.join(&output_name).join(".compass_root");
+    let marker = launch_root.join(&output_name).join("source-root.txt");
     let recorded_root = hook_commands::read_text_bounded(&marker, 16 * 1024)
         .ok()
         .map(|value| value.trim().to_owned())
@@ -2779,7 +2778,7 @@ fn extract_help() -> String {
 }
 
 fn saved_graph_root() -> Option<PathBuf> {
-    let path = default_graph_path().parent()?.join(".compass_root");
+    let path = default_graph_path().parent()?.join("source-root.txt");
     let root = fs::read_to_string(path).ok()?;
     let root = root.trim();
     (!root.is_empty()).then(|| PathBuf::from(root))
@@ -2810,7 +2809,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     let mut labels_path = default_graph_path()
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join(".compass_labels.json");
+        .join("labels.json");
     let mut labels_explicit = false;
     let mut report_path = default_graph_path()
         .parent()
@@ -3037,7 +3036,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     if graph_explicit {
         let output_dir = graph_path.parent().unwrap_or_else(|| Path::new("."));
         if !labels_explicit {
-            labels_path = output_dir.join(".compass_labels.json");
+            labels_path = output_dir.join("labels.json");
         }
         if !report_explicit {
             report_path = output_dir.join("GRAPH_REPORT.md");
@@ -3165,13 +3164,16 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     match result {
         Ok(mut output) => {
             if format == "html" {
+                let artifact_directory = graph_path.parent().unwrap_or_else(|| Path::new("."));
                 let output_container =
                     compass_files::BuildGuard::output_container_for_artifact(&graph_path);
-                if let Err(error) = compass_files::BuildGuard::publish_root_artifacts(
-                    &output_container,
-                    &["graph.html"],
-                    true,
-                ) {
+                if output_container != artifact_directory
+                    && let Err(error) = compass_files::BuildGuard::publish_root_artifacts(
+                        &output_container,
+                        &["graph.html"],
+                        true,
+                    )
+                {
                     return Outcome::failure(format!(
                         "error: could not publish graph.html at the output root: {error}"
                     ));
@@ -3459,7 +3461,7 @@ fn export_obsidian_cli(inputs: &ExportInputs, output_dir: &Path) -> Result<Strin
 fn export_wiki_cli(inputs: &ExportInputs, output_dir: &Path) -> Result<String, String> {
     if inputs.communities.is_empty() {
         return Err(
-            ".compass_analysis.json is missing or empty — refusing to export wiki to prevent data loss.\nRun `compass extract .` (or `compass cluster-only .`) to regenerate community data first."
+            "analysis.json is missing or empty — refusing to export wiki to prevent data loss.\nRun `compass extract .` (or `compass cluster-only .`) to regenerate community data first."
                 .to_owned(),
         );
     }
@@ -4201,28 +4203,6 @@ mod mcp_option_tests {
         let options = parse_mcp_options(&args)?
             .ok_or_else(|| "options unexpectedly returned help".to_owned())?;
         assert_eq!(options.graph_path, PathBuf::from("flag.json"));
-        Ok(())
-    }
-
-    #[test]
-    fn shared_cli_artifact_resolution_distinguishes_legacy_from_malformed_pointer()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let directory = tempfile::tempdir()?;
-        let output = directory.path().join("compass-out");
-        fs::create_dir_all(&output)?;
-        fs::write(output.join("graph.json"), "{}")?;
-
-        assert_eq!(
-            resolve_output_artifact(&output, "graph.json")?,
-            output.join("graph.json"),
-            "pointer absence must retain documented legacy compatibility"
-        );
-
-        fs::write(output.join(".compass-active-generation"), "../escape")?;
-        let Err(error) = resolve_output_artifact(&output, "graph.json") else {
-            return Err("a malformed pointer must never fall back to the legacy graph".into());
-        };
-        assert!(error.contains("generation"), "{error}");
         Ok(())
     }
 

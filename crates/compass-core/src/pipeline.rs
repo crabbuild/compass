@@ -78,13 +78,10 @@ use crate::raw_guard::enforce_incomplete_raw_guard;
 /// size while building records. Callers may raise this bound explicitly for
 /// repositories with intentionally large generated sources.
 pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
-const SEMANTIC_MARKER_FILE: &str = ".compass_semantic_marker";
+const SEMANTIC_MARKER_FILE: &str = "semantic-marker.json";
 const PIPELINE_RAYON_WORKER_CAP: usize = 12;
-const STORE_GENERATION_EXCLUSIONS: [&str; 3] = [
-    STORE_FILE_NAME,
-    "compass-store.sqlite3-wal",
-    "compass-store.sqlite3-shm",
-];
+const STORE_SNAPSHOT_EXCLUSIONS: [&str; 3] =
+    [STORE_FILE_NAME, "store.sqlite3-wal", "store.sqlite3-shm"];
 const ROOT_ARTIFACTS: [&str; 6] = [
     "GRAPH_REPORT.md",
     "graph-overview.json",
@@ -171,8 +168,8 @@ pub enum BuildPurpose {
     Extract,
 }
 
-const OUTPUT_STATS_FILE: &str = ".compass_output_stats.json";
-const AST_FACT_DIGESTS_FILE: &str = ".compass_ast_fact_digests.json";
+const OUTPUT_STATS_FILE: &str = "output-stats.json";
+const AST_FACT_DIGESTS_FILE: &str = "ast-fact-digests.json";
 const AST_FACT_DIGESTS_SCHEMA: &str = "compass.ast-fact-digests/3";
 const MAX_AST_FACT_DIGEST_ENTRIES: usize = 100_000;
 const MAX_AST_FACT_DIGEST_FILE_BYTES: usize = 16 * 1024 * 1024;
@@ -1936,7 +1933,7 @@ fn publish_fact_neutral_incremental(
         store_metrics.is_some(),
         timings,
     )?;
-    let published_output_dir = commit_generation(
+    let published_output_dir = commit_snapshot(
         guard,
         output_container,
         options.graph_storage,
@@ -2283,7 +2280,7 @@ fn build_graph_inner_unscoped(
         source,
     })?;
     let prior_build_complete = BuildGuard::ensure_complete(&output_container).is_ok();
-    let guard = BuildGuard::begin_excluding(&output_container, &STORE_GENERATION_EXCLUSIONS)?;
+    let guard = BuildGuard::begin_excluding(&output_container, &STORE_SNAPSHOT_EXCLUSIONS)?;
     let output_dir = guard.staging_directory().to_path_buf();
     if !options.program_analysis {
         remove_if_exists(&output_dir.join("program.json"))?;
@@ -2419,7 +2416,7 @@ fn build_graph_inner_unscoped(
             }
             remove_if_exists(&output_dir.join("needs_update"))?;
             let store_ready = storage_artifacts_complete(options.graph_storage, &output_dir);
-            let published_output_dir = commit_generation(
+            let published_output_dir = commit_snapshot(
                 guard,
                 &output_container,
                 options.graph_storage,
@@ -2504,7 +2501,7 @@ fn build_graph_inner_unscoped(
             storage_artifacts_complete(options.graph_storage, &output_dir),
             &mut timings,
         )?;
-        let published_output_dir = commit_generation(
+        let published_output_dir = commit_snapshot(
             guard,
             &output_container,
             options.graph_storage,
@@ -3321,7 +3318,7 @@ fn build_graph_inner_unscoped(
             storage_artifacts_complete(options.graph_storage, &output_dir),
             &mut timings,
         )?;
-        let published_output_dir = commit_generation(
+        let published_output_dir = commit_snapshot(
             guard,
             &output_container,
             options.graph_storage,
@@ -3462,7 +3459,7 @@ fn build_graph_inner_unscoped(
         write_semantic_marker(&output_dir, semantic)?;
         if options.purpose == BuildPurpose::Update {
             write_text_atomic(
-                output_dir.join(".compass_root"),
+                output_dir.join("source-root.txt"),
                 &options.root.to_string_lossy(),
             )?;
         }
@@ -3503,7 +3500,7 @@ fn build_graph_inner_unscoped(
             no_cluster_state_started.elapsed(),
         );
         let no_cluster_commit_started = Instant::now();
-        let published_output_dir = commit_generation(
+        let published_output_dir = commit_snapshot(
             guard,
             &output_container,
             options.graph_storage,
@@ -3513,7 +3510,7 @@ fn build_graph_inner_unscoped(
             &mut timings,
         )?;
         profile_internal_duration(
-            "no-cluster generation commit",
+            "no-cluster snapshot commit",
             no_cluster_commit_started.elapsed(),
         );
         timings.publish = stage_started.elapsed();
@@ -3575,7 +3572,7 @@ fn build_graph_inner_unscoped(
         BuildPurpose::Update => update_artifacts_complete(options, &output_dir),
         BuildPurpose::Extract => {
             output_dir.join("graph.json").is_file()
-                && output_dir.join(".compass_analysis.json").is_file()
+                && output_dir.join("analysis.json").is_file()
                 && storage_artifacts_complete(options.graph_storage, &output_dir)
         }
     };
@@ -3634,7 +3631,7 @@ fn build_graph_inner_unscoped(
                 true,
                 &mut timings,
             )?;
-            let published_output_dir = commit_generation(
+            let published_output_dir = commit_snapshot(
                 guard,
                 &output_container,
                 options.graph_storage,
@@ -3793,18 +3790,15 @@ fn build_graph_inner_unscoped(
             })
         };
         if options.purpose == BuildPurpose::Extract {
-            write_json_atomic(output_dir.join(".compass_analysis.json"), &analysis, true)?;
+            write_json_atomic(output_dir.join("analysis.json"), &analysis, true)?;
         } else {
             let labels_json = serde_json::to_string_pretty(&labels).map_err(|source| {
                 CoreError::SerializeExtraction {
-                    path: output_dir.join(".compass_labels.json"),
+                    path: output_dir.join("labels.json"),
                     source,
                 }
             })?;
-            write_text_atomic(
-                output_dir.join(".compass_labels.json"),
-                &format!("{labels_json}\n"),
-            )?;
+            write_text_atomic(output_dir.join("labels.json"), &format!("{labels_json}\n"))?;
         }
         let detection_summary = DetectionSummary {
             total_files: detection.total_files,
@@ -3873,7 +3867,7 @@ fn build_graph_inner_unscoped(
         let started = Instant::now();
         let model = if options.purpose == BuildPurpose::Update {
             write_text_atomic(
-                output_dir.join(".compass_root"),
+                output_dir.join("source-root.txt"),
                 &options.root.to_string_lossy(),
             )?;
             graph_overview_model(&document, &communities, &labels, &output_dir)?
@@ -4016,7 +4010,7 @@ fn build_graph_inner_unscoped(
         &mut timings,
     )?;
     profile_internal("Program output and build seals", &mut internal_started);
-    let published_output_dir = commit_generation(
+    let published_output_dir = commit_snapshot(
         guard,
         &output_container,
         options.graph_storage,
@@ -4221,17 +4215,17 @@ fn publish_build_state(
     }
     match options.purpose {
         BuildPurpose::Update => {
-            required.push(output_dir.join(".compass_root"));
+            required.push(output_dir.join("source-root.txt"));
             if !options.no_cluster {
                 required.extend([
                     output_dir.join(GRAPH_OVERVIEW_FILE),
-                    output_dir.join(".compass_labels.json"),
+                    output_dir.join("labels.json"),
                     output_dir.join("GRAPH_REPORT.md"),
                 ]);
             }
         }
         BuildPurpose::Extract if !options.no_cluster => {
-            required.push(output_dir.join(".compass_analysis.json"));
+            required.push(output_dir.join("analysis.json"));
         }
         BuildPurpose::Extract => {}
     }
@@ -4265,7 +4259,7 @@ fn publish_build_state(
     state.save(output_dir)
 }
 
-fn commit_generation(
+fn commit_snapshot(
     guard: BuildGuard,
     output_container: &Path,
     graph_storage: GraphStorage,
@@ -4311,7 +4305,9 @@ fn commit_generation(
         guard.commit_with_artifacts(&artifacts)?;
     }
     BuildGuard::publish_root_artifacts(output_container, &ROOT_ARTIFACTS, root_artifacts_changed)?;
-    Ok(BuildGuard::resolve_active_directory(output_container)?)
+    Ok(BuildGuard::resolve_current_snapshot_directory(
+        output_container,
+    )?)
 }
 
 fn garbage_collect_shared_store(
@@ -4339,7 +4335,7 @@ fn garbage_collect_shared_store(
         &staging_reference_path,
         &staging_reference_bytes,
     )?];
-    if let Ok(active_directory) = BuildGuard::resolve_active_directory(output_container) {
+    if let Ok(active_directory) = BuildGuard::resolve_current_snapshot_directory(output_container) {
         let path = active_directory.join(STORE_REF_FILE_NAME);
         if let Ok(bytes) = fs::read(&path) {
             retained_references.push(parse_reference(&path, &bytes)?);
@@ -4355,7 +4351,7 @@ fn garbage_collect_shared_store(
     });
 
     let mut all_references = retained_references.clone();
-    for directory in BuildGuard::complete_generation_directories(output_container)? {
+    for directory in BuildGuard::complete_snapshot_directories(output_container)? {
         let path = directory.join(STORE_REF_FILE_NAME);
         let Ok(bytes) = fs::read(&path) else {
             continue;
@@ -4395,8 +4391,8 @@ fn garbage_collect_shared_store(
     Ok(stats)
 }
 
-/// Ensure every committed generation has a validated, queryable immutable
-/// snapshot in the output root's shared store. The generation publishes only a
+/// Ensure every committed snapshot has a validated, queryable immutable
+/// snapshot in the output root's shared store. The snapshot publishes only a
 /// digest-bound selector beside the permanent `graph.json` artifact.
 fn ensure_store_snapshot(output_dir: &Path) -> Result<StorePublishMetrics, CoreError> {
     let graph_path = output_dir.join("graph.json");
@@ -6570,8 +6566,8 @@ fn update_artifacts_complete(options: &BuildOptions, output_dir: &Path) -> bool 
     let mut required = vec![
         "graph.json",
         "GRAPH_REPORT.md",
-        ".compass_labels.json",
-        ".compass_root",
+        "labels.json",
+        "source-root.txt",
         GRAPH_OVERVIEW_FILE,
     ];
     if options.graph_storage.publishes_store() {
@@ -6670,7 +6666,7 @@ fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<O
         .and_then(|bytes| serde_json::from_slice::<OutputStats>(&bytes).ok());
     if let Some(stats) = saved.filter(|stats| stats.graph_bytes == graph_bytes) {
         if options.no_cluster == stats.clustered
-            || !output_dir.join(".compass_root").is_file()
+            || !output_dir.join("source-root.txt").is_file()
             || (!options.no_cluster
                 && (options.resolution != 1.0
                     || options.exclude_hubs.is_some()
@@ -6686,7 +6682,7 @@ fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<O
     let header = &bytes[..bytes.len().min(512)];
     let has_key = |key: &[u8]| header.windows(key.len()).any(|window| window == key);
     let is_clustered = has_key(b"\"directed\"") && has_key(b"\"multigraph\"");
-    if options.no_cluster == is_clustered || !output_dir.join(".compass_root").is_file() {
+    if options.no_cluster == is_clustered || !output_dir.join("source-root.txt").is_file() {
         return None;
     }
     let document: GraphDocument = serde_json::from_slice(&bytes).ok()?;
@@ -7883,11 +7879,9 @@ mod tests {
         );
         assert_eq!(overview["model"]["schema"], "compass.viewer.graph/1");
         assert!(cold.output_dir.join("manifest.json").is_file());
-        assert!(!cold.output_dir.join(".compass_incomplete").exists());
         let cold_graph = V1GraphDocument::load(&cold.output_dir.join("graph.json"))?;
-        let output_stats: Value = serde_json::from_slice(&fs::read(
-            cold.output_dir.join(".compass_output_stats.json"),
-        )?)?;
+        let output_stats: Value =
+            serde_json::from_slice(&fs::read(cold.output_dir.join("output-stats.json"))?)?;
         assert_eq!(output_stats["nodes"], cold_graph.nodes.len());
         assert_eq!(output_stats["edges"], cold_graph.links.len());
         assert_eq!(
@@ -8406,7 +8400,7 @@ char* Arena::AllocateAligned(size_t bytes) { return Allocate(bytes); }
         assert!(value.get("links").is_some());
         assert!(value.get("edges").is_none());
         assert!(!result.output_dir.join("GRAPH_REPORT.md").exists());
-        assert!(!result.output_dir.join(".compass_analysis.json").exists());
+        assert!(!result.output_dir.join("analysis.json").exists());
 
         let update_dir = tempfile::tempdir()?;
         fs::write(update_dir.path().join("main.py"), "def main():\n    pass\n")?;
@@ -8420,7 +8414,7 @@ char* Arena::AllocateAligned(size_t bytes) { return Allocate(bytes); }
         assert_eq!(value["multigraph"], true);
         assert!(value.get("links").is_some());
         assert!(value.get("edges").is_none());
-        assert!(result.output_dir.join(".compass_root").is_file());
+        assert!(result.output_dir.join("source-root.txt").is_file());
         Ok(())
     }
 
@@ -8593,7 +8587,7 @@ char* Arena::AllocateAligned(size_t bytes) { return Allocate(bytes); }
                 .is_some_and(|hash| !hash.is_empty())
         );
         let analysis: Value =
-            serde_json::from_slice(&fs::read(first.output_dir.join(".compass_analysis.json"))?)?;
+            serde_json::from_slice(&fs::read(first.output_dir.join("analysis.json"))?)?;
         assert_eq!(analysis["tokens"], json!({"input": 13, "output": 7}));
 
         let second_layer = SemanticLayer {

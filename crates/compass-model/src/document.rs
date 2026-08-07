@@ -1398,7 +1398,7 @@ fn query_cache_path(graph_path: &Path) -> PathBuf {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("cache")
-        .join(format!(".{file_name}.compass-cache-v1"))
+        .join(format!("{file_name}.query-v1.cache"))
 }
 
 fn affected_cache_path(graph_path: &Path) -> PathBuf {
@@ -1410,7 +1410,7 @@ fn affected_cache_path(graph_path: &Path) -> PathBuf {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("cache")
-        .join(format!(".{file_name}.compass-affected-v1"))
+        .join(format!("{file_name}.affected-v1.cache"))
 }
 
 fn traversal_cache_path(graph_path: &Path) -> PathBuf {
@@ -1422,7 +1422,7 @@ fn traversal_cache_path(graph_path: &Path) -> PathBuf {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("cache")
-        .join(format!(".{file_name}.compass-traversal-v1"))
+        .join(format!("{file_name}.traversal-v1.cache"))
 }
 
 fn encode_cache_header(magic: &[u8; 8], signature: GraphSignature) -> [u8; QUERY_CACHE_HEADER_LEN] {
@@ -1779,7 +1779,7 @@ mod tests {
     }
 
     #[test]
-    fn query_cache_is_hidden_and_invalidates_when_the_graph_changes() {
+    fn query_cache_is_visible_and_invalidates_when_the_graph_changes() {
         let directory = tempfile::tempdir().unwrap_or_else(|_| std::process::abort());
         let path = directory.path().join("graph.json");
         fs::create_dir(directory.path().join("cache")).unwrap_or_else(|_| std::process::abort());
@@ -1788,6 +1788,10 @@ mod tests {
 
         let first = GraphDocument::load(&path).unwrap_or_else(|_| std::process::abort());
         assert_eq!(first.nodes[0].id, "a");
+        assert_eq!(
+            query_cache_path(&path),
+            directory.path().join("cache/graph.json.query-v1.cache")
+        );
         assert!(query_cache_path(&path).is_file());
 
         fs::write(
@@ -1815,6 +1819,10 @@ mod tests {
         .unwrap_or_else(|_| std::process::abort());
 
         let full = GraphDocument::load(&path).unwrap_or_else(|_| std::process::abort());
+        assert_eq!(
+            affected_cache_path(&path),
+            directory.path().join("cache/graph.json.affected-v1.cache")
+        );
         assert!(affected_cache_path(&path).is_file());
         let compact =
             GraphDocument::load_for_affected(&path).unwrap_or_else(|_| std::process::abort());
@@ -1849,6 +1857,10 @@ mod tests {
 
         let compact =
             GraphDocument::load_for_traversal(&path).unwrap_or_else(|_| std::process::abort());
+        assert_eq!(
+            traversal_cache_path(&path),
+            directory.path().join("cache/graph.json.traversal-v1.cache")
+        );
         assert!(traversal_cache_path(&path).is_file());
         assert_eq!(compact.nodes[0].label(), "A");
         assert_eq!(compact.nodes[0].string("source_file"), "src/a.py");

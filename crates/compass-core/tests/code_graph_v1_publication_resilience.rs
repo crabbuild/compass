@@ -39,9 +39,7 @@ fn invalid_topology_is_quarantined_and_the_valid_graph_is_published() -> Result<
     options.no_viz = true;
     options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
     let _first = build_local_graph(&options)?;
-    let pointer = directory
-        .path()
-        .join("compass-out/.compass-active-generation");
+    let pointer = directory.path().join("compass-out/current-snapshot");
     let active_before = fs::read_to_string(&pointer)?;
 
     options.force = true;
@@ -105,9 +103,8 @@ fn invalid_topology_is_quarantined_and_the_valid_graph_is_published() -> Result<
             && diagnostic.message.contains("0 nodes and 1 edges")
     }));
 
-    let stats: serde_json::Value = serde_json::from_slice(&fs::read(
-        result.output_dir.join(".compass_output_stats.json"),
-    )?)?;
+    let stats: serde_json::Value =
+        serde_json::from_slice(&fs::read(result.output_dir.join("output-stats.json"))?)?;
     assert_eq!(stats["omitted_nodes"], 0);
     assert_eq!(stats["omitted_edges"], 1);
     assert_eq!(stats["identity_collisions"], 0);
@@ -415,7 +412,7 @@ fn sealed_legacy_build_state_cannot_skip_current_publication() -> Result<(), Box
     options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
     let first = build_local_graph(&options)?;
     let graph_path = first.output_dir.join("graph.json");
-    let state_path = first.output_dir.join(".compass_build_state.json");
+    let state_path = first.output_dir.join("build-state.json");
 
     let mut graph: serde_json::Value = serde_json::from_slice(&fs::read(&graph_path)?)?;
     let files = graph["graph"]["files"]

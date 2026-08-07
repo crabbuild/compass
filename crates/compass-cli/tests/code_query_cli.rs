@@ -122,7 +122,7 @@ fn typed_query_text_is_a_projection_of_the_same_response() -> Result<(), Box<dyn
 }
 
 #[test]
-fn typed_query_resolves_the_active_generation_from_the_public_path() -> Result<(), Box<dyn Error>> {
+fn typed_query_resolves_the_current_snapshot_from_the_public_path() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let output = directory.path().join("compass-out");
     let guard = BuildGuard::begin(&output)?;
@@ -144,7 +144,7 @@ fn typed_query_resolves_the_active_generation_from_the_public_path() -> Result<(
 }
 
 #[test]
-fn typed_query_prefers_active_generation_over_stale_legacy_graph() -> Result<(), Box<dyn Error>> {
+fn typed_query_prefers_current_snapshot_over_a_stale_root_facade() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let output = directory.path().join("compass-out");
     support::write_typed_graph(&output)?;
@@ -168,11 +168,11 @@ fn typed_query_prefers_active_generation_over_stale_legacy_graph() -> Result<(),
 }
 
 #[test]
-fn typed_query_fails_closed_on_a_malformed_generation_pointer() -> Result<(), Box<dyn Error>> {
+fn typed_query_fails_closed_on_a_malformed_snapshot_pointer() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let output = directory.path().join("compass-out");
     support::write_typed_graph(&output)?;
-    std::fs::write(output.join(".compass-active-generation"), "../escape")?;
+    std::fs::write(output.join("current-snapshot"), "../escape")?;
 
     let outcome = run(
         Frontend::Compass,
@@ -184,18 +184,18 @@ fn typed_query_fails_closed_on_a_malformed_generation_pointer() -> Result<(), Bo
         ],
     );
     assert_ne!(outcome.code, 0);
-    assert!(outcome.stderr.contains("generation"));
+    assert!(outcome.stderr.contains("snapshot"));
     Ok(())
 }
 
 #[test]
-fn natural_query_reads_legacy_only_when_the_generation_pointer_is_absent()
+fn natural_query_accepts_a_standalone_graph_but_rejects_a_malformed_managed_pointer()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let output = directory.path().join("compass-out");
     support::write_typed_graph(&output)?;
 
-    let legacy = run(
+    let standalone = run(
         Frontend::Compass,
         [
             OsString::from("query"),
@@ -204,9 +204,9 @@ fn natural_query_reads_legacy_only_when_the_generation_pointer_is_absent()
             output.join("graph.json").into_os_string(),
         ],
     );
-    assert_eq!(legacy.code, 0, "{}", legacy.stderr);
+    assert_eq!(standalone.code, 0, "{}", standalone.stderr);
 
-    std::fs::write(output.join(".compass-active-generation"), "../escape")?;
+    std::fs::write(output.join("current-snapshot"), "../escape")?;
     let malformed = run(
         Frontend::Compass,
         [
@@ -218,7 +218,7 @@ fn natural_query_reads_legacy_only_when_the_generation_pointer_is_absent()
     );
     assert_ne!(malformed.code, 0);
     assert!(
-        malformed.stderr.contains("generation"),
+        malformed.stderr.contains("snapshot"),
         "{}",
         malformed.stderr
     );

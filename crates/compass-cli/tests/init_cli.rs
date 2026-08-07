@@ -95,7 +95,7 @@ fn sqlite_store_option_publishes_a_durable_snapshot_alongside_json() -> Result<(
     assert!(timing.contains("bytes_written="));
 
     let output_root = root.path().join("compass-out");
-    let active = BuildGuard::resolve_active_directory(&output_root)?;
+    let active = BuildGuard::resolve_current_snapshot_directory(&output_root)?;
     let graph_path = active.join("graph.json");
     let store_path = local_sqlite_store_path(&graph_path);
     let store = SqliteStore::open_read_only(&store_path)?;
@@ -117,12 +117,12 @@ fn sqlite_store_option_publishes_a_durable_snapshot_alongside_json() -> Result<(
         String::from_utf8_lossy(&update.stdout),
         String::from_utf8_lossy(&update.stderr)
     );
-    let active = BuildGuard::resolve_active_directory(&output_root)?;
+    let active = BuildGuard::resolve_current_snapshot_directory(&output_root)?;
     assert!(active.join("graph.json").is_file());
     assert!(!active.join(STORE_FILE_NAME).exists());
     assert!(store_path.is_file());
     assert!(active.join(STORE_REF_FILE_NAME).is_file());
-    assert!(!active.join(".compass-build-incomplete").exists());
+    assert!(!active.join("build-incomplete").exists());
     Ok(())
 }
 
@@ -141,15 +141,49 @@ fn graph_build_defaults_to_sqlite_query_artifacts() -> Result<(), Box<dyn Error>
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    let active = BuildGuard::resolve_active_directory(&root.path().join("compass-out"))?;
+    let output_root = root.path().join("compass-out");
+    let active = BuildGuard::resolve_current_snapshot_directory(&output_root)?;
     assert!(active.join("graph.json").is_file());
     assert!(active.join(STORE_REF_FILE_NAME).is_file());
     assert!(local_sqlite_store_path(&active.join("graph.json")).is_file());
+    assert!(output_root.join("current-snapshot").is_file());
+    assert!(output_root.join("snapshots").is_dir());
+    assert!(output_root.join("store").is_dir());
+    for entry in fs::read_dir(&output_root)? {
+        let name = entry?.file_name();
+        let name = name.to_string_lossy();
+        assert!(
+            !name.starts_with(".compass") && !name.starts_with("compass-"),
+            "prefixed Compass artifact {name} remained at {}",
+            output_root.display()
+        );
+    }
+    for entry in fs::read_dir(&active)? {
+        let name = entry?.file_name();
+        let name = name.to_string_lossy();
+        assert!(
+            !name.starts_with(".compass") && !name.starts_with("compass-"),
+            "prefixed Compass artifact {name} remained at {}",
+            active.display()
+        );
+    }
+    for name in [
+        "ast-fact-digests.json",
+        "build-state.json",
+        "labels.json",
+        "output-stats.json",
+        "source-root.txt",
+    ] {
+        assert!(
+            active.join(name).is_file(),
+            "missing visible artifact {name}"
+        );
+    }
     Ok(())
 }
 
 #[test]
-fn explicit_json_build_replaces_an_opted_in_store_generation() -> Result<(), Box<dyn Error>> {
+fn explicit_json_build_replaces_an_opted_in_store_snapshot() -> Result<(), Box<dyn Error>> {
     let root = tempfile::tempdir()?;
     fs::write(root.path().join("main.rs"), "fn main() {}\n")?;
     let sqlite = Command::new(env!("CARGO_BIN_EXE_compass"))
@@ -159,7 +193,7 @@ fn explicit_json_build_replaces_an_opted_in_store_generation() -> Result<(), Box
         .output()?;
     assert!(sqlite.status.success());
     let output = root.path().join("compass-out");
-    let active = BuildGuard::resolve_active_directory(&output)?;
+    let active = BuildGuard::resolve_current_snapshot_directory(&output)?;
     assert!(!active.join(STORE_FILE_NAME).exists());
     assert!(local_sqlite_store_path(&active.join("graph.json")).is_file());
 
@@ -174,7 +208,7 @@ fn explicit_json_build_replaces_an_opted_in_store_generation() -> Result<(), Box
         String::from_utf8_lossy(&json.stdout),
         String::from_utf8_lossy(&json.stderr)
     );
-    let active = BuildGuard::resolve_active_directory(&output)?;
+    let active = BuildGuard::resolve_current_snapshot_directory(&output)?;
     assert!(active.join("graph.json").is_file());
     assert!(!active.join(STORE_FILE_NAME).exists());
     assert!(!active.join(STORE_REF_FILE_NAME).exists());

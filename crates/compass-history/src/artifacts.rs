@@ -49,9 +49,9 @@ const EDGE_COMPATIBILITY_FIELDS: [&str; 6] = [
     "confidence_score",
     "_origin",
 ];
-const TRUSTED_GRAPH_CONTENT: &str = ".compass-history/graph.v1.json";
-const PROGRAM_SOURCE_DIGEST_CONTENT: &str = ".compass-history/program.source-digest";
-const SOURCE_INVENTORY_CONTENT: &str = ".compass_source_inventory.json";
+const TRUSTED_GRAPH_CONTENT: &str = "history/graph.v1.json";
+const PROGRAM_SOURCE_DIGEST_CONTENT: &str = "history/program.source-digest";
+const SOURCE_INVENTORY_CONTENT: &str = "source-inventory.json";
 
 /// All authoritative inputs needed to reconstruct a complete Compass output.
 #[derive(Clone, Debug, PartialEq)]
@@ -324,8 +324,8 @@ impl GraphArtifacts {
         let artifacts = Self {
             document,
             program: program.bundle,
-            analysis: read_optional_json(&output_dir.join(".compass_analysis.json"))?,
-            labels: read_optional_json(&output_dir.join(".compass_labels.json"))?,
+            analysis: read_optional_json(&output_dir.join("analysis.json"))?,
+            labels: read_optional_json(&output_dir.join("labels.json"))?,
             manifest: read_optional_json(&output_dir.join("manifest.json"))?,
             authoritative_sidecars,
         };
@@ -699,12 +699,8 @@ impl GraphArtifacts {
             ));
         }
 
-        add_optional_analysis(
-            &mut partitioned,
-            ".compass_analysis.json",
-            self.analysis.take(),
-        )?;
-        add_optional_analysis(&mut partitioned, ".compass_labels.json", self.labels.take())?;
+        add_optional_analysis(&mut partitioned, "analysis.json", self.analysis.take())?;
+        add_optional_analysis(&mut partitioned, "labels.json", self.labels.take())?;
         if let Some(manifest) = self.manifest.take() {
             let manifest = canonical_manifest_owned(manifest);
             partitioned.metadata.push((
@@ -780,8 +776,8 @@ impl GraphArtifacts {
                 [_, _, kind, path] if kind == b"sidecar" => {
                     let value = decode_record(bytes, "compass.analysis.sidecar")?;
                     match path.as_slice() {
-                        b".compass_analysis.json" => analysis = Some(value),
-                        b".compass_labels.json" => labels = Some(value),
+                        b"analysis.json" => analysis = Some(value),
+                        b"labels.json" => labels = Some(value),
                         _ => {
                             return Err(HistoryError::InvalidArtifacts(
                                 "unknown analysis sidecar".to_owned(),
@@ -1039,10 +1035,10 @@ impl GraphArtifacts {
             write_bytes_atomic(output_dir.join("program.json"), &program.canonical_bytes()?)?;
         }
         if let Some(value) = &self.analysis {
-            write_json_atomic(output_dir.join(".compass_analysis.json"), value, false)?;
+            write_json_atomic(output_dir.join("analysis.json"), value, false)?;
         }
         if let Some(value) = &self.labels {
-            write_json_atomic(output_dir.join(".compass_labels.json"), value, false)?;
+            write_json_atomic(output_dir.join("labels.json"), value, false)?;
         }
         if let Some(value) = &self.manifest {
             write_json_atomic(output_dir.join("manifest.json"), value, false)?;
@@ -1059,7 +1055,7 @@ impl GraphArtifacts {
             write_bytes_atomic(destination, bytes)?;
         }
         write_json_atomic(
-            output_dir.join(".compass_semantic_marker"),
+            output_dir.join("semantic-marker.json"),
             &SemanticCompletionMarker::from(completion),
             false,
         )?;
@@ -1297,8 +1293,8 @@ fn artifact_registry_with_graph_bytes(
         ));
     }
     for (path, value) in [
-        (".compass_analysis.json", artifacts.analysis.as_ref()),
-        (".compass_labels.json", artifacts.labels.as_ref()),
+        ("analysis.json", artifacts.analysis.as_ref()),
+        ("labels.json", artifacts.labels.as_ref()),
         ("manifest.json", artifacts.manifest.as_ref()),
     ] {
         if let Some(value) = value {
@@ -1330,7 +1326,7 @@ fn artifact_registry_with_graph_bytes(
         "GRAPH_REPORT.md",
         "graph.html",
         "GRAPH_TREE.html",
-        ".compass_labels.json.sig",
+        "labels.json.sig",
     ] {
         registry.push(ArtifactRegistryEntry {
             registry_version: 1,
@@ -1352,7 +1348,7 @@ fn artifact_registry_with_graph_bytes(
     }
     registry.push(ArtifactRegistryEntry {
         registry_version: 1,
-        relative_path: ".compass_semantic_marker".to_owned(),
+        relative_path: "semantic-marker.json".to_owned(),
         class: ArtifactClass::Operational,
         media_type: "application/json".to_owned(),
         schema_version: None,
@@ -1401,11 +1397,7 @@ fn completion_from_partition(
 fn is_builtin_artifact(path: &str) -> bool {
     matches!(
         path,
-        "graph.json"
-            | "program.json"
-            | ".compass_analysis.json"
-            | ".compass_labels.json"
-            | "manifest.json"
+        "graph.json" | "program.json" | "analysis.json" | "labels.json" | "manifest.json"
     )
 }
 
@@ -1508,12 +1500,12 @@ fn verify_builtin_registry_content(
     {
         let bytes = match entry.relative_path.as_str() {
             "graph.json" => Some(authoritative_graph_bytes(artifacts)?),
-            ".compass_analysis.json" => artifacts
+            "analysis.json" => artifacts
                 .analysis
                 .as_ref()
                 .map(canonical_json_bytes)
                 .transpose()?,
-            ".compass_labels.json" => artifacts
+            "labels.json" => artifacts
                 .labels
                 .as_ref()
                 .map(canonical_json_bytes)
@@ -2189,8 +2181,8 @@ mod tests {
         }
         assert!(validate_relative_path("nested/facts.json").is_ok());
         assert!(is_builtin_artifact("graph.json"));
-        assert!(is_builtin_artifact(".compass_analysis.json"));
-        assert!(is_builtin_artifact(".compass_labels.json"));
+        assert!(is_builtin_artifact("analysis.json"));
+        assert!(is_builtin_artifact("labels.json"));
         assert!(is_builtin_artifact("manifest.json"));
         assert!(!is_builtin_artifact("custom.json"));
 

@@ -28,7 +28,7 @@ fn write_fixture(root: &std::path::Path) -> Result<std::path::PathBuf, Box<dyn E
     )?;
     fs::write(root.join("GRAPH_REPORT.md"), "# Fixture report\n")?;
     fs::write(
-        root.join(".compass_labels.json"),
+        root.join("labels.json"),
         r#"{"0":"Core","1":"Feature","2":"Boundary"}"#,
     )?;
     Ok(graph)

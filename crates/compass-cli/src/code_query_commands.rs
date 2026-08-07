@@ -29,8 +29,10 @@ pub(crate) fn command(operation: &str, args: &[String]) -> Outcome {
 
 fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String> {
     let positional = positional(args);
-    let requested_graph =
-        PathBuf::from(option(args, "--graph").unwrap_or("compass-out/graph.json"));
+    let graph_option = option(args, "--graph");
+    let output =
+        PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()));
+    let requested_graph = graph_option.map_or_else(|| output.join("graph.json"), PathBuf::from);
     let engine = match option(args, "--engine") {
         Some("default") => EngineSelection::Default,
         Some("json") => EngineSelection::Json,
@@ -50,10 +52,15 @@ fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .join("cache")
         });
-    let graph = resolve_generation_artifact(requested_graph)?;
+    let graph = if graph_option.is_some() {
+        resolve_snapshot_artifact(requested_graph)?
+    } else {
+        compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
+            .map_err(|error| error.to_string())?
+    };
     let program = option(args, "--program")
         .map(PathBuf::from)
-        .map(resolve_generation_artifact)
+        .map(resolve_snapshot_artifact)
         .transpose()?;
     let engine = open_with_engine(&graph, program.as_deref(), &cache, engine)
         .map_err(|error| error.to_string())?;
@@ -95,7 +102,7 @@ fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String
     .map_err(|error| error.to_string())
 }
 
-fn resolve_generation_artifact(path: PathBuf) -> Result<PathBuf, String> {
+fn resolve_snapshot_artifact(path: PathBuf) -> Result<PathBuf, String> {
     compass_files::BuildGuard::resolve_requested_artifact(&path).map_err(|error| error.to_string())
 }
 

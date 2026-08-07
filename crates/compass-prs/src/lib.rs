@@ -1274,50 +1274,44 @@ mod tests {
     }
 
     #[test]
-    fn graph_impact_rereads_the_active_generation_pointer() {
+    fn graph_impact_rereads_the_current_snapshot_pointer() {
         let directory = tempfile::tempdir().unwrap_or_else(|_| std::process::abort());
         let output = directory.path();
         let public = output.join("graph.json");
-        write_impact_graph(&public, "Legacy", 0);
-        let generations = output.join(".compass-generations");
-        let first = generations.join("generation-first");
-        let second = generations.join("generation-second");
+        write_impact_graph(&public, "Public", 0);
+        let snapshots = output.join("snapshots");
+        let first = snapshots.join("snapshot-first");
+        let second = snapshots.join("snapshot-second");
         std::fs::create_dir_all(&first).unwrap_or_else(|_| std::process::abort());
         std::fs::create_dir_all(&second).unwrap_or_else(|_| std::process::abort());
         write_impact_graph(&first.join("graph.json"), "First", 1);
         write_impact_graph(&second.join("graph.json"), "Second", 2);
 
-        std::fs::write(
-            output.join(".compass-active-generation"),
-            "generation-first",
-        )
-        .unwrap_or_else(|_| std::process::abort());
+        std::fs::write(output.join("current-snapshot"), "snapshot-first")
+            .unwrap_or_else(|_| std::process::abort());
         let first_labels = attach_graph_impact(&StubRunner::default(), &mut [], &public, None);
         assert_eq!(first_labels.get(&1), Some(&vec!["First".to_owned()]));
 
-        std::fs::write(
-            output.join(".compass-active-generation"),
-            "generation-second",
-        )
-        .unwrap_or_else(|_| std::process::abort());
+        std::fs::write(output.join("current-snapshot"), "snapshot-second")
+            .unwrap_or_else(|_| std::process::abort());
         let second_labels = attach_graph_impact(&StubRunner::default(), &mut [], &public, None);
         assert_eq!(second_labels.get(&2), Some(&vec!["Second".to_owned()]));
     }
 
     #[test]
-    fn graph_impact_uses_legacy_only_when_the_pointer_is_absent() {
+    fn graph_impact_accepts_standalone_graphs_but_rejects_malformed_managed_pointers() {
         let directory = tempfile::tempdir().unwrap_or_else(|_| std::process::abort());
         let public = directory.path().join("graph.json");
-        write_impact_graph(&public, "Legacy", 0);
+        write_impact_graph(&public, "Standalone", 0);
 
-        let legacy_labels = attach_graph_impact(&StubRunner::default(), &mut [], &public, None);
-        assert_eq!(legacy_labels.get(&0), Some(&vec!["Legacy".to_owned()]));
+        let standalone_labels = attach_graph_impact(&StubRunner::default(), &mut [], &public, None);
+        assert_eq!(
+            standalone_labels.get(&0),
+            Some(&vec!["Standalone".to_owned()])
+        );
 
-        std::fs::write(
-            directory.path().join(".compass-active-generation"),
-            "../escape",
-        )
-        .unwrap_or_else(|_| std::process::abort());
+        std::fs::write(directory.path().join("current-snapshot"), "../escape")
+            .unwrap_or_else(|_| std::process::abort());
         let malformed_labels = attach_graph_impact(&StubRunner::default(), &mut [], &public, None);
         assert!(malformed_labels.is_empty());
     }

@@ -143,7 +143,7 @@ fn detection_ignores_compass_generated_output() -> Result<(), Box<dyn Error>> {
     fs::write(root.join("main.rs"), "fn main() {}\n")?;
     fs::create_dir(root.join("compass-out"))?;
     fs::write(root.join("compass-out/graph.json"), "{}\n")?;
-    fs::write(root.join("compass-out/.compass_labels.json"), "{}\n")?;
+    fs::write(root.join("compass-out/labels.json"), "{}\n")?;
     fs::create_dir(root.join("graphify-out"))?;
     fs::write(
         root.join("graphify-out/generated.rs"),
@@ -664,7 +664,7 @@ fn lossy_source_limit_slicing_and_build_guard() -> Result<(), Box<dyn Error>> {
     assert!(slices.len() >= 2);
 
     let guard = BuildGuard::begin(directory.path())?;
-    BuildGuard::ensure_complete(directory.path())?;
+    assert!(BuildGuard::ensure_complete(directory.path()).is_err());
     guard.commit()?;
     BuildGuard::ensure_complete(directory.path())?;
     let not_a_directory = directory.path().join("not-a-directory");
@@ -672,9 +672,7 @@ fn lossy_source_limit_slicing_and_build_guard() -> Result<(), Box<dyn Error>> {
     assert!(BuildGuard::begin(&not_a_directory.join("output")).is_err());
 
     let broken_guard = BuildGuard::begin(directory.path())?;
-    let marker = broken_guard
-        .staging_directory()
-        .join(".compass-build-incomplete");
+    let marker = broken_guard.staging_directory().join("build-incomplete");
     fs::remove_file(&marker)?;
     fs::create_dir(&marker)?;
     assert!(broken_guard.commit().is_err());
@@ -682,7 +680,7 @@ fn lossy_source_limit_slicing_and_build_guard() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn build_guard_publishes_one_complete_generation_at_a_time() -> Result<(), Box<dyn Error>> {
+fn build_guard_publishes_one_complete_snapshot_at_a_time() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let first = BuildGuard::begin(directory.path())?;
     fs::write(first.staging_directory().join("graph.json"), "graph-one")?;
@@ -825,7 +823,7 @@ fn build_guard_maps_active_artifacts_to_the_output_container() -> Result<(), Box
 }
 
 #[test]
-fn build_guard_can_exclude_a_large_generation_sidecar() -> Result<(), Box<dyn Error>> {
+fn build_guard_can_exclude_a_large_snapshot_sidecar() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let first = BuildGuard::begin(directory.path())?;
     fs::write(first.staging_directory().join("graph.json"), "graph-one")?;
@@ -843,7 +841,19 @@ fn build_guard_can_exclude_a_large_generation_sidecar() -> Result<(), Box<dyn Er
 }
 
 #[test]
-fn build_guard_retains_only_two_complete_generations() -> Result<(), Box<dyn Error>> {
+fn build_guard_never_imports_an_unmanaged_root_snapshot() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root_graph = directory.path().join("graph.json");
+    fs::write(&root_graph, "unmanaged")?;
+
+    let guard = BuildGuard::begin(directory.path())?;
+    assert!(!guard.staging_directory().join("graph.json").exists());
+    assert!(BuildGuard::resolve_requested_artifact(&root_graph).is_err());
+    Ok(())
+}
+
+#[test]
+fn build_guard_retains_only_two_complete_snapshots() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     for version in 0..4 {
         let guard = BuildGuard::begin(directory.path())?;
@@ -853,11 +863,11 @@ fn build_guard_retains_only_two_complete_generations() -> Result<(), Box<dyn Err
         )?;
         guard.commit_with_artifacts(&["graph.json"])?;
     }
-    let generations = fs::read_dir(directory.path().join(".compass-generations"))?
+    let snapshots = fs::read_dir(directory.path().join("snapshots"))?
         .filter_map(Result::ok)
         .filter(|entry| entry.path().is_dir())
         .collect::<Vec<_>>();
-    assert_eq!(generations.len(), 2);
+    assert_eq!(snapshots.len(), 2);
     assert_eq!(
         fs::read_to_string(BuildGuard::resolve_artifact(
             directory.path(),
@@ -1224,7 +1234,7 @@ fn slicing_hashing_atomic_writes_and_stat_index_cover_hostile_boundaries()
     assert!(write_text_atomic(directory.path().join("not-a-directory/child"), "x").is_err());
 
     let guard = BuildGuard::begin(directory.path())?;
-    fs::remove_file(guard.staging_directory().join(".compass-build-incomplete"))?;
+    fs::remove_file(guard.staging_directory().join("build-incomplete"))?;
     assert!(guard.commit().is_err());
     Ok(())
 }

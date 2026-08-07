@@ -158,9 +158,8 @@ where
     let analyze_started = Instant::now();
     let hub_labels = label_communities_by_hub(&document, &communities);
     let signatures = community_member_signatures(&communities);
-    let saved_labels = load_usize_string_map(&options.output_dir.join(".compass_labels.json"));
-    let saved_signatures =
-        load_usize_string_map(&options.output_dir.join(".compass_labels.json.sig"));
+    let saved_labels = load_usize_string_map(&options.output_dir.join("labels.json"));
+    let saved_signatures = load_usize_string_map(&options.output_dir.join("labels.json.sig"));
     let cohesion = score_communities(&document, &communities);
     let gods = god_nodes(&document, 10);
     let surprises = surprising_connections(&document, &communities, 5);
@@ -207,7 +206,7 @@ where
     let export_started = Instant::now();
     let backup = backup_if_protected(&options.output_dir);
     write_json_atomic(
-        options.output_dir.join(".compass_analysis.json"),
+        options.output_dir.join("analysis.json"),
         &json!({
             "communities": communities.iter().map(|(key, value)| (key.to_string(), value)).collect::<BTreeMap<_, _>>(),
             "cohesion": cohesion.iter().map(|(key, value)| (key.to_string(), value)).collect::<BTreeMap<_, _>>(),
@@ -227,11 +226,8 @@ where
             community_labels: Some(&labels),
         },
     )?;
-    write_python_string_map(options.output_dir.join(".compass_labels.json"), &labels)?;
-    write_python_string_map(
-        options.output_dir.join(".compass_labels.json.sig"),
-        &signatures,
-    )?;
+    write_python_string_map(options.output_dir.join("labels.json"), &labels)?;
+    write_python_string_map(options.output_dir.join("labels.json.sig"), &signatures)?;
     write_graph_overview_artifact(&document, &communities, &labels, &options.output_dir)?;
     let html_path = options.output_dir.join("graph.html");
     let html_written = if options.no_viz {

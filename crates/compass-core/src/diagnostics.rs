@@ -235,7 +235,7 @@ pub fn diagnose_graph_quality(path: &Path) -> Result<Value, CoreError> {
     );
 
     let output_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let output_stats = read_json_object(&output_dir.join(".compass_output_stats.json"));
+    let output_stats = read_json_object(&output_dir.join("output-stats.json"));
     let overview = read_json_object(&output_dir.join("graph-overview.json"));
     let stats_nodes = output_stats
         .as_ref()
@@ -399,11 +399,11 @@ fn diagnose_oversized_graph(path: &Path, size: u64, cap: u64) -> Result<Value, C
         &path
             .parent()
             .unwrap_or_else(|| Path::new("."))
-            .join(".compass_output_stats.json"),
+            .join("output-stats.json"),
     )
     .ok_or_else(|| {
         CoreError::DiagnosticFile(format!(
-            "graph file {} exceeds the {}-byte cap and has no .compass_output_stats.json; set COMPASS_MAX_GRAPH_BYTES to inspect it",
+            "graph file {} exceeds the {}-byte cap and has no output-stats.json; set COMPASS_MAX_GRAPH_BYTES to inspect it",
             path.display(),
             grouped(u128::from(cap)),
         ))

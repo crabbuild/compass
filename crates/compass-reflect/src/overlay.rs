@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 
 use crate::{Aggregate, ProvenanceEvent, ReflectError};
 
-pub const LEARNING_SIDECAR_NAME: &str = ".compass_learning.json";
+pub const LEARNING_SIDECAR_NAME: &str = "learning.json";
 const LEARNING_SCHEMA_VERSION: u8 = 1;
 const PROVENANCE_CAP: usize = 5;
 
@@ -174,7 +174,7 @@ fn resolve_source_path(source: &str, graph_path: &Path) -> Option<PathBuf> {
     }
     let output = graph_path.parent().unwrap_or_else(|| Path::new("."));
     let mut candidates = Vec::new();
-    if let Ok(recorded) = fs::read_to_string(output.join(".compass_root")) {
+    if let Ok(recorded) = fs::read_to_string(output.join("source-root.txt")) {
         let recorded = recorded.trim();
         if !recorded.is_empty() {
             candidates.push(PathBuf::from(recorded));

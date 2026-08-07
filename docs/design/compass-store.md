@@ -8,16 +8,16 @@ implemented. This includes the namespace-first common contract, versioned
 logical envelopes, SQLite backup/restore, explicit rebuild tooling, release
 qualification reports, canonical JSON/typed-query/CompassQL differential
 checks, and packaging boundaries. `graph.json` remains permanent and
-compatible. Local bounded generation retention and reachability collection are
+compatible. Local bounded snapshot retention and reachability collection are
 implemented. PostgreSQL, DynamoDB, hosted credentials/TLS, distributed leases,
 and service quotas remain future work.
 
 New stores contain only the Phase 2 content-addressed projected indexes and
 their manifest; they do not duplicate the complete graph in a legacy chunked
 payload. One stable SQLite database lives below the output root, while each
-BuildGuard generation contains canonical `graph.json` and a small immutable
+BuildGuard snapshot contains canonical `graph.json` and a small immutable
 `store.ref`. The database is prepared and checkpointed before the filesystem
-generation switch publishes that reference. `graph.json` remains a permanent
+snapshot switch publishes that reference. `graph.json` remains a permanent
 compatible engine and is never removed or made dependent on SQLite.
 
 The first support window is `0.3.x`: matching logical majors may be reopened
@@ -674,7 +674,7 @@ digest, schema, index kind, ordering, root selection, and graph validation
 before returning a record. Point reads and scans enforce item, byte, object,
 and depth limits; corruption is never converted into an empty result.
 
-`snapshot_id` is a meaning-oriented identity digest. The build generation ID
+`snapshot_id` is a meaning-oriented identity digest. The build snapshot ID
 is retained in the exported metadata and graph digest but is excluded from
 the identity projection, so operational rebuilds do not create a different
 logical identity. A prepared snapshot writes no active selector. Activation is
@@ -683,11 +683,11 @@ to finish against that immutable realization.
 
 The Phase 3 local adapter maps these same objects and selectors to durable
 SQLite. It validates the active selector and canonical export after reopen,
-publishes a typed `store.ref`, and checkpoints WAL frames before the generation
+publishes a typed `store.ref`, and checkpoints WAL frames before the snapshot
 switch. After publication, bounded mark-and-sweep collection retains objects
-reachable from the active and previous complete generations and deletes other
+reachable from the active and previous complete snapshots and deletes other
 entries in bounded transactions. A malformed or stale store fails the
-unpublished build and leaves the previous generation and its JSON engine
+unpublished build and leaves the previous snapshot and its JSON engine
 readable.
 
 ### Structural sharing and incremental update
@@ -722,24 +722,24 @@ safe to retry and later collect.
 ### Local artifact-set publication
 
 For `compass init` and `compass update`, the existing filesystem build guard
-remains the coordinator for a coherent local output generation. A dual-profile
-generation contains:
+remains the coordinator for a coherent local output snapshot. A dual-profile
+snapshot contains:
 
 ```text
-staged generation/
+staged snapshot/
   graph.json
   reports and viewer artifacts
   store.ref -> immutable snapshot ID + manifest digest + store identity
 ```
 
 The store snapshot is fully prepared but does not independently become
-current. The filesystem generation switch atomically publishes `graph.json`,
-its reports, and `store.ref` together. A reader opening that generation may
+current. The filesystem snapshot switch atomically publishes `graph.json`,
+its reports, and `store.ref` together. A reader opening that snapshot may
 choose either the JSON engine or the referenced store engine and must observe
 the same graph.
 
-A JSON-profile generation follows the existing artifact publication without a
-store reference. A store-profile generation stages `store.ref` plus reports
+A JSON-profile snapshot follows the existing artifact publication without a
+store reference. A store-profile snapshot stages `store.ref` plus reports
 derived from that immutable snapshot and deliberately omits eager JSON
 materialization; its export command can create JSON as a new coherent artifact
 without changing the selected snapshot.
@@ -750,11 +750,11 @@ usable complete engine. No best-effort sequence of “update database, then
 replace JSON” is allowed to expose two different current graphs.
 
 When selected by default or with `--store sqlite`, the Phase 3 local implementation uses the
-stable `DIR/.compass-store/compass-store.sqlite3` database outside staged and
-complete generation directories. SQLite runs in WAL/FULL mode; the writer
-checkpoints before the generation switch, while the staged generation receives
+stable `DIR/store/store.sqlite3` database outside staged and
+complete snapshot directories. SQLite runs in WAL/FULL mode; the writer
+checkpoints before the snapshot switch, while the staged snapshot receives
 only `store.ref` and bounded retention metadata. An ordinary build omits the
-reference and retains the JSON publication. No generation copies the database.
+reference and retains the JSON publication. No snapshot copies the database.
 
 ### Store-native or cloud publication
 
@@ -875,7 +875,7 @@ own format migration policy.
 | Key order | Binary primary-key order | Byte-key table order | Binary `bytea` order | Table sort-key order |
 | Strong read | Read transaction | Read transaction | Primary/qualifying synchronous path | Consistent base-table read |
 | Conditional write | Transaction plus row/version predicate | Write transaction plus version check | Unique constraint/conditional update | Conditional expression |
-| Publication commit | One selector-row CAS or filesystem generation switch | One selector-key CAS or filesystem generation switch | One selector-row CAS | One selector-item CAS |
+| Publication commit | One selector-row CAS or filesystem snapshot switch | One selector-key CAS or filesystem snapshot switch | One selector-row CAS | One selector-item CAS |
 | Optional acceleration | FTS/derived tables | Derived local tables | Derived indexes/text search | Derived items or separately qualified service |
 
 Only the contract column meanings are portable. For example, availability of a
@@ -912,7 +912,7 @@ explicit transactions. Immutable objects are compressed above the adapter and
 inserted with backend-neutral bounded batches; one conflict-checked SQL
 transaction covers each batch without a preceding existence query per object.
 The publication path explicitly checkpoints before `BuildGuard` seals the
-generation. File creation, permissions, symlink handling, corruption recovery,
+snapshot. File creation, permissions, symlink handling, corruption recovery,
 and atomic replacement reuse `compass-files` primitives. Native tests use
 `EXPLAIN QUERY PLAN` to require primary-key point and partition-range plans;
 physical choices remain benchmarked adapter details rather than public schema.
@@ -1048,7 +1048,7 @@ Immutable publication makes orphaned content expected. Garbage collection is
 mark-and-sweep, rooted at:
 
 - active selectors;
-- filesystem `store.ref` records for retained local generations;
+- filesystem `store.ref` records for retained local snapshots;
 - retained historical realization roots;
 - explicit pins; and
 - unexpired reader or build leases.
@@ -1072,10 +1072,10 @@ Recovery is ordered by authority:
 2. validate its manifest and roots;
 3. use a coherent backend backup or an alternate retained snapshot if the
    store is corrupt;
-4. for local artifact generations, open the co-published `graph.json` engine;
+4. for local artifact snapshots, open the co-published `graph.json` engine;
 5. rebuild disposable indexes or the store snapshot from validated JSON or
    source; and
-6. publish a new generation rather than editing an immutable snapshot.
+6. publish a new snapshot rather than editing an immutable snapshot.
 
 A missing object reachable from a committed manifest is corruption or
 incomplete replication, not an empty graph. A dangling prepared manifest is

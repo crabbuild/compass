@@ -156,8 +156,8 @@ pub(super) fn command_reflect(frontend: Frontend, args: &[String]) -> Outcome {
     };
     if let Some(graph_path) = graph.as_deref() {
         let parent = graph_path.parent().unwrap_or_else(|| Path::new("."));
-        analysis.get_or_insert_with(|| parent.join(".compass_analysis.json"));
-        labels.get_or_insert_with(|| parent.join(".compass_labels.json"));
+        analysis.get_or_insert_with(|| parent.join("analysis.json"));
+        labels.get_or_insert_with(|| parent.join("labels.json"));
     }
     if if_stale
         && lessons_fresh(

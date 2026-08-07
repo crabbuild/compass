@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Simplify every Compass-owned current-output path beneath `compass-out/`.
+  Immutable build snapshots now live under `snapshots/`, the selector is
+  `current-snapshot`, the SQLite query index is under
+  `store/`, and snapshot-local sidecars use concise names such as
+  `build-state.json` and `analysis.json`. This is an unconditional hard cut
+  with no old-path detector, compatibility reader, or migrator. History
+  realization schema 1,
+  store format v1, and `compass/v1` realization roots remain unchanged; the
+  output path cutover does not introduce a new serialized schema.
+
 - Let agents size natural `query` and `explain` pages with an explicit token
   budget (2,000 by default) and retrieve every deterministic continuation with
   `--page`. Output now reports exact page/fact ranges and no longer silently

@@ -876,7 +876,8 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
         let Some(output_container) = self.working_tree_seed.as_ref() else {
             return Ok(None);
         };
-        let Ok(output_dir) = compass_files::BuildGuard::resolve_active_directory(output_container)
+        let Ok(output_dir) =
+            compass_files::BuildGuard::resolve_current_snapshot_directory(output_container)
         else {
             return Ok(None);
         };
@@ -984,8 +985,9 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
         }
 
         let output_container = output_root.join("compass-out");
-        let output_dir = compass_files::BuildGuard::resolve_active_directory(&output_container)
-            .map_err(|error| MaterializeError::Builder(error.to_string()))?;
+        let output_dir =
+            compass_files::BuildGuard::resolve_current_snapshot_directory(&output_container)
+                .map_err(|error| MaterializeError::Builder(error.to_string()))?;
         let detection = detect(
             checkout,
             &DetectOptions {

@@ -39,8 +39,8 @@ structural graph by default; pass `--program` when the initial workspace also
 needs Program IR.
 The initial build publishes JSON and a SQLite query snapshot by default. Pass
 `--store json` when only the portable JSON artifact is wanted. The database
-lives below the output root at `.compass-store/compass-store.sqlite3`; the
-generation contains only the small reference beside `graph.json`.
+lives below the output root at `store/store.sqlite3`; the
+snapshot contains only the small reference beside `graph.json`.
 
 ### `update`
 
@@ -483,7 +483,9 @@ compass cache-check FILES_FROM
 ```
 
 Checks whether cached semantic results can be reused for a file list, root,
-mode, and prompt contract.
+mode, and prompt contract. Results are written visibly below the selected
+output root as `cached.json` (when hits exist) and
+`uncached.txt`.
 
 ### `merge-chunks`
 
@@ -702,8 +704,8 @@ compass store restore --from BACKUP_DIR --into OUTPUT [--format text|json]
 
 `status` is read-only and reports graph, shared SQLite store, selector, schema,
 and digest state. `validate` requires a matching
-`.compass-store/compass-store.sqlite3`, active snapshot, and generation
-`store.ref`; a mismatch is an error, never an empty graph.
+`store/store.sqlite3`, the current snapshot, and that snapshot's `store.ref`;
+a mismatch is an error, never an empty graph.
 `backup` creates a new digest-bound directory after checkpointing SQLite.
 `restore` validates that bundle and writes only to a new or empty destination.
 The commands currently operate on the local SQLite adapter. The redb adapter is

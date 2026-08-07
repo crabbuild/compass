@@ -39,10 +39,10 @@ and is independently mergeable:
   versioned SQLite realization in one package. The contract does not expose
   SQL or require a particular backend, so redb, PostgreSQL, DynamoDB, or a
   service adapter can implement the same trait later.
-- Every committed local generation contains `graph.json`. Builds using the
+- Every committed local snapshot contains `graph.json`. Builds using the
   default SQLite storage (or explicit `--store sqlite`) additionally contain a
   typed `store.ref`; one shared
-  `.compass-store/compass-store.sqlite3` lives outside the generation
+  `store/store.sqlite3` lives outside the snapshot
   directories. The store contains immutable digest-addressed projected trees,
   manifests, and a CAS-protected selector, but no legacy complete-graph
   payload. WAL is checkpointed before the BuildGuard switch; streamed
@@ -64,7 +64,7 @@ Acceptance criteria for this slice are deliberately concrete:
    selection, reference failures, pinned readers, cache identity, and
    JSON-equivalent typed query results.
 3. The core publication regression test proves the shared database and
-   generation reference are present, reopenable, digest-valid, and
+   snapshot reference are present, reopenable, digest-valid, and
    byte-identical to canonical `graph.json` after a local build.
 4. Deleting or corrupting the sidecar never changes the JSON artifact; default
    query opening falls back only when the sidecar is absent, while an active
@@ -94,14 +94,14 @@ and canonical JSON export. Repeated builds are idempotent and report immutable
 object reuse; prepared content never becomes active until the selector CAS.
 The permanent `graph.json` engine remains unchanged. Phase 3 persists these
 same objects in the SQLite sidecar and verifies their canonical export before
-the generation is sealed.
+the snapshot is sealed.
 
 The slice's acceptance evidence is in
 `crates/compass-graph/tests/store_snapshot.rs`: deterministic identity across
-record insertion order and operational generation IDs, immutable object reuse,
+record insertion order and operational snapshot IDs, immutable object reuse,
 selector-before-commit behavior, bounded reads, directional multiplicity, key
 vectors, and fail-closed tamper detection. Persistent SQLite publication and
-CLI generation checks are covered by the Phase 3 tests below; full
+CLI snapshot checks are covered by the Phase 3 tests below; full
 `JsonGraphEngine` versus streaming store-engine differential qualification and
 measured performance claims remain follow-on work.
 
@@ -468,7 +468,7 @@ broader remote-adapter work.
 
 - Phase 0's adapter conformance harness;
 - Phase 2's immutable snapshot builder; and
-- the existing `BuildGuard` generation publication primitive.
+- the existing `BuildGuard` snapshot publication primitive.
 
 ### Owned surfaces
 
@@ -489,14 +489,14 @@ broader remote-adapter work.
 4. Run the complete adapter conformance suite against a newly created and a
    reopened database.
 5. Add reopen/durability, WAL checkpoint, orphan-discovery, stale-format, and
-   generation-publication tests. Fault-injected crash qualification remains a
+   snapshot-publication tests. Fault-injected crash qualification remains a
    release gate for the larger Phase 3 evidence set.
 6. Define a typed, versioned `store.ref` containing store identity, namespace,
    snapshot ID, manifest digest, and graph digest but no machine-specific
    absolute path.
 7. During `init`, `update`, `extract`, or `watch` with default storage (or
    `--store sqlite`), prepare the SQLite snapshot and stage `store.ref` with
-   `graph.json` and other output artifacts. The filesystem generation switch is
+   `graph.json` and other output artifacts. The filesystem snapshot switch is
    the only local commit.
 8. Keep `graph.json` as the permanent compatible engine. The default query
    uses a validated adjacent store reference, while explicit JSON always opens
@@ -504,7 +504,7 @@ broader remote-adapter work.
    before commit.
 9. Make SQLite publication the default dual profile. `--store json` opts out
    of the sidecar; selecting SQLite never removes JSON.
-10. Retain two complete local generations and run bounded root-based object GC
+10. Retain two complete local snapshots and run bounded root-based object GC
     after coherent publication. Distributed lease-aware GC remains Phase 8.
 
 ### Required tests
@@ -513,8 +513,8 @@ broader remote-adapter work.
 - acknowledged writes survive process reopen under the configured durability;
 - copying or recovering SQLite accounts for WAL state;
 - an interrupted database write cannot change the active filesystem
-  generation;
-- an interrupted filesystem switch leaves the prior generation readable;
+  snapshot;
+- an interrupted filesystem switch leaves the prior snapshot readable;
 - published `graph.json` and `store.ref` select equal graph digests;
 - a store database missing or corrupt after publication does not make the
   co-published JSON unreadable;
@@ -531,9 +531,9 @@ broader remote-adapter work.
   separate release gate.
 - `compass init --store sqlite` and `compass update --store sqlite` CLI
   integration tests assert successful exit, `graph.json`, `store.ref`,
-  complete manifest, and no visible partial generation.
+  complete manifest, and no visible partial snapshot.
 - Cross-engine comparison covers the published core fixture and CLI init/update
-  generations and rejects publication on any canonical mismatch.
+  snapshots and rejects publication on any canonical mismatch.
 - The permanent `graph.json` engine remains independently readable when the
   store is missing or corrupt. Default queries use the validated sidecar when
   present and fail closed when a published reference is corrupt; explicit
@@ -544,7 +544,7 @@ broader remote-adapter work.
 ### Exit and rollback
 
 Disable SQLite publication and remove unpublished databases. Existing
-`graph.json` generations remain valid. Do not attempt to repair a partially
+`graph.json` snapshots remain valid. Do not attempt to repair a partially
 published store by rewriting its immutable objects; rebuild a new snapshot.
 
 ## Phase 4: Route local queries to the store engine (implemented local slice)
@@ -561,7 +561,7 @@ default or whenever the caller explicitly selects it.
 
 ### Prerequisite inputs
 
-- Phase 3 has qualification evidence from real local build generations.
+- Phase 3 has qualification evidence from real local build snapshots.
 - Every current query family is already behind the Phase 1 graph read contract.
 
 ### Owned surfaces
@@ -575,7 +575,7 @@ default or whenever the caller explicitly selects it.
 
 1. Define deterministic engine selection:
    - explicit JSON path selects `JsonGraphEngine`;
-   - a validated active generation with a valid `store.ref` selects
+   - a validated active snapshot with a valid `store.ref` selects
      `StoreGraphEngine` by default;
    - an explicit `--engine json|store` diagnostic option may override the
      default where the command surface review approves it.
@@ -587,7 +587,7 @@ default or whenever the caller explicitly selects it.
    only as a disposable, differential-tested accelerator.
 5. Make corruption and unavailability actionable. An automatic switch to JSON
    is permitted only before results are emitted, only when the selected local
-   generation proves digest equivalence, and only with an explicit diagnostic.
+   snapshot proves digest equivalence, and only with an explicit diagnostic.
 6. Remove assumptions that opening a current graph loads every node and edge.
 7. Add engine identity to safe diagnostics and telemetry, not to public result
    meaning.
@@ -596,7 +596,7 @@ default or whenever the caller explicitly selects it.
 9. Define a typed storage/materialization profile at the application boundary:
    `json`, `store`, or `dual`. Preserve the existing output profile by default;
    expose `store` only through a separately reviewed CLI/configuration change.
-   Store-only generations must support bounded deterministic JSON export.
+   Store-only snapshots must support bounded deterministic JSON export.
 
 The shipped local slice implements items 1–8 for typed code queries and the
 dual local profile. It pins opened readers, uses backend-neutral candidate
@@ -622,7 +622,7 @@ separately gated.
   immutable snapshot; and
 - accelerator deletion changes latency only, not ordered results;
 - `json` publishes the existing artifact set without requiring a database;
-- `dual` publishes equal JSON and store snapshots in one generation; and
+- `dual` publishes equal JSON and store snapshots in one snapshot; and
 - `store` avoids full JSON materialization but can export byte-identical
   canonical JSON on demand.
 
@@ -649,7 +649,7 @@ storage profiles remain follow-on gates. Typed projected-query and
 ### Exit and rollback
 
 Engine selection can return to JSON without converting data because each local
-generation still contains it. Keep store databases as disposable/unselected or
+snapshot still contains it. Keep store databases as disposable/unselected or
 rebuild them. A rollback must not remove the graph read abstraction.
 
 ## Phase 5: Add the redb embedded adapter (implemented local slice)
@@ -1038,7 +1038,7 @@ The local release work closes the first support window without claiming cloud
 readiness:
 
 - `compass store status|validate|backup|restore` validates the co-published
-  SQLite generation and writes digest-bound backup bundles;
+  SQLite snapshot and writes digest-bound backup bundles;
 - `scripts/rebuild_compass_store.sh` provides an explicit, rollback-preserving
   hard-cut rebuild path;
 - `compass-store-qualification` and
@@ -1132,7 +1132,7 @@ other way.
 The program is complete only when a reviewer can demonstrate this sequence
 without inspecting backend internals:
 
-1. build one graph and publish a coherent JSON plus store generation;
+1. build one graph and publish a coherent JSON plus store snapshot;
 2. query both engines and obtain equal ordered outputs;
 3. interrupt an update at each publication boundary and retain the old graph;
 4. complete an update and keep an already-open reader on its old snapshot;
