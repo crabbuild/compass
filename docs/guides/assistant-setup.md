@@ -182,7 +182,9 @@ Strict mode:
 git status --short
 ```
 
-For a project install, open the installed `SKILL.md` and any referenced files.
+For a project install, open the installed `SKILL.md`, any referenced files, and
+the optional `agents/openai.yaml` metadata when the target is Codex. The latter
+only supplies display and invocation text; it does not pre-approve tools.
 Check:
 
 - commands use `compass`, not a stale product name;

@@ -81,6 +81,10 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     assert!(body.contains("next=none"));
     assert_native(&body);
     assert!(skill.with_file_name(".compass_version").is_file());
+    let openai_metadata = skill.with_file_name("agents").join("openai.yaml");
+    let openai_metadata = fs::read_to_string(openai_metadata)?;
+    assert!(openai_metadata.contains("display_name: \"Compass\""));
+    assert!(openai_metadata.contains("default_prompt: \"Use $compass"));
     assert!(
         skill
             .with_file_name("references")
