@@ -3249,6 +3249,90 @@ frozen.active;
 }
 
 #[test]
+fn javascript_flow_assignment_object_literal_selects_exact_members() {
+    let batch = candidate(
+        "src/object-reassignment.js",
+        br#"function read(flag) {
+    let auth = undefined;
+    auth = { username: "user", password: "secret" };
+    return auth.username;
+}
+"#,
+    );
+    let username = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "username")
+        .expect("object assignment member declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "username"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(username.id.as_str())
+    }));
+}
+
+#[test]
+fn javascript_flow_assignment_object_literal_branch_fails_closed() {
+    let batch = candidate(
+        "src/object-branch-reassignment.js",
+        br#"function read(flag) {
+    let auth = undefined;
+    if (flag) {
+        auth = { username: "user" };
+    }
+    return auth.username;
+}
+"#,
+    );
+    assert!(!batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.target_spelling == "username"
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+}
+
+#[test]
+fn javascript_object_literal_methods_resolve_this_members() {
+    let batch = candidate(
+        "src/object-this.js",
+        br#"const api = {
+    write() {},
+    remove() { this.write(); }
+};
+api.remove();
+"#,
+    );
+    let write = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "object-this.api.write")
+        .expect("object method declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "write"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(write.id.as_str())
+    }));
+
+    let spread = candidate(
+        "src/object-this-spread.js",
+        br#"const base = { write() {} };
+const api = {
+    ...base,
+    remove() { this.write(); }
+};
+api.remove();
+"#,
+    );
+    assert!(!spread.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "write"
+            && candidate.constraints.exact_target_declaration_id.is_some()
+    }));
+}
+
+#[test]
 fn candidate_emits_curated_external_builtin_evidence_and_respects_shadowing() {
     let batch = candidate(
         "src/builtins.ts",

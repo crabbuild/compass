@@ -1609,6 +1609,31 @@ precision/Wilson gates, framework tiers, equivalent Graphify/SCIP scope, and
 the production hard cut remain open; this is an interop correctness slice, not
 a best-in-class release claim.
 
+### Execution checkpoint (2026-08-07, bounded object-flow and object-method slice)
+
+The candidate now covers two additional source-grounded JavaScript receiver
+shapes without relaxing its fail-closed flow policy:
+
+- A direct straight-line local assignment such as `let value; value = { ... }`
+  carries the exact object receiver into later member accesses. Object spreads,
+  conditional assignments, unknown writes, and compound writes remain
+  unresolved; the new regression pair proves both the positive and negative
+  paths.
+- Stable, spread-free object-literal methods now retain their object receiver
+  for `this.member` calls. Object literals with spreads do not receive this
+  recovery, so a potentially overridden member is not attributed by guesswork.
+- The focused candidate suite is now 94 tests and the universal resolver suite
+  remains 168 tests. On the pinned Axios checker diagnostic at the same corpus
+  realization, exact local target matches improved to 3,052/3,167 (115
+  missing, 0 wrong); member matches are 389/503 and calls remain 1,544/1,545.
+  The recovered target is a same-file object-flow member in
+  `axios/tests/unit/toFormData.test.js`; this is diagnostic evidence, not a
+  release precision or leadership claim.
+
+Fixture qualification, compiler-source-oracle recall, accepted-sample/Wilson
+gates, framework tiers, equivalent Graphify/SCIP scope, and the production hard
+cut remain open.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

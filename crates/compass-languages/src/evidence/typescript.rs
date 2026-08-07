@@ -775,6 +775,14 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         .insert(child_scope.clone(), declaration.id);
                     self.scope_kinds
                         .insert(child_scope.clone(), scope_kind.to_owned());
+                    if kind == "method"
+                        && self
+                            .stable_structural_object_variables
+                            .contains(&qualified_prefix)
+                    {
+                        self.this_receivers
+                            .insert(child_scope.clone(), qualified_prefix.clone());
+                    }
                     self.collect_unwrapped_callable_parameters(node, &child_scope, &next_prefix)?;
                     let mut cursor = node.walk();
                     for child in node.named_children(&mut cursor) {
@@ -1679,9 +1687,15 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         let straight_line = self
                             .flow_scope_is_compatible(&variable.scope_id, &scope_id)
                             && self.flow_assignment_is_straight_line(left, &scope_id);
-                        let receiver = right
-                            .map(unwrap_expression_node)
-                            .and_then(|right| self.flow_receiver_for_value(&scope_id, right));
+                        let receiver = right.map(unwrap_expression_node).and_then(|right| {
+                            self.flow_receiver_for_value(&scope_id, right).or_else(|| {
+                                (right.kind() == "object")
+                                    .then(|| {
+                                        self.flow_object_assignment_receiver(&scope_id, current)
+                                    })
+                                    .flatten()
+                            })
+                        });
                         if straight_line && operator == "=" {
                             if let Some(receiver) = receiver {
                                 self.record_flow_assignment(
@@ -1892,6 +1906,47 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             current = ancestor.parent();
         }
         None
+    }
+
+    /// Recover the structural receiver for a direct local object assignment
+    /// (`let value; value = { member() {} }`).  Declaration collection has
+    /// already indexed the object literal under the binding's qualified name;
+    /// this helper only carries that source identity into the bounded
+    /// straight-line flow fact.  Spreads remain unresolved because their
+    /// property inventory is not source-complete.
+    fn flow_object_assignment_receiver(
+        &self,
+        scope_id: &str,
+        assignment: Node<'tree>,
+    ) -> Option<ReceiverTarget> {
+        let left = assignment.child_by_field_name("left")?;
+        if left.kind() != "identifier" {
+            return None;
+        }
+        let right = assignment
+            .child_by_field_name("right")
+            .map(unwrap_expression_node)?;
+        if right.kind() != "object" || object_literal_has_spread(right) {
+            return None;
+        }
+        let name = node_text(self.source, left);
+        let Resolution::Local(variable) = self.resolve_name(scope_id, &name, Namespace::Value)?
+        else {
+            return None;
+        };
+        if variable.kind != "variable"
+            || !self
+                .structural_object_variables
+                .contains(&variable.qualified_name)
+        {
+            return None;
+        }
+        Some(ReceiverTarget {
+            qualified_name: variable.qualified_name,
+            import: None,
+            scope_id: Some(variable.scope_id),
+            type_arguments: None,
+        })
     }
 
     fn record_flow_call_argument_escapes(&mut self, node: Node<'tree>, scope_id: &str) {
