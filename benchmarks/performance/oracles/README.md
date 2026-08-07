@@ -27,11 +27,13 @@ source ranges. Header/footer counts cover every typed record, and the Python
 audit rejects missing parents, duplicate IDs, invalid ranges, unknown fields,
 and count/digest mismatches.
 
-- `typescript-source-oracle.mjs` records source constructs for declarations,
-  imports/reexports, calls, construction, members, bases, type references, and
-  JSX. It does not select graph targets. Its payload/JSONL stream includes
-  project scopes, configuration/source digests, diagnostics, and deterministic
-  UTF-8 ranges.
+- `typescript-source-oracle.mjs` records source constructs for declarations
+  (including `using`/`await using` resource bindings), imports/reexports,
+  calls, construction, members, bases, decorators, type references, and JSX.
+  Decorator factories are not duplicated as ordinary calls, while calls nested
+  in decorator arguments remain visible. It does not select graph targets. Its
+  payload/JSONL stream includes project scopes, configuration/source digests,
+  diagnostics, and deterministic UTF-8 ranges.
 - `typescript-resolution-oracle.mjs` records compiler-API import/reexport,
   dynamic-import, `import =`, and literal-`require()` decisions, including
   module mode, project ownership, source/external/unresolved/ambiguous outcome,

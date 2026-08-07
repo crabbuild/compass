@@ -95,6 +95,12 @@ the adapter actually emits. The batch contains six bounded collections:
   types participate in overload selection. Dynamic or computed decorator
   expressions retain a targetless occurrence, while calls nested inside
   decorator arguments remain independent call evidence.
+  TypeScript `using` and `await using` resource bindings are emitted as
+  immutable, source-anchored variable declarations even though the pinned
+  tree-sitter grammar represents them as assignment expressions. Their
+  initializer calls and subsequent references/members keep the same binding
+  identity; contextual or malformed non-statement assignments remain
+  unresolved rather than being promoted into declarations.
 - `EvidenceDiagnostic` records a bounded extraction problem without creating
   a graph fact.
 

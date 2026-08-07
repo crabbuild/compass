@@ -808,6 +808,25 @@ function parseFile(root, fileName, raw, constructs, diagnostics, typedFacts) {
 
   const visit = (node) => {
     const pushedScope = addScope(node);
+    if (ts.isDecorator(node)) {
+      // Decorator factories are relationship occurrences, not ordinary
+      // calls to the decorator expression. Keep the callee/property anchor
+      // aligned with the native candidate and let nested calls in decorator
+      // arguments be visited normally.
+      const expression = node.expression;
+      const callee = ts.isCallExpression(expression)
+        ? expression.expression
+        : expression;
+      const ownerNode = node.parent ?? node;
+      add(
+        "decorates",
+        "decorators",
+        callee,
+        targetQualifier(sourceFile, callee),
+        null,
+        ownerNode,
+      );
+    }
     if (ts.isImportDeclaration(node) && node.moduleSpecifier) {
       add("imports", "imports", node.moduleSpecifier, null, node.moduleSpecifier.text);
       const moduleSpecifier = node.moduleSpecifier.text;
@@ -913,8 +932,14 @@ function parseFile(root, fileName, raw, constructs, diagnostics, typedFacts) {
         Boolean(node.isTypeOnly),
       );
     } else if (ts.isCallExpression(node)) {
-      add("calls", "calls", node.expression, targetQualifier(sourceFile, node.expression));
-      addCall(node, "calls");
+      // The enclosing decorator contributes a `decorates` construct above;
+      // publishing the factory invocation again as `calls` would double-count
+      // the same source occurrence. Calls nested in its arguments are not
+      // direct children of the decorator and remain ordinary calls.
+      if (!node.parent || !ts.isDecorator(node.parent)) {
+        add("calls", "calls", node.expression, targetQualifier(sourceFile, node.expression));
+        addCall(node, "calls");
+      }
       if (node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments.length > 0) {
         const argument = node.arguments[0];
         addImportFact(

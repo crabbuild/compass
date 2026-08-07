@@ -480,6 +480,90 @@ class CorrectnessTests(unittest.TestCase):
                 if "callEndByte" in record:
                     self.assertLessEqual(record["callEndByte"], source_size)
 
+    def test_typescript_source_oracle_records_decorator_occurrences_without_factory_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            source = (
+                'function nested(): string { return "ok"; }\n'
+                '@Controller({ path: nested() })\n'
+                'class ControllerHost {}\n'
+                '@unknownFactory()\n'
+                'class DynamicHost {}\n'
+            )
+            (root / "src" / "decorators.ts").write_text(source, encoding="utf-8")
+            result = subprocess.run(
+                ("node", str(SOURCE_ORACLE), "--root", str(root), "--jsonl"),
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            payload = _typescript_payload_from_jsonl(result.stdout)
+
+        decorators = [
+            construct
+            for construct in payload["constructs"]
+            if construct["relation"] == "decorates"
+        ]
+        self.assertEqual(len(decorators), 2)
+        self.assertEqual({item["capability"] for item in decorators}, {"decorators"})
+        self.assertEqual(
+            {item["targetSpelling"] for item in decorators},
+            {"Controller", "unknownFactory"},
+        )
+        source_bytes = source.encode("utf-8")
+        controller = next(item for item in decorators if item["targetSpelling"] == "Controller")
+        self.assertEqual(
+            source_bytes[controller["startByte"] : controller["endByte"]],
+            b"Controller",
+        )
+        self.assertFalse(
+            any(
+                call["targetSpelling"] in {"Controller", "unknownFactory"}
+                for call in payload["calls"]
+            )
+        )
+        self.assertTrue(any(call["targetSpelling"] == "nested" for call in payload["calls"]))
+
+    def test_typescript_source_oracle_preserves_using_resource_declarations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = (
+                "declare function acquire(): Disposable;\n"
+                "declare function acquireAsync(): Promise<Disposable>;\n"
+                "function run() {\n"
+                "  using resource = acquire();\n"
+                "  await using asyncResource = acquireAsync();\n"
+                "  resource.close();\n"
+                "  asyncResource.close();\n"
+                "}\n"
+            )
+            (root / "resources.ts").write_text(source, encoding="utf-8")
+            result = subprocess.run(
+                ("node", str(SOURCE_ORACLE), "--root", str(root), "--jsonl"),
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            payload = _typescript_payload_from_jsonl(result.stdout)
+
+        resources = {
+            declaration["name"]
+            for declaration in payload["declarations"]
+            if declaration["name"] in {"resource", "asyncResource"}
+        }
+        self.assertEqual(resources, {"resource", "asyncResource"})
+        self.assertTrue(
+            all(
+                call["targetSpelling"] in {"acquire", "acquireAsync", "close"}
+                for call in payload["calls"]
+            )
+        )
+        self.assertIn("acquire", {call["targetSpelling"] for call in payload["calls"]})
+        self.assertIn("acquireAsync", {call["targetSpelling"] for call in payload["calls"]})
+
     def test_typescript_source_oracle_reports_invalid_config_and_follows_cycles_once(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

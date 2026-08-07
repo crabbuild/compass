@@ -2049,6 +2049,30 @@ adapter remains qualification-only and unregistered; compiler differential,
 framework-contract, competitor, production hard-cut, and leadership gates
 remain open.
 
+### Execution checkpoint (2026-08-07, resource-management and decorator-oracle slice)
+
+The syntax/evidence path now covers two modern TypeScript quality seams that
+were previously easy to lose during qualification:
+
+- TypeScript 5.2 explicit resource declarations (`using` and `await using`)
+  are represented by the pinned tree-sitter grammar as assignment expressions.
+  The candidate now materializes their binding patterns as immutable,
+  source-anchored variable declarations, so initializer calls, later member
+  accesses, flow facts, and references retain the same identity as ordinary
+  lexical bindings. Malformed or non-statement contextual uses are not
+  promoted into declarations.
+- The independent TypeScript 5.9.3 source oracle now emits `decorates`
+  constructs for direct and member decorator factories, suppresses the outer
+  factory invocation from its ordinary `calls` inventory, and still records
+  calls nested inside decorator arguments. Resource declarations and their
+  initializer calls are covered by the same oracle tests.
+
+The candidate test suite is now 108 tests and the resolver suite remains 180;
+focused oracle correctness tests pass. This is still a qualification-only
+slice: the universal adapter is unregistered, the legacy/native hard cut is
+open, and compiler-differential, framework, competitor, release-corpus, and
+leadership gates remain required.
+
 ## Outcome
 
 Compass should produce the most trustworthy TypeScript and JavaScript graph for

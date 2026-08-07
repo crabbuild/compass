@@ -111,6 +111,60 @@ new App();
 }
 
 #[test]
+fn typescript_candidate_emits_using_resource_bindings_and_initializer_calls() {
+    let source = br#"interface Resource { close(): void }
+declare function acquire(): Resource;
+declare function acquireAsync(): Promise<Resource>;
+export function run() {
+    using resource = acquire();
+    await using asyncResource = acquireAsync();
+    resource.close();
+    asyncResource.close();
+}
+"#;
+    let batch = candidate("src/resources.ts", source);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("using evidence");
+    assert!(
+        !batch
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "partial_parser_recovery")
+    );
+
+    for name in ["resource", "asyncResource"] {
+        let declaration = batch
+            .declarations
+            .iter()
+            .find(|declaration| declaration.name == name)
+            .unwrap_or_else(|| panic!("missing using binding {name}"));
+        assert_eq!(declaration.kind, "variable");
+        let start = usize::try_from(declaration.range.start_byte).expect("range fits usize");
+        assert_eq!(&source[start..start + name.len()], name.as_bytes());
+    }
+
+    for (callee, argument_count) in [("acquire", 0), ("acquireAsync", 0)] {
+        let call = batch
+            .candidates
+            .iter()
+            .find(|candidate| {
+                candidate.relation == CandidateRelation::Calls
+                    && candidate.target_spelling == callee
+            })
+            .unwrap_or_else(|| panic!("missing using initializer call {callee}"));
+        assert_eq!(call.constraints.argument_count, Some(argument_count));
+    }
+    let member_calls = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::AccessesMember
+                && candidate.target_spelling == "close"
+        })
+        .count();
+    assert_eq!(member_calls, 2);
+}
+
+#[test]
 fn javascript_candidate_emits_jsx_commonjs_and_dynamic_import_evidence() {
     let source = br#"const Button = () => null;
 export function render() { return <Button />; }

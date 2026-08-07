@@ -869,6 +869,35 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 }
             }
         }
+        // TypeScript's explicit resource-management declarations (`using`
+        // and `await using`) are represented by the pinned tree-sitter
+        // grammar as an assignment expression rather than a variable
+        // declarator.  Materialize their bindings here so the initializer
+        // call and later member/reference occurrences resolve against the
+        // same source identity as an ordinary immutable lexical binding.
+        if let Some(pattern) = using_binding_pattern(node, self.source) {
+            let mut names = Vec::new();
+            collect_pattern_names(pattern, self.source, &mut names);
+            for (name, name_node) in names {
+                if name.is_empty() {
+                    continue;
+                }
+                let declaration = self.add_declaration_at(
+                    node,
+                    name_node,
+                    "variable",
+                    Namespace::Value,
+                    &scope_id,
+                    &qualified_prefix,
+                    &name,
+                )?;
+                // `using` bindings are immutable for the lifetime of their
+                // enclosing block, just like `const`; retaining that fact
+                // lets the bounded JavaScript flow resolver keep a proven
+                // receiver after safe callback/argument escapes.
+                self.immutable_bindings.insert(declaration.id);
+            }
+        }
         if let Some((kind, name_node, namespace, creates_scope, scope_kind)) =
             declaration_shape(node)
         {
@@ -9966,6 +9995,36 @@ fn is_var_binding_node(node: Node<'_>) -> bool {
         }
     }
     false
+}
+
+/// Return the binding pattern for a TypeScript explicit resource declaration.
+/// The pinned tree-sitter grammar keeps `using` as an anonymous token on an
+/// `assignment_expression`; `await using` wraps the same assignment in an
+/// `await_expression`. Restrict recognition to statement position so an
+/// identifier or malformed expression beginning with the contextual keyword
+/// cannot become a fabricated declaration.
+fn using_binding_pattern<'tree>(node: Node<'tree>, source: &[u8]) -> Option<Node<'tree>> {
+    if node.kind() != "assignment_expression" {
+        return None;
+    }
+    let source_text = node_text(source, node);
+    let text = source_text.trim_start();
+    let rest = text.strip_prefix("using")?;
+    if !rest
+        .as_bytes()
+        .first()
+        .is_some_and(|byte| byte.is_ascii_whitespace())
+    {
+        return None;
+    }
+    let statement_position = node.parent().is_some_and(|parent| {
+        parent.kind() == "expression_statement"
+            || (parent.kind() == "await_expression"
+                && parent
+                    .parent()
+                    .is_some_and(|grandparent| grandparent.kind() == "expression_statement"))
+    });
+    statement_position.then(|| node.child_by_field_name("left"))?
 }
 
 fn is_callable_node(node: Node<'_>) -> bool {
