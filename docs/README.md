@@ -88,6 +88,17 @@ The [cookbook index](cookbook/README.md) routes to:
 | [CompassQL](COMPASSQL.md) | Canonical language and runtime contract |
 | [CompassQL support](COMPASSQL_SUPPORT.md) | Checked syntax and feature matrix |
 
+### Work on Compass internals
+
+Implementation documents describe architecture and planned engineering work.
+They are not evidence that an uncompleted design has shipped.
+
+| Document | Purpose |
+| --- | --- |
+| [Universal evidence implementation](implementation/universal-evidence.md) | Current universal evidence pipeline, resolution order, and failure classes |
+| [Evidence resolution framework technical design](implementation/evidence-resolution-framework-technical-design.md) | Target ownership, components, interfaces, and invariants for rearchitecting the resolver |
+| [Evidence resolution framework execution plan](implementation/evidence-resolution-framework-phased-execution-plan.md) | Phased, commit-oriented implementation and verification plan |
+
 ## How these documents are written
 
 Compass documentation uses four document types:

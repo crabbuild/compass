@@ -32,6 +32,8 @@ Read [Language architecture](../design/language-architecture.md) before
 changing parser ownership or adapter profiles. Read
 [Universal evidence implementation](universal-evidence.md) before starting an
 independently qualified language transition.
+Read [Evidence resolution framework technical design](evidence-resolution-framework-technical-design.md)
+before adding cross-file lookup rules or language-specific resolution policy.
 
 ### Implementation checklist
 
@@ -43,7 +45,11 @@ independently qualified language transition.
 - emit unresolved raw call/member facts when needed;
 - add project/config metadata support if resolution needs it;
 - implement resolver logic conservatively;
+- reuse a generic resolver stage before adding language policy;
+- route unavoidable language policy through the closed static policy enum;
+- keep every lookup bounded by the semantic lookup budget;
 - preserve ambiguous targets;
+- add direct parser-free decision, precedence, ambiguity, and projection tests;
 - update coverage/support documentation.
 
 ### Evidence
