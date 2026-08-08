@@ -12,9 +12,9 @@ use compass_model::query_contract::{
     SearchRequest,
 };
 use compass_query::{
-    EdgeIdentity, EdgeJudgment, IdJudgment, JudgedQuery, JudgmentCorpus, ObservedEdge,
-    ObservedPath, PathJudgment, PathPattern, QueryClass, QueryObservation, RelevanceError,
-    WorkCounts, qualification_report, score,
+    EdgeIdentity, EdgeJudgment, IdJudgment, JudgedQuery, JudgmentCorpus, NaturalQueryRequest,
+    ObservedEdge, ObservedPath, PathJudgment, PathPattern, QUERY_PLANNER_PROFILE_V1, QueryClass,
+    QueryObservation, RelevanceError, WorkCounts, qualification_report, score,
 };
 use compass_query::{EngineSelection, open_with_engine};
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
@@ -198,16 +198,21 @@ fn executable_corpus(graph_digest: String) -> JudgmentCorpus {
     };
     let mut search_list = query(
         "exec-search-list",
-        "UserService.list",
+        "find definition of UserService.list",
         QueryClass::Exact,
         "search",
     );
     search_list.node_judgments = vec![node_judgment("n:list")];
-    let mut search_unicode = query("exec-search-cafe", "cafe", QueryClass::Lexical, "search");
+    let mut search_unicode = query(
+        "exec-search-cafe",
+        "where is cafe defined",
+        QueryClass::Lexical,
+        "search",
+    );
     search_unicode.node_judgments = vec![node_judgment("n:unicode")];
     let mut callers = query(
         "exec-callers",
-        "callers of UserService.list",
+        "who calls UserService.list?",
         QueryClass::Edge,
         "callers",
     );
@@ -220,9 +225,25 @@ fn executable_corpus(graph_digest: String) -> JudgmentCorpus {
         edge_judgment("n:caller", "n:list", "calls"),
         edge_judgment("n:route", "n:list", "routes_to"),
     ];
+    let mut callees = query(
+        "exec-callees",
+        "what does Api.caller call?",
+        QueryClass::Edge,
+        "callees",
+    );
+    callees.node_judgments = vec![node_judgment("n:caller"), node_judgment("n:list")];
+    callees.edge_judgments = vec![edge_judgment("n:caller", "n:list", "calls")];
+    let mut impact = query(
+        "exec-impact",
+        "what depends on Api.caller?",
+        QueryClass::Intent,
+        "impact",
+    );
+    impact.node_judgments = vec![node_judgment("n:caller"), node_judgment("n:dependent")];
+    impact.edge_judgments = vec![edge_judgment("n:dependent", "n:caller", "imports")];
     let mut trail = query(
         "exec-trail",
-        "Api.caller to Store.callee",
+        "path from Api.caller to Store.callee",
         QueryClass::Path,
         "node_trail",
     );
@@ -244,7 +265,7 @@ fn executable_corpus(graph_digest: String) -> JudgmentCorpus {
     }];
     let mut missing = query(
         "exec-missing",
-        "definitely_missing",
+        "find definitely_missing",
         QueryClass::Negative,
         "search",
     );
@@ -256,7 +277,15 @@ fn executable_corpus(graph_digest: String) -> JudgmentCorpus {
         graph_digest,
         repository_revision: "crates/compass-query/tests/support@v1".to_owned(),
         analyzer_version: "compass.search-term/1".to_owned(),
-        queries: vec![search_list, search_unicode, callers, trail, missing],
+        queries: vec![
+            search_list,
+            search_unicode,
+            callers,
+            callees,
+            impact,
+            trail,
+            missing,
+        ],
     }
 }
 
@@ -269,41 +298,25 @@ fn execute_subset(
             let response = operation()?;
             observe_execution(id, &response, u64::try_from(started.elapsed().as_micros())?)
         };
-    Ok(vec![
-        execute("exec-search-list", &|| {
-            engine.search(SearchRequest {
-                query: "UserService.list".to_owned(),
-                limits: CodeQueryLimits::default(),
-            })
-        })?,
-        execute("exec-search-cafe", &|| {
-            engine.search(SearchRequest {
-                query: "cafe".to_owned(),
-                limits: CodeQueryLimits::default(),
-            })
-        })?,
-        execute("exec-callers", &|| {
-            engine.callers(CallRequest {
-                symbol: "UserService.list".to_owned(),
-                include_heuristic: false,
-                limits: CodeQueryLimits::default(),
-            })
-        })?,
-        execute("exec-trail", &|| {
-            engine.node_trail(NodeTrailRequest {
-                source: "Api.caller".to_owned(),
-                target: "Store.callee".to_owned(),
-                include_heuristic: false,
-                limits: CodeQueryLimits::default(),
-            })
-        })?,
-        execute("exec-missing", &|| {
-            engine.search(SearchRequest {
-                query: "definitely_missing".to_owned(),
-                limits: CodeQueryLimits::default(),
-            })
-        })?,
-    ])
+    let natural = |question: &str| {
+        engine.query_natural(NaturalQueryRequest {
+            question: question.to_owned(),
+            include_heuristic: false,
+            limits: CodeQueryLimits::default(),
+        })
+    };
+    [
+        ("exec-search-list", "find definition of UserService.list"),
+        ("exec-search-cafe", "where is cafe defined"),
+        ("exec-callers", "who calls UserService.list?"),
+        ("exec-callees", "what does Api.caller call?"),
+        ("exec-impact", "what depends on Api.caller?"),
+        ("exec-trail", "path from Api.caller to Store.callee"),
+        ("exec-missing", "find definitely_missing"),
+    ]
+    .into_iter()
+    .map(|(id, question)| execute(id, &|| natural(question)))
+    .collect()
 }
 
 #[test]
@@ -473,12 +486,13 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
         &corpus,
         &store_observations,
         "code-query/1",
-        "typed-code-query/1",
+        QUERY_PLANNER_PROFILE_V1,
         "store",
         limits,
     )?;
     assert_eq!(report.graph_digest, graph_digest);
     assert_eq!(report.metrics.success_at_1.value, Some(1.0));
+    assert_eq!(report.metrics.intent_macro_f1.value, Some(1.0));
     assert_eq!(report.metrics.edge_direction_precision.value, Some(1.0));
     assert_eq!(report.metrics.path_acceptance_rate.value, Some(1.0));
     assert_eq!(report.metrics.no_answer_precision.value, Some(1.0));
@@ -501,7 +515,7 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
         &corpus,
         &deterministic_observations,
         "code-query/1",
-        "typed-code-query/1",
+        QUERY_PLANNER_PROFILE_V1,
         "store",
         BTreeMap::from([
             ("maxCandidates".to_owned(), 20),
@@ -514,7 +528,7 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
             &corpus,
             &deterministic_observations,
             "code-query/1",
-            "typed-code-query/1",
+            QUERY_PLANNER_PROFILE_V1,
             "store",
             BTreeMap::from([
                 ("maxCandidates".to_owned(), 20),

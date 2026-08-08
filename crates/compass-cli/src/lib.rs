@@ -61,8 +61,8 @@ use compass_output::{
 };
 use compass_query::{
     DEFAULT_AFFECTED_RELATIONS, DEFAULT_TEXT_TOKEN_BUDGET, TextPageOptions, TraversalMode,
-    format_affected, format_benchmark, query_graph_text_page, render_explanation_page,
-    render_shortest_path, run_benchmark,
+    format_affected, format_benchmark, plan_natural_query, query_graph_text_page,
+    render_explanation_page, render_shortest_path, run_benchmark,
 };
 use compass_semantic::{
     CachedCorpusExtractionOptions, CorpusExtractionOptions, detect_backend_with_custom,
@@ -3605,11 +3605,17 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
     let mut budget = DEFAULT_TEXT_TOKEN_BUDGET;
     let mut page = 1_usize;
     let mut mode = TraversalMode::Bfs;
+    let mut force_traversal = false;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
+            "--traverse" => {
+                force_traversal = true;
+                index += 1;
+            }
             "--dfs" => {
                 mode = TraversalMode::Dfs;
+                force_traversal = true;
                 index += 1;
             }
             "--budget" => {
@@ -3620,6 +3626,7 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                     return Outcome::failure("error: --budget must be an integer".to_owned());
                 };
                 budget = value;
+                force_traversal = true;
                 index += 2;
             }
             "--context" => {
@@ -3627,6 +3634,7 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                     return Outcome::failure("error: --context requires a value".to_owned());
                 };
                 contexts.push(value.clone());
+                force_traversal = true;
                 index += 2;
             }
             "--page" => {
@@ -3637,6 +3645,7 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                     return Outcome::failure("error: --page must be an integer".to_owned());
                 };
                 page = value;
+                force_traversal = true;
                 index += 2;
             }
             value if value.starts_with("--budget=") => {
@@ -3644,10 +3653,12 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                     return Outcome::failure("error: --budget must be an integer".to_owned());
                 };
                 budget = value;
+                force_traversal = true;
                 index += 1;
             }
             value if value.starts_with("--context=") => {
                 contexts.push(value[10..].to_owned());
+                force_traversal = true;
                 index += 1;
             }
             value if value.starts_with("--page=") => {
@@ -3655,6 +3666,7 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                     return Outcome::failure("error: --page must be an integer".to_owned());
                 };
                 page = value;
+                force_traversal = true;
                 index += 1;
             }
             value => {
@@ -3664,6 +3676,24 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
     }
     if let Err(error) = validate_text_pagination(budget, page) {
         return Outcome::failure(format!("error: {error}"));
+    }
+    if !force_traversal && let GraphSelection::File(path) = &selection {
+        let plan = match plan_natural_query(question) {
+            Ok(plan) => plan,
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        };
+        if plan.routes_to_typed_query() {
+            let typed_args = vec![
+                question.clone(),
+                "--graph".to_owned(),
+                path.to_string_lossy().into_owned(),
+            ];
+            let outcome = code_query_commands::command("ask", &typed_args);
+            if outcome.code == 0 {
+                touch_selected_query_stamp(&selection);
+            }
+            return outcome;
+        }
     }
     let loaded = match load_selection(frontend, &selection, false) {
         Ok(loaded) => loaded,
@@ -3956,7 +3986,7 @@ fn touch_selected_query_stamp(selection: &GraphSelection) {
 fn query_help(frontend: Frontend) -> String {
     let prefix = frontend_name(frontend);
     format!(
-        "Usage: {prefix} query \"<question>\" [--dfs] [--context VALUE] [--budget N] [--page N] [--graph PATH|--at REV]"
+        "Usage: {prefix} query \"<question>\" [--traverse] [--dfs] [--context VALUE] [--budget N] [--page N] [--graph PATH|--at REV]"
     )
 }
 

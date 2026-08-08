@@ -1,12 +1,14 @@
 use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, CodeQueryResponse, ImpactRequest, NodeTrailRequest, SearchRequest,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::code_query::{CodeQueryEngine, validate_limits};
 use crate::cql::{QueryError, QueryErrorKind};
 
 pub const QUERY_PLANNER_PROFILE_V1: &str = "query-planner/1";
 const MAX_NATURAL_QUERY_BYTES: usize = 4_096;
+const AUTO_ROUTE_CONFIDENCE: u8 = 90;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NaturalQueryRequest {
@@ -15,13 +17,51 @@ pub struct NaturalQueryRequest {
     pub limits: CodeQueryLimits,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum NaturalQueryPlan {
-    Search { query: String },
-    Callers { symbol: String },
-    Callees { symbol: String },
-    Impact { symbol: String },
-    NodeTrail { source: String, target: String },
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NaturalQueryIntent {
+    Search,
+    Callers,
+    Callees,
+    Impact,
+    NodeTrail,
+    Fallback,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NaturalQueryPlan {
+    profile: String,
+    intent: NaturalQueryIntent,
+    confidence: u8,
+    operands: Vec<String>,
+}
+
+impl NaturalQueryPlan {
+    #[must_use]
+    pub fn profile(&self) -> &str {
+        &self.profile
+    }
+
+    #[must_use]
+    pub fn intent(&self) -> NaturalQueryIntent {
+        self.intent
+    }
+
+    #[must_use]
+    pub fn confidence(&self) -> u8 {
+        self.confidence
+    }
+
+    #[must_use]
+    pub fn operands(&self) -> &[String] {
+        &self.operands
+    }
+
+    #[must_use]
+    pub fn routes_to_typed_query(&self) -> bool {
+        self.intent != NaturalQueryIntent::Fallback && self.confidence >= AUTO_ROUTE_CONFIDENCE
+    }
 }
 
 impl CodeQueryEngine {
@@ -30,38 +70,50 @@ impl CodeQueryEngine {
         request: NaturalQueryRequest,
     ) -> Result<CodeQueryResponse, QueryError> {
         validate_limits(&request.limits)?;
-        validate_question(&request.question)?;
-        match plan_natural_query(&request.question) {
-            NaturalQueryPlan::Search { query } => self.search(SearchRequest {
-                query,
-                limits: request.limits,
-            }),
-            NaturalQueryPlan::Callers { symbol } => self.callers(CallRequest {
-                symbol,
+        let plan = plan_natural_query(&request.question)?;
+        let primary = plan.operands.first().cloned().unwrap_or_default();
+        match plan.intent {
+            NaturalQueryIntent::Search | NaturalQueryIntent::Fallback => {
+                self.search(SearchRequest {
+                    query: primary,
+                    limits: request.limits,
+                })
+            }
+            NaturalQueryIntent::Callers => self.callers(CallRequest {
+                symbol: primary,
                 include_heuristic: request.include_heuristic,
                 limits: request.limits,
             }),
-            NaturalQueryPlan::Callees { symbol } => self.callees(CallRequest {
-                symbol,
+            NaturalQueryIntent::Callees => self.callees(CallRequest {
+                symbol: primary,
                 include_heuristic: request.include_heuristic,
                 limits: request.limits,
             }),
-            NaturalQueryPlan::Impact { symbol } => self.impact(ImpactRequest {
-                symbol,
+            NaturalQueryIntent::Impact => self.impact(ImpactRequest {
+                symbol: primary,
                 include_heuristic: request.include_heuristic,
                 limits: request.limits,
             }),
-            NaturalQueryPlan::NodeTrail { source, target } => self.node_trail(NodeTrailRequest {
-                source,
-                target,
-                include_heuristic: request.include_heuristic,
-                limits: request.limits,
-            }),
+            NaturalQueryIntent::NodeTrail => {
+                let target = plan.operands.get(1).cloned().ok_or_else(|| {
+                    QueryError::new(
+                        QueryErrorKind::Internal,
+                        "invalid_natural_query_plan",
+                        "node-trail intent is missing its target operand",
+                    )
+                })?;
+                self.node_trail(NodeTrailRequest {
+                    source: primary,
+                    target,
+                    include_heuristic: request.include_heuristic,
+                    limits: request.limits,
+                })
+            }
         }
     }
 }
 
-fn validate_question(question: &str) -> Result<(), QueryError> {
+pub fn plan_natural_query(question: &str) -> Result<NaturalQueryPlan, QueryError> {
     if question.len() > MAX_NATURAL_QUERY_BYTES {
         return Err(QueryError::new(
             QueryErrorKind::InvalidParameter,
@@ -69,36 +121,48 @@ fn validate_question(question: &str) -> Result<(), QueryError> {
             format!("natural query exceeds {MAX_NATURAL_QUERY_BYTES} bytes"),
         ));
     }
-    Ok(())
+    Ok(plan_validated_natural_query(question))
 }
 
-fn plan_natural_query(question: &str) -> NaturalQueryPlan {
+fn plan_validated_natural_query(question: &str) -> NaturalQueryPlan {
     let original = question.trim().trim_end_matches(['?', '!', '.']).trim();
     if original.is_empty() {
-        return NaturalQueryPlan::Search {
-            query: String::new(),
-        };
+        return plan(NaturalQueryIntent::Fallback, 0, [String::new()]);
     }
     let lower = original.to_ascii_lowercase();
 
-    // Contradictory direction words are deliberately not resolved by choosing
-    // the first cue. Search is the safe fallback and can surface candidates.
-    if contains_word(&lower, "callers") && contains_word(&lower, "callees") {
-        return search_plan(original);
-    }
-
-    for prefix in ["shortest path from ", "path from "] {
+    for prefix in [
+        "shortest path from ",
+        "path from ",
+        "route from ",
+        "connection from ",
+    ] {
         if let Some((source, target)) = split_operands(original, &lower, prefix, " to ") {
-            return NaturalQueryPlan::NodeTrail { source, target };
+            return plan(NaturalQueryIntent::NodeTrail, 100, [source, target]);
         }
     }
     for prefix in ["how does ", "how can "] {
         if let Some((source, target)) = split_operands(original, &lower, prefix, " reach ") {
-            return NaturalQueryPlan::NodeTrail { source, target };
+            return plan(NaturalQueryIntent::NodeTrail, 100, [source, target]);
         }
     }
     if let Some((source, target)) = split_operands(original, &lower, "how is ", " connected to ") {
-        return NaturalQueryPlan::NodeTrail { source, target };
+        return plan(NaturalQueryIntent::NodeTrail, 100, [source, target]);
+    }
+
+    // Contradictory direction words are deliberately not resolved by choosing
+    // the first cue. Search is the safe fallback and can surface candidates.
+    // Explicit path syntax is parsed first because symbol names can themselves
+    // contain words such as `caller` and `callee`.
+    if (["caller", "callers"]
+        .iter()
+        .any(|word| contains_word(&lower, word))
+        && ["callee", "callees"]
+            .iter()
+            .any(|word| contains_word(&lower, word)))
+        || (contains_word(&lower, "incoming") && contains_word(&lower, "outgoing"))
+    {
+        return fallback_plan(original);
     }
 
     for prefix in [
@@ -107,10 +171,17 @@ fn plan_natural_query(question: &str) -> NaturalQueryPlan {
         "callers of ",
         "who calls ",
         "what calls ",
+        "what functions call ",
+        "what methods call ",
+        "which functions call ",
+        "which methods call ",
     ] {
         if let Some(symbol) = operand_after_prefix(original, &lower, prefix) {
-            return NaturalQueryPlan::Callers { symbol };
+            return plan(NaturalQueryIntent::Callers, 100, [symbol]);
         }
+    }
+    if let Some(symbol) = operand_between(original, &lower, "where is ", " called") {
+        return plan(NaturalQueryIntent::Callers, 95, [symbol]);
     }
 
     for prefix in [
@@ -120,12 +191,14 @@ fn plan_natural_query(question: &str) -> NaturalQueryPlan {
         "calls made by ",
     ] {
         if let Some(symbol) = operand_after_prefix(original, &lower, prefix) {
-            return NaturalQueryPlan::Callees { symbol };
+            return plan(NaturalQueryIntent::Callees, 100, [symbol]);
         }
     }
-    for suffix in [" call", " calls", " invoke", " invokes"] {
-        if let Some(symbol) = operand_between(original, &lower, "what does ", suffix) {
-            return NaturalQueryPlan::Callees { symbol };
+    for prefix in ["what does ", "what functions does ", "what methods does "] {
+        for suffix in [" call", " calls", " invoke", " invokes"] {
+            if let Some(symbol) = operand_between(original, &lower, prefix, suffix) {
+                return plan(NaturalQueryIntent::Callees, 100, [symbol]);
+            }
         }
     }
 
@@ -137,6 +210,8 @@ fn plan_natural_query(question: &str) -> NaturalQueryPlan {
         "what changes if ",
         "dependents of ",
         "impact of ",
+        "what is the impact of ",
+        "what would break if ",
     ] {
         if let Some(mut symbol) = operand_after_prefix(original, &lower, prefix) {
             for suffix in [" changes", " changed"] {
@@ -146,15 +221,28 @@ fn plan_natural_query(question: &str) -> NaturalQueryPlan {
                 }
             }
             if !symbol.is_empty() {
-                return NaturalQueryPlan::Impact { symbol };
+                return plan(NaturalQueryIntent::Impact, 100, [symbol]);
             }
         }
     }
+    for suffix in [" changes, what breaks", " changes what breaks"] {
+        if let Some(symbol) = operand_between(original, &lower, "if ", suffix) {
+            return plan(NaturalQueryIntent::Impact, 95, [symbol]);
+        }
+    }
 
+    for prefix in ["find definition of ", "definition of ", "search for "] {
+        if let Some(mut query) = operand_after_prefix(original, &lower, prefix) {
+            if query.to_ascii_lowercase().ends_with(" defined") {
+                query.truncate(query.len().saturating_sub(" defined".len()));
+                query = clean_operand(&query);
+            }
+            if !query.is_empty() {
+                return plan(NaturalQueryIntent::Search, 90, [query]);
+            }
+        }
+    }
     for prefix in [
-        "find definition of ",
-        "definition of ",
-        "search for ",
         "show me ",
         "where is ",
         "where are ",
@@ -163,23 +251,40 @@ fn plan_natural_query(question: &str) -> NaturalQueryPlan {
         "show ",
     ] {
         if let Some(mut query) = operand_after_prefix(original, &lower, prefix) {
-            if query.to_ascii_lowercase().ends_with(" defined") {
+            let explicitly_defined = query.to_ascii_lowercase().ends_with(" defined");
+            if explicitly_defined {
                 query.truncate(query.len().saturating_sub(" defined".len()));
                 query = clean_operand(&query);
             }
             if !query.is_empty() {
-                return NaturalQueryPlan::Search { query };
+                let confidence = if explicitly_defined || looks_like_symbol_operand(&query) {
+                    90
+                } else {
+                    60
+                };
+                return plan(NaturalQueryIntent::Search, confidence, [query]);
             }
         }
     }
 
-    search_plan(original)
+    fallback_plan(original)
 }
 
-fn search_plan(query: &str) -> NaturalQueryPlan {
-    NaturalQueryPlan::Search {
-        query: query.to_owned(),
+fn plan(
+    intent: NaturalQueryIntent,
+    confidence: u8,
+    operands: impl IntoIterator<Item = String>,
+) -> NaturalQueryPlan {
+    NaturalQueryPlan {
+        profile: QUERY_PLANNER_PROFILE_V1.to_owned(),
+        intent,
+        confidence,
+        operands: operands.into_iter().collect(),
     }
+}
+
+fn fallback_plan(query: &str) -> NaturalQueryPlan {
+    plan(NaturalQueryIntent::Fallback, 0, [query.to_owned()])
 }
 
 fn operand_after_prefix(original: &str, lower: &str, prefix: &str) -> Option<String> {
@@ -230,61 +335,67 @@ fn contains_word(value: &str, expected: &str) -> bool {
         .any(|word| word == expected)
 }
 
+fn looks_like_symbol_operand(value: &str) -> bool {
+    !value.chars().any(char::is_whitespace)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{NaturalQueryPlan, plan_natural_query};
+    use super::{NaturalQueryIntent, QueryError, plan_natural_query};
 
-    #[test]
-    fn planner_routes_high_confidence_structural_intents() {
-        assert_eq!(
-            plan_natural_query("Who calls UserService.list?"),
-            NaturalQueryPlan::Callers {
-                symbol: "UserService.list".to_owned()
-            }
-        );
-        assert_eq!(
-            plan_natural_query("What does Api.caller call?"),
-            NaturalQueryPlan::Callees {
-                symbol: "Api.caller".to_owned()
-            }
-        );
-        assert_eq!(
-            plan_natural_query("What breaks if Api.caller changes?"),
-            NaturalQueryPlan::Impact {
-                symbol: "Api.caller".to_owned()
-            }
-        );
-        assert_eq!(
-            plan_natural_query("Path from Api.caller to Store.callee"),
-            NaturalQueryPlan::NodeTrail {
-                source: "Api.caller".to_owned(),
-                target: "Store.callee".to_owned()
-            }
-        );
+    fn planned(question: &str) -> Result<(NaturalQueryIntent, Vec<String>), QueryError> {
+        let plan = plan_natural_query(question)?;
+        Ok((plan.intent(), plan.operands().to_vec()))
     }
 
     #[test]
-    fn planner_cleans_search_scaffolding_and_preserves_unicode() {
+    fn planner_routes_high_confidence_structural_intents() -> Result<(), QueryError> {
         assert_eq!(
-            plan_natural_query("Where is résumé defined?"),
-            NaturalQueryPlan::Search {
-                query: "résumé".to_owned()
-            }
+            planned("Who calls UserService.list?")?,
+            (
+                NaturalQueryIntent::Callers,
+                vec!["UserService.list".to_owned()]
+            )
         );
+        assert_eq!(
+            planned("What does Api.caller call?")?,
+            (NaturalQueryIntent::Callees, vec!["Api.caller".to_owned()])
+        );
+        assert_eq!(
+            planned("What breaks if Api.caller changes?")?,
+            (NaturalQueryIntent::Impact, vec!["Api.caller".to_owned()])
+        );
+        assert_eq!(
+            planned("Path from Api.caller to Store.callee")?,
+            (
+                NaturalQueryIntent::NodeTrail,
+                vec!["Api.caller".to_owned(), "Store.callee".to_owned()]
+            )
+        );
+        Ok(())
     }
 
     #[test]
-    fn planner_falls_back_on_low_confidence_and_contradictory_direction() {
+    fn planner_cleans_search_scaffolding_and_preserves_unicode() -> Result<(), QueryError> {
+        assert_eq!(
+            planned("Where is résumé defined?")?,
+            (NaturalQueryIntent::Search, vec!["résumé".to_owned()])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn planner_falls_back_on_low_confidence_and_contradictory_direction() -> Result<(), QueryError>
+    {
         for question in [
             "authentication flow",
             "show callers and callees of UserService.list",
         ] {
             assert_eq!(
-                plan_natural_query(question),
-                NaturalQueryPlan::Search {
-                    query: question.to_owned()
-                }
+                planned(question)?,
+                (NaturalQueryIntent::Fallback, vec![question.to_owned()])
             );
         }
+        Ok(())
     }
 }

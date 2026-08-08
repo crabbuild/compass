@@ -25,7 +25,10 @@ pub use cql::{
 };
 pub use graph_engine::{GraphEngine, JsonGraphEngine, StoreGraphEngine, open_graph_engine};
 pub use index::{EngineSelection, QueryEngineKind, open, open_with_engine, open_with_store};
-pub use intent::{NaturalQueryRequest, QUERY_PLANNER_PROFILE_V1};
+pub use intent::{
+    NaturalQueryIntent, NaturalQueryPlan, NaturalQueryRequest, QUERY_PLANNER_PROFILE_V1,
+    plan_natural_query,
+};
 pub use program_join::join_program_evidence;
 pub use relevance::{
     EdgeIdentity, EdgeJudgment, IdJudgment, IntentMetrics, JudgedQuery, JudgmentCorpus,

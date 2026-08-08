@@ -29,11 +29,13 @@ review and evidence explaining the tradeoff.
 The native query-relevance gate keeps two intentionally separate evidence
 sets: the checked-in 80-question reviewed synthetic corpus validates fixture,
 schema, scoring, and metric behavior; a compact executable subset runs actual
-typed `CodeQueryEngine` search, callers, path, and no-answer requests against
-the support graph. The executable subset derives its canonical graph digest,
-records measured latency and serialized response bytes, and requires matching
-ordered observations from JSON, store, and a repeated store execution. Timing
-is measured but removed before the deterministic response-baseline comparison.
+`CodeQueryEngine::query_natural` requests for search, callers, callees, impact,
+path, and no-answer cases against the support graph. The executable subset
+therefore qualifies the planner and typed operation together. It derives its
+canonical graph digest, records measured latency and serialized response bytes,
+and requires matching ordered observations from JSON, store, and a repeated
+store execution. Timing is measured but removed before the deterministic
+response-baseline comparison.
 
 Run the gate with this checkout's external Cargo target:
 

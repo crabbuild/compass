@@ -92,9 +92,13 @@ directly.
 
 The additive `compass ask` command routes bounded natural-language questions
 to the existing typed search, callers, callees, impact, or node-trail operation
-and returns the same `compass.query/1` response contract. Explicit typed query
-commands remain available and unchanged; ambiguous or contradictory questions
-never invent a direction or select an arbitrary symbol.
+and returns the same `compass.query/1` response contract. `compass query`
+automatically uses that path for high-confidence questions against a current
+typed graph. Generic or contradictory questions, historical `--at` queries,
+and requests with `--traverse`, `--dfs`, `--context`, `--budget`, or `--page`
+retain the established text-traversal behavior. Explicit typed query commands
+remain available and unchanged; ambiguous questions never invent a direction
+or select an arbitrary symbol.
 
 Structural `init`, `update`, `extract`, and `watch` builds publish
 `program.json` only when `--program` or `--program-artifact` is selected. The

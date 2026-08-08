@@ -86,12 +86,13 @@ candidates retain their explicit source penalty in `query-ranker/2`.
 ## Natural-language intent routing
 
 `compass ask "<question>"` uses the deterministic `query-planner/1` profile
-before executing the existing typed query operations. High-confidence forms
-route callers, callees, impact, and source-to-target path questions to their
-matching `compass.query/1` operation. Search scaffolding such as `where is` or
-`find` is removed before symbol search, which avoids spending recall terms on
-question prose. Explicit `search`, `callers`, `callees`, `impact`, and `node`
-commands retain their existing behavior.
+before executing the existing typed query operations. `compass query` also
+selects this path for a high-confidence question against a current typed graph.
+High-confidence forms route callers, callees, impact, and source-to-target path
+questions to their matching `compass.query/1` operation. Search scaffolding
+such as `where is` or `find` is removed before symbol search, which avoids
+spending recall terms on question prose. Explicit `search`, `callers`,
+`callees`, `impact`, and `node` commands retain their existing behavior.
 
 The planner is deliberately bounded and conservative. Questions above 4,096
 bytes fail before graph work. Empty, low-confidence, or contradictory requests
@@ -99,7 +100,11 @@ fall back to bounded search; ambiguous symbol resolution remains an explicit
 `ambiguous_match` diagnostic and never selects a convenient candidate. Planner
 rules are local, credential-free, deterministic, and share the request limits,
 heuristic-evidence gate, backend behavior, and response envelope of the typed
-operation they select.
+operation they select. Generic or contradictory questions, historical `--at`
+queries, and requests carrying `--traverse` or a text-traversal control remain
+on the established relevance traversal. MCP `query_graph` uses the same routing
+rule for typed graphs unless a legacy `mode`, `depth`, `token_budget`, or
+`context_filter` field is present.
 
 ## Relevance qualification
 
@@ -107,11 +112,12 @@ operation they select.
 80-question synthetic corpus from a compact executable baseline. The larger
 corpus exercises the versioned judgment and metric contract without pretending
 that its synthetic identities can execute on a production graph. The executable
-subset uses the checked-in support graph, derives its canonical graph digest,
-and maps actual `CodeQueryResponse` values into ordered node IDs, directed
-edges, paths, truncation/no-answer state, measured latency, and serialized
-response bytes. JSON/store parity and repeated store execution must agree once
-timing is normalized away.
+subset sends natural-language questions through `query_natural` on the
+checked-in support graph, derives its canonical graph digest, and maps actual
+`CodeQueryResponse` values into ordered node IDs, directed edges, paths,
+truncation/no-answer state, measured latency, and serialized response bytes.
+JSON/store parity and repeated store execution must agree once timing is
+normalized away.
 
 Run `python3 scripts/qualify_query_relevance.py` with an external
 `CARGO_TARGET_DIR`. The native gate evaluates Success@1, MRR, Recall@k, nDCG,
@@ -127,11 +133,16 @@ minimums requires an intentional review rather than copying a new result.
 
 ```text
 question
-  -> query_terms()
-  -> score_nodes()
-  -> choose anchors
-  -> query_graph_text() with BFS/DFS and budget
-  -> focused text subgraph
+  -> plan_natural_query()
+     -> high-confidence + current typed graph
+        -> search/callers/callees/impact/node-trail
+        -> compass.query/1
+     -> generic, historical, contradictory, or traversal-controlled
+        -> query_terms()
+        -> score_nodes()
+        -> choose anchors
+        -> query_graph_text() with BFS/DFS and budget
+        -> focused text subgraph
 ```
 
 ### Text normalization

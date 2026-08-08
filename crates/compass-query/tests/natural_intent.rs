@@ -5,7 +5,10 @@ use std::path::Path;
 
 use compass_graph::GraphSnapshotBuilder;
 use compass_model::query_contract::{CodeQueryLimits, CodeQueryOperation, QueryDiagnosticCode};
-use compass_query::{EngineSelection, NaturalQueryRequest, open_with_engine};
+use compass_query::{
+    EngineSelection, NaturalQueryIntent, NaturalQueryRequest, QUERY_PLANNER_PROFILE_V1,
+    open_with_engine, plan_natural_query,
+};
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 
 fn publish_snapshot(directory: &Path, graph_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -136,5 +139,123 @@ fn natural_question_size_is_bounded_before_graph_work() -> Result<(), Box<dyn st
         EngineSelection::Json,
     )?;
     assert!(engine.query_natural(request(&"x".repeat(4_097))).is_err());
+    Ok(())
+}
+
+#[test]
+fn planner_profile_covers_reviewed_phrase_variants_and_safe_fallbacks()
+-> Result<(), Box<dyn std::error::Error>> {
+    let cases = [
+        ("who calls Target?", NaturalQueryIntent::Callers, true),
+        ("what calls Target", NaturalQueryIntent::Callers, true),
+        (
+            "which functions call Target",
+            NaturalQueryIntent::Callers,
+            true,
+        ),
+        (
+            "which methods call Target",
+            NaturalQueryIntent::Callers,
+            true,
+        ),
+        ("where is Target called", NaturalQueryIntent::Callers, true),
+        ("callers of Target", NaturalQueryIntent::Callers, true),
+        ("what does Source call?", NaturalQueryIntent::Callees, true),
+        (
+            "what functions does Source call",
+            NaturalQueryIntent::Callees,
+            true,
+        ),
+        (
+            "what methods does Source invoke",
+            NaturalQueryIntent::Callees,
+            true,
+        ),
+        ("callees of Source", NaturalQueryIntent::Callees, true),
+        ("calls made by Source", NaturalQueryIntent::Callees, true),
+        ("what depends on Target?", NaturalQueryIntent::Impact, true),
+        (
+            "what is impacted by Target",
+            NaturalQueryIntent::Impact,
+            true,
+        ),
+        (
+            "what is the impact of Target",
+            NaturalQueryIntent::Impact,
+            true,
+        ),
+        (
+            "what would break if Target changes",
+            NaturalQueryIntent::Impact,
+            true,
+        ),
+        (
+            "if Target changes, what breaks",
+            NaturalQueryIntent::Impact,
+            true,
+        ),
+        ("dependents of Target", NaturalQueryIntent::Impact, true),
+        (
+            "path from Source to Target",
+            NaturalQueryIntent::NodeTrail,
+            true,
+        ),
+        (
+            "shortest path from Source to Target",
+            NaturalQueryIntent::NodeTrail,
+            true,
+        ),
+        (
+            "route from Source to Target",
+            NaturalQueryIntent::NodeTrail,
+            true,
+        ),
+        (
+            "connection from Source to Target",
+            NaturalQueryIntent::NodeTrail,
+            true,
+        ),
+        (
+            "how can Source reach Target",
+            NaturalQueryIntent::NodeTrail,
+            true,
+        ),
+        ("where is Target defined?", NaturalQueryIntent::Search, true),
+        (
+            "find definition of Target",
+            NaturalQueryIntent::Search,
+            true,
+        ),
+        ("search for Target", NaturalQueryIntent::Search, true),
+        ("show me Target", NaturalQueryIntent::Search, true),
+        (
+            "where is authentication enforced?",
+            NaturalQueryIntent::Search,
+            false,
+        ),
+        ("authentication flow", NaturalQueryIntent::Fallback, false),
+        (
+            "show callers and callees of Target",
+            NaturalQueryIntent::Fallback,
+            false,
+        ),
+        (
+            "show incoming and outgoing calls for Target",
+            NaturalQueryIntent::Fallback,
+            false,
+        ),
+        ("", NaturalQueryIntent::Fallback, false),
+    ];
+    for (question, expected, auto_route) in cases {
+        let plan = plan_natural_query(question)?;
+        assert_eq!(plan.profile(), QUERY_PLANNER_PROFILE_V1, "{question:?}");
+        assert_eq!(plan.intent(), expected, "{question:?}");
+        assert_eq!(plan.routes_to_typed_query(), auto_route, "{question:?}");
+        assert_eq!(
+            plan.confidence() > 0,
+            expected != NaturalQueryIntent::Fallback,
+            "{question:?}"
+        );
+    }
     Ok(())
 }

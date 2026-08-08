@@ -2,10 +2,12 @@
 
 ## Unreleased
 
-- Add `compass ask` with deterministic, bounded natural-language routing for
-  symbol search, callers, callees, impact, and node trails. Low-confidence or
-  contradictory questions fall back to search, while ambiguous symbols remain
-  explicit instead of selecting an arbitrary candidate.
+- Add deterministic, bounded natural-language routing for symbol search,
+  callers, callees, impact, and node trails through `compass ask`, clear
+  `compass query` intents, and MCP `query_graph`. Generic, contradictory,
+  historical, or explicitly traversed queries retain compatibility traversal,
+  while ambiguous symbols remain explicit instead of selecting an arbitrary
+  candidate.
 
 - Route JavaScript and TypeScript production extraction through the registered
   universal semantic candidate, including source-backed declarations, imports,

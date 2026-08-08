@@ -22,7 +22,8 @@ use compass_prs::{
     fetch_prs, fetch_worktrees, format_prs_text, parse_ci,
 };
 use compass_query::{
-    TraversalMode, find_node, pick_scored_endpoint, query_graph_text, sanitize_label, score_nodes,
+    TraversalMode, find_node, pick_scored_endpoint, plan_natural_query, query_graph_text,
+    sanitize_label, score_nodes,
 };
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, ErrorData, Implementation,
@@ -78,11 +79,13 @@ struct GraphContext {
     graph: Graph,
     overlay: HashMap<String, Map<String, Value>>,
     communities: BTreeMap<usize, Vec<NodeIndex>>,
+    typed_query_supported: bool,
 }
 
 impl GraphContext {
     fn load(path: &Path) -> Result<Self, String> {
         let loaded = LoadedGraph::load_directed(path).map_err(|error| error.to_string())?;
+        let typed_query_supported = GraphDocument::load(path).is_ok();
         let mut communities = BTreeMap::<usize, Vec<NodeIndex>>::new();
         for (index, node) in loaded.graph.nodes() {
             if let Some(community) = node
@@ -98,6 +101,7 @@ impl GraphContext {
             graph: loaded.graph,
             overlay: loaded.overlay,
             communities,
+            typed_query_supported,
         })
     }
 
@@ -338,7 +342,7 @@ impl CompassMcp {
             .store
             .load(project_path.as_deref())
             .map_err(InvocationError::Internal)?;
-        if matches!(
+        let typed_query = matches!(
             name,
             "search_symbols"
                 | "get_callers"
@@ -346,7 +350,9 @@ impl CompassMcp {
                 | "get_impact"
                 | "explore_code"
                 | "get_node"
-        ) {
+        ) || (name == "query_graph"
+            && should_route_natural_query(arguments, &context)?);
+        if typed_query {
             let response = code_query::invoke(name, arguments, &context.path)?;
             let text = format!(
                 "{:?}: {} nodes, {} edges, {} paths{}",
@@ -373,6 +379,31 @@ impl CompassMcp {
             structured_content: None,
         })
     }
+}
+
+fn should_route_natural_query(
+    arguments: &Map<String, Value>,
+    context: &GraphContext,
+) -> Result<bool, InvocationError> {
+    if ["mode", "depth", "token_budget", "context_filter"]
+        .iter()
+        .any(|name| arguments.contains_key(*name))
+    {
+        return Ok(false);
+    }
+    let Some(question) = arguments
+        .get("question")
+        .and_then(Value::as_str)
+        .filter(|question| !question.is_empty())
+    else {
+        return Ok(false);
+    };
+    if !context.typed_query_supported {
+        return Ok(false);
+    }
+    plan_natural_query(question)
+        .map(|plan| plan.routes_to_typed_query())
+        .map_err(|error| InvocationError::InvalidParams(error.to_string()))
 }
 
 fn tool_specs() -> Vec<Tool> {
@@ -413,7 +444,7 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "query_graph",
-            "Search the knowledge graph using BFS or DFS. Returns relevant nodes and edges as text context.",
+            "Route clear natural-language intents through bounded typed code queries; use explicit traversal controls for BFS/DFS text context.",
             json!({"type":"object","properties":{
                 "question":{"type":"string","description":"Natural language question or keyword search"},
                 "mode":{"type":"string","enum":["bfs","dfs"],"default":"bfs","description":"bfs=broad context, dfs=trace a specific path"},
