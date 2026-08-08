@@ -8,6 +8,8 @@ whether a Compass capability is covered by the installed skill. Run
 
 - `compass capabilities`: report versioned, read-only machine contracts for
   editor and automation integrations.
+- `compass ask`: route a direct natural-language structural question to a
+  bounded, deterministic typed query operation.
 - `compass search`: find typed symbols by name using the local FTS index.
 - `compass callers`: list direct typed call-graph predecessors.
 - `compass callees`: list direct typed call-graph successors.

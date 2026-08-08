@@ -83,6 +83,24 @@ it changes the term, then adjacent transpositions are tried before deletions so
 the fixed three-variant budget prioritizes common spelling mistakes. Fuzzy
 candidates retain their explicit source penalty in `query-ranker/2`.
 
+## Natural-language intent routing
+
+`compass ask "<question>"` uses the deterministic `query-planner/1` profile
+before executing the existing typed query operations. High-confidence forms
+route callers, callees, impact, and source-to-target path questions to their
+matching `compass.query/1` operation. Search scaffolding such as `where is` or
+`find` is removed before symbol search, which avoids spending recall terms on
+question prose. Explicit `search`, `callers`, `callees`, `impact`, and `node`
+commands retain their existing behavior.
+
+The planner is deliberately bounded and conservative. Questions above 4,096
+bytes fail before graph work. Empty, low-confidence, or contradictory requests
+fall back to bounded search; ambiguous symbol resolution remains an explicit
+`ambiguous_match` diagnostic and never selects a convenient candidate. Planner
+rules are local, credential-free, deterministic, and share the request limits,
+heuristic-evidence gate, backend behavior, and response envelope of the typed
+operation they select.
+
 ## Relevance qualification
 
 `crates/compass-query/tests/relevance_qualification.rs` separates the reviewed

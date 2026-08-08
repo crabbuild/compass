@@ -82,6 +82,8 @@ codebase question:
 
 Use the specialized navigation commands when they fit:
 
+- `compass ask "<question>"` for bounded, typed intent routing from a direct
+  natural-language question; inspect the reported operation and ambiguity.
 - `compass search "<symbol>"` for exact or fuzzy typed-symbol lookup.
 - `compass callers` or `compass callees` for one-hop call-graph evidence.
 - `compass call-graph` for a bounded caller/callee trace from a source position
@@ -117,9 +119,9 @@ debug a graph result; it should not silently replace the graph-first workflow.
 
 Classify the effect before selecting a command:
 
-- Read-only local: `search`, `callers`, `callees`, `impact`, `explore`, `node`,
-  `call-graph`, `query`, `program`, `path`, `explain`, `affected`, `tree`, and
-  local diagnostics.
+- Read-only local: `ask`, `search`, `callers`, `callees`, `impact`, `explore`,
+  `node`, `call-graph`, `query`, `program`, `path`, `explain`, `affected`,
+  `tree`, and local diagnostics.
 - Local publication: `init`, `update`, `extract`, `watch`, `cluster-only`,
   `label`, history materialization, installation, and file-based exports.
 - External or credentialed: semantic providers, URL ingestion, cloning, PR
@@ -171,6 +173,8 @@ Do not force every request through `query`:
 - Dependency route: `path`.
 - Change-review scope: `affected`.
 - Exact relationship or automation: `query --cql`.
+- Direct natural-language structural question: `ask`; inspect the typed
+  operation before using its evidence.
 - Exact symbol or call evidence: `search`, `callers`, `callees`, `call-graph`,
   `explore`, `node`, or `program`.
 - Repository structure: `tree`.

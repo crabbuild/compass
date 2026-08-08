@@ -90,6 +90,12 @@ and reference are internal realizations of the backend-neutral `compass-store`
 contract, not a stable SQL schema or pointer format that consumers may query
 directly.
 
+The additive `compass ask` command routes bounded natural-language questions
+to the existing typed search, callers, callees, impact, or node-trail operation
+and returns the same `compass.query/1` response contract. Explicit typed query
+commands remain available and unchanged; ambiguous or contradictory questions
+never invent a direction or select an arbitrary symbol.
+
 Structural `init`, `update`, `extract`, and `watch` builds publish
 `program.json` only when `--program` or `--program-artifact` is selected. The
 legacy `--no-program` flag remains accepted and continues to request the

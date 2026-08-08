@@ -43,6 +43,8 @@ compass query "authentication flow" --at HEAD~20
 ## Focused graph operations
 
 ```bash
+compass ask "who calls PaymentGateway.charge?"
+compass ask "what depends on authorizePayment?"
 compass search PaymentGateway
 compass callers PaymentGateway.charge
 compass callees CheckoutController.create
@@ -56,6 +58,9 @@ compass affected authorizePayment --depth 3
 compass tree
 ```
 
+- `ask` deterministically routes a direct natural-language question to a
+  bounded typed operation such as search, callers, callees, impact, or node
+  trail. Treat the reported operation and any ambiguity as part of the result.
 - `search` resolves typed symbols by exact or fuzzy name.
 - `callers` and `callees` walk one attributable call-graph hop.
 - `impact` traverses a bounded transitive radius and excludes heuristic

@@ -19,6 +19,7 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
     let cache = cache.to_string_lossy().into_owned();
     let root = directory.path().to_string_lossy().into_owned();
     for (command, positional, operation) in [
+        ("ask", vec!["who calls Target?"], "callers"),
         ("search", vec!["Target"], "search"),
         ("callers", vec!["Target"], "callers"),
         ("callees", vec!["Caller"], "callees"),

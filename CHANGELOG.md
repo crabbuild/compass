@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add `compass ask` with deterministic, bounded natural-language routing for
+  symbol search, callers, callees, impact, and node trails. Low-confidence or
+  contradictory questions fall back to search, while ambiguous symbols remain
+  explicit instead of selecting an arbitrary candidate.
+
 - Route JavaScript and TypeScript production extraction through the registered
   universal semantic candidate, including source-backed declarations, imports,
   re-exports, calls, references, heritage, aliases, and framework route

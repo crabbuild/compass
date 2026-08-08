@@ -349,6 +349,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "history" => history_commands::command(frontend, &args),
         "call-graph" => call_graph_commands::command(frontend, &args),
         "capabilities" => capability_commands::command(frontend, &args),
+        "ask" => code_query_commands::command("ask", &args),
         "search" => code_query_commands::command("search", &args),
         "callers" => code_query_commands::command("callers", &args),
         "callees" => code_query_commands::command("callees", &args),

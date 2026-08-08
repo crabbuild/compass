@@ -88,6 +88,7 @@ const GROUPS: &[Group] = &[
     Group {
         title: "Explore",
         commands: &[
+            "ask",
             "search",
             "callers",
             "callees",
@@ -142,6 +143,12 @@ const GROUPS: &[Group] = &[
 ];
 
 const PAGES: &[Page] = &[
+    page!(
+        "ask",
+        "Route a natural-language question to a typed code-graph query",
+        ["compass ask <QUESTION> [OPTIONS]"],
+        "Arguments:\n  <QUESTION>                    Natural-language code-graph question\n\nOptions:\n  --graph <PATH>                Typed graph [default: compass-out/graph.json]\n  --program <PATH>              Optional Program IR enrichment\n  --cache <DIR>                 Query-index cache directory\n  --engine <default|json|store> Graph storage engine [default: default]\n  --max-depth <N>               Traversal radius\n  --max-nodes <N>               Node bound\n  --max-edges <N>               Edge bound\n  --max-paths <N>               Path bound\n  --max-candidates <N>          Candidate bound\n  --include-heuristic           Include heuristic evidence\n  --format <text|json>          Output format [default: text]\n\nExamples:\n  compass ask \"who calls PaymentService.charge?\"\n  compass ask \"what does CheckoutController.create call?\" --format json\n  compass ask \"path from CheckoutController.create to PaymentGateway.charge\"\n\nNotes:\n  High-confidence callers, callees, impact, and path questions route to the matching typed operation. Contradictory or low-confidence input falls back to bounded symbol search. The response uses compass.query/1."
+    ),
     page!(
         "call-graph",
         "Trace callers and callees for a source position or symbol",
@@ -1099,7 +1106,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 46);
+        assert_eq!(roots.len(), 47);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");
