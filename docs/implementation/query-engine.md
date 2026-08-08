@@ -53,9 +53,13 @@ before query state is created. `--engine json` also uses the compatible JSON
 engine without opening the database, while `--engine store`
 requires a readable, referenced store and reports corruption or absence
 explicitly. The query index remains disposable and keyed by canonical snapshot
-bytes for the JSON engine. Its current `compass-code-index/2` FTS tokenizer
-preserves underscores, matching the portable store term tokenizer. Store
-queries use immutable snapshot indexes instead of this disposable cache.
+bytes for the JSON engine. Its current `compass-code-index/4` FTS tokenizer
+uses the shared `compass.search-term/1` analyzer, which applies Unicode case
+normalization and combining-mark removal while preserving underscore tokens.
+Store queries use immutable snapshot indexes instead of this disposable cache.
+The corresponding immutable term-posting layout is
+`compass.store.graph-index/3`; a v2 snapshot is rejected and rebuilt rather
+than being reinterpreted with the new analyzer.
 
 Search candidate truncation is observable and therefore backend-neutral. Both
 engines select matching candidates in canonical node-ID order, apply the bound,
@@ -63,6 +67,28 @@ then run common Rust ranking and tie-breaking. Store prefix scans traverse the
 complete bounded posting range before retaining the smallest candidate IDs;
 the posting-chunk count cannot consume a node-candidate limit. Differential
 tests include more matching vocabulary entries than the public candidate bound.
+
+## Relevance qualification
+
+`crates/compass-query/tests/relevance_qualification.rs` separates the reviewed
+80-question synthetic corpus from a compact executable baseline. The larger
+corpus exercises the versioned judgment and metric contract without pretending
+that its synthetic identities can execute on a production graph. The executable
+subset uses the checked-in support graph, derives its canonical graph digest,
+and maps actual `CodeQueryResponse` values into ordered node IDs, directed
+edges, paths, truncation/no-answer state, measured latency, and serialized
+response bytes. JSON/store parity and repeated store execution must agree once
+timing is normalized away.
+
+Run `python3 scripts/qualify_query_relevance.py` with an external
+`CARGO_TARGET_DIR`. The native gate evaluates Success@1, MRR, Recall@k, nDCG,
+intent macro-F1, edge direction, path acceptance, no-answer precision,
+backend parity, deterministic ordering, and latency percentiles. Only response
+bytes are directly observable work counts today; the harness records the other
+work fields as uninstrumented instead of fabricating candidate or posting work.
+The reviewed executable threshold block lives beside the test so a failure is
+local and deterministic. Updating its expected identities, graph digest, or
+minimums requires an intentional review rather than copying a new result.
 
 ## Focused discovery path
 

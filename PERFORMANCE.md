@@ -24,6 +24,37 @@ Compare a proposed change with a previously approved Compass result captured on
 the same runner and corpus. A median regression above 10% requires explicit
 review and evidence explaining the tradeoff.
 
+## Query-relevance qualification
+
+The native query-relevance gate keeps two intentionally separate evidence
+sets: the checked-in 80-question reviewed synthetic corpus validates fixture,
+schema, scoring, and metric behavior; a compact executable subset runs actual
+typed `CodeQueryEngine` search, callers, path, and no-answer requests against
+the support graph. The executable subset derives its canonical graph digest,
+records measured latency and serialized response bytes, and requires matching
+ordered observations from JSON, store, and a repeated store execution. Timing
+is measured but removed before the deterministic response-baseline comparison.
+
+Run the gate with this checkout's external Cargo target:
+
+```bash
+CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
+  python3 scripts/qualify_query_relevance.py
+```
+
+The gate fails on corpus/schema/digest drift, non-deterministic backend output,
+or a reviewed minimum metric miss. Its thresholds currently require perfect
+Success@1, edge-direction precision, path acceptance, and no-answer precision
+for the deliberately small executable graph. It reports MRR, Recall@k, nDCG,
+intent macro-F1, edge-kind/direction precision and recall, backend parity,
+latency percentiles, and observable response-byte work. Candidate, posting,
+and expansion counters are not public query-engine observations and remain
+explicitly uninstrumented rather than inferred from output sizes.
+
+Refresh a judged corpus, executable request, digest expectation, or threshold
+only with a reviewed intent/identity change and updated deterministic evidence;
+never regenerate expected judgments or thresholds from a proposed ranker.
+
 ## Compass Store release qualification
 
 The local store release harness records the adapter's build/query timings,

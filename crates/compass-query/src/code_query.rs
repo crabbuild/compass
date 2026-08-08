@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use compass_graph::{GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS, SnapshotReadLimits};
@@ -16,6 +16,7 @@ use crate::cql::{QueryError, QueryErrorKind};
 use crate::graph_engine::LocalStoreSnapshot;
 use crate::index::QueryEngineKind;
 use crate::join_program_evidence;
+use crate::ranking::{SearchRankProfile, rank_search_candidates};
 use crate::recall::{CandidateSource, RecallBudget, SearchCandidatePool};
 use crate::source::{VerifiedSource, verified_source};
 use crate::text::strip_diacritics;
@@ -23,6 +24,8 @@ use crate::text::strip_diacritics;
 type GraphPath = (Vec<String>, Vec<String>);
 type BoundedPathResult = (Option<GraphPath>, bool);
 const MAX_CODE_QUERY_CANDIDATES: u32 = 256;
+const MAX_RECALL_FUZZY_VARIANTS_PER_TERM: usize = 3;
+const MIN_RECALL_CANDIDATES_BEFORE_FUZZY: usize = 4;
 
 struct TraversalBudget {
     remaining_nodes: usize,
@@ -533,11 +536,12 @@ impl CodeQueryEngine {
         let budget = RecallBudget {
             max_total_candidates: candidate_limit,
             max_per_source: candidate_limit,
+            max_fuzzy_candidates: candidate_limit.min(16),
         };
         let mut pool = SearchCandidatePool::new(budget);
 
         if let Some(node) = self.backend.node_by_id(&request.query)? {
-            pool.add(CandidateSource::ExactId, node);
+            let _ = pool.add(CandidateSource::ExactId, node);
         }
 
         let normalized_name_query = normalize_symbol(&request.query);
@@ -546,6 +550,17 @@ impl CodeQueryEngine {
             .nodes_by_normalized_name(&normalized_name_query, candidate_limit)?;
         pool.add_many(CandidateSource::ExactName, exact_name_nodes);
         response.truncated |= exact_name_truncated;
+
+        for term in &terms {
+            if term.chars().count() < 3 {
+                continue;
+            }
+            let (alias_nodes, alias_truncated) = self
+                .backend
+                .nodes_by_normalized_name(term, candidate_limit)?;
+            pool.add_many(CandidateSource::Alias, alias_nodes);
+            response.truncated |= alias_truncated;
+        }
 
         let (term_nodes, term_truncated) = if let Some(candidates) = self
             .backend
@@ -558,51 +573,35 @@ impl CodeQueryEngine {
         pool.add_many(CandidateSource::TermIndex, term_nodes);
         response.truncated |= term_truncated;
 
-        response.truncated |= pool.truncated;
-        let candidates = pool.into_vec();
-        let normalized_query = strip_diacritics(request.query.trim()).to_lowercase();
-        let mut ranked = Vec::new();
-        for candidate in candidates {
-            let source_rank = candidate.best_source_rank();
-            let node = candidate.node;
-            let normalized_name = strip_diacritics(&node.name).to_lowercase();
-            let normalized_qualified = strip_diacritics(&node.qualified_name).to_lowercase();
-            let tier = if normalized_qualified == normalized_query {
-                4_u8
-            } else if normalized_name == normalized_query {
-                3
-            } else if normalized_qualified.starts_with(&normalized_query)
-                || normalized_name.starts_with(&normalized_query)
-            {
-                2
-            } else {
-                1
-            };
-            let mut matched_fields = Vec::new();
-            if normalized_name.contains(&normalized_query) {
-                matched_fields.push("name".to_owned());
+        if pool.len() < candidate_limit.min(MIN_RECALL_CANDIDATES_BEFORE_FUZZY) {
+            for variant in recall_fuzzy_term_variants(&terms) {
+                if variant.len() < 3 {
+                    continue;
+                }
+                if pool.len() >= candidate_limit {
+                    break;
+                }
+                let (fuzzy_nodes, fuzzy_truncated) = self
+                    .backend
+                    .nodes_by_normalized_name(&variant, budget.max_fuzzy_candidates)?;
+                pool.add_many(CandidateSource::Fuzzy, fuzzy_nodes);
+                response.truncated |= fuzzy_truncated;
+                if pool.truncated_by_fuzzy_capacity() {
+                    break;
+                }
             }
-            if normalized_qualified.contains(&normalized_query) {
-                matched_fields.push("qualified_name".to_owned());
-            }
-            ranked.push((
-                f64::from(tier) * 1_000_000.0
-                    + f64::from(source_rank)
-                    + matched_fields.len() as f64,
-                node.id.clone(),
-                matched_fields,
-                node,
-            ));
         }
-        ranked.sort_by(|left, right| {
-            right
-                .0
-                .total_cmp(&left.0)
-                .then_with(|| left.1.cmp(&right.1))
-        });
+
+        response.truncated |= pool.is_truncated();
+        let candidates = pool.into_vec();
+        let ranked = rank_search_candidates(
+            SearchRankProfile::from_env(),
+            &request.query,
+            &terms,
+            candidates,
+        );
         let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);
         if ranked.len() > max_nodes {
-            ranked.truncate(max_nodes);
             response.truncated = true;
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::BoundedTruncation,
@@ -611,7 +610,11 @@ impl CodeQueryEngine {
                 path: None,
             });
         }
-        for (score, id, matched_fields, node) in ranked {
+        for result in ranked.into_iter().take(max_nodes) {
+            let score = result.score;
+            let id = result.node_id;
+            let matched_fields = result.matched_fields;
+            let node = result.node;
             response.results.push(SearchHit {
                 node_id: id,
                 score,
@@ -1379,6 +1382,74 @@ fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
     Ok(terms)
 }
 
+fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
+    let mut variants = BTreeSet::new();
+    let max_total_variants = terms
+        .len()
+        .saturating_mul(MAX_RECALL_FUZZY_VARIANTS_PER_TERM)
+        .max(1);
+
+    for term in terms {
+        let chars = term.chars().collect::<Vec<_>>();
+        if chars.len() < 4 {
+            continue;
+        }
+        let remaining_capacity = max_total_variants.saturating_sub(variants.len());
+        if remaining_capacity == 0 {
+            break;
+        }
+        let per_term_target = remaining_capacity.min(MAX_RECALL_FUZZY_VARIANTS_PER_TERM);
+        let mut emitted = 0_usize;
+        let stripped = strip_diacritics(term);
+        if stripped.len() >= 3 && variants.insert(stripped) {
+            emitted = emitted.saturating_add(1);
+        }
+
+        for index in 0..chars.len() {
+            if emitted >= per_term_target {
+                break;
+            }
+            let mut variant = chars.clone();
+            variant.remove(index);
+            if variant.len() < 3 {
+                continue;
+            }
+            if variants.insert(variant.iter().collect()) {
+                emitted = emitted.saturating_add(1);
+            }
+        }
+
+        if emitted >= per_term_target {
+            continue;
+        }
+        for index in 0..chars.len().saturating_sub(1) {
+            if emitted >= per_term_target {
+                break;
+            }
+            let mut variant = chars.clone();
+            variant.swap(index, index + 1);
+            if variant == chars {
+                continue;
+            }
+            if variants.insert(variant.iter().collect()) {
+                emitted = emitted.saturating_add(1);
+            }
+        }
+
+        if emitted >= per_term_target {
+            continue;
+        }
+        if chars.len() > 3 && variants.insert(chars[..chars.len() - 1].iter().collect()) {
+            emitted = emitted.saturating_add(1);
+        }
+        if chars.len() > 4 && emitted < per_term_target {
+            variants.insert(chars[1..].iter().collect());
+        }
+    }
+
+    variants.into_iter().collect()
+}
+
 pub(crate) fn enforce_response_size(response: &mut CodeQueryResponse) -> Result<(), QueryError> {
     let bytes = serde_json::to_vec(response).map_err(|error| {
         QueryError::new(
@@ -1650,5 +1721,44 @@ mod adjacency_tests {
             matching.len()
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod fuzzy_term_variant_tests {
+    use super::{MAX_RECALL_FUZZY_VARIANTS_PER_TERM, recall_fuzzy_term_variants};
+
+    #[test]
+    fn recall_fuzzy_term_variants_is_deterministic_and_bounded() {
+        let terms = vec![
+            "fetchUsers".to_owned(),
+            "dependencies".to_owned(),
+            "résumé".to_owned(),
+        ];
+        let first = recall_fuzzy_term_variants(&terms);
+        let second = recall_fuzzy_term_variants(&terms);
+        assert_eq!(first, second, "variant generation must be deterministic");
+        assert!(!first.is_empty());
+        assert!(first.len() <= terms.len() * MAX_RECALL_FUZZY_VARIANTS_PER_TERM);
+        assert!(first.iter().all(|variant| variant.len() >= 3));
+        let unique = first.iter().collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(unique.len(), first.len());
+        assert!(first.iter().any(|variant| variant == "resume"));
+    }
+
+    #[test]
+    fn recall_fuzzy_term_variants_ignores_short_tokens() {
+        let terms = vec![
+            "a".to_owned(),
+            "ab".to_owned(),
+            "abc".to_owned(),
+            "abcd".to_owned(),
+        ];
+        let variants = recall_fuzzy_term_variants(&terms);
+        assert!(
+            !variants
+                .iter()
+                .any(|variant| variant == "a" || variant == "ab" || variant == "abc")
+        );
     }
 }
