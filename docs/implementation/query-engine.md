@@ -67,6 +67,11 @@ then run common Rust ranking and tie-breaking. Store prefix scans traverse the
 complete bounded posting range before retaining the smallest candidate IDs;
 the posting-chunk count cannot consume a node-candidate limit. Differential
 tests include more matching vocabulary entries than the public candidate bound.
+`maxCandidates` is the total multi-source recall-pool bound; it is never
+inflated to `maxNodes`. The default therefore ranks at most 20 recalled
+candidates, while `maxNodes` independently limits how many ranked nodes can be
+returned. The 100,000-node in-process ceiling exercises direct search and the
+natural-query planner in addition to callers, impact, and node trails.
 
 Each opened code-query engine keeps a 64-entry LRU cache of validated search
 preparations. The cache stores only bounded query terms and the derived FTS

@@ -578,9 +578,7 @@ impl CodeQueryEngine {
             });
             return self.finish_response(&mut response);
         }
-        let candidate_limit =
-            usize::try_from(request.limits.max_candidates.max(request.limits.max_nodes))
-                .unwrap_or(usize::MAX);
+        let candidate_limit = usize::try_from(request.limits.max_candidates).unwrap_or(usize::MAX);
         let budget = RecallBudget {
             max_total_candidates: candidate_limit,
             max_per_source: candidate_limit,
@@ -641,6 +639,21 @@ impl CodeQueryEngine {
         }
 
         response.truncated |= pool.is_truncated();
+        if response.truncated {
+            let candidate_label = if candidate_limit == 1 {
+                "candidate"
+            } else {
+                "candidates"
+            };
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::BoundedTruncation,
+                message: format!(
+                    "Search candidate recall was limited to {candidate_limit} {candidate_label}"
+                ),
+                node_id: None,
+                path: None,
+            });
+        }
         let candidates = pool.into_vec();
         let candidate_count = candidates.len();
         let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);

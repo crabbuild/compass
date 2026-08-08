@@ -67,6 +67,12 @@ baseline with real production vocabulary, run
 then follow the two-reviewer, graph-digest-pinned process in the relevance
 fixture README. Importer output is a review queue, never a generated truth set.
 
+Search work is bounded independently from response size: `maxCandidates`
+limits the total multi-source recall pool and is never expanded to
+`maxNodes`. The default ranks at most 20 recalled candidates. The existing
+100,000-node in-process ceiling now covers direct search and natural-query
+planning as well as callers, impact, and node trails.
+
 ## Compass Store release qualification
 
 The local store release harness records the adapter's build/query timings,

@@ -15,7 +15,9 @@
   a bounded local redaction/review workflow for growing the corpus from
   approved production query samples without network telemetry or automatic
   judgment generation. Opt-in MCP query logs now cover typed natural queries,
-  use a versioned record, and stop at 16 MiB.
+  use a versioned record, and stop at 16 MiB. Search now enforces
+  `maxCandidates` as the total recall-pool bound instead of silently inflating
+  it to `maxNodes`.
 
 - Make `compass upgrade` discover releases through a bounded, versioned static
   release manifest instead of the unauthenticated GitHub REST API. Corporate
