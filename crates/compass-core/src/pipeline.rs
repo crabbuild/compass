@@ -80,6 +80,7 @@ use crate::raw_guard::enforce_incomplete_raw_guard;
 pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const SEMANTIC_MARKER_FILE: &str = "semantic-marker.json";
 const PIPELINE_RAYON_WORKER_CAP: usize = 12;
+const PARALLEL_AST_FACT_DIGEST_MIN_FILES: usize = 32;
 const STORE_SNAPSHOT_EXCLUSIONS: [&str; 3] =
     [STORE_FILE_NAME, "store.sqlite3-wal", "store.sqlite3-shm"];
 const ROOT_ARTIFACTS: [&str; 6] = [
@@ -839,7 +840,7 @@ impl<'a> FactDigestEvidenceContext<'a> {
                     continue;
                 };
                 let next = format!("{base}|parent={parent}");
-                if base != &next {
+                if previous.get(scope.id.as_str()) != Some(&next) {
                     changed = true;
                 }
                 scope_keys.insert(scope.id.as_str(), next);
@@ -1374,7 +1375,7 @@ fn ast_fact_digest_entries(
         })?;
         Ok((relative_fact_path(path, root), digest))
     };
-    let entries = if paths.len() < 256 {
+    let entries = if !should_parallel_ast_fact_digest(paths.len()) {
         paths
             .iter()
             .zip(extractions)
@@ -1391,6 +1392,10 @@ fn ast_fact_digest_entries(
     // build the deterministic contract map sequentially so a malformed fact
     // set reports the same first failure regardless of worker scheduling.
     entries.into_iter().collect()
+}
+
+const fn should_parallel_ast_fact_digest(files: usize) -> bool {
+    files >= PARALLEL_AST_FACT_DIGEST_MIN_FILES
 }
 
 fn detected_file_sets_match(manifest: &Manifest, files: &BTreeMap<String, Vec<String>>) -> bool {
@@ -4299,12 +4304,22 @@ fn commit_snapshot(
             .store_write_transactions
             .saturating_add(gc.delete_transactions);
     }
+    let commit_started = Instant::now();
     if presealed_artifacts && !publish_store {
         guard.commit_with_presealed_artifacts(&artifacts)?;
     } else {
         guard.commit_with_artifacts(&artifacts)?;
     }
+    profile_internal_duration(
+        "snapshot seal and pointer publication",
+        commit_started.elapsed(),
+    );
+    let root_projection_started = Instant::now();
     BuildGuard::publish_root_artifacts(output_container, &ROOT_ARTIFACTS, root_artifacts_changed)?;
+    profile_internal_duration(
+        "root artifact projection",
+        root_projection_started.elapsed(),
+    );
     Ok(BuildGuard::resolve_current_snapshot_directory(
         output_container,
     )?)
@@ -7098,6 +7113,17 @@ mod tests {
             Some("src/module_299.py")
         );
         Ok(())
+    }
+
+    #[test]
+    fn ast_fact_digests_parallelize_at_the_cold_extraction_crossover() {
+        assert!(!should_parallel_ast_fact_digest(
+            PARALLEL_AST_FACT_DIGEST_MIN_FILES - 1
+        ));
+        assert!(should_parallel_ast_fact_digest(
+            PARALLEL_AST_FACT_DIGEST_MIN_FILES
+        ));
+        assert!(should_parallel_ast_fact_digest(246));
     }
 
     #[cfg(unix)]

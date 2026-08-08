@@ -5,8 +5,10 @@
 //! both languages here; qualification callers use the same entry point so
 //! there is no shadow implementation to drift from the shipped graph path.
 
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
+use std::time::Instant;
 
 use tree_sitter::Node;
 
@@ -191,6 +193,7 @@ struct CandidateState<'source, 'tree> {
     declarations: HashMap<String, DeclarationInfo>,
     definition_start_bytes: HashMap<String, u64>,
     declarations_by_scope: HashMap<String, Vec<String>>,
+    declarations_by_scope_name: HashMap<String, HashMap<String, Vec<String>>>,
     declarations_by_qualified: HashMap<String, Vec<String>>,
     generic_parameters_by_declaration: HashMap<String, HashMap<String, Option<String>>>,
     generic_parameter_order_by_declaration: HashMap<String, Vec<String>>,
@@ -201,7 +204,7 @@ struct CandidateState<'source, 'tree> {
     type_alias_union_targets: HashMap<String, Vec<String>>,
     property_literal_values: HashMap<String, String>,
     index_value_types: HashMap<String, String>,
-    import_bindings: HashMap<(String, String), ImportInfo>,
+    import_bindings: HashMap<String, HashMap<String, ImportInfo>>,
     variable_types: HashMap<String, String>,
     /// Source-order receiver facts for simple local assignments.  A fact is
     /// usable only when it is in the variable's binding scope and precedes
@@ -287,6 +290,8 @@ struct CandidateState<'source, 'tree> {
     base_type_bindings: HashMap<String, HashMap<String, String>>,
     parser_recovered: bool,
     declaration_name_nodes: HashSet<usize>,
+    preorder_nodes: Vec<(Node<'tree>, usize)>,
+    precollected_import_nodes: Vec<Node<'tree>>,
     import_nodes: HashSet<usize>,
     emitted_facts: HashSet<String>,
     builder: EvidenceBuilder,
@@ -361,6 +366,7 @@ pub(crate) fn extract_candidate_tree_evidence(
         declarations: HashMap::new(),
         definition_start_bytes: HashMap::new(),
         declarations_by_scope: HashMap::new(),
+        declarations_by_scope_name: HashMap::new(),
         declarations_by_qualified: HashMap::new(),
         generic_parameters_by_declaration: HashMap::new(),
         generic_parameter_order_by_declaration: HashMap::new(),
@@ -395,25 +401,40 @@ pub(crate) fn extract_candidate_tree_evidence(
         base_type_bindings: HashMap::new(),
         parser_recovered,
         declaration_name_nodes: HashSet::new(),
+        preorder_nodes: Vec::new(),
+        precollected_import_nodes: Vec::new(),
         import_nodes: HashSet::new(),
         emitted_facts: HashSet::new(),
         builder,
         _tree: std::marker::PhantomData,
     };
+    let mut profile_started = Instant::now();
     state.collect_constructor_name_hints(root, 0);
+    profile_candidate_pass(source_file, "constructor hints", &mut profile_started);
     state.collect_declarations(root, root_scope, module_name, 0)?;
+    profile_candidate_pass(source_file, "declarations", &mut profile_started);
     // Imports are lexically hoisted by ECMAScript/TypeScript.  Materialize
     // their bindings before receiver inference so a later declaration such
     // as `const client = new ImportedClient()` can use the imported class
     // without depending on source order.
-    state.precollect_imports(root, 0)?;
+    state.emit_precollected_imports()?;
+    profile_candidate_pass(source_file, "imports", &mut profile_started);
     state.resolve_callable_property_aliases();
+    profile_candidate_pass(source_file, "callable aliases", &mut profile_started);
     state.precollect_base_targets(root, 0);
-    state.infer_variable_types(root, 0);
-    state.collect_flow_assignment_facts(root, 0);
+    profile_candidate_pass(source_file, "base targets", &mut profile_started);
+    let scoped_preorder = state.take_scoped_preorder();
+    profile_candidate_pass(source_file, "scope projection", &mut profile_started);
+    state.infer_variable_types(&scoped_preorder);
+    profile_candidate_pass(source_file, "variable inference", &mut profile_started);
+    state.collect_flow_assignment_facts(&scoped_preorder);
+    profile_candidate_pass(source_file, "flow facts", &mut profile_started);
     state.emit_declaration_ownership_candidates()?;
-    state.emit_nodes(root, 0)?;
+    profile_candidate_pass(source_file, "declaration ownership", &mut profile_started);
+    state.emit_preordered_nodes(&scoped_preorder)?;
+    profile_candidate_pass(source_file, "node emission", &mut profile_started);
     state.emit_import_type_queries(root)?;
+    profile_candidate_pass(source_file, "import type queries", &mut profile_started);
     if parser_recovered {
         state.builder.diagnose(
             "partial_parser_recovery",
@@ -428,6 +449,22 @@ pub(crate) fn extract_candidate_tree_evidence(
         declaration.definition_start_byte = definition_start_bytes.get(&declaration.id).copied();
     }
     Ok(batch)
+}
+
+fn profile_candidate_pass(source_file: &str, pass: &str, started: &mut Instant) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        let selected = std::env::var("COMPASS_PROFILE_ECMASCRIPT_FILE").ok();
+        if selected
+            .as_deref()
+            .is_none_or(|selected| source_file.ends_with(selected))
+        {
+            eprintln!(
+                "[compass internal] ECMAScript {source_file} {pass}: {:.6}s",
+                started.elapsed().as_secs_f64()
+            );
+        }
+    }
+    *started = Instant::now();
 }
 
 impl<'source, 'tree> CandidateState<'source, 'tree> {
@@ -466,6 +503,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             if current_depth > MAX_TRAVERSAL_DEPTH {
                 continue;
             }
+            self.preorder_nodes.push((current, current_depth));
             if current.kind() == "new_expression"
                 && let Some(constructor) = current
                     .child_by_field_name("constructor")
@@ -509,12 +547,29 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     self.constructor_name_hints.insert(spelling.to_owned());
                 }
             }
-            let mut cursor = current.walk();
-            let children = current.named_children(&mut cursor).collect::<Vec<_>>();
-            for child in children.into_iter().rev() {
-                pending.push((child, current_depth.saturating_add(1)));
+            let named_child_count = u32::try_from(current.named_child_count()).unwrap_or(u32::MAX);
+            for index in (0..named_child_count).rev() {
+                if let Some(child) = current.named_child(index) {
+                    pending.push((child, current_depth.saturating_add(1)));
+                }
             }
         }
+    }
+
+    fn take_scoped_preorder(&mut self) -> Vec<(Node<'tree>, usize, String)> {
+        let preorder = std::mem::take(&mut self.preorder_nodes);
+        let mut scope_stack = Vec::<String>::new();
+        let mut scoped = Vec::with_capacity(preorder.len());
+        for (node, depth) in preorder {
+            scope_stack.truncate(depth);
+            let scope = scope_stack.last().map_or_else(
+                || self.scope_for_node(node),
+                |parent| self.scope_for_child(node, parent),
+            );
+            scope_stack.push(scope.clone());
+            scoped.push((node, depth, scope));
+        }
+        scoped
     }
 
     fn collect_declarations(
@@ -532,6 +587,12 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 "ECMAScript declaration traversal exceeded the bounded depth",
             )?;
             return Ok(());
+        }
+        if node.kind() == "import_statement"
+            || (node.kind() == "export_statement"
+                && first_named_child_kind(node, "string").is_some())
+        {
+            self.precollected_import_nodes.push(node);
         }
         let mut scope_id = self.enter_lexical_scope(node, scope_id)?;
         // Conditional and mapped types introduce their own type-binding
@@ -1470,6 +1531,12 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             .entry(scope_id.to_owned())
             .or_default()
             .push(declaration.id.clone());
+        self.declarations_by_scope_name
+            .entry(scope_id.to_owned())
+            .or_default()
+            .entry(declaration.name.clone())
+            .or_default()
+            .push(declaration.id.clone());
         self.declarations_by_qualified
             .entry(declaration.qualified_name.clone())
             .or_default()
@@ -1567,14 +1634,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let mut current = Some(scope_id.to_owned());
         while let Some(scope) = current {
             let candidates = self
-                .declarations_by_scope
-                .get(&scope)
-                .into_iter()
-                .flat_map(|ids| ids.iter())
+                .declaration_ids_in_scope(&scope, name)
+                .iter()
                 .filter_map(|id| self.declarations.get(id))
                 .filter(|declaration| {
-                    declaration.name == name
-                        && declaration.namespace.accepts(Namespace::Value)
+                    declaration.namespace.accepts(Namespace::Value)
                         && self.lexically_visible_unqualified(&scope, declaration)
                 })
                 .collect::<Vec<_>>();
@@ -1588,21 +1652,15 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         false
     }
 
-    fn precollect_imports(&mut self, node: Node<'tree>, depth: usize) -> Result<(), EvidenceError> {
-        if depth > MAX_TRAVERSAL_DEPTH {
-            return Ok(());
-        }
-        let scope_id = self.scope_for_node(node);
-        match node.kind() {
-            "import_statement" => self.emit_import(node, &scope_id, false)?,
-            "export_statement" if first_named_child_kind(node, "string").is_some() => {
-                self.emit_import(node, &scope_id, true)?;
+    fn emit_precollected_imports(&mut self) -> Result<(), EvidenceError> {
+        let imports = std::mem::take(&mut self.precollected_import_nodes);
+        for node in imports {
+            let scope_id = self.scope_for_node(node);
+            match node.kind() {
+                "import_statement" => self.emit_import(node, &scope_id, false)?,
+                "export_statement" => self.emit_import(node, &scope_id, true)?,
+                _ => {}
             }
-            _ => {}
-        }
-        let mut cursor = node.walk();
-        for child in node.named_children(&mut cursor) {
-            self.precollect_imports(child, depth + 1)?;
         }
         Ok(())
     }
@@ -1731,31 +1789,25 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         }
     }
 
-    fn infer_variable_types(&mut self, node: Node<'tree>, depth: usize) {
-        let mut pending = vec![(node, depth)];
-        while let Some((current, current_depth)) = pending.pop() {
-            if current_depth > MAX_TRAVERSAL_DEPTH {
-                continue;
-            }
+    fn infer_variable_types(&mut self, scoped_preorder: &[(Node<'tree>, usize, String)]) {
+        for &(current, _, ref scope_id) in scoped_preorder {
             if is_parameter_node(current) {
-                let scope_id = self.scope_for_node(current);
-                self.infer_parameter_nominal_type(current, &scope_id);
-                self.infer_inline_object_type_receiver(current, &scope_id);
+                self.infer_parameter_nominal_type(current, scope_id);
+                self.infer_inline_object_type_receiver(current, scope_id);
             }
             if current.kind() == "variable_declarator"
                 && let Some(name_node) = current.child_by_field_name("name")
             {
-                let scope_id = self.scope_for_node(current);
-                self.infer_variable_object_sources(current, &scope_id);
-                self.infer_variable_prototype_source(current, &scope_id);
-                self.infer_inline_object_type_receiver(current, &scope_id);
-                self.infer_destructured_variable_types(current, &scope_id);
-                if let Some(qualified_type) = self.nominal_type_for_variable(current, &scope_id) {
+                self.infer_variable_object_sources(current, scope_id);
+                self.infer_variable_prototype_source(current, scope_id);
+                self.infer_inline_object_type_receiver(current, scope_id);
+                self.infer_destructured_variable_types(current, scope_id);
+                if let Some(qualified_type) = self.nominal_type_for_variable(current, scope_id) {
                     let mut names = Vec::new();
                     collect_pattern_names(name_node, self.source, &mut names);
                     for (name, _) in names {
                         if let Some(Resolution::Local(declaration)) =
-                            self.resolve_name(&scope_id, &name, Namespace::Value)
+                            self.resolve_name(scope_id, &name, Namespace::Value)
                             && declaration.kind == "variable"
                         {
                             self.variable_types
@@ -1768,14 +1820,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 current.kind(),
                 "call_expression" | "optional_call_expression"
             ) {
-                let scope_id = self.scope_for_node(current);
-                self.infer_contextual_callable_parameters(current, &scope_id);
-            }
-            let mut children = Vec::new();
-            let mut cursor = current.walk();
-            children.extend(current.named_children(&mut cursor));
-            for child in children.into_iter().rev() {
-                pending.push((child, current_depth.saturating_add(1)));
+                self.infer_contextual_callable_parameters(current, scope_id);
             }
         }
     }
@@ -1788,151 +1833,138 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     /// an unknown mutation.  This keeps JavaScript reassignment useful while
     /// failing closed on aliasing and control-flow shapes the native
     /// candidate does not model.
-    fn collect_flow_assignment_facts(&mut self, node: Node<'tree>, depth: usize) {
-        let mut pending = vec![(node, depth)];
-        while let Some((current, current_depth)) = pending.pop() {
-            if current_depth > MAX_TRAVERSAL_DEPTH {
-                continue;
-            }
-            let scope_id = self.scope_for_node(current);
-            if matches!(
-                current.kind(),
-                "call_expression" | "optional_call_expression" | "new_expression"
-            ) {
-                self.record_flow_call_argument_escapes(current, &scope_id);
-            }
-            if current.kind() == "with_statement" {
-                self.record_flow_scope_barriers(
-                    &scope_id,
-                    current.start_byte(),
-                    "dynamic with scope",
-                );
-            }
-            if is_callable_node(current) {
-                self.record_flow_closure_captures(current, &scope_id);
-            }
-            if current.kind() == "variable_declarator"
-                && let Some(name_node) = current.child_by_field_name("name")
-                && let Some(value) = current.child_by_field_name("value")
+    fn collect_flow_assignment_facts(&mut self, scoped_preorder: &[(Node<'tree>, usize, String)]) {
+        for &(current, _, ref scope_id) in scoped_preorder {
+            self.collect_flow_assignment_fact(current, scope_id);
+        }
+    }
+
+    fn collect_flow_assignment_fact(&mut self, current: Node<'tree>, scope_id: &str) {
+        if matches!(
+            current.kind(),
+            "call_expression" | "optional_call_expression" | "new_expression"
+        ) {
+            self.record_flow_call_argument_escapes(current, scope_id);
+        }
+        if current.kind() == "with_statement" {
+            self.record_flow_scope_barriers(scope_id, current.start_byte(), "dynamic with scope");
+        }
+        if is_callable_node(current) {
+            self.record_flow_closure_captures(current, scope_id);
+        }
+        if current.kind() == "variable_declarator"
+            && let Some(name_node) = current.child_by_field_name("name")
+            && let Some(value) = current.child_by_field_name("value")
+        {
+            let value = unwrap_expression_node(value);
+            if name_node.kind() == "identifier"
+                && let Some(receiver) = self.flow_receiver_for_value(scope_id, value)
             {
-                let value = unwrap_expression_node(value);
-                if name_node.kind() == "identifier"
-                    && let Some(receiver) = self.flow_receiver_for_value(&scope_id, value)
-                {
-                    let mut names = Vec::new();
-                    collect_pattern_names(name_node, self.source, &mut names);
-                    for (name, _) in names {
-                        let Some(Resolution::Local(variable)) =
-                            self.resolve_name(&scope_id, &name, Namespace::Value)
-                        else {
-                            continue;
-                        };
-                        if variable.kind == "variable"
-                            && self.flow_scope_is_compatible(&variable.scope_id, &scope_id)
-                            && self.flow_assignment_is_straight_line(name_node, &scope_id)
-                        {
-                            self.record_flow_assignment(
-                                &variable.id,
-                                value.start_byte(),
-                                receiver.clone(),
-                            );
-                        }
+                let mut names = Vec::new();
+                collect_pattern_names(name_node, self.source, &mut names);
+                for (name, _) in names {
+                    let Some(Resolution::Local(variable)) =
+                        self.resolve_name(scope_id, &name, Namespace::Value)
+                    else {
+                        continue;
+                    };
+                    if variable.kind == "variable"
+                        && self.flow_scope_is_compatible(&variable.scope_id, scope_id)
+                        && self.flow_assignment_is_straight_line(name_node, scope_id)
+                    {
+                        self.record_flow_assignment(
+                            &variable.id,
+                            value.start_byte(),
+                            receiver.clone(),
+                        );
                     }
                 }
             }
-            if matches!(
-                current.kind(),
-                "assignment_expression" | "augmented_assignment_expression"
-            ) && let Some(left) = current.child_by_field_name("left")
-            {
-                if left.kind() == "identifier" {
-                    let name = node_text(self.source, left);
-                    if let Some(Resolution::Local(variable)) =
-                        self.resolve_name(&scope_id, &name, Namespace::Value)
-                        && variable.kind == "variable"
-                    {
-                        let right = current.child_by_field_name("right");
-                        let operator = right
-                            .and_then(|right| {
-                                self.source
-                                    .get(left.end_byte()..right.start_byte())
-                                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
-                            })
-                            .map(str::trim)
-                            .unwrap_or_default();
-                        let straight_line = self
-                            .flow_scope_is_compatible(&variable.scope_id, &scope_id)
-                            && self.flow_assignment_is_straight_line(left, &scope_id);
-                        let receiver = right.map(unwrap_expression_node).and_then(|right| {
-                            self.flow_receiver_for_value(&scope_id, right).or_else(|| {
-                                (right.kind() == "object")
-                                    .then(|| {
-                                        self.flow_object_assignment_receiver(&scope_id, current)
-                                    })
-                                    .flatten()
-                            })
-                        });
-                        if straight_line && operator == "=" {
-                            if let Some(receiver) = receiver {
-                                self.record_flow_assignment(
-                                    &variable.id,
-                                    current.start_byte(),
-                                    receiver,
-                                );
-                            } else {
-                                self.record_flow_assignment_barrier(
-                                    &variable.id,
-                                    current.start_byte(),
-                                    "unsupported local assignment value",
-                                );
-                            }
+        }
+        if matches!(
+            current.kind(),
+            "assignment_expression" | "augmented_assignment_expression"
+        ) && let Some(left) = current.child_by_field_name("left")
+        {
+            if left.kind() == "identifier" {
+                let name = node_text(self.source, left);
+                if let Some(Resolution::Local(variable)) =
+                    self.resolve_name(scope_id, &name, Namespace::Value)
+                    && variable.kind == "variable"
+                {
+                    let right = current.child_by_field_name("right");
+                    let operator = right
+                        .and_then(|right| {
+                            self.source
+                                .get(left.end_byte()..right.start_byte())
+                                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                        })
+                        .map(str::trim)
+                        .unwrap_or_default();
+                    let straight_line = self.flow_scope_is_compatible(&variable.scope_id, scope_id)
+                        && self.flow_assignment_is_straight_line(left, scope_id);
+                    let receiver = right.map(unwrap_expression_node).and_then(|right| {
+                        self.flow_receiver_for_value(scope_id, right).or_else(|| {
+                            (right.kind() == "object")
+                                .then(|| self.flow_object_assignment_receiver(scope_id, current))
+                                .flatten()
+                        })
+                    });
+                    if straight_line && operator == "=" {
+                        if let Some(receiver) = receiver {
+                            self.record_flow_assignment(
+                                &variable.id,
+                                current.start_byte(),
+                                receiver,
+                            );
                         } else {
                             self.record_flow_assignment_barrier(
                                 &variable.id,
                                 current.start_byte(),
-                                if straight_line {
-                                    "compound local assignment"
-                                } else {
-                                    "conditional or out-of-scope local assignment"
-                                },
+                                "unsupported local assignment value",
                             );
                         }
+                    } else {
+                        self.record_flow_assignment_barrier(
+                            &variable.id,
+                            current.start_byte(),
+                            if straight_line {
+                                "compound local assignment"
+                            } else {
+                                "conditional or out-of-scope local assignment"
+                            },
+                        );
                     }
                 }
-                if matches!(
-                    left.kind(),
-                    "member_expression" | "optional_member_expression" | "subscript_expression"
-                ) && let Some(object) = left.child_by_field_name("object")
-                {
-                    let property = member_property_node(left);
-                    let property_name =
-                        property.and_then(|property| member_property_name(self.source, property));
-                    self.record_flow_member_write(
-                        &scope_id,
-                        object,
-                        current.start_byte(),
-                        property,
-                        property_name.as_deref(),
-                    );
-                }
             }
-            if current.kind() == "return_statement"
-                && let Some(value) = current
-                    .child_by_field_name("argument")
-                    .or_else(|| current.child_by_field_name("value"))
+            if matches!(
+                left.kind(),
+                "member_expression" | "optional_member_expression" | "subscript_expression"
+            ) && let Some(object) = left.child_by_field_name("object")
             {
-                self.record_flow_value_escape(
-                    &scope_id,
-                    unwrap_expression_node(value),
+                let property = member_property_node(left);
+                let property_name =
+                    property.and_then(|property| member_property_name(self.source, property));
+                self.record_flow_member_write(
+                    scope_id,
+                    object,
                     current.start_byte(),
-                    "returned local alias",
+                    property,
+                    property_name.as_deref(),
                 );
             }
-            let mut cursor = current.walk();
-            let children = current.named_children(&mut cursor).collect::<Vec<_>>();
-            for child in children.into_iter().rev() {
-                pending.push((child, current_depth.saturating_add(1)));
-            }
+        }
+        if current.kind() == "return_statement"
+            && let Some(value) = current
+                .child_by_field_name("argument")
+                .or_else(|| current.child_by_field_name("value"))
+        {
+            self.record_flow_value_escape(
+                scope_id,
+                unwrap_expression_node(value),
+                current.start_byte(),
+                "returned local alias",
+            );
         }
     }
 
@@ -3576,90 +3608,91 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         }
     }
 
-    fn emit_nodes(&mut self, node: Node<'tree>, depth: usize) -> Result<(), EvidenceError> {
-        if depth > MAX_TRAVERSAL_DEPTH {
-            return Ok(());
-        }
-        let scope_id = self.scope_for_node(node);
-        match node.kind() {
-            "import_statement" => {
-                if !self.import_nodes.contains(&node.start_byte()) {
-                    self.emit_import(node, &scope_id, false)?;
+    fn emit_preordered_nodes(
+        &mut self,
+        scoped_preorder: &[(Node<'tree>, usize, String)],
+    ) -> Result<(), EvidenceError> {
+        let mut skip_descendants_of_depth = None;
+        for &(node, depth, ref scope_id) in scoped_preorder {
+            if let Some(skipped_depth) = skip_descendants_of_depth {
+                if depth > skipped_depth {
+                    continue;
                 }
-                return Ok(());
+                skip_descendants_of_depth = None;
             }
-            "export_statement" => {
-                if first_named_child_kind(node, "string").is_some() {
-                    if !self.import_nodes.contains(&node.start_byte()) {
-                        self.emit_export(node, &scope_id)?;
-                    }
-                    return Ok(());
-                }
-                self.emit_export(node, &scope_id)?;
-                if first_named_child_kind(node, "export_clause").is_some() {
-                    // The clause was consumed as a single source construct;
-                    // still walk a declaration attached to the export.
-                    let mut cursor = node.walk();
-                    for child in node.named_children(&mut cursor) {
-                        if child.kind() != "export_clause" {
-                            self.emit_nodes(child, depth + 1)?;
-                        }
-                    }
-                    return Ok(());
-                }
-            }
-            "call_expression" | "optional_call_expression" => {
-                // A decorator factory invocation is represented by the
-                // Decorates candidate emitted from its enclosing decorator
-                // node. Do not publish a second ordinary Calls edge for the
-                // same syntax; nested calls in decorator arguments still
-                // receive their own traversal pass.
-                if !node
-                    .parent()
-                    .is_some_and(|parent| parent.kind() == "decorator")
-                {
-                    self.emit_call(node, &scope_id, false)?;
-                    self.emit_dynamic_import(node, &scope_id)?;
-                    self.emit_commonjs_object_assign(&scope_id, node, false)?;
-                    self.emit_commonjs_define_property(&scope_id, node)?;
-                    self.emit_commonjs_export_star(&scope_id, node)?;
-                }
-            }
-            "new_expression" => self.emit_call(node, &scope_id, true)?,
-            "member_expression" | "optional_member_expression" | "subscript_expression" => {
-                self.emit_member(node, &scope_id)?;
-            }
-            "jsx_opening_element" | "jsx_self_closing_element" => {
-                self.emit_jsx(node, &scope_id)?;
-            }
-            "jsx_expression" => {
-                self.emit_jsx_value_references(node, &scope_id)?;
-            }
-            "decorator" => self.emit_decorator(node, &scope_id)?,
-            "class_heritage" if self.language == "javascript" => {
-                self.emit_bases(node, &scope_id)?;
-            }
-            "extends_clause" | "extends_type_clause" | "implements_clause" => {
-                self.emit_bases(node, &scope_id)?;
-            }
-            "assignment_expression" => self.emit_commonjs_export(node, &scope_id)?,
-            "variable_declarator" => self.emit_require_declarator(node, &scope_id)?,
-            "type_identifier" | "nested_type_identifier" => {
-                if is_type_reference_node(node) {
-                    self.emit_type_reference(node, &scope_id)?;
-                }
-            }
-            "identifier" => {
-                self.emit_callable_reference(node, &scope_id)?;
-            }
-            _ => {}
-        }
-        let mut cursor = node.walk();
-        for child in node.named_children(&mut cursor) {
-            if self.import_nodes.contains(&child.start_byte()) {
+            if matches!(node.kind(), "import_statement" | "export_statement")
+                && self.import_nodes.contains(&node.start_byte())
+            {
+                skip_descendants_of_depth = Some(depth);
                 continue;
             }
-            self.emit_nodes(child, depth + 1)?;
+            if node.kind() == "export_clause"
+                && node
+                    .parent()
+                    .is_some_and(|parent| parent.kind() == "export_statement")
+            {
+                skip_descendants_of_depth = Some(depth);
+                continue;
+            }
+            match node.kind() {
+                "import_statement" => {
+                    self.emit_import(node, scope_id, false)?;
+                    skip_descendants_of_depth = Some(depth);
+                }
+                "export_statement" => {
+                    if first_named_child_kind(node, "string").is_some() {
+                        self.emit_export(node, scope_id)?;
+                        skip_descendants_of_depth = Some(depth);
+                        continue;
+                    }
+                    self.emit_export(node, scope_id)?;
+                }
+                "call_expression" | "optional_call_expression" => {
+                    // A decorator factory invocation is represented by the
+                    // Decorates candidate emitted from its enclosing decorator
+                    // node. Do not publish a second ordinary Calls edge for the
+                    // same syntax; nested calls in decorator arguments still
+                    // receive their own traversal pass.
+                    if !node
+                        .parent()
+                        .is_some_and(|parent| parent.kind() == "decorator")
+                    {
+                        self.emit_call(node, scope_id, false)?;
+                        self.emit_dynamic_import(node, scope_id)?;
+                        self.emit_commonjs_object_assign(scope_id, node, false)?;
+                        self.emit_commonjs_define_property(scope_id, node)?;
+                        self.emit_commonjs_export_star(scope_id, node)?;
+                    }
+                }
+                "new_expression" => self.emit_call(node, scope_id, true)?,
+                "member_expression" | "optional_member_expression" | "subscript_expression" => {
+                    self.emit_member(node, scope_id)?;
+                }
+                "jsx_opening_element" | "jsx_self_closing_element" => {
+                    self.emit_jsx(node, scope_id)?;
+                }
+                "jsx_expression" => {
+                    self.emit_jsx_value_references(node, scope_id)?;
+                }
+                "decorator" => self.emit_decorator(node, scope_id)?,
+                "class_heritage" if self.language == "javascript" => {
+                    self.emit_bases(node, scope_id)?;
+                }
+                "extends_clause" | "extends_type_clause" | "implements_clause" => {
+                    self.emit_bases(node, scope_id)?;
+                }
+                "assignment_expression" => self.emit_commonjs_export(node, scope_id)?,
+                "variable_declarator" => self.emit_require_declarator(node, scope_id)?,
+                "type_identifier" | "nested_type_identifier" => {
+                    if is_type_reference_node(node) {
+                        self.emit_type_reference(node, scope_id)?;
+                    }
+                }
+                "identifier" => {
+                    self.emit_callable_reference(node, scope_id)?;
+                }
+                _ => {}
+            }
         }
         Ok(())
     }
@@ -3791,6 +3824,13 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             current = candidate.parent();
         }
         self.root_scope.clone()
+    }
+
+    fn scope_for_child(&self, child: Node<'tree>, parent_scope: &str) -> String {
+        self.scope_by_node
+            .get(&child.id())
+            .cloned()
+            .unwrap_or_else(|| parent_scope.to_owned())
     }
 
     fn infer_binding_scope(&self, node: Node<'tree>, fallback: &str) -> String {
@@ -4091,14 +4131,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         while let Some(scope) = current {
             if self
                 .import_bindings
-                .contains_key(&(scope.clone(), name.to_owned()))
-                || self
-                    .declarations_by_scope
-                    .get(&scope)
-                    .into_iter()
-                    .flat_map(|ids| ids.iter())
-                    .filter_map(|id| self.declarations.get(id))
-                    .any(|declaration| declaration.name == name)
+                .get(&scope)
+                .is_some_and(|bindings| bindings.contains_key(name))
+                || !self.declaration_ids_in_scope(&scope, name).is_empty()
             {
                 return false;
             }
@@ -4365,18 +4400,21 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 )?;
             }
             if !reexport {
-                self.import_bindings.insert(
-                    (scope_id.to_owned(), binding.local_name.clone()),
-                    ImportInfo {
-                        binding_id: binding_id.clone(),
-                        target: target.clone(),
-                        module: module.clone(),
-                        imported_name: binding.imported_name.clone(),
-                        namespace,
-                        type_only: binding.type_only,
-                        callable_namespace: false,
-                    },
-                );
+                self.import_bindings
+                    .entry(scope_id.to_owned())
+                    .or_default()
+                    .insert(
+                        binding.local_name.clone(),
+                        ImportInfo {
+                            binding_id: binding_id.clone(),
+                            target: target.clone(),
+                            module: module.clone(),
+                            imported_name: binding.imported_name.clone(),
+                            namespace,
+                            type_only: binding.type_only,
+                            callable_namespace: false,
+                        },
+                    );
             }
             let owner = self.owner_for_scope(scope_id);
             let occurrence_id = self.builder.occur_with_context(
@@ -4486,18 +4524,21 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             false,
             range_for_node(self.source_file, local_node),
         )?;
-        self.import_bindings.insert(
-            (scope_id.to_owned(), local_name.clone()),
-            ImportInfo {
-                binding_id: binding_id.clone(),
-                target: target.clone(),
-                module: module.clone(),
-                imported_name: "*".to_owned(),
-                namespace: Namespace::Both,
-                type_only: false,
-                callable_namespace: true,
-            },
-        );
+        self.import_bindings
+            .entry(scope_id.to_owned())
+            .or_default()
+            .insert(
+                local_name.clone(),
+                ImportInfo {
+                    binding_id: binding_id.clone(),
+                    target: target.clone(),
+                    module: module.clone(),
+                    imported_name: "*".to_owned(),
+                    namespace: Namespace::Both,
+                    type_only: false,
+                    callable_namespace: true,
+                },
+            );
         let occurrence_id = self.builder.occur_with_context(
             SemanticRole::Import,
             &owner,
@@ -4619,14 +4660,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let mut current = Some(scope_id.to_owned());
         while let Some(scope) = current {
             let declarations = self
-                .declarations_by_scope
-                .get(&scope)
-                .into_iter()
-                .flat_map(|ids| ids.iter())
+                .declaration_ids_in_scope(&scope, name)
+                .iter()
                 .filter_map(|id| self.declarations.get(id))
                 .filter(|declaration| {
-                    declaration.name == name
-                        && declaration.namespace.accepts(namespace)
+                    declaration.namespace.accepts(namespace)
                         && self.lexically_visible_unqualified(&scope, declaration)
                 })
                 .cloned()
@@ -5188,7 +5226,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 None,
             );
         }
-        let spelling = node_text(self.source, target);
+        let spelling = node_text_ref(self.source, target);
         if target.kind() == "super" {
             if let Some(resolution) = self.resolve_super_target(scope_id) {
                 return self.add_declaration_resolution_with_arguments(
@@ -5777,18 +5815,21 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             type_only,
             range_for_node(self.source_file, anchor),
         )?;
-        self.import_bindings.insert(
-            (scope_id.to_owned(), local_name.to_owned()),
-            ImportInfo {
-                binding_id: binding_id.clone(),
-                target: target.clone(),
-                module: module.to_owned(),
-                imported_name: imported_name.to_owned(),
-                namespace,
-                type_only,
-                callable_namespace: imported_name == "*" && context == "require",
-            },
-        );
+        self.import_bindings
+            .entry(scope_id.to_owned())
+            .or_default()
+            .insert(
+                local_name.to_owned(),
+                ImportInfo {
+                    binding_id: binding_id.clone(),
+                    target: target.clone(),
+                    module: module.to_owned(),
+                    imported_name: imported_name.to_owned(),
+                    namespace,
+                    type_only,
+                    callable_namespace: imported_name == "*" && context == "require",
+                },
+            );
         let owner = self.owner_for_scope(scope_id);
         let occurrence_id = self.builder.occur_with_context(
             SemanticRole::Import,
@@ -6015,7 +6056,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         if self.declaration_name_nodes.contains(&node.start_byte()) {
             return Ok(());
         }
-        let spelling = node_text(self.source, node);
+        let spelling = node_text_ref(self.source, node);
         if spelling.is_empty() {
             return Ok(());
         }
@@ -6416,7 +6457,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         }) {
             return Ok(());
         }
-        let spelling = node_text(self.source, node);
+        let spelling = node_text_ref(self.source, node);
         if node.kind() == "nested_type_identifier"
             && let (Some(module), Some(name)) = (
                 node.child_by_field_name("module"),
@@ -6608,7 +6649,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         {
             return Ok(());
         }
-        let spelling = node_text(self.source, node);
+        let spelling = node_text_ref(self.source, node);
         let Some(resolution) = self.resolve_name(scope_id, &spelling, Namespace::Value) else {
             return Ok(());
         };
@@ -7267,7 +7308,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     fn resolve_name(&self, scope_id: &str, name: &str, namespace: Namespace) -> Option<Resolution> {
         let mut current = Some(scope_id.to_owned());
         while let Some(scope) = current {
-            if let Some(import) = self.import_bindings.get(&(scope.clone(), name.to_owned())) {
+            if let Some(import) = self
+                .import_bindings
+                .get(&scope)
+                .and_then(|bindings| bindings.get(name))
+            {
                 let accepts = if import.namespace == Namespace::Module {
                     matches!(namespace, Namespace::Type | Namespace::Both)
                         || (namespace == Namespace::Value && !import.type_only)
@@ -7279,14 +7324,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 }
             }
             let candidates = self
-                .declarations_by_scope
-                .get(&scope)
-                .into_iter()
-                .flat_map(|ids| ids.iter())
+                .declaration_ids_in_scope(&scope, name)
+                .iter()
                 .filter_map(|id| self.declarations.get(id))
                 .filter(|declaration| {
-                    declaration.name == name
-                        && declaration.namespace.accepts(namespace)
+                    declaration.namespace.accepts(namespace)
                         && self.lexically_visible_unqualified(&scope, declaration)
                 })
                 .cloned()
@@ -7312,7 +7354,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     ) -> Option<Resolution> {
         let mut current = Some(scope_id.to_owned());
         while let Some(scope) = current {
-            if let Some(import) = self.import_bindings.get(&(scope.clone(), name.to_owned())) {
+            if let Some(import) = self
+                .import_bindings
+                .get(&scope)
+                .and_then(|bindings| bindings.get(name))
+            {
                 let accepts = if import.namespace == Namespace::Module {
                     matches!(namespace, Namespace::Type | Namespace::Both)
                         || (namespace == Namespace::Value && !import.type_only)
@@ -7324,14 +7370,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 }
             }
             let candidates = self
-                .declarations_by_scope
-                .get(&scope)
-                .into_iter()
-                .flat_map(|ids| ids.iter())
+                .declaration_ids_in_scope(&scope, name)
+                .iter()
                 .filter_map(|id| self.declarations.get(id))
                 .filter(|declaration| {
-                    declaration.name == name
-                        && declaration.namespace.accepts(namespace)
+                    declaration.namespace.accepts(namespace)
                         && self.lexically_visible_unqualified(&scope, declaration)
                 })
                 .cloned()
@@ -8396,14 +8439,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let mut current = Some(scope_id.to_owned());
         while let Some(scope) = current {
             let candidates = self
-                .declarations_by_scope
-                .get(&scope)
-                .into_iter()
-                .flat_map(|ids| ids.iter())
+                .declaration_ids_in_scope(&scope, name)
+                .iter()
                 .filter_map(|id| self.declarations.get(id))
                 .filter(|declaration| {
-                    declaration.name == name
-                        && declaration.namespace.accepts(Namespace::Type)
+                    declaration.namespace.accepts(Namespace::Type)
                         && self.lexically_visible_unqualified(&scope, declaration)
                         && matches!(
                             declaration.kind.as_str(),
@@ -8446,6 +8486,14 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             current = self.scope_parents.get(&scope).cloned().flatten();
         }
         None
+    }
+
+    fn declaration_ids_in_scope(&self, scope_id: &str, name: &str) -> &[String] {
+        self.declarations_by_scope_name
+            .get(scope_id)
+            .and_then(|declarations| declarations.get(name))
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 
     fn resolve_super_target(&self, scope_id: &str) -> Option<Resolution> {
@@ -13264,4 +13312,10 @@ fn node_text(source: &[u8], node: Node<'_>) -> String {
         .map_or_else(String::new, |bytes| {
             String::from_utf8_lossy(bytes).into_owned()
         })
+}
+
+fn node_text_ref<'source>(source: &'source [u8], node: Node<'_>) -> Cow<'source, str> {
+    source
+        .get(node.start_byte()..node.end_byte())
+        .map_or(Cow::Borrowed(""), String::from_utf8_lossy)
 }
