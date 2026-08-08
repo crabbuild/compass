@@ -7,6 +7,7 @@ mod cql;
 mod graph_engine;
 mod index;
 mod program_join;
+mod relevance;
 mod score;
 mod source;
 mod text;
@@ -22,6 +23,13 @@ pub use cql::{
 pub use graph_engine::{GraphEngine, JsonGraphEngine, StoreGraphEngine, open_graph_engine};
 pub use index::{EngineSelection, QueryEngineKind, open, open_with_engine, open_with_store};
 pub use program_join::join_program_evidence;
+pub use relevance::{
+    EdgeIdentity, EdgeJudgment, IdJudgment, IntentMetrics, JudgedQuery, JudgmentCorpus,
+    MAX_JUDGMENTS_PER_QUERY, MAX_QUESTIONS, MAX_TEXT_BYTES, MetricValue, ObservedEdge,
+    ObservedPath, PathJudgment, PathPattern, QUERY_JUDGMENTS_SCHEMA_V1,
+    QUERY_QUALIFICATION_SCHEMA_V1, QualificationReport, QueryClass, QueryObservation,
+    RelevanceError, RelevanceMetrics, WorkCounts, qualification_report, score,
+};
 pub use score::{QueryScores, ScoredNode, find_node, pick_scored_endpoint, score_nodes};
 pub use text::{normalize_context_filters, query_terms, sanitize_label, search_tokens};
 pub use traversal::{

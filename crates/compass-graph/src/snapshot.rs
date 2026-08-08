@@ -25,6 +25,8 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::ser::Formatter;
 use sha2::{Digest, Sha256};
+use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::char::is_combining_mark;
 
 pub const GRAPH_SNAPSHOT_LAYOUT_V2: &str = "compass.store.graph-index/2";
 pub const GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1: &str = "compass.store.graph-selector/1";
@@ -1751,7 +1753,10 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         let mut intersection: Option<BTreeSet<String>> = None;
         let mut truncated = false;
         for term in terms {
-            let normalized = term.to_lowercase();
+            let normalized = normalize_search_term(term);
+            if normalized.is_empty() {
+                continue;
+            }
             let prefix_length = normalized.len().min(3);
             let posting_prefix = normalized
                 .get(..prefix_length)
@@ -1774,7 +1779,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             let mut ids = BTreeSet::new();
             for value in values {
                 let posting = decode_json::<TermPostingChunk>(&value)?;
-                if !posting.term.starts_with(&normalized) {
+                if !normalize_search_term(&posting.term).starts_with(&normalized) {
                     continue;
                 }
                 for node_id in posting.node_ids {
@@ -3060,7 +3065,16 @@ fn search_terms(value: &str) -> impl Iterator<Item = String> + '_ {
     value
         .split(|character: char| !character.is_alphanumeric() && character != '_')
         .filter(|term| !term.is_empty())
-        .map(str::to_lowercase)
+        .map(normalize_search_term)
+}
+
+fn normalize_search_term(value: &str) -> String {
+    value
+        .trim()
+        .nfkd()
+        .filter(|character| !is_combining_mark(*character))
+        .collect::<String>()
+        .to_lowercase()
 }
 
 fn bounded_count(count: u64) -> Result<usize, SnapshotError> {
