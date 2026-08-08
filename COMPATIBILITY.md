@@ -62,6 +62,14 @@ A user-visible incompatible change requires:
 Versioned formats use Compass-owned identifiers. Consumers should reject
 unknown major versions instead of attempting legacy fallback behavior.
 
+The release workflow publishes `compass-release.json` with schema
+`compass.release/1`. `compass upgrade` retrieves that bounded static manifest
+through the GitHub release-download path, requires one exact artifact for each
+running binary's target, and rejects unknown schemas, unstable or mismatched
+versions/tags, duplicate or invalid targets, invalid sizes, and invalid SHA-256
+digests. Additional bounded target entries remain forward-compatible. Archive
+downloads use the immutable validated tag rather than a mutable latest URL.
+
 Current output uses visible Compass-owned paths: `snapshots/`,
 `current-snapshot`, `root-artifacts-complete`, and
 `store/`. Snapshot-local state likewise uses concise names such as

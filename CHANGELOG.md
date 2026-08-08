@@ -9,6 +9,12 @@
   while ambiguous symbols remain explicit instead of selecting an arbitrary
   candidate.
 
+- Make `compass upgrade` discover releases through a bounded, versioned static
+  release manifest instead of the unauthenticated GitHub REST API. Corporate
+  networks that share an outbound IP no longer consume GitHub's per-IP API
+  quota when checking for Compass updates; archive size, digest, target, tag,
+  and staged-binary validation remain fail-closed.
+
 - Route JavaScript and TypeScript production extraction through the registered
   universal semantic candidate, including source-backed declarations, imports,
   re-exports, calls, references, heritage, aliases, and framework route

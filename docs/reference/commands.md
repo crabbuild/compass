@@ -552,10 +552,12 @@ Review targets before `--purge`.
 compass upgrade
 ```
 
-Downloads the latest stable Compass release for the current platform, verifies
-its SHA-256 checksum and reported version, then replaces the running executable.
-If the installed version is current or newer, the command exits successfully
-without changing it.
+Reads the bounded `compass.release/1` static manifest from the latest stable
+Compass release, downloads the exact immutable-tag archive for the current
+platform, verifies its declared size, SHA-256 digest, and reported version,
+then replaces the running executable. Release discovery does not use the
+rate-limited GitHub REST API. If the installed version is current or newer,
+the command exits successfully without changing it.
 
 ### `hook`
 

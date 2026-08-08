@@ -57,6 +57,9 @@ pub fn resolve_and_publish_framework_domains(
 }
 
 pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[ResolvedDomainFact]) {
+    if resolved.is_empty() {
+        return;
+    }
     let mut nodes = extraction
         .nodes
         .iter()
