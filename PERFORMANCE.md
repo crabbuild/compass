@@ -30,8 +30,9 @@ The native query-relevance gate keeps two intentionally separate evidence
 sets: the checked-in 80-question reviewed synthetic corpus validates fixture,
 schema, scoring, and metric behavior; a 23-question, production-shaped
 executable subset runs actual
-`CodeQueryEngine::query_natural` requests for search, callers, callees, impact,
-path, and no-answer cases against the support graph. The executable subset
+`CodeQueryEngine::query_natural_profiled` requests for search, callers,
+callees, impact, directed-path, and no-answer cases against the support graph.
+The executable subset
 therefore qualifies the planner and typed operation together. It derives its
 canonical graph digest, records measured latency and serialized response bytes,
 and requires matching ordered observations from JSON, store, and a repeated
@@ -50,9 +51,12 @@ or a reviewed minimum metric miss. Its thresholds currently require perfect
 Success@1, edge-direction precision, path acceptance, and no-answer precision
 for the deliberately small executable graph. It reports MRR, Recall@k, nDCG,
 intent macro-F1, edge-kind/direction precision and recall, backend parity,
-latency percentiles, and observable response-byte work. Candidate, posting,
-and expansion counters are not public query-engine observations and remain
-explicitly uninstrumented rather than inferred from output sizes.
+latency percentiles, and versioned query work. The profile records intent,
+recall, ranking, execution, and total microseconds. Its logical work counters
+measure candidate records observed before deduplication, term candidates
+materialized by bounded posting lookup, nodes and edges examined by traversal
+or relationship probes, and exact serialized response bytes. These counters
+come from the query engine rather than being inferred from result size.
 
 Refresh a judged corpus, executable request, digest expectation, or threshold
 only with a reviewed intent/identity change and updated deterministic evidence;

@@ -13,6 +13,7 @@ mod recall;
 mod relevance;
 mod score;
 mod source;
+mod telemetry;
 mod text;
 mod traversal;
 
@@ -36,9 +37,13 @@ pub use relevance::{
     MAX_JUDGMENTS_PER_QUERY, MAX_QUESTIONS, MAX_TEXT_BYTES, MetricValue, ObservedEdge,
     ObservedPath, PathJudgment, PathPattern, QUERY_JUDGMENTS_SCHEMA_V1,
     QUERY_QUALIFICATION_SCHEMA_V1, QualificationReport, QueryClass, QueryObservation,
-    RelevanceError, RelevanceMetrics, WorkCounts, qualification_report, score,
+    RelevanceError, RelevanceMetrics, qualification_report, score,
 };
 pub use score::{QueryScores, ScoredNode, find_node, pick_scored_endpoint, score_nodes};
+pub use telemetry::{
+    ProfiledCodeQueryResponse, QUERY_EXECUTION_PROFILE_V1, QueryExecutionProfile,
+    QueryStageTimings, WorkCounts,
+};
 pub use text::{normalize_context_filters, query_terms, sanitize_label, search_tokens};
 pub use traversal::{
     DEFAULT_TEXT_TOKEN_BUDGET, TextPageOptions, TextPaginationError, TraversalMode,

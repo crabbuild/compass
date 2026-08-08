@@ -108,6 +108,20 @@ retain the established text-traversal behavior. Explicit typed query commands
 remain available and unchanged; ambiguous questions never invent a direction
 or select an arbitrary symbol.
 
+Structural operands use the same bounded exact, alias, term, and typo recall
+channels as search. A unique relationship-role seed may disambiguate a
+non-exact operand, while duplicate exact names remain an explicit
+`ambiguous_match`. Node-trail operations are directed from the supplied source
+to target. A route that exists only when ignoring edge direction returns `direction_mismatch`
+instead of publishing a misleading path; callers that need the reverse route
+must swap the operands. This adds one typed diagnostic variant to
+`compass.query/1`.
+
+The Rust library's `query_natural_profiled` API returns a separate
+`compass.query-execution-profile/1` envelope. It does not add timing or work
+fields to `compass.query/1`, so ordinary responses remain deterministic and
+backend-neutral.
+
 Typed symbol search now unconditionally uses `query-ranker/2`. The internal
 `COMPASS_QUERY_RANKER_PROFILE` experiment switch and v1 runtime fallback have
 been removed. This does not change the `compass.query/1` schema, but intentional

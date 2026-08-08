@@ -57,6 +57,7 @@ pub(crate) struct SearchCandidatePool {
     truncation_reasons: BTreeSet<RecallTruncationReason>,
     fuzzy_limit_reached: bool,
     fuzzy_candidates_added: usize,
+    candidates_read: u64,
 }
 
 impl SearchCandidatePool {
@@ -68,6 +69,7 @@ impl SearchCandidatePool {
             truncation_reasons: BTreeSet::new(),
             fuzzy_limit_reached: false,
             fuzzy_candidates_added: 0,
+            candidates_read: 0,
         }
     }
 
@@ -92,6 +94,7 @@ impl SearchCandidatePool {
     }
 
     pub(crate) fn add(&mut self, source: CandidateSource, node: NodeRecord) -> bool {
+        self.candidates_read = self.candidates_read.saturating_add(1);
         if let Some(record) = self.candidates.get_mut(&node.id) {
             record.sources.insert(source);
             return false;
@@ -140,6 +143,22 @@ impl SearchCandidatePool {
     #[must_use]
     pub(crate) fn into_vec(self) -> Vec<SearchCandidate> {
         self.candidates.into_values().collect()
+    }
+
+    #[must_use]
+    pub(crate) fn candidates_read(&self) -> u64 {
+        self.candidates_read
+    }
+
+    pub(crate) fn candidate_ids(&self) -> Vec<String> {
+        self.candidates.keys().cloned().collect()
+    }
+
+    pub(crate) fn tag(&mut self, node_id: &str, source: CandidateSource) -> bool {
+        let Some(candidate) = self.candidates.get_mut(node_id) else {
+            return false;
+        };
+        candidate.sources.insert(source)
     }
 
     #[must_use]

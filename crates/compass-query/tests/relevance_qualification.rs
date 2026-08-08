@@ -3,19 +3,17 @@ mod support;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
-use std::time::Instant;
 
 use compass_graph::{GraphSnapshotBuilder, canonical_graph_json};
 use compass_model::code_graph::GraphDocument;
 use compass_model::query_contract::{
-    CallRequest, CodeQueryLimits, CodeQueryOperation, CodeQueryResponse, NodeTrailRequest,
-    SearchRequest,
+    CallRequest, CodeQueryLimits, CodeQueryOperation, NodeTrailRequest, SearchRequest,
 };
 use compass_query::{
     EdgeIdentity, EdgeJudgment, IdJudgment, JudgedQuery, JudgmentCorpus, NaturalQueryRequest,
-    ObservedEdge, ObservedPath, PathJudgment, PathPattern, QUERY_PLANNER_PROFILE_V1,
-    QUERY_RANKER_PROFILE_V2, QueryClass, QueryObservation, RelevanceError, WorkCounts,
-    qualification_report, score,
+    ObservedEdge, ObservedPath, PathJudgment, PathPattern, ProfiledCodeQueryResponse,
+    QUERY_PLANNER_PROFILE_V1, QUERY_RANKER_PROFILE_V2, QueryClass, QueryObservation,
+    RelevanceError, WorkCounts, qualification_report, score,
 };
 use compass_query::{EngineSelection, open_with_engine};
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
@@ -98,9 +96,9 @@ fn operation_intent(operation: CodeQueryOperation) -> &'static str {
 
 fn observe_execution(
     query_id: &str,
-    response: &CodeQueryResponse,
-    latency_micros: u64,
+    execution: &ProfiledCodeQueryResponse,
 ) -> Result<QueryObservation, Box<dyn std::error::Error>> {
+    let response = &execution.response;
     let edge_kinds = response
         .edges
         .iter()
@@ -116,6 +114,7 @@ fn observe_execution(
             .collect()
     };
     let response_bytes = u64::try_from(serde_json::to_vec(response)?.len())?;
+    assert_eq!(execution.profile.work.response_bytes, response_bytes);
     let mut slots = BTreeMap::from([(
         "operation".to_owned(),
         operation_intent(response.operation).to_owned(),
@@ -157,14 +156,8 @@ fn observe_execution(
             && response.nodes.is_empty()
             && response.edges.is_empty()
             && response.paths.is_empty(),
-        latency_micros: Some(latency_micros),
-        // The public query response exposes serialized response bytes, but not
-        // candidate/posting/expansion counters. Leave unavailable counters at
-        // zero rather than synthesizing implementation work.
-        work: WorkCounts {
-            response_bytes,
-            ..WorkCounts::default()
-        },
+        latency_micros: Some(execution.profile.timings.total_micros),
+        work: execution.profile.work.clone(),
     })
 }
 
@@ -378,14 +371,8 @@ fn execute_subset(
     engine: &compass_query::CodeQueryEngine,
     corpus: &JudgmentCorpus,
 ) -> Result<Vec<QueryObservation>, Box<dyn std::error::Error>> {
-    let execute =
-        |id: &str, operation: &dyn Fn() -> Result<CodeQueryResponse, compass_query::QueryError>| {
-            let started = Instant::now();
-            let response = operation()?;
-            observe_execution(id, &response, u64::try_from(started.elapsed().as_micros())?)
-        };
     let natural = |question: &str| {
-        engine.query_natural(NaturalQueryRequest {
+        engine.query_natural_profiled(NaturalQueryRequest {
             question: question.to_owned(),
             include_heuristic: false,
             limits: CodeQueryLimits::default(),
@@ -394,7 +381,7 @@ fn execute_subset(
     corpus
         .queries
         .iter()
-        .map(|query| execute(&query.id, &|| natural(&query.text)))
+        .map(|query| observe_execution(&query.id, &natural(&query.text)?))
         .collect()
 }
 
@@ -539,12 +526,28 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
     assert!(store_observations.iter().all(|observation| {
         observation.latency_micros.is_some() && observation.work.response_bytes > 0
     }));
-    assert!(store_observations.iter().all(|observation| {
-        observation.work.candidates_read == 0
-            && observation.work.postings_decoded == 0
-            && observation.work.nodes_expanded == 0
-            && observation.work.edges_expanded == 0
-    }));
+    let observed_work =
+        store_observations
+            .iter()
+            .fold(WorkCounts::default(), |mut total, observation| {
+                total.candidates_read = total
+                    .candidates_read
+                    .saturating_add(observation.work.candidates_read);
+                total.postings_decoded = total
+                    .postings_decoded
+                    .saturating_add(observation.work.postings_decoded);
+                total.nodes_expanded = total
+                    .nodes_expanded
+                    .saturating_add(observation.work.nodes_expanded);
+                total.edges_expanded = total
+                    .edges_expanded
+                    .saturating_add(observation.work.edges_expanded);
+                total
+            });
+    assert!(observed_work.candidates_read > 0);
+    assert!(observed_work.postings_decoded > 0);
+    assert!(observed_work.nodes_expanded > 0);
+    assert!(observed_work.edges_expanded > 0);
 
     let normalize_timing = |mut observations: Vec<QueryObservation>| {
         for observation in &mut observations {
@@ -631,6 +634,10 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
             .is_some_and(f64::is_finite)
     );
     assert!(report.metrics.work.response_bytes > 0);
+    assert!(report.metrics.work.candidates_read > 0);
+    assert!(report.metrics.work.postings_decoded > 0);
+    assert!(report.metrics.work.nodes_expanded > 0);
+    assert!(report.metrics.work.edges_expanded > 0);
     let deterministic_report = qualification_report(
         &corpus,
         &deterministic_observations,

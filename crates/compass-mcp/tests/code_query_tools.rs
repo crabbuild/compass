@@ -135,6 +135,14 @@ fn code_query_tools_share_the_bounded_versioned_contract() -> Result<(), Box<dyn
         assert!(response["limits"]["maxNodes"].as_u64().is_some(), "{tool}");
     }
 
+    let reverse = invoke(
+        &server,
+        "get_node",
+        json!({"source":"Target","target":"Caller"}),
+    )?;
+    assert_eq!(reverse["paths"], json!([]));
+    assert_eq!(reverse["diagnostics"][0]["code"], "direction_mismatch");
+
     for arguments in [
         json!({"question":"authentication flow"}),
         json!({"question":"who calls Target?","mode":"bfs"}),
