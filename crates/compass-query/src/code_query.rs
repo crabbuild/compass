@@ -1,5 +1,6 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use compass_graph::{GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS, SnapshotReadLimits};
 use compass_ir::ProgramBundle;
@@ -16,11 +17,17 @@ use crate::cql::{QueryError, QueryErrorKind};
 use crate::graph_engine::LocalStoreSnapshot;
 use crate::index::QueryEngineKind;
 use crate::join_program_evidence;
+use crate::ranking::rank_search_candidates;
+use crate::recall::{CandidateSource, RecallBudget, SearchCandidatePool};
 use crate::source::{VerifiedSource, verified_source};
+use crate::text::strip_diacritics;
 
 type GraphPath = (Vec<String>, Vec<String>);
 type BoundedPathResult = (Option<GraphPath>, bool);
 const MAX_CODE_QUERY_CANDIDATES: u32 = 256;
+const MAX_RECALL_FUZZY_VARIANTS_PER_TERM: usize = 3;
+const MIN_RECALL_CANDIDATES_BEFORE_FUZZY: usize = 4;
+const SEARCH_QUERY_CACHE_CAPACITY: usize = 64;
 
 struct TraversalBudget {
     remaining_nodes: usize,
@@ -84,6 +91,51 @@ pub struct CodeQueryEngine {
     pub(crate) index_path: PathBuf,
     pub(crate) partial_graph_message: Option<String>,
     pub(crate) engine_kind: QueryEngineKind,
+    pub(crate) search_query_cache: Mutex<SearchQueryCache>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PreparedSearchQuery {
+    terms: Vec<String>,
+    fts_query: String,
+}
+
+#[derive(Debug)]
+pub(crate) struct SearchQueryCache {
+    entries: HashMap<String, PreparedSearchQuery>,
+    order: VecDeque<String>,
+    capacity: usize,
+}
+
+impl Default for SearchQueryCache {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::with_capacity(SEARCH_QUERY_CACHE_CAPACITY),
+            order: VecDeque::with_capacity(SEARCH_QUERY_CACHE_CAPACITY),
+            capacity: SEARCH_QUERY_CACHE_CAPACITY,
+        }
+    }
+}
+
+impl SearchQueryCache {
+    fn get(&mut self, query: &str) -> Option<PreparedSearchQuery> {
+        let prepared = self.entries.get(query)?.clone();
+        self.order.retain(|cached| cached != query);
+        self.order.push_back(query.to_owned());
+        Some(prepared)
+    }
+
+    fn insert(&mut self, query: String, prepared: PreparedSearchQuery) {
+        self.order.retain(|cached| cached != &query);
+        while self.entries.len() >= self.capacity {
+            let Some(expired) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&expired);
+        }
+        self.order.push_back(query.clone());
+        self.entries.insert(query, prepared);
+    }
 }
 
 pub(crate) enum CodeGraphBackend {
@@ -512,8 +564,9 @@ fn sort_edge_indices(edges: &mut [usize], graph: &GraphDocument) {
 impl CodeQueryEngine {
     pub fn search(&self, request: SearchRequest) -> Result<CodeQueryResponse, QueryError> {
         validate_limits(&request.limits)?;
-        let terms = search_query_terms(&request.query)?;
-        let query = fts_query(&request.query)?;
+        let prepared = self.prepare_search_query(&request.query)?;
+        let terms = prepared.terms;
+        let query = prepared.fts_query;
         let mut response =
             CodeQueryResponse::empty(CodeQueryOperation::Search, request.limits.clone());
         if query.is_empty() {
@@ -528,84 +581,71 @@ impl CodeQueryEngine {
         let candidate_limit =
             usize::try_from(request.limits.max_candidates.max(request.limits.max_nodes))
                 .unwrap_or(usize::MAX);
-        let (candidates, candidate_truncated) = if let Some(candidates) = self
+        let budget = RecallBudget {
+            max_total_candidates: candidate_limit,
+            max_per_source: candidate_limit,
+            max_fuzzy_candidates: candidate_limit.min(16),
+        };
+        let mut pool = SearchCandidatePool::new(budget);
+
+        if let Some(node) = self.backend.node_by_id(&request.query)? {
+            let _ = pool.add(CandidateSource::ExactId, node);
+        }
+
+        let normalized_name_query = normalize_symbol(&request.query);
+        let (exact_name_nodes, exact_name_truncated) = self
+            .backend
+            .nodes_by_normalized_name(&normalized_name_query, candidate_limit)?;
+        pool.add_many(CandidateSource::ExactName, exact_name_nodes);
+        response.truncated |= exact_name_truncated;
+
+        for term in &terms {
+            if term.chars().count() < 3 {
+                continue;
+            }
+            let (alias_nodes, alias_truncated) = self
+                .backend
+                .nodes_by_normalized_name(term, candidate_limit)?;
+            pool.add_many(CandidateSource::Alias, alias_nodes);
+            response.truncated |= alias_truncated;
+        }
+
+        let (term_nodes, term_truncated) = if let Some(candidates) = self
             .backend
             .store_term_candidates(&terms, candidate_limit)?
         {
             candidates
         } else {
-            let connection = self.connection.as_ref().ok_or_else(|| {
-                QueryError::new(
-                    QueryErrorKind::Internal,
-                    "query_index_missing",
-                    "materialized query engine has no search index",
-                )
-            })?;
-            let mut statement = connection
-                .prepare(
-                    // Candidate truncation is part of the public response. Keep
-                    // it backend-neutral: immutable term postings and the JSON
-                    // FTS accelerator both select IDs in canonical byte order;
-                    // common Rust ranking is applied only after that bound.
-                    "SELECT n.id
-                         FROM node_fts JOIN nodes n ON n.id = node_fts.node_id
-                         WHERE node_fts MATCH ?1
-                         ORDER BY n.id
-                         LIMIT ?2",
-                )
-                .map_err(sql_error)?;
-            let sql_limit = i64::try_from(candidate_limit.saturating_add(1)).unwrap_or(i64::MAX);
-            let mut rows = statement
-                .query(params![query, sql_limit])
-                .map_err(sql_error)?;
-            let mut nodes = Vec::new();
-            while let Some(row) = rows.next().map_err(sql_error)? {
-                let id: String = row.get(0).map_err(sql_error)?;
-                let node = self.backend.node_by_id(&id)?.ok_or_else(|| {
-                    QueryError::new(
-                        QueryErrorKind::GraphInvariant,
-                        "query_graph_invariant",
-                        format!("index references absent graph node {id}"),
-                    )
-                })?;
-                nodes.push(node);
-            }
-            let truncated = nodes.len() > candidate_limit;
-            if truncated {
-                nodes.truncate(candidate_limit);
-            }
-            (nodes, truncated)
+            self.materialized_term_candidates(&query, candidate_limit)?
         };
-        response.truncated |= candidate_truncated;
-        let normalized_query = request.query.trim().to_lowercase();
-        let mut ranked = Vec::new();
-        for node in candidates {
-            let normalized_name = node.name.to_lowercase();
-            let normalized_qualified = node.qualified_name.to_lowercase();
-            let tier = if normalized_qualified == normalized_query {
-                4_u8
-            } else if normalized_name == normalized_query {
-                3
-            } else if normalized_qualified.starts_with(&normalized_query)
-                || normalized_name.starts_with(&normalized_query)
-            {
-                2
-            } else {
-                1
-            };
-            let mut matched_fields = Vec::new();
-            if normalized_name.contains(&normalized_query) {
-                matched_fields.push("name".to_owned());
+        pool.add_many(CandidateSource::TermIndex, term_nodes);
+        response.truncated |= term_truncated;
+
+        if pool.len() < candidate_limit.min(MIN_RECALL_CANDIDATES_BEFORE_FUZZY) {
+            for variant in recall_fuzzy_term_variants(&terms) {
+                if variant.len() < 3 {
+                    continue;
+                }
+                if pool.len() >= candidate_limit {
+                    break;
+                }
+                let (fuzzy_nodes, fuzzy_truncated) = self
+                    .backend
+                    .nodes_by_normalized_name(&variant, budget.max_fuzzy_candidates)?;
+                pool.add_many(CandidateSource::Fuzzy, fuzzy_nodes);
+                response.truncated |= fuzzy_truncated;
+                if pool.truncated_by_fuzzy_capacity() {
+                    break;
+                }
             }
-            if normalized_qualified.contains(&normalized_query) {
-                matched_fields.push("qualified_name".to_owned());
-            }
-            ranked.push((tier, node.id.clone(), matched_fields, node));
         }
-        ranked.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+
+        response.truncated |= pool.is_truncated();
+        let candidates = pool.into_vec();
+        let candidate_count = candidates.len();
         let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);
-        if ranked.len() > max_nodes {
-            ranked.truncate(max_nodes);
+        let ranked = rank_search_candidates(&request.query, &terms, candidates, max_nodes);
+        if candidate_count > max_nodes {
             response.truncated = true;
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::BoundedTruncation,
@@ -614,10 +654,14 @@ impl CodeQueryEngine {
                 path: None,
             });
         }
-        for (tier, id, matched_fields, node) in ranked {
+        for result in ranked {
+            let score = result.score;
+            let id = result.node_id;
+            let matched_fields = result.matched_fields;
+            let node = result.node;
             response.results.push(SearchHit {
                 node_id: id,
-                score: f64::from(tier) * 1_000_000.0 + matched_fields.len() as f64,
+                score,
                 matched_fields,
             });
             response.nodes.push(query_node(&node));
@@ -631,6 +675,79 @@ impl CodeQueryEngine {
             });
         }
         self.finish_response(&mut response)
+    }
+
+    fn prepare_search_query(&self, query: &str) -> Result<PreparedSearchQuery, QueryError> {
+        validate_search_query_size(query)?;
+        {
+            let mut cache = match self.search_query_cache.lock() {
+                Ok(cache) => cache,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if let Some(prepared) = cache.get(query) {
+                return Ok(prepared);
+            }
+        }
+
+        let terms = search_query_terms(query)?;
+        let prepared = PreparedSearchQuery {
+            fts_query: fts_query_from_terms(&terms),
+            terms,
+        };
+        let mut cache = match self.search_query_cache.lock() {
+            Ok(cache) => cache,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        cache.insert(query.to_owned(), prepared.clone());
+        Ok(prepared)
+    }
+
+    fn materialized_term_candidates(
+        &self,
+        query: &str,
+        candidate_limit: usize,
+    ) -> Result<(Vec<NodeRecord>, bool), QueryError> {
+        let connection = self.connection.as_ref().ok_or_else(|| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "query_index_missing",
+                "materialized query engine has no search index",
+            )
+        })?;
+        let mut statement = connection
+            .prepare(
+                // Candidate truncation is part of the public response. Keep
+                // it backend-neutral: immutable term postings and the JSON
+                // FTS accelerator both select IDs in canonical byte order;
+                // common Rust ranking is applied only after that bound.
+                "SELECT n.id
+                     FROM node_fts JOIN nodes n ON n.id = node_fts.node_id
+                     WHERE node_fts MATCH ?1
+                     ORDER BY n.id
+                     LIMIT ?2",
+            )
+            .map_err(sql_error)?;
+        let sql_limit = i64::try_from(candidate_limit.saturating_add(1)).unwrap_or(i64::MAX);
+        let mut rows = statement
+            .query(params![query, sql_limit])
+            .map_err(sql_error)?;
+        let mut nodes = Vec::new();
+        while let Some(row) = rows.next().map_err(sql_error)? {
+            let id: String = row.get(0).map_err(sql_error)?;
+            let node = self.backend.node_by_id(&id)?.ok_or_else(|| {
+                QueryError::new(
+                    QueryErrorKind::GraphInvariant,
+                    "query_graph_invariant",
+                    format!("index references absent graph node {id}"),
+                )
+            })?;
+            nodes.push(node);
+        }
+        let truncated = nodes.len() > candidate_limit;
+        if truncated {
+            nodes.truncate(candidate_limit);
+        }
+        Ok((nodes, truncated))
     }
 
     pub fn callers(&self, request: CallRequest) -> Result<CodeQueryResponse, QueryError> {
@@ -1296,15 +1413,15 @@ pub(crate) fn validate_limits(
     Ok(())
 }
 
-fn fts_query(value: &str) -> Result<String, QueryError> {
-    Ok(search_query_terms(value)?
-        .into_iter()
+fn fts_query_from_terms(terms: &[String]) -> String {
+    terms
+        .iter()
         .map(|term| format!("\"{}\"*", term.replace('"', "\"\"")))
         .collect::<Vec<_>>()
-        .join(" AND "))
+        .join(" AND ")
 }
 
-fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
+fn validate_search_query_size(value: &str) -> Result<(), QueryError> {
     if value.len() > 4_096 {
         return Err(QueryError::new(
             QueryErrorKind::InvalidParameter,
@@ -1312,6 +1429,11 @@ fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
             "search query exceeds 4096 bytes",
         ));
     }
+    Ok(())
+}
+
+fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
+    validate_search_query_size(value)?;
     let terms = value
         .split(|character: char| !(character.is_alphanumeric() || character == '_'))
         .filter(|term| {
@@ -1332,6 +1454,72 @@ fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
         ));
     }
     Ok(terms)
+}
+
+fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut variants = Vec::new();
+    let max_total_variants = terms
+        .len()
+        .saturating_mul(MAX_RECALL_FUZZY_VARIANTS_PER_TERM)
+        .max(1);
+
+    for term in terms {
+        let chars = term.chars().collect::<Vec<_>>();
+        if chars.len() < 4 {
+            continue;
+        }
+        let remaining_capacity = max_total_variants.saturating_sub(variants.len());
+        if remaining_capacity == 0 {
+            break;
+        }
+        let per_term_target = remaining_capacity.min(MAX_RECALL_FUZZY_VARIANTS_PER_TERM);
+        let mut emitted = 0_usize;
+        let stripped = strip_diacritics(term);
+        if stripped != *term && stripped.len() >= 3 && seen.insert(stripped.clone()) {
+            variants.push(stripped);
+            emitted = emitted.saturating_add(1);
+        }
+
+        // A transposition is a common typo and can recover the exact indexed
+        // symbol without broadening the prefix scan.
+        for index in 0..chars.len().saturating_sub(1) {
+            if emitted >= per_term_target {
+                break;
+            }
+            let mut variant = chars.clone();
+            variant.swap(index, index + 1);
+            if variant == chars {
+                continue;
+            }
+            let variant = variant.iter().collect::<String>();
+            if seen.insert(variant.clone()) {
+                variants.push(variant);
+                emitted = emitted.saturating_add(1);
+            }
+        }
+
+        if emitted >= per_term_target {
+            continue;
+        }
+        for index in 0..chars.len() {
+            if emitted >= per_term_target {
+                break;
+            }
+            let mut variant = chars.clone();
+            variant.remove(index);
+            if variant.len() < 3 {
+                continue;
+            }
+            let variant = variant.iter().collect::<String>();
+            if seen.insert(variant.clone()) {
+                variants.push(variant);
+                emitted = emitted.saturating_add(1);
+            }
+        }
+    }
+
+    variants
 }
 
 pub(crate) fn enforce_response_size(response: &mut CodeQueryResponse) -> Result<(), QueryError> {
@@ -1605,5 +1793,79 @@ mod adjacency_tests {
             matching.len()
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod fuzzy_term_variant_tests {
+    use super::{
+        MAX_RECALL_FUZZY_VARIANTS_PER_TERM, PreparedSearchQuery, SearchQueryCache,
+        recall_fuzzy_term_variants,
+    };
+
+    #[test]
+    fn recall_fuzzy_term_variants_is_deterministic_and_bounded() {
+        let terms = vec![
+            "fetchUsers".to_owned(),
+            "dependencies".to_owned(),
+            "résumé".to_owned(),
+        ];
+        let first = recall_fuzzy_term_variants(&terms);
+        let second = recall_fuzzy_term_variants(&terms);
+        assert_eq!(first, second, "variant generation must be deterministic");
+        assert!(!first.is_empty());
+        assert!(first.len() <= terms.len() * MAX_RECALL_FUZZY_VARIANTS_PER_TERM);
+        assert!(first.iter().all(|variant| variant.len() >= 3));
+        let unique = first.iter().collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(unique.len(), first.len());
+        assert!(first.iter().any(|variant| variant == "resume"));
+    }
+
+    #[test]
+    fn recall_fuzzy_term_variants_ignores_short_tokens() {
+        let terms = vec![
+            "a".to_owned(),
+            "ab".to_owned(),
+            "abc".to_owned(),
+            "abcd".to_owned(),
+        ];
+        let variants = recall_fuzzy_term_variants(&terms);
+        assert!(
+            !variants
+                .iter()
+                .any(|variant| variant == "a" || variant == "ab" || variant == "abc")
+        );
+    }
+
+    #[test]
+    fn recall_fuzzy_term_variants_prioritizes_transpositions() {
+        let variants = recall_fuzzy_term_variants(&["lits".to_owned()]);
+        assert_eq!(variants.first().map(String::as_str), Some("ilts"));
+        assert!(variants.iter().any(|variant| variant == "list"));
+    }
+
+    fn prepared(term: &str) -> PreparedSearchQuery {
+        PreparedSearchQuery {
+            terms: vec![term.to_owned()],
+            fts_query: format!("\"{term}\"*"),
+        }
+    }
+
+    #[test]
+    fn search_query_cache_is_bounded_and_refreshes_recent_entries() {
+        let mut cache = SearchQueryCache {
+            entries: Default::default(),
+            order: Default::default(),
+            capacity: 2,
+        };
+        cache.insert("one".to_owned(), prepared("one"));
+        cache.insert("two".to_owned(), prepared("two"));
+        assert!(cache.get("one").is_some());
+        cache.insert("three".to_owned(), prepared("three"));
+
+        assert!(cache.get("one").is_some());
+        assert!(cache.get("two").is_none());
+        assert!(cache.get("three").is_some());
+        assert_eq!(cache.entries.len(), 2);
     }
 }

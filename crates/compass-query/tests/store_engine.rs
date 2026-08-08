@@ -99,9 +99,11 @@ fn bounded_search_candidate_order_matches_store_postings() -> Result<(), Box<dyn
     let cache = directory.path().join("cache");
     let store = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
     let json = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
-    let mut limits = CodeQueryLimits::default();
-    limits.max_candidates = 10;
-    limits.max_nodes = 100;
+    let limits = CodeQueryLimits {
+        max_candidates: 10,
+        max_nodes: 100,
+        ..CodeQueryLimits::default()
+    };
     let request = SearchRequest {
         query: "dja".to_owned(),
         limits,

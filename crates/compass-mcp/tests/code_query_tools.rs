@@ -109,6 +109,11 @@ fn code_query_tools_share_the_bounded_versioned_contract() -> Result<(), Box<dyn
     let graph = write_typed_graph(directory.path())?;
     let server = CompassMcp::new(graph);
     for (tool, arguments, operation) in [
+        (
+            "query_graph",
+            json!({"question":"who calls Target?"}),
+            "callers",
+        ),
         ("search_symbols", json!({"query":"Target"}), "search"),
         ("get_callers", json!({"symbol":"Target"}), "callers"),
         ("get_callees", json!({"symbol":"Caller"}), "callees"),
@@ -128,6 +133,17 @@ fn code_query_tools_share_the_bounded_versioned_contract() -> Result<(), Box<dyn
         assert_eq!(response["schema"], "compass.query/1", "{tool}");
         assert_eq!(response["operation"], operation, "{tool}");
         assert!(response["limits"]["maxNodes"].as_u64().is_some(), "{tool}");
+    }
+
+    for arguments in [
+        json!({"question":"authentication flow"}),
+        json!({"question":"who calls Target?","mode":"bfs"}),
+    ] {
+        let output = server.invoke(
+            "query_graph",
+            arguments.as_object().cloned().unwrap_or_else(Map::new),
+        );
+        assert!(serde_json::from_str::<Value>(&output).is_err(), "{output}");
     }
     Ok(())
 }

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Add deterministic, bounded natural-language routing for symbol search,
+  callers, callees, impact, and node trails through `compass ask`, clear
+  `compass query` intents, and MCP `query_graph`. Generic, contradictory,
+  historical, or explicitly traversed queries retain compatibility traversal,
+  while ambiguous symbols remain explicit instead of selecting an arbitrary
+  candidate.
+
+- Hard-cut typed symbol search to the deterministic `query-ranker/2`, add a
+  23-question executable relevance baseline with reviewed paraphrase,
+  production-versus-generated ambiguity, domain, and no-answer cases, and add
+  a bounded local redaction/review workflow for growing the corpus from
+  approved production query samples without network telemetry or automatic
+  judgment generation. Opt-in MCP query logs now cover typed natural queries,
+  use a versioned record, and stop at 16 MiB.
+
 - Make `compass upgrade` discover releases through a bounded, versioned static
   release manifest instead of the unauthenticated GitHub REST API. Corporate
   networks that share an outbound IP no longer consume GitHub's per-IP API

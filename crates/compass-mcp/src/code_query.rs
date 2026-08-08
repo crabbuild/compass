@@ -4,8 +4,8 @@ use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, CodeQueryResponse, ExploreRequest, ImpactRequest,
     NodeTrailRequest, SearchRequest,
 };
-use compass_query::QueryErrorKind;
 use compass_query::open;
+use compass_query::{NaturalQueryRequest, QueryErrorKind};
 use serde_json::{Map, Value, json};
 
 pub(super) fn schema(required: &[&str]) -> Value {
@@ -60,6 +60,11 @@ pub(super) fn invoke(
         .map_err(|error| super::InvocationError::Internal(error.to_string()))?;
     let limits = limits(arguments)?;
     match name {
+        "query_graph" => engine.query_natural(NaturalQueryRequest {
+            question: required_string(arguments, "question")?,
+            include_heuristic: false,
+            limits,
+        }),
         "search_symbols" => engine.search(SearchRequest {
             query: required_string(arguments, "query")?,
             limits,

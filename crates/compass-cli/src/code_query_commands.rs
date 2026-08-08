@@ -4,7 +4,7 @@ use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, CodeQueryResponse, ExploreRequest, ImpactRequest,
     NodeTrailRequest, SearchRequest,
 };
-use compass_query::{EngineSelection, open_with_engine};
+use compass_query::{EngineSelection, NaturalQueryRequest, open_with_engine};
 
 use crate::Outcome;
 
@@ -66,6 +66,11 @@ fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String
         .map_err(|error| error.to_string())?;
     let limits = limits(args)?;
     match operation {
+        "ask" => engine.query_natural(NaturalQueryRequest {
+            question: required(&positional, 0, "ask <QUESTION>")?.to_owned(),
+            include_heuristic: args.iter().any(|arg| arg == "--include-heuristic"),
+            limits,
+        }),
         "search" => engine.search(SearchRequest {
             query: required(&positional, 0, "search <QUERY>")?.to_owned(),
             limits,

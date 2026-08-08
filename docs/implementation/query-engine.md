@@ -53,9 +53,13 @@ before query state is created. `--engine json` also uses the compatible JSON
 engine without opening the database, while `--engine store`
 requires a readable, referenced store and reports corruption or absence
 explicitly. The query index remains disposable and keyed by canonical snapshot
-bytes for the JSON engine. Its current `compass-code-index/2` FTS tokenizer
-preserves underscores, matching the portable store term tokenizer. Store
-queries use immutable snapshot indexes instead of this disposable cache.
+bytes for the JSON engine. Its current `compass-code-index/4` FTS tokenizer
+uses the shared `compass.search-term/1` analyzer, which applies Unicode case
+normalization and combining-mark removal while preserving underscore tokens.
+Store queries use immutable snapshot indexes instead of this disposable cache.
+The corresponding immutable term-posting layout is
+`compass.store.graph-index/3`; a v2 snapshot is rejected and rebuilt rather
+than being reinterpreted with the new analyzer.
 
 Search candidate truncation is observable and therefore backend-neutral. Both
 engines select matching candidates in canonical node-ID order, apply the bound,
@@ -64,15 +68,97 @@ complete bounded posting range before retaining the smallest candidate IDs;
 the posting-chunk count cannot consume a node-candidate limit. Differential
 tests include more matching vocabulary entries than the public candidate bound.
 
+Each opened code-query engine keeps a 64-entry LRU cache of validated search
+preparations. The cache stores only bounded query terms and the derived FTS
+expression, is scoped to one graph engine, and is discarded when that engine
+closes, so it cannot outlive or cross graph realizations. Ranking retains the
+same total deterministic comparator but uses partial top-k selection before
+sorting when `maxNodes` is smaller than the candidate set. This avoids sorting
+results that the response budget will discard without changing the returned
+prefix or truncation semantics.
+
+Bounded typo variants are generated only when the higher-confidence recall
+channels produce too few candidates. Diacritic normalization is attempted when
+it changes the term, then adjacent transpositions are tried before deletions so
+the fixed three-variant budget prioritizes common spelling mistakes. Fuzzy
+candidates retain their explicit source penalty in `query-ranker/2`.
+`query-ranker/2` is now the unconditional typed-search ranker. The former
+runtime selection and v1 fallback have been removed, so equivalent inputs do
+not depend on process environment. The ranker combines lexical coverage,
+candidate provenance, evidence confidence, semantic node kind, and bounded
+ambiguity penalties. Production source receives a deterministic advantage over
+otherwise equal generated/test declarations. A frozen v1 implementation exists
+only in unit tests to prove the reviewed production-versus-generated case is a
+strict v2 improvement; it is not a runtime fallback.
+
+## Natural-language intent routing
+
+`compass ask "<question>"` uses the deterministic `query-planner/1` profile
+before executing the existing typed query operations. `compass query` also
+selects this path for a high-confidence question against a current typed graph.
+High-confidence forms route callers, callees, impact, and source-to-target path
+questions to their matching `compass.query/1` operation. Search scaffolding
+such as `where is` or `find` is removed before symbol search, which avoids
+spending recall terms on question prose. Explicit `search`, `callers`,
+`callees`, `impact`, and `node` commands retain their existing behavior.
+
+The planner is deliberately bounded and conservative. Questions above 4,096
+bytes fail before graph work. Empty, low-confidence, or contradictory requests
+fall back to bounded search; ambiguous symbol resolution remains an explicit
+`ambiguous_match` diagnostic and never selects a convenient candidate. Planner
+rules are local, credential-free, deterministic, and share the request limits,
+heuristic-evidence gate, backend behavior, and response envelope of the typed
+operation they select. Generic or contradictory questions, historical `--at`
+queries, and requests carrying `--traverse` or a text-traversal control remain
+on the established relevance traversal. MCP `query_graph` uses the same routing
+rule for typed graphs unless a legacy `mode`, `depth`, `token_budget`, or
+`context_filter` field is present.
+
+## Relevance qualification
+
+`crates/compass-query/tests/relevance_qualification.rs` separates the reviewed
+80-question synthetic corpus from a 23-question, production-shaped executable
+baseline. The larger
+corpus exercises the versioned judgment and metric contract without pretending
+that its synthetic identities can execute on a production graph. The executable
+subset sends natural-language questions through `query_natural` on the
+checked-in support graph, derives its canonical graph digest, and maps actual
+`CodeQueryResponse` values into ordered node IDs, directed edges, paths,
+truncation/no-answer state, measured latency, and serialized response bytes.
+JSON/store parity and repeated store execution must agree once timing is
+normalized away.
+
+Run `python3 scripts/qualify_query_relevance.py` with an external
+`CARGO_TARGET_DIR`. The native gate evaluates Success@1, MRR, Recall@k, nDCG,
+intent macro-F1, edge direction, path acceptance, no-answer precision,
+backend parity, deterministic ordering, and latency percentiles. Only response
+bytes are directly observable work counts today; the harness records the other
+work fields as uninstrumented instead of fabricating candidate or posting work.
+The reviewed executable threshold block lives beside the test so a failure is
+local and deterministic. Updating its expected identities, graph digest, or
+minimums requires an intentional review rather than copying a new result.
+`scripts/prepare_query_relevance_review.py` turns approved local JSONL query
+logs into bounded, redacted, deterministic review candidates. It never sends
+data, invents expected results, or writes directly to the judgment corpus; a
+two-person review must bind every accepted question to an immutable graph
+revision and explicit expected identities. This supplies a safe feedback loop
+for unseen paraphrases and domain vocabulary without adding a runtime model,
+embedding service, or self-modifying ranker.
+
 ## Focused discovery path
 
 ```text
 question
-  -> query_terms()
-  -> score_nodes()
-  -> choose anchors
-  -> query_graph_text() with BFS/DFS and budget
-  -> focused text subgraph
+  -> plan_natural_query()
+     -> high-confidence + current typed graph
+        -> search/callers/callees/impact/node-trail
+        -> compass.query/1
+     -> generic, historical, contradictory, or traversal-controlled
+        -> query_terms()
+        -> score_nodes()
+        -> choose anchors
+        -> query_graph_text() with BFS/DFS and budget
+        -> focused text subgraph
 ```
 
 ### Text normalization

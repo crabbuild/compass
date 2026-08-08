@@ -221,6 +221,42 @@ fn snapshot_is_deterministic_and_reuses_immutable_objects() -> Result<(), Box<dy
 }
 
 #[test]
+fn nodes_for_terms_matches_diacritic_normalized_queries() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut document = graph();
+    let mut cafe = node("cafe");
+    cafe.name = "café".to_owned();
+    cafe.qualified_name = "crate::café".to_owned();
+    document.nodes.push(cafe);
+
+    let prepared = builder.prepare(&store, &document)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+
+    let (nodes, truncated) = reader.nodes_for_terms(&["cafe".to_owned()], limits(8))?;
+    assert!(!truncated);
+    assert_eq!(nodes.len(), 1);
+    assert_eq!(
+        nodes.into_iter().map(|node| node.id).collect::<Vec<_>>(),
+        ["cafe"]
+    );
+
+    let (nodes_with_punctuation, truncated) =
+        reader.nodes_for_terms(&["café".to_owned()], limits(8))?;
+    assert!(!truncated);
+    assert_eq!(
+        nodes_with_punctuation
+            .into_iter()
+            .map(|node| node.id)
+            .collect::<Vec<_>>(),
+        ["cafe"]
+    );
+
+    Ok(())
+}
+
+#[test]
 fn selector_is_not_active_until_commit_and_reads_are_bounded() -> Result<(), Box<dyn Error>> {
     let store = MemoryStore::default();
     let builder = GraphSnapshotBuilder::new();
