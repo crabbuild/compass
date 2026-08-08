@@ -215,8 +215,14 @@ impl Engine {
         }
         if spec.kind == ExtractorKind::Generic && matches!(spec.name, "go" | "java") {
             let tree = self.parse(path, spec, source)?;
-            let mut graph =
-                self.extract_generic_from_tree(path, spec, source_file, source, tree.root_node());
+            let mut graph = self.extract_generic_from_tree(
+                path,
+                spec,
+                source_file,
+                true,
+                source,
+                tree.root_node(),
+            );
             self.stamp_project_evidence(path, &mut graph);
             stamp_producer_metadata(&mut graph, spec.name);
             return Ok(CombinedExtraction {
@@ -239,7 +245,7 @@ impl Engine {
         }
         let tree = self.parse(path, spec, source)?;
         let root = tree.root_node();
-        let mut graph = self.extract_generic_from_tree(path, spec, source_file, source, root);
+        let mut graph = self.extract_generic_from_tree(path, spec, source_file, true, source, root);
         self.stamp_project_evidence(path, &mut graph);
         stamp_producer_metadata(&mut graph, spec.name);
         let program = include_program
@@ -343,6 +349,7 @@ impl Engine {
             path,
             spec,
             &evidence_source_file,
+            false,
             source,
             tree.root_node(),
         ))
@@ -353,6 +360,7 @@ impl Engine {
         path: &Path,
         spec: LanguageSpec,
         evidence_source_file: &str,
+        evidence_source_is_explicit: bool,
         source: &[u8],
         root: Node<'_>,
     ) -> Extraction {
@@ -405,21 +413,16 @@ impl Engine {
         }
         // Framework conventions need the complete repository-relative path
         // (for example `src/routes/**`, `app/routes/**`, and `src/app/**`) to
-        // classify a file. The pipeline supplies that path as
-        // `evidence_source_file`; using it here keeps convention anchors and
-        // synthetic identities aligned with the graph manifest while avoiding
-        // absolute checkout paths. Direct byte-extraction callers may not have
-        // a repository-relative spelling, so retain the deterministic fallback
-        // for those calls.
+        // classify a file. Pipeline callers supply that authoritative identity;
+        // direct extraction derives a bounded portable fallback from the path.
         let framework_source = universal_profile.map(|_| {
-            let portable_source = portable_evidence_source(path);
-            if Path::new(evidence_source_file).is_absolute()
-                || evidence_source_file.is_empty()
-                || evidence_source_file == portable_source
+            if evidence_source_is_explicit
+                && !evidence_source_file.is_empty()
+                && Path::new(evidence_source_file).is_relative()
             {
-                portable_framework_source(path)
+                evidence_source_file.replace('\\', "/")
             } else {
-                evidence_source_file.to_owned()
+                portable_framework_source(path)
             }
         });
         let framework_path = framework_source.as_deref().map(Path::new).unwrap_or(path);
@@ -4615,6 +4618,35 @@ fn resolve_js_import_path(path: &Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod rationale_tests {
     use super::*;
+
+    #[test]
+    fn explicit_source_identity_controls_universal_framework_anchors()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("src/orders.ts");
+        let source = br#"import { Controller } from '@nestjs/common';
+import { EventPattern } from '@nestjs/microservices';
+@Controller()
+export class OrdersConsumer {
+  @EventPattern('orders.cancelled')
+  handleCancelled() {}
+}
+"#;
+
+        let extraction =
+            Engine::default().extract_source_graph_only(&path, "src/orders.ts", source)?;
+
+        assert!(!extraction.framework_facts.is_empty());
+        assert!(extraction.framework_facts.iter().all(|fact| {
+            let anchor = match fact {
+                crate::RawFrameworkFact::Route(route) => &route.anchor,
+                crate::RawFrameworkFact::Domain(domain) => &domain.anchor,
+                crate::RawFrameworkFact::Annotation(annotation) => &annotation.anchor,
+            };
+            anchor.source_file == "src/orders.ts"
+        }));
+        Ok(())
+    }
 
     #[test]
     fn c_function_declarators_prefer_callable_names_over_types()

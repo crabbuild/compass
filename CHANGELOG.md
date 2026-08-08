@@ -30,7 +30,9 @@
   re-exports, calls, references, heritage, aliases, and framework route
   targets. The candidate is now the same deterministic path used by
   qualification fixtures, with universal provenance and cross-file resolution
-  preserved through cached and rebuilt graphs.
+  preserved through cached and rebuilt graphs. Preserve the pipeline's exact
+  repository-relative identity for universal framework facts so shallow source
+  paths are published instead of being mistaken for temporary-directory paths.
 
 ## 0.3.6 - 2026-08-06
 
