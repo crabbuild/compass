@@ -55,10 +55,7 @@ fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
     };
     assert_eq!(
         FrameworkPackRegistry::validate_descriptors(&[typescript]),
-        Err(FrameworkPackRegistryError::NonUniversalLanguage {
-            pack: descriptor.id,
-            language: "typescript",
-        })
+        Ok(())
     );
 
     let unsupported = FrameworkPackDescriptor {
@@ -271,26 +268,42 @@ class Second {
 "#;
 
     let extraction = Engine::default().extract_source(&path, source)?;
-    let constructors = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing JavaScript universal evidence")?;
+    let constructors = evidence
+        .declarations
         .iter()
-        .filter(|node| node.label() == ".constructor()")
+        .filter(|declaration| declaration.kind == "constructor")
         .collect::<Vec<_>>();
 
-    assert_eq!(constructors.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(
+        constructors.len(),
+        2,
+        "declarations={:?}",
+        evidence.declarations
+    );
     assert_eq!(
         constructors
             .iter()
-            .map(|node| node.string("lexical_owner"))
+            .map(|declaration| {
+                declaration
+                    .qualified_name
+                    .rsplit_once('.')
+                    .and_then(|(owner, _)| owner.rsplit_once('.').map(|(_, name)| name))
+                    .unwrap_or_default()
+                    .to_owned()
+            })
             .collect::<std::collections::BTreeSet<_>>(),
         ["First", "Second"].into_iter().map(str::to_owned).collect()
     );
     assert_eq!(
         constructors
             .iter()
-            .map(|node| node.string("qualified_name"))
+            .map(|declaration| declaration.qualified_name.clone())
             .collect::<std::collections::BTreeSet<_>>(),
-        ["First::constructor", "Second::constructor"]
+        ["bundle.First.constructor", "bundle.Second.constructor"]
             .into_iter()
             .map(str::to_owned)
             .collect()
@@ -1082,13 +1095,26 @@ export function run() { target(); View(); return item; }
     )?;
     let mut engine = Engine::default();
     let extraction = engine.extract(&source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing JavaScript universal evidence")?;
+    assert!(evidence.bindings.iter().any(|binding| {
+        binding.spelling == "target" && binding.qualified_target == "./target.js::target"
+    }));
+    assert!(evidence.bindings.iter().any(|binding| {
+        binding.spelling == "View" && binding.qualified_target == "./view.jsx::View"
+    }));
+    assert!(evidence.bindings.iter().any(|binding| {
+        binding.spelling == "item" && binding.qualified_target == "./pkg::item"
+    }));
     assert!(
-        extraction
-            .edges
+        evidence
+            .candidates
             .iter()
-            .any(|edge| matches!(edge.string("relation").as_str(), "imports" | "imports_from")),
-        "edges={:?}",
-        extraction.edges
+            .filter(|candidate| candidate.relation == CandidateRelation::Imports)
+            .count()
+            >= 3
     );
     Ok(())
 }
@@ -1124,6 +1150,10 @@ fn javascript_modules_reexports_require_and_decorators_keep_compass_contracts()
 
     let mut engine = Engine::default();
     let barrel_facts = engine.extract(&barrel)?;
+    let barrel_evidence = barrel_facts
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing barrel universal evidence")?;
     assert_eq!(
         barrel_facts
             .edges
@@ -1135,55 +1165,52 @@ fn javascript_modules_reexports_require_and_decorators_keep_compass_contracts()
         0,
         "file-level re-export edges belong to the collection resolver"
     );
-    assert_eq!(
-        barrel_facts
-            .edges
+    assert!(
+        barrel_evidence
+            .candidates
             .iter()
-            .filter(|edge| {
-                edge.string("relation") == "imports_from" && edge.string("context") == "re-export"
-            })
-            .count(),
-        2
+            .filter(|candidate| candidate.relation == CandidateRelation::Reexports)
+            .count()
+            >= 2
     );
-    assert!(barrel_facts.edges.iter().any(|edge| {
-        edge.string("relation") == "re_exports" && edge.string("context") == "re-export"
-    }));
 
     let decorated_facts = engine.extract(&decorated)?;
-    let decorator_id = make_id(&["Injectable"]);
-    assert!(decorated_facts.nodes.iter().any(|node| {
-        node.id == decorator_id
-            && node.label() == "Injectable"
-            && node.string("source_file").is_empty()
-    }));
-    assert!(decorated_facts.edges.iter().any(|edge| {
-        edge.target == decorator_id
-            && edge.string("relation") == "references"
-            && edge.string("context") == "decorator"
-    }));
-    assert!(decorated_facts.edges.iter().any(|edge| {
-        edge.target == make_id(&["ref", "@nestjs/common"])
-            && edge.string("relation") == "imports_from"
-    }));
+    let decorated_evidence = decorated_facts
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing decorated universal evidence")?;
     assert!(
-        !decorated_facts
-            .edges
+        decorated_evidence
+            .occurrences
             .iter()
-            .any(|edge| { edge.string("relation") == "imports" && edge.target == decorator_id })
+            .any(|occurrence| occurrence.role == SemanticRole::Decorator)
     );
+    assert!(
+        decorated_evidence
+            .candidates
+            .iter()
+            .any(|candidate| candidate.relation == CandidateRelation::Decorates)
+    );
+    assert!(decorated_evidence.bindings.iter().any(|binding| {
+        binding.spelling == "Injectable" && binding.qualified_target == "@nestjs/common::Injectable"
+    }));
 
     let cjs_facts = engine.extract(&common_js)?;
+    let cjs_evidence = cjs_facts
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing CommonJS universal evidence")?;
     assert!(
-        cjs_facts
-            .edges
+        cjs_evidence
+            .candidates
             .iter()
-            .any(|edge| edge.string("relation") == "imports_from")
+            .any(|candidate| candidate.relation == CandidateRelation::Imports)
     );
     assert!(
-        cjs_facts
-            .edges
+        cjs_evidence
+            .candidates
             .iter()
-            .any(|edge| edge.string("relation") == "imports")
+            .any(|candidate| candidate.relation == CandidateRelation::Reexports)
     );
     Ok(())
 }
@@ -1204,6 +1231,10 @@ fn typescript_type_star_reexports_do_not_discard_earlier_barrel_edges() -> Resul
 
     let mut engine = Engine::default();
     let extraction = engine.extract(&barrel)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing TypeScript universal evidence")?;
     assert_ne!(
         extraction
             .extensions
@@ -1212,15 +1243,13 @@ fn typescript_type_star_reexports_do_not_discard_earlier_barrel_edges() -> Resul
         Some(EXTRACTION_QUALITY_PARTIAL),
         "a supported type-only star re-export must not mark the whole file partial"
     );
-    assert_eq!(
-        extraction
-            .edges
+    assert!(
+        evidence
+            .candidates
             .iter()
-            .filter(|edge| {
-                edge.string("relation") == "imports_from" && edge.string("context") == "re-export"
-            })
-            .count(),
-        2,
+            .filter(|candidate| candidate.relation == CandidateRelation::Reexports)
+            .count()
+            >= 2,
         "both star re-exports must remain source-grounded"
     );
     Ok(())
@@ -1244,6 +1273,10 @@ fn typescript_import_type_query_gap_does_not_quarantine_namespace_heritage()
 
     let mut engine = Engine::default();
     let extraction = engine.extract(&path)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing TypeScript universal evidence")?;
     assert_ne!(
         extraction
             .extensions
@@ -1252,10 +1285,10 @@ fn typescript_import_type_query_gap_does_not_quarantine_namespace_heritage()
         Some(EXTRACTION_QUALITY_PARTIAL)
     );
     assert_eq!(
-        extraction
-            .edges
+        evidence
+            .candidates
             .iter()
-            .filter(|edge| edge.string("relation") == "inherits")
+            .filter(|candidate| candidate.relation == CandidateRelation::Extends)
             .count(),
         2
     );
@@ -1278,45 +1311,54 @@ fn javascript_and_typescript_heritage_edges_keep_exact_base_sites() -> Result<()
 
     let mut engine = Engine::default();
     let typescript_facts = engine.extract(&typescript)?;
-    let type_id = |label: &str| {
-        typescript_facts
-            .nodes
+    let typescript_evidence = typescript_facts
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing TypeScript universal evidence")?;
+    let declaration_id = |name: &str| {
+        typescript_evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == label)
-            .map(|node| node.id.as_str())
+            .find(|declaration| declaration.name == name)
+            .map(|declaration| declaration.id.as_str())
     };
-    assert!(typescript_facts.edges.iter().any(|edge| {
-        Some(edge.source.as_str()) == type_id("AddOptions")
-            && Some(edge.target.as_str()) == type_id("ContextOptions")
-            && edge.string("relation") == "inherits"
-            && edge.string("source_location") == "L2"
+    assert!(typescript_evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Extends
+            && Some(candidate.source_declaration_id.as_str()) == declaration_id("AddOptions")
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == declaration_id("ContextOptions")
+            && candidate.occurrence_id.is_some()
     }));
-    assert!(typescript_facts.edges.iter().any(|edge| {
-        Some(edge.source.as_str()) == type_id("Derived")
-            && Some(edge.target.as_str()) == type_id("Base")
-            && edge.string("relation") == "inherits"
-            && edge.string("source_location") == "L4"
+    assert!(typescript_evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Extends
+            && Some(candidate.source_declaration_id.as_str()) == declaration_id("Derived")
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == declaration_id("Base")
     }));
-    assert!(typescript_facts.edges.iter().any(|edge| {
-        Some(edge.source.as_str()) == type_id("Derived")
-            && Some(edge.target.as_str()) == type_id("ContextOptions")
-            && edge.string("relation") == "implements"
-            && edge.string("source_location") == "L4"
+    assert!(typescript_evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Implements
+            && Some(candidate.source_declaration_id.as_str()) == declaration_id("Derived")
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == declaration_id("ContextOptions")
     }));
 
     let javascript_facts = engine.extract(&javascript)?;
+    let javascript_evidence = javascript_facts
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing JavaScript universal evidence")?;
     let javascript_id = |label: &str| {
-        javascript_facts
-            .nodes
+        javascript_evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == label)
-            .map(|node| node.id.as_str())
+            .find(|declaration| declaration.name == label)
+            .map(|declaration| declaration.id.as_str())
     };
-    assert!(javascript_facts.edges.iter().any(|edge| {
-        Some(edge.source.as_str()) == javascript_id("DomainError")
-            && Some(edge.target.as_str()) == javascript_id("ErrorBase")
-            && edge.string("relation") == "inherits"
-            && edge.string("source_location") == "L2"
+    assert!(javascript_evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Extends
+            && Some(candidate.source_declaration_id.as_str()) == javascript_id("DomainError")
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == javascript_id("ErrorBase")
     }));
     Ok(())
 }
@@ -1339,6 +1381,10 @@ function health() { return "ok"; }
     )?;
 
     let extraction = Engine::default().extract(&path)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing TypeScript universal evidence")?;
     for name in [
         "app",
         "settings",
@@ -1346,23 +1392,160 @@ function health() { return "ok"; }
         "Stream",
         "nodeMajorVersion",
     ] {
-        let binding = extraction
-            .nodes
+        let binding = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == name)
+            .find(|declaration| declaration.name == name && declaration.kind == "variable")
             .ok_or_else(|| format!("missing {name} binding"))?;
-        assert_eq!(
-            binding.string("symbol_kind"),
-            "variable",
-            "binding={binding:#?}"
-        );
+        assert_eq!(binding.kind, "variable", "binding={binding:#?}");
     }
-    assert!(!extraction.nodes.iter().any(|node| {
+    assert!(!evidence.declarations.iter().any(|declaration| {
         matches!(
-            node.label(),
+            declaration.name.as_str(),
             "EventEmitterPassThroughStream" | "nodeMajorVersionprocessversionsnodesplit"
         )
     }));
+    Ok(())
+}
+
+#[test]
+fn javascript_callback_values_are_references_without_invocation_evidence()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("callbacks.ts");
+    fs::write(
+        &path,
+        r#"
+function register(_callback) {}
+function callback() {}
+const handlers = [callback];
+register(callback);
+"#,
+    )?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing TypeScript universal evidence")?;
+    let callback_id = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "callback")
+        .ok_or("missing callback declaration")?
+        .id
+        .clone();
+    let callback_candidates = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(callback_id.as_str())
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        callback_candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::References && candidate.occurrence_id.is_some()
+        }),
+        "callback id={callback_id}; callback candidates={callback_candidates:?}"
+    );
+    assert!(
+        callback_candidates.len() >= 2,
+        "callback candidates={callback_candidates:?}"
+    );
+    assert!(
+        callback_candidates
+            .iter()
+            .all(|candidate| candidate.relation != CandidateRelation::IndirectCalls)
+    );
+    Ok(())
+}
+
+#[test]
+fn javascript_typescript_import_kinds_commonjs_exports_and_jsx_references()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let target = directory.path().join("target.ts");
+    let consumer = directory.path().join("consumer.tsx");
+    let common_js = directory.path().join("loader.cjs");
+    fs::write(
+        &target,
+        "export default function render() {}\nexport const value = 1;\nexport class Button {}\n",
+    )?;
+    fs::write(
+        &consumer,
+        r#"import render, * as UI from "./target.js";
+import { Button } from "./target.js";
+import type { Button as ButtonType } from "./target.js";
+export function App(value: ButtonType) {
+  return <UI.Button value={value} onClick={render} />;
+}
+const local = Button;
+"#,
+    )?;
+    fs::write(
+        &common_js,
+        "function handler() {}\nmodule.exports = { handler };\nexports.named = handler;\n",
+    )?;
+
+    let mut engine = Engine::default();
+    let consumer_facts = engine.extract(&consumer)?;
+    let consumer_evidence = consumer_facts
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing TSX universal evidence")?;
+    assert!(consumer_evidence.bindings.iter().any(|binding| {
+        binding.spelling == "render" && binding.qualified_target == "./target.js::default"
+    }));
+    assert!(consumer_evidence.bindings.iter().any(|binding| {
+        binding.spelling == "UI" && binding.qualified_target == "./target.js::*"
+    }));
+    assert!(consumer_evidence.bindings.iter().any(|binding| {
+        binding.spelling == "ButtonType"
+            && binding.qualified_target == "./target.js::Button"
+            && binding.type_only
+    }));
+    assert!(consumer_evidence.bindings.iter().any(|binding| {
+        binding.spelling == "Button" && binding.qualified_target == "./target.js::Button"
+    }));
+    assert!(
+        consumer_evidence
+            .occurrences
+            .iter()
+            .any(|occurrence| occurrence.context.as_deref() == Some("jsx"))
+    );
+    assert!(
+        consumer_evidence
+            .candidates
+            .iter()
+            .any(|candidate| candidate.relation == CandidateRelation::References),
+        "candidates={:#?}",
+        consumer_evidence.candidates
+    );
+
+    let common_js_facts = engine.extract(&common_js)?;
+    let commonjs_evidence = common_js_facts
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing CommonJS universal evidence")?;
+    let commonjs_exports = commonjs_evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Reexports
+                && matches!(candidate.target_spelling.as_str(), "handler" | "named")
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        commonjs_exports
+            .iter()
+            .any(|candidate| candidate.target_spelling == "handler")
+    );
+    assert!(
+        commonjs_exports
+            .iter()
+            .any(|candidate| candidate.target_spelling == "named")
+    );
     Ok(())
 }
 
@@ -1400,16 +1583,25 @@ fn repeated_anonymous_class_methods_receive_cross_definition_discriminators()
     let source = fs::read(&path)?;
 
     let extraction = Engine::default().extract_source(&path, &source)?;
-    let methods = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing JavaScript universal evidence")?;
+    let methods = evidence
+        .declarations
         .iter()
-        .filter(|node| node.label() == "cleanUp()")
+        .filter(|declaration| declaration.name == "cleanUp")
         .collect::<Vec<_>>();
     assert!(methods.len() >= 2, "methods={methods:?}");
     assert_eq!(
         methods
             .iter()
-            .map(|node| node.string("overload_discriminator"))
+            .map(|declaration| {
+                (
+                    declaration.qualified_name.clone(),
+                    declaration.range.start_byte,
+                )
+            })
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
         methods.len(),

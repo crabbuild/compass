@@ -11,7 +11,7 @@ use super::model::{
     AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
     EvidenceDiagnostic, EvidenceRange, HierarchyConstraint, OccurrenceFact,
     ReceiverDispatchStrategy, RelationshipCandidate, ResolutionConstraint, ScopeFact,
-    SemanticEvidenceBatch, SemanticRole,
+    SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate_evidence};
 
@@ -48,11 +48,23 @@ impl EvidenceBuilder {
         source_file: impl Into<String>,
         limits: EvidenceLimits,
     ) -> Self {
+        Self::new_with_dialect(profile, producer, source_file, limits, None)
+    }
+
+    #[must_use]
+    pub fn new_with_dialect(
+        profile: &'static AdapterProfile,
+        producer: impl Into<String>,
+        source_file: impl Into<String>,
+        limits: EvidenceLimits,
+        dialect: Option<&str>,
+    ) -> Self {
         Self {
             batch: SemanticEvidenceBatch {
                 adapter: AdapterIdentity {
                     id: profile.id.to_owned(),
                     language: profile.language.to_owned(),
+                    dialect: dialect.map(str::to_owned),
                     version: profile.version,
                     evidence_schema: profile.evidence_schema.to_owned(),
                     profile: profile.profile,
@@ -94,6 +106,69 @@ impl EvidenceBuilder {
         )
     }
 
+    /// Add a declaration while retaining its source-level symbol space.
+    #[allow(clippy::too_many_arguments)]
+    pub fn declare_with_namespace(
+        &mut self,
+        kind: &str,
+        graph_node_id: &str,
+        name: &str,
+        qualified_name: &str,
+        module_or_package: Option<&str>,
+        scope_id: Option<&str>,
+        namespace: Option<SymbolNamespace>,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
+        self.declare_with_metadata_and_namespace(
+            kind,
+            graph_node_id,
+            name,
+            qualified_name,
+            module_or_package,
+            scope_id,
+            range,
+            namespace,
+            DeclarationMetadata::default(),
+        )
+    }
+
+    /// Add a declaration with a bounded source-level signature fragment.
+    ///
+    /// Candidate adapters use this for type-shape facts that the shared
+    /// resolver can consume without inventing a target from a terminal name.
+    /// Keeping the entry point crate-private avoids expanding the public
+    /// builder surface while allowing adapters implemented in sibling
+    /// modules to publish the existing, versioned `signature` field.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn declare_with_signature(
+        &mut self,
+        kind: &str,
+        graph_node_id: &str,
+        name: &str,
+        qualified_name: &str,
+        module_or_package: Option<&str>,
+        scope_id: Option<&str>,
+        namespace: Option<SymbolNamespace>,
+        signature: Option<&str>,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
+        let metadata = DeclarationMetadata {
+            signature: signature.map(str::to_owned),
+            ..DeclarationMetadata::default()
+        };
+        self.declare_with_metadata_and_namespace(
+            kind,
+            graph_node_id,
+            name,
+            qualified_name,
+            module_or_package,
+            scope_id,
+            range,
+            namespace,
+            metadata,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn declare_with_metadata(
         &mut self,
@@ -106,24 +181,52 @@ impl EvidenceBuilder {
         range: EvidenceRange,
         metadata: DeclarationMetadata,
     ) -> Result<String, EvidenceError> {
+        self.declare_with_metadata_and_namespace(
+            kind,
+            graph_node_id,
+            name,
+            qualified_name,
+            module_or_package,
+            scope_id,
+            range,
+            None,
+            metadata,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn declare_with_metadata_and_namespace(
+        &mut self,
+        kind: &str,
+        graph_node_id: &str,
+        name: &str,
+        qualified_name: &str,
+        module_or_package: Option<&str>,
+        scope_id: Option<&str>,
+        range: EvidenceRange,
+        namespace: Option<SymbolNamespace>,
+        metadata: DeclarationMetadata,
+    ) -> Result<String, EvidenceError> {
         ensure_capacity(
             "declarations",
             self.batch.declarations.len(),
             self.limits.declarations,
         )?;
-        let id = self.stable_id(
-            "declaration",
-            &[
-                kind,
-                graph_node_id,
-                name,
-                qualified_name,
-                module_or_package.unwrap_or_default(),
-                scope_id.unwrap_or_default(),
-                &range.start_byte.to_string(),
-                &range.end_byte.to_string(),
-            ],
-        );
+        let start_byte = range.start_byte.to_string();
+        let end_byte = range.end_byte.to_string();
+        let mut identity = vec![
+            kind,
+            graph_node_id,
+            name,
+            qualified_name,
+            module_or_package.unwrap_or_default(),
+            scope_id.unwrap_or_default(),
+        ];
+        if namespace.is_some() {
+            identity.push(symbol_namespace_name(namespace));
+        }
+        identity.extend([start_byte.as_str(), end_byte.as_str()]);
+        let id = self.stable_id("declaration", &identity);
         self.batch.declarations.push(DeclarationFact {
             id: id.clone(),
             language: self.batch.adapter.language.clone(),
@@ -131,6 +234,7 @@ impl EvidenceBuilder {
             kind: kind.to_owned(),
             name: name.to_owned(),
             qualified_name: qualified_name.to_owned(),
+            namespace,
             module_or_package: module_or_package.map(str::to_owned),
             scope_id: scope_id.map(str::to_owned),
             signature: metadata.signature,
@@ -141,6 +245,7 @@ impl EvidenceBuilder {
             signature_hash: metadata.signature_hash,
             implementation_hash: metadata.implementation_hash,
             source_hash: metadata.source_hash,
+            definition_start_byte: None,
             range,
         });
         Ok(id)
@@ -199,6 +304,35 @@ impl EvidenceBuilder {
         )
     }
 
+    /// Add an import/re-export binding with explicit symbol-space identity.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bind_with_identity(
+        &mut self,
+        kind: BindingKind,
+        spelling: &str,
+        qualified_target: &str,
+        target_declaration_id: Option<&str>,
+        scope_id: Option<&str>,
+        namespace: Option<SymbolNamespace>,
+        type_only: bool,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
+        self.bind_with_output_index_and_identity(
+            kind,
+            spelling,
+            qualified_target,
+            target_declaration_id,
+            scope_id,
+            None,
+            None,
+            None,
+            None,
+            namespace,
+            type_only,
+            range,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn bind_chained_call_result(
         &mut self,
@@ -238,30 +372,69 @@ impl EvidenceBuilder {
         fallback_binding_id: Option<&str>,
         range: EvidenceRange,
     ) -> Result<String, EvidenceError> {
+        self.bind_with_output_index_and_identity(
+            kind,
+            spelling,
+            qualified_target,
+            target_declaration_id,
+            scope_id,
+            output_index,
+            result_type_qualified_name,
+            receiver_binding_id,
+            fallback_binding_id,
+            None,
+            false,
+            range,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bind_with_output_index_and_identity(
+        &mut self,
+        kind: BindingKind,
+        spelling: &str,
+        qualified_target: &str,
+        target_declaration_id: Option<&str>,
+        scope_id: Option<&str>,
+        output_index: Option<u32>,
+        result_type_qualified_name: Option<&str>,
+        receiver_binding_id: Option<&str>,
+        fallback_binding_id: Option<&str>,
+        namespace: Option<SymbolNamespace>,
+        type_only: bool,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
         ensure_capacity("bindings", self.batch.bindings.len(), self.limits.bindings)?;
         let output_index_text = output_index.map(|index| index.to_string());
-        let id = self.stable_id(
-            "binding",
-            &[
-                binding_kind_name(kind),
-                spelling,
-                qualified_target,
-                target_declaration_id.unwrap_or_default(),
-                scope_id.unwrap_or_default(),
-                output_index_text.as_deref().unwrap_or_default(),
-                result_type_qualified_name.unwrap_or_default(),
-                receiver_binding_id.unwrap_or_default(),
-                fallback_binding_id.unwrap_or_default(),
-                &range.start_byte.to_string(),
-                &range.end_byte.to_string(),
-            ],
-        );
+        let start_byte = range.start_byte.to_string();
+        let end_byte = range.end_byte.to_string();
+        let mut identity = vec![
+            binding_kind_name(kind),
+            spelling,
+            qualified_target,
+            target_declaration_id.unwrap_or_default(),
+            scope_id.unwrap_or_default(),
+            output_index_text.as_deref().unwrap_or_default(),
+            result_type_qualified_name.unwrap_or_default(),
+            receiver_binding_id.unwrap_or_default(),
+            fallback_binding_id.unwrap_or_default(),
+        ];
+        if namespace.is_some() {
+            identity.push(symbol_namespace_name(namespace));
+        }
+        if type_only {
+            identity.push("type_only");
+        }
+        identity.extend([start_byte.as_str(), end_byte.as_str()]);
+        let id = self.stable_id("binding", &identity);
         self.batch.bindings.push(BindingFact {
             id: id.clone(),
             language: self.batch.adapter.language.clone(),
             kind,
             spelling: spelling.to_owned(),
             qualified_target: qualified_target.to_owned(),
+            namespace,
+            type_only,
             target_declaration_id: target_declaration_id.map(str::to_owned),
             scope_id: scope_id.map(str::to_owned),
             output_index,
@@ -549,6 +722,15 @@ pub(crate) fn extract_tree_evidence(
     root: Node<'_>,
     profile: &'static AdapterProfile,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
+    if matches!(profile.language, "javascript" | "typescript") {
+        return super::typescript::extract_candidate_tree_evidence(
+            path,
+            source_file,
+            source,
+            root,
+            profile.language,
+        );
+    }
     let mut state = DirectAdapterState::new(path, source_file, source, root, profile);
     state.add_file(root)?;
     if root.end_byte() == root.start_byte() {
@@ -8466,7 +8648,7 @@ fn rust_use_binding_range(
     )
 }
 
-fn range_for_byte_span(
+pub(super) fn range_for_byte_span(
     source_file: &str,
     source: &[u8],
     start_byte: usize,
@@ -9994,6 +10176,16 @@ const fn binding_kind_name(kind: BindingKind) -> &'static str {
         BindingKind::CallResult => "call_result",
         BindingKind::Package => "package",
         BindingKind::Member => "member",
+    }
+}
+
+const fn symbol_namespace_name(namespace: Option<SymbolNamespace>) -> &'static str {
+    match namespace {
+        None => "",
+        Some(SymbolNamespace::Value) => "value",
+        Some(SymbolNamespace::Type) => "type",
+        Some(SymbolNamespace::Namespace) => "namespace",
+        Some(SymbolNamespace::ValueAndType) => "value_and_type",
     }
 }
 

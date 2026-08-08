@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from contextlib import closing
+import json
 from pathlib import Path
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 
@@ -12,12 +14,21 @@ from benchmarks.performance.compass.correctness import (
     index_graph,
 )
 from benchmarks.performance.compass.occurrences import (
+    _typescript_payload_from_jsonl,
+    _typescript_inventory_from_payload,
     independent_source_constructs,
     independent_source_inventory,
+    source_construct_inventory_sha256,
 )
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
+RESOLUTION_ORACLE = (
+    Path(__file__).resolve().parents[1] / "oracles" / "typescript-resolution-oracle.mjs"
+)
+SOURCE_ORACLE = (
+    Path(__file__).resolve().parents[1] / "oracles" / "typescript-source-oracle.mjs"
+)
 
 
 def compare_documents(
@@ -50,6 +61,661 @@ class CorrectnessTests(unittest.TestCase):
         database = sqlite3.connect(":memory:")
         self.addCleanup(database.close)
         return database
+
+    def test_typescript_oracle_payload_preserves_unicode_byte_ranges(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "src" / "main.ts"
+            source.parent.mkdir()
+            contents = "const café = 1;\nrun(café);\n"
+            source.write_text(contents, encoding="utf-8")
+            start = len("const ".encode("utf-8"))
+            end = start + len("café".encode("utf-8"))
+            payload = {
+                "schema": "compass.typescript-source-oracle/1",
+                "provider": "typescript_compiler_api_5_9_3",
+                "metadata": {
+                    "compilerVersion": "5.9.3",
+                    "scriptSha256": "a" * 64,
+                    "nodeVersion": "v22.0.0",
+                },
+                "scannedFiles": 1,
+                "parsedFiles": 1,
+                "rejectedFiles": [],
+                "constructs": [
+                    {
+                        "sourceFile": "src/main.ts",
+                        "relation": "references",
+                        "capability": "references",
+                        "ownerQualifiedName": "src.main",
+                        "targetSpelling": "café",
+                        "qualifier": None,
+                        "startByte": start,
+                        "endByte": end,
+                        "startLine": 1,
+                    }
+                ],
+            }
+            inventory = _typescript_inventory_from_payload(payload, root)
+            source_bytes = source.read_bytes()
+
+        self.assertEqual(inventory.scanned_files, 1)
+        self.assertEqual(inventory.parsed_files, 1)
+        self.assertEqual(inventory.provider_metadata[0], ("compilerVersion", "5.9.3"))
+        construct = inventory.constructs[0]
+        self.assertEqual(
+            source_bytes[construct.start_byte : construct.end_byte],
+            "café".encode(),
+        )
+        self.assertEqual(
+            source_construct_inventory_sha256("typescript", inventory),
+            source_construct_inventory_sha256("typescript", inventory),
+        )
+
+    def test_typescript_oracle_payload_rejects_incomplete_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, "coverage does not account"):
+                _typescript_inventory_from_payload(
+                    {
+                        "schema": "compass.typescript-source-oracle/1",
+                        "provider": "typescript_compiler_api_5_9_3",
+                        "metadata": {
+                            "compilerVersion": "5.9.3",
+                            "scriptSha256": "a" * 64,
+                        },
+                        "scannedFiles": 2,
+                        "parsedFiles": 1,
+                        "rejectedFiles": [],
+                        "constructs": [],
+                    },
+                    root,
+                )
+
+    def test_typescript_resolution_oracle_is_pinned_and_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "node_modules" / "@example" / "pkg").mkdir(parents=True)
+            (root / "tsconfig.json").write_text(
+                '{"compilerOptions":{"module":"NodeNext",'
+                '"moduleResolution":"NodeNext"},"include":["src/**/*"]}',
+                encoding="utf-8",
+            )
+            (root / "node_modules" / "@example" / "pkg" / "package.json").write_text(
+                '{"name":"@example/pkg","exports":{".":{'
+                '"import":"./import.d.ts","require":"./require.d.cts"}}}',
+                encoding="utf-8",
+            )
+            (root / "node_modules" / "@example" / "pkg" / "import.d.ts").write_text(
+                "export declare const value: string;\n",
+                encoding="utf-8",
+            )
+            (root / "node_modules" / "@example" / "pkg" / "require.d.cts").write_text(
+                "export declare const value: string;\n",
+                encoding="utf-8",
+            )
+            (root / "src" / "importer.mts").write_text(
+                'const café = "🙂";\n'
+                'import { value } from "@example/pkg";\n'
+                'export const imported = value + café.length;\n',
+                encoding="utf-8",
+            )
+            (root / "src" / "consumer.cts").write_text(
+                'import packageValue = require("@example/pkg");\n'
+                'const { value } = require("@example/pkg");\n'
+                'export = packageValue || value;\n',
+                encoding="utf-8",
+            )
+            importer_source = (root / "src" / "importer.mts").read_bytes()
+            command = ("node", str(RESOLUTION_ORACLE), "--root", str(root))
+            first = subprocess.run(
+                command,
+                cwd=RESOLUTION_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            second = subprocess.run(
+                command,
+                cwd=RESOLUTION_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(first.stdout, second.stdout)
+            payload = json.loads(first.stdout)
+            trace = subprocess.run(
+                (
+                    str(RESOLUTION_ORACLE.parents[3] / "node_modules" / ".bin" / "tsc"),
+                    "--project",
+                    str(root / "tsconfig.json"),
+                    "--traceResolution",
+                    "--noEmit",
+                ),
+                cwd=RESOLUTION_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            trace_output = f"{trace.stdout}\n{trace.stderr}"
+            self.assertIn("Resolving module '@example/pkg'", trace_output)
+            self.assertIn("import.d.ts", trace_output)
+            self.assertIn("require.d.cts", trace_output)
+
+        self.assertEqual(payload["schema"], "compass.typescript-resolution-oracle/1")
+        self.assertEqual(payload["provider"], "typescript_compiler_api_5_9_3")
+        self.assertEqual(payload["scannedFiles"], 2)
+        self.assertEqual(payload["parsedFiles"], 2)
+        self.assertEqual(payload["rejectedFiles"], [])
+        resolutions = {
+            (item["sourceFile"], item["context"]): item for item in payload["resolutions"]
+        }
+        self.assertEqual(
+            resolutions[("src/importer.mts", "import")]["targetFile"],
+            "node_modules/@example/pkg/import.d.ts",
+        )
+        importer_resolution = resolutions[("src/importer.mts", "import")]
+        self.assertEqual(
+            importer_source[
+                importer_resolution["startByte"] : importer_resolution["endByte"]
+            ],
+            b'"@example/pkg"',
+        )
+        self.assertEqual(importer_resolution["startLine"], 2)
+        self.assertEqual(
+            resolutions[("src/consumer.cts", "require")]["targetFile"],
+            "node_modules/@example/pkg/require.d.cts",
+        )
+        self.assertTrue(payload["metadata"]["configDigest"])
+        self.assertRegex(payload["metadata"]["sourceDigest"], r"^[0-9a-f]{64}$")
+
+    def test_typescript_source_oracle_honors_project_boundaries_and_references(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "packages" / "lib" / "src").mkdir(parents=True)
+            (root / "tsconfig.base.json").write_text(
+                json.dumps({"compilerOptions": {"strict": True}}),
+                encoding="utf-8",
+            )
+            (root / "tsconfig.json").write_text(
+                json.dumps(
+                    {
+                        "compilerOptions": {
+                            "composite": True,
+                            "module": "NodeNext",
+                            "moduleResolution": "NodeNext",
+                            "target": "ES2022",
+                        },
+                        "include": ["src/**/*"],
+                        "exclude": ["src/excluded.ts"],
+                        "references": [{"path": "packages/lib"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "packages" / "lib" / "tsconfig.json").write_text(
+                json.dumps(
+                    {
+                        "compilerOptions": {"composite": True, "target": "ES2022"},
+                        "include": ["src/**/*"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "src" / "main.ts").write_text(
+                "const café = '🙂';\nrun(café);\n",
+                encoding="utf-8",
+            )
+            (root / "src" / "bad.ts").write_text("const = ;\n", encoding="utf-8")
+            (root / "src" / "excluded.ts").write_text("ignored();\n", encoding="utf-8")
+            (root / "outside.ts").write_text("notInAProject();\n", encoding="utf-8")
+            (root / "packages" / "lib" / "src" / "lib.ts").write_text(
+                "export const library = 1;\n",
+                encoding="utf-8",
+            )
+            command = ("node", str(SOURCE_ORACLE), "--root", str(root))
+            first = subprocess.run(
+                command,
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            second = subprocess.run(
+                command,
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(first.stdout, second.stdout)
+            payload = json.loads(first.stdout)
+            source_bytes = (root / "src" / "main.ts").read_bytes()
+
+        self.assertEqual(payload["scannedFiles"], 3)
+        self.assertEqual(payload["parsedFiles"], 2)
+        self.assertEqual(payload["rejectedFiles"], ["src/bad.ts"])
+        self.assertEqual(payload["metadata"]["projectMode"], "project")
+        self.assertRegex(payload["metadata"]["configDigest"], r"^[0-9a-f]{64}$")
+        self.assertRegex(payload["metadata"]["sourceDigest"], r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            [project["configFile"] for project in payload["projects"]],
+            ["packages/lib/tsconfig.json", "tsconfig.json"],
+        )
+        self.assertEqual(
+            payload["projects"][1]["references"], ["packages/lib/tsconfig.json"]
+        )
+        self.assertEqual(
+            sorted(file_name for project in payload["projects"] for file_name in project["files"]),
+            ["packages/lib/src/lib.ts", "src/bad.ts", "src/main.ts"],
+        )
+        self.assertTrue(
+            any(diagnostic["file"] == "src/bad.ts" for diagnostic in payload["diagnostics"])
+        )
+        self.assertFalse(any(construct["sourceFile"] == "outside.ts" for construct in payload["constructs"]))
+        cafe_construct = next(
+            construct
+            for construct in payload["constructs"]
+            if construct["sourceFile"] == "src/main.ts"
+            and construct["targetSpelling"] == "café"
+        )
+        self.assertEqual(
+            source_bytes[cafe_construct["startByte"] : cafe_construct["endByte"]],
+            "café".encode(),
+        )
+
+    def test_typescript_source_oracle_jsonl_is_complete_and_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "src" / "main.ts").write_text(
+                'export function run(café: string): string { return café; }\n'
+                'const result = run(café);\n',
+                encoding="utf-8",
+            )
+            (root / "src" / "bad.ts").write_text("const = ;\n", encoding="utf-8")
+            command = ("node", str(SOURCE_ORACLE), "--root", str(root), "--jsonl")
+            first = subprocess.run(
+                command,
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            second = subprocess.run(
+                command,
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            self.assertEqual(first.returncode, 0, first.stderr.decode())
+            self.assertEqual(second.returncode, 0, second.stderr.decode())
+            self.assertEqual(first.stdout, second.stdout)
+            lines = first.stdout.splitlines()
+            self.assertGreaterEqual(len(lines), 2)
+            self.assertEqual(json.loads(lines[0])["recordType"], "header")
+            self.assertEqual(json.loads(lines[-1])["recordType"], "footer")
+            payload = _typescript_payload_from_jsonl(first.stdout)
+            inventory = _typescript_inventory_from_payload(payload, root)
+            provider_inventory = independent_source_inventory(root, "typescript")
+            source_bytes = (root / "src" / "main.ts").read_bytes()
+            tampered_records = [json.loads(line) for line in lines]
+            tampered_records[-1]["callCount"] += 1
+            with self.assertRaisesRegex(RuntimeError, "footer count callCount"):
+                _typescript_payload_from_jsonl(
+                    "\n".join(json.dumps(record) for record in tampered_records).encode()
+                )
+            payload["scopes"][1]["parentScopeId"] = "missing-scope"
+            with self.assertRaisesRegex(RuntimeError, "scope parent"):
+                _typescript_inventory_from_payload(payload, root)
+
+        self.assertEqual(inventory.scanned_files, 2)
+        self.assertEqual(inventory.parsed_files, 1)
+        self.assertEqual(inventory.rejected_files, ("src/bad.ts",))
+        self.assertEqual(provider_inventory, inventory)
+        header = json.loads(lines[0])
+        footer = json.loads(lines[-1])
+        self.assertEqual(footer["constructCount"], len(inventory.constructs))
+        self.assertEqual(footer["scannedFiles"], inventory.scanned_files)
+        self.assertEqual(header["scopeCount"], len(payload["scopes"]))
+        self.assertEqual(header["declarationCount"], len(payload["declarations"]))
+        self.assertEqual(header["callCount"], len(payload["calls"]))
+        self.assertGreaterEqual(len(payload["scopes"]), 2)
+        self.assertTrue(any(scope["kind"] == "module" for scope in payload["scopes"]))
+        run = next(
+            declaration
+            for declaration in payload["declarations"]
+            if declaration["name"] == "run"
+        )
+        self.assertEqual(run["kind"], "function")
+        self.assertEqual(run["parameterCount"], 1)
+        cafe = next(
+            declaration
+            for declaration in payload["declarations"]
+            if declaration["name"] == "café"
+        )
+        self.assertEqual(source_bytes[cafe["startByte"] : cafe["endByte"]], "café".encode())
+        call = next(call for call in payload["calls"] if call["targetSpelling"] == "run")
+        self.assertEqual(source_bytes[call["startByte"] : call["endByte"]], b"run")
+        self.assertEqual(
+            source_bytes[call["callStartByte"] : call["callEndByte"]],
+            "run(café)".encode(),
+        )
+
+    def test_typescript_source_oracle_jsonl_exposes_typed_relationship_records(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "src" / "base.ts").write_text(
+                "export default class Default { base(): void {} }\n"
+                "export const imported = () => 1;\n"
+                "export interface Runnable { run(): void }\n",
+                encoding="utf-8",
+            )
+            (root / "src" / "main.tsx").write_text(
+                'import Default, { imported, type Runnable as RunType } from "./base";\n'
+                'export { imported as exported };\n'
+                'export * from "./base";\n'
+                'class Child extends Default implements RunType {\n'
+                '  field = imported;\n'
+                '  run(): void {\n'
+                '    const obj = { literal: imported };\n'
+                '    obj.literal = imported;\n'
+                '    obj["literal"];\n'
+                '    new Default();\n'
+                '    imported();\n'
+                '    return <Default />;\n'
+                '  }\n'
+                '}\n'
+                'export default Child;\n',
+                encoding="utf-8",
+            )
+            command = ("node", str(SOURCE_ORACLE), "--root", str(root), "--jsonl")
+            result = subprocess.run(
+                command,
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            payload = _typescript_payload_from_jsonl(result.stdout)
+            _typescript_inventory_from_payload(payload, root)
+            source_sizes = {
+                file_name: (root / file_name).stat().st_size
+                for file_name in {record["sourceFile"] for field in ("imports", "reexports", "constructions", "bases", "members", "references") for record in payload[field]}
+            }
+        self.assertGreaterEqual(len(payload["imports"]), 3)
+        self.assertIn("named", {item["kind"] for item in payload["imports"]})
+        self.assertIn("default", {item["kind"] for item in payload["imports"]})
+        self.assertTrue(any(item["isTypeOnly"] for item in payload["imports"]))
+        self.assertGreaterEqual(len(payload["reexports"]), 3)
+        self.assertIn("star", {item["kind"] for item in payload["reexports"]})
+        self.assertIn("default", {item["kind"] for item in payload["reexports"]})
+        self.assertTrue(payload["constructions"])
+        self.assertTrue(all(item["relation"] == "instantiates" for item in payload["constructions"]))
+        self.assertIn("extends", {item["relation"] for item in payload["bases"]})
+        self.assertIn("implements", {item["relation"] for item in payload["bases"]})
+        self.assertIn("property", {item["kind"] for item in payload["members"]})
+        self.assertIn("computed_literal", {item["kind"] for item in payload["members"]})
+        self.assertIn("write", {item["accessKind"] for item in payload["members"]})
+        self.assertIn("jsx", {item["kind"] for item in payload["references"]})
+        for field in (
+            "imports",
+            "reexports",
+            "constructions",
+            "bases",
+            "members",
+            "references",
+        ):
+            for record in payload[field]:
+                source_size = source_sizes[record["sourceFile"]]
+                self.assertLessEqual(record["endByte"], source_size)
+                if "statementEndByte" in record:
+                    self.assertLessEqual(record["statementEndByte"], source_size)
+                if "callEndByte" in record:
+                    self.assertLessEqual(record["callEndByte"], source_size)
+
+    def test_typescript_source_oracle_records_import_type_queries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_path = root / "src" / "types.ts"
+            source_path.parent.mkdir()
+            source = (
+                'type Item = (typeof import("./items").items)[number];\n'
+                'type Plain = import("./plain").Item;\n'
+            )
+            source_path.write_text(source, encoding="utf-8")
+            (root / "src" / "runtime.js").write_text(
+                'const probe = typeof import("./runtime");\n', encoding="utf-8"
+            )
+            result = subprocess.run(
+                ("node", str(SOURCE_ORACLE), "--root", str(root), "--jsonl"),
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            payload = _typescript_payload_from_jsonl(result.stdout)
+            imports = [item for item in payload["imports"] if item["kind"] == "import_type"]
+            self.assertEqual(len(imports), 2)
+            record = next(item for item in imports if item["moduleSpecifier"] == "./items")
+            self.assertEqual(record["sourceFile"], "src/types.ts")
+            self.assertTrue(record["isTypeOnly"])
+            start = record["startByte"]
+            end = record["endByte"]
+            self.assertEqual(source.encode("utf-8")[start:end], b'"./items"')
+            plain = next(item for item in imports if item["moduleSpecifier"] == "./plain")
+            self.assertFalse(plain["isTypeOnly"])
+            dynamic = [
+                item
+                for item in payload["imports"]
+                if item["kind"] == "dynamic" and item["sourceFile"] == "src/runtime.js"
+            ]
+            self.assertEqual(len(dynamic), 1)
+
+    def test_typescript_source_oracle_records_decorator_occurrences_without_factory_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            source = (
+                'function nested(): string { return "ok"; }\n'
+                '@Controller({ path: nested() })\n'
+                'class ControllerHost {}\n'
+                '@unknownFactory()\n'
+                'class DynamicHost {}\n'
+            )
+            (root / "src" / "decorators.ts").write_text(source, encoding="utf-8")
+            result = subprocess.run(
+                ("node", str(SOURCE_ORACLE), "--root", str(root), "--jsonl"),
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            payload = _typescript_payload_from_jsonl(result.stdout)
+
+        decorators = [
+            construct
+            for construct in payload["constructs"]
+            if construct["relation"] == "decorates"
+        ]
+        self.assertEqual(len(decorators), 2)
+        self.assertEqual({item["capability"] for item in decorators}, {"decorators"})
+        self.assertEqual(
+            {item["targetSpelling"] for item in decorators},
+            {"Controller", "unknownFactory"},
+        )
+        source_bytes = source.encode("utf-8")
+        controller = next(item for item in decorators if item["targetSpelling"] == "Controller")
+        self.assertEqual(
+            source_bytes[controller["startByte"] : controller["endByte"]],
+            b"Controller",
+        )
+        self.assertFalse(
+            any(
+                call["targetSpelling"] in {"Controller", "unknownFactory"}
+                for call in payload["calls"]
+            )
+        )
+        self.assertTrue(any(call["targetSpelling"] == "nested" for call in payload["calls"]))
+
+    def test_typescript_source_oracle_records_jsx_value_and_spread_references(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = (
+                'const title = "Hello";\n'
+                'const props = { title };\n'
+                'function handle(label: string): void {}\n'
+                'export function View(label: string) {\n'
+                '  return <Button title={title} onClick={() => handle(label)} '
+                'data={user.name} {...props}>{title}</Button>;\n'
+                '}\n'
+            )
+            (root / "view.tsx").write_text(source, encoding="utf-8")
+            result = subprocess.run(
+                ("node", str(SOURCE_ORACLE), "--root", str(root), "--jsonl"),
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            payload = _typescript_payload_from_jsonl(result.stdout)
+
+        jsx_values = [
+            construct
+            for construct in payload["constructs"]
+            if construct["relation"] == "references"
+            and construct["capability"] == "jsx_values"
+        ]
+        self.assertGreaterEqual(len(jsx_values), 5)
+        self.assertEqual(
+            {construct["targetSpelling"] for construct in jsx_values},
+            {"title", "label", "props", "user"},
+        )
+        self.assertEqual(
+            {reference["kind"] for reference in payload["references"] if reference["kind"] in {
+                "jsx_value", "jsx_spread", "jsx_child"
+            }},
+            {"jsx_value", "jsx_spread", "jsx_child"},
+        )
+        source_bytes = source.encode("utf-8")
+        for construct in jsx_values:
+            self.assertEqual(
+                source_bytes[construct["startByte"] : construct["endByte"]],
+                construct["targetSpelling"].encode("utf-8"),
+            )
+        self.assertFalse(any(construct["targetSpelling"] == "onClick" for construct in jsx_values))
+
+    def test_typescript_source_oracle_preserves_using_resource_declarations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = (
+                "declare function acquire(): Disposable;\n"
+                "declare function acquireAsync(): Promise<Disposable>;\n"
+                "function run() {\n"
+                "  using resource = acquire();\n"
+                "  await using asyncResource = acquireAsync();\n"
+                "  resource.close();\n"
+                "  asyncResource.close();\n"
+                "}\n"
+            )
+            (root / "resources.ts").write_text(source, encoding="utf-8")
+            result = subprocess.run(
+                ("node", str(SOURCE_ORACLE), "--root", str(root), "--jsonl"),
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            payload = _typescript_payload_from_jsonl(result.stdout)
+
+        resources = {
+            declaration["name"]
+            for declaration in payload["declarations"]
+            if declaration["name"] in {"resource", "asyncResource"}
+        }
+        self.assertEqual(resources, {"resource", "asyncResource"})
+        self.assertTrue(
+            all(
+                call["targetSpelling"] in {"acquire", "acquireAsync", "close"}
+                for call in payload["calls"]
+            )
+        )
+        self.assertIn("acquire", {call["targetSpelling"] for call in payload["calls"]})
+        self.assertIn("acquireAsync", {call["targetSpelling"] for call in payload["calls"]})
+
+    def test_typescript_source_oracle_reports_invalid_config_and_follows_cycles_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "tsconfig.json").write_text("{ invalid", encoding="utf-8")
+            (root / "src" / "main.ts").write_text("run();\n", encoding="utf-8")
+            fallback = subprocess.run(
+                ("node", str(SOURCE_ORACLE), "--root", str(root)),
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(fallback.returncode, 0, fallback.stderr)
+            fallback_payload = json.loads(fallback.stdout)
+            self.assertEqual(fallback_payload["metadata"]["projectMode"], "fallback")
+            self.assertEqual(fallback_payload["scannedFiles"], 1)
+            self.assertEqual(fallback_payload["parsedFiles"], 1)
+            self.assertEqual(
+                [diagnostic["file"] for diagnostic in fallback_payload["diagnostics"]],
+                ["tsconfig.json"],
+            )
+
+            (root / "tsconfig.json").unlink()
+            (root / "a").mkdir()
+            (root / "b").mkdir()
+            (root / "a" / "tsconfig.json").write_text(
+                json.dumps(
+                    {
+                        "compilerOptions": {"composite": True},
+                        "include": ["src/**/*"],
+                        "references": [{"path": "../b"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "b" / "tsconfig.json").write_text(
+                json.dumps(
+                    {
+                        "compilerOptions": {"composite": True},
+                        "include": ["src/**/*"],
+                        "references": [{"path": "../a"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "a" / "src").mkdir()
+            (root / "b" / "src").mkdir()
+            (root / "a" / "src" / "a.ts").write_text("export const a = 1;\n", encoding="utf-8")
+            (root / "b" / "src" / "b.ts").write_text("export const b = 1;\n", encoding="utf-8")
+            cycled = subprocess.run(
+                ("node", str(SOURCE_ORACLE), "--root", str(root)),
+                cwd=SOURCE_ORACLE.parents[3],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(cycled.returncode, 0, cycled.stderr)
+            cycled_payload = json.loads(cycled.stdout)
+
+        self.assertEqual(cycled_payload["metadata"]["projectMode"], "project")
+        self.assertEqual(
+            [project["configFile"] for project in cycled_payload["projects"]],
+            ["a/tsconfig.json", "b/tsconfig.json"],
+        )
+        self.assertEqual(cycled_payload["scannedFiles"], 2)
+        self.assertEqual(cycled_payload["parsedFiles"], 2)
 
     def test_compass_superset_passes_shared_fact_comparison(self) -> None:
         database = self.database()

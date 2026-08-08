@@ -75,16 +75,18 @@ Candidate or hard-cut status does not mean compiler-grade completeness. It
 states which publication architecture is active and which qualification has
 been completed.
 
-### Established TypeScript and JavaScript paths
+### TypeScript and JavaScript universal candidates
 
-TypeScript, TSX, JavaScript, and JSX still use established extraction and
-language-specific collection resolution. They are not entries in the
-hard-cut universal adapter registry.
+TypeScript, TSX, JavaScript, and JSX now use the registered universal candidate
+route. TypeScript and JavaScript retain distinct adapter identities while
+sharing one bounded source-grounded ECMAScript emitter; TSX is the TypeScript
+parser dialect. Their replaced direct graph publisher is not a fallback.
+Candidate status means the universal route is active while the complete
+qualification matrix and any compiler-backed enrichment remain future work.
 
-Compiler enrichment must not create a permanent third route beside their
-established and future universal paths. TypeScript and JavaScript must first
-complete an independently qualified universal hard cut, or compiler facts
-must remain Program-only until that cutover occurs.
+Compiler enrichment must not create a permanent third graph route beside the
+candidate path. Until a compiler provider is independently bounded and
+qualified, compiler facts remain Program-only.
 
 ### Program and SCIP support
 
@@ -591,9 +593,10 @@ under the same process and network bounds as the Go toolchain.
 
 ### TypeScript
 
-TypeScript and TSX must first hard-cut to version-1 universal evidence and
-remove replaced publication/resolution branches. Until then, analyzer facts
-remain Program-only.
+TypeScript and TSX use version-1 universal candidate evidence and have their
+replaced publication/resolution branches removed. Promotion to a complete
+adapter still requires the conformance and corpus gates below; analyzer facts
+remain Program-only until a separate provider is qualified.
 
 Use verified `scip-typescript` first. Build a pinned TypeScript Compiler API
 bridge for controlled batch analysis and BuilderProgram incrementality.
@@ -622,8 +625,10 @@ callbacks, properties, JSX, and external declarations.
 
 ### JavaScript
 
-JavaScript/JSX/MJS/CJS need a version-1 universal profile or documented shared
-ECMAScript profile and qualified hard cut before analyzer graph projection.
+JavaScript/JSX/MJS/CJS use the version-1 JavaScript universal candidate and
+share the TypeScript emitter with distinct language policy and identity.
+Analyzer graph projection remains disabled until a provider is separately
+qualified.
 
 Share the TypeScript tool/runtime but retain distinct JavaScript policy for
 `allowJs`, `checkJs`, JSDoc, declarations, CJS/ESM, and package resolution.
@@ -779,14 +784,16 @@ unrealizable. Published realizations remain immutable.
 - No non-Java graph relationship changes.
 - Pre-generated offline SCIP remains supported.
 
-### Phase 3: TypeScript and JavaScript universal hard cut
+### Phase 3: TypeScript and JavaScript universal completion
 
 **Direction**
 
-- Add honest version-1 TypeScript/TSX/JavaScript/JSX profiles.
-- Emit complete structural universal evidence.
-- Qualify against established fixtures and production corpora.
-- Remove replaced direct/member/module/re-export paths atomically.
+- Complete the version-1 TypeScript/TSX/JavaScript/JSX candidate conformance
+  matrix and corpus qualification.
+- Extend structural evidence only when each new relation has direct source
+  anchors, resolver coverage, and negative fixtures.
+- Remove any remaining candidate-era compatibility branch atomically when its
+  replacement is fully qualified.
 
 **Acceptance criteria**
 
@@ -933,8 +940,8 @@ unrealizable. Published realizations remain immutable.
 
 | Milestone | Python | Rust | Go | TypeScript | JavaScript | Java |
 | --- | --- | --- | --- | --- | --- | --- |
-| Native structural path | Available | Available | Available | Established | Established | Available |
-| Universal hard cut | Available | Available | Available | Required | Required | Available |
+| Native structural path | Available | Available | Available | Universal candidate | Universal candidate | Available |
+| Universal hard cut | Available | Available | Available | Candidate route; qualification ongoing | Candidate route; qualification ongoing | Available |
 | Offline SCIP ingestion | Generic | Generic | Generic | Generic | Generic | Calls projected |
 | Managed artifact runner | Planned | Planned | Not selected | Planned | Planned | Planned |
 | Native batch analyzer | Optional | Optional | Go types | Compiler API | Compiler API | JDT Core |
@@ -976,7 +983,8 @@ The integration is complete only when:
   remain visible;
 - meaning-affecting inputs participate in cache/history identity;
 - current, watch, and history workflows publish coherent artifacts;
-- TypeScript/JavaScript hard-cut before analyzer facts alter production graphs;
+- TypeScript/JavaScript completion before analyzer facts alter production
+  graphs;
 - cross-platform correctness, determinism, security, packaging, history, and
   performance gates pass per advertised profile; and
 - current behavior and planned phases remain distinguished across all public

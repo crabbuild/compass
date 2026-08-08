@@ -1,9 +1,10 @@
 # Universal semantic evidence
 
 Compass resolves source relationships through a language-neutral evidence
-contract. Python, Go, Rust, and Java use this contract in production. Other
-languages keep their existing extractors until a dedicated change removes the
-old algorithm and adds the universal adapter atomically.
+contract. Python, Go, Rust, and Java use this contract in production, and the
+TypeScript and JavaScript candidate adapters now use the same production route.
+The ECMAScript adapters remain candidates while their complete qualification
+matrix is finished; they do not retain a second direct graph publisher.
 
 This is a hard-cutover interface. It has no raw-fact translation layer, shadow
 mode, terminal-name fallback, or runtime dependency on Graphify.
@@ -17,12 +18,19 @@ the adapter actually emits. The batch contains six bounded collections:
 - `DeclarationFact` identifies a source-backed declaration and its existing
   graph node, kind, name, qualified name, optional module/package, lexical
   scope, signature, optional bounded canonical parameter-type vector, optional
-  complete-direct-base marker for Java types, and exact range.
+  complete-direct-base marker for Java types, and exact range. TypeScript and
+  JavaScript candidate evidence may additionally identify the declaration's
+  `namespace` as `value`, `type`, `namespace`, or `value_and_type`; legacy
+  adapters omit this optional field.
 - `ScopeFact` identifies a lexical scope, optional owning declaration, parent
   scope, and exact range.
 - `BindingFact` records an import, import alias, re-export, local alias,
-  call-result, or package binding. Its target is qualified; a proven local
-  declaration may also be named directly. A call-result binding names the
+  call-result, member, or package binding. Its target is qualified; a proven local
+  declaration may also be named directly. TypeScript and JavaScript import
+  and re-export bindings may additionally carry a `namespace` identity and a
+  `typeOnly` marker. A type-only binding must identify the `type` or
+  `namespace` space; this prevents a type import from being resolved as a
+  runtime value. A call-result binding names the
   exact callable that initialized a receiver and may record the zero-based
   output selected by a destructuring assignment. It may preserve an exact
   nominal result type proven in the same file, reference an earlier
@@ -37,6 +45,24 @@ the adapter actually emits. The batch contains six bounded collections:
   resolves to an exact source declaration or an explicitly qualified external
   identity. An unresolved prelude or imported spelling must not be
   reinterpreted as a repository-local type.
+  The TypeScript/JavaScript candidate adapter may use a member binding
+  with spelling `*` as a source-range-backed object-owner alias, including a
+  CommonJS file-module owner for a proven `module.exports = { ...source }`
+  shape, including a source-anchored namespace import, static `require()`
+  source, or bounded `Object.assign` composition. CommonJS
+  `Object.defineProperty(exports, "name", { value/get: ... })` reexports are
+  likewise admitted only for a static key and source-proven value/getter
+ return; `__esModule`, dynamic descriptors, and shadowed CommonJS globals are
+  not exported. The same bounded owner-alias path admits
+  `__exportStar(require("./source"), exports)` and `tslib.__exportStar` only
+  when the helper is source-proven or imported from `tslib`, the require
+  argument is a static string, and the destination is the unshadowed
+  CommonJS export object. Named imports and namespace members may project a
+  requested source-published property through that alias; direct destination
+  properties retain precedence, and unknown, dynamic, lookalike-helper, or
+  ambiguous cases remain unresolved. None of these aliases is a wildcard
+  export: the resolver follows them only when the target owner and requested
+  member are independently source-proven.
 - `OccurrenceFact` records one exact use site and its role, owner, spelling,
   optional qualifier, lexical scope, and range. Repeated uses are separate
   occurrences.
@@ -53,6 +79,41 @@ the adapter actually emits. The batch contains six bounded collections:
   conversions, but only when one applicable vector is more specific than all
   other applicable vectors. Unknown hierarchy or a competing conversion
   remains unresolved.
+  The TypeScript/JavaScript candidate adapter represents a tagged
+  template (``tag`text ${value}``) as a call with occurrence context
+  `tagged_template` (or `tagged_member` for a member tag). Its bounded argument
+  vector starts with an explicit unknown slot for the runtime
+  `TemplateStringsArray`, followed by one slot per substitution expression. The
+  synthetic slot is intentionally not typed as a general array, and dynamic tag
+  expressions remain targetless unless a declaration is independently source
+  proven. Tagged-template arity and known substitution types therefore
+  participate in the same fail-closed overload and cross-file resolution rules
+  as ordinary calls.
+  Decorator factories use `Decorates` candidates rather than generic call
+  edges. Direct decorators carry `decorator` context; member decorators carry
+  `decorator_member` context and resolve through the nominal member/index
+  path. A decorator invocation's bounded argument count and known literal
+  types participate in overload selection. Dynamic or computed decorator
+  expressions retain a targetless occurrence, while calls nested inside
+  decorator arguments remain independent call evidence.
+  TypeScript `using` and `await using` resource bindings are emitted as
+  immutable, source-anchored variable declarations even though the pinned
+  tree-sitter grammar represents them as assignment expressions. Their
+  initializer calls and subsequent references/members keep the same binding
+  identity; contextual or malformed non-statement assignments remain
+  unresolved rather than being promoted into declarations.
+  JSX attribute values, spread attributes, and child expressions are ordinary
+  value-reference contexts. The TypeScript/JavaScript candidate adapter emits
+  exact `jsx_value`, `jsx_spread`, and `jsx_child` occurrences
+  for local, imported, and unresolved values, while excluding prop names,
+  member-property spellings, and call callees. This preserves callback
+  arguments and object/receiver values without inventing indirect calls.
+  TypeScript `import("...")` and `typeof import("...")` type queries retain
+  the exact module literal as an `imports` candidate with `import_type`
+  context. This remains a type-space dependency rather than a runtime
+  dynamic-import call, including indexed queries that the pinned parser
+  recovers through its byte-preserving mask; bounded comments, strings, and
+  query counts fail closed.
 - `EvidenceDiagnostic` records a bounded extraction problem without creating
   a graph fact.
 
@@ -125,7 +186,8 @@ orders return the same first error.
 
 `AdapterRegistry::universal_profile(language)` is the authority for universal
 cutover. A returned `AdapterProfile` means universal evidence is mandatory.
-Python, Go, Rust, and Java are currently registered. An unregistered language
+Python, Go, Rust, Java, TypeScript, and JavaScript are currently registered;
+TSX resolves to the canonical TypeScript profile. An unregistered language
 does not silently claim universal behavior.
 
 An adapter profile must:
@@ -599,8 +661,11 @@ Python or Go has met the production qualification gates.
 
 ## Current qualification boundary
 
-Python, Go, Rust, and Java are hard-cut universal language adapters. Rust and
-Java remain `UniversalCandidate`; this framework change does not promote Java.
+Python and Go are hard-cut universal language adapters. Rust, Java,
+TypeScript, and JavaScript remain `UniversalCandidate`; the latter two share a
+bounded ECMAScript emitter but retain distinct adapter identities. TSX uses the
+TypeScript candidate profile. Candidate status means the universal route is
+active while complete capability and corpus qualification remain in progress.
 `spring-java` is the first production universal framework pack and advertises
 typed HTTP, bean, injection, messaging, scheduling, persistence, transaction,
 and security capabilities. Kotlin Spring remains on its established detector.

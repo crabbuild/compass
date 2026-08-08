@@ -138,6 +138,70 @@ rule does not relax body references or endpoint conflicts.
 
 ## Source-grounded quality audit
 
+TypeScript and JavaScript source recall uses the independent compiler oracle in
+`benchmarks/performance/oracles/typescript-source-oracle.mjs`. It is a pinned
+developer-side tool, not a Compass runtime dependency. The audit pipeline uses
+its bounded `--jsonl` stream (schema `compass.typescript-source-oracle-jsonl/3`;
+header, project/file coverage, diagnostics, flattened constructs, typed scopes,
+declarations, calls, constructions, imports, reexports, bases, members,
+references, and footer) so incomplete source denominators fail closed.
+Run `npm ci` before the
+first TypeScript/JavaScript audit so the lockfile's TypeScript 5.9.3 package is
+available. The provider discovers bounded `tsconfig*.json`/`jsconfig*.json`
+projects, follows in-root project references with cycle/depth limits, and uses
+the compiler-selected file set. It records project scopes, configuration/source
+digests, exact UTF-8 byte ranges, and bounded diagnostics; malformed or
+unbounded files are explicit rejected coverage rather than silent omissions.
+When every discovered configuration is invalid it reports the diagnostics and
+falls back to the bounded source tree so a broken config cannot masquerade as a
+perfectly empty project.
+
+Module/import target qualification uses the companion
+`benchmarks/performance/oracles/typescript-resolution-oracle.mjs`. It resolves
+imports, reexports, dynamic imports, `import type`, `import =`, and literal
+`require()` sites under each discovered project configuration. Its output
+records the selected module mode, exact source range, target or explicit
+external/unresolved/ambiguous outcome, and configuration/source digests. The
+resolver fixture suite cross-checks representative decisions against
+`tsc --traceResolution`; neither oracle is used by normal Compass builds.
+
+The Rust-side candidate seam has one opt-in compiler differential fixture. Run
+it from a checkout with the pinned Node dependencies installed:
+
+```bash
+CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923 \
+  cargo test -p compass-languages --test typescript_oracle_differential \
+  --locked -- --ignored
+```
+
+The test compares exact source-byte coverage for a mixed TSX fixture. It is
+ignored by ordinary workspace tests so native Compass remains Node-free.
+
+For developer-only same-file target adjudication on a pinned real corpus, use
+the separate checker oracle and keep the candidate adapter out of production:
+
+```bash
+RUST_MIN_STACK=33554432 \
+COMPASS_TS_QUALIFICATION_ROOT=/Volumes/Workspace/Github/<owner>/<pinned-corpus> \
+CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
+  cargo test -p compass-languages --test typescript_target_differential \
+  checker_oracle_adjudicates_local_candidate_targets --locked -- --ignored --nocapture
+```
+
+The report separates exact local targets, missing targets, wrong targets,
+external positives, and unresolved/ambiguous outcomes by capability. It is an
+adjudication instrument rather than a release claim: accepted labels, Wilson
+intervals, cross-file/project strata, framework tiers, and an equivalent
+Graphify/SCIP comparison must be frozen before an adapter can be registered.
+
+The target harness can persist its source-backed observations with
+`COMPASS_TS_TARGET_REPORT`; see
+`benchmarks/performance/oracles/README.md` for the report and reviewed
+`compass.typescript-target-scorecard/1` workflow. The scorecard evaluator is
+deliberately separate from the checker oracle: automatic checker outcomes are
+not accepted precision labels, and diagnostic scorecards are never eligible for
+a public quality claim.
+
 Create an unjudged candidate set from a comparator database without rerunning
 either graph producer:
 

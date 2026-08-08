@@ -41,6 +41,9 @@ fn assert_public_containment(
         .rsplit("::")
         .next()
         .unwrap_or(target_prefix)
+        .rsplit('.')
+        .next()
+        .unwrap_or(target_prefix)
         .split('@')
         .next()
         .unwrap_or(target_prefix);
@@ -412,11 +415,31 @@ namespace Two {
             "crate::rust_ownership::two::Shared",
             Some("crate::rust_ownership::two"),
         ),
-        ("ts_ownership.ts", "Shared@", None),
-        ("ts_ownership.ts", "One::Item@", Some("One")),
-        ("ts_ownership.ts", "One::Nested::Leaf@", Some("One::Nested")),
-        ("ts_ownership.ts", "Two::Item@", Some("Two")),
-        ("ts_ownership.ts", "Two::Shared@", Some("Two")),
+        (
+            "ts_ownership.ts",
+            "ts_ownership.Shared",
+            Some("ts_ownership"),
+        ),
+        (
+            "ts_ownership.ts",
+            "ts_ownership.One.Item",
+            Some("ts_ownership.One"),
+        ),
+        (
+            "ts_ownership.ts",
+            "ts_ownership.One.Nested.Leaf",
+            Some("ts_ownership.One.Nested"),
+        ),
+        (
+            "ts_ownership.ts",
+            "ts_ownership.Two.Item",
+            Some("ts_ownership.Two"),
+        ),
+        (
+            "ts_ownership.ts",
+            "ts_ownership.Two.Shared",
+            Some("ts_ownership.Two"),
+        ),
         ("CsharpOwnership.cs", "Shared@", None),
         ("CsharpOwnership.cs", "One::Item@", Some("One")),
         ("CsharpOwnership.cs", "One::Outer@", Some("One")),

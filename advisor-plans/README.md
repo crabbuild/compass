@@ -20,6 +20,13 @@ context only: the plans prohibit Graphify runtime, fixture, test, or fallback
 dependencies. Each executor should read the selected plan in full; no audit or
 conversation context is required beyond the plan file.
 
+Plan 013 is a third, self-contained TypeScript/JavaScript code-graph quality
+program. It was planned against Compass commit `a8a6a80` with read-only
+diagnostic comparison to Graphify and official TypeScript/SCIP references.
+Graphify remains comparison context only. The program preserves Compass's
+native, compiler-free structural tier and makes any compiler/SCIP enrichment
+explicit, optional, fresh, and provenance-preserving.
+
 ## Execution order and status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -36,6 +43,7 @@ conversation context is required beyond the plan file.
 | 010 | Preserve OOXML order and add native PPTX document graphs | P2 | L | 006, 007, 008 | TODO |
 | 011 | Add a bounded native RTF decoder with explicit fidelity diagnostics | P2 | L | 007, 008 | TODO |
 | 012 | Qualify document graphs across formats, limits, and determinism | P1 | M | 009, 010, 011 | TODO |
+| 013 | Make TypeScript and JavaScript code graphs best in class | P1 | XL | —; final gate should consume 005 or equivalent | IN PROGRESS |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 
@@ -60,6 +68,11 @@ Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
   three format plans into one stable qualification and documentation gate.
 - Plan 012 complements plan 005 rather than depending on it: plan 005 owns the
   broad production release gate; plan 012 owns document-specific evidence.
+- Plan 013 is deliberately staged: independent truth and project semantics land
+  before a test-only universal adapter, production changes in one hard cut, and
+  compiler/framework enhancements follow only after the native graph qualifies.
+  Its final public claim should consume plan 005's exact-production-evidence
+  model or an equivalent release-candidate gate.
 
 ## Direction options not promoted to implementation plans
 

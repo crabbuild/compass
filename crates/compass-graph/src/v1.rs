@@ -2426,6 +2426,16 @@ fn mark_external_placeholder(
         let language = parts.next().unwrap_or_default();
         let package = parts.next().unwrap_or_default();
         let module = parts.next().unwrap_or_default();
+        // A framework edge may not carry a language on either endpoint even
+        // when the canonical external node was created from a typed universal
+        // candidate. Preserve that candidate language instead of erasing it
+        // while normalizing the placeholder scope; qualification relies on a
+        // complete `(language, wiring-site, qualified-name)` identity.
+        let retained_language = attributes
+            .get("language")
+            .or_else(|| attributes.get("lang"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         for key in [
             "language",
             "lang",
@@ -2441,6 +2451,8 @@ fn mark_external_placeholder(
         }
         if !language.is_empty() {
             attributes.insert("language".to_owned(), Value::String(language.to_owned()));
+        } else if let Some(language) = retained_language {
+            attributes.insert("language".to_owned(), Value::String(language));
         }
         if !package.is_empty() {
             attributes.insert("package".to_owned(), Value::String(package.to_owned()));
@@ -4158,6 +4170,7 @@ fn map_edge_kind(raw: &str) -> Option<(EdgeKind, Option<&'static str>, bool)> {
         "references_constant" | "uses_static_prop" | "uses" | "scip_ref" | "scip_def" => {
             (EdgeKind::References, None, false)
         }
+        "accesses" => (EdgeKind::References, Some("member-access"), false),
         "scip_typed" => (EdgeKind::TypeOf, None, false),
         "scip_impl" => (EdgeKind::Implements, None, false),
         "rationale_for" => (EdgeKind::Documents, None, false),

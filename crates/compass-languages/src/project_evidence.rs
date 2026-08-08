@@ -6,6 +6,8 @@ use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use crate::json_config::parse_jsonc;
+
 pub const FRAMEWORK_PROJECT_EVIDENCE_EXTENSION: &str = "_compass_framework_project_evidence";
 
 const EVIDENCE_SCHEMA: &str = "compass.framework-project-evidence/1";
@@ -765,7 +767,7 @@ fn parse_package_configuration(source: &str, output: &mut ParsedConfiguration) {
 }
 
 fn parse_typescript_configuration(source: &str, output: &mut ParsedConfiguration) {
-    let Ok(root) = serde_json::from_str::<Value>(source) else {
+    let Some(root) = parse_jsonc(source) else {
         return;
     };
     let Some(options) = root.get("compilerOptions").and_then(Value::as_object) else {
@@ -1276,6 +1278,43 @@ mod tests {
         assert!(evidence.has_plugin("@vitejs/plugin-react"));
         assert!(evidence.has_plugin("next-plugin-intl"));
         assert!(evidence.has_route_root("next", "src/app"));
+        Ok(())
+    }
+
+    #[test]
+    fn typescript_jsonc_configuration_keeps_aliases_and_ignores_comment_text()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        let source = root.join("src/app.ts");
+        fs::create_dir_all(source.parent().ok_or("source has no parent")?)?;
+        fs::write(&source, "export const app = true;\n")?;
+        fs::write(
+            root.join("tsconfig.json"),
+            r##"{
+                // The slash in this comment must not start a value.
+                "compilerOptions": {
+                    "baseUrl": ".",
+                    "paths": {
+                        "@/*": ["./src/*",],
+                    },
+                },
+            }"##,
+        )?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        assert!(
+            evidence
+                .configuration_keys()
+                .contains("compilerOptions.baseUrl")
+        );
+        assert!(
+            evidence
+                .configuration_keys()
+                .contains("compilerOptions.paths")
+        );
+        assert_eq!(evidence.aliases().get("@/*"), Some(&"src/*".to_owned()));
         Ok(())
     }
 

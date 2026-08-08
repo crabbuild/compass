@@ -8,6 +8,10 @@ use crate::UniversalAdapterProfile;
 pub struct AdapterIdentity {
     pub id: String,
     pub language: String,
+    /// Parser dialect preserved separately from the semantic language family.
+    /// `None` is retained for legacy adapters that predate dialect metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dialect: Option<String>,
     pub version: u32,
     pub evidence_schema: String,
     pub profile: UniversalAdapterProfile,
@@ -112,6 +116,19 @@ pub enum BindingKind {
     Member,
 }
 
+/// The TypeScript/JavaScript symbol space occupied by a declaration or
+/// binding. ECMAScript modules expose values, types, and namespaces through
+/// overlapping source spellings, so retaining the space is required before a
+/// resolver can safely select one identity.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SymbolNamespace {
+    Value,
+    Type,
+    Namespace,
+    ValueAndType,
+}
+
 impl BindingKind {
     #[must_use]
     pub const fn required_capability(self) -> LanguageCapability {
@@ -189,6 +206,10 @@ pub struct DeclarationFact {
     pub kind: String,
     pub name: String,
     pub qualified_name: String,
+    /// Optional value/type/namespace identity. `None` preserves legacy
+    /// adapters that predate explicit symbol-space evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<SymbolNamespace>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module_or_package: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -213,6 +234,12 @@ pub struct DeclarationFact {
     pub implementation_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_hash: Option<String>,
+    /// Full syntax-node start for legacy callable identities. The canonical
+    /// evidence range may intentionally begin at the identifier, while the
+    /// public graph identity historically used the enclosing declaration
+    /// start (for example `export async function` begins after `export`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_start_byte: Option<u64>,
     pub range: EvidenceRange,
 }
 
@@ -243,6 +270,12 @@ pub struct BindingFact {
     pub kind: BindingKind,
     pub spelling: String,
     pub qualified_target: String,
+    /// Optional symbol space selected by the source construct.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<SymbolNamespace>,
+    /// Whether this import or re-export is explicitly type-only in source.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub type_only: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_declaration_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

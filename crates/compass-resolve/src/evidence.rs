@@ -42,6 +42,7 @@ pub enum ResolutionRule {
     ExactSourceDeclaration,
     ExactLexicalDeclaration,
     ExplicitBinding,
+    ProjectModuleBinding,
     MemberBinding,
     DeferredReceiver,
     WildcardBinding,
@@ -95,6 +96,41 @@ struct RustImplTraitSet {
     complete: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TypeScriptReexportTarget {
+    module: String,
+    exported: String,
+}
+
+#[derive(Clone, Debug)]
+struct TypeScriptMemberPath {
+    root_export: String,
+    type_arguments: Vec<String>,
+    call_result: bool,
+    call_argument_types: Vec<String>,
+    call_type_arguments: Vec<String>,
+    call_member_index: Option<usize>,
+    indexed: bool,
+    members: Vec<String>,
+}
+
+/// A source-proven object spread emitted by the TypeScript/JavaScript
+/// candidate adapter. The `*` member spelling is an owner alias marker, not a
+/// wildcard export: the destination object inherits only members that the
+/// resolver can prove on this source owner.
+#[derive(Clone, Debug)]
+struct TypeScriptMemberAlias {
+    source: String,
+    source_slot: Option<DeclarationSlot>,
+    start_byte: u64,
+}
+
+struct TypeScriptMemberContext<'a> {
+    owner_signature: Option<&'a str>,
+    type_arguments: &'a [String],
+    index_selector: Option<&'a str>,
+}
+
 /// Compact slot into the declaration table used by secondary indexes.
 ///
 /// Declaration IDs are long, repeated strings on corpus-scale Java and
@@ -102,6 +138,18 @@ struct RustImplTraitSet {
 /// the universal resolver's transient memory, while the declaration table
 /// already provides the canonical ID for each slot.
 type DeclarationSlot = u32;
+type TypeScriptModuleIndex = AHashMap<(String, String, String), Vec<DeclarationSlot>>;
+type TypeScriptReexportIndex = AHashMap<(String, String, String), Vec<TypeScriptReexportTarget>>;
+type TypeScriptProjectModuleIndex = AHashMap<(String, String, String), Vec<String>>;
+type TypeScriptProjectMetadataIndex =
+    AHashMap<(String, String, String, String), BTreeMap<String, String>>;
+
+struct TypeScriptExportWalk<'a> {
+    candidate: &'a RelationshipCandidate,
+    allow_type_owner: bool,
+    visiting: BTreeSet<(String, String, String)>,
+    slots: BTreeSet<DeclarationSlot>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolutionEvidence {
@@ -145,6 +193,30 @@ pub struct UniversalResolutionIndex {
     by_module_name: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
     by_scope_name: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
     by_source_directory_name: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
+    /// TypeScript/JavaScript source modules are indexed by the normalized
+    /// repository-relative module path rather than by a basename. This keeps
+    /// relative imports project-aware without allowing terminal-name lookup
+    /// to select a same-spelled declaration from another directory.
+    typescript_modules: TypeScriptModuleIndex,
+    /// Declaration slots with an explicit source export binding. The module
+    /// index also retains private declarations for internal type expansion,
+    /// but ordinary value/module imports may select only this admitted set.
+    typescript_exported_declarations: AHashSet<DeclarationSlot>,
+    /// Export aliases such as `export default Foo` and `export { Foo as Bar }`
+    /// retain the exact source declaration selected by the adapter. Re-export
+    /// chains without a local declaration remain unresolved until a later
+    /// module hop can prove one target.
+    typescript_export_aliases: TypeScriptModuleIndex,
+    /// Cross-file re-exports retain their normalized target module and export
+    /// spelling. Resolution follows this bounded table rather than selecting
+    /// a terminal name from an unrelated source file.
+    typescript_reexport_targets: TypeScriptReexportIndex,
+    /// Project/module resolver decisions keyed by importer and raw module
+    /// specifier. Values are normalized source-module keys and are retained
+    /// only when the existing bounded project resolver admitted a target.
+    typescript_project_modules: TypeScriptProjectModuleIndex,
+    typescript_project_metadata: TypeScriptProjectMetadataIndex,
+    root: std::path::PathBuf,
     direct_bases: AHashMap<(String, String), DirectBaseSet>,
     direct_subtypes: AHashMap<(String, String), DirectSubtypeSet>,
     members_by_owner: AHashMap<(String, String, String), Vec<DeclarationSlot>>,
@@ -158,6 +230,7 @@ pub struct UniversalResolutionIndex {
     wildcard_bindings_by_module: AHashMap<(String, String), WildcardModuleSet>,
     wildcard_reexports_by_module: AHashMap<(String, String), WildcardModuleSet>,
     members: AHashMap<(String, String, String), Vec<String>>,
+    typescript_member_aliases: AHashMap<(String, String), Vec<TypeScriptMemberAlias>>,
     return_candidates_by_callable: AHashMap<(String, String), Vec<String>>,
     outer_return_candidates_by_callable: AHashMap<(String, String), Vec<String>>,
     go_module_path: Option<String>,
@@ -197,21 +270,47 @@ impl UniversalResolutionIndex {
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
-        Self::new_with_inventory_owned_impl(batches, inventory_nodes, root, limits, true)
+        Self::new_with_inventory_owned_impl(batches, inventory_nodes, &[], root, limits, true)
     }
 
-    pub(crate) fn new_with_prevalidated_inventory_owned(
+    pub(crate) fn new_with_project_inventory_owned(
         batches: Vec<SemanticEvidenceBatch>,
         inventory_nodes: &[NodeRecord],
+        project_edges: &[EdgeRecord],
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
-        Self::new_with_inventory_owned_impl(batches, inventory_nodes, root, limits, false)
+        Self::new_with_inventory_owned_impl(
+            batches,
+            inventory_nodes,
+            project_edges,
+            root,
+            limits,
+            true,
+        )
+    }
+
+    pub(crate) fn new_with_prevalidated_project_inventory_owned(
+        batches: Vec<SemanticEvidenceBatch>,
+        inventory_nodes: &[NodeRecord],
+        project_edges: &[EdgeRecord],
+        root: &Path,
+        limits: UniversalResolutionLimits,
+    ) -> Result<Self, String> {
+        Self::new_with_inventory_owned_impl(
+            batches,
+            inventory_nodes,
+            project_edges,
+            root,
+            limits,
+            false,
+        )
     }
 
     fn new_with_inventory_owned_impl(
         batches: Vec<SemanticEvidenceBatch>,
         inventory_nodes: &[NodeRecord],
+        project_edges: &[EdgeRecord],
         root: &Path,
         limits: UniversalResolutionLimits,
         validate_batches: bool,
@@ -308,6 +407,29 @@ impl UniversalResolutionIndex {
             return Err("universal declaration slot count exceeds u32".to_owned());
         }
         let definition_ranges = unique_definition_ranges(&declarations, &scopes);
+        let (typescript_project_modules, typescript_project_metadata) =
+            typescript_project_module_index(
+                project_edges,
+                inventory_nodes,
+                root,
+                limits.candidates,
+                limits.candidates_per_lookup,
+            )?;
+        let (typescript_modules, typescript_export_aliases, typescript_reexport_targets) =
+            typescript_module_indices(
+                &declarations,
+                &declaration_ids,
+                &bindings,
+                &scopes,
+                root,
+                &typescript_project_modules,
+            );
+        let typescript_exported_declarations = bindings
+            .values()
+            .filter(|binding| binding.kind == compass_languages::BindingKind::Reexport)
+            .filter_map(|binding| binding.target_declaration_id.as_deref())
+            .filter_map(|id| declaration_slot(&declaration_ids, id))
+            .collect::<AHashSet<_>>();
         for (name, count, limit) in [
             ("declarations", declarations.len(), limits.declarations),
             ("bindings", bindings.len(), limits.bindings),
@@ -635,6 +757,67 @@ impl UniversalResolutionIndex {
                 .or_default()
                 .push(slot);
         }
+        // Object-literal members are deliberately collected in their lexical
+        // binding scope by the TypeScript adapter: unlike a class/interface,
+        // an object value has no syntax-level scope owner.  Recover the
+        // source-qualified object variable as an additional owner so imported
+        // chains such as `api.make(value).inspect()` can traverse the
+        // callable property without widening ordinary lexical members.
+        let mut structural_object_owners =
+            AHashMap::<(String, String), Vec<DeclarationSlot>>::new();
+        for declaration in declarations.values().filter(|declaration| {
+            declaration.kind == "variable"
+                && matches!(declaration.language.as_str(), "typescript" | "javascript")
+        }) {
+            let Some(slot) = declaration_slot(&declaration_ids, &declaration.id) else {
+                continue;
+            };
+            structural_object_owners
+                .entry((
+                    declaration.language.clone(),
+                    declaration.qualified_name.clone(),
+                ))
+                .or_default()
+                .push(slot);
+        }
+        for declaration in declarations.values().filter(|declaration| {
+            matches!(declaration.language.as_str(), "typescript" | "javascript")
+                && matches!(
+                    declaration.kind.as_str(),
+                    "property" | "method" | "field" | "constructor"
+                )
+        }) {
+            let Some((owner_name, _)) = declaration.qualified_name.rsplit_once('.') else {
+                continue;
+            };
+            let Some(owner_slots) = structural_object_owners
+                .get(&(declaration.language.clone(), owner_name.to_owned()))
+            else {
+                continue;
+            };
+            let Some(slot) = declaration_slot(&declaration_ids, &declaration.id) else {
+                continue;
+            };
+            for owner_slot in owner_slots {
+                let Some(owner_id) = declaration_ids.get(*owner_slot as usize) else {
+                    continue;
+                };
+                let Some(owner) = declarations.get(owner_id) else {
+                    continue;
+                };
+                if owner.scope_id != declaration.scope_id {
+                    continue;
+                }
+                members_by_owner
+                    .entry((
+                        declaration.language.clone(),
+                        owner_name.to_owned(),
+                        declaration.name.clone(),
+                    ))
+                    .or_default()
+                    .push(slot);
+            }
+        }
         for members in members_by_owner.values_mut() {
             members.sort_unstable_by(|left, right| {
                 declaration_ids[*left as usize].cmp(&declaration_ids[*right as usize])
@@ -767,6 +950,50 @@ impl UniversalResolutionIndex {
             targets.sort_unstable();
             targets.dedup();
         }
+        let mut typescript_member_aliases =
+            AHashMap::<(String, String), Vec<TypeScriptMemberAlias>>::new();
+        for binding in bindings.values().filter(|binding| {
+            binding.kind == compass_languages::BindingKind::Member
+                && binding.spelling == "*"
+                && matches!(binding.language.as_str(), "typescript" | "javascript")
+        }) {
+            let Some(owner) = binding
+                .scope_id
+                .as_deref()
+                .and_then(|id| scopes.get(id))
+                .and_then(|scope| scope.owner_declaration_id.as_deref())
+                .and_then(|id| declarations.get(id))
+            else {
+                continue;
+            };
+            typescript_member_aliases
+                .entry((binding.language.clone(), owner.qualified_name.clone()))
+                .or_default()
+                .push(TypeScriptMemberAlias {
+                    source: binding.qualified_target.clone(),
+                    source_slot: binding
+                        .target_declaration_id
+                        .as_deref()
+                        .and_then(|id| declaration_slot(&declaration_ids, id)),
+                    start_byte: binding.range.start_byte,
+                });
+        }
+        for aliases in typescript_member_aliases.values_mut() {
+            aliases.sort_unstable_by(|left, right| {
+                left.start_byte
+                    .cmp(&right.start_byte)
+                    .then_with(|| left.source.cmp(&right.source))
+                    .then_with(|| left.source_slot.cmp(&right.source_slot))
+            });
+            aliases.dedup_by(|left, right| {
+                left.source == right.source
+                    && left.source_slot == right.source_slot
+                    && left.start_byte == right.start_byte
+            });
+            if aliases.len() > limits.candidates_per_lookup {
+                aliases.truncate(candidate_storage_limit(limits.candidates_per_lookup));
+            }
+        }
         let mut return_entries = AHashMap::<_, Vec<_>>::new();
         let mut outer_return_entries = AHashMap::<_, Vec<_>>::new();
         for candidate in candidates
@@ -842,6 +1069,13 @@ impl UniversalResolutionIndex {
             by_module_name,
             by_scope_name,
             by_source_directory_name,
+            typescript_modules,
+            typescript_exported_declarations,
+            typescript_export_aliases,
+            typescript_reexport_targets,
+            typescript_project_modules,
+            typescript_project_metadata,
+            root: root.to_path_buf(),
             direct_bases,
             direct_subtypes,
             members_by_owner,
@@ -855,6 +1089,7 @@ impl UniversalResolutionIndex {
             wildcard_bindings_by_module,
             wildcard_reexports_by_module,
             members,
+            typescript_member_aliases,
             return_candidates_by_callable,
             outer_return_candidates_by_callable,
             go_module_path,
@@ -969,6 +1204,9 @@ impl UniversalResolutionIndex {
                 trait_qualified_name,
                 candidate,
             );
+        }
+        if let Some(decision) = self.resolve_typescript_import_candidate(language, candidate) {
+            return decision;
         }
         if let Some(decision) = self.resolve_explicit_binding(language, candidate) {
             return decision;
@@ -1126,6 +1364,1634 @@ impl UniversalResolutionIndex {
             };
         }
         ResolutionDecision::Unresolved
+    }
+
+    fn resolve_typescript_import_candidate(
+        &self,
+        language: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        if !matches!(language, "typescript" | "javascript") {
+            return None;
+        }
+        let occurrence = self.occurrence(candidate)?;
+        let mut module_and_export = None;
+        if let Some(binding) = candidate
+            .binding_id
+            .as_deref()
+            .and_then(|binding_id| self.bindings.get(binding_id))
+            && matches!(
+                binding.kind,
+                compass_languages::BindingKind::Import
+                    | compass_languages::BindingKind::ImportAlias
+                    | compass_languages::BindingKind::Reexport
+            )
+            && let Some((module, exported)) = binding.qualified_target.rsplit_once("::")
+            && !module.is_empty()
+            && !exported.is_empty()
+        {
+            module_and_export = Some((module.to_owned(), exported.to_owned()));
+        } else if matches!(
+            candidate.relation,
+            CandidateRelation::Imports | CandidateRelation::Reexports
+        ) && let Some(qualified) = candidate.constraints.qualified_name.as_deref()
+            && let Some((module, exported)) = qualified.rsplit_once("::")
+            && !module.is_empty()
+            && !exported.is_empty()
+        {
+            module_and_export = Some((module.to_owned(), exported.to_owned()));
+        }
+
+        let (module, exported) = if let Some(module_and_export) = module_and_export {
+            module_and_export
+        } else if matches!(
+            candidate.relation,
+            CandidateRelation::Imports | CandidateRelation::Reexports
+        ) {
+            let module = candidate
+                .constraints
+                .module_or_package
+                .as_deref()
+                .filter(|module| !module.is_empty())?
+                .to_owned();
+            (module, "module".to_owned())
+        } else {
+            return None;
+        };
+        let (keys, project_resolved) = self
+            .typescript_project_module_keys(
+                &occurrence.range.source_file,
+                &module,
+                if matches!(
+                    candidate.relation,
+                    CandidateRelation::Imports | CandidateRelation::Reexports
+                ) {
+                    occurrence.context.as_deref()
+                } else {
+                    None
+                },
+            )
+            .map_or_else(
+                || {
+                    (
+                        typescript_import_module_keys(
+                            &occurrence.range.source_file,
+                            &module,
+                            &self.root,
+                        ),
+                        false,
+                    )
+                },
+                |keys| (keys, true),
+            );
+        if keys.is_empty() {
+            return None;
+        }
+        let member_path = if matches!(
+            candidate.relation,
+            CandidateRelation::Calls
+                | CandidateRelation::IndirectCalls
+                | CandidateRelation::AccessesMember
+        ) {
+            candidate
+                .constraints
+                .qualified_name
+                .as_deref()
+                .and_then(|qualified| typescript_member_path(qualified, &candidate.target_spelling))
+        } else {
+            None
+        };
+        let member_owner_export = member_path
+            .as_ref()
+            .filter(|path| path.members.len() == 1)
+            .map(|path| path.root_export.clone());
+        // A namespace import (`import * as api` or `const api =
+        // require("./api")`) carries the module target as `module::*`, while
+        // the source-grounded member occurrence is represented as
+        // `module::member`.  It is a direct export lookup, not a nominal
+        // owner/member lookup; preserve that distinction so an exact provider
+        // re-export can resolve without manufacturing a qualified external.
+        let namespace_member_export = (exported == "*")
+            .then(|| {
+                candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .and_then(|qualified| {
+                        let (qualified_module, path) = split_typescript_module_qualified(qualified);
+                        let segments = split_typescript_member_segments(path);
+                        let [member] = segments.as_slice() else {
+                            return None;
+                        };
+                        (qualified_module == Some(module.as_str())
+                            && member == &candidate.target_spelling)
+                            .then(|| member.clone())
+                    })
+            })
+            .flatten();
+        let commonjs_namespace_call = exported == "*"
+            && candidate.relation == CandidateRelation::Calls
+            && namespace_member_export.is_none();
+        let is_member_candidate = member_path.is_some() || namespace_member_export.is_some();
+        let mut source_member_target_seen = false;
+        let mut structural_alias_seen = false;
+        let mut targets = BTreeSet::new();
+        for key in keys {
+            let expand_member_chain = member_path.as_ref().is_some_and(|path| {
+                path.call_result
+                    || path.indexed
+                    || path.members.len() > 1
+                    || !path.type_arguments.is_empty()
+                    || self
+                        .typescript_export_slots(language, &key, &path.root_export, candidate, true)
+                        .iter()
+                        .any(|slot| {
+                            self.declaration(*slot)
+                                .is_some_and(|declaration| declaration.kind == "type_alias")
+                        })
+            });
+            if expand_member_chain {
+                let Some(path) = member_path.as_ref() else {
+                    continue;
+                };
+                source_member_target_seen |= !self
+                    .typescript_export_slots(language, &key, &path.root_export, candidate, true)
+                    .is_empty();
+                targets.extend(self.typescript_member_chain_slots(language, &key, path, candidate));
+                continue;
+            }
+            let owner_export = namespace_member_export
+                .as_deref()
+                .or(member_owner_export.as_deref())
+                .unwrap_or(&exported)
+                .to_owned();
+            // A member candidate constrains the final target to
+            // callable/value kinds, but the exported owner can be a
+            // type-only declaration such as an interface. Widen only this
+            // internal owner lookup; member filtering below still uses the
+            // original candidate, so an interface itself is never published
+            // as the callable/access target.
+            let namespace_alias_targets = namespace_member_export.as_ref().map(|_| {
+                self.typescript_export_alias_slots(
+                    language,
+                    &key,
+                    &owner_export,
+                    candidate,
+                    member_owner_export.is_some(),
+                )
+            });
+            let mut owner_targets = namespace_alias_targets
+                .filter(|targets| !targets.is_empty())
+                .unwrap_or_else(|| {
+                    self.typescript_export_slots(
+                        language,
+                        &key,
+                        &owner_export,
+                        candidate,
+                        member_owner_export.is_some(),
+                    )
+                });
+            // A CommonJS namespace can inherit a member through a proven
+            // object spread without publishing that inherited name as a
+            // direct reexport. If the direct export lookup is empty, recover
+            // the module owner itself so the bounded `Member("*")` alias can
+            // project the source member. Direct named reexports still win
+            // because this fallback only runs for an empty owner set.
+            let mut structural_namespace_owner = false;
+            if owner_targets.is_empty() && namespace_member_export.is_some() {
+                let module_targets =
+                    self.typescript_export_slots(language, &key, "*", candidate, true);
+                if !module_targets.is_empty() {
+                    owner_targets = module_targets;
+                    structural_namespace_owner = true;
+                }
+            }
+            if owner_targets.is_empty() && commonjs_namespace_call {
+                // A direct CommonJS require can return a callable
+                // `module.exports = fn`.  The namespace binding is retained
+                // for member access, but a direct call may resolve through the
+                // provider's source-grounded default export. Object-valued
+                // defaults remain filtered by the candidate's callable kinds.
+                owner_targets =
+                    self.typescript_export_slots(language, &key, "default", candidate, true);
+            }
+            if owner_targets.is_empty()
+                && !is_member_candidate
+                && exported != "*"
+                && exported != "default"
+            {
+                // Project a named import through a bounded CommonJS barrel
+                // owner alias when no direct export slot exists.
+                let module_targets =
+                    self.typescript_export_slots(language, &key, "*", candidate, true);
+                for owner_slot in module_targets {
+                    let Some(owner) = self.declaration(owner_slot) else {
+                        continue;
+                    };
+                    if self
+                        .typescript_member_aliases
+                        .contains_key(&(owner.language.clone(), owner.qualified_name.clone()))
+                    {
+                        structural_alias_seen = true;
+                        if let Ok(Some(alias_members)) = self.typescript_structural_member_slots(
+                            owner_slot,
+                            &exported,
+                            candidate,
+                            &mut BTreeSet::new(),
+                        ) {
+                            targets.extend(alias_members);
+                        }
+                    }
+                }
+            }
+            source_member_target_seen |= !owner_targets.is_empty();
+            if member_owner_export.is_some() || structural_namespace_owner {
+                for owner_slot in &owner_targets {
+                    let Some(owner) = self.declaration(*owner_slot) else {
+                        continue;
+                    };
+                    if member_owner_export.is_some()
+                        && let Some(members) = self.members_by_owner.get(&(
+                            owner.language.clone(),
+                            owner.qualified_name.clone(),
+                            candidate.target_spelling.clone(),
+                        ))
+                    {
+                        let members = members.iter().copied().collect::<BTreeSet<_>>();
+                        let members = if candidate.relation == CandidateRelation::Calls {
+                            let argument_types = typescript_candidate_argument_types(candidate);
+                            self.typescript_callable_overload_slots(&members, &argument_types, &[])
+                        } else {
+                            members
+                        };
+                        targets.extend(
+                            members
+                                .iter()
+                                .filter(|slot| {
+                                    self.typescript_declaration_allowed_slot(**slot, candidate)
+                                })
+                                .copied(),
+                        );
+                    }
+                    if self
+                        .typescript_member_aliases
+                        .contains_key(&(owner.language.clone(), owner.qualified_name.clone()))
+                    {
+                        structural_alias_seen = true;
+                        if let Ok(Some(alias_members)) = self.typescript_structural_member_slots(
+                            *owner_slot,
+                            &candidate.target_spelling,
+                            candidate,
+                            &mut BTreeSet::new(),
+                        ) {
+                            targets.extend(alias_members);
+                        }
+                    }
+                }
+                // A value import can be declared with a nominal object type
+                // (`declare const api: Api`).  Its callable members live on
+                // the interface/type declaration rather than on the value
+                // declaration itself; expand that direct type evidence before
+                // falling back to an external target.
+                if targets.is_empty()
+                    && let Some(path) = member_path.as_ref()
+                    && path.members.len() == 1
+                {
+                    for owner_slot in &owner_targets {
+                        for (typed_owner, _) in self.typescript_value_type_contexts(
+                            language,
+                            &key,
+                            *owner_slot,
+                            &path.type_arguments,
+                            candidate,
+                        ) {
+                            let Some(typed_owner) = self.declaration(typed_owner) else {
+                                continue;
+                            };
+                            if let Some(members) = self.members_by_owner.get(&(
+                                language.to_owned(),
+                                typed_owner.qualified_name.clone(),
+                                candidate.target_spelling.clone(),
+                            )) {
+                                targets.extend(
+                                    members
+                                        .iter()
+                                        .filter(|slot| {
+                                            self.typescript_declaration_allowed_slot(
+                                                **slot, candidate,
+                                            )
+                                        })
+                                        .copied(),
+                                );
+                            }
+                        }
+                    }
+                }
+            } else {
+                targets.extend(owner_targets);
+            }
+        }
+        let targets = targets.into_iter().collect::<Vec<_>>();
+        if is_member_candidate && structural_alias_seen && targets.is_empty() {
+            return Some(ResolutionDecision::Unresolved);
+        }
+        if !is_member_candidate && structural_alias_seen && targets.is_empty() {
+            return Some(ResolutionDecision::Unresolved);
+        }
+        if is_member_candidate
+            && candidate.relation == CandidateRelation::Calls
+            && targets.is_empty()
+            && source_member_target_seen
+        {
+            return Some(ResolutionDecision::Unresolved);
+        }
+        self.unique_typescript_decision(
+            Some(&targets),
+            candidate,
+            if is_member_candidate {
+                ResolutionRule::MemberBinding
+            } else if project_resolved {
+                ResolutionRule::ProjectModuleBinding
+            } else {
+                ResolutionRule::ExplicitBinding
+            },
+        )
+    }
+
+    /// Resolve one member through a source-proven object-owner alias. Direct
+    /// members always win; inherited aliases are followed only when the
+    /// source owner is itself a bounded object owner. Multiple distinct
+    /// source declarations remain ambiguous instead of relying on hash or
+    /// traversal order.
+    fn typescript_structural_member_slots(
+        &self,
+        owner_slot: DeclarationSlot,
+        property: &str,
+        candidate: &RelationshipCandidate,
+        visiting: &mut BTreeSet<DeclarationSlot>,
+    ) -> Result<Option<BTreeSet<DeclarationSlot>>, ()> {
+        if !visiting.insert(owner_slot) {
+            return Err(());
+        }
+        let Some(owner) = self.declaration(owner_slot) else {
+            visiting.remove(&owner_slot);
+            return Err(());
+        };
+        let owner_language = owner.language.as_str();
+        if owner.kind == "module" {
+            // Module-owner aliases represent a namespace object (including a
+            // CommonJS `module.exports` object). Resolve direct members only
+            // through the provider's published export slots; the lexical
+            // module scope also contains private declarations that must not be
+            // exposed merely because their names match the requested member.
+            let mut exported = BTreeSet::new();
+            let source_modules =
+                typescript_source_module_keys(&owner.range.source_file, &self.root);
+            for module in source_modules {
+                exported.extend(self.typescript_export_slots(
+                    owner_language,
+                    &module,
+                    property,
+                    candidate,
+                    false,
+                ));
+            }
+            if exported.is_empty() {
+                exported.extend(self.typescript_export_slots(
+                    owner_language,
+                    &owner.qualified_name,
+                    property,
+                    candidate,
+                    false,
+                ));
+            }
+            if !exported.is_empty() {
+                visiting.remove(&owner_slot);
+                return Ok(Some(exported));
+            }
+        }
+        let direct_key = (
+            owner_language.to_owned(),
+            owner.qualified_name.clone(),
+            property.to_owned(),
+        );
+        if owner.kind != "module"
+            && let Some(members) = self.members_by_owner.get(&direct_key)
+        {
+            let direct = members
+                .iter()
+                .filter(|slot| self.typescript_declaration_allowed_slot(**slot, candidate))
+                .copied()
+                .collect::<BTreeSet<_>>();
+            if !direct.is_empty() {
+                visiting.remove(&owner_slot);
+                return Ok(Some(direct));
+            }
+        }
+        let alias_key = (owner_language.to_owned(), owner.qualified_name.clone());
+        let Some(aliases) = self.typescript_member_aliases.get(&alias_key) else {
+            visiting.remove(&owner_slot);
+            return Ok(None);
+        };
+        if !self.typescript_structural_object_owner(owner_slot) {
+            visiting.remove(&owner_slot);
+            return Err(());
+        }
+        let mut inherited = BTreeSet::new();
+        let mut unresolved = false;
+        for alias in aliases {
+            let source_slots =
+                self.typescript_member_alias_source_slots(owner_language, owner, alias, candidate);
+            let Some(source_slots) = source_slots else {
+                unresolved = true;
+                continue;
+            };
+            if source_slots.is_empty() {
+                unresolved = true;
+                continue;
+            }
+            for source_slot in source_slots {
+                match self.typescript_structural_member_slots(
+                    source_slot,
+                    property,
+                    candidate,
+                    visiting,
+                ) {
+                    Ok(Some(members)) => inherited.extend(members),
+                    Ok(None) => {}
+                    Err(()) => unresolved = true,
+                }
+            }
+        }
+        visiting.remove(&owner_slot);
+        if unresolved {
+            return Err(());
+        }
+        Ok(Some(inherited))
+    }
+
+    fn typescript_structural_object_owner(&self, slot: DeclarationSlot) -> bool {
+        let Some(owner) = self.declaration(slot) else {
+            return false;
+        };
+        if !matches!(owner.language.as_str(), "typescript" | "javascript") {
+            return false;
+        }
+        // CommonJS object exports retain the file module as their owner. A
+        // `Member("*")` alias is emitted for that owner only after the
+        // adapter proves every spread source, so treating a module owner as a
+        // structural object here does not widen arbitrary module lookups.
+        if owner.kind == "module" {
+            return true;
+        }
+        if owner.kind != "variable" {
+            return false;
+        }
+        if owner
+            .scope_id
+            .as_deref()
+            .and_then(|scope_id| self.scopes.get(scope_id))
+            .is_some_and(|scope| scope.kind == "object")
+        {
+            return true;
+        }
+        self.members_by_owner
+            .keys()
+            .any(|(language, qualified, _)| {
+                language == &owner.language && qualified == &owner.qualified_name
+            })
+    }
+
+    fn typescript_member_alias_source_slots(
+        &self,
+        language: &str,
+        owner: &DeclarationFact,
+        alias: &TypeScriptMemberAlias,
+        candidate: &RelationshipCandidate,
+    ) -> Option<BTreeSet<DeclarationSlot>> {
+        let mut source_slots = BTreeSet::new();
+        if let Some(slot) = alias.source_slot {
+            source_slots.insert(slot);
+            return Some(source_slots);
+        }
+        if let Some((module, exported)) = alias.source.rsplit_once("::") {
+            if module.is_empty() || exported.is_empty() {
+                return None;
+            }
+            let mut modules = self
+                .typescript_project_module_keys(&owner.range.source_file, module, None)
+                .unwrap_or_else(|| {
+                    typescript_import_module_keys(&owner.range.source_file, module, &self.root)
+                });
+            modules.sort_unstable();
+            modules.dedup();
+            for module in modules {
+                source_slots.extend(
+                    self.typescript_export_slots(language, &module, exported, candidate, true),
+                );
+            }
+            return Some(source_slots);
+        }
+        if let Some(slots) = self
+            .by_qualified
+            .get(&(language.to_owned(), alias.source.clone()))
+        {
+            source_slots.extend(slots.iter().copied());
+        }
+        Some(source_slots)
+    }
+
+    fn typescript_project_module_keys(
+        &self,
+        importer: &str,
+        module: &str,
+        context: Option<&str>,
+    ) -> Option<Vec<String>> {
+        typescript_project_module_keys(
+            &self.typescript_project_modules,
+            importer,
+            module,
+            &self.root,
+            context,
+        )
+    }
+
+    fn typescript_project_metadata(
+        &self,
+        candidate: &RelationshipCandidate,
+        target_source_file: Option<&str>,
+    ) -> Option<BTreeMap<String, String>> {
+        if !matches!(candidate.language.as_str(), "typescript" | "javascript") {
+            return None;
+        }
+        let occurrence = self.occurrence(candidate)?;
+        let module = candidate
+            .constraints
+            .module_or_package
+            .clone()
+            .or_else(|| {
+                candidate
+                    .binding_id
+                    .as_deref()
+                    .and_then(|binding_id| self.bindings.get(binding_id))
+                    .and_then(|binding| binding.qualified_target.rsplit_once("::"))
+                    .map(|(module, _)| module.to_owned())
+            })?;
+        let importer = typescript_project_importer_key(&occurrence.range.source_file, &self.root)?;
+        let target_keys = target_source_file
+            .map(|source| typescript_source_module_keys(source, &self.root))
+            .unwrap_or_else(|| vec![String::new()]);
+        if target_keys.is_empty() {
+            return None;
+        }
+        let mut matches = Vec::new();
+        for ((candidate_importer, candidate_module, _candidate_context, target_key), value) in
+            &self.typescript_project_metadata
+        {
+            if candidate_importer != &importer
+                || candidate_module != &module
+                || !target_keys.contains(target_key)
+            {
+                continue;
+            }
+            matches.push(value.clone());
+        }
+        matches.sort();
+        matches.dedup();
+        (matches.len() == 1).then(|| matches.pop()).flatten()
+    }
+
+    /// Resolve a bounded TypeScript member-value chain such as
+    /// `Box<Item>.item.inspect`. The root export and generic arguments come
+    /// from the import binding; each intermediate member must publish a
+    /// direct type signature, and every hop must resolve uniquely. Missing,
+    /// structural, or competing type evidence remains unresolved.
+    fn typescript_member_chain_slots(
+        &self,
+        language: &str,
+        module: &str,
+        path: &TypeScriptMemberPath,
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<DeclarationSlot> {
+        const MAX_MEMBER_CHAIN_DEPTH: usize = 16;
+        if path.members.is_empty() || path.members.len() > MAX_MEMBER_CHAIN_DEPTH {
+            return BTreeSet::new();
+        }
+        let root_targets =
+            self.typescript_export_slots(language, module, &path.root_export, candidate, true);
+        let root_targets = if path.call_result && path.call_member_index.is_none() {
+            self.typescript_callable_overload_slots(
+                &root_targets,
+                &path.call_argument_types,
+                &path.call_type_arguments,
+            )
+        } else {
+            root_targets
+        };
+        if path.call_member_index.is_some() && root_targets.len() != 1 {
+            return BTreeSet::new();
+        }
+        let mut targets = BTreeSet::new();
+        for root_slot in root_targets {
+            let has_index_signature = self
+                .declaration(root_slot)
+                .and_then(|declaration| declaration.signature.as_deref())
+                .and_then(typescript_index_value_type)
+                .is_some();
+            let mut owners = if path.call_result && path.call_member_index.is_none() {
+                self.typescript_callable_return_contexts(
+                    language,
+                    module,
+                    root_slot,
+                    &path.call_argument_types,
+                    &path.call_type_arguments,
+                    candidate,
+                )
+            } else if let Some(signature) = self
+                .declaration(root_slot)
+                .and_then(|declaration| declaration.signature.as_deref())
+                && typescript_value_type(signature).is_some()
+            {
+                self.typescript_value_type_contexts(
+                    language,
+                    module,
+                    root_slot,
+                    &path.type_arguments,
+                    candidate,
+                )
+            } else if path.indexed && has_index_signature {
+                self.typescript_index_value_contexts(
+                    language,
+                    module,
+                    root_slot,
+                    &path.type_arguments,
+                    candidate,
+                )
+            } else {
+                self.typescript_expand_type_alias_contexts(
+                    language,
+                    module,
+                    root_slot,
+                    path.type_arguments.clone(),
+                    candidate,
+                )
+            };
+            for (index, raw_member_name) in path.members.iter().enumerate() {
+                let Some((member_name, index_selector)) =
+                    typescript_indexed_member_segment(raw_member_name)
+                else {
+                    owners.clear();
+                    break;
+                };
+                let final_member = index.saturating_add(1) == path.members.len();
+                let mut next_owners = BTreeSet::new();
+                for (owner_slot, owner_type_arguments) in owners.clone() {
+                    let expanded_owners = self.typescript_expand_type_alias_contexts(
+                        language,
+                        module,
+                        owner_slot,
+                        owner_type_arguments,
+                        candidate,
+                    );
+                    for (owner_slot, owner_type_arguments) in expanded_owners {
+                        let Some(owner) = self.declaration(owner_slot) else {
+                            continue;
+                        };
+                        let Some(members) = self.members_by_owner.get(&(
+                            owner.language.clone(),
+                            owner.qualified_name.clone(),
+                            member_name.clone(),
+                        )) else {
+                            continue;
+                        };
+                        if path.call_result && path.call_member_index == Some(index) {
+                            let owner_module =
+                                typescript_source_module_keys(&owner.range.source_file, &self.root)
+                                    .into_iter()
+                                    .next()
+                                    .unwrap_or_else(|| module.to_owned());
+                            next_owners.extend(self.typescript_member_callable_return_contexts(
+                                language,
+                                &owner_module,
+                                members,
+                                &path.call_argument_types,
+                                &path.call_type_arguments,
+                                candidate,
+                            ));
+                            continue;
+                        }
+                        if final_member {
+                            next_owners.extend(
+                                members
+                                    .iter()
+                                    .filter(|slot| {
+                                        self.typescript_declaration_allowed_slot(**slot, candidate)
+                                    })
+                                    .map(|slot| (*slot, Vec::new())),
+                            );
+                        } else {
+                            let typed_members = members
+                                .iter()
+                                .filter_map(|slot| self.declaration(*slot))
+                                .filter(|member| member.kind == "property")
+                                .filter_map(|member| member.signature.as_deref())
+                                .collect::<Vec<_>>();
+                            let [type_name] = typed_members.as_slice() else {
+                                continue;
+                            };
+                            next_owners.extend(self.typescript_member_type_contexts(
+                                language,
+                                module,
+                                type_name,
+                                TypeScriptMemberContext {
+                                    owner_signature: owner.signature.as_deref(),
+                                    type_arguments: &owner_type_arguments,
+                                    index_selector: index_selector.as_deref(),
+                                },
+                                candidate,
+                            ));
+                        }
+                    }
+                }
+                if next_owners.is_empty() {
+                    owners.clear();
+                    break;
+                }
+                owners = next_owners;
+            }
+            targets.extend(owners.into_iter().map(|(slot, _)| slot));
+            if targets.len() > self.limits.candidates_per_lookup {
+                break;
+            }
+        }
+        targets
+    }
+
+    fn typescript_value_type_contexts(
+        &self,
+        language: &str,
+        module: &str,
+        owner_slot: DeclarationSlot,
+        type_arguments: &[String],
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
+        let Some(owner) = self.declaration(owner_slot) else {
+            return BTreeSet::new();
+        };
+        let Some(signature) = owner.signature.as_deref() else {
+            return BTreeSet::new();
+        };
+        let Some(type_name) = typescript_value_type(signature) else {
+            return BTreeSet::new();
+        };
+        self.typescript_member_type_contexts(
+            language,
+            module,
+            type_name,
+            TypeScriptMemberContext {
+                owner_signature: None,
+                type_arguments,
+                index_selector: None,
+            },
+            candidate,
+        )
+    }
+
+    /// Resolve the nominal receiver produced by an imported callable result.
+    /// Only source-published fixed parameters and direct/container generic
+    /// inference are accepted; overloads, contextual inference, and
+    /// structural assignability remain unresolved.
+    fn typescript_callable_return_contexts(
+        &self,
+        language: &str,
+        module: &str,
+        callable_slot: DeclarationSlot,
+        call_argument_types: &[String],
+        call_type_arguments: &[String],
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
+        let Some(callable) = self.declaration(callable_slot) else {
+            return BTreeSet::new();
+        };
+        let Some(signature) = callable.signature.as_deref() else {
+            return BTreeSet::new();
+        };
+        let Some(return_type) = typescript_callable_return_type(signature) else {
+            return BTreeSet::new();
+        };
+        let parameters = typescript_generic_parameter_names(signature);
+        let mut type_arguments = if call_type_arguments.is_empty() {
+            parameters.clone()
+        } else if call_type_arguments.len() == parameters.len() {
+            call_type_arguments.to_vec()
+        } else {
+            return BTreeSet::new();
+        };
+        if let Some(parameter_types) = typescript_callable_parameter_types(signature) {
+            if parameter_types.len() != call_argument_types.len() {
+                return BTreeSet::new();
+            }
+            for (parameter_type, argument_type) in
+                parameter_types.iter().zip(call_argument_types.iter())
+            {
+                if argument_type == "__unknown" {
+                    continue;
+                }
+                if !typescript_infer_type_arguments(
+                    parameter_type,
+                    argument_type,
+                    &parameters,
+                    &mut type_arguments,
+                ) {
+                    return BTreeSet::new();
+                }
+            }
+        } else if call_type_arguments.is_empty()
+            && !parameters.is_empty()
+            && typescript_type_mentions_parameter(return_type, &parameters)
+        {
+            return BTreeSet::new();
+        }
+        if !parameters.is_empty()
+            && typescript_type_mentions_parameter(return_type, &parameters)
+            && type_arguments == parameters
+        {
+            return BTreeSet::new();
+        }
+        self.typescript_member_type_contexts(
+            language,
+            module,
+            return_type,
+            TypeScriptMemberContext {
+                owner_signature: Some(signature),
+                type_arguments: &type_arguments,
+                index_selector: None,
+            },
+            candidate,
+        )
+    }
+
+    fn typescript_member_callable_return_contexts(
+        &self,
+        language: &str,
+        module: &str,
+        members: &[DeclarationSlot],
+        call_argument_types: &[String],
+        call_type_arguments: &[String],
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
+        let mut contexts = BTreeSet::new();
+        let member_slots = members
+            .iter()
+            .copied()
+            .filter(|slot| {
+                self.declaration(*slot)
+                    .and_then(|declaration| declaration.signature.as_deref())
+                    .and_then(typescript_callable_return_type)
+                    .is_some()
+            })
+            .take(self.limits.candidates_per_lookup.saturating_add(1))
+            .collect::<BTreeSet<_>>();
+        let callable_members = self.typescript_callable_overload_slots(
+            &member_slots,
+            call_argument_types,
+            call_type_arguments,
+        );
+        if callable_members.len() != 1 {
+            return BTreeSet::new();
+        }
+        for slot in callable_members {
+            contexts.extend(self.typescript_callable_return_contexts(
+                language,
+                module,
+                slot,
+                call_argument_types,
+                call_type_arguments,
+                candidate,
+            ));
+            if contexts.len() > self.limits.candidates_per_lookup {
+                break;
+            }
+        }
+        contexts
+    }
+
+    /// Select one source-proven callable overload when the call carries a
+    /// complete, exact argument shape.  TypeScript overload assignability is
+    /// intentionally not modeled here: unsupported unions, contextual
+    /// inference, optional/rest parameters, and competing exact matches stay
+    /// unresolved instead of being collapsed to a convenient declaration.
+    fn typescript_callable_overload_slots(
+        &self,
+        slots: &BTreeSet<DeclarationSlot>,
+        call_argument_types: &[String],
+        call_type_arguments: &[String],
+    ) -> BTreeSet<DeclarationSlot> {
+        let callable_slots = slots
+            .iter()
+            .filter(|slot| {
+                self.declaration(**slot)
+                    .and_then(|declaration| declaration.signature.as_deref())
+                    .is_some_and(|signature| {
+                        typescript_callable_return_type(signature).is_some()
+                            || typescript_callable_parameter_types(signature).is_some()
+                    })
+            })
+            .take(self.limits.candidates_per_lookup.saturating_add(1))
+            .copied()
+            .collect::<Vec<_>>();
+        if callable_slots.len() > self.limits.candidates_per_lookup {
+            return BTreeSet::new();
+        }
+        if callable_slots.len() <= 1 {
+            return slots.clone();
+        }
+        let matching = callable_slots
+            .iter()
+            .copied()
+            .filter(|slot| {
+                self.declaration(*slot).is_some_and(|declaration| {
+                    let normalized_argument_types = call_argument_types
+                        .iter()
+                        .map(|argument| {
+                            self.typescript_normalize_overload_type(
+                                &declaration.range.source_file,
+                                argument,
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let normalized_type_arguments = call_type_arguments
+                        .iter()
+                        .map(|argument| {
+                            self.typescript_normalize_overload_type(
+                                &declaration.range.source_file,
+                                argument,
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    typescript_callable_overload_matches(
+                        declaration,
+                        &normalized_argument_types,
+                        &normalized_type_arguments,
+                        &self.typescript_callable_parameter_aliases(declaration),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        match matching.as_slice() {
+            [only] => BTreeSet::from([*only]),
+            _ => BTreeSet::new(),
+        }
+    }
+
+    fn typescript_callable_parameter_aliases(
+        &self,
+        declaration: &DeclarationFact,
+    ) -> AHashMap<String, String> {
+        let mut aliases = AHashMap::<String, Vec<String>>::new();
+        let mut scope = declaration.scope_id.clone();
+        let mut visited = BTreeSet::new();
+        let mut resolved_spellings = BTreeSet::new();
+        while let Some(scope_id) = scope.filter(|scope_id| visited.insert(scope_id.clone())) {
+            let mut scope_spellings = BTreeSet::new();
+            for binding in self.bindings.values().filter(|binding| {
+                binding.language == declaration.language
+                    && binding.scope_id.as_deref() == Some(scope_id.as_str())
+                    && matches!(
+                        binding.kind,
+                        compass_languages::BindingKind::Import
+                            | compass_languages::BindingKind::ImportAlias
+                            | compass_languages::BindingKind::Reexport
+                    )
+                    && binding.namespace.is_none_or(|namespace| {
+                        matches!(
+                            namespace,
+                            compass_languages::SymbolNamespace::Type
+                                | compass_languages::SymbolNamespace::ValueAndType
+                                | compass_languages::SymbolNamespace::Namespace
+                        )
+                    })
+            }) {
+                if resolved_spellings.contains(&binding.spelling)
+                    && !scope_spellings.contains(&binding.spelling)
+                {
+                    continue;
+                }
+                if !scope_spellings.insert(binding.spelling.clone()) {
+                    let targets = aliases.entry(binding.spelling.clone()).or_default();
+                    if targets.len() < 2 {
+                        targets.push(self.typescript_normalize_overload_type(
+                            &declaration.range.source_file,
+                            &binding.qualified_target,
+                        ));
+                    }
+                    continue;
+                }
+                aliases.insert(
+                    binding.spelling.clone(),
+                    vec![self.typescript_normalize_overload_type(
+                        &declaration.range.source_file,
+                        &binding.qualified_target,
+                    )],
+                );
+            }
+            resolved_spellings.extend(scope_spellings);
+            scope = self
+                .scopes
+                .get(&scope_id)
+                .and_then(|scope| scope.parent_scope_id.clone());
+        }
+        aliases
+            .into_iter()
+            .filter_map(|(spelling, targets)| {
+                let [target] = targets.as_slice() else {
+                    return None;
+                };
+                Some((spelling, target.clone()))
+            })
+            .collect()
+    }
+
+    fn typescript_normalize_overload_type(&self, source_file: &str, value: &str) -> String {
+        self.typescript_normalize_overload_type_at_depth(source_file, value, 0)
+    }
+
+    fn typescript_normalize_overload_type_at_depth(
+        &self,
+        source_file: &str,
+        value: &str,
+        depth: usize,
+    ) -> String {
+        let value = value.trim();
+        if depth > 32 || value.is_empty() || value == "__unknown" || value.len() > 1024 {
+            return value.to_owned();
+        }
+        if let Some((base, arguments)) = typescript_generic_type_parts(value) {
+            let arguments = arguments
+                .iter()
+                .map(|argument| {
+                    self.typescript_normalize_overload_type_at_depth(
+                        source_file,
+                        argument,
+                        depth.saturating_add(1),
+                    )
+                })
+                .collect::<Vec<_>>();
+            return format!("{base}<{}>", arguments.join(","));
+        }
+        let (module, exported) = split_typescript_module_qualified(value);
+        let Some(module) = module else {
+            return value.to_owned();
+        };
+        let Some(key) = typescript_import_module_keys(source_file, module, &self.root)
+            .into_iter()
+            .next()
+        else {
+            return value.to_owned();
+        };
+        format!("{key}::{exported}")
+    }
+
+    fn typescript_index_value_contexts(
+        &self,
+        language: &str,
+        module: &str,
+        owner_slot: DeclarationSlot,
+        type_arguments: &[String],
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
+        let Some(owner) = self.declaration(owner_slot) else {
+            return BTreeSet::new();
+        };
+        let Some(signature) = owner.signature.as_deref() else {
+            return BTreeSet::new();
+        };
+        let Some(type_name) = typescript_index_value_type(signature) else {
+            return BTreeSet::new();
+        };
+        self.typescript_member_type_contexts(
+            language,
+            module,
+            type_name,
+            TypeScriptMemberContext {
+                owner_signature: Some(signature),
+                type_arguments,
+                index_selector: None,
+            },
+            candidate,
+        )
+    }
+
+    fn typescript_expand_type_alias_contexts(
+        &self,
+        language: &str,
+        module: &str,
+        owner_slot: DeclarationSlot,
+        type_arguments: Vec<String>,
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
+        const MAX_ALIAS_DEPTH: usize = 16;
+        let mut current = BTreeSet::from([(owner_slot, type_arguments)]);
+        let mut seen = BTreeSet::new();
+        for _ in 0..=MAX_ALIAS_DEPTH {
+            let mut next = BTreeSet::new();
+            let mut expanded = false;
+            for (slot, arguments) in current {
+                if !seen.insert((slot, arguments.clone())) {
+                    continue;
+                }
+                let Some(owner) = self.declaration(slot) else {
+                    continue;
+                };
+                let Some(signature) = owner.signature.as_deref() else {
+                    next.insert((slot, arguments));
+                    continue;
+                };
+                let Some(alias_target) = typescript_type_alias_target(signature) else {
+                    next.insert((slot, arguments));
+                    continue;
+                };
+                let alias_module =
+                    typescript_source_module_keys(&owner.range.source_file, &self.root)
+                        .into_iter()
+                        .next()
+                        .unwrap_or_else(|| module.to_owned());
+                let substituted = typescript_substitute_type_parameters(
+                    alias_target,
+                    &typescript_generic_parameter_names(signature),
+                    &arguments,
+                );
+                let contexts = self.typescript_member_type_contexts(
+                    language,
+                    &alias_module,
+                    &substituted,
+                    TypeScriptMemberContext {
+                        owner_signature: Some(signature),
+                        type_arguments: &arguments,
+                        index_selector: substituted.strip_suffix("[]").map(|_| ""),
+                    },
+                    candidate,
+                );
+                if contexts.is_empty() {
+                    continue;
+                }
+                expanded = true;
+                next.extend(contexts);
+            }
+            if !expanded {
+                return next;
+            }
+            current = next;
+        }
+        BTreeSet::new()
+    }
+
+    fn typescript_member_type_contexts(
+        &self,
+        language: &str,
+        module: &str,
+        type_name: &str,
+        context: TypeScriptMemberContext<'_>,
+        candidate: &RelationshipCandidate,
+    ) -> BTreeSet<(DeclarationSlot, Vec<String>)> {
+        let type_name = type_name.trim();
+        if type_name.is_empty() || type_name.len() > 1024 {
+            return BTreeSet::new();
+        }
+        let generic_parameters = context
+            .owner_signature
+            .map(typescript_generic_parameter_names)
+            .unwrap_or_default();
+        let substituted = typescript_substitute_type_parameters(
+            type_name,
+            &generic_parameters,
+            context.type_arguments,
+        );
+        let substituted = typescript_utility_receiver_type(&substituted).unwrap_or(substituted);
+        if let Some((base, property)) = typescript_literal_indexed_type(&substituted) {
+            let base_contexts = self.typescript_member_type_contexts(
+                language,
+                module,
+                base,
+                TypeScriptMemberContext {
+                    owner_signature: None,
+                    type_arguments: &[],
+                    index_selector: None,
+                },
+                candidate,
+            );
+            let mut indexed_contexts = BTreeSet::new();
+            for (owner_slot, owner_type_arguments) in base_contexts {
+                let Some(owner) = self.declaration(owner_slot) else {
+                    continue;
+                };
+                let Some(members) = self.members_by_owner.get(&(
+                    owner.language.clone(),
+                    owner.qualified_name.clone(),
+                    property.clone(),
+                )) else {
+                    continue;
+                };
+                if members.len() != 1 {
+                    continue;
+                }
+                let Some(&member_slot) = members.first() else {
+                    continue;
+                };
+                let Some(member) = self.declaration(member_slot) else {
+                    continue;
+                };
+                let Some(signature) = member.signature.as_deref() else {
+                    continue;
+                };
+                let direct_property_type = (member.kind == "property"
+                    && !signature.contains("|params:")
+                    && !signature.contains("|return:"))
+                .then_some(signature.trim());
+                if let Some(value_type) = typescript_value_type(signature).or(direct_property_type)
+                {
+                    let owner_parameters = typescript_generic_parameter_names(
+                        owner.signature.as_deref().unwrap_or_default(),
+                    );
+                    let value_type = typescript_substitute_type_parameters(
+                        value_type,
+                        &owner_parameters,
+                        &owner_type_arguments,
+                    );
+                    let member_module =
+                        typescript_source_module_keys(&member.range.source_file, &self.root)
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| module.to_owned());
+                    indexed_contexts.extend(self.typescript_member_type_contexts(
+                        language,
+                        &member_module,
+                        &value_type,
+                        TypeScriptMemberContext {
+                            owner_signature: Some(signature),
+                            type_arguments: &[],
+                            index_selector: None,
+                        },
+                        candidate,
+                    ));
+                } else if typescript_callable_parameter_types(signature).is_some()
+                    || typescript_callable_return_type(signature).is_some()
+                {
+                    indexed_contexts.insert((member_slot, Vec::new()));
+                }
+            }
+            return indexed_contexts;
+        }
+        if let Some((utility, arguments)) = typescript_generic_type_parts(&substituted)
+            && matches!(utility, "Pick" | "Omit")
+            && arguments.len() == 2
+        {
+            let base = arguments[0].trim();
+            let keys = arguments[1].trim();
+            if typescript_keyof_type_base(keys) == Some(base) {
+                if utility == "Omit" {
+                    return BTreeSet::new();
+                }
+                // `Pick<Base, keyof Base>` is an identity projection. Keep
+                // this resolver branch deliberately narrow: literal Pick or
+                // Omit sets need member-level projection metadata, while a
+                // broad structural key expression must not widen a receiver.
+                return self.typescript_member_type_contexts(
+                    language,
+                    module,
+                    base,
+                    TypeScriptMemberContext {
+                        owner_signature: None,
+                        type_arguments: &[],
+                        index_selector: None,
+                    },
+                    candidate,
+                );
+            }
+            if let Some(key_names) = typescript_literal_key_names(keys) {
+                let selected = key_names.contains(candidate.target_spelling.as_str());
+                if (utility == "Pick" && !selected) || (utility == "Omit" && selected) {
+                    return BTreeSet::new();
+                }
+                // A literal projection is safe to resolve through its nominal
+                // base: the current member candidate is the only downstream
+                // property being adjudicated, and the key-set check above
+                // prevents a projected-away member from inheriting the base.
+                // This works across imported aliases while remaining bounded;
+                // dynamic and structural key spaces still fail closed.
+                return self.typescript_member_type_contexts(
+                    language,
+                    module,
+                    base,
+                    TypeScriptMemberContext {
+                        owner_signature: None,
+                        type_arguments: &[],
+                        index_selector: None,
+                    },
+                    candidate,
+                );
+            }
+        }
+        let substituted = match context.index_selector {
+            Some("") => match typescript_array_element_type(&substituted) {
+                Some(element) => element.to_owned(),
+                None => return BTreeSet::new(),
+            },
+            Some(index) => {
+                if let Some(element) = typescript_array_element_type(&substituted) {
+                    element
+                } else {
+                    match typescript_tuple_element_type(&substituted, index) {
+                        Some(element) => element,
+                        None => return BTreeSet::new(),
+                    }
+                }
+            }
+            None => substituted,
+        };
+        let (base, nested_type_arguments) = typescript_generic_type_parts(&substituted)
+            .unwrap_or((substituted.as_str(), Vec::new()));
+        let (qualified_module, exported) = split_typescript_module_qualified(base);
+        if exported.is_empty() {
+            return BTreeSet::new();
+        }
+        let mut modules = Vec::new();
+        if let Some(qualified_module) = qualified_module {
+            modules.push(qualified_module.to_owned());
+            modules.extend(typescript_import_module_keys(
+                module,
+                qualified_module,
+                &self.root,
+            ));
+        } else {
+            modules.push(module.to_owned());
+        }
+        modules.sort_unstable();
+        modules.dedup();
+        let mut contexts = BTreeSet::new();
+        let exported_name = exported
+            .rsplit_once('.')
+            .map_or(exported, |(_, name)| name)
+            .to_owned();
+        for module in modules {
+            for slot in
+                self.typescript_export_slots(language, &module, &exported_name, candidate, true)
+            {
+                if exported.contains('.')
+                    && self
+                        .declaration(slot)
+                        .is_none_or(|declaration| declaration.qualified_name != exported)
+                {
+                    continue;
+                }
+                contexts.insert((slot, nested_type_arguments.clone()));
+            }
+            if contexts.len() > self.limits.candidates_per_lookup {
+                break;
+            }
+        }
+        if qualified_module.is_none() && !exported.contains('.') {
+            let mut imported_contexts = BTreeSet::new();
+            for binding in self.bindings.values().filter(|binding| {
+                binding.language == language
+                    && binding.spelling == exported
+                    && matches!(
+                        binding.kind,
+                        compass_languages::BindingKind::Import
+                            | compass_languages::BindingKind::ImportAlias
+                            | compass_languages::BindingKind::Reexport
+                    )
+                    && binding.namespace.is_none_or(|namespace| {
+                        matches!(
+                            namespace,
+                            compass_languages::SymbolNamespace::Type
+                                | compass_languages::SymbolNamespace::ValueAndType
+                                | compass_languages::SymbolNamespace::Namespace
+                        )
+                    })
+            }) {
+                let Some(owner) = binding
+                    .scope_id
+                    .as_deref()
+                    .and_then(|scope_id| self.scopes.get(scope_id))
+                    .and_then(|scope| scope.owner_declaration_id.as_deref())
+                    .and_then(|declaration_id| self.declarations.get(declaration_id))
+                else {
+                    continue;
+                };
+                let owner_modules =
+                    typescript_source_module_keys(&owner.range.source_file, &self.root);
+                let mut module_candidates = vec![module.to_owned()];
+                module_candidates.extend(typescript_import_module_keys(
+                    &owner.range.source_file,
+                    module,
+                    &self.root,
+                ));
+                if !module_candidates
+                    .iter()
+                    .any(|candidate_module| owner_modules.contains(candidate_module))
+                {
+                    continue;
+                }
+                let Some((target_module, target_export)) =
+                    binding.qualified_target.rsplit_once("::")
+                else {
+                    continue;
+                };
+                let mut target_modules = vec![target_module.to_owned()];
+                target_modules.extend(typescript_import_module_keys(
+                    &owner.range.source_file,
+                    target_module,
+                    &self.root,
+                ));
+                target_modules.sort_unstable();
+                target_modules.dedup();
+                for target_module in target_modules {
+                    for slot in self.typescript_export_slots(
+                        language,
+                        &target_module,
+                        target_export,
+                        candidate,
+                        true,
+                    ) {
+                        imported_contexts.insert((slot, nested_type_arguments.clone()));
+                    }
+                }
+            }
+            if !imported_contexts.is_empty() {
+                contexts = imported_contexts;
+            }
+        }
+        contexts
+    }
+
+    fn typescript_export_slots(
+        &self,
+        language: &str,
+        module: &str,
+        exported: &str,
+        candidate: &RelationshipCandidate,
+        allow_type_owner: bool,
+    ) -> BTreeSet<DeclarationSlot> {
+        const MAX_TYPESCRIPT_REEXPORT_DEPTH: usize = 64;
+        let mut walk = TypeScriptExportWalk {
+            candidate,
+            allow_type_owner,
+            visiting: BTreeSet::new(),
+            slots: BTreeSet::new(),
+        };
+        self.collect_typescript_export_slots(
+            language,
+            module,
+            exported,
+            0,
+            MAX_TYPESCRIPT_REEXPORT_DEPTH,
+            &mut walk,
+        );
+        walk.slots
+    }
+
+    fn typescript_export_alias_slots(
+        &self,
+        language: &str,
+        module: &str,
+        exported: &str,
+        candidate: &RelationshipCandidate,
+        allow_type_owner: bool,
+    ) -> BTreeSet<DeclarationSlot> {
+        let mut slots = BTreeSet::new();
+        for target_language in typescript_language_family(language) {
+            if let Some(values) = self.typescript_export_aliases.get(&(
+                (*target_language).to_owned(),
+                module.to_owned(),
+                exported.to_owned(),
+            )) {
+                slots.extend(
+                    values
+                        .iter()
+                        .filter(|slot| {
+                            if allow_type_owner {
+                                self.typescript_declaration_allowed_owner_slot(**slot, candidate)
+                            } else {
+                                self.typescript_declaration_allowed_slot(**slot, candidate)
+                            }
+                        })
+                        .copied(),
+                );
+            }
+        }
+        slots
+    }
+
+    fn collect_typescript_export_slots(
+        &self,
+        language: &str,
+        module: &str,
+        exported: &str,
+        depth: usize,
+        max_depth: usize,
+        walk: &mut TypeScriptExportWalk<'_>,
+    ) {
+        if depth >= max_depth
+            || walk.slots.len() > self.limits.candidates_per_lookup
+            || !walk
+                .visiting
+                .insert((language.to_owned(), module.to_owned(), exported.to_owned()))
+        {
+            return;
+        }
+        for target_language in typescript_language_family(language) {
+            let target_language = *target_language;
+            // An export-star namespace alias carries a reexport target whose
+            // exported spelling is a wildcard. Treat that spelling as the
+            // provider module owner so \`ns.member\` can use the same exact
+            // member index as a namespace import. Ordinary wildcard barrel
+            // traversal still requests the concrete exported name below.
+            let direct_export = if exported == "*" { "module" } else { exported };
+            for (direct_module_index, index) in [
+                (true, &self.typescript_modules),
+                (false, &self.typescript_export_aliases),
+            ] {
+                if let Some(values) = index.get(&(
+                    target_language.to_owned(),
+                    module.to_owned(),
+                    direct_export.to_owned(),
+                )) {
+                    let remaining = candidate_storage_limit(self.limits.candidates_per_lookup)
+                        .saturating_sub(walk.slots.len());
+                    if remaining > 0 {
+                        walk.slots.extend(
+                            values
+                                .iter()
+                                .filter(|slot| {
+                                    if direct_module_index
+                                        && !walk.allow_type_owner
+                                        && !self.typescript_exported_declarations.contains(slot)
+                                        && self
+                                            .declaration(**slot)
+                                            .is_none_or(|declaration| declaration.kind != "module")
+                                    {
+                                        return false;
+                                    }
+                                    if walk.allow_type_owner {
+                                        (exported == "*"
+                                            && self.declaration(**slot).is_some_and(
+                                                |declaration| declaration.kind == "module",
+                                            ))
+                                            || self.typescript_declaration_allowed_owner_slot(
+                                                **slot,
+                                                walk.candidate,
+                                            )
+                                    } else {
+                                        self.typescript_declaration_allowed_slot(
+                                            **slot,
+                                            walk.candidate,
+                                        )
+                                    }
+                                })
+                                .take(remaining)
+                                .copied(),
+                        );
+                    }
+                }
+            }
+            if exported != "default"
+                && let Some(values) = self.typescript_reexport_targets.get(&(
+                    target_language.to_owned(),
+                    module.to_owned(),
+                    "*".to_owned(),
+                ))
+            {
+                for target in values {
+                    self.collect_typescript_export_slots(
+                        target_language,
+                        &target.module,
+                        exported,
+                        depth.saturating_add(1),
+                        max_depth,
+                        walk,
+                    );
+                }
+            }
+            if let Some(values) = self.typescript_reexport_targets.get(&(
+                target_language.to_owned(),
+                module.to_owned(),
+                exported.to_owned(),
+            )) {
+                for target in values {
+                    self.collect_typescript_export_slots(
+                        target_language,
+                        &target.module,
+                        &target.exported,
+                        depth.saturating_add(1),
+                        max_depth,
+                        walk,
+                    );
+                }
+            }
+        }
+        walk.visiting
+            .remove(&(language.to_owned(), module.to_owned(), exported.to_owned()));
     }
 
     fn resolve_wildcard_binding(
@@ -1772,10 +3638,33 @@ impl UniversalResolutionIndex {
             .filter_map(
                 |(candidate_id, target, resolution_rule, target_kind, target_site)| {
                     let candidate = &self.candidates[candidate_id];
-                    let source = self
+                    let owner_source = self
                         .declarations
                         .get(&candidate.source_declaration_id)
                         .map(|declaration| graph_ids[&declaration.id].clone())?;
+                    let annotation_source = (candidate.relation == CandidateRelation::Decorates)
+                        .then(|| {
+                            let occurrence = self.occurrence(candidate)?;
+                            self.declarations
+                                .values()
+                                .filter(|declaration| {
+                                    declaration.kind == "annotation"
+                                        && declaration.name == occurrence.spelling
+                                        && declaration.range.source_file
+                                            == occurrence.range.source_file
+                                        && declaration.range.start_byte
+                                            <= occurrence.range.start_byte
+                                        && declaration.range.end_byte >= occurrence.range.end_byte
+                                })
+                                .min_by_key(|declaration| {
+                                    (declaration.range.start_byte, declaration.id.as_str())
+                                })
+                                .map(|declaration| graph_ids[&declaration.id].clone())
+                        })
+                        .flatten();
+                    let source = annotation_source
+                        .clone()
+                        .unwrap_or_else(|| owner_source.clone());
                     let (source, target) = if candidate.relation == CandidateRelation::Contains {
                         (source, target)
                     } else if self.occurrence(candidate).is_some_and(|occurrence| {
@@ -1790,7 +3679,11 @@ impl UniversalResolutionIndex {
                         .exact_target_declaration_id
                         .as_deref()
                         .and_then(|id| self.declarations.get(id));
-                    let relation = if self.occurrence(candidate).is_some_and(|occurrence| {
+                    let relation = if candidate.relation == CandidateRelation::Decorates
+                        && annotation_source.is_some()
+                    {
+                        "decorates"
+                    } else if self.occurrence(candidate).is_some_and(|occurrence| {
                         occurrence.role == compass_languages::SemanticRole::Receiver
                     }) {
                         "method"
@@ -1828,24 +3721,89 @@ impl UniversalResolutionIndex {
                     if source == target && relation != "calls" {
                         return None;
                     }
-                    Some(materialized_edge(
+                    let target_source_file = target_site.map(|range| range.source_file.as_str());
+                    let project_metadata =
+                        self.typescript_project_metadata(candidate, target_source_file);
+                    let binding = candidate
+                        .binding_id
+                        .as_deref()
+                        .and_then(|binding_id| self.bindings.get(binding_id));
+                    let occurrence = self.occurrence(candidate);
+                    let edge = materialized_edge(
                         source,
                         target,
                         relation,
                         candidate,
-                        self.occurrence(candidate),
-                        candidate
-                            .binding_id
-                            .as_deref()
-                            .and_then(|binding_id| self.bindings.get(binding_id)),
+                        occurrence,
+                        binding,
                         target_kind.as_deref(),
-                        target_site.map(|range| range.source_file.as_str()),
+                        target_source_file,
                         site,
                         resolution_rule,
                         &candidate.language,
-                    ))
+                        project_metadata.as_ref(),
+                    );
+                    let mut materialized = vec![edge.clone()];
+                    if candidate.relation == CandidateRelation::Reexports
+                        && binding.is_some_and(|binding| {
+                            let target_name = binding
+                                .qualified_target
+                                .rsplit([':', '.'])
+                                .find(|name| !name.is_empty())
+                                .unwrap_or_default();
+                            binding.spelling != target_name
+                                || occurrence
+                                    .and_then(|occurrence| occurrence.qualifier.as_deref())
+                                    .is_some_and(|qualifier| qualifier != binding.spelling)
+                        })
+                    {
+                        let export_name = binding.map(|binding| binding.spelling.as_str());
+                        let alias_source = export_name.and_then(|export_name| {
+                            occurrence.and_then(|occurrence| {
+                                self.declarations
+                                    .values()
+                                    .filter(|declaration| {
+                                        declaration.kind == "export"
+                                            && declaration.name == export_name
+                                            && declaration.range.source_file
+                                                == occurrence.range.source_file
+                                            && declaration.range.start_byte
+                                                <= occurrence.range.start_byte
+                                            && declaration.range.end_byte
+                                                >= occurrence.range.end_byte
+                                    })
+                                    .min_by_key(|declaration| {
+                                        (declaration.range.start_byte, declaration.id.as_str())
+                                    })
+                                    .map(|declaration| graph_ids[&declaration.id].clone())
+                            })
+                        });
+                        if let Some(alias_source) = alias_source {
+                            let mut attributes = edge.attributes.clone();
+                            attributes
+                                .insert("relation".to_owned(), Value::String("aliases".to_owned()));
+                            attributes.insert(
+                                "context".to_owned(),
+                                Value::String("export_alias".to_owned()),
+                            );
+                            attributes.insert(
+                                "rule".to_owned(),
+                                Value::String(format!(
+                                    "universal-reexport-alias-{}",
+                                    resolution_rule_name(resolution_rule)
+                                )),
+                            );
+                            materialized.push(EdgeRecord {
+                                source: alias_source,
+                                target: edge.target.clone(),
+                                attributes,
+                            });
+                        }
+                    }
+                    Some(materialized)
                 },
             )
+            .flatten()
             .collect::<Vec<_>>();
         edges.extend(materialized);
         profile_internal("universal edge materialization", &mut profile_started);
@@ -2819,6 +4777,56 @@ impl UniversalResolutionIndex {
                 });
             }
         }
+        match eligible.as_slice() {
+            [only] => Some(ResolutionDecision::Resolved {
+                declaration_id: self.declaration_id(*only)?.to_owned(),
+                evidence: ResolutionEvidence {
+                    rule,
+                    candidate_count: 1,
+                },
+            }),
+            [] => None,
+            many => Some(ResolutionDecision::Ambiguous {
+                candidate_count: many.len(),
+            }),
+        }
+    }
+
+    fn typescript_declaration_allowed_slot(
+        &self,
+        slot: DeclarationSlot,
+        candidate: &RelationshipCandidate,
+    ) -> bool {
+        let Some(target) = self.declaration(slot) else {
+            return false;
+        };
+        typescript_declaration_basic_allowed(target, candidate)
+    }
+
+    fn typescript_declaration_allowed_owner_slot(
+        &self,
+        slot: DeclarationSlot,
+        candidate: &RelationshipCandidate,
+    ) -> bool {
+        let Some(target) = self.declaration(slot) else {
+            return false;
+        };
+        typescript_declaration_basic_allowed_with_type_owner(target, candidate)
+    }
+
+    fn unique_typescript_decision(
+        &self,
+        ids: Option<&Vec<DeclarationSlot>>,
+        candidate: &RelationshipCandidate,
+        rule: ResolutionRule,
+    ) -> Option<ResolutionDecision> {
+        let ids = ids?;
+        let eligible = ids
+            .iter()
+            .filter(|slot| self.typescript_declaration_allowed_slot(**slot, candidate))
+            .take(self.limits.candidates_per_lookup.saturating_add(1))
+            .copied()
+            .collect::<Vec<_>>();
         match eligible.as_slice() {
             [only] => Some(ResolutionDecision::Resolved {
                 declaration_id: self.declaration_id(*only)?.to_owned(),
@@ -3910,6 +5918,876 @@ fn declaration_basic_allowed(target: &DeclarationFact, candidate: &RelationshipC
                 .contains(&target.kind))
 }
 
+fn typescript_language_family(language: &str) -> &'static [&'static str] {
+    match language {
+        "typescript" => &["typescript", "javascript"],
+        "javascript" => &["javascript", "typescript"],
+        _ => &[],
+    }
+}
+
+fn typescript_member_path(qualified: &str, target_spelling: &str) -> Option<TypeScriptMemberPath> {
+    let (_, path) = split_typescript_module_qualified(qualified);
+    let segments = split_typescript_member_segments(path);
+    if segments.len() < 2 || segments.last()?.as_str() != target_spelling {
+        return None;
+    }
+    let root_segment = segments.first()?;
+    let indexed = root_segment.ends_with("[]");
+    let root_segment = root_segment
+        .strip_suffix("[]")
+        .unwrap_or(root_segment)
+        .trim();
+    let (root_base, mut call_result, mut call_argument_types, mut call_type_arguments) =
+        if let Some((base, arguments, type_arguments)) = typescript_call_result_marker(root_segment)
+        {
+            (base, true, arguments, type_arguments)
+        } else {
+            (root_segment.to_owned(), false, Vec::new(), Vec::new())
+        };
+    let (root_export, type_arguments) = typescript_generic_type_parts(&root_base).map_or_else(
+        || (root_base.clone(), Vec::new()),
+        |(base, arguments)| (base.to_owned(), arguments),
+    );
+    let mut members = segments.into_iter().skip(1).collect::<Vec<_>>();
+    let member_count = members.len();
+    let mut call_member_index = None;
+    for (index, member) in members.iter_mut().enumerate() {
+        let Some((base, arguments, type_arguments)) = typescript_call_result_marker(member) else {
+            continue;
+        };
+        if call_result || index.saturating_add(1) >= member_count {
+            return None;
+        }
+        *member = base;
+        call_result = true;
+        call_argument_types = arguments;
+        call_type_arguments = type_arguments;
+        call_member_index = Some(index);
+    }
+    if root_export.is_empty() {
+        return None;
+    }
+    Some(TypeScriptMemberPath {
+        root_export,
+        type_arguments,
+        call_result,
+        call_argument_types,
+        call_type_arguments,
+        call_member_index,
+        indexed,
+        members,
+    })
+}
+
+fn typescript_call_result_marker(value: &str) -> Option<(String, Vec<String>, Vec<String>)> {
+    let value = value.trim();
+    let mut call_value = value;
+    let type_arguments = if let Some(marker) = call_value.find("#types<") {
+        let payload_start = marker.saturating_add("#types<".len());
+        let payload = call_value.get(payload_start..)?.strip_suffix('>')?;
+        let marker_end = payload_start
+            .saturating_add(payload.len())
+            .saturating_add(1);
+        if marker_end != call_value.len() || payload.is_empty() {
+            return None;
+        }
+        call_value = call_value.get(..marker)?.trim();
+        let wrapped = format!("Types<{payload}>");
+        let (_, arguments) = typescript_generic_type_parts(&wrapped)?;
+        arguments
+    } else {
+        Vec::new()
+    };
+    let marker = call_value.find("#call<")?;
+    let payload_start = marker.saturating_add("#call<".len());
+    let payload = call_value.get(payload_start..)?.strip_suffix('>')?;
+    let marker_end = payload_start
+        .saturating_add(payload.len())
+        .saturating_add(1);
+    if marker_end != call_value.len() || payload.is_empty() {
+        return None;
+    }
+    let base = call_value.get(..marker)?.trim();
+    if base.is_empty() {
+        return None;
+    }
+    let arguments = if payload == "__none" {
+        Vec::new()
+    } else {
+        let wrapped = format!("Call<{payload}>");
+        let (_, arguments) = typescript_generic_type_parts(&wrapped)?;
+        arguments
+    };
+    Some((base.to_owned(), arguments, type_arguments))
+}
+
+fn split_typescript_module_qualified(value: &str) -> (Option<&str>, &str) {
+    let bytes = value.as_bytes();
+    let mut angle_depth = 0_u32;
+    let mut split = None;
+    for index in 0..bytes.len().saturating_sub(1) {
+        match bytes[index] {
+            b'<' => angle_depth = angle_depth.saturating_add(1),
+            b'>' => angle_depth = angle_depth.saturating_sub(1),
+            b':' if bytes[index + 1] == b':' && angle_depth == 0 => split = Some(index),
+            _ => {}
+        }
+    }
+    split.map_or((None, value), |index| {
+        (
+            value.get(..index).filter(|module| !module.is_empty()),
+            value.get(index.saturating_add(2)..).unwrap_or_default(),
+        )
+    })
+}
+
+fn split_typescript_member_segments(value: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut start = 0_usize;
+    let mut angle_depth = 0_u32;
+    let bytes = value.as_bytes();
+    let mut index = 0_usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'<' => angle_depth = angle_depth.saturating_add(1),
+            b'>' => angle_depth = angle_depth.saturating_sub(1),
+            b'.' if angle_depth == 0 => {
+                if let Some(segment) = value.get(start..index).map(str::trim)
+                    && !segment.is_empty()
+                {
+                    segments.push(segment.to_owned());
+                }
+                start = index.saturating_add(1);
+            }
+            b':' if angle_depth == 0 && bytes.get(index.saturating_add(1)) == Some(&b':') => {
+                if let Some(segment) = value.get(start..index).map(str::trim)
+                    && !segment.is_empty()
+                {
+                    segments.push(segment.to_owned());
+                }
+                start = index.saturating_add(2);
+                index = index.saturating_add(1);
+            }
+            _ => {}
+        }
+        index = index.saturating_add(1);
+    }
+    if let Some(segment) = value.get(start..).map(str::trim)
+        && !segment.is_empty()
+    {
+        segments.push(segment.to_owned());
+    }
+    segments
+}
+
+fn typescript_generic_type_parts(value: &str) -> Option<(&str, Vec<String>)> {
+    let value = value.trim();
+    let bytes = value.as_bytes();
+    let open = bytes.iter().position(|byte| *byte == b'<')?;
+    if open == 0 || !value.ends_with('>') {
+        return None;
+    }
+    let base = value.get(..open)?.trim();
+    let arguments = value.get(open.saturating_add(1)..value.len().saturating_sub(1))?;
+    if base.is_empty() || arguments.is_empty() || arguments.len() > 1024 {
+        return None;
+    }
+    let mut parts = Vec::new();
+    let mut start = 0_usize;
+    let mut depth = 0_u32;
+    for (index, character) in arguments.char_indices() {
+        match character {
+            '<' | '[' | '(' | '{' => depth = depth.saturating_add(1),
+            '>' | ']' | ')' | '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                let part = arguments.get(start..index)?.trim();
+                if part.is_empty() || part.len() > 1024 {
+                    return None;
+                }
+                parts.push(part.to_owned());
+                start = index.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+    let part = arguments.get(start..)?.trim();
+    if part.is_empty() || part.len() > 1024 {
+        return None;
+    }
+    parts.push(part.to_owned());
+    (parts.len() <= 64).then_some((base, parts))
+}
+
+fn typescript_array_element_type(value: &str) -> Option<String> {
+    let value = value.trim();
+    if let Some(element) = value.strip_suffix("[]") {
+        let element = element.trim();
+        return (!element.is_empty() && element.len() <= 1024).then(|| element.to_owned());
+    }
+    let (base, arguments) = typescript_generic_type_parts(value)?;
+    if !matches!(base, "Array" | "ReadonlyArray") || arguments.len() != 1 {
+        return None;
+    }
+    arguments.first().cloned()
+}
+
+fn typescript_utility_receiver_type(value: &str) -> Option<String> {
+    typescript_utility_receiver_type_at_depth(value, 0)
+}
+
+fn typescript_utility_receiver_type_at_depth(value: &str, depth: u32) -> Option<String> {
+    if depth > 32 {
+        return None;
+    }
+    let (base, arguments) = typescript_generic_type_parts(value)?;
+    if arguments.len() != 1 {
+        return None;
+    }
+    let argument = arguments[0].trim();
+    match base {
+        "NonNullable" => {
+            let members = typescript_split_top_level_union(argument)?;
+            let nominal = members
+                .into_iter()
+                .map(str::trim)
+                .filter(|member| !typescript_non_nominal_union_member(member))
+                .collect::<Vec<_>>();
+            let [nominal] = nominal.as_slice() else {
+                return None;
+            };
+            Some((*nominal).to_owned())
+        }
+        "Awaited" => {
+            if let Some((promise, nested)) = typescript_generic_type_parts(argument)
+                && matches!(promise, "Promise" | "PromiseLike")
+                && nested.len() == 1
+            {
+                return typescript_utility_receiver_type_at_depth(
+                    &format!("Awaited<{}>", nested[0]),
+                    depth.saturating_add(1),
+                )
+                .or_else(|| Some(nested[0].clone()));
+            }
+            Some(argument.to_owned())
+        }
+        "Partial" | "Required" | "Readonly" => Some(argument.to_owned()),
+        _ => None,
+    }
+}
+
+fn typescript_non_nominal_union_member(value: &str) -> bool {
+    matches!(
+        value,
+        "any"
+            | "unknown"
+            | "never"
+            | "void"
+            | "undefined"
+            | "null"
+            | "string"
+            | "number"
+            | "boolean"
+            | "bigint"
+            | "symbol"
+            | "object"
+            | "true"
+            | "false"
+    )
+}
+
+fn typescript_split_top_level_union(value: &str) -> Option<Vec<&str>> {
+    let mut members = Vec::new();
+    let mut start = 0_usize;
+    let mut depth = 0_u32;
+    for (index, character) in value.char_indices() {
+        match character {
+            '<' | '{' | '(' | '[' => depth = depth.checked_add(1)?,
+            '>' | '}' | ')' | ']' => depth = depth.checked_sub(1)?,
+            '|' if depth == 0 => {
+                let member = value.get(start..index)?.trim();
+                if member.is_empty() {
+                    return None;
+                }
+                members.push(member);
+                start = index.saturating_add(character.len_utf8());
+            }
+            _ => {}
+        }
+        if members.len() >= 64 {
+            return None;
+        }
+    }
+    let member = value.get(start..)?.trim();
+    if member.is_empty() {
+        return None;
+    }
+    members.push(member);
+    Some(members)
+}
+
+fn typescript_tuple_elements(value: &str) -> Option<Vec<&str>> {
+    let value = value.trim();
+    if !value.starts_with('[') || !value.ends_with(']') {
+        return None;
+    }
+    let inner = value.get(1..value.len().saturating_sub(1))?.trim();
+    if inner.is_empty() || inner.len() > 1024 {
+        return None;
+    }
+    let mut elements = Vec::new();
+    let mut start = 0_usize;
+    let mut depth = 0_u32;
+    for (index, character) in inner.char_indices() {
+        match character {
+            '<' | '[' | '(' | '{' => depth = depth.saturating_add(1),
+            '>' | ']' | ')' | '}' => depth = depth.checked_sub(1)?,
+            ',' if depth == 0 => {
+                let element = inner.get(start..index)?.trim();
+                if element.is_empty() || element.len() > 1024 {
+                    return None;
+                }
+                elements.push(element);
+                start = index.saturating_add(1);
+            }
+            _ => {}
+        }
+        if elements.len() >= 64 {
+            return None;
+        }
+    }
+    if depth != 0 {
+        return None;
+    }
+    let element = inner.get(start..)?.trim();
+    if element.is_empty() || element.len() > 1024 {
+        return None;
+    }
+    elements.push(element);
+    Some(elements)
+}
+
+fn typescript_tuple_element_type(value: &str, index: &str) -> Option<String> {
+    let index = index.parse::<usize>().ok()?;
+    let element = typescript_tuple_elements(value)?.get(index)?.trim();
+    if element.is_empty() || element.starts_with("...") || element.ends_with('?') {
+        return None;
+    }
+    Some(element.to_owned())
+}
+
+fn typescript_indexed_member_segment(value: &str) -> Option<(String, Option<String>)> {
+    let value = value.trim();
+    if let Some(base) = value.strip_suffix("[]") {
+        let base = base.trim();
+        return (!base.is_empty()).then(|| (base.to_owned(), Some(String::new())));
+    }
+    if let Some(open) = value.rfind('[')
+        && value.ends_with(']')
+    {
+        let base = value.get(..open)?.trim();
+        let index = value.get(open.saturating_add(1)..value.len().saturating_sub(1))?;
+        if base.is_empty()
+            || index.is_empty()
+            || !index.chars().all(|character| character.is_ascii_digit())
+        {
+            return None;
+        }
+        return Some((base.to_owned(), Some(index.to_owned())));
+    }
+    (!value.is_empty()).then(|| (value.to_owned(), None))
+}
+
+fn typescript_literal_indexed_type(value: &str) -> Option<(&str, String)> {
+    let value = value.trim();
+    if !value.ends_with(']') {
+        return None;
+    }
+    let open = value.rfind('[')?;
+    let base = value.get(..open)?.trim();
+    let raw_property = value
+        .get(open.saturating_add(1)..value.len().saturating_sub(1))?
+        .trim();
+    let property = raw_property
+        .strip_prefix('"')
+        .and_then(|property| property.strip_suffix('"'))
+        .or_else(|| {
+            raw_property
+                .strip_prefix('\'')
+                .and_then(|property| property.strip_suffix('\''))
+        })?;
+    if base.is_empty() || property.is_empty() || property.len() > 1024 {
+        return None;
+    }
+    Some((base, property.to_owned()))
+}
+
+fn typescript_keyof_type_base(value: &str) -> Option<&str> {
+    let rest = value.trim().strip_prefix("keyof")?;
+    rest.chars()
+        .next()
+        .filter(|character| character.is_whitespace())?;
+    let base = rest.trim();
+    (!base.is_empty()).then_some(base)
+}
+
+fn typescript_literal_key_names(value: &str) -> Option<BTreeSet<String>> {
+    let mut names = BTreeSet::new();
+    for key in value.split('|').map(str::trim) {
+        let key = key
+            .strip_prefix('"')
+            .and_then(|key| key.strip_suffix('"'))
+            .or_else(|| {
+                key.strip_prefix('\'')
+                    .and_then(|key| key.strip_suffix('\''))
+            })
+            .or_else(|| key.strip_prefix('`').and_then(|key| key.strip_suffix('`')))?;
+        if key.is_empty() || key.len() > 1024 {
+            return None;
+        }
+        names.insert(key.to_owned());
+        if names.len() > 256 {
+            return None;
+        }
+    }
+    (!names.is_empty()).then_some(names)
+}
+
+fn typescript_generic_parameter_names(signature: &str) -> Vec<String> {
+    let signature = signature
+        .trim()
+        .split(['=', '|'])
+        .next()
+        .unwrap_or_default()
+        .trim();
+    if !signature.starts_with('<') || !signature.ends_with('>') {
+        return Vec::new();
+    }
+    let body = &signature[1..signature.len().saturating_sub(1)];
+    let mut names = Vec::new();
+    for name in body.split(',').map(str::trim) {
+        if name.is_empty()
+            || name.len() > 128
+            || !name.chars().all(|character| {
+                character == '_' || character == '$' || character.is_ascii_alphanumeric()
+            })
+        {
+            return Vec::new();
+        }
+        names.push(name.to_owned());
+        if names.len() > 64 {
+            return Vec::new();
+        }
+    }
+    names
+}
+
+fn typescript_callable_return_type(signature: &str) -> Option<&str> {
+    let (_, return_type) = signature.rsplit_once("|return:")?;
+    let return_type = return_type.trim();
+    (!return_type.is_empty() && return_type.len() <= 1024).then_some(return_type)
+}
+
+fn typescript_value_type(signature: &str) -> Option<&str> {
+    let type_name = signature.trim().strip_prefix("|type:")?.trim();
+    (!type_name.is_empty() && type_name.len() <= 1024).then_some(type_name)
+}
+
+fn typescript_callable_parameter_types(signature: &str) -> Option<Vec<String>> {
+    let (_, parameters) = signature.split_once("|params:")?;
+    let parameters = parameters
+        .split_once("|return:")
+        .map_or(parameters, |(parameters, _)| parameters)
+        .trim();
+    if parameters.is_empty() {
+        return Some(Vec::new());
+    }
+    let wrapped = format!("Parameters<{parameters}>");
+    typescript_generic_type_parts(&wrapped).map(|(_, arguments)| arguments)
+}
+
+fn typescript_candidate_argument_types(candidate: &RelationshipCandidate) -> Vec<String> {
+    candidate
+        .constraints
+        .argument_types
+        .iter()
+        .map(|argument| argument.clone().unwrap_or_else(|| "__unknown".to_owned()))
+        .collect()
+}
+
+fn typescript_callable_overload_matches(
+    declaration: &DeclarationFact,
+    call_argument_types: &[String],
+    call_type_arguments: &[String],
+    parameter_aliases: &AHashMap<String, String>,
+) -> bool {
+    let Some(signature) = declaration.signature.as_deref() else {
+        return false;
+    };
+    let generic_parameters = typescript_generic_parameter_names(signature);
+    if !call_type_arguments.is_empty() && call_type_arguments.len() != generic_parameters.len() {
+        return false;
+    }
+    let mut inferred_arguments = if call_type_arguments.is_empty() {
+        generic_parameters.clone()
+    } else {
+        call_type_arguments.to_vec()
+    };
+    if let Some(parameter_types) = typescript_callable_parameter_types(signature) {
+        if parameter_types.len() != call_argument_types.len() {
+            return false;
+        }
+        for (parameter, argument) in parameter_types.iter().zip(call_argument_types) {
+            if argument == "__unknown" {
+                if call_type_arguments.is_empty()
+                    || generic_parameters.iter().all(|name| {
+                        !typescript_type_mentions_parameter(parameter, std::slice::from_ref(name))
+                    })
+                {
+                    return false;
+                }
+                continue;
+            }
+            if !typescript_callable_parameter_matches(
+                parameter,
+                argument,
+                &generic_parameters,
+                &mut inferred_arguments,
+                parameter_aliases,
+            ) {
+                return false;
+            }
+        }
+        return true;
+    }
+    declaration
+        .parameter_count
+        .and_then(|count| usize::try_from(count).ok())
+        .is_some_and(|count| {
+            count == call_argument_types.len()
+                && call_argument_types
+                    .iter()
+                    .all(|argument| argument != "__unknown")
+        })
+}
+
+fn typescript_callable_parameter_matches(
+    parameter: &str,
+    argument: &str,
+    generic_parameters: &[String],
+    inferred_arguments: &mut [String],
+    parameter_aliases: &AHashMap<String, String>,
+) -> bool {
+    typescript_callable_parameter_matches_at_depth(
+        parameter,
+        argument,
+        generic_parameters,
+        inferred_arguments,
+        parameter_aliases,
+        0,
+    )
+}
+
+fn typescript_callable_parameter_matches_at_depth(
+    parameter: &str,
+    argument: &str,
+    generic_parameters: &[String],
+    inferred_arguments: &mut [String],
+    parameter_aliases: &AHashMap<String, String>,
+    depth: usize,
+) -> bool {
+    if depth > 32 {
+        return false;
+    }
+    let parameter = parameter.trim();
+    let argument = argument.trim();
+    if parameter.is_empty() || argument.is_empty() {
+        return false;
+    }
+    if let Some(index) = generic_parameters.iter().position(|name| name == parameter) {
+        let Some(inferred) = inferred_arguments.get_mut(index) else {
+            return false;
+        };
+        if inferred == parameter {
+            inferred.clone_from(&argument.to_owned());
+            return true;
+        }
+        return inferred == argument;
+    }
+    if let Some(alias) = parameter_aliases.get(parameter) {
+        return alias == argument;
+    }
+    if parameter == argument {
+        return true;
+    }
+    if let (Some(parameter_element), Some(argument_element)) =
+        (parameter.strip_suffix("[]"), argument.strip_suffix("[]"))
+    {
+        return typescript_callable_parameter_matches_at_depth(
+            parameter_element,
+            argument_element,
+            generic_parameters,
+            inferred_arguments,
+            parameter_aliases,
+            depth.saturating_add(1),
+        );
+    }
+    let Some((parameter_base, parameter_arguments)) = typescript_generic_type_parts(parameter)
+    else {
+        return false;
+    };
+    let Some((argument_base, argument_arguments)) = typescript_generic_type_parts(argument) else {
+        return false;
+    };
+    parameter_base == argument_base
+        && parameter_arguments.len() == argument_arguments.len()
+        && parameter_arguments
+            .iter()
+            .zip(argument_arguments.iter())
+            .all(|(parameter_argument, argument_argument)| {
+                typescript_callable_parameter_matches_at_depth(
+                    parameter_argument,
+                    argument_argument,
+                    generic_parameters,
+                    inferred_arguments,
+                    parameter_aliases,
+                    depth.saturating_add(1),
+                )
+            })
+}
+
+fn typescript_infer_type_arguments(
+    parameter: &str,
+    argument: &str,
+    parameters: &[String],
+    arguments: &mut [String],
+) -> bool {
+    let parameter = parameter.trim();
+    let argument = argument.trim();
+    if parameter.is_empty() || argument.is_empty() {
+        return true;
+    }
+    if let Some(index) = parameters.iter().position(|name| name == parameter) {
+        let Some(slot) = arguments.get_mut(index) else {
+            return true;
+        };
+        if slot
+            == parameters
+                .get(index)
+                .map(String::as_str)
+                .unwrap_or_default()
+        {
+            slot.clone_from(&argument.to_owned());
+            return true;
+        }
+        return slot == argument;
+    }
+    if let (Some(parameter_element), Some(argument_element)) =
+        (parameter.strip_suffix("[]"), argument.strip_suffix("[]"))
+    {
+        return typescript_infer_type_arguments(
+            parameter_element,
+            argument_element,
+            parameters,
+            arguments,
+        );
+    }
+    let Some((parameter_base, parameter_arguments)) = typescript_generic_type_parts(parameter)
+    else {
+        return true;
+    };
+    let Some((argument_base, argument_arguments)) = typescript_generic_type_parts(argument) else {
+        return true;
+    };
+    if parameter_base != argument_base || parameter_arguments.len() != argument_arguments.len() {
+        return true;
+    }
+    for (parameter_argument, argument_argument) in
+        parameter_arguments.iter().zip(argument_arguments.iter())
+    {
+        if !typescript_infer_type_arguments(
+            parameter_argument,
+            argument_argument,
+            parameters,
+            arguments,
+        ) {
+            return false;
+        }
+    }
+    true
+}
+
+fn typescript_type_mentions_parameter(type_name: &str, parameters: &[String]) -> bool {
+    type_name
+        .split(|character: char| {
+            !(character == '_' || character == '$' || character.is_ascii_alphanumeric())
+        })
+        .filter(|token| !token.is_empty())
+        .any(|token| parameters.iter().any(|parameter| parameter == token))
+}
+
+fn typescript_type_alias_target(signature: &str) -> Option<&str> {
+    let alias_separator = signature.find('=');
+    if let Some(index_separator) = signature.find("|index=")
+        && alias_separator.is_none_or(|separator| separator >= index_separator)
+    {
+        // `index=` is declaration-shape metadata, not an alias target. A
+        // generic interface such as `<T>|index=T` must not be expanded as if
+        // its whole receiver were the indexed value.
+        return None;
+    }
+    let (parameters, target) = signature.trim().split_once('=')?;
+    let parameters = parameters.trim();
+    let target = target
+        .split_once("|index=")
+        .map_or(target, |(target, _)| target);
+    if parameters.contains("|index=")
+        || (!parameters.is_empty() && !parameters.starts_with('<'))
+        || target.trim().is_empty()
+        || target.len() > 1024
+    {
+        return None;
+    }
+    Some(target.trim())
+}
+
+fn typescript_index_value_type(signature: &str) -> Option<&str> {
+    let value = signature
+        .trim()
+        .split_once("|index=")
+        .map(|(_, value)| value)
+        .or_else(|| signature.trim().strip_prefix("index="))?;
+    (!value.is_empty() && value.len() <= 1024).then_some(value.trim())
+}
+
+fn typescript_substitute_type_parameters(
+    type_name: &str,
+    parameters: &[String],
+    arguments: &[String],
+) -> String {
+    let type_name = type_name.trim();
+    if type_name.is_empty() || type_name.len() > 1024 {
+        return type_name.to_owned();
+    }
+    if let Some(index) = parameters
+        .iter()
+        .position(|parameter| parameter == type_name)
+        && let Some(argument) = arguments.get(index)
+    {
+        return argument.clone();
+    }
+    if let Some(key_base) = typescript_keyof_type_base(type_name) {
+        let substituted = typescript_substitute_type_parameters(key_base, parameters, arguments);
+        let substituted = format!("keyof {substituted}");
+        return if substituted.len() <= 1024 {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
+    }
+    if let Some(element) = type_name.strip_suffix("[]") {
+        let substituted = typescript_substitute_type_parameters(element, parameters, arguments);
+        let substituted = format!("{substituted}[]");
+        return if substituted.len() <= 1024 {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
+    }
+    if let Some((base, _)) = typescript_literal_indexed_type(type_name)
+        && let Some(open) = type_name.rfind('[')
+    {
+        let substituted_base = typescript_substitute_type_parameters(base, parameters, arguments);
+        let suffix = type_name.get(open..).unwrap_or_default();
+        let substituted = format!("{substituted_base}{suffix}");
+        return if substituted.len() <= 1024 {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
+    }
+    if let Some(elements) = typescript_tuple_elements(type_name) {
+        let substituted = elements
+            .iter()
+            .map(|element| typescript_substitute_type_parameters(element, parameters, arguments))
+            .collect::<Vec<_>>();
+        let substituted = format!("[{}]", substituted.join(","));
+        return if substituted.len() <= 1024 {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
+    }
+    if let Some(members) = typescript_split_top_level_union(type_name)
+        && members.len() > 1
+    {
+        let substituted = members
+            .iter()
+            .map(|member| typescript_substitute_type_parameters(member, parameters, arguments))
+            .collect::<Vec<_>>()
+            .join("|");
+        return if substituted.len() <= 1024 {
+            substituted
+        } else {
+            type_name.to_owned()
+        };
+    }
+    let Some((base, nested)) = typescript_generic_type_parts(type_name) else {
+        return type_name.to_owned();
+    };
+    let nested = nested
+        .iter()
+        .map(|argument| typescript_substitute_type_parameters(argument, parameters, arguments))
+        .collect::<Vec<_>>();
+    let substituted = format!("{base}<{}>", nested.join(","));
+    if substituted.len() <= 1024 {
+        substituted
+    } else {
+        type_name.to_owned()
+    }
+}
+
+fn typescript_declaration_basic_allowed(
+    target: &DeclarationFact,
+    candidate: &RelationshipCandidate,
+) -> bool {
+    typescript_declaration_basic_allowed_for(target, candidate, false)
+}
+
+fn typescript_declaration_basic_allowed_with_type_owner(
+    target: &DeclarationFact,
+    candidate: &RelationshipCandidate,
+) -> bool {
+    typescript_declaration_basic_allowed_for(target, candidate, true)
+}
+
+fn typescript_declaration_basic_allowed_for(
+    target: &DeclarationFact,
+    candidate: &RelationshipCandidate,
+    allow_type_owner: bool,
+) -> bool {
+    typescript_language_family(&candidate.language).contains(&target.language.as_str())
+        && candidate
+            .constraints
+            .argument_count
+            .is_none_or(|arguments| {
+                target.parameter_count.is_none_or(|parameters| {
+                    arguments == parameters
+                        || (target.variadic && arguments >= parameters.saturating_sub(1))
+                })
+            })
+        && (candidate.constraints.allowed_target_kinds.is_empty()
+            || candidate
+                .constraints
+                .allowed_target_kinds
+                .contains(&target.kind)
+            || (allow_type_owner
+                && matches!(
+                    target.kind.as_str(),
+                    "class" | "enum" | "interface" | "namespace" | "type_alias"
+                )))
+}
+
 fn declaration_overloads<'a>(
     declarations: impl Iterator<Item = &'a DeclarationFact>,
 ) -> AHashMap<String, String> {
@@ -4087,6 +6965,443 @@ fn source_directory(source_file: &str, root: &Path) -> Option<String> {
         .trim_matches('/')
         .to_owned();
     (!directory.is_empty()).then_some(directory)
+}
+
+fn typescript_project_importer_key(source_file: &str, root: &Path) -> Option<String> {
+    let relative = typescript_relative_path(source_file, root)?;
+    let key = relative.to_str()?.to_owned();
+    (!key.is_empty() && key.len() <= 4_096).then_some(key)
+}
+
+fn typescript_project_module_keys(
+    project_modules: &TypeScriptProjectModuleIndex,
+    importer: &str,
+    module: &str,
+    root: &Path,
+    context: Option<&str>,
+) -> Option<Vec<String>> {
+    let importer = typescript_project_importer_key(importer, root)?;
+    if let Some(context) = context.filter(|context| !context.is_empty()) {
+        return project_modules
+            .get(&(importer, module.to_owned(), context.to_owned()))
+            .filter(|keys| !keys.is_empty())
+            .cloned();
+    }
+    let mut keys = project_modules
+        .iter()
+        .filter(|((candidate_importer, candidate_module, _), _)| {
+            candidate_importer == &importer && candidate_module == module
+        })
+        .flat_map(|(_, keys)| keys.iter().cloned())
+        .collect::<Vec<_>>();
+    keys.sort_unstable();
+    keys.dedup();
+    (!keys.is_empty()).then_some(keys)
+}
+
+fn typescript_project_module_index(
+    edges: &[EdgeRecord],
+    inventory_nodes: &[NodeRecord],
+    root: &Path,
+    entry_limit: usize,
+    candidates_per_lookup: usize,
+) -> Result<(TypeScriptProjectModuleIndex, TypeScriptProjectMetadataIndex), String> {
+    if edges.is_empty() {
+        return Ok((
+            TypeScriptProjectModuleIndex::new(),
+            TypeScriptProjectMetadataIndex::new(),
+        ));
+    }
+    let mut source_by_node = BTreeMap::<String, BTreeSet<String>>::new();
+    for node in inventory_nodes {
+        let source = node.string("source_file");
+        if !source.is_empty() {
+            source_by_node.entry(node.id.clone()).or_default().insert(
+                node.attributes
+                    .get("universal_evidence_source_file")
+                    .and_then(Value::as_str)
+                    .filter(|source| !source.is_empty())
+                    .unwrap_or(&source)
+                    .to_owned(),
+            );
+        }
+    }
+    let max_targets = candidate_storage_limit(candidates_per_lookup);
+    let mut targets = BTreeMap::<(String, String, String), BTreeSet<String>>::new();
+    let mut metadata = TypeScriptProjectMetadataIndex::new();
+    for edge in edges {
+        if edge.attributes.get("relation").and_then(Value::as_str) != Some("imports_from") {
+            continue;
+        }
+        let module = edge.string("module");
+        if module.is_empty() || module.len() > 4_096 || module.contains(['\\', '\0']) {
+            continue;
+        }
+        let importer = {
+            let source = edge
+                .attributes
+                .get("universal_evidence_source_file")
+                .and_then(Value::as_str)
+                .filter(|source| !source.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| edge.string("source_file"));
+            if source.is_empty() {
+                unique_inventory_source(&source_by_node, &edge.source)
+                    .unwrap_or_default()
+                    .to_owned()
+            } else {
+                source
+            }
+        };
+        let Some(importer) = typescript_project_importer_key(&importer, root) else {
+            continue;
+        };
+        let target_source = unique_inventory_source(&source_by_node, &edge.target)
+            .map(str::to_owned)
+            .filter(|source| !source.is_empty())
+            .unwrap_or_else(|| edge.string("target_file"));
+        let normalized_target_source = if target_source.is_empty() {
+            target_source.clone()
+        } else {
+            std::fs::canonicalize(&target_source)
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| target_source.clone())
+        };
+        let edge_target_keys = if normalized_target_source.is_empty() {
+            vec![String::new()]
+        } else {
+            let keys = typescript_source_module_keys(&normalized_target_source, root);
+            if keys.is_empty() {
+                continue;
+            }
+            keys
+        };
+        let context = edge.string("context");
+        let key = (importer.clone(), module.clone(), context.clone());
+        if !targets.contains_key(&key) && targets.len() >= entry_limit {
+            return Err(format!(
+                "TypeScript project module entry count exceeds limit {entry_limit}"
+            ));
+        }
+        let values = targets.entry(key).or_default();
+        for target_key in &edge_target_keys {
+            if !target_key.is_empty() && (values.contains(target_key) || values.len() < max_targets)
+            {
+                values.insert(target_key.clone());
+            }
+        }
+        let mut edge_metadata = edge
+            .attributes
+            .iter()
+            .filter_map(|(name, value)| {
+                matches!(
+                    name.as_str(),
+                    "resolution_rule"
+                        | "package_condition"
+                        | "resolution_config"
+                        | "module_resolution"
+                        | "module_kind"
+                        | "resolution_project_references"
+                )
+                .then(|| {
+                    value
+                        .as_str()
+                        .map(|value| (name.clone(), value.to_owned()))
+                        .or_else(|| {
+                            (name == "resolution_project_references")
+                                .then(|| (name.clone(), value.to_string()))
+                        })
+                })
+                .flatten()
+            })
+            .collect::<BTreeMap<_, _>>();
+        edge_metadata.insert("project_module".to_owned(), module.clone());
+        for target_key in edge_target_keys {
+            let metadata_key = (
+                importer.clone(),
+                module.clone(),
+                context.clone(),
+                target_key,
+            );
+            match metadata.entry(metadata_key) {
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(edge_metadata.clone());
+                }
+                std::collections::hash_map::Entry::Occupied(entry)
+                    if entry.get() != &edge_metadata =>
+                {
+                    entry.remove();
+                }
+                std::collections::hash_map::Entry::Occupied(_) => {}
+            }
+        }
+    }
+    Ok((
+        targets
+            .into_iter()
+            .filter_map(|(key, values)| {
+                (!values.is_empty()).then_some((key, values.into_iter().collect()))
+            })
+            .collect(),
+        metadata,
+    ))
+}
+
+fn unique_inventory_source<'a>(
+    source_by_node: &'a BTreeMap<String, BTreeSet<String>>,
+    node_id: &str,
+) -> Option<&'a str> {
+    let sources = source_by_node.get(node_id)?;
+    let mut values = sources.iter();
+    let source = values.next()?;
+    values.next().is_none().then_some(source.as_str())
+}
+
+fn typescript_module_indices(
+    declarations: &AHashMap<String, DeclarationFact>,
+    declaration_ids: &[String],
+    bindings: &AHashMap<String, BindingFact>,
+    scopes: &AHashMap<String, compass_languages::ScopeFact>,
+    root: &Path,
+    project_modules: &TypeScriptProjectModuleIndex,
+) -> (
+    TypeScriptModuleIndex,
+    TypeScriptModuleIndex,
+    TypeScriptReexportIndex,
+) {
+    let mut modules = TypeScriptModuleIndex::new();
+    for declaration in declarations
+        .values()
+        .filter(|declaration| matches!(declaration.language.as_str(), "typescript" | "javascript"))
+    {
+        let Some(slot) = declaration_slot(declaration_ids, &declaration.id) else {
+            continue;
+        };
+        for module in typescript_source_module_keys(&declaration.range.source_file, root) {
+            modules
+                .entry((
+                    declaration.language.clone(),
+                    module.clone(),
+                    declaration.name.clone(),
+                ))
+                .or_default()
+                .push(slot);
+            if declaration.kind == "module" {
+                modules
+                    .entry((declaration.language.clone(), module, "module".to_owned()))
+                    .or_default()
+                    .push(slot);
+            }
+        }
+    }
+
+    let mut export_aliases = TypeScriptModuleIndex::new();
+    for binding in bindings.values().filter(|binding| {
+        binding.kind == compass_languages::BindingKind::Reexport
+            && binding.target_declaration_id.is_some()
+    }) {
+        let Some(target) = binding.target_declaration_id.as_deref() else {
+            continue;
+        };
+        let Some(slot) = declaration_slot(declaration_ids, target) else {
+            continue;
+        };
+        let Some(owner) = binding
+            .scope_id
+            .as_deref()
+            .and_then(|scope_id| scopes.get(scope_id))
+            .and_then(|scope| scope.owner_declaration_id.as_deref())
+            .and_then(|declaration_id| declarations.get(declaration_id))
+        else {
+            continue;
+        };
+        if !matches!(owner.language.as_str(), "typescript" | "javascript") {
+            continue;
+        }
+        for module in typescript_source_module_keys(&owner.range.source_file, root) {
+            export_aliases
+                .entry((owner.language.clone(), module, binding.spelling.clone()))
+                .or_default()
+                .push(slot);
+        }
+    }
+    let mut reexport_targets = TypeScriptReexportIndex::new();
+    for binding in bindings.values().filter(|binding| {
+        binding.kind == compass_languages::BindingKind::Reexport
+            && binding.target_declaration_id.is_none()
+    }) {
+        let Some((target_module, target_export)) = binding.qualified_target.rsplit_once("::")
+        else {
+            continue;
+        };
+        if target_module.is_empty() || target_export.is_empty() {
+            continue;
+        }
+        let Some(owner) = binding
+            .scope_id
+            .as_deref()
+            .and_then(|scope_id| scopes.get(scope_id))
+            .and_then(|scope| scope.owner_declaration_id.as_deref())
+            .and_then(|declaration_id| declarations.get(declaration_id))
+        else {
+            continue;
+        };
+        if !matches!(owner.language.as_str(), "typescript" | "javascript") {
+            continue;
+        }
+        let target_modules = typescript_project_module_keys(
+            project_modules,
+            &owner.range.source_file,
+            target_module,
+            root,
+            None,
+        )
+        .unwrap_or_else(|| {
+            typescript_import_module_keys(&owner.range.source_file, target_module, root)
+        });
+        if target_modules.is_empty() {
+            continue;
+        }
+        for owner_module in typescript_source_module_keys(&owner.range.source_file, root) {
+            let targets = reexport_targets
+                .entry((
+                    owner.language.clone(),
+                    owner_module,
+                    binding.spelling.clone(),
+                ))
+                .or_default();
+            for target_module in &target_modules {
+                targets.push(TypeScriptReexportTarget {
+                    module: target_module.clone(),
+                    exported: target_export.to_owned(),
+                });
+            }
+        }
+    }
+    for targets in reexport_targets.values_mut() {
+        targets.sort_unstable_by(|left, right| {
+            left.module
+                .cmp(&right.module)
+                .then_with(|| left.exported.cmp(&right.exported))
+        });
+        targets.dedup();
+    }
+    for index in [&mut modules, &mut export_aliases] {
+        sort_declaration_index(index, declaration_ids, usize::MAX);
+    }
+    (modules, export_aliases, reexport_targets)
+}
+
+fn typescript_source_module_keys(source_file: &str, root: &Path) -> Vec<String> {
+    let Some(relative) = typescript_relative_path(source_file, root) else {
+        return Vec::new();
+    };
+    let Some(module) = typescript_module_stem(&relative) else {
+        return Vec::new();
+    };
+    let mut keys = vec![module.clone()];
+    if relative
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("index"))
+        && let Some(parent) = module.rsplit_once('/').map(|(parent, _)| parent)
+    {
+        if !parent.is_empty() {
+            keys.push(parent.to_owned());
+        }
+    } else if relative
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("index"))
+    {
+        keys.push(String::new());
+    }
+    keys.sort();
+    keys.dedup();
+    keys.retain(|key| !key.is_empty());
+    keys
+}
+
+fn typescript_import_module_keys(importer: &str, module: &str, root: &Path) -> Vec<String> {
+    let mut keys = Vec::new();
+    if module.starts_with('.') {
+        if let Some(importer_path) = typescript_relative_path(importer, root) {
+            let base = importer_path.parent().unwrap_or_else(|| Path::new(""));
+            if let Some(joined) = normalize_relative_module_path(&base.join(module))
+                && let Some(key) = typescript_module_stem(&joined)
+            {
+                keys.push(key);
+                if joined
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("index"))
+                    && let Some(parent) = keys[0].rsplit_once('/').map(|(parent, _)| parent)
+                    && !parent.is_empty()
+                {
+                    keys.push(parent.to_owned());
+                }
+            }
+        }
+    } else if !module.is_empty() && !module.starts_with('#') {
+        let path = Path::new(module);
+        if let Some(key) = typescript_module_stem(path) {
+            keys.push(key);
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+fn typescript_relative_path(source_file: &str, root: &Path) -> Option<std::path::PathBuf> {
+    let path = Path::new(source_file);
+    let relative = if path.is_absolute() {
+        path.strip_prefix(root).ok()?.to_path_buf()
+    } else {
+        path.to_path_buf()
+    };
+    normalize_relative_module_path(&relative)
+}
+
+fn normalize_relative_module_path(path: &Path) -> Option<std::path::PathBuf> {
+    let mut components = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                components.pop()?;
+            }
+            std::path::Component::Normal(value) => components.push(value.to_owned()),
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    let mut normalized = std::path::PathBuf::new();
+    for component in components {
+        normalized.push(component);
+    }
+    Some(normalized)
+}
+
+fn typescript_module_stem(path: &Path) -> Option<String> {
+    let mut value = path.to_string_lossy().replace('\\', "/");
+    value = value.trim_start_matches("./").to_owned();
+    for extension in [
+        ".d.mts", ".d.cts", ".d.ts", ".mts", ".cts", ".tsx", ".jsx", ".mjs", ".cjs", ".ts", ".js",
+    ] {
+        if let Some(stem) = value.strip_suffix(extension) {
+            value = stem.to_owned();
+            break;
+        }
+    }
+    while value.ends_with('/') {
+        value.pop();
+    }
+    (!value.is_empty()
+        && !value.starts_with('/')
+        && !value
+            .split('/')
+            .any(|component| component.is_empty() || component == ".."))
+    .then_some(value)
 }
 
 fn read_go_module_path(root: &Path) -> Option<String> {
@@ -4351,6 +7666,13 @@ fn declaration_node(
         _ => declaration.name.clone(),
     };
     let callable = matches!(declaration.kind.as_str(), "function" | "method");
+    // The universal evidence model keeps TypeScript's type-parameter kind
+    // explicit for resolution, while the public graph v1 contract represents
+    // all generic parameters as `parameter` nodes.
+    let graph_kind = match declaration.kind.as_str() {
+        "type_parameter" | "lifetime_parameter" | "const_parameter" => "parameter",
+        kind => kind,
+    };
     let mut attributes = Map::from_iter([
         ("label".to_owned(), Value::String(label)),
         (
@@ -4359,7 +7681,7 @@ fn declaration_node(
         ),
         (
             "symbol_kind".to_owned(),
-            Value::String(declaration.kind.clone()),
+            Value::String(graph_kind.to_owned()),
         ),
         ("file_type".to_owned(), Value::String("code".to_owned())),
         (
@@ -4415,6 +7737,12 @@ fn declaration_node(
             Value::String(declaration.id.clone()),
         ),
     ]);
+    if let Some(legacy_qualified_name) = legacy_callable_qualified_name(declaration) {
+        attributes.insert(
+            "legacy_qualified_name".to_owned(),
+            Value::String(legacy_qualified_name),
+        );
+    }
     if callable {
         attributes.insert("_callable".to_owned(), Value::Bool(true));
     }
@@ -4450,6 +7778,36 @@ fn declaration_node(
     NodeRecord {
         id: graph_node_id.to_owned(),
         attributes,
+    }
+}
+
+/// Preserve the public callable spelling emitted by the pre-universal
+/// TypeScript/JavaScript extractor. Universal evidence keeps its richer module
+/// qualified name for resolution, while framework route contracts continue to
+/// identify source callables as `name()@offset` (or `Owner::name()@offset`).
+fn legacy_callable_qualified_name(declaration: &DeclarationFact) -> Option<String> {
+    let start = declaration
+        .definition_start_byte
+        .unwrap_or(declaration.range.start_byte);
+    match declaration.kind.as_str() {
+        "function" => {
+            if declaration.name == "default" {
+                Some("default".to_owned())
+            } else {
+                Some(format!("{}()@{start}", declaration.name))
+            }
+        }
+        "method" => {
+            let mut parts = declaration.qualified_name.split('.');
+            let _module = parts.next()?;
+            let owner_parts = parts.collect::<Vec<_>>();
+            if owner_parts.len() < 2 {
+                return Some(format!("{}()@{start}", declaration.name));
+            }
+            let (method, owner) = owner_parts.split_last()?;
+            Some(format!("{}::{}()@{start}", owner.join("::"), method))
+        }
+        _ => None,
     }
 }
 
@@ -4700,6 +8058,7 @@ fn materialized_edge(
     range: &compass_languages::EvidenceRange,
     resolution_rule: ResolutionRule,
     language: &str,
+    project_metadata: Option<&BTreeMap<String, String>>,
 ) -> EdgeRecord {
     let context = match (relation, resolution_rule) {
         ("calls", ResolutionRule::QualifiedExternal) => "external_call",
@@ -4709,6 +8068,7 @@ fn materialized_edge(
             .and_then(|occurrence| occurrence.context.as_deref())
             .unwrap_or("reference"),
         ("references", _) if candidate.relation == CandidateRelation::Decorates => "decorator",
+        ("decorates", _) => "decorator",
         ("references", _)
             if occurrence.is_some_and(|occurrence| {
                 occurrence.role == compass_languages::SemanticRole::CallableReference
@@ -4723,7 +8083,9 @@ fn materialized_edge(
         {
             "submodule_import"
         }
-        ("imports_from", _) => "import",
+        ("imports_from", _) => occurrence
+            .and_then(|occurrence| occurrence.context.as_deref())
+            .unwrap_or("import"),
         ("re_exports", _) => "export",
         ("inherits", _) => "base_type",
         ("references", _) => "type_reference",
@@ -4813,28 +8175,47 @@ fn materialized_edge(
     if matches!(
         candidate.relation,
         CandidateRelation::Imports | CandidateRelation::Reexports
-    ) && let Some(binding) = binding
-    {
-        attributes.insert(
-            "local_name".to_owned(),
-            Value::String(binding.spelling.clone()),
-        );
-        attributes.insert(
-            "imported_name".to_owned(),
-            Value::String(candidate.target_spelling.clone()),
-        );
-        attributes.insert(
-            "qualified_target".to_owned(),
-            Value::String(binding.qualified_target.clone()),
-        );
-        attributes.insert(
-            "binding_kind".to_owned(),
-            Value::String(binding_kind_name(binding.kind).to_owned()),
-        );
-        if let Some(module) = candidate.constraints.module_or_package.as_ref() {
+    ) {
+        if let Some(binding) = binding {
+            attributes.insert(
+                "local_name".to_owned(),
+                Value::String(binding.spelling.clone()),
+            );
+            attributes.insert(
+                "imported_name".to_owned(),
+                Value::String(candidate.target_spelling.clone()),
+            );
+            attributes.insert(
+                "qualified_target".to_owned(),
+                Value::String(binding.qualified_target.clone()),
+            );
+            attributes.insert(
+                "binding_kind".to_owned(),
+                Value::String(binding_kind_name(binding.kind).to_owned()),
+            );
+        }
+        let module = candidate
+            .constraints
+            .module_or_package
+            .clone()
+            .or_else(|| {
+                binding
+                    .and_then(|binding| binding.qualified_target.rsplit_once("::"))
+                    .map(|(module, _)| module.to_owned())
+            })
+            .or_else(|| {
+                project_metadata
+                    .and_then(|metadata| metadata.get("project_module"))
+                    .cloned()
+            });
+        if let Some(module) = module {
             attributes.insert(
                 "module".to_owned(),
-                Value::String(import_module_for_edge(language, &range.source_file, module)),
+                Value::String(import_module_for_edge(
+                    language,
+                    &range.source_file,
+                    &module,
+                )),
             );
         }
     }
@@ -4846,6 +8227,29 @@ fn materialized_edge(
             "target_file".to_owned(),
             Value::String(target_source_file.to_owned()),
         );
+    }
+    if let Some(project_metadata) = project_metadata {
+        for (name, value) in project_metadata {
+            if name == "project_module" {
+                continue;
+            }
+            let metadata_value = if name == "resolution_project_references" {
+                serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.clone()))
+            } else {
+                Value::String(value.clone())
+            };
+            attributes.insert(format!("project_{name}"), metadata_value.clone());
+            if matches!(
+                name.as_str(),
+                "package_condition"
+                    | "resolution_config"
+                    | "module_resolution"
+                    | "module_kind"
+                    | "resolution_project_references"
+            ) {
+                attributes.insert(name.clone(), metadata_value);
+            }
+        }
     }
     if let Some(binding) = binding {
         attributes.extend([
@@ -4937,6 +8341,7 @@ const fn resolution_rule_name(rule: ResolutionRule) -> &'static str {
         ResolutionRule::ExactSourceDeclaration => "exact-source-declaration",
         ResolutionRule::ExactLexicalDeclaration => "exact-lexical-declaration",
         ResolutionRule::ExplicitBinding => "explicit-binding",
+        ResolutionRule::ProjectModuleBinding => "project-module-binding",
         ResolutionRule::MemberBinding => "member-binding",
         ResolutionRule::DeferredReceiver => "deferred-receiver",
         ResolutionRule::WildcardBinding => "wildcard-binding",

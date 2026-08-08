@@ -130,6 +130,38 @@ impl Engine {
         Ok(extraction)
     }
 
+    /// Extract TypeScript/JavaScript universal evidence directly from source.
+    ///
+    /// This hidden API remains useful for qualification fixtures, but it now
+    /// calls the same registered candidate emitter used by normal Compass
+    /// extraction. Keeping both paths on one implementation prevents a
+    /// qualification-only graph from diverging from production output.
+    #[doc(hidden)]
+    pub fn extract_source_universal_candidate_evidence(
+        &mut self,
+        path: &Path,
+        source_file: &str,
+        source: &[u8],
+    ) -> Result<crate::SemanticEvidenceBatch, ExtractError> {
+        let spec =
+            Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
+        if !matches!(spec.name, "typescript" | "tsx" | "javascript") {
+            return Err(ExtractError::Unsupported(path.to_path_buf()));
+        }
+        let tree = self.parse(path, spec, source)?;
+        crate::evidence::extract_candidate_tree_evidence(
+            path,
+            source_file,
+            source,
+            tree.root_node(),
+            spec.name,
+        )
+        .map_err(|error| ExtractError::InvalidProgramEvidence {
+            path: path.to_path_buf(),
+            detail: error.to_string(),
+        })
+    }
+
     pub fn extract_source_combined(
         &mut self,
         path: &Path,
@@ -371,9 +403,26 @@ impl Engine {
                 }
             }
         }
-        let framework_path = universal_profile
-            .map(|_| Path::new(evidence_source_file))
-            .unwrap_or(path);
+        // Framework conventions need the complete repository-relative path
+        // (for example `src/routes/**`, `app/routes/**`, and `src/app/**`) to
+        // classify a file. The pipeline supplies that path as
+        // `evidence_source_file`; using it here keeps convention anchors and
+        // synthetic identities aligned with the graph manifest while avoiding
+        // absolute checkout paths. Direct byte-extraction callers may not have
+        // a repository-relative spelling, so retain the deterministic fallback
+        // for those calls.
+        let framework_source = universal_profile.map(|_| {
+            let portable_source = portable_evidence_source(path);
+            if Path::new(evidence_source_file).is_absolute()
+                || evidence_source_file.is_empty()
+                || evidence_source_file == portable_source
+            {
+                portable_framework_source(path)
+            } else {
+                evidence_source_file.to_owned()
+            }
+        });
+        let framework_path = framework_source.as_deref().map(Path::new).unwrap_or(path);
         crate::frameworks::detect(
             framework_path,
             source,
@@ -747,6 +796,41 @@ fn portable_evidence_source(path: &Path) -> String {
     }
 }
 
+fn portable_framework_source(path: &Path) -> String {
+    if path.is_relative() {
+        return path.to_string_lossy().replace('\\', "/");
+    }
+    let source = path.to_string_lossy().replace('\\', "/");
+    const ROUTE_MARKERS: &[&str] = &[
+        "src/routes/",
+        "app/routes/",
+        "src/app/",
+        "app/",
+        "src/pages/",
+        "pages/",
+        "server/api/",
+        "middleware/",
+    ];
+    if let Some((index, _)) = ROUTE_MARKERS
+        .iter()
+        .filter_map(|marker| {
+            source
+                .match_indices(marker)
+                .find(|(index, _)| *index == 0 || source.as_bytes().get(index - 1) == Some(&b'/'))
+                .map(|(index, _)| (index, *marker))
+        })
+        .min_by_key(|(index, _)| *index)
+    {
+        return source[index..].to_owned();
+    }
+    let components = source
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>();
+    let start = components.len().saturating_sub(3);
+    components[start..].join("/")
+}
+
 struct FunctionBody<'tree> {
     id: String,
     node: Node<'tree>,
@@ -758,6 +842,7 @@ struct JsImportTarget {
     target: String,
     module: String,
     imported_name: String,
+    type_only: bool,
 }
 
 struct ExtractState<'source, 'tree> {
@@ -773,6 +858,7 @@ struct ExtractState<'source, 'tree> {
     callables: HashMap<String, Vec<String>>,
     types: HashMap<String, String>,
     seen_resolved_calls: HashSet<(String, String, usize, usize)>,
+    seen_js_references: HashSet<(String, String, usize, usize)>,
     seen_dynamic_imports: HashSet<(String, String)>,
     js_import_targets: HashMap<String, JsImportTarget>,
     js_type_namespace_names: HashSet<String>,
@@ -815,6 +901,7 @@ fn extract_tree(
         callables: HashMap::new(),
         types: HashMap::new(),
         seen_resolved_calls: HashSet::new(),
+        seen_js_references: HashSet::new(),
         seen_dynamic_imports: HashSet::new(),
         js_import_targets: HashMap::new(),
         js_type_namespace_names,
@@ -828,12 +915,14 @@ fn extract_tree(
         .unwrap_or_default();
     state.add_node(&state.file_id.clone(), file_label, 1, false, None);
     state.walk_declarations(root, None);
+    if matches!(language, "javascript" | "typescript" | "tsx") {
+        state.walk_jsx_references(root);
+    }
     if language == "python" && collect_calls {
         let module_bound = python_bound_names(root, source, true);
         state.walk_python_indirect(root, &state.file_id.clone(), true, &module_bound);
     } else if matches!(language, "javascript" | "typescript" | "tsx") {
-        let module_bound = js_module_bound_names(root, source);
-        state.walk_js_module_indirect(root, true, &module_bound);
+        state.walk_js_module_indirect(root, true);
     }
     if collect_calls {
         state.walk_function_calls();
@@ -1445,6 +1534,42 @@ fn collect_js_binding_names(node: Node<'_>, source: &[u8], output: &mut Vec<Stri
     }
 }
 
+fn js_type_only_statement(text: &str, reexport: bool) -> bool {
+    let trimmed = text.trim_start();
+    if reexport {
+        trimmed
+            .strip_prefix("export")
+            .is_some_and(|rest| rest.trim_start().starts_with("type "))
+    } else {
+        trimmed
+            .strip_prefix("import")
+            .is_some_and(|rest| rest.trim_start().starts_with("type "))
+    }
+}
+
+fn js_type_only_specifier(node: &Node<'_>, source: &[u8]) -> bool {
+    source_node_text(*node, source)
+        .trim_start()
+        .strip_prefix("type")
+        .is_some_and(|rest| rest.chars().next().is_some_and(char::is_whitespace))
+}
+
+fn js_commonjs_export_name(node: Node<'_>, source: &[u8]) -> Option<String> {
+    let spelling = source_node_text(node, source)
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    let name = if spelling == "module.exports" {
+        "default"
+    } else if let Some(name) = spelling.strip_prefix("module.exports.") {
+        name
+    } else {
+        spelling.strip_prefix("exports.")?
+    };
+    (!name.is_empty() && name.len() <= 4_096 && !name.contains(['.', '\\', '\0']))
+        .then(|| name.to_owned())
+}
+
 fn js_top_level_type_names(
     root: Node<'_>,
     config: &GenericConfig,
@@ -1642,6 +1767,13 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             return;
         }
 
+        if matches!(self.language, "javascript" | "typescript" | "tsx")
+            && parent_declaration.is_none()
+            && kind == "assignment_expression"
+        {
+            self.add_js_commonjs_export(node);
+        }
+
         if self.language == "kotlin" && kind == "enum_entry" {
             if let Some((class_id, _, _, _)) = parent_declaration
                 && let Some(name_node) = first_descendant(node, "simple_identifier")
@@ -1837,12 +1969,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         });
     }
 
-    fn walk_js_module_indirect(
-        &mut self,
-        node: Node<'tree>,
-        is_root: bool,
-        bound: &HashSet<String>,
-    ) {
+    fn walk_js_module_indirect(&mut self, node: Node<'tree>, is_root: bool) {
         if !is_root
             && matches!(
                 node.kind(),
@@ -1862,7 +1989,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             collect_js_collection_values(node, &mut identifiers);
             for identifier in identifiers {
                 if !self.add_js_import_reference(identifier, "collection") {
-                    self.add_js_indirect(identifier, "collection", bound);
+                    self.add_js_reference(identifier, "collection");
                 }
             }
         } else if matches!(node.kind(), "call_expression" | "new_expression")
@@ -1873,13 +2000,63 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 if argument.kind() == "identifier"
                     && !self.add_js_import_reference(argument, "argument")
                 {
-                    self.add_js_indirect(argument, "argument", bound);
+                    self.add_js_reference(argument, "argument");
                 }
             }
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            self.walk_js_module_indirect(child, false, bound);
+            self.walk_js_module_indirect(child, false);
+        }
+    }
+
+    fn walk_jsx_references(&mut self, node: Node<'tree>) {
+        if matches!(
+            node.kind(),
+            "jsx_opening_element" | "jsx_self_closing_element"
+        ) {
+            self.add_jsx_reference(node);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.walk_jsx_references(child);
+        }
+    }
+
+    fn add_jsx_reference(&mut self, node: Node<'tree>) {
+        let Some(name_node) = node
+            .child_by_field_name("name")
+            .or_else(|| first_descendant(node, "jsx_identifier"))
+        else {
+            return;
+        };
+        let Some(name) = self.node_text(name_node).map(clean_name) else {
+            return;
+        };
+        if name.is_empty()
+            || name
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_ascii_lowercase())
+        {
+            // Lower-case JSX tags are intrinsic DOM/custom elements, not
+            // JavaScript symbol references. Preserve component identity only
+            // for capitalized, member, or namespace-qualified tags.
+            return;
+        }
+        let reference = if matches!(
+            name_node.kind(),
+            "jsx_member_expression" | "member_expression"
+        ) {
+            name_node
+                .child_by_field_name("object")
+                .or_else(|| first_identifier(name_node))
+                .unwrap_or(name_node)
+        } else {
+            name_node
+        };
+        if !self.add_js_import_reference(reference, "jsx") {
+            self.add_js_reference(reference, "jsx");
         }
     }
 
@@ -1890,6 +2067,14 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         let Some(binding) = self.js_import_targets.get(&name).cloned() else {
             return false;
         };
+        if !self.seen_js_references.insert((
+            self.file_id.clone(),
+            binding.target.clone(),
+            node.start_byte(),
+            node.end_byte(),
+        )) {
+            return true;
+        }
         self.add_edge_at(
             &self.file_id.clone(),
             &binding.target,
@@ -1906,28 +2091,36 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 "imported_name".to_owned(),
                 Value::String(binding.imported_name),
             );
+            if binding.type_only {
+                edge.attributes
+                    .insert("type_only".to_owned(), Value::Bool(true));
+            }
         }
         true
     }
 
-    fn add_js_indirect(&mut self, node: Node<'tree>, context: &str, bound: &HashSet<String>) {
+    fn add_js_reference(&mut self, node: Node<'tree>, context: &str) {
         let Some(name) = self.node_text(node).map(clean_name) else {
             return;
         };
-        if name.is_empty() || bound.contains(&name) {
+        if name.is_empty() {
             return;
         }
-        let Some(target) = self
-            .callables
-            .get(&name)
-            .filter(|candidates| candidates.len() == 1)
-            .and_then(|candidates| candidates.first())
-            .cloned()
-        else {
+        let value_candidates = self.js_value_bindings.get(&name);
+        let callable_candidates = self.callables.get(&name);
+        let target = match (value_candidates, callable_candidates) {
+            (Some(values), None) if values.len() == 1 => values.first().cloned(),
+            (None, Some(callables)) if callables.len() == 1 => callables.first().cloned(),
+            (Some(values), Some(callables)) if values.len() == 1 && callables.len() == 1 => {
+                (values.first() == callables.first()).then(|| values[0].clone())
+            }
+            _ => None,
+        };
+        let Some(target) = target else {
             return;
         };
         if target == self.file_id
-            || !self.seen_resolved_calls.insert((
+            || !self.seen_js_references.insert((
                 self.file_id.clone(),
                 target.clone(),
                 node.start_byte(),
@@ -1936,33 +2129,13 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         {
             return;
         }
-        let mut attributes = Map::new();
-        attributes.insert(
-            "relation".to_owned(),
-            Value::String("indirect_call".to_owned()),
+        self.add_edge_at(
+            &self.file_id.clone(),
+            &target,
+            "references",
+            node,
+            Some(context),
         );
-        attributes.insert("context".to_owned(), Value::String(context.to_owned()));
-        attributes.insert(
-            "confidence".to_owned(),
-            Value::String("INFERRED".to_owned()),
-        );
-        attributes.insert(
-            "source_file".to_owned(),
-            Value::String(self.source_file.clone()),
-        );
-        attributes.insert(
-            "source_location".to_owned(),
-            Value::String(format!("L{}", line(node))),
-        );
-        attributes.insert("weight".to_owned(), Value::from(1.0));
-        self.extraction.edges.push(EdgeRecord {
-            source: self.file_id.clone(),
-            target,
-            attributes,
-        });
-        if let Some(edge) = self.extraction.edges.last_mut() {
-            crate::facts::stamp_node_range(&mut edge.attributes, node);
-        }
     }
 
     fn walk_calls(&mut self, node: Node<'tree>, caller: &str, is_root: bool) {
@@ -2416,6 +2589,8 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
 
     fn add_js_import(&mut self, node: Node<'tree>) {
         let is_reexport = node.kind() == "export_statement";
+        let statement_text = self.node_text(node).unwrap_or_default();
+        let statement_type_only = js_type_only_statement(&statement_text, is_reexport);
         let mut cursor = node.walk();
         let Some(module_node) = node
             .children(&mut cursor)
@@ -2453,6 +2628,10 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         if let Some(edge) = self.extraction.edges.last_mut() {
             edge.attributes
                 .insert("module".to_owned(), Value::String(raw_module.clone()));
+            if statement_type_only {
+                edge.attributes
+                    .insert("type_only".to_owned(), Value::Bool(true));
+            }
             if let Some(target_path) = &target_path {
                 edge.attributes.insert(
                     "target_file".to_owned(),
@@ -2488,34 +2667,109 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     line(node),
                     Some("re-export"),
                 );
+                if let Some(edge) = self.extraction.edges.last_mut() {
+                    if statement_type_only || js_type_only_specifier(&specifier, self.source) {
+                        edge.attributes
+                            .insert("type_only".to_owned(), Value::Bool(true));
+                    }
+                    edge.attributes
+                        .insert("exported_name".to_owned(), Value::String(name.clone()));
+                }
             }
         } else if let Some(clause) = first_descendant(node, "import_clause") {
-            let mut specifiers = Vec::new();
-            collect_nodes_of_kind(clause, "import_specifier", &mut specifiers);
-            for specifier in specifiers {
-                let Some(imported_name) = specifier
-                    .child_by_field_name("name")
-                    .and_then(|name| self.node_text(name))
-                    .map(clean_name)
-                else {
-                    continue;
-                };
-                if imported_name.is_empty() {
-                    continue;
+            let mut bindings = Vec::new();
+            let mut clause_cursor = clause.walk();
+            for child in clause.named_children(&mut clause_cursor) {
+                match child.kind() {
+                    // `import Foo from "..."`.
+                    "identifier" => {
+                        let Some(local_name) = self.node_text(child).map(clean_name) else {
+                            continue;
+                        };
+                        if !local_name.is_empty() {
+                            bindings.push((
+                                local_name,
+                                "default".to_owned(),
+                                statement_type_only,
+                                child,
+                            ));
+                        }
+                    }
+                    // `import * as Foo from "..."`.
+                    "namespace_import" => {
+                        let Some(local_node) = child
+                            .child_by_field_name("name")
+                            .or_else(|| first_identifier(child))
+                        else {
+                            continue;
+                        };
+                        let Some(local_name) = self.node_text(local_node).map(clean_name) else {
+                            continue;
+                        };
+                        if !local_name.is_empty() {
+                            bindings.push((
+                                local_name,
+                                "*".to_owned(),
+                                statement_type_only,
+                                local_node,
+                            ));
+                        }
+                    }
+                    "named_imports" => {
+                        let mut specifiers = Vec::new();
+                        collect_nodes_of_kind(child, "import_specifier", &mut specifiers);
+                        for specifier in specifiers {
+                            let Some(imported_name) = specifier
+                                .child_by_field_name("name")
+                                .or_else(|| first_identifier(specifier))
+                                .and_then(|name| self.node_text(name))
+                                .map(clean_name)
+                            else {
+                                continue;
+                            };
+                            if imported_name.is_empty() {
+                                continue;
+                            }
+                            let local_name = specifier
+                                .child_by_field_name("alias")
+                                .or_else(|| {
+                                    let identifiers = direct_named_children(specifier)
+                                        .into_iter()
+                                        .filter(|node| node.kind() == "identifier")
+                                        .collect::<Vec<_>>();
+                                    (identifiers.len() > 1).then(|| identifiers[1])
+                                })
+                                .and_then(|alias| self.node_text(alias))
+                                .map(clean_name)
+                                .filter(|alias| !alias.is_empty())
+                                .unwrap_or_else(|| imported_name.clone());
+                            bindings.push((
+                                local_name,
+                                imported_name,
+                                statement_type_only
+                                    || js_type_only_specifier(&specifier, self.source),
+                                specifier,
+                            ));
+                        }
+                    }
+                    _ => {}
                 }
-                let local_name = specifier
-                    .child_by_field_name("alias")
-                    .and_then(|alias| self.node_text(alias))
-                    .map(clean_name)
-                    .filter(|alias| !alias.is_empty())
-                    .unwrap_or_else(|| imported_name.clone());
-                let target = make_id(&[&target_stem, &imported_name]);
+            }
+            for (local_name, imported_name, type_only, binding_node) in bindings {
+                let target = if imported_name == "*" {
+                    module_id.clone()
+                } else if imported_name == "default" {
+                    make_id(&[&target_stem, "default"])
+                } else {
+                    make_id(&[&target_stem, &imported_name])
+                };
                 self.js_import_targets.insert(
                     local_name.clone(),
                     JsImportTarget {
                         target: target.clone(),
                         module: raw_module.clone(),
                         imported_name: imported_name.clone(),
+                        type_only,
                     },
                 );
                 self.add_edge(
@@ -2532,12 +2786,35 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                         .insert("imported_name".to_owned(), Value::String(imported_name));
                     edge.attributes
                         .insert("local_name".to_owned(), Value::String(local_name));
+                    edge.attributes.insert(
+                        "import_kind".to_owned(),
+                        Value::String(
+                            if target == module_id {
+                                "namespace"
+                            } else if edge.string("imported_name") == "default" {
+                                "default"
+                            } else {
+                                "named"
+                            }
+                            .to_owned(),
+                        ),
+                    );
+                    if type_only {
+                        edge.attributes
+                            .insert("type_only".to_owned(), Value::Bool(true));
+                    }
                     if let Some(target_path) = &target_path {
                         edge.attributes.insert(
                             "target_file".to_owned(),
                             Value::String(target_path.to_string_lossy().into_owned()),
                         );
                     }
+                }
+                // Keep the exact binding anchor available to downstream
+                // diagnostics even when the import target is a module file
+                // (namespace imports) rather than a declaration.
+                if let Some(edge) = self.extraction.edges.last_mut() {
+                    crate::facts::stamp_node_range(&mut edge.attributes, binding_node);
                 }
             }
         }
@@ -2680,9 +2957,11 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             &module_id,
             "imports_from",
             line(declaration),
-            Some("import"),
+            Some("require"),
         );
         if let Some(edge) = self.extraction.edges.last_mut() {
+            edge.attributes
+                .insert("module".to_owned(), Value::String(raw_module.clone()));
             edge.attributes.insert(
                 "target_file".to_owned(),
                 Value::String(target_path.to_string_lossy().into_owned()),
@@ -2722,7 +3001,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 &make_id(&[&target_stem, &symbol]),
                 "imports",
                 line(declaration),
-                Some("import"),
+                Some("require"),
             );
         }
         true
@@ -3430,6 +3709,105 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         true
     }
 
+    fn add_js_commonjs_export(&mut self, node: Node<'tree>) -> bool {
+        let Some(left) = node.child_by_field_name("left") else {
+            return false;
+        };
+        let Some(export_name) = js_commonjs_export_name(left, self.source) else {
+            return false;
+        };
+        let Some(value) = node.child_by_field_name("right") else {
+            return false;
+        };
+
+        let mut bindings = Vec::new();
+        if export_name == "default" && value.kind() == "object" {
+            let mut cursor = value.walk();
+            for property in value.children(&mut cursor).filter(|child| child.is_named()) {
+                match property.kind() {
+                    "pair" => {
+                        let Some(key) = property
+                            .child_by_field_name("key")
+                            .and_then(|key| self.node_text(key))
+                            .map(clean_name)
+                            .filter(|key| !key.is_empty())
+                        else {
+                            continue;
+                        };
+                        let Some(value) = property.child_by_field_name("value") else {
+                            continue;
+                        };
+                        bindings.push((key, value));
+                    }
+                    "shorthand_property_identifier" => {
+                        let Some(name) = self.node_text(property).map(clean_name) else {
+                            continue;
+                        };
+                        if !name.is_empty() {
+                            bindings.push((name, property));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        } else {
+            bindings.push((export_name.clone(), value));
+        }
+
+        let mut emitted = false;
+        for (name, expression) in bindings {
+            let Some(expression_name) = expression
+                .is_named()
+                .then(|| self.node_text(expression))
+                .flatten()
+                .map(clean_name)
+                .filter(|name| !name.is_empty())
+            else {
+                continue;
+            };
+            let Some(target) = self.js_local_target(&expression_name) else {
+                continue;
+            };
+            self.add_edge_at(
+                &self.file_id.clone(),
+                &target,
+                "exports",
+                node,
+                Some("commonjs"),
+            );
+            if let Some(edge) = self.extraction.edges.last_mut() {
+                edge.attributes
+                    .insert("export_name".to_owned(), Value::String(name));
+                edge.attributes.insert(
+                    "module_format".to_owned(),
+                    Value::String("commonjs".to_owned()),
+                );
+            }
+            emitted = true;
+        }
+        emitted
+    }
+
+    fn js_local_target(&self, name: &str) -> Option<String> {
+        let value = self
+            .js_value_bindings
+            .get(name)
+            .filter(|targets| targets.len() == 1)
+            .and_then(|targets| targets.first())
+            .cloned();
+        let callable = self
+            .callables
+            .get(name)
+            .filter(|targets| targets.len() == 1)
+            .and_then(|targets| targets.first())
+            .cloned();
+        match (value, callable) {
+            (Some(value), None) | (None, Some(value)) => Some(value),
+            (Some(value), Some(callable)) if value == callable => Some(value),
+            _ => self.types.get(name).cloned(),
+        }
+    }
+
     fn node_text(&self, node: Node<'tree>) -> Option<String> {
         node.utf8_text(self.source).ok().map(str::to_owned)
     }
@@ -3833,62 +4211,6 @@ fn collect_python_assignment_targets(
             collect_python_assignment_targets(Some(child), source, output);
         }
     }
-}
-
-fn js_module_bound_names(root: Node<'_>, source: &[u8]) -> HashSet<String> {
-    fn collect_pattern(node: Node<'_>, source: &[u8], output: &mut HashSet<String>) {
-        if matches!(
-            node.kind(),
-            "identifier"
-                | "shorthand_property_identifier_pattern"
-                | "shorthand_property_identifier"
-        ) {
-            if let Ok(name) = node.utf8_text(source) {
-                output.insert(name.to_owned());
-            }
-            return;
-        }
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-            collect_pattern(child, source, output);
-        }
-    }
-
-    fn walk(node: Node<'_>, source: &[u8], root: bool, output: &mut HashSet<String>) {
-        if !root
-            && matches!(
-                node.kind(),
-                "function_declaration"
-                    | "function_expression"
-                    | "arrow_function"
-                    | "generator_function_declaration"
-                    | "generator_function"
-                    | "class_declaration"
-                    | "class"
-            )
-        {
-            return;
-        }
-        if node.kind() == "variable_declarator" {
-            let value_is_function = node.child_by_field_name("value").is_some_and(|value| {
-                matches!(
-                    value.kind(),
-                    "arrow_function" | "function_expression" | "function" | "generator_function"
-                )
-            });
-            if !value_is_function && let Some(name) = node.child_by_field_name("name") {
-                collect_pattern(name, source, output);
-            }
-        }
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            walk(child, source, false, output);
-        }
-    }
-
-    let mut output = HashSet::new();
-    walk(root, source, true, &mut output);
-    output
 }
 
 fn collect_js_collection_values<'tree>(node: Node<'tree>, output: &mut Vec<Node<'tree>>) {
@@ -4390,31 +4712,36 @@ mod rationale_tests {
              function helper() { return true; }\n",
         )?;
 
+        let source_bytes = fs::read(&source)?;
         let extraction = Engine::default().extract(&source)?;
-        let method = extraction
-            .nodes
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing JavaScript universal evidence")?;
+        let method = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == ".render()")
+            .find(|declaration| {
+                declaration.name == "render"
+                    && declaration.qualified_name.contains("Widget.prototype")
+            })
             .ok_or("missing prototype method")?;
-        assert_eq!(method.string("symbol_kind"), "method");
-        assert_eq!(method.string("qualified_name"), "Widget.prototype::render");
-        let owner = extraction
-            .nodes
+        assert_eq!(method.kind, "property");
+        let direct = Engine::default().extract_source_universal_candidate_evidence(
+            &source,
+            "widget.js",
+            &source_bytes,
+        )?;
+        let helper = direct
+            .declarations
             .iter()
-            .find(|node| node.label() == "Widget()")
-            .ok_or("missing Widget constructor")?;
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.source == owner.id
-                && edge.target == method.id
-                && edge.string("relation") == "contains"
-        }));
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.source == method.id
-                && edge.string("relation") == "calls"
-                && extraction
-                    .nodes
-                    .iter()
-                    .any(|node| node.id == edge.target && node.label() == "helper()")
+            .find(|declaration| declaration.name == "helper" && declaration.kind == "function")
+            .ok_or("missing helper declaration")?;
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Calls
+                && candidate.target_spelling == "helper"
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(helper.id.as_str())
         }));
         Ok(())
     }
@@ -4467,86 +4794,83 @@ mod rationale_tests {
             Some(EXTRACTION_QUALITY_PARTIAL),
             "valid TypeScript variance syntax must not trigger parser recovery"
         );
-        let zod_any = extraction
-            .nodes
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing TypeScript universal evidence")?;
+        let zod_any = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "ZodAny" && node.string("symbol_kind") == "interface")
+            .find(|declaration| declaration.name == "ZodAny" && declaration.kind == "interface")
             .ok_or("missing ZodAny interface")?;
-        let private_zod_type = extraction
-            .nodes
+        let private_zod_type = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "_ZodType")
+            .find(|declaration| declaration.name == "_ZodType")
             .ok_or("missing _ZodType interface")?;
-        let zod_any_value = extraction
-            .nodes
+        let zod_any_value = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "ZodAny" && node.string("symbol_kind") == "variable")
+            .find(|declaration| declaration.name == "ZodAny" && declaration.kind == "variable")
             .ok_or("missing ZodAny runtime value")?;
-        let create = extraction
-            .nodes
+        let create = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "create()")
+            .find(|declaration| declaration.name == "create" && declaration.kind == "function")
             .ok_or("missing create function")?;
-        let first_type = extraction
-            .nodes
+        let first_type = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "First" && node.string("symbol_kind") == "interface")
+            .find(|declaration| declaration.name == "First" && declaration.kind == "interface")
             .ok_or("missing reverse-order First interface")?;
-        let first_value = extraction
-            .nodes
+        let first_value = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "First" && node.string("symbol_kind") == "variable")
+            .find(|declaration| declaration.name == "First" && declaration.kind == "variable")
             .ok_or("missing reverse-order First runtime value")?;
-        let create_first = extraction
-            .nodes
+        let create_first = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "createFirst()")
+            .find(|declaration| declaration.name == "createFirst" && declaration.kind == "function")
             .ok_or("missing createFirst function")?;
-        let keys = extraction
-            .nodes
+        let keys = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "Keys")
+            .find(|declaration| declaration.name == "Keys")
             .ok_or("mapped-type `in` must remain a Keys declaration")?;
-        let file = extraction
-            .nodes
-            .iter()
-            .find(|node| node.string("symbol_kind") == "file")
-            .ok_or("missing source file")?;
-        assert_eq!(zod_any.string("source_location"), "L4");
-        assert_eq!(zod_any_value.string("source_location"), "L5");
-        assert_eq!(keys.string("source_location"), "L7");
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.source == file.id
-                && edge.target == zod_any.id
-                && edge.string("relation") == "contains"
+        assert_eq!(zod_any.range.start_line, 4);
+        assert_eq!(zod_any_value.range.start_line, 5);
+        assert_eq!(keys.range.start_line, 7);
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Extends
+                && candidate.source_declaration_id == zod_any.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(private_zod_type.id.as_str())
         }));
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.source == zod_any.id
-                && edge.target == private_zod_type.id
-                && edge.string("relation") == "inherits"
-                && edge.string("context") == "extends"
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Constructs
+                && candidate.source_declaration_id == create.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(zod_any_value.id.as_str())
         }));
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.source == create.id
-                && edge.target == zod_any_value.id
-                && edge.string("relation") == "calls"
-                && edge.string("source_location") == "L6"
-        }));
-        assert!(!extraction.edges.iter().any(|edge| {
-            edge.source == create.id
-                && edge.target == zod_any.id
-                && edge.string("relation") == "calls"
+        assert!(!evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Calls
+                && candidate.source_declaration_id == create.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(zod_any.id.as_str())
         }));
         assert_ne!(first_type.id, first_value.id);
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.source == create_first.id
-                && edge.target == first_value.id
-                && edge.string("relation") == "calls"
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Constructs
+                && candidate.source_declaration_id == create_first.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(first_value.id.as_str())
         }));
-        assert!(!extraction.edges.iter().any(|edge| {
-            edge.source == create_first.id
-                && edge.target == first_type.id
-                && edge.string("relation") == "calls"
+        assert!(!evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Constructs
+                && candidate.source_declaration_id == create_first.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(first_type.id.as_str())
         }));
 
         fs::write(&source, "export interface Broken<out T extends> {}\n")?;
@@ -4590,31 +4914,40 @@ mod rationale_tests {
         )?;
 
         let extraction = Engine::default().extract(&source)?;
-        let create = extraction
-            .nodes
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing TypeScript universal evidence")?;
+        let create = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "create()")
+            .find(|declaration| declaration.name == "create" && declaration.kind == "function")
             .ok_or("missing create function")?;
-        let widget_values = extraction
-            .nodes
+        let widget_values = evidence
+            .declarations
             .iter()
-            .filter(|node| node.label() == "Widget" && node.string("symbol_kind") == "variable")
-            .map(|node| node.id.as_str())
+            .filter(|declaration| declaration.name == "Widget" && declaration.kind == "variable")
+            .map(|declaration| declaration.id.as_str())
             .collect::<Vec<_>>();
         assert_eq!(widget_values.len(), 2);
-        assert!(!extraction.edges.iter().any(|edge| {
-            edge.source == create.id
-                && edge.string("relation") == "calls"
-                && widget_values.contains(&edge.target.as_str())
+        assert!(!evidence.candidates.iter().any(|candidate| {
+            candidate.source_declaration_id == create.id
+                && matches!(
+                    candidate.relation,
+                    crate::CandidateRelation::Calls | crate::CandidateRelation::Constructs
+                )
+                && candidate
+                    .constraints
+                    .exact_target_declaration_id
+                    .as_deref()
+                    .is_some_and(|target| widget_values.contains(&target))
         }));
-        assert!(
-            extraction
-                .raw_calls
-                .as_deref()
-                .unwrap_or_default()
-                .iter()
-                .any(|call| call.caller_nid == create.id && call.callee == "Widget")
-        );
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.source_declaration_id == create.id
+                && candidate.relation == crate::CandidateRelation::Constructs
+                && candidate.target_spelling == "Widget"
+                && candidate.constraints.exact_target_declaration_id.is_none()
+        }));
         Ok(())
     }
 

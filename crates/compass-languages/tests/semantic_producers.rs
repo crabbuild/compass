@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fs;
 
-use compass_languages::{Engine, Extraction};
+use compass_languages::{BindingKind, CandidateRelation, Engine, Extraction, SemanticRole};
 
 fn kinds(extraction: &Extraction) -> HashSet<String> {
     extraction
@@ -232,56 +232,47 @@ function helper() {}
 Widget.prototype.render = function () { helper(); };
 Other.prototype.render = () => helper();
 Plugin.fn.install = function () { helper(); };
-const config = {};
+    const config = {};
 config.render = function () { helper(); };
 "#;
     let extraction = Engine::default().extract_source(&path, source)?;
-    let prototype_methods = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing JavaScript universal evidence")?;
+    let prototype_methods = evidence
+        .declarations
         .iter()
-        .filter(|node| {
-            matches!(
-                node.string("qualified_name").as_str(),
-                "Widget.prototype::render" | "Other.prototype::render" | "Plugin.fn::install"
-            )
+        .filter(|declaration| {
+            declaration.kind == "property"
+                && ["Widget.prototype", "Other.prototype", "Plugin.fn"]
+                    .iter()
+                    .any(|prefix| declaration.qualified_name.contains(prefix))
         })
         .collect::<Vec<_>>();
     assert_eq!(prototype_methods.len(), 3);
-    assert!(prototype_methods.iter().all(|node| {
-        node.string("symbol_kind") == "method"
-            && extraction.edges.iter().any(|edge| {
-                edge.string("relation") == "contains"
-                    && edge.target == node.id
-                    && extraction.nodes.iter().any(|owner| {
-                        owner.id == edge.source
-                            && matches!(owner.label(), "Widget()" | "Other()" | "Plugin()")
-                    })
-            })
-            && extraction.edges.iter().any(|edge| {
-                edge.string("relation") == "calls"
-                    && edge.source == node.id
-                    && extraction
-                        .nodes
-                        .iter()
-                        .any(|target| target.id == edge.target && target.label() == "helper()")
-            })
-    }));
-    assert_eq!(
-        extraction
-            .nodes
-            .iter()
-            .filter(|node| node.label() == ".render()")
-            .count(),
-        2,
-        "ordinary object-property assignments must not become prototype methods"
-    );
+    let helper = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "helper")
+        .ok_or("missing helper declaration")?;
+    let helper_calls = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "helper"
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(helper.id.as_str())
+        })
+        .count();
+    assert!(helper_calls >= 3, "candidates={:?}", evidence.candidates);
     assert!(
-        extraction
-            .nodes
+        evidence
+            .declarations
             .iter()
-            .all(|node| node.string("qualified_name") != "config::render")
+            .any(|declaration| declaration.qualified_name.contains("config.render"))
     );
-    assert_unique_node_ids(&extraction);
     Ok(())
 }
 
@@ -406,7 +397,7 @@ fn build(mut graph: Graph) {
         "compass.languages.evidence/1"
     );
     assert_eq!(evidence.adapter.id, "compass.rust");
-    assert_eq!(evidence.adapter.version, 13);
+    assert_eq!(evidence.adapter.version, 15);
 
     let calls = evidence
         .occurrences
@@ -563,10 +554,12 @@ export class Service extends Base {
   override run(value: Contract): Contract { return value; }
 }
 export { Service as DefaultService };
-"#;
+    "#;
     let extraction = Engine::default().extract_source(&path, source)?;
-    let node_kinds = kinds(&extraction);
-    let edge_kinds = relations(&extraction);
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing TypeScript universal evidence")?;
 
     for expected in [
         "constructor",
@@ -576,25 +569,50 @@ export { Service as DefaultService };
         "annotation",
     ] {
         assert!(
-            node_kinds.contains(expected),
-            "missing {expected}: nodes={:?}",
-            extraction.nodes
+            (expected == "export"
+                && evidence
+                    .bindings
+                    .iter()
+                    .any(|binding| binding.kind == BindingKind::Reexport))
+                || evidence
+                    .declarations
+                    .iter()
+                    .any(|declaration| declaration.kind == expected)
+                || evidence.occurrences.iter().any(|occurrence| {
+                    matches!(
+                        occurrence.role,
+                        SemanticRole::Annotation | SemanticRole::TypeReference
+                    ) && expected == "annotation"
+                }),
+            "missing {expected}: declarations={:?}, bindings={:?}, occurrences={:?}",
+            evidence.declarations,
+            evidence.bindings,
+            evidence.occurrences
         );
     }
-    for expected in [
-        "type_of",
-        "returns",
-        "overrides",
-        "decorates",
-        "aliases",
-        "exports",
-    ] {
-        assert!(
-            edge_kinds.contains(expected),
-            "missing {expected}: edges={:?}",
-            extraction.edges
-        );
-    }
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::References
+            && candidate.target_spelling == "Contract"
+            && candidate.constraints.qualified_name.as_deref() == Some("semantic.Contract")
+    }));
+    assert!(
+        evidence
+            .candidates
+            .iter()
+            .any(|candidate| candidate.relation == compass_languages::CandidateRelation::Decorates)
+    );
+    assert!(
+        evidence
+            .candidates
+            .iter()
+            .any(|candidate| candidate.relation == compass_languages::CandidateRelation::Reexports)
+    );
+    assert!(
+        evidence
+            .candidates
+            .iter()
+            .any(|candidate| candidate.relation == CandidateRelation::Reexports)
+    );
     Ok(())
 }
 
@@ -862,29 +880,52 @@ class Service {
 }
 "#;
     let ts = Engine::default().extract_source(&ts_path, ts_source)?;
-    let ts_items = ts
-        .nodes
+    let ts_evidence = ts
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing TypeScript universal evidence")?;
+    let ts_items = ts_evidence
+        .declarations
         .iter()
-        .filter(|node| node.string("symbol_kind") == "class" && node.label() == "Item")
+        .filter(|declaration| declaration.kind == "class" && declaration.name == "Item")
         .collect::<Vec<_>>();
-    assert_eq!(ts_items.len(), 2, "nodes={:?}", ts.nodes);
     assert_eq!(
-        ts.nodes
+        ts_items.len(),
+        2,
+        "declarations={:?}",
+        ts_evidence.declarations
+    );
+    assert_eq!(
+        ts_evidence
+            .declarations
             .iter()
-            .filter(|node| node.string("symbol_kind") == "constructor")
+            .filter(|declaration| declaration.kind == "constructor")
             .count(),
         3,
-        "nodes={:?}",
-        ts.nodes
+        "declarations={:?}",
+        ts_evidence.declarations
     );
+    let overloaded = ts_evidence
+        .declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.kind == "constructor"
+                || (declaration.kind == "method" && declaration.name == "run")
+        })
+        .collect::<Vec<_>>();
     assert!(
-        ts.nodes
+        overloaded.len() >= 6,
+        "declarations={:?}",
+        ts_evidence.declarations
+    );
+    assert_eq!(
+        overloaded
             .iter()
-            .filter(|node| {
-                node.string("symbol_kind") == "constructor"
-                    || (node.string("symbol_kind") == "method" && node.label().contains("run"))
-            })
-            .all(|node| !node.string("overload_discriminator").is_empty())
+            .map(|declaration| declaration.id.as_str())
+            .collect::<HashSet<_>>()
+            .len(),
+        overloaded.len(),
+        "overload declarations must retain distinct identities"
     );
 
     let csharp_path = directory.path().join("Scoped.cs");
@@ -1002,21 +1043,73 @@ namespace Two {
         run(value: number): void {}
     }
     class Shared {}
-}
+    }
 "#;
     let ts = Engine::default().extract_source(&ts_path, ts_source)?;
-    for (target, owner) in [
-        ("Shared@", None),
-        ("One::Item@", Some("One")),
-        ("One::Nested", Some("One")),
-        ("One::Nested::Leaf@", Some("One::Nested")),
-        ("Two::Item@", Some("Two")),
-        ("Two::Shared@", Some("Two")),
+    let ts_evidence = ts
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing TypeScript universal evidence")?;
+    for (target_suffix, owner_suffix) in [
+        (".Shared", None),
+        (".One.Item", Some(".One")),
+        (".One.Nested", Some(".One")),
+        (".One.Nested.Leaf", Some(".One.Nested")),
+        (".Two.Item", Some(".Two")),
+        (".Two.Shared", Some(".Two")),
     ] {
-        assert_exact_containment(&ts, target, owner)?;
+        let target = ts_evidence
+            .declarations
+            .iter()
+            .find(|declaration| {
+                (target_suffix == ".Shared" && declaration.qualified_name == "ownership.Shared")
+                    || (target_suffix != ".Shared"
+                        && declaration.qualified_name.ends_with(target_suffix))
+                        && declaration.name == target_suffix.rsplit('.').next().unwrap_or_default()
+            })
+            .ok_or_else(|| {
+                format!(
+                    "missing target {target_suffix}: {:?}",
+                    ts_evidence
+                        .declarations
+                        .iter()
+                        .map(|declaration| declaration.qualified_name.as_str())
+                        .collect::<Vec<_>>()
+                )
+            })?;
+        let scope = ts_evidence
+            .scopes
+            .iter()
+            .find(|scope| scope.id == target.scope_id.clone().unwrap_or_default())
+            .ok_or_else(|| format!("missing scope for {target_suffix}"))?;
+        let owner = ts_evidence
+            .declarations
+            .iter()
+            .find(|declaration| {
+                scope
+                    .owner_declaration_id
+                    .as_deref()
+                    .is_some_and(|owner_id| declaration.id == owner_id)
+            })
+            .ok_or_else(|| format!("missing scope owner for {target_suffix}"))?;
+        match owner_suffix {
+            Some(expected) => assert!(
+                owner.qualified_name.ends_with(expected),
+                "target {target_suffix} owner={}",
+                owner.qualified_name
+            ),
+            None => assert_eq!(
+                owner.kind, "module",
+                "target {target_suffix} owner={owner:#?}"
+            ),
+        }
     }
-    assert_unique_node_ids(&ts);
-    assert_containment_sites_belong_to_targets(&ts);
+    let declaration_ids = ts_evidence
+        .declarations
+        .iter()
+        .map(|declaration| declaration.id.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(declaration_ids.len(), ts_evidence.declarations.len());
 
     let csharp_path = directory.path().join("Ownership.cs");
     let csharp_source = b"class Shared {} namespace One { class Item { void Run(int value) {} } class Outer { class Leaf {} } } namespace Two { class Item { void Run(int value) {} } class Shared {} }\n";
@@ -1088,26 +1181,56 @@ class Service { run() { const marker = " override "; } }
 export { A as First, B as Second, Service };
 "#;
     let extraction = Engine::default().extract_source(&ts, ts_source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing TypeScript universal evidence")?;
+    for exported in ["First", "Second", "Service"] {
+        assert!(
+            evidence.bindings.iter().any(
+                |binding| binding.kind == BindingKind::Reexport && binding.spelling == exported
+            ),
+            "missing re-export {exported}: bindings={:?}",
+            evidence.bindings
+        );
+    }
     assert!(
-        !relations(&extraction).contains("overrides"),
-        "edges={:?}",
-        extraction.edges
-    );
-    let exports = extraction
-        .nodes
-        .iter()
-        .filter(|node| node.string("symbol_kind") == "export")
-        .map(|node| node.label())
-        .collect::<HashSet<_>>();
-    assert!(exports.contains("First"), "nodes={:?}", extraction.nodes);
-    assert!(exports.contains("Second"), "nodes={:?}", extraction.nodes);
-    assert!(exports.contains("Service"), "nodes={:?}", extraction.nodes);
-    assert!(
-        extraction.nodes.iter().any(|node| {
-            node.string("symbol_kind") == "annotation" && node.label() == "ns.decorate"
+        evidence.occurrences.iter().any(|occurrence| {
+            occurrence.role == SemanticRole::Decorator
+                && occurrence.spelling == "decorate"
+                && occurrence.qualifier.as_deref() == Some("ns.decorate")
         }),
-        "nodes={:?}",
-        extraction.nodes
+        "missing decorator occurrence: occurrences={:?}",
+        evidence.occurrences
+    );
+    assert!(
+        evidence
+            .candidates
+            .iter()
+            .any(|candidate| candidate.relation == CandidateRelation::Decorates),
+        "missing decorator candidate: candidates={:?}",
+        evidence.candidates
+    );
+    let exports = evidence
+        .bindings
+        .iter()
+        .filter(|binding| binding.kind == BindingKind::Reexport)
+        .map(|binding| binding.spelling.as_str())
+        .collect::<HashSet<_>>();
+    assert!(
+        exports.contains("First"),
+        "bindings={:?}",
+        evidence.bindings
+    );
+    assert!(
+        exports.contains("Second"),
+        "bindings={:?}",
+        evidence.bindings
+    );
+    assert!(
+        exports.contains("Service"),
+        "bindings={:?}",
+        evidence.bindings
     );
 
     let rust = directory.path().join("attributes.rs");

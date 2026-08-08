@@ -59,8 +59,9 @@ pub fn resolve_routes(
     extraction: &Extraction,
     limits: FrameworkLimits,
 ) -> Result<Vec<ResolvedRoute>, FrameworkResolutionError> {
-    let targets = FrameworkTargetIndex::new(extraction);
-    resolve_routes_with_targets(extraction, limits, &targets, None)
+    let target_extraction = super::materialize_universal_framework_targets(extraction);
+    let targets = FrameworkTargetIndex::new(&target_extraction);
+    resolve_routes_with_targets(&target_extraction, limits, &targets, None)
 }
 
 pub(super) fn resolve_routes_with_targets(
@@ -112,8 +113,10 @@ pub fn resolve_and_publish_framework_routes(
     extraction: &mut Extraction,
     limits: FrameworkLimits,
 ) -> Result<Vec<ResolvedRoute>, FrameworkResolutionError> {
-    let resolved = resolve_routes(extraction, limits)?;
-    publish_resolved_routes(extraction, &resolved)?;
+    let mut target_extraction = super::materialize_universal_framework_targets(extraction);
+    let resolved = resolve_routes(&target_extraction, limits)?;
+    publish_resolved_routes(&mut target_extraction, &resolved)?;
+    *extraction = target_extraction;
     Ok(resolved)
 }
 
@@ -800,6 +803,23 @@ fn source_anchor(anchor: &RawFrameworkAnchor) -> SourceAnchor {
     }
 }
 
+fn evidence_origin(origin: RawFrameworkOrigin) -> EvidenceOrigin {
+    match origin {
+        RawFrameworkOrigin::Ast => EvidenceOrigin::Ast,
+        RawFrameworkOrigin::Config => EvidenceOrigin::Config,
+        RawFrameworkOrigin::Convention => EvidenceOrigin::Convention,
+        RawFrameworkOrigin::Heuristic => EvidenceOrigin::Heuristic,
+    }
+}
+
+fn resolution_name(state: ResolutionState) -> &'static str {
+    match state {
+        ResolutionState::Exact => "exact",
+        ResolutionState::Ambiguous => "ambiguous",
+        ResolutionState::Unresolved => "unresolved",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -925,22 +945,5 @@ mod tests {
         assert!(resolved[0].stages[0].target.is_none());
         assert!(resolved[0].candidates.is_empty());
         Ok(())
-    }
-}
-
-fn evidence_origin(origin: RawFrameworkOrigin) -> EvidenceOrigin {
-    match origin {
-        RawFrameworkOrigin::Ast => EvidenceOrigin::Ast,
-        RawFrameworkOrigin::Config => EvidenceOrigin::Config,
-        RawFrameworkOrigin::Convention => EvidenceOrigin::Convention,
-        RawFrameworkOrigin::Heuristic => EvidenceOrigin::Heuristic,
-    }
-}
-
-fn resolution_name(state: ResolutionState) -> &'static str {
-    match state {
-        ResolutionState::Exact => "exact",
-        ResolutionState::Ambiguous => "ambiguous",
-        ResolutionState::Unresolved => "unresolved",
     }
 }
