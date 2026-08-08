@@ -10,7 +10,9 @@ mod spring;
 mod target_index;
 mod typescript;
 
+use compass_languages::{RawNodeRecord, make_id};
 use rayon::join;
+use serde_json::{Map, Value};
 
 type UniversalFrameworkExpansion =
     fn(&mut compass_languages::Extraction) -> Result<(), FrameworkResolutionError>;
@@ -68,11 +70,121 @@ pub(crate) fn resolve_framework_facts(
     if extraction.framework_facts.is_empty() {
         return (Ok(Vec::new()), Ok(Vec::new()));
     }
-    let targets = target_index::FrameworkTargetIndex::new_with_root(extraction, Some(root));
+    let target_extraction = materialize_universal_framework_targets(extraction);
+    let targets = target_index::FrameworkTargetIndex::new_with_root(&target_extraction, Some(root));
     join(
-        || routes::resolve_routes_with_targets(extraction, limits, &targets, Some(root)),
-        || domain::resolve_domains_with_targets(extraction, limits, &targets),
+        || routes::resolve_routes_with_targets(&target_extraction, limits, &targets, Some(root)),
+        || domain::resolve_domains_with_targets(&target_extraction, limits, &targets),
     )
+}
+
+/// Universal TypeScript/JavaScript extraction publishes declaration evidence
+/// first and lets the project resolver materialize graph nodes. Framework
+/// route/domain resolution can also be invoked directly on a single-file
+/// extraction, so provide the target index with source-backed declaration
+/// identities at this boundary without changing the universal evidence batch.
+pub(super) fn materialize_universal_framework_targets(
+    extraction: &compass_languages::Extraction,
+) -> compass_languages::Extraction {
+    let Some(batches) = extraction
+        .semantic_evidence
+        .as_ref()
+        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
+    else {
+        return extraction.clone();
+    };
+    let mut enriched = extraction.clone();
+    let existing = enriched
+        .nodes
+        .iter()
+        .map(|node| node.id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    let mut graph_id_counts = std::collections::BTreeMap::<&str, usize>::new();
+    for declaration in &batches.declarations {
+        *graph_id_counts
+            .entry(declaration.graph_node_id.as_str())
+            .or_default() += 1;
+    }
+    for declaration in &batches.declarations {
+        let id = if graph_id_counts
+            .get(declaration.graph_node_id.as_str())
+            .copied()
+            == Some(1)
+        {
+            declaration.graph_node_id.clone()
+        } else {
+            make_id(&[&declaration.graph_node_id, &declaration.id])
+        };
+        if existing.contains(&id) {
+            continue;
+        }
+        let mut attributes = Map::from_iter([
+            ("label".to_owned(), Value::String(declaration.name.clone())),
+            ("name".to_owned(), Value::String(declaration.name.clone())),
+            (
+                "qualified_name".to_owned(),
+                Value::String(declaration.qualified_name.clone()),
+            ),
+            (
+                "symbol_kind".to_owned(),
+                Value::String(declaration.kind.clone()),
+            ),
+            (
+                "source_file".to_owned(),
+                Value::String(declaration.range.source_file.clone()),
+            ),
+            (
+                "source_location".to_owned(),
+                Value::String(format!("L{}", declaration.range.start_line)),
+            ),
+            (
+                "start_byte".to_owned(),
+                Value::from(declaration.range.start_byte),
+            ),
+            (
+                "end_byte".to_owned(),
+                Value::from(declaration.range.end_byte),
+            ),
+            (
+                "line_start".to_owned(),
+                Value::from(declaration.range.start_line),
+            ),
+            (
+                "line_end".to_owned(),
+                Value::from(declaration.range.end_line),
+            ),
+            (
+                "column_start".to_owned(),
+                Value::from(declaration.range.start_column),
+            ),
+            (
+                "column_end".to_owned(),
+                Value::from(declaration.range.end_column),
+            ),
+            (
+                "language".to_owned(),
+                Value::String(declaration.language.clone()),
+            ),
+            (
+                "extractor".to_owned(),
+                Value::String(format!(
+                    "compass.languages.{}.universal",
+                    declaration.language
+                )),
+            ),
+            ("file_type".to_owned(), Value::String("code".to_owned())),
+            (
+                "confidence".to_owned(),
+                Value::String("EXTRACTED".to_owned()),
+            ),
+            ("_origin".to_owned(), Value::String("ast".to_owned())),
+        ]);
+        if let Some(signature) = declaration.signature.as_ref() {
+            attributes.insert("signature".to_owned(), Value::String(signature.clone()));
+        }
+        enriched.nodes.push(RawNodeRecord { id, attributes });
+    }
+    enriched
 }
 
 #[cfg(test)]

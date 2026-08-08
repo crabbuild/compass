@@ -30,8 +30,9 @@ This architecture is transitioning one language at a time. The status labels bel
 | --- | --- |
 | Available now | The vendored package supplies 37 pinned static Tree-sitter grammars |
 | Available now | Python and Go are registered hard-cut adapters: they emit semantic evidence and use shared resolution and projection |
-| Available now | Rust is a quality-gated, hard-cut version-13 `UniversalCandidate`; version 13 resolves bounded multi-stage method-result chains across files while preserving a source-proven fallback when project-wide result evidence is absent, version 12 resolves the next member on a same-file method's exact outer nominal result type, version 11 resolves calls chained from source-proven associated-function results and publishes concrete impl `Self` returns, version 10 prevents ambiguous local `self` method sets from becoming fabricated external or deferred calls, version 9 preserves source-valid calls through mutually exclusive Unix/Windows reexports, version 8 publishes blanket trait implementations from the exact impl-scoped generic parameter declaration, version 7 publishes source-anchored references from an implementer declaration proven in the current source evidence to non-primitive nested type arguments in its trait implementation, version 6 resolves inherited associated types through complete source-proven supertrait hierarchies and exact receiver declarations, version 5 preserves impl-scoped associated types and exact lexical `Self::Type` returns, version 4 publishes scoped type, lifetime, and const generic parameters, and version 3 preserves nested function declarations and lexical calls; replaced publisher and collection resolution branches remain removed |
+| Available now | Rust is a quality-gated, hard-cut version-15 `UniversalCandidate`; version 15 preserves bounded multi-stage method-result chains across files while retaining source-proven fallbacks when project-wide result evidence is absent, alongside the earlier associated-type, generic-parameter, re-export, and lexical-call safeguards; replaced publisher and collection resolution branches remain removed |
 | Available now | Java is a hard-cut version-3 `UniversalCandidate`; its replaced publisher and Java member resolver are removed, and post-cutover pinned-corpus qualification is complete |
+| Available now | TypeScript and JavaScript are hard-cut `UniversalCandidate` adapters; TSX uses the TypeScript identity, both share the bounded ECMAScript evidence emitter, and their replaced generic publisher is removed |
 | Available now | The remaining production languages keep their established extraction and resolution paths |
 | Planned | Later languages transition independently after language-specific qualification |
 
@@ -191,6 +192,8 @@ Examples include:
 - Java packages, overload signatures, annotations, and interfaces
 - Python modules, aliases, decorators, and dynamic member occurrences
 - Go packages, receiver ownership, imports, and interfaces
+- TypeScript/JavaScript namespaces, import/re-export bindings, JSX values,
+  CommonJS/ESM module candidates, prototypes, and source-anchored type edges
 
 The current graph contract has a known Rust representation boundary. An
 implementation owner can be published exactly when the implementer is a
@@ -207,7 +210,11 @@ being assigned a convenient but false identity.
 
 An AST-backed adapter receives borrowed source bytes and one prepared tree. It does not parse the source again or call the language pack's generic intelligence pipeline.
 
-After a language completes its universal transition, its adapter emits evidence only. The shared projector creates graph nodes and edges for both single-file and collection builds.
+After a language enters its universal transition, its adapter emits evidence
+only. The shared projector creates graph nodes and edges for both single-file
+and collection builds. `UniversalCandidate` means this route is active while
+qualification continues; it is not permission to retain the replaced direct
+publisher.
 
 ## Universal evidence
 
@@ -336,7 +343,10 @@ supported languages.
 
 ## Language-by-language transitions
 
-Each language keeps its established direct implementation until its universal candidate proves the transition is safe.
+An established language keeps its direct implementation until its universal
+candidate proves the transition is safe. TypeScript and JavaScript have
+completed the route switch and remain candidates while their completion gates
+run.
 
 ```text
 established adapter baseline

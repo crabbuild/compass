@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Route JavaScript and TypeScript production extraction through the registered
+  universal semantic candidate, including source-backed declarations, imports,
+  re-exports, calls, references, heritage, aliases, and framework route
+  targets. The candidate is now the same deterministic path used by
+  qualification fixtures, with universal provenance and cross-file resolution
+  preserved through cached and rebuilt graphs.
+
 ## 0.3.6 - 2026-08-06
 
 - Simplify every Compass-owned current-output path beneath `compass-out/`.

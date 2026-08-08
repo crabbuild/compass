@@ -1069,8 +1069,8 @@
       "id": "node-variable",
       "kind": "variable",
       "source": "fixtures/code-graph/routes/typescript/express.ts",
-      "qualifiedName": "app",
-      "producer": "compass.languages.typescript",
+      "qualifiedName": "express.app",
+      "producer": "compass.languages.typescript.universal",
       "origins": [
         "ast"
       ],
@@ -1113,8 +1113,8 @@
       "id": "node-export",
       "kind": "export",
       "source": "fixtures/code-graph/qualification/rich.ts",
-      "qualifiedName": "DefaultStore@271",
-      "producer": "compass.languages.typescript",
+      "qualifiedName": "rich.DefaultStore",
+      "producer": "compass.languages.typescript.universal",
       "origins": [
         "ast"
       ],
@@ -1135,8 +1135,8 @@
       "id": "node-annotation",
       "kind": "annotation",
       "source": "fixtures/code-graph/qualification/rich.ts",
-      "qualifiedName": "sealed@159",
-      "producer": "compass.languages.typescript",
+      "qualifiedName": "rich::sealed",
+      "producer": "compass.languages.typescript.universal",
       "origins": [
         "ast"
       ],
@@ -1479,7 +1479,7 @@
       "kind": "instantiates",
       "source": "fixtures/code-graph/domain/messaging/dynamic-near-matches.ts",
       "qualifiedName": "*",
-      "producer": "compass.languages.typescript",
+      "producer": "compass.resolve.typescript.universal",
       "origins": [
         "ast"
       ],
@@ -1501,7 +1501,7 @@
       "kind": "decorates",
       "source": "fixtures/code-graph/qualification/rich.ts",
       "qualifiedName": "*",
-      "producer": "compass.languages.typescript",
+      "producer": "compass.resolve.typescript.universal",
       "origins": [
         "ast"
       ],
@@ -1545,7 +1545,7 @@
       "kind": "aliases",
       "source": "fixtures/code-graph/qualification/rich.ts",
       "qualifiedName": "*",
-      "producer": "compass.languages.typescript",
+      "producer": "compass.resolve.typescript.universal",
       "origins": [
         "ast"
       ],

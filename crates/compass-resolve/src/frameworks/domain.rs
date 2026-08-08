@@ -22,8 +22,9 @@ pub fn resolve_domains(
     extraction: &Extraction,
     limits: FrameworkLimits,
 ) -> Result<Vec<ResolvedDomainFact>, FrameworkResolutionError> {
-    let targets = FrameworkTargetIndex::new(extraction);
-    resolve_domains_with_targets(extraction, limits, &targets)
+    let target_extraction = super::materialize_universal_framework_targets(extraction);
+    let targets = FrameworkTargetIndex::new(&target_extraction);
+    resolve_domains_with_targets(&target_extraction, limits, &targets)
 }
 
 pub(super) fn resolve_domains_with_targets(

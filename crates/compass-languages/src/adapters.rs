@@ -154,6 +154,25 @@ const JAVA_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::ExternalReferences,
 ];
 
+const JAVASCRIPT_CAPABILITIES: &[LanguageCapability] = &[
+    LanguageCapability::Declarations,
+    LanguageCapability::LexicalScopes,
+    LanguageCapability::Namespaces,
+    LanguageCapability::Imports,
+    LanguageCapability::Reexports,
+    LanguageCapability::Aliases,
+    LanguageCapability::Calls,
+    LanguageCapability::Construction,
+    LanguageCapability::Decorators,
+    LanguageCapability::TypeReferences,
+    LanguageCapability::BaseTypes,
+    LanguageCapability::HierarchyDispatch,
+    LanguageCapability::Members,
+    LanguageCapability::Ownership,
+    LanguageCapability::Receivers,
+    LanguageCapability::ExternalReferences,
+];
+
 const RUST_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::Declarations,
     LanguageCapability::LexicalScopes,
@@ -171,6 +190,25 @@ const RUST_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::HierarchyDispatch,
     LanguageCapability::Members,
     LanguageCapability::Ownership,
+    LanguageCapability::ExternalReferences,
+];
+
+const TYPESCRIPT_CAPABILITIES: &[LanguageCapability] = &[
+    LanguageCapability::Declarations,
+    LanguageCapability::LexicalScopes,
+    LanguageCapability::Namespaces,
+    LanguageCapability::Imports,
+    LanguageCapability::Reexports,
+    LanguageCapability::Aliases,
+    LanguageCapability::Calls,
+    LanguageCapability::Construction,
+    LanguageCapability::Decorators,
+    LanguageCapability::TypeReferences,
+    LanguageCapability::BaseTypes,
+    LanguageCapability::HierarchyDispatch,
+    LanguageCapability::Members,
+    LanguageCapability::Ownership,
+    LanguageCapability::Receivers,
     LanguageCapability::ExternalReferences,
 ];
 
@@ -192,6 +230,14 @@ const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
         capabilities: JAVA_CAPABILITIES,
     },
     AdapterProfile {
+        id: "compass.javascript.candidate",
+        language: "javascript",
+        version: 5,
+        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+        profile: UniversalAdapterProfile::UniversalCandidate,
+        capabilities: JAVASCRIPT_CAPABILITIES,
+    },
+    AdapterProfile {
         id: "compass.python",
         language: "python",
         version: 11,
@@ -206,5 +252,13 @@ const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         profile: UniversalAdapterProfile::UniversalCandidate,
         capabilities: RUST_CAPABILITIES,
+    },
+    AdapterProfile {
+        id: "compass.typescript.candidate",
+        language: "typescript",
+        version: 5,
+        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+        profile: UniversalAdapterProfile::UniversalCandidate,
+        capabilities: TYPESCRIPT_CAPABILITIES,
     },
 ];

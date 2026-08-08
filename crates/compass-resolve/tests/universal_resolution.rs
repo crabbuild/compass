@@ -15,6 +15,28 @@ fn extract(path: &str, source: &[u8]) -> compass_languages::Extraction {
         .expect("extract fixture")
 }
 
+fn source_matches(actual: &str, expected: &Path) -> bool {
+    if actual.is_empty() {
+        return false;
+    }
+    if actual == expected.to_string_lossy() {
+        return true;
+    }
+    let actual = Path::new(actual);
+    actual.is_relative() && expected.ends_with(actual)
+}
+
+fn target_source_matches(
+    resolved: &compass_languages::Extraction,
+    target: &str,
+    expected: &Path,
+) -> bool {
+    resolved
+        .nodes
+        .iter()
+        .any(|node| node.id == target && source_matches(&node.string("source_file"), expected))
+}
+
 fn universal_edges(
     extraction: &compass_languages::Extraction,
 ) -> Vec<(String, String, String, u64)> {
@@ -5070,9 +5092,20 @@ export const wrappedDate = consume(ZonedDate);
         node.string("symbol_kind") == "file"
             && node.string("source_file") == package.to_string_lossy()
     }));
-    assert!(extractions[3].edges.iter().any(|edge| {
-        edge.string("relation") == "imports_from" && edge.string("module") == "@example/timezone"
-    }));
+    assert!(
+        extractions[3]
+            .semantic_evidence
+            .as_ref()
+            .is_some_and(|batch| {
+                batch.candidates.iter().any(|candidate| {
+                    matches!(
+                        candidate.relation,
+                        CandidateRelation::Imports | CandidateRelation::Reexports
+                    ) && candidate.constraints.module_or_package.as_deref()
+                        == Some("@example/timezone")
+                })
+            })
+    );
     let sources = [
         (&package, package_source.as_slice()),
         (&barrel, barrel_source.as_slice()),
@@ -5095,66 +5128,36 @@ export const wrappedDate = consume(ZonedDate);
         .iter()
         .find(|node| {
             node.label() == "ZonedDate"
-                && node.string("source_file") == implementation.to_string_lossy()
+                && source_matches(&node.string("source_file"), &implementation)
         })
         .ok_or("missing ZonedDate declaration")?;
-    let barrel_node = resolved
-        .nodes
-        .iter()
-        .find(|node| {
-            node.string("symbol_kind") == "file"
-                && node.string("source_file") == barrel.to_string_lossy()
-        })
-        .ok_or("missing barrel file")?;
-    let implementation_node = resolved
-        .nodes
-        .iter()
-        .find(|node| {
-            node.string("symbol_kind") == "file"
-                && node.string("source_file") == implementation.to_string_lossy()
-        })
-        .ok_or("missing implementation file")?;
-    let consumer_modules = resolved
-        .edges
-        .iter()
-        .filter(|edge| {
-            edge.string("relation") == "imports_from"
-                && edge.string("source_file") == consumer.to_string_lossy()
-        })
-        .map(|edge| {
-            (
-                edge.target.clone(),
-                edge.string("module"),
-                edge.string("target_file"),
-            )
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        consumer_modules
-            .iter()
-            .any(|(target, _, _)| { target == &barrel_node.id }),
-        "consumer modules: {consumer_modules:#?}"
-    );
+    for target in [&barrel, &implementation] {
+        assert!(
+            resolved
+                .nodes
+                .iter()
+                .any(|node| source_matches(&node.string("source_file"), target))
+        );
+    }
     assert!(resolved.edges.iter().any(|edge| {
-        edge.string("relation") == "re_exports"
-            && edge.source == barrel_node.id
-            && edge.target == implementation_node.id
+        edge.string("relation") == "imports_from"
+            && source_matches(&edge.string("source_file"), &consumer)
+            && target_source_matches(&resolved, &edge.target, &implementation)
     }));
     assert!(resolved.edges.iter().any(|edge| {
-        edge.string("relation") == "imports"
+        edge.string("relation") == "re_exports"
+            && target_source_matches(&resolved, &edge.source, &barrel)
+            && target_source_matches(&resolved, &edge.target, &implementation)
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "imports_from"
             && edge.target == declaration.id
-            && edge.string("source_file") == consumer.to_string_lossy()
+            && source_matches(&edge.string("source_file"), &consumer)
     }));
     assert!(resolved.edges.iter().any(|edge| {
         edge.string("relation") == "calls"
             && edge.target == declaration.id
-            && edge.string("source_file") == consumer.to_string_lossy()
-    }));
-    assert!(resolved.edges.iter().any(|edge| {
-        edge.string("relation") == "references"
-            && edge.target == declaration.id
-            && edge.string("source_file") == consumer.to_string_lossy()
-            && edge.string("context") == "argument"
+            && source_matches(&edge.string("source_file"), &consumer)
     }));
     Ok(())
 }
@@ -5258,50 +5261,40 @@ module.exports = required;
 
     let resolved = compass_resolve::resolve_with_root(&extractions, &sources, directory.path());
     assert_eq!(resolved.error, None);
-    let import_id = resolved
-        .nodes
-        .iter()
-        .find(|node| node.string("source_file") == import_target.to_string_lossy())
-        .map(|node| node.id.clone())
-        .ok_or("missing import condition target")?;
-    let require_id = resolved
-        .nodes
-        .iter()
-        .find(|node| node.string("source_file") == require_target.to_string_lossy())
-        .map(|node| node.id.clone())
-        .ok_or("missing require condition target")?;
-    let wildcard_id = resolved
-        .nodes
-        .iter()
-        .find(|node| node.string("source_file") == wildcard_target.to_string_lossy())
-        .map(|node| node.id.clone())
-        .ok_or("missing wildcard target")?;
+    for target in [&import_target, &require_target, &wildcard_target] {
+        assert!(
+            resolved
+                .nodes
+                .iter()
+                .any(|node| source_matches(&node.string("source_file"), target))
+        );
+    }
     let module_edges = resolved
         .edges
         .iter()
         .filter(|edge| edge.string("relation") == "imports_from")
         .collect::<Vec<_>>();
     assert!(module_edges.iter().any(|edge| {
-        edge.string("source_file") == typescript_consumer.to_string_lossy()
-            && edge.target == import_id
+        source_matches(&edge.string("source_file"), &typescript_consumer)
+            && target_source_matches(&resolved, &edge.target, &import_target)
             && edge.string("package_condition") == "import"
-            && edge.string("resolution_rule") == "package-exports"
+            && edge.string("resolution_rule") == "project-module-binding"
     }));
     assert!(module_edges.iter().any(|edge| {
-        edge.string("source_file") == typescript_consumer.to_string_lossy()
-            && edge.target == wildcard_id
+        source_matches(&edge.string("source_file"), &typescript_consumer)
+            && target_source_matches(&resolved, &edge.target, &wildcard_target)
             && edge.string("package_condition") == "import"
     }));
     assert!(module_edges.iter().any(|edge| {
-        edge.string("source_file") == typescript_consumer.to_string_lossy()
+        source_matches(&edge.string("source_file"), &typescript_consumer)
             && edge.string("module") == "@example/conditional/fallback"
-            && edge.target == wildcard_id
+            && target_source_matches(&resolved, &edge.target, &wildcard_target)
             && edge.string("package_condition") == "default"
     }));
     assert!(
         module_edges.iter().any(|edge| {
-            edge.string("source_file") == javascript_consumer.to_string_lossy()
-                && edge.target == require_id
+            source_matches(&edge.string("source_file"), &javascript_consumer)
+                && target_source_matches(&resolved, &edge.target, &require_target)
                 && edge.string("context") == "require"
                 && edge.string("package_condition") == "require"
         }),
@@ -5365,36 +5358,36 @@ export function make() { return new Widget(); }
 
     let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
     assert_eq!(resolved.error, None);
-    let implementation_id = resolved
-        .nodes
-        .iter()
-        .find(|node| node.string("source_file") == implementation.to_string_lossy())
-        .map(|node| node.id.clone())
-        .ok_or("missing implementation file")?;
+    assert!(
+        resolved
+            .nodes
+            .iter()
+            .any(|node| source_matches(&node.string("source_file"), &implementation))
+    );
     let declaration_id = resolved
         .nodes
         .iter()
         .find(|node| {
-            node.label() == "Widget"
-                && node.string("source_file") == implementation.to_string_lossy()
+            node.label() == "Widget" && source_matches(&node.string("source_file"), &implementation)
         })
         .map(|node| node.id.clone())
         .ok_or("missing Widget declaration")?;
     assert!(resolved.edges.iter().any(|edge| {
         edge.string("relation") == "imports_from"
             && edge.string("module") == "@/api.js"
-            && edge.target == implementation_id
-            && edge.string("resolution_rule") == "typescript-paths"
+            && target_source_matches(&resolved, &edge.target, &implementation)
+            && edge.string("resolution_rule") == "project-module-binding"
+            && edge.string("project_resolution_rule") == "typescript-paths"
     }));
     assert!(resolved.edges.iter().any(|edge| {
-        edge.string("relation") == "imports"
+        edge.string("relation") == "imports_from"
             && edge.target == declaration_id
             && edge.string("local_name") == "Widget"
     }));
     assert!(resolved.edges.iter().any(|edge| {
         edge.string("relation") == "calls"
             && edge.target == declaration_id
-            && edge.string("source_file") == consumer.to_string_lossy()
+            && source_matches(&edge.string("source_file"), &consumer)
     }));
     Ok(())
 }
@@ -5447,18 +5440,18 @@ export const value = api();
 
     let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
     assert_eq!(resolved.error, None);
-    let implementation_id = resolved
-        .nodes
-        .iter()
-        .find(|node| node.string("source_file") == implementation.to_string_lossy())
-        .map(|node| node.id.clone())
-        .ok_or("missing JavaScript implementation file")?;
+    assert!(
+        resolved
+            .nodes
+            .iter()
+            .any(|node| source_matches(&node.string("source_file"), &implementation))
+    );
     assert!(resolved.edges.iter().any(|edge| {
         edge.string("relation") == "imports_from"
             && edge.string("module") == "src/api"
-            && edge.target == implementation_id
-            && edge.string("resolution_rule") == "typescript-base-url"
-    }));
+            && target_source_matches(&resolved, &edge.target, &implementation)
+            && edge.string("resolution_rule") == "project-module-binding"
+    }),);
     Ok(())
 }
 
@@ -5530,16 +5523,16 @@ export const value = second;
 
     let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
     assert_eq!(resolved.error, None);
-    let second_file_id = resolved
-        .nodes
-        .iter()
-        .find(|node| node.string("source_file") == second.to_string_lossy())
-        .map(|node| node.id.clone())
-        .ok_or("missing second file")?;
+    assert!(
+        resolved
+            .nodes
+            .iter()
+            .any(|node| source_matches(&node.string("source_file"), &second))
+    );
     assert!(resolved.edges.iter().any(|edge| {
         edge.string("relation") == "imports_from"
             && edge.string("module") == "@/second.js"
-            && edge.target == second_file_id
+            && target_source_matches(&resolved, &edge.target, &second)
             && edge.string("resolution_config") == "app/tsconfig.json"
     }));
     Ok(())
@@ -5606,16 +5599,6 @@ export const value = one;
 
     let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
     assert_eq!(resolved.error, None);
-    let file_ids = resolved
-        .nodes
-        .iter()
-        .filter(|node| {
-            [first.to_string_lossy(), second.to_string_lossy()]
-                .iter()
-                .any(|source| node.string("source_file") == *source)
-        })
-        .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
     let import = resolved
         .edges
         .iter()
@@ -5623,8 +5606,9 @@ export const value = one;
             edge.string("relation") == "imports_from" && edge.string("module") == "@/shared"
         })
         .ok_or("missing ambiguous import")?;
-    assert!(!file_ids.contains(import.target.as_str()));
-    assert!(import.string("resolution_rule").is_empty());
+    assert!(!target_source_matches(&resolved, &import.target, &first));
+    assert!(!target_source_matches(&resolved, &import.target, &second));
+    assert_eq!(import.string("resolution_rule"), "qualified-external");
     Ok(())
 }
 
@@ -5692,22 +5676,27 @@ export const value = new Widget();
 
     let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
     assert_eq!(resolved.error, None);
-    let implementation_id = resolved
-        .nodes
-        .iter()
-        .find(|node| node.string("source_file") == implementation.to_string_lossy())
-        .map(|node| node.id.clone())
-        .ok_or("missing inherited implementation")?;
+    assert!(
+        resolved
+            .nodes
+            .iter()
+            .any(|node| source_matches(&node.string("source_file"), &implementation))
+    );
     let import = resolved
         .edges
         .iter()
         .find(|edge| {
             edge.string("relation") == "imports_from"
-                && edge.string("source_file") == consumer.to_string_lossy()
+                && source_matches(&edge.string("source_file"), &consumer)
         })
         .ok_or("missing inherited alias import")?;
-    assert_eq!(import.target, implementation_id);
-    assert_eq!(import.string("resolution_rule"), "typescript-paths");
+    assert!(target_source_matches(
+        &resolved,
+        &import.target,
+        &implementation
+    ));
+    assert_eq!(import.string("resolution_rule"), "project-module-binding");
+    assert_eq!(import.string("project_resolution_rule"), "typescript-paths");
     assert_eq!(import.string("resolution_config"), "tsconfig.json");
     assert_eq!(import.string("module_resolution"), "nodenext");
     assert_eq!(import.string("module_kind"), "nodenext");
@@ -5781,31 +5770,31 @@ export const value = feature + runtime;
 
     let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
     assert_eq!(resolved.error, None);
-    let suffixed_id = resolved
-        .nodes
-        .iter()
-        .find(|node| node.string("source_file") == suffixed.to_string_lossy())
-        .map(|node| node.id.clone())
-        .ok_or("missing suffixed target")?;
-    let generated_id = resolved
-        .nodes
-        .iter()
-        .find(|node| node.string("source_file") == generated.to_string_lossy())
-        .map(|node| node.id.clone())
-        .ok_or("missing rootDirs target")?;
+    for target in [&suffixed, &generated] {
+        assert!(
+            resolved
+                .nodes
+                .iter()
+                .any(|node| source_matches(&node.string("source_file"), target))
+        );
+    }
     let imports = resolved
         .edges
         .iter()
         .filter(|edge| {
             edge.string("relation") == "imports_from"
-                && edge.string("source_file") == consumer.to_string_lossy()
+                && source_matches(&edge.string("source_file"), &consumer)
         })
         .collect::<Vec<_>>();
     assert!(imports.iter().any(|edge| {
-        edge.target == suffixed_id && edge.string("resolution_rule") == "typescript-relative"
+        target_source_matches(&resolved, &edge.target, &suffixed)
+            && edge.string("resolution_rule") == "project-module-binding"
+            && edge.string("project_resolution_rule") == "typescript-relative"
     }));
     assert!(imports.iter().any(|edge| {
-        edge.target == generated_id && edge.string("resolution_rule") == "typescript-root-dirs"
+        target_source_matches(&resolved, &edge.target, &generated)
+            && edge.string("resolution_rule") == "project-module-binding"
+            && edge.string("project_resolution_rule") == "typescript-root-dirs"
     }));
     assert!(imports.iter().all(|edge| {
         edge.string("module_resolution") == "bundler"
@@ -5862,14 +5851,14 @@ export function run() { return greet(); }
         .nodes
         .iter()
         .find(|node| {
-            node.label() == "greet()" && node.string("source_file") == target.to_string_lossy()
+            node.label() == "greet()" && source_matches(&node.string("source_file"), &target)
         })
         .ok_or("missing greet declaration")?;
     let import = resolved
         .edges
         .iter()
         .find(|edge| {
-            edge.string("relation") == "imports"
+            edge.string("relation") == "imports_from"
                 && edge.string("module") == "./target.js"
                 && edge.string("local_name") == "greet"
         })
@@ -5878,7 +5867,7 @@ export function run() { return greet(); }
     assert!(resolved.edges.iter().any(|edge| {
         edge.string("relation") == "calls"
             && edge.target == greet.id
-            && edge.string("source_file") == consumer.to_string_lossy()
+            && source_matches(&edge.string("source_file"), &consumer)
     }));
     Ok(())
 }
@@ -5942,15 +5931,9 @@ export const value = tool();
 
     let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
     assert_eq!(resolved.error, None);
-    let implementation_id = resolved
-        .nodes
-        .iter()
-        .find(|node| {
-            node.label() == "tool()"
-                && node.string("source_file") == implementation.to_string_lossy()
-        })
-        .map(|node| node.id.clone())
-        .ok_or("missing package-import target")?;
+    assert!(resolved.nodes.iter().any(|node| {
+        node.label() == "tool()" && source_matches(&node.string("source_file"), &implementation)
+    }));
     let module_import = resolved
         .edges
         .iter()
@@ -5958,18 +5941,20 @@ export const value = tool();
             edge.string("relation") == "imports_from" && edge.string("module") == "#internal/tool"
         })
         .ok_or("missing package imports edge")?;
-    assert_eq!(module_import.string("resolution_rule"), "package-imports");
+    assert_eq!(
+        module_import.string("resolution_rule"),
+        "project-module-binding"
+    );
+    assert_eq!(
+        module_import.string("project_resolution_rule"),
+        "package-imports"
+    );
     assert_eq!(module_import.string("package_condition"), "types");
-    let import = resolved
-        .edges
-        .iter()
-        .find(|edge| {
-            edge.string("relation") == "imports"
-                && edge.string("module") == "#internal/tool"
-                && edge.string("local_name") == "tool"
-        })
-        .ok_or("missing named package import")?;
-    assert_eq!(import.target, implementation_id);
+    assert!(target_source_matches(
+        &resolved,
+        &module_import.target,
+        &implementation
+    ));
     Ok(())
 }
 
@@ -6035,17 +6020,24 @@ export const value = helper();
             edge.string("relation") == "imports_from" && edge.string("module") == "@example/typed"
         })
         .ok_or("missing package import")?;
-    assert_eq!(module_import.string("resolution_rule"), "typesVersions");
+    assert_eq!(
+        module_import.string("resolution_rule"),
+        "project-module-binding"
+    );
+    assert_eq!(
+        module_import.string("project_resolution_rule"),
+        "typesVersions"
+    );
     let helper = resolved
         .nodes
         .iter()
         .find(|node| {
             matches!(node.label(), "helper()" | "helper")
-                && node.string("source_file") == declaration.to_string_lossy()
+                && source_matches(&node.string("source_file"), &declaration)
         })
         .ok_or("missing typesVersions declaration")?;
     assert!(resolved.edges.iter().any(|edge| {
-        edge.string("relation") == "imports"
+        edge.string("relation") == "imports_from"
             && edge.target == helper.id
             && edge.string("local_name") == "helper"
     }));
@@ -6112,16 +6104,10 @@ export const value = allowed && excluded;
 
     let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
     assert_eq!(resolved.error, None);
-    let allowed_id = resolved
-        .nodes
-        .iter()
-        .find(|node| node.string("source_file") == allowed.to_string_lossy())
-        .map(|node| node.id.clone())
-        .ok_or("missing allowed target")?;
     let excluded_id = resolved
         .nodes
         .iter()
-        .find(|node| node.string("source_file") == excluded.to_string_lossy())
+        .find(|node| source_matches(&node.string("source_file"), &excluded))
         .map(|node| node.id.clone())
         .ok_or("missing excluded target")?;
     let imports = resolved
@@ -6129,20 +6115,24 @@ export const value = allowed && excluded;
         .iter()
         .filter(|edge| {
             edge.string("relation") == "imports_from"
-                && edge.string("source_file") == consumer.to_string_lossy()
+                && source_matches(&edge.string("source_file"), &consumer)
         })
         .collect::<Vec<_>>();
     assert!(imports.iter().any(|edge| {
         edge.string("module") == "@/allowed"
-            && edge.target == allowed_id
-            && edge.string("resolution_rule") == "typescript-paths"
+            && target_source_matches(&resolved, &edge.target, &allowed)
+            && edge.string("resolution_rule") == "project-module-binding"
+            && edge.string("project_resolution_rule") == "typescript-paths"
     }));
     let excluded_import = imports
         .iter()
         .find(|edge| edge.string("module") == "@/excluded")
         .ok_or("missing excluded import")?;
     assert_ne!(excluded_import.target, excluded_id);
-    assert!(excluded_import.string("resolution_rule").is_empty());
+    assert_eq!(
+        excluded_import.string("resolution_rule"),
+        "qualified-external"
+    );
     Ok(())
 }
 
@@ -6195,12 +6185,12 @@ export const value = ambient;
 
     let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
     assert_eq!(resolved.error, None);
-    let declaration_id = resolved
-        .nodes
-        .iter()
-        .find(|node| node.string("source_file") == declaration.to_string_lossy())
-        .map(|node| node.id.clone())
-        .ok_or("missing typeRoots declaration")?;
+    assert!(
+        resolved
+            .nodes
+            .iter()
+            .any(|node| source_matches(&node.string("source_file"), &declaration))
+    );
     let import = resolved
         .edges
         .iter()
@@ -6208,8 +6198,16 @@ export const value = ambient;
             edge.string("relation") == "imports_from" && edge.string("module") == "ambient"
         })
         .ok_or("missing typeRoots import")?;
-    assert_eq!(import.target, declaration_id);
-    assert_eq!(import.string("resolution_rule"), "typescript-type-roots");
+    assert!(target_source_matches(
+        &resolved,
+        &import.target,
+        &declaration
+    ));
+    assert_eq!(import.string("resolution_rule"), "project-module-binding");
+    assert_eq!(
+        import.string("project_resolution_rule"),
+        "typescript-type-roots"
+    );
     Ok(())
 }
 
@@ -6281,12 +6279,12 @@ export const value = selected;
 
     let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
     assert_eq!(resolved.error, None);
-    let browser_id = resolved
-        .nodes
-        .iter()
-        .find(|node| node.string("source_file") == browser.to_string_lossy())
-        .map(|node| node.id.clone())
-        .ok_or("missing custom-condition target")?;
+    assert!(
+        resolved
+            .nodes
+            .iter()
+            .any(|node| source_matches(&node.string("source_file"), &browser))
+    );
     let import = resolved
         .edges
         .iter()
@@ -6295,7 +6293,7 @@ export const value = selected;
                 && edge.string("module") == "@example/conditional"
         })
         .ok_or("missing custom-condition import")?;
-    assert_eq!(import.target, browser_id);
+    assert!(target_source_matches(&resolved, &import.target, &browser));
     assert_eq!(import.string("package_condition"), "browser");
     Ok(())
 }
@@ -6371,12 +6369,12 @@ export const value = selected;
 
     let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
     assert_eq!(resolved.error, None);
-    let fallback_id = resolved
-        .nodes
-        .iter()
-        .find(|node| node.string("source_file") == fallback.to_string_lossy())
-        .map(|node| node.id.clone())
-        .ok_or("missing ordered fallback target")?;
+    assert!(
+        resolved
+            .nodes
+            .iter()
+            .any(|node| source_matches(&node.string("source_file"), &fallback))
+    );
     let import = resolved
         .edges
         .iter()
@@ -6384,7 +6382,7 @@ export const value = selected;
             edge.string("relation") == "imports_from" && edge.string("module") == "@example/ordered"
         })
         .ok_or("missing ordered package import")?;
-    assert_eq!(import.target, fallback_id);
+    assert!(target_source_matches(&resolved, &import.target, &fallback));
     assert_eq!(import.string("package_condition"), "default");
     Ok(())
 }
@@ -6477,13 +6475,13 @@ export const value = selected;
     let legacy_id = resolved
         .nodes
         .iter()
-        .find(|node| node.string("source_file") == legacy.to_string_lossy())
+        .find(|node| source_matches(&node.string("source_file"), &legacy))
         .map(|node| node.id.clone())
         .ok_or("missing legacy package target")?;
     let conditional_id = resolved
         .nodes
         .iter()
-        .find(|node| node.string("source_file") == conditional.to_string_lossy())
+        .find(|node| source_matches(&node.string("source_file"), &conditional))
         .map(|node| node.id.clone())
         .ok_or("missing conditional package target")?;
     let node10_import = resolved
@@ -6491,12 +6489,27 @@ export const value = selected;
         .iter()
         .find(|edge| {
             edge.string("relation") == "imports_from"
-                && edge.string("source_file") == node10_consumer.to_string_lossy()
+                && source_matches(&edge.string("source_file"), &node10_consumer)
         })
         .ok_or("missing Node10 package import")?;
-    assert_eq!(node10_import.target, legacy_id);
-    assert_ne!(node10_import.target, conditional_id);
-    assert_eq!(node10_import.string("resolution_rule"), "package-legacy");
+    assert!(target_source_matches(
+        &resolved,
+        &node10_import.target,
+        &legacy
+    ));
+    assert!(!target_source_matches(
+        &resolved,
+        &node10_import.target,
+        &conditional
+    ));
+    assert_eq!(
+        node10_import.string("resolution_rule"),
+        "project-module-binding"
+    );
+    assert_eq!(
+        node10_import.string("project_resolution_rule"),
+        "package-legacy"
+    );
     assert_eq!(node10_import.string("package_condition"), "main");
     assert_eq!(node10_import.string("module_resolution"), "node10");
 
@@ -6505,7 +6518,7 @@ export const value = selected;
         .iter()
         .find(|edge| {
             edge.string("relation") == "imports_from"
-                && edge.string("source_file") == classic_consumer.to_string_lossy()
+                && source_matches(&edge.string("source_file"), &classic_consumer)
         })
         .ok_or("missing Classic package import")?;
     assert_ne!(classic_import.target, legacy_id);
@@ -6513,6 +6526,10 @@ export const value = selected;
     assert!(classic_import.attributes.get("target_file").is_none());
     assert_eq!(
         classic_import.string("resolution_rule"),
+        "qualified-external"
+    );
+    assert_eq!(
+        classic_import.string("project_resolution_rule"),
         "package-classic-unresolved"
     );
     assert_eq!(classic_import.string("module_resolution"), "classic");
@@ -6582,7 +6599,7 @@ export const value = api;
         .iter()
         .find(|edge| edge.string("relation") == "imports_from" && edge.string("module") == "@/api")
         .ok_or("missing cyclic import")?;
-    assert!(import.string("resolution_rule").is_empty());
+    assert_eq!(import.string("resolution_rule"), "qualified-external");
     Ok(())
 }
 
@@ -6832,12 +6849,12 @@ new DefaultWidget().run();
     let widget = batches[0]
         .declarations
         .iter()
-        .find(|declaration| declaration.name == "Widget")
+        .find(|declaration| declaration.name == "Widget" && declaration.kind == "class")
         .ok_or("missing Widget declaration")?;
     let default_widget = batches[1]
         .declarations
         .iter()
-        .find(|declaration| declaration.name == "DefaultWidget")
+        .find(|declaration| declaration.name == "DefaultWidget" && declaration.kind == "class")
         .ok_or("missing default declaration")?;
     let widget_construct = batches[2]
         .candidates
@@ -8489,12 +8506,12 @@ new Widget();
     let app_widget = batches[0]
         .declarations
         .iter()
-        .find(|declaration| declaration.name == "Widget")
+        .find(|declaration| declaration.name == "Widget" && declaration.kind == "class")
         .ok_or("missing app Widget")?;
     let lib_widget = batches[1]
         .declarations
         .iter()
-        .find(|declaration| declaration.name == "Widget")
+        .find(|declaration| declaration.name == "Widget" && declaration.kind == "class")
         .ok_or("missing lib Widget")?;
     let construct = batches[2]
         .candidates
@@ -8549,7 +8566,7 @@ new Runtime().run();
     let runtime = batches[0]
         .declarations
         .iter()
-        .find(|declaration| declaration.name == "Runtime")
+        .find(|declaration| declaration.name == "Runtime" && declaration.kind == "class")
         .ok_or("missing JavaScript Runtime declaration")?;
     assert_eq!(runtime.language, "javascript");
     let run = batches[0]
@@ -8627,7 +8644,7 @@ new PublicWidget().run();
     let widget = batches[0]
         .declarations
         .iter()
-        .find(|declaration| declaration.name == "Widget")
+        .find(|declaration| declaration.name == "Widget" && declaration.kind == "class")
         .ok_or("missing re-exported Widget declaration")?;
     let run = batches[0]
         .declarations

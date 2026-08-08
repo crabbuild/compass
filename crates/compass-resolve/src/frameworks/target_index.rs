@@ -239,11 +239,33 @@ impl<'a> FrameworkTargetIndex<'a> {
         limit: usize,
     ) -> (Vec<usize>, bool) {
         let source = source_key(source, self.root);
-        bounded_union(
+        let direct = bounded_union(
             families.iter().filter_map(|family| {
                 self.by_source_terminal
                     .get(&(*family, source.clone(), terminal.to_owned()))
                     .map(Vec::as_slice)
+            }),
+            limit,
+        );
+        if !direct.0.is_empty() || direct.1 {
+            return direct;
+        }
+        // Universal TypeScript/JavaScript evidence deliberately carries a
+        // portable source suffix when a caller has no project root. Framework
+        // facts, however, may still retain the absolute path used for route
+        // convention detection. Treat an exact path suffix as the same source
+        // only for this source-scoped lookup; if several suffixes match, the
+        // normal candidate-state logic reports ambiguity instead of guessing.
+        bounded_union(
+            families.iter().flat_map(|family| {
+                self.by_source_terminal.iter().filter_map(
+                    |((indexed_family, indexed_source, indexed_terminal), values)| {
+                        (*indexed_family == *family
+                            && indexed_terminal == terminal
+                            && source_suffix_matches(indexed_source, &source))
+                        .then_some(values.as_slice())
+                    },
+                )
             }),
             limit,
         )
@@ -289,6 +311,20 @@ impl<'a> FrameworkTargetIndex<'a> {
             limit,
         )
     }
+}
+
+fn source_suffix_matches(left: &str, right: &str) -> bool {
+    let left = left.trim_start_matches("./");
+    let right = right.trim_start_matches("./");
+    left == right
+        || left
+            .strip_prefix('/')
+            .is_some_and(|left| left == right || left.ends_with(&format!("/{right}")))
+        || right
+            .strip_prefix('/')
+            .is_some_and(|right| right == left || right.ends_with(&format!("/{left}")))
+        || left.ends_with(&format!("/{right}"))
+        || right.ends_with(&format!("/{left}"))
 }
 
 pub(super) fn source_key(source: &str, root: Option<&Path>) -> String {

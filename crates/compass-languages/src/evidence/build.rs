@@ -245,6 +245,7 @@ impl EvidenceBuilder {
             signature_hash: metadata.signature_hash,
             implementation_hash: metadata.implementation_hash,
             source_hash: metadata.source_hash,
+            definition_start_byte: None,
             range,
         });
         Ok(id)
@@ -721,6 +722,15 @@ pub(crate) fn extract_tree_evidence(
     root: Node<'_>,
     profile: &'static AdapterProfile,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
+    if matches!(profile.language, "javascript" | "typescript") {
+        return super::typescript::extract_candidate_tree_evidence(
+            path,
+            source_file,
+            source,
+            root,
+            profile.language,
+        );
+    }
     let mut state = DirectAdapterState::new(path, source_file, source, root, profile);
     state.add_file(root)?;
     if root.end_byte() == root.start_byte() {

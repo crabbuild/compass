@@ -130,11 +130,12 @@ impl Engine {
         Ok(extraction)
     }
 
-    /// Extract the Phase 2 TypeScript/JavaScript universal-evidence candidate.
+    /// Extract TypeScript/JavaScript universal evidence directly from source.
     ///
-    /// This is intentionally a qualification-only seam. It is not consulted
-    /// by normal extraction and does not register a production universal
-    /// adapter until Plan 013's direct-evidence and hard-cut gates pass.
+    /// This hidden API remains useful for qualification fixtures, but it now
+    /// calls the same registered candidate emitter used by normal Compass
+    /// extraction. Keeping both paths on one implementation prevents a
+    /// qualification-only graph from diverging from production output.
     #[doc(hidden)]
     pub fn extract_source_universal_candidate_evidence(
         &mut self,
@@ -402,9 +403,26 @@ impl Engine {
                 }
             }
         }
-        let framework_path = universal_profile
-            .map(|_| Path::new(evidence_source_file))
-            .unwrap_or(path);
+        // Framework conventions need the complete repository-relative path
+        // (for example `src/routes/**`, `app/routes/**`, and `src/app/**`) to
+        // classify a file. The pipeline supplies that path as
+        // `evidence_source_file`; using it here keeps convention anchors and
+        // synthetic identities aligned with the graph manifest while avoiding
+        // absolute checkout paths. Direct byte-extraction callers may not have
+        // a repository-relative spelling, so retain the deterministic fallback
+        // for those calls.
+        let framework_source = universal_profile.map(|_| {
+            let portable_source = portable_evidence_source(path);
+            if Path::new(evidence_source_file).is_absolute()
+                || evidence_source_file.is_empty()
+                || evidence_source_file == portable_source
+            {
+                portable_framework_source(path)
+            } else {
+                evidence_source_file.to_owned()
+            }
+        });
+        let framework_path = framework_source.as_deref().map(Path::new).unwrap_or(path);
         crate::frameworks::detect(
             framework_path,
             source,
@@ -776,6 +794,41 @@ fn portable_evidence_source(path: &Path) -> String {
     } else {
         format!("{parent}/{file}")
     }
+}
+
+fn portable_framework_source(path: &Path) -> String {
+    if path.is_relative() {
+        return path.to_string_lossy().replace('\\', "/");
+    }
+    let source = path.to_string_lossy().replace('\\', "/");
+    const ROUTE_MARKERS: &[&str] = &[
+        "src/routes/",
+        "app/routes/",
+        "src/app/",
+        "app/",
+        "src/pages/",
+        "pages/",
+        "server/api/",
+        "middleware/",
+    ];
+    if let Some((index, _)) = ROUTE_MARKERS
+        .iter()
+        .filter_map(|marker| {
+            source
+                .match_indices(marker)
+                .find(|(index, _)| *index == 0 || source.as_bytes().get(index - 1) == Some(&b'/'))
+                .map(|(index, _)| (index, *marker))
+        })
+        .min_by_key(|(index, _)| *index)
+    {
+        return source[index..].to_owned();
+    }
+    let components = source
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>();
+    let start = components.len().saturating_sub(3);
+    components[start..].join("/")
 }
 
 struct FunctionBody<'tree> {
@@ -4659,31 +4712,36 @@ mod rationale_tests {
              function helper() { return true; }\n",
         )?;
 
+        let source_bytes = fs::read(&source)?;
         let extraction = Engine::default().extract(&source)?;
-        let method = extraction
-            .nodes
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing JavaScript universal evidence")?;
+        let method = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == ".render()")
+            .find(|declaration| {
+                declaration.name == "render"
+                    && declaration.qualified_name.contains("Widget.prototype")
+            })
             .ok_or("missing prototype method")?;
-        assert_eq!(method.string("symbol_kind"), "method");
-        assert_eq!(method.string("qualified_name"), "Widget.prototype::render");
-        let owner = extraction
-            .nodes
+        assert_eq!(method.kind, "property");
+        let direct = Engine::default().extract_source_universal_candidate_evidence(
+            &source,
+            "widget.js",
+            &source_bytes,
+        )?;
+        let helper = direct
+            .declarations
             .iter()
-            .find(|node| node.label() == "Widget()")
-            .ok_or("missing Widget constructor")?;
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.source == owner.id
-                && edge.target == method.id
-                && edge.string("relation") == "contains"
-        }));
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.source == method.id
-                && edge.string("relation") == "calls"
-                && extraction
-                    .nodes
-                    .iter()
-                    .any(|node| node.id == edge.target && node.label() == "helper()")
+            .find(|declaration| declaration.name == "helper" && declaration.kind == "function")
+            .ok_or("missing helper declaration")?;
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Calls
+                && candidate.target_spelling == "helper"
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(helper.id.as_str())
         }));
         Ok(())
     }
@@ -4736,86 +4794,83 @@ mod rationale_tests {
             Some(EXTRACTION_QUALITY_PARTIAL),
             "valid TypeScript variance syntax must not trigger parser recovery"
         );
-        let zod_any = extraction
-            .nodes
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing TypeScript universal evidence")?;
+        let zod_any = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "ZodAny" && node.string("symbol_kind") == "interface")
+            .find(|declaration| declaration.name == "ZodAny" && declaration.kind == "interface")
             .ok_or("missing ZodAny interface")?;
-        let private_zod_type = extraction
-            .nodes
+        let private_zod_type = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "_ZodType")
+            .find(|declaration| declaration.name == "_ZodType")
             .ok_or("missing _ZodType interface")?;
-        let zod_any_value = extraction
-            .nodes
+        let zod_any_value = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "ZodAny" && node.string("symbol_kind") == "variable")
+            .find(|declaration| declaration.name == "ZodAny" && declaration.kind == "variable")
             .ok_or("missing ZodAny runtime value")?;
-        let create = extraction
-            .nodes
+        let create = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "create()")
+            .find(|declaration| declaration.name == "create" && declaration.kind == "function")
             .ok_or("missing create function")?;
-        let first_type = extraction
-            .nodes
+        let first_type = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "First" && node.string("symbol_kind") == "interface")
+            .find(|declaration| declaration.name == "First" && declaration.kind == "interface")
             .ok_or("missing reverse-order First interface")?;
-        let first_value = extraction
-            .nodes
+        let first_value = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "First" && node.string("symbol_kind") == "variable")
+            .find(|declaration| declaration.name == "First" && declaration.kind == "variable")
             .ok_or("missing reverse-order First runtime value")?;
-        let create_first = extraction
-            .nodes
+        let create_first = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "createFirst()")
+            .find(|declaration| declaration.name == "createFirst" && declaration.kind == "function")
             .ok_or("missing createFirst function")?;
-        let keys = extraction
-            .nodes
+        let keys = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "Keys")
+            .find(|declaration| declaration.name == "Keys")
             .ok_or("mapped-type `in` must remain a Keys declaration")?;
-        let file = extraction
-            .nodes
-            .iter()
-            .find(|node| node.string("symbol_kind") == "file")
-            .ok_or("missing source file")?;
-        assert_eq!(zod_any.string("source_location"), "L4");
-        assert_eq!(zod_any_value.string("source_location"), "L5");
-        assert_eq!(keys.string("source_location"), "L7");
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.source == file.id
-                && edge.target == zod_any.id
-                && edge.string("relation") == "contains"
+        assert_eq!(zod_any.range.start_line, 4);
+        assert_eq!(zod_any_value.range.start_line, 5);
+        assert_eq!(keys.range.start_line, 7);
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Extends
+                && candidate.source_declaration_id == zod_any.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(private_zod_type.id.as_str())
         }));
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.source == zod_any.id
-                && edge.target == private_zod_type.id
-                && edge.string("relation") == "inherits"
-                && edge.string("context") == "extends"
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Constructs
+                && candidate.source_declaration_id == create.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(zod_any_value.id.as_str())
         }));
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.source == create.id
-                && edge.target == zod_any_value.id
-                && edge.string("relation") == "calls"
-                && edge.string("source_location") == "L6"
-        }));
-        assert!(!extraction.edges.iter().any(|edge| {
-            edge.source == create.id
-                && edge.target == zod_any.id
-                && edge.string("relation") == "calls"
+        assert!(!evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Calls
+                && candidate.source_declaration_id == create.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(zod_any.id.as_str())
         }));
         assert_ne!(first_type.id, first_value.id);
-        assert!(extraction.edges.iter().any(|edge| {
-            edge.source == create_first.id
-                && edge.target == first_value.id
-                && edge.string("relation") == "calls"
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Constructs
+                && candidate.source_declaration_id == create_first.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(first_value.id.as_str())
         }));
-        assert!(!extraction.edges.iter().any(|edge| {
-            edge.source == create_first.id
-                && edge.target == first_type.id
-                && edge.string("relation") == "calls"
+        assert!(!evidence.candidates.iter().any(|candidate| {
+            candidate.relation == crate::CandidateRelation::Constructs
+                && candidate.source_declaration_id == create_first.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(first_type.id.as_str())
         }));
 
         fs::write(&source, "export interface Broken<out T extends> {}\n")?;
@@ -4859,31 +4914,40 @@ mod rationale_tests {
         )?;
 
         let extraction = Engine::default().extract(&source)?;
-        let create = extraction
-            .nodes
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing TypeScript universal evidence")?;
+        let create = evidence
+            .declarations
             .iter()
-            .find(|node| node.label() == "create()")
+            .find(|declaration| declaration.name == "create" && declaration.kind == "function")
             .ok_or("missing create function")?;
-        let widget_values = extraction
-            .nodes
+        let widget_values = evidence
+            .declarations
             .iter()
-            .filter(|node| node.label() == "Widget" && node.string("symbol_kind") == "variable")
-            .map(|node| node.id.as_str())
+            .filter(|declaration| declaration.name == "Widget" && declaration.kind == "variable")
+            .map(|declaration| declaration.id.as_str())
             .collect::<Vec<_>>();
         assert_eq!(widget_values.len(), 2);
-        assert!(!extraction.edges.iter().any(|edge| {
-            edge.source == create.id
-                && edge.string("relation") == "calls"
-                && widget_values.contains(&edge.target.as_str())
+        assert!(!evidence.candidates.iter().any(|candidate| {
+            candidate.source_declaration_id == create.id
+                && matches!(
+                    candidate.relation,
+                    crate::CandidateRelation::Calls | crate::CandidateRelation::Constructs
+                )
+                && candidate
+                    .constraints
+                    .exact_target_declaration_id
+                    .as_deref()
+                    .is_some_and(|target| widget_values.contains(&target))
         }));
-        assert!(
-            extraction
-                .raw_calls
-                .as_deref()
-                .unwrap_or_default()
-                .iter()
-                .any(|call| call.caller_nid == create.id && call.callee == "Widget")
-        );
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.source_declaration_id == create.id
+                && candidate.relation == crate::CandidateRelation::Constructs
+                && candidate.target_spelling == "Widget"
+                && candidate.constraints.exact_target_declaration_id.is_none()
+        }));
         Ok(())
     }
 

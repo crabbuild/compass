@@ -1,9 +1,10 @@
 # Universal semantic evidence
 
 Compass resolves source relationships through a language-neutral evidence
-contract. Python, Go, Rust, and Java use this contract in production. Other
-languages keep their existing extractors until a dedicated change removes the
-old algorithm and adds the universal adapter atomically.
+contract. Python, Go, Rust, and Java use this contract in production, and the
+TypeScript and JavaScript candidate adapters now use the same production route.
+The ECMAScript adapters remain candidates while their complete qualification
+matrix is finished; they do not retain a second direct graph publisher.
 
 This is a hard-cutover interface. It has no raw-fact translation layer, shadow
 mode, terminal-name fallback, or runtime dependency on Graphify.
@@ -44,7 +45,7 @@ the adapter actually emits. The batch contains six bounded collections:
   resolves to an exact source declaration or an explicitly qualified external
   identity. An unresolved prelude or imported spelling must not be
   reinterpreted as a repository-local type.
-  The qualification-only TypeScript/JavaScript adapter may use a member binding
+  The TypeScript/JavaScript candidate adapter may use a member binding
   with spelling `*` as a source-range-backed object-owner alias, including a
   CommonJS file-module owner for a proven `module.exports = { ...source }`
   shape, including a source-anchored namespace import, static `require()`
@@ -78,7 +79,7 @@ the adapter actually emits. The batch contains six bounded collections:
   conversions, but only when one applicable vector is more specific than all
   other applicable vectors. Unknown hierarchy or a competing conversion
   remains unresolved.
-  The qualification-only TypeScript/JavaScript adapter represents a tagged
+  The TypeScript/JavaScript candidate adapter represents a tagged
   template (``tag`text ${value}``) as a call with occurrence context
   `tagged_template` (or `tagged_member` for a member tag). Its bounded argument
   vector starts with an explicit unknown slot for the runtime
@@ -102,8 +103,8 @@ the adapter actually emits. The batch contains six bounded collections:
   identity; contextual or malformed non-statement assignments remain
   unresolved rather than being promoted into declarations.
   JSX attribute values, spread attributes, and child expressions are ordinary
-  value-reference contexts. The qualification-only TypeScript/JavaScript
-  adapter emits exact `jsx_value`, `jsx_spread`, and `jsx_child` occurrences
+  value-reference contexts. The TypeScript/JavaScript candidate adapter emits
+  exact `jsx_value`, `jsx_spread`, and `jsx_child` occurrences
   for local, imported, and unresolved values, while excluding prop names,
   member-property spellings, and call callees. This preserves callback
   arguments and object/receiver values without inventing indirect calls.
@@ -185,7 +186,8 @@ orders return the same first error.
 
 `AdapterRegistry::universal_profile(language)` is the authority for universal
 cutover. A returned `AdapterProfile` means universal evidence is mandatory.
-Python, Go, Rust, and Java are currently registered. An unregistered language
+Python, Go, Rust, Java, TypeScript, and JavaScript are currently registered;
+TSX resolves to the canonical TypeScript profile. An unregistered language
 does not silently claim universal behavior.
 
 An adapter profile must:
@@ -659,8 +661,11 @@ Python or Go has met the production qualification gates.
 
 ## Current qualification boundary
 
-Python, Go, Rust, and Java are hard-cut universal language adapters. Rust and
-Java remain `UniversalCandidate`; this framework change does not promote Java.
+Python and Go are hard-cut universal language adapters. Rust, Java,
+TypeScript, and JavaScript remain `UniversalCandidate`; the latter two share a
+bounded ECMAScript emitter but retain distinct adapter identities. TSX uses the
+TypeScript candidate profile. Candidate status means the universal route is
+active while complete capability and corpus qualification remain in progress.
 `spring-java` is the first production universal framework pack and advertises
 typed HTTP, bean, injection, messaging, scheduling, persistence, transaction,
 and security capabilities. Kotlin Spring remains on its established detector.

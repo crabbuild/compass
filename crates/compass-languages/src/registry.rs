@@ -77,9 +77,17 @@ impl Registry {
     }
 
     /// Return the hard-cut adapter associated with a resolved language.
+    ///
+    /// TSX is a parser dialect of the canonical TypeScript universal adapter;
+    /// keep the registry's `tsx` grammar name while publishing one stable
+    /// semantic language identity for resolution and cache invalidation.
     #[must_use]
     pub fn universal_profile_for_spec(spec: LanguageSpec) -> Option<&'static AdapterProfile> {
-        AdapterRegistry::universal_profile(spec.name)
+        let language = match spec.name {
+            "tsx" => "typescript",
+            language => language,
+        };
+        AdapterRegistry::universal_profile(language)
     }
 
     #[must_use]

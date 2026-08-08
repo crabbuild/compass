@@ -1,9 +1,9 @@
-//! Direct, test-only universal evidence for the ECMAScript family.
+//! Direct universal evidence for the ECMAScript family.
 //!
-//! This module deliberately does not participate in `UNIVERSAL_ADAPTERS` yet.
-//! It is a source-grounded qualification path for the Phase 2 work in Plan
-//! 013. The production extractor remains the compatibility path until this
-//! emitter has complete capability coverage and passes the hard-cut gates.
+//! TypeScript and JavaScript share the bounded source-grounded emitter while
+//! retaining distinct adapter identities. The production registry dispatches
+//! both languages here; qualification callers use the same entry point so
+//! there is no shadow implementation to drift from the shipped graph path.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
@@ -12,73 +12,17 @@ use tree_sitter::Node;
 
 use super::build::{EvidenceBuilder, range_for_byte_span, range_for_node};
 use super::model::{
-    BindingKind, CandidateRelation, EvidenceRange, HierarchyConstraint, LanguageCapability,
-    ResolutionConstraint, SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
+    BindingKind, CandidateRelation, EvidenceRange, HierarchyConstraint, ResolutionConstraint,
+    SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits};
-use crate::{AdapterProfile, UNIVERSAL_EVIDENCE_SCHEMA, make_id};
+use crate::{AdapterRegistry, make_id};
 
 const MAX_TRAVERSAL_DEPTH: usize = 512;
 const MAX_INLINE_OBJECT_PROPERTIES: usize = 256;
 const MAX_TYPE_SHAPE_DEPTH: u32 = 32;
 const MAX_TYPE_SHAPE_BYTES: usize = 16 * 1024;
 const MAX_IMPORT_TYPE_QUERIES: usize = 256;
-
-const TYPESCRIPT_CAPABILITIES: &[LanguageCapability] = &[
-    LanguageCapability::Declarations,
-    LanguageCapability::LexicalScopes,
-    LanguageCapability::Namespaces,
-    LanguageCapability::Imports,
-    LanguageCapability::Reexports,
-    LanguageCapability::Aliases,
-    LanguageCapability::Calls,
-    LanguageCapability::Construction,
-    LanguageCapability::Decorators,
-    LanguageCapability::TypeReferences,
-    LanguageCapability::BaseTypes,
-    LanguageCapability::HierarchyDispatch,
-    LanguageCapability::Members,
-    LanguageCapability::Ownership,
-    LanguageCapability::Receivers,
-    LanguageCapability::ExternalReferences,
-];
-
-const JAVASCRIPT_CAPABILITIES: &[LanguageCapability] = &[
-    LanguageCapability::Declarations,
-    LanguageCapability::LexicalScopes,
-    LanguageCapability::Namespaces,
-    LanguageCapability::Imports,
-    LanguageCapability::Reexports,
-    LanguageCapability::Aliases,
-    LanguageCapability::Calls,
-    LanguageCapability::Construction,
-    LanguageCapability::Decorators,
-    LanguageCapability::TypeReferences,
-    LanguageCapability::BaseTypes,
-    LanguageCapability::HierarchyDispatch,
-    LanguageCapability::Members,
-    LanguageCapability::Ownership,
-    LanguageCapability::Receivers,
-    LanguageCapability::ExternalReferences,
-];
-
-static TYPESCRIPT_PROFILE: AdapterProfile = AdapterProfile {
-    id: "compass.typescript.candidate",
-    language: "typescript",
-    version: 5,
-    evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA,
-    profile: crate::UniversalAdapterProfile::UniversalCandidate,
-    capabilities: TYPESCRIPT_CAPABILITIES,
-};
-
-static JAVASCRIPT_PROFILE: AdapterProfile = AdapterProfile {
-    id: "compass.javascript.candidate",
-    language: "javascript",
-    version: 5,
-    evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA,
-    profile: crate::UniversalAdapterProfile::UniversalCandidate,
-    capabilities: JAVASCRIPT_CAPABILITIES,
-};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Namespace {
@@ -245,6 +189,7 @@ struct CandidateState<'source, 'tree> {
     scope_owners: HashMap<String, String>,
     scope_kinds: HashMap<String, String>,
     declarations: HashMap<String, DeclarationInfo>,
+    definition_start_bytes: HashMap<String, u64>,
     declarations_by_scope: HashMap<String, Vec<String>>,
     declarations_by_qualified: HashMap<String, Vec<String>>,
     generic_parameters_by_declaration: HashMap<String, HashMap<String, Option<String>>>,
@@ -355,9 +300,9 @@ pub(crate) fn extract_candidate_tree_evidence(
     root: Node<'_>,
     dialect: &str,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
-    let (language, profile) = match dialect {
-        "typescript" | "tsx" => ("typescript", &TYPESCRIPT_PROFILE),
-        "javascript" => ("javascript", &JAVASCRIPT_PROFILE),
+    let language = match dialect {
+        "typescript" | "tsx" => "typescript",
+        "javascript" => "javascript",
         _ => {
             return Err(EvidenceError::new(
                 EvidenceErrorCode::InvalidAdapter,
@@ -365,6 +310,12 @@ pub(crate) fn extract_candidate_tree_evidence(
             ));
         }
     };
+    let profile = AdapterRegistry::universal_profile(language).ok_or_else(|| {
+        EvidenceError::new(
+            EvidenceErrorCode::InvalidAdapter,
+            format!("ECMAScript universal adapter {language:?} is not registered"),
+        )
+    })?;
     let module_name = module_name(path, source_file);
     let dialect_name = dialect_for_path(path, dialect);
     let mut builder = EvidenceBuilder::new_with_dialect(
@@ -376,8 +327,13 @@ pub(crate) fn extract_candidate_tree_evidence(
     );
     let file_range = range_for_node(source_file, root);
     let file_graph_id = stable_graph_id(source_file, "module", &module_name, 0);
+    let file_kind = if root.end_byte() == root.start_byte() {
+        "file"
+    } else {
+        "module"
+    };
     let file_declaration = builder.declare_with_namespace(
-        "module",
+        file_kind,
         &file_graph_id,
         &module_name,
         &module_name,
@@ -387,6 +343,9 @@ pub(crate) fn extract_candidate_tree_evidence(
         file_range.clone(),
     )?;
     let root_scope = builder.open_scope("module", Some(&file_declaration), None, file_range)?;
+    if root.end_byte() == root.start_byte() {
+        return builder.finish();
+    }
     let parser_recovered = root.has_error();
     let mut state = CandidateState {
         source_file,
@@ -400,6 +359,7 @@ pub(crate) fn extract_candidate_tree_evidence(
         scope_owners: HashMap::from([(root_scope.clone(), file_declaration)]),
         scope_kinds: HashMap::from([(root_scope.clone(), "module".to_owned())]),
         declarations: HashMap::new(),
+        definition_start_bytes: HashMap::new(),
         declarations_by_scope: HashMap::new(),
         declarations_by_qualified: HashMap::new(),
         generic_parameters_by_declaration: HashMap::new(),
@@ -451,6 +411,7 @@ pub(crate) fn extract_candidate_tree_evidence(
     state.precollect_base_targets(root, 0);
     state.infer_variable_types(root, 0);
     state.collect_flow_assignment_facts(root, 0);
+    state.emit_declaration_ownership_candidates()?;
     state.emit_nodes(root, 0)?;
     state.emit_import_type_queries(root)?;
     if parser_recovered {
@@ -461,10 +422,44 @@ pub(crate) fn extract_candidate_tree_evidence(
             "parser recovered from malformed ECMAScript source; emitted evidence remains source-bounded",
         )?;
     }
-    state.builder.finish()
+    let definition_start_bytes = state.definition_start_bytes;
+    let mut batch = state.builder.finish()?;
+    for declaration in &mut batch.declarations {
+        declaration.definition_start_byte = definition_start_bytes.get(&declaration.id).copied();
+    }
+    Ok(batch)
 }
 
 impl<'source, 'tree> CandidateState<'source, 'tree> {
+    fn emit_declaration_ownership_candidates(&mut self) -> Result<(), EvidenceError> {
+        let mut declarations = self.declarations.values().cloned().collect::<Vec<_>>();
+        declarations.sort_unstable_by(|left, right| left.id.cmp(&right.id));
+        for declaration in declarations {
+            let owner = self
+                .scope_owners
+                .get(&declaration.scope_id)
+                .cloned()
+                .unwrap_or_else(|| self.file_declaration.clone());
+            if owner == declaration.id {
+                continue;
+            }
+            self.builder.relate(
+                CandidateRelation::Contains,
+                &owner,
+                None,
+                None,
+                &declaration.name,
+                ResolutionConstraint {
+                    exact_target_declaration_id: Some(declaration.id.clone()),
+                    exact_language: Some(self.language.to_owned()),
+                    allowed_target_kinds: vec![declaration.kind.clone()],
+                    ..ResolutionConstraint::default()
+                },
+            )?;
+        }
+        Ok(())
+    }
+
     fn collect_constructor_name_hints(&mut self, node: Node<'tree>, depth: usize) {
         let mut pending = vec![(node, depth)];
         while let Some((current, current_depth)) = pending.pop() {
@@ -1359,6 +1354,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             signature.as_deref(),
             range_for_node(self.source_file, range_node),
         )?;
+        self.definition_start_bytes
+            .insert(declaration_id.clone(), node.start_byte() as u64);
         self.declaration_name_nodes.insert(name_node.start_byte());
         let callable_value = callable_value_node(node);
         let parameter_arity = callable_parameter_arity(node, self.source).or_else(|| {
@@ -3816,6 +3813,50 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             .unwrap_or_else(|| self.file_declaration.clone())
     }
 
+    /// Keep named exports visible as source-backed public graph nodes while
+    /// the universal resolver retains the binding as the authoritative target
+    /// relation. Export declarations are not used to guess targets; the
+    /// containment candidate points at this exact declaration identity.
+    fn emit_export_declaration(
+        &mut self,
+        scope_id: &str,
+        export_name: &str,
+        anchor: Node<'tree>,
+        namespace: Namespace,
+    ) -> Result<String, EvidenceError> {
+        if export_name.is_empty() {
+            return Ok(String::new());
+        }
+        let qualified_name = format!("{}.{}", self.file_qualified_name, export_name);
+        let graph_node_id =
+            stable_graph_id(self.source_file, "export", export_name, anchor.start_byte());
+        let declaration_id = self.builder.declare_with_namespace(
+            "export",
+            &graph_node_id,
+            export_name,
+            &qualified_name,
+            Some(self.source_file),
+            Some(scope_id),
+            Some(symbol_namespace(namespace)),
+            range_for_node(self.source_file, anchor),
+        )?;
+        let owner = self.owner_for_scope(scope_id);
+        self.builder.relate(
+            CandidateRelation::Contains,
+            &owner,
+            None,
+            None,
+            export_name,
+            ResolutionConstraint {
+                exact_target_declaration_id: Some(declaration_id.clone()),
+                exact_language: Some(self.language.to_owned()),
+                allowed_target_kinds: vec!["export".to_owned()],
+                ..ResolutionConstraint::default()
+            },
+        )?;
+        Ok(declaration_id)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn add_declaration_resolution(
         &mut self,
@@ -4246,6 +4287,16 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 type_only,
                 range_for_node(self.source_file, anchor),
             )?;
+            self.emit_export_declaration(
+                scope_id,
+                export_name,
+                anchor,
+                if type_only {
+                    Namespace::Type
+                } else {
+                    Namespace::Module
+                },
+            )?;
             let occurrence_id = self.builder.occur_with_context(
                 SemanticRole::Reexport,
                 &owner,
@@ -4301,6 +4352,18 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 binding.type_only,
                 range_for_node(self.source_file, binding.anchor),
             )?;
+            if reexport {
+                self.emit_export_declaration(
+                    scope_id,
+                    &binding.local_name,
+                    binding.anchor,
+                    if binding.type_only {
+                        Namespace::Type
+                    } else {
+                        namespace
+                    },
+                )?;
+            }
             if !reexport {
                 self.import_bindings.insert(
                     (scope_id.to_owned(), binding.local_name.clone()),
@@ -4637,6 +4700,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             }),
             range_for_node(self.source_file, anchor),
         )?;
+        self.emit_export_declaration(scope_id, "default", anchor, namespace)?;
         self.builder.relate(
             CandidateRelation::Reexports,
             &owner,
@@ -4716,6 +4780,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             Some("declaration"),
             range_for_node(self.source_file, anchor),
         )?;
+        self.emit_export_declaration(scope_id, export_name, anchor, target.namespace)?;
         self.builder.relate(
             CandidateRelation::Reexports,
             &owner,
@@ -4797,6 +4862,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 type_only,
                 range_for_node(self.source_file, exported),
             )?;
+            self.emit_export_declaration(scope_id, &exported_name, exported, namespace)?;
             let occurrence_id = self.builder.occur_with_context(
                 SemanticRole::Reexport,
                 &owner,
@@ -5750,6 +5816,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     "variable".to_owned(),
                     "type_alias".to_owned(),
                     "interface".to_owned(),
+                    "property".to_owned(),
                 ],
                 allow_external: true,
                 ..ResolutionConstraint::default()
@@ -6036,6 +6103,26 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             callee.kind(),
             "member_expression" | "optional_member_expression" | "subscript_expression"
         );
+        let annotation_name = node_text(self.source, callee);
+        if !annotation_name.is_empty() {
+            let qualified_name = format!("{}::{}", self.file_qualified_name, annotation_name);
+            let graph_node_id = stable_graph_id(
+                self.source_file,
+                "annotation",
+                &annotation_name,
+                callee.start_byte(),
+            );
+            self.builder.declare_with_namespace(
+                "annotation",
+                &graph_node_id,
+                &annotation_name,
+                &qualified_name,
+                Some(self.source_file),
+                Some(scope_id),
+                Some(SymbolNamespace::Value),
+                range_for_node(self.source_file, callee),
+            )?;
+        }
         if member_decorator {
             let Some(property) = member_property_node(callee) else {
                 return self.add_unresolved_candidate(
@@ -6509,6 +6596,12 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         | "jsx_self_closing_element"
                 )
             })
+            || node.parent().is_some_and(|parent| {
+                parent.kind() == "pair"
+                    && parent
+                        .child_by_field_name("key")
+                        .is_some_and(|key| key.id() == node.id())
+            })
             || is_jsx_value_reference_node(node)
             || is_jsx_attribute_name(node)
             || is_type_reference_node(node)
@@ -6521,10 +6614,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         };
         let is_callable = match &resolution {
             Resolution::Local(declaration) => self.proven_callable_declaration(&declaration.id),
-            Resolution::Import(import) => {
-                import.imported_name == "default"
-                    || (import.imported_name == "*" && import.callable_namespace)
-            }
+            // A named import can be a function, class, component, or value
+            // callback. Its source declaration is proven only by the project
+            // resolver, so retain the binding occurrence here rather than
+            // dropping value positions such as `{ Component: UserPage }`.
+            Resolution::Import(_) => true,
         };
         if !is_callable {
             return Ok(());
@@ -7144,6 +7238,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             Some("commonjs"),
             range_for_node(self.source_file, anchor),
         )?;
+        self.emit_export_declaration(scope_id, export_name, anchor, namespace)?;
         self.builder.relate(
             CandidateRelation::Reexports,
             &owner,

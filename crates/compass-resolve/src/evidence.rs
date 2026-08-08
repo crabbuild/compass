@@ -140,7 +140,9 @@ struct TypeScriptMemberContext<'a> {
 type DeclarationSlot = u32;
 type TypeScriptModuleIndex = AHashMap<(String, String, String), Vec<DeclarationSlot>>;
 type TypeScriptReexportIndex = AHashMap<(String, String, String), Vec<TypeScriptReexportTarget>>;
-type TypeScriptProjectModuleIndex = AHashMap<(String, String), Vec<String>>;
+type TypeScriptProjectModuleIndex = AHashMap<(String, String, String), Vec<String>>;
+type TypeScriptProjectMetadataIndex =
+    AHashMap<(String, String, String, String), BTreeMap<String, String>>;
 
 struct TypeScriptExportWalk<'a> {
     candidate: &'a RelationshipCandidate,
@@ -213,6 +215,7 @@ pub struct UniversalResolutionIndex {
     /// specifier. Values are normalized source-module keys and are retained
     /// only when the existing bounded project resolver admitted a target.
     typescript_project_modules: TypeScriptProjectModuleIndex,
+    typescript_project_metadata: TypeScriptProjectMetadataIndex,
     root: std::path::PathBuf,
     direct_bases: AHashMap<(String, String), DirectBaseSet>,
     direct_subtypes: AHashMap<(String, String), DirectSubtypeSet>,
@@ -404,13 +407,14 @@ impl UniversalResolutionIndex {
             return Err("universal declaration slot count exceeds u32".to_owned());
         }
         let definition_ranges = unique_definition_ranges(&declarations, &scopes);
-        let typescript_project_modules = typescript_project_module_index(
-            project_edges,
-            inventory_nodes,
-            root,
-            limits.candidates,
-            limits.candidates_per_lookup,
-        )?;
+        let (typescript_project_modules, typescript_project_metadata) =
+            typescript_project_module_index(
+                project_edges,
+                inventory_nodes,
+                root,
+                limits.candidates,
+                limits.candidates_per_lookup,
+            )?;
         let (typescript_modules, typescript_export_aliases, typescript_reexport_targets) =
             typescript_module_indices(
                 &declarations,
@@ -1070,6 +1074,7 @@ impl UniversalResolutionIndex {
             typescript_export_aliases,
             typescript_reexport_targets,
             typescript_project_modules,
+            typescript_project_metadata,
             root: root.to_path_buf(),
             direct_bases,
             direct_subtypes,
@@ -1414,12 +1419,18 @@ impl UniversalResolutionIndex {
             return None;
         };
         let (keys, project_resolved) = self
-            .typescript_project_modules
-            .get(&(
-                typescript_project_importer_key(&occurrence.range.source_file, &self.root)?,
-                module.clone(),
-            ))
-            .cloned()
+            .typescript_project_module_keys(
+                &occurrence.range.source_file,
+                &module,
+                if matches!(
+                    candidate.relation,
+                    CandidateRelation::Imports | CandidateRelation::Reexports
+                ) {
+                    occurrence.context.as_deref()
+                } else {
+                    None
+                },
+            )
             .map_or_else(
                 || {
                     (
@@ -1868,7 +1879,7 @@ impl UniversalResolutionIndex {
                 return None;
             }
             let mut modules = self
-                .typescript_project_module_keys(&owner.range.source_file, module)
+                .typescript_project_module_keys(&owner.range.source_file, module, None)
                 .unwrap_or_else(|| {
                     typescript_import_module_keys(&owner.range.source_file, module, &self.root)
                 });
@@ -1890,13 +1901,64 @@ impl UniversalResolutionIndex {
         Some(source_slots)
     }
 
-    fn typescript_project_module_keys(&self, importer: &str, module: &str) -> Option<Vec<String>> {
+    fn typescript_project_module_keys(
+        &self,
+        importer: &str,
+        module: &str,
+        context: Option<&str>,
+    ) -> Option<Vec<String>> {
         typescript_project_module_keys(
             &self.typescript_project_modules,
             importer,
             module,
             &self.root,
+            context,
         )
+    }
+
+    fn typescript_project_metadata(
+        &self,
+        candidate: &RelationshipCandidate,
+        target_source_file: Option<&str>,
+    ) -> Option<BTreeMap<String, String>> {
+        if !matches!(candidate.language.as_str(), "typescript" | "javascript") {
+            return None;
+        }
+        let occurrence = self.occurrence(candidate)?;
+        let module = candidate
+            .constraints
+            .module_or_package
+            .clone()
+            .or_else(|| {
+                candidate
+                    .binding_id
+                    .as_deref()
+                    .and_then(|binding_id| self.bindings.get(binding_id))
+                    .and_then(|binding| binding.qualified_target.rsplit_once("::"))
+                    .map(|(module, _)| module.to_owned())
+            })?;
+        let importer = typescript_project_importer_key(&occurrence.range.source_file, &self.root)?;
+        let target_keys = target_source_file
+            .map(|source| typescript_source_module_keys(source, &self.root))
+            .unwrap_or_else(|| vec![String::new()]);
+        if target_keys.is_empty() {
+            return None;
+        }
+        let mut matches = Vec::new();
+        for ((candidate_importer, candidate_module, _candidate_context, target_key), value) in
+            &self.typescript_project_metadata
+        {
+            if candidate_importer != &importer
+                || candidate_module != &module
+                || !target_keys.contains(target_key)
+            {
+                continue;
+            }
+            matches.push(value.clone());
+        }
+        matches.sort();
+        matches.dedup();
+        (matches.len() == 1).then(|| matches.pop()).flatten()
     }
 
     /// Resolve a bounded TypeScript member-value chain such as
@@ -3576,10 +3638,33 @@ impl UniversalResolutionIndex {
             .filter_map(
                 |(candidate_id, target, resolution_rule, target_kind, target_site)| {
                     let candidate = &self.candidates[candidate_id];
-                    let source = self
+                    let owner_source = self
                         .declarations
                         .get(&candidate.source_declaration_id)
                         .map(|declaration| graph_ids[&declaration.id].clone())?;
+                    let annotation_source = (candidate.relation == CandidateRelation::Decorates)
+                        .then(|| {
+                            let occurrence = self.occurrence(candidate)?;
+                            self.declarations
+                                .values()
+                                .filter(|declaration| {
+                                    declaration.kind == "annotation"
+                                        && declaration.name == occurrence.spelling
+                                        && declaration.range.source_file
+                                            == occurrence.range.source_file
+                                        && declaration.range.start_byte
+                                            <= occurrence.range.start_byte
+                                        && declaration.range.end_byte >= occurrence.range.end_byte
+                                })
+                                .min_by_key(|declaration| {
+                                    (declaration.range.start_byte, declaration.id.as_str())
+                                })
+                                .map(|declaration| graph_ids[&declaration.id].clone())
+                        })
+                        .flatten();
+                    let source = annotation_source
+                        .clone()
+                        .unwrap_or_else(|| owner_source.clone());
                     let (source, target) = if candidate.relation == CandidateRelation::Contains {
                         (source, target)
                     } else if self.occurrence(candidate).is_some_and(|occurrence| {
@@ -3594,7 +3679,11 @@ impl UniversalResolutionIndex {
                         .exact_target_declaration_id
                         .as_deref()
                         .and_then(|id| self.declarations.get(id));
-                    let relation = if self.occurrence(candidate).is_some_and(|occurrence| {
+                    let relation = if candidate.relation == CandidateRelation::Decorates
+                        && annotation_source.is_some()
+                    {
+                        "decorates"
+                    } else if self.occurrence(candidate).is_some_and(|occurrence| {
                         occurrence.role == compass_languages::SemanticRole::Receiver
                     }) {
                         "method"
@@ -3632,24 +3721,89 @@ impl UniversalResolutionIndex {
                     if source == target && relation != "calls" {
                         return None;
                     }
-                    Some(materialized_edge(
+                    let target_source_file = target_site.map(|range| range.source_file.as_str());
+                    let project_metadata =
+                        self.typescript_project_metadata(candidate, target_source_file);
+                    let binding = candidate
+                        .binding_id
+                        .as_deref()
+                        .and_then(|binding_id| self.bindings.get(binding_id));
+                    let occurrence = self.occurrence(candidate);
+                    let edge = materialized_edge(
                         source,
                         target,
                         relation,
                         candidate,
-                        self.occurrence(candidate),
-                        candidate
-                            .binding_id
-                            .as_deref()
-                            .and_then(|binding_id| self.bindings.get(binding_id)),
+                        occurrence,
+                        binding,
                         target_kind.as_deref(),
-                        target_site.map(|range| range.source_file.as_str()),
+                        target_source_file,
                         site,
                         resolution_rule,
                         &candidate.language,
-                    ))
+                        project_metadata.as_ref(),
+                    );
+                    let mut materialized = vec![edge.clone()];
+                    if candidate.relation == CandidateRelation::Reexports
+                        && binding.is_some_and(|binding| {
+                            let target_name = binding
+                                .qualified_target
+                                .rsplit([':', '.'])
+                                .find(|name| !name.is_empty())
+                                .unwrap_or_default();
+                            binding.spelling != target_name
+                                || occurrence
+                                    .and_then(|occurrence| occurrence.qualifier.as_deref())
+                                    .is_some_and(|qualifier| qualifier != binding.spelling)
+                        })
+                    {
+                        let export_name = binding.map(|binding| binding.spelling.as_str());
+                        let alias_source = export_name.and_then(|export_name| {
+                            occurrence.and_then(|occurrence| {
+                                self.declarations
+                                    .values()
+                                    .filter(|declaration| {
+                                        declaration.kind == "export"
+                                            && declaration.name == export_name
+                                            && declaration.range.source_file
+                                                == occurrence.range.source_file
+                                            && declaration.range.start_byte
+                                                <= occurrence.range.start_byte
+                                            && declaration.range.end_byte
+                                                >= occurrence.range.end_byte
+                                    })
+                                    .min_by_key(|declaration| {
+                                        (declaration.range.start_byte, declaration.id.as_str())
+                                    })
+                                    .map(|declaration| graph_ids[&declaration.id].clone())
+                            })
+                        });
+                        if let Some(alias_source) = alias_source {
+                            let mut attributes = edge.attributes.clone();
+                            attributes
+                                .insert("relation".to_owned(), Value::String("aliases".to_owned()));
+                            attributes.insert(
+                                "context".to_owned(),
+                                Value::String("export_alias".to_owned()),
+                            );
+                            attributes.insert(
+                                "rule".to_owned(),
+                                Value::String(format!(
+                                    "universal-reexport-alias-{}",
+                                    resolution_rule_name(resolution_rule)
+                                )),
+                            );
+                            materialized.push(EdgeRecord {
+                                source: alias_source,
+                                target: edge.target.clone(),
+                                attributes,
+                            });
+                        }
+                    }
+                    Some(materialized)
                 },
             )
+            .flatten()
             .collect::<Vec<_>>();
         edges.extend(materialized);
         profile_internal("universal edge materialization", &mut profile_started);
@@ -6824,12 +6978,25 @@ fn typescript_project_module_keys(
     importer: &str,
     module: &str,
     root: &Path,
+    context: Option<&str>,
 ) -> Option<Vec<String>> {
     let importer = typescript_project_importer_key(importer, root)?;
-    project_modules
-        .get(&(importer, module.to_owned()))
-        .filter(|keys| !keys.is_empty())
-        .cloned()
+    if let Some(context) = context.filter(|context| !context.is_empty()) {
+        return project_modules
+            .get(&(importer, module.to_owned(), context.to_owned()))
+            .filter(|keys| !keys.is_empty())
+            .cloned();
+    }
+    let mut keys = project_modules
+        .iter()
+        .filter(|((candidate_importer, candidate_module, _), _)| {
+            candidate_importer == &importer && candidate_module == module
+        })
+        .flat_map(|(_, keys)| keys.iter().cloned())
+        .collect::<Vec<_>>();
+    keys.sort_unstable();
+    keys.dedup();
+    (!keys.is_empty()).then_some(keys)
 }
 
 fn typescript_project_module_index(
@@ -6838,22 +7005,30 @@ fn typescript_project_module_index(
     root: &Path,
     entry_limit: usize,
     candidates_per_lookup: usize,
-) -> Result<TypeScriptProjectModuleIndex, String> {
+) -> Result<(TypeScriptProjectModuleIndex, TypeScriptProjectMetadataIndex), String> {
     if edges.is_empty() {
-        return Ok(TypeScriptProjectModuleIndex::new());
+        return Ok((
+            TypeScriptProjectModuleIndex::new(),
+            TypeScriptProjectMetadataIndex::new(),
+        ));
     }
     let mut source_by_node = BTreeMap::<String, BTreeSet<String>>::new();
     for node in inventory_nodes {
         let source = node.string("source_file");
         if !source.is_empty() {
-            source_by_node
-                .entry(node.id.clone())
-                .or_default()
-                .insert(source);
+            source_by_node.entry(node.id.clone()).or_default().insert(
+                node.attributes
+                    .get("universal_evidence_source_file")
+                    .and_then(Value::as_str)
+                    .filter(|source| !source.is_empty())
+                    .unwrap_or(&source)
+                    .to_owned(),
+            );
         }
     }
     let max_targets = candidate_storage_limit(candidates_per_lookup);
-    let mut targets = BTreeMap::<(String, String), BTreeSet<String>>::new();
+    let mut targets = BTreeMap::<(String, String, String), BTreeSet<String>>::new();
+    let mut metadata = TypeScriptProjectMetadataIndex::new();
     for edge in edges {
         if edge.attributes.get("relation").and_then(Value::as_str) != Some("imports_from") {
             continue;
@@ -6863,7 +7038,13 @@ fn typescript_project_module_index(
             continue;
         }
         let importer = {
-            let source = edge.string("source_file");
+            let source = edge
+                .attributes
+                .get("universal_evidence_source_file")
+                .and_then(Value::as_str)
+                .filter(|source| !source.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| edge.string("source_file"));
             if source.is_empty() {
                 unique_inventory_source(&source_by_node, &edge.source)
                     .unwrap_or_default()
@@ -6875,41 +7056,95 @@ fn typescript_project_module_index(
         let Some(importer) = typescript_project_importer_key(&importer, root) else {
             continue;
         };
-        let target_source = {
-            let source = edge.string("target_file");
-            if source.is_empty() {
-                unique_inventory_source(&source_by_node, &edge.target)
-                    .unwrap_or_default()
-                    .to_owned()
-            } else {
-                source
+        let target_source = unique_inventory_source(&source_by_node, &edge.target)
+            .map(str::to_owned)
+            .filter(|source| !source.is_empty())
+            .unwrap_or_else(|| edge.string("target_file"));
+        let normalized_target_source = if target_source.is_empty() {
+            target_source.clone()
+        } else {
+            std::fs::canonicalize(&target_source)
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| target_source.clone())
+        };
+        let edge_target_keys = if normalized_target_source.is_empty() {
+            vec![String::new()]
+        } else {
+            let keys = typescript_source_module_keys(&normalized_target_source, root);
+            if keys.is_empty() {
+                continue;
             }
+            keys
         };
-        let Some(target_keys) = (!target_source.is_empty())
-            .then(|| typescript_source_module_keys(&target_source, root))
-            .filter(|keys| !keys.is_empty())
-        else {
-            continue;
-        };
-        let key = (importer, module);
+        let context = edge.string("context");
+        let key = (importer.clone(), module.clone(), context.clone());
         if !targets.contains_key(&key) && targets.len() >= entry_limit {
             return Err(format!(
                 "TypeScript project module entry count exceeds limit {entry_limit}"
             ));
         }
         let values = targets.entry(key).or_default();
-        for target_key in target_keys {
-            if values.contains(&target_key) || values.len() < max_targets {
-                values.insert(target_key);
+        for target_key in &edge_target_keys {
+            if !target_key.is_empty() && (values.contains(target_key) || values.len() < max_targets)
+            {
+                values.insert(target_key.clone());
+            }
+        }
+        let mut edge_metadata = edge
+            .attributes
+            .iter()
+            .filter_map(|(name, value)| {
+                matches!(
+                    name.as_str(),
+                    "resolution_rule"
+                        | "package_condition"
+                        | "resolution_config"
+                        | "module_resolution"
+                        | "module_kind"
+                        | "resolution_project_references"
+                )
+                .then(|| {
+                    value
+                        .as_str()
+                        .map(|value| (name.clone(), value.to_owned()))
+                        .or_else(|| {
+                            (name == "resolution_project_references")
+                                .then(|| (name.clone(), value.to_string()))
+                        })
+                })
+                .flatten()
+            })
+            .collect::<BTreeMap<_, _>>();
+        edge_metadata.insert("project_module".to_owned(), module.clone());
+        for target_key in edge_target_keys {
+            let metadata_key = (
+                importer.clone(),
+                module.clone(),
+                context.clone(),
+                target_key,
+            );
+            match metadata.entry(metadata_key) {
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(edge_metadata.clone());
+                }
+                std::collections::hash_map::Entry::Occupied(entry)
+                    if entry.get() != &edge_metadata =>
+                {
+                    entry.remove();
+                }
+                std::collections::hash_map::Entry::Occupied(_) => {}
             }
         }
     }
-    Ok(targets
-        .into_iter()
-        .filter_map(|(key, values)| {
-            (!values.is_empty()).then_some((key, values.into_iter().collect()))
-        })
-        .collect())
+    Ok((
+        targets
+            .into_iter()
+            .filter_map(|(key, values)| {
+                (!values.is_empty()).then_some((key, values.into_iter().collect()))
+            })
+            .collect(),
+        metadata,
+    ))
 }
 
 fn unique_inventory_source<'a>(
@@ -7019,6 +7254,7 @@ fn typescript_module_indices(
             &owner.range.source_file,
             target_module,
             root,
+            None,
         )
         .unwrap_or_else(|| {
             typescript_import_module_keys(&owner.range.source_file, target_module, root)
@@ -7430,6 +7666,13 @@ fn declaration_node(
         _ => declaration.name.clone(),
     };
     let callable = matches!(declaration.kind.as_str(), "function" | "method");
+    // The universal evidence model keeps TypeScript's type-parameter kind
+    // explicit for resolution, while the public graph v1 contract represents
+    // all generic parameters as `parameter` nodes.
+    let graph_kind = match declaration.kind.as_str() {
+        "type_parameter" | "lifetime_parameter" | "const_parameter" => "parameter",
+        kind => kind,
+    };
     let mut attributes = Map::from_iter([
         ("label".to_owned(), Value::String(label)),
         (
@@ -7438,7 +7681,7 @@ fn declaration_node(
         ),
         (
             "symbol_kind".to_owned(),
-            Value::String(declaration.kind.clone()),
+            Value::String(graph_kind.to_owned()),
         ),
         ("file_type".to_owned(), Value::String("code".to_owned())),
         (
@@ -7494,6 +7737,12 @@ fn declaration_node(
             Value::String(declaration.id.clone()),
         ),
     ]);
+    if let Some(legacy_qualified_name) = legacy_callable_qualified_name(declaration) {
+        attributes.insert(
+            "legacy_qualified_name".to_owned(),
+            Value::String(legacy_qualified_name),
+        );
+    }
     if callable {
         attributes.insert("_callable".to_owned(), Value::Bool(true));
     }
@@ -7529,6 +7778,36 @@ fn declaration_node(
     NodeRecord {
         id: graph_node_id.to_owned(),
         attributes,
+    }
+}
+
+/// Preserve the public callable spelling emitted by the pre-universal
+/// TypeScript/JavaScript extractor. Universal evidence keeps its richer module
+/// qualified name for resolution, while framework route contracts continue to
+/// identify source callables as `name()@offset` (or `Owner::name()@offset`).
+fn legacy_callable_qualified_name(declaration: &DeclarationFact) -> Option<String> {
+    let start = declaration
+        .definition_start_byte
+        .unwrap_or(declaration.range.start_byte);
+    match declaration.kind.as_str() {
+        "function" => {
+            if declaration.name == "default" {
+                Some("default".to_owned())
+            } else {
+                Some(format!("{}()@{start}", declaration.name))
+            }
+        }
+        "method" => {
+            let mut parts = declaration.qualified_name.split('.');
+            let _module = parts.next()?;
+            let owner_parts = parts.collect::<Vec<_>>();
+            if owner_parts.len() < 2 {
+                return Some(format!("{}()@{start}", declaration.name));
+            }
+            let (method, owner) = owner_parts.split_last()?;
+            Some(format!("{}::{}()@{start}", owner.join("::"), method))
+        }
+        _ => None,
     }
 }
 
@@ -7779,6 +8058,7 @@ fn materialized_edge(
     range: &compass_languages::EvidenceRange,
     resolution_rule: ResolutionRule,
     language: &str,
+    project_metadata: Option<&BTreeMap<String, String>>,
 ) -> EdgeRecord {
     let context = match (relation, resolution_rule) {
         ("calls", ResolutionRule::QualifiedExternal) => "external_call",
@@ -7788,6 +8068,7 @@ fn materialized_edge(
             .and_then(|occurrence| occurrence.context.as_deref())
             .unwrap_or("reference"),
         ("references", _) if candidate.relation == CandidateRelation::Decorates => "decorator",
+        ("decorates", _) => "decorator",
         ("references", _)
             if occurrence.is_some_and(|occurrence| {
                 occurrence.role == compass_languages::SemanticRole::CallableReference
@@ -7802,7 +8083,9 @@ fn materialized_edge(
         {
             "submodule_import"
         }
-        ("imports_from", _) => "import",
+        ("imports_from", _) => occurrence
+            .and_then(|occurrence| occurrence.context.as_deref())
+            .unwrap_or("import"),
         ("re_exports", _) => "export",
         ("inherits", _) => "base_type",
         ("references", _) => "type_reference",
@@ -7892,28 +8175,47 @@ fn materialized_edge(
     if matches!(
         candidate.relation,
         CandidateRelation::Imports | CandidateRelation::Reexports
-    ) && let Some(binding) = binding
-    {
-        attributes.insert(
-            "local_name".to_owned(),
-            Value::String(binding.spelling.clone()),
-        );
-        attributes.insert(
-            "imported_name".to_owned(),
-            Value::String(candidate.target_spelling.clone()),
-        );
-        attributes.insert(
-            "qualified_target".to_owned(),
-            Value::String(binding.qualified_target.clone()),
-        );
-        attributes.insert(
-            "binding_kind".to_owned(),
-            Value::String(binding_kind_name(binding.kind).to_owned()),
-        );
-        if let Some(module) = candidate.constraints.module_or_package.as_ref() {
+    ) {
+        if let Some(binding) = binding {
+            attributes.insert(
+                "local_name".to_owned(),
+                Value::String(binding.spelling.clone()),
+            );
+            attributes.insert(
+                "imported_name".to_owned(),
+                Value::String(candidate.target_spelling.clone()),
+            );
+            attributes.insert(
+                "qualified_target".to_owned(),
+                Value::String(binding.qualified_target.clone()),
+            );
+            attributes.insert(
+                "binding_kind".to_owned(),
+                Value::String(binding_kind_name(binding.kind).to_owned()),
+            );
+        }
+        let module = candidate
+            .constraints
+            .module_or_package
+            .clone()
+            .or_else(|| {
+                binding
+                    .and_then(|binding| binding.qualified_target.rsplit_once("::"))
+                    .map(|(module, _)| module.to_owned())
+            })
+            .or_else(|| {
+                project_metadata
+                    .and_then(|metadata| metadata.get("project_module"))
+                    .cloned()
+            });
+        if let Some(module) = module {
             attributes.insert(
                 "module".to_owned(),
-                Value::String(import_module_for_edge(language, &range.source_file, module)),
+                Value::String(import_module_for_edge(
+                    language,
+                    &range.source_file,
+                    &module,
+                )),
             );
         }
     }
@@ -7925,6 +8227,29 @@ fn materialized_edge(
             "target_file".to_owned(),
             Value::String(target_source_file.to_owned()),
         );
+    }
+    if let Some(project_metadata) = project_metadata {
+        for (name, value) in project_metadata {
+            if name == "project_module" {
+                continue;
+            }
+            let metadata_value = if name == "resolution_project_references" {
+                serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.clone()))
+            } else {
+                Value::String(value.clone())
+            };
+            attributes.insert(format!("project_{name}"), metadata_value.clone());
+            if matches!(
+                name.as_str(),
+                "package_condition"
+                    | "resolution_config"
+                    | "module_resolution"
+                    | "module_kind"
+                    | "resolution_project_references"
+            ) {
+                attributes.insert(name.clone(), metadata_value);
+            }
+        }
     }
     if let Some(binding) = binding {
         attributes.extend([

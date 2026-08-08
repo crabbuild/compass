@@ -1,7 +1,10 @@
 use compass_languages::{Extraction, FrameworkLimits};
 use compass_model::provenance::ResolutionState;
 
-use super::{FrameworkResolutionError, ResolvedRoute, resolve_routes};
+use super::{
+    FrameworkResolutionError, ResolvedRoute, materialize_universal_framework_targets,
+    resolve_routes,
+};
 
 /// A route assertion reusable by framework fixtures and external qualification
 /// harnesses. The handler is optional when a convention only promises the
@@ -115,7 +118,13 @@ pub fn qualify_framework_case(
     limits: FrameworkLimits,
     case: &FrameworkQualificationCase,
 ) -> Result<FrameworkQualificationReport, FrameworkQualificationError> {
-    let resolved_routes = resolve_routes(extraction, limits)?;
+    // A universal candidate intentionally keeps the per-file extraction
+    // evidence-only: declaration nodes are projected by the collection
+    // resolver. Qualification fixtures also exercise a single extracted file,
+    // so provide the target index with the same source-backed declaration
+    // identities without publishing a second graph route.
+    let target_extraction = materialize_universal_framework_targets(extraction);
+    let resolved_routes = resolve_routes(&target_extraction, limits)?;
     let mut matched_routes = 0_usize;
     for expected in &case.expectations {
         let candidates = resolved_routes

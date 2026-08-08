@@ -136,7 +136,7 @@ export function run() {
             .declarations
             .iter()
             .find(|declaration| declaration.name == name)
-            .unwrap_or_else(|| panic!("missing using binding {name}"));
+            .expect("missing using binding");
         assert_eq!(declaration.kind, "variable");
         let start = usize::try_from(declaration.range.start_byte).expect("range fits usize");
         assert_eq!(&source[start..start + name.len()], name.as_bytes());
@@ -150,7 +150,7 @@ export function run() {
                 candidate.relation == CandidateRelation::Calls
                     && candidate.target_spelling == callee
             })
-            .unwrap_or_else(|| panic!("missing using initializer call {callee}"));
+            .expect("missing using initializer call");
         assert_eq!(call.constraints.argument_count, Some(argument_count));
     }
     let member_calls = batch
@@ -279,6 +279,32 @@ export function render() { return <UI.Button />; }
         Some("./ui::Button")
     );
     assert!(jsx_member.binding_id.is_some());
+}
+
+#[test]
+fn typescript_candidate_keeps_named_imports_used_as_object_values() {
+    let batch = candidate(
+        "src/routes.tsx",
+        br#"import { UserPage } from "./UserPage";
+export const routes = [{ path: "/users", Component: UserPage }];
+"#,
+    );
+    validate_evidence(&batch, EvidenceLimits::default()).expect("object value evidence");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::References
+            && candidate.target_spelling == "UserPage"
+            && candidate
+                .occurrence_id
+                .as_deref()
+                .and_then(|id| {
+                    batch
+                        .occurrences
+                        .iter()
+                        .find(|occurrence| occurrence.id == id)
+                })
+                .is_some_and(|occurrence| occurrence.context.as_deref() == Some("value"))
+            && candidate.binding_id.is_some()
+    }));
 }
 
 #[test]
@@ -1532,11 +1558,12 @@ function use(value: Maybe) {
         .find(|declaration| declaration.qualified_name.ends_with(".Second.run"))
         .expect("Second.run declaration");
     assert!(!batch.candidates.iter().any(|candidate| {
-        candidate
-            .constraints
-            .exact_target_declaration_id
-            .as_deref()
-            .is_some_and(|id| id == first_run.id || id == second_run.id)
+        candidate.relation != CandidateRelation::Contains
+            && candidate
+                .constraints
+                .exact_target_declaration_id
+                .as_deref()
+                .is_some_and(|id| id == first_run.id || id == second_run.id)
     }));
 }
 

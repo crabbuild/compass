@@ -234,6 +234,12 @@ pub struct DeclarationFact {
     pub implementation_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_hash: Option<String>,
+    /// Full syntax-node start for legacy callable identities. The canonical
+    /// evidence range may intentionally begin at the identifier, while the
+    /// public graph identity historically used the enclosing declaration
+    /// start (for example `export async function` begins after `export`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_start_byte: Option<u64>,
     pub range: EvidenceRange,
 }
 

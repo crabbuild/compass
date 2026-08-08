@@ -57,6 +57,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
             signature_hash: None,
             implementation_hash: None,
             source_hash: None,
+            definition_start_byte: None,
             range: range(0, 6),
         }],
         scopes: vec![ScopeFact {
@@ -470,7 +471,7 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
             .iter()
             .map(|profile| profile.language)
             .collect::<Vec<_>>(),
-        ["go", "java", "python", "rust"]
+        ["go", "java", "javascript", "python", "rust", "typescript"]
     );
     assert!(
         profiles
@@ -509,6 +510,16 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
         AdapterRegistry::universal_profile("rust").map(|profile| profile.version),
         Some(15)
     );
+    assert_eq!(
+        AdapterRegistry::universal_profile("javascript")
+            .map(|profile| (profile.version, profile.profile)),
+        Some((5, UniversalAdapterProfile::UniversalCandidate))
+    );
+    assert_eq!(
+        AdapterRegistry::universal_profile("typescript")
+            .map(|profile| (profile.version, profile.profile)),
+        Some((5, UniversalAdapterProfile::UniversalCandidate))
+    );
 }
 
 #[test]
@@ -516,12 +527,17 @@ fn empty_hard_cut_sources_emit_zero_width_file_inventory_evidence() {
     for (path, source_file, language) in [
         ("/repo/pkg/__init__.py", "pkg/__init__.py", "python"),
         ("/repo/pkg/empty.go", "pkg/empty.go", "go"),
+        ("/repo/pkg/empty.java", "pkg/empty.java", "java"),
         ("/repo/pkg/empty.rs", "pkg/empty.rs", "rust"),
+        ("/repo/pkg/empty.js", "pkg/empty.js", "javascript"),
+        ("/repo/pkg/empty.ts", "pkg/empty.ts", "typescript"),
+        ("/repo/pkg/empty.tsx", "pkg/empty.tsx", "typescript"),
     ] {
         let mut engine = Engine::default();
-        let evidence = engine
+        let extraction = engine
             .extract_source_combined(std::path::Path::new(path), source_file, b"")
-            .expect("extract empty hard-cut source")
+            .expect("extract empty hard-cut source");
+        let evidence = extraction
             .graph
             .semantic_evidence
             .expect("empty source evidence");
@@ -536,6 +552,58 @@ fn empty_hard_cut_sources_emit_zero_width_file_inventory_evidence() {
         assert_eq!(evidence.scopes.len(), 1);
         assert_eq!(evidence.scopes[0].kind, "module");
         assert_eq!(evidence.scopes[0].range, evidence.declarations[0].range);
+    }
+}
+
+#[test]
+fn typescript_javascript_candidate_is_wired_into_production_extraction() {
+    for (path, source_file, language, dialect, source) in [
+        (
+            "/repo/src/app.ts",
+            "src/app.ts",
+            "typescript",
+            "ts",
+            b"export const value: string = 'ok';\n".as_slice(),
+        ),
+        (
+            "/repo/src/view.tsx",
+            "src/view.tsx",
+            "typescript",
+            "tsx",
+            b"export const View = () => <span>ok</span>;\n".as_slice(),
+        ),
+        (
+            "/repo/src/app.js",
+            "src/app.js",
+            "javascript",
+            "js",
+            b"export function run(value) { return value; }\n".as_slice(),
+        ),
+    ] {
+        let mut engine = Engine::default();
+        let extraction = engine
+            .extract_source_combined(std::path::Path::new(path), source_file, source)
+            .expect("extract ECMAScript universal source");
+        assert!(
+            extraction.graph.raw_calls.is_none(),
+            "production universal extraction must replace raw calls for {path}"
+        );
+        assert!(
+            extraction.graph.nodes.is_empty() && extraction.graph.edges.is_empty(),
+            "production universal extraction must not publish the replaced generic graph for {path}"
+        );
+        let evidence = extraction
+            .graph
+            .semantic_evidence
+            .expect("production universal evidence");
+        validate_evidence(&evidence, EvidenceLimits::default()).expect("valid ECMAScript evidence");
+        assert_eq!(evidence.adapter.language, language);
+        assert_eq!(evidence.adapter.dialect.as_deref(), Some(dialect));
+        assert_eq!(
+            evidence.adapter.profile,
+            UniversalAdapterProfile::UniversalCandidate
+        );
+        assert_eq!(evidence.adapter.id, format!("compass.{language}.candidate"));
     }
 }
 

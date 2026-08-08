@@ -9,6 +9,7 @@ use compass_languages::{
 };
 use compass_model::provenance::ResolutionState;
 use compass_resolve::frameworks::{RouteStageRole, resolve_and_publish_framework_routes};
+use compass_resolve::resolve;
 use tempfile::tempdir;
 
 fn fixture(name: &str) -> PathBuf {
@@ -324,6 +325,53 @@ const unrelated = { path: "/not-a-router", component: UserPage };
 }
 
 #[test]
+fn project_react_router_named_imports_resolve_to_source_callables()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut engine = Engine::default();
+    let mut files = Vec::new();
+    let mut sources = HashMap::new();
+    for (path, fixture_name) in [
+        ("src/routes.tsx", "react-router.tsx"),
+        ("src/AccountPage.tsx", "AccountPage.tsx"),
+        ("src/UserPage.tsx", "UserPage.tsx"),
+    ] {
+        let source = fs::read(fixture(fixture_name))?;
+        files.push(engine.extract_source(Path::new(path), &source)?);
+        sources.insert(path.to_owned(), String::from_utf8(source)?);
+    }
+    let mut extraction = resolve(&files, &sources);
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+
+    for (path, expected_source) in [
+        ("/accounts/{accountId}", "src/AccountPage.tsx"),
+        ("/account-settings", "src/AccountPage.tsx"),
+        ("/users/{userId}", "src/UserPage.tsx"),
+    ] {
+        let route = resolved
+            .iter()
+            .find(|route| route.route.normalized_path == path)
+            .ok_or("missing React Router route")?;
+        assert_eq!(route.state, ResolutionState::Exact, "{path}");
+        let target = route
+            .stages
+            .last()
+            .and_then(|stage| stage.target.as_deref())
+            .ok_or("missing React Router handler target")?;
+        assert_eq!(
+            extraction
+                .nodes
+                .iter()
+                .find(|node| node.id == target)
+                .map(|node| node.string("source_file")),
+            Some(expected_source.to_owned()),
+            "{path}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn import_alias_metadata_and_near_matches_remain_conservative()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut react = source_extract(Path::new("src/routes.tsx"), "react-router.tsx")?;
@@ -390,7 +438,8 @@ fn import_alias_metadata_and_near_matches_remain_conservative()
 fn default_import_aliases_are_scoped_by_declaring_module_and_follow_default_exports()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = Engine::default();
-    let mut extraction = Extraction::default();
+    let mut files = Vec::new();
+    let mut sources = HashMap::new();
     for (path, source) in [
         (
             "src/admin/routes.tsx",
@@ -415,13 +464,10 @@ export const router = createBrowserRouter([{ path: "/public", Component: Screen 
             "export default function PublicPage() { return null; }\n",
         ),
     ] {
-        let mut source = engine.extract_source(Path::new(path), source.as_bytes())?;
-        extraction.nodes.append(&mut source.nodes);
-        extraction.edges.append(&mut source.edges);
-        extraction
-            .framework_facts
-            .append(&mut source.framework_facts);
+        files.push(engine.extract_source(Path::new(path), source.as_bytes())?);
+        sources.insert(path.to_owned(), source.to_owned());
     }
+    let mut extraction = resolve(&files, &sources);
 
     let resolved =
         resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
@@ -598,7 +644,8 @@ fn file_routes_emit_convention_components_and_exact_bindings()
 fn file_endpoint_reexports_bind_to_the_exported_handler_module()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = Engine::default();
-    let mut extraction = Extraction::default();
+    let mut files = Vec::new();
+    let mut sources = HashMap::new();
     for (path, source) in [
         (
             "src/pages/api/users.ts",
@@ -610,13 +657,10 @@ fn file_endpoint_reexports_bind_to_the_exported_handler_module()
             "export async function GET() { return new Response(); }\n",
         ),
     ] {
-        let mut source = engine.extract_source(Path::new(path), source.as_bytes())?;
-        extraction.nodes.append(&mut source.nodes);
-        extraction.edges.append(&mut source.edges);
-        extraction
-            .framework_facts
-            .append(&mut source.framework_facts);
+        files.push(engine.extract_source(Path::new(path), source.as_bytes())?);
+        sources.insert(path.to_owned(), source.to_owned());
     }
+    let mut extraction = resolve(&files, &sources);
 
     let route = routes(&extraction)
         .find(|route| route.framework == "astro" && route.normalized_path == "/api/users")

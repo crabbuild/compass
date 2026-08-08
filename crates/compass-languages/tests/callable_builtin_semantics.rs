@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::error::Error;
 use std::path::Path;
 
@@ -11,70 +11,6 @@ fn calls(extraction: &Extraction) -> Vec<(&str, &str)> {
         .filter(|edge| edge.string("relation") == "calls")
         .map(|edge| (edge.source.as_str(), edge.target.as_str()))
         .collect()
-}
-
-fn callable_labels(extraction: &Extraction) -> HashMap<&str, String> {
-    extraction
-        .nodes
-        .iter()
-        .map(|node| {
-            (
-                node.id.as_str(),
-                node.label()
-                    .trim()
-                    .trim_matches(['(', ')'])
-                    .trim_start_matches('.')
-                    .to_owned(),
-            )
-        })
-        .collect()
-}
-
-fn assert_local_builtin_collisions_resolve(
-    path: &Path,
-    source: &[u8],
-    expected_sites: usize,
-) -> Result<(), Box<dyn Error>> {
-    let extraction = Engine::default().extract_source(path, source)?;
-    let labels = callable_labels(&extraction);
-    let local_calls = calls(&extraction)
-        .into_iter()
-        .filter_map(|(_, target)| labels.get(target).map(String::as_str))
-        .filter(|label| matches!(*label, "open" | "list" | "map" | "filter"))
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        local_calls.len(),
-        expected_sites,
-        "nodes={:?}\nedges={:?}\nraw_calls={:?}",
-        extraction.nodes,
-        extraction.edges,
-        extraction.raw_calls
-    );
-    assert_eq!(
-        local_calls.iter().copied().collect::<HashSet<_>>(),
-        HashSet::from(["open", "list", "map", "filter"])
-    );
-    for edge in extraction
-        .edges
-        .iter()
-        .filter(|edge| edge.string("relation") == "calls")
-    {
-        let start = edge
-            .attributes
-            .get("start_byte")
-            .and_then(|value| value.as_u64());
-        let end = edge
-            .attributes
-            .get("end_byte")
-            .and_then(|value| value.as_u64());
-        assert!(
-            matches!((start, end), (Some(start), Some(end)) if start < end),
-            "call has no exact source range: {edge:?}"
-        );
-        assert!(!edge.string("extractor").is_empty(), "edge={edge:?}");
-    }
-    Ok(())
 }
 
 fn assert_universal_builtin_collisions_are_resolvable(
@@ -164,7 +100,7 @@ class Collisions {
 #[test]
 fn local_javascript_and_python_declarations_override_builtin_spellings()
 -> Result<(), Box<dyn Error>> {
-    assert_local_builtin_collisions_resolve(
+    assert_universal_builtin_collisions_are_resolvable(
         Path::new("collisions.js"),
         br#"
 function open() {}
@@ -241,6 +177,49 @@ fn unresolved_javascript_and_python_builtins_remain_suppressed() -> Result<(), B
         ),
     ] {
         let extraction = Engine::default().extract_source(path, source)?;
+        if let Some(evidence) = extraction.semantic_evidence.as_ref() {
+            assert!(
+                extraction.nodes.is_empty(),
+                "{path:?}: nodes={:?}",
+                extraction.nodes
+            );
+            assert!(
+                extraction.edges.is_empty(),
+                "{path:?}: edges={:?}",
+                extraction.edges
+            );
+            assert!(
+                extraction.raw_calls.is_none(),
+                "{path:?}: raw_calls={:?}",
+                extraction.raw_calls
+            );
+            if path.extension().and_then(|extension| extension.to_str()) == Some("js") {
+                assert_eq!(
+                    evidence
+                        .candidates
+                        .iter()
+                        .filter(|candidate| candidate.constraints.allow_external)
+                        .map(|candidate| candidate.target_spelling.as_str())
+                        .collect::<HashSet<_>>(),
+                    HashSet::from(["Map", "parseInt", "Array"]),
+                    "{path:?}: candidates={:?}",
+                    evidence.candidates
+                );
+                assert!(evidence.candidates.iter().all(|candidate| {
+                    !candidate.constraints.allow_external
+                        || candidate.constraints.module_or_package.as_deref()
+                            == Some("javascript.global")
+                }));
+            } else {
+                assert!(
+                    !evidence
+                        .candidates
+                        .iter()
+                        .any(|candidate| candidate.constraints.allow_external)
+                );
+            }
+            continue;
+        }
         assert!(
             calls(&extraction).is_empty(),
             "{path:?}: edges={:?}",

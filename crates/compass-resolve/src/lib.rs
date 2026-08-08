@@ -16,8 +16,9 @@ use std::time::Instant;
 
 use ahash::{AHashMap, AHashSet};
 use compass_languages::{
-    Extraction, RawCall, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord,
-    SemanticEvidenceBatch, file_stem, is_language_builtin_global, make_id, parse_jsonc,
+    CandidateRelation, Extraction, RawCall, RawEdgeRecord as EdgeRecord,
+    RawNodeRecord as NodeRecord, SemanticEvidenceBatch, SemanticRole, file_stem,
+    is_language_builtin_global, make_id, parse_jsonc,
 };
 use compass_model::provenance::{
     EndpointRewriteEvidence, EndpointRewriteRule, append_endpoint_rewrite_evidence,
@@ -366,6 +367,13 @@ fn resolve_owned_with_root_impl(
                 .collect::<HashSet<_>>();
             allowed.extend(
                 extraction
+                    .nodes
+                    .iter()
+                    .filter(|node| is_framework_owned_node(node))
+                    .map(|node| node.id.clone()),
+            );
+            allowed.extend(
+                extraction
                     .edges
                     .iter()
                     .filter(|edge| !evidence::is_replaced_relation(relation(edge)))
@@ -423,11 +431,473 @@ fn universal_allowed_node_ids(extraction: &Extraction) -> HashSet<String> {
             .filter(|edge| !evidence::is_replaced_relation(relation(edge)))
             .flat_map(|edge| [edge.source.clone(), edge.target.clone()]),
     );
+    allowed.extend(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| is_framework_owned_node(node))
+            .map(|node| node.id.clone()),
+    );
     allowed
+}
+
+fn is_framework_owned_node(node: &NodeRecord) -> bool {
+    node.string("_origin") == "convention"
+        || node.string("extractor").starts_with("compass.frameworks.")
 }
 
 fn is_source_inventory_node(node: &NodeRecord) -> bool {
     node.string("symbol_kind") == "file" && !node.string("source_file").is_empty()
+}
+
+/// Universal JavaScript/TypeScript extraction deliberately publishes only
+/// semantic evidence at the language boundary. Project-level package and
+/// `tsconfig` resolution still needs a bounded source inventory and an
+/// importer/module edge before the evidence index materializes final graph
+/// edges. Build those transient resolver facts here so the language layer does
+/// not regress to a second raw AST graph.
+fn augment_universal_project_inventory(
+    merged: &mut Extraction,
+    evidence_batches: &[SemanticEvidenceBatch],
+    sources: &HashMap<String, String>,
+    root: &Path,
+    project_edges: &mut Vec<EdgeRecord>,
+) {
+    let mut source_languages = BTreeMap::<String, String>::new();
+    let mut source_evidence_lengths = BTreeMap::<String, usize>::new();
+    for batch in evidence_batches
+        .iter()
+        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
+    {
+        for declaration in &batch.declarations {
+            if !declaration.range.source_file.is_empty() {
+                source_languages
+                    .entry(declaration.range.source_file.clone())
+                    .or_insert_with(|| batch.adapter.language.clone());
+                let length = source_evidence_lengths
+                    .entry(declaration.range.source_file.clone())
+                    .or_insert(0);
+                *length = (*length).max(declaration.range.end_byte as usize);
+            }
+        }
+    }
+    if source_languages.is_empty() {
+        return;
+    }
+
+    let mut source_ids = BTreeMap::<String, String>::new();
+    for node in &merged.nodes {
+        let source = node.string("source_file");
+        if !source.is_empty() && is_file_node(node, &source) {
+            source_ids
+                .entry(source_key(&source, root))
+                .or_insert_with(|| node.id.clone());
+        }
+    }
+    for (source, language) in &source_languages {
+        let key = source_key(source, root);
+        if !is_safe_relative_source(&key) {
+            continue;
+        }
+        let display_source =
+            source_inventory_display(source, &key, sources, root).unwrap_or_else(|| source.clone());
+        let file_id = source_ids.entry(key.clone()).or_insert_with(|| {
+            let id = make_id(&[&display_source]);
+            let label = Path::new(&display_source)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(&display_source)
+                .to_owned();
+            let byte_len = source_inventory_byte_len(&display_source, sources, root).max(
+                source_evidence_lengths
+                    .iter()
+                    .filter(|(source, _)| source_key(source, root) == key)
+                    .map(|(_, length)| *length)
+                    .max()
+                    .unwrap_or(0),
+            );
+            let mut attributes = Map::from_iter([
+                ("label".to_owned(), Value::String(label)),
+                ("symbol_kind".to_owned(), Value::String("file".to_owned())),
+                ("file_type".to_owned(), Value::String("code".to_owned())),
+                (
+                    "source_file".to_owned(),
+                    Value::String(display_source.clone()),
+                ),
+                ("source_location".to_owned(), Value::String("L1".to_owned())),
+                ("start_byte".to_owned(), Value::from(0_u64)),
+                ("end_byte".to_owned(), Value::from(byte_len as u64)),
+                ("line_start".to_owned(), Value::from(1_u64)),
+                ("line_end".to_owned(), Value::from(1_u64)),
+                ("column_start".to_owned(), Value::from(0_u64)),
+                ("column_end".to_owned(), Value::from(0_u64)),
+                ("language".to_owned(), Value::String(language.clone())),
+                (
+                    "extractor".to_owned(),
+                    Value::String(format!("compass.languages.{language}.universal")),
+                ),
+                (
+                    "universal_evidence_source_file".to_owned(),
+                    Value::String(source.clone()),
+                ),
+                (
+                    "confidence".to_owned(),
+                    Value::String("EXTRACTED".to_owned()),
+                ),
+                ("_origin".to_owned(), Value::String("ast".to_owned())),
+            ]);
+            // Keep the inventory node distinguishable from a semantic module
+            // declaration while retaining the stable source identity used by
+            // the existing package/path resolvers.
+            attributes.insert("universal_inventory".to_owned(), Value::Bool(true));
+            merged.nodes.push(NodeRecord {
+                id: id.clone(),
+                attributes,
+            });
+            id
+        });
+        let _ = file_id;
+    }
+
+    let declaration_ids = evidence_batches
+        .iter()
+        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
+        .flat_map(|batch| {
+            batch
+                .declarations
+                .iter()
+                .map(|declaration| (declaration.id.as_str(), declaration))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut existing = project_edges
+        .iter()
+        .filter(|edge| edge.attributes.get("_universal_project_edge") == Some(&Value::Bool(true)))
+        .map(|edge| {
+            edge.attributes
+                .get("evidence_candidate_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect::<HashSet<_>>();
+    for batch in evidence_batches
+        .iter()
+        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
+    {
+        for candidate in batch.candidates.iter().filter(|candidate| {
+            matches!(
+                candidate.relation,
+                CandidateRelation::Imports | CandidateRelation::Reexports
+            )
+        }) {
+            if !existing.insert(candidate.id.clone()) {
+                continue;
+            }
+            let Some(occurrence) = candidate.occurrence_id.as_deref().and_then(|id| {
+                batch
+                    .occurrences
+                    .iter()
+                    .find(|occurrence| occurrence.id == id)
+            }) else {
+                continue;
+            };
+            if !matches!(
+                occurrence.role,
+                SemanticRole::Import | SemanticRole::Reexport
+            ) {
+                continue;
+            }
+            let Some(owner) = declaration_ids.get(candidate.source_declaration_id.as_str()) else {
+                continue;
+            };
+            let module = candidate
+                .binding_id
+                .as_deref()
+                .and_then(|binding_id| {
+                    batch
+                        .bindings
+                        .iter()
+                        .find(|binding| binding.id == binding_id)
+                        .and_then(|binding| binding.qualified_target.rsplit_once("::"))
+                        .map(|(module, _)| module.to_owned())
+                })
+                .or_else(|| {
+                    candidate
+                        .constraints
+                        .qualified_name
+                        .as_deref()
+                        .and_then(|qualified| qualified.rsplit_once("::"))
+                        .map(|(module, _)| module.to_owned())
+                })
+                .or_else(|| candidate.constraints.module_or_package.clone())
+                .filter(|module| !module.is_empty())
+                .unwrap_or_default();
+            let context = occurrence
+                .context
+                .as_deref()
+                .filter(|context| !context.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    if candidate.relation == CandidateRelation::Reexports {
+                        "re-export".to_owned()
+                    } else {
+                        "import".to_owned()
+                    }
+                });
+            if module.is_empty() {
+                continue;
+            }
+            let source_key_value = source_key(&occurrence.range.source_file, root);
+            let Some(source_id) = source_ids.get(&source_key_value) else {
+                continue;
+            };
+            let project_source_file = merged
+                .nodes
+                .iter()
+                .find(|node| node.id == *source_id)
+                .map(|node| node.string("source_file"))
+                .filter(|source| !source.is_empty())
+                .unwrap_or_else(|| occurrence.range.source_file.clone());
+            let attributes = Map::from_iter([
+                (
+                    "relation".to_owned(),
+                    Value::String("imports_from".to_owned()),
+                ),
+                ("module".to_owned(), Value::String(module)),
+                ("source_file".to_owned(), Value::String(project_source_file)),
+                (
+                    "universal_evidence_source_file".to_owned(),
+                    Value::String(occurrence.range.source_file.clone()),
+                ),
+                (
+                    "source_location".to_owned(),
+                    Value::String(format!("L{}", occurrence.range.start_line)),
+                ),
+                (
+                    "start_byte".to_owned(),
+                    Value::from(occurrence.range.start_byte),
+                ),
+                (
+                    "end_byte".to_owned(),
+                    Value::from(occurrence.range.end_byte),
+                ),
+                (
+                    "line_start".to_owned(),
+                    Value::from(occurrence.range.start_line),
+                ),
+                (
+                    "line_end".to_owned(),
+                    Value::from(occurrence.range.end_line),
+                ),
+                (
+                    "column_start".to_owned(),
+                    Value::from(occurrence.range.start_column),
+                ),
+                (
+                    "column_end".to_owned(),
+                    Value::from(occurrence.range.end_column),
+                ),
+                (
+                    "language".to_owned(),
+                    Value::String(candidate.language.clone()),
+                ),
+                (
+                    "extractor".to_owned(),
+                    Value::String(format!(
+                        "compass.languages.{}.universal",
+                        candidate.language
+                    )),
+                ),
+                (
+                    "confidence".to_owned(),
+                    Value::String("EXTRACTED".to_owned()),
+                ),
+                ("_origin".to_owned(), Value::String("ast".to_owned())),
+                ("context".to_owned(), Value::String(context)),
+                (
+                    "evidence_candidate_id".to_owned(),
+                    Value::String(candidate.id.clone()),
+                ),
+                (
+                    "evidence_occurrence_id".to_owned(),
+                    Value::String(occurrence.id.clone()),
+                ),
+                ("_universal_project_edge".to_owned(), Value::Bool(true)),
+            ]);
+            let placeholder = make_id(&[
+                "universal-project-import",
+                candidate.language.as_str(),
+                occurrence.range.source_file.as_str(),
+                candidate.id.as_str(),
+            ]);
+            project_edges.push(EdgeRecord {
+                source: source_id.clone(),
+                target: placeholder,
+                attributes,
+            });
+            // `owner` is intentionally looked up above to guarantee that the
+            // candidate is source-backed; the transient project edge is keyed
+            // by its file inventory node so path resolution remains importer-
+            // aware and cannot infer a declaration owner from spelling alone.
+            let _ = owner;
+        }
+    }
+}
+
+/// Framework routes historically exposed callable identities using the
+/// source-oriented `name()@offset` spelling. Universal evidence keeps a
+/// module-qualified name for cross-file resolution, so restore the legacy
+/// display identity only on files that actually publish framework facts. This
+/// preserves existing route/publication identities without weakening the
+/// universal declaration index used by ordinary TypeScript/JavaScript code.
+fn restore_framework_callable_names(
+    extraction: &mut Extraction,
+    sources: &HashMap<String, String>,
+    root: &Path,
+) {
+    let mut framework_sources = BTreeSet::new();
+    for fact in &extraction.framework_facts {
+        match fact {
+            compass_languages::RawFrameworkFact::Route(route) => {
+                framework_sources.insert(route.anchor.source_file.clone());
+                if let Some(handler_source) = route
+                    .detail
+                    .get("handler_source")
+                    .and_then(Value::as_str)
+                    .filter(|source| !source.is_empty())
+                {
+                    // Convention/framework routes may target a callable in
+                    // another TS/JS file. Restore the historical callable
+                    // identity on that source as well as on the route file.
+                    framework_sources.insert(handler_source.to_owned());
+                }
+            }
+            compass_languages::RawFrameworkFact::Domain(domain) => {
+                framework_sources.insert(domain.anchor.source_file.clone());
+            }
+            compass_languages::RawFrameworkFact::Annotation(annotation) => {
+                framework_sources.insert(annotation.anchor.source_file.clone());
+            }
+        }
+    }
+    let nodes_by_id = extraction
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let framework_source_keys = framework_sources
+        .iter()
+        .map(|source| source_key(source, root))
+        .collect::<BTreeSet<_>>();
+    for edge in &extraction.edges {
+        if !matches!(
+            edge.attributes.get("relation").and_then(Value::as_str),
+            Some("references" | "calls" | "constructs" | "imports" | "imports_from")
+        ) {
+            continue;
+        }
+        let Some(edge_source) = edge
+            .attributes
+            .get("source_file")
+            .and_then(Value::as_str)
+            .filter(|source| !source.is_empty())
+        else {
+            continue;
+        };
+        if !framework_source_keys.contains(&source_key(edge_source, root)) {
+            continue;
+        }
+        let Some(target_source) = nodes_by_id
+            .get(edge.target.as_str())
+            .and_then(|node| node.attributes.get("source_file"))
+            .and_then(Value::as_str)
+            .filter(|source| !source.is_empty())
+        else {
+            continue;
+        };
+        // Universal binding/reference evidence is the source-backed bridge
+        // for framework handlers that live in another TS/JS file.
+        framework_sources.insert(target_source.to_owned());
+    }
+    if framework_sources.is_empty() {
+        return;
+    }
+    for node in &mut extraction.nodes {
+        let source = string_attribute(node, "source_file");
+        if !framework_sources.contains(&source)
+            || !matches!(
+                string_attribute(node, "language").as_str(),
+                "typescript" | "javascript" | "tsx" | "jsx"
+            )
+        {
+            continue;
+        }
+        let Some(legacy) = node
+            .attributes
+            .get("legacy_qualified_name")
+            .and_then(Value::as_str)
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        let mut legacy = legacy.to_owned();
+        if string_attribute(node, "symbol_kind") == "function"
+            && let Some(contents) = sources.iter().find_map(|(candidate, contents)| {
+                (source_key(candidate, root) == source).then_some(contents)
+            })
+            && let Some(start) = framework_function_start(contents, node)
+            && let Some(separator) = legacy.rfind('@')
+        {
+            legacy.truncate(separator + 1);
+            legacy.push_str(&start.to_string());
+        }
+        node.attributes
+            .insert("qualified_name".to_owned(), Value::String(legacy));
+        if matches!(
+            string_attribute(node, "symbol_kind").as_str(),
+            "function" | "method" | "class" | "component"
+        ) && let Some(dialect) = framework_source_dialect(&source)
+        {
+            node.attributes
+                .insert("language".to_owned(), Value::String(dialect.to_owned()));
+        }
+    }
+}
+
+fn framework_source_dialect(source: &str) -> Option<&'static str> {
+    match Path::new(source)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("tsx") => Some("tsx"),
+        Some("jsx") => Some("jsx"),
+        _ => None,
+    }
+}
+
+fn framework_function_start(source: &str, node: &NodeRecord) -> Option<usize> {
+    let start = node.attributes.get("start_byte").and_then(Value::as_u64)? as usize;
+    if start > source.len() {
+        return None;
+    }
+    let line_start = source[..start].rfind('\n').map_or(0, |index| index + 1);
+    let line = &source[line_start..];
+    let indent = line.len() - line.trim_start_matches(char::is_whitespace).len();
+    let mut declaration_start = line_start + indent;
+    let remainder = &source[declaration_start..];
+    if let Some(after_export) = remainder.strip_prefix("export") {
+        let consumed = remainder.len() - after_export.len();
+        declaration_start += consumed;
+        declaration_start += after_export.len() - after_export.trim_start().len();
+        if source[declaration_start..].starts_with("default") {
+            declaration_start += "default".len();
+            declaration_start +=
+                source[declaration_start..].len() - source[declaration_start..].trim_start().len();
+        }
+    }
+    Some(declaration_start)
 }
 
 fn finish_resolution(
@@ -441,6 +911,14 @@ fn finish_resolution(
 ) -> Extraction {
     let mut profile_started = Instant::now();
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut project_edges = project_edges;
+    augment_universal_project_inventory(
+        &mut merged,
+        &evidence_batches,
+        sources,
+        &canonical_root,
+        &mut project_edges,
+    );
     let has_javascript = sources.keys().any(|source| {
         let extension = extension(source);
         matches!(
@@ -548,6 +1026,7 @@ fn finish_resolution(
         }
     }
     profile_internal("resolver universal evidence", &mut profile_started);
+    restore_framework_callable_names(&mut merged, sources, &canonical_root);
     canonicalize_file_targets(&mut merged, root);
     profile_internal(
         "resolver file-target canonicalization",
@@ -1597,9 +2076,6 @@ fn resolve_javascript_typescript_paths(
     sources: &HashMap<String, String>,
 ) -> Result<(), String> {
     let (configs, referenced_configs) = collect_typescript_configs(extraction, root, sources)?;
-    if configs.is_empty() {
-        return Ok(());
-    }
 
     let mut file_by_source = BTreeMap::<String, (String, String)>::new();
     let mut source_by_file = HashMap::<String, String>::new();
@@ -4008,6 +4484,66 @@ fn source_key(source: &str, root: &Path) -> String {
         return relative.to_string_lossy().replace('\\', "/");
     }
     path.to_string_lossy().replace('\\', "/")
+}
+
+/// Recover the source-inventory spelling for a portable universal-evidence
+/// path. The language adapter intentionally shortens absolute temporary paths
+/// to a stable `parent/file` spelling; a project resolver must map that
+/// spelling back to the admitted source only when the suffix is unique.
+fn source_inventory_display(
+    _evidence_source: &str,
+    key: &str,
+    sources: &HashMap<String, String>,
+    root: &Path,
+) -> Option<String> {
+    if key.is_empty() {
+        return None;
+    }
+    let suffix = format!("/{key}");
+    let mut matches = sources
+        .keys()
+        .filter(|candidate| {
+            source_key(candidate, root) == key || {
+                let candidate = candidate.replace('\\', "/");
+                candidate == key || candidate.ends_with(&suffix)
+            }
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    matches.sort();
+    matches.dedup();
+    if matches.len() != 1 {
+        return None;
+    }
+    matches
+        .pop()
+        .map(|candidate| source_key(&candidate, root))
+        .filter(|display| is_safe_relative_source(display))
+}
+
+fn source_inventory_byte_len(
+    display: &str,
+    sources: &HashMap<String, String>,
+    root: &Path,
+) -> usize {
+    let display_key = source_key(display, root);
+    let suffix = format!("/{display_key}");
+    let mut matches = sources
+        .iter()
+        .filter(|(candidate, _)| {
+            source_key(candidate, root) == display_key
+                || candidate.replace('\\', "/") == display_key
+                || candidate.replace('\\', "/").ends_with(&suffix)
+        })
+        .map(|(candidate, contents)| (candidate.to_owned(), contents.len()))
+        .collect::<Vec<_>>();
+    matches.sort_by(|left, right| left.0.cmp(&right.0));
+    matches.dedup_by(|left, right| left.0 == right.0);
+    if matches.len() == 1 {
+        matches.pop().map_or(0, |(_, length)| length)
+    } else {
+        0
+    }
 }
 
 /// Resolve non-member raw calls using unique definitions and import evidence.
