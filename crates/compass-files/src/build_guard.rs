@@ -1,11 +1,10 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader};
+use std::fs::{self, OpenOptions};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::atomic::sync_directory;
-use crate::{FileError, io_error, write_atomic_with, write_text_atomic};
+use crate::atomic::{copy_file_atomic, sync_directory};
+use crate::{FileError, io_error, write_text_atomic};
 
 const SNAPSHOTS_DIRECTORY: &str = "snapshots";
 const CURRENT_SNAPSHOT: &str = "current-snapshot";
@@ -221,14 +220,25 @@ impl BuildGuard {
         artifacts: &[&str],
         refresh: bool,
     ) -> Result<(), FileError> {
+        let resolve_started = Instant::now();
         validate_exclusions(artifacts)?;
         let active = Self::resolve_current_snapshot_directory(output_directory)?;
+        profile_internal_duration(
+            "root projection resolve active snapshot",
+            resolve_started.elapsed(),
+        );
 
         let completion_marker = output_directory.join(ROOT_ARTIFACTS_COMPLETE);
         let repair_all = refresh || !completion_marker.is_file();
+        let marker_started = Instant::now();
         remove_file_if_exists(&completion_marker)?;
+        profile_internal_duration(
+            "root projection remove completion marker",
+            marker_started.elapsed(),
+        );
 
         for artifact in artifacts {
+            let artifact_started = Instant::now();
             let source = active.join(artifact);
             let destination = output_directory.join(artifact);
             if source.is_file() {
@@ -238,13 +248,23 @@ impl BuildGuard {
             } else {
                 remove_file_if_exists(&destination)?;
             }
+            profile_internal_duration(
+                &format!("root projection artifact {artifact}"),
+                artifact_started.elapsed(),
+            );
         }
 
         let snapshot = active
             .file_name()
             .ok_or_else(|| FileError::InvalidSnapshotArtifact(active.clone()))?
             .to_string_lossy();
-        write_text_atomic(completion_marker, &snapshot)
+        let completion_started = Instant::now();
+        write_text_atomic(completion_marker, &snapshot)?;
+        profile_internal_duration(
+            "root projection publish completion marker",
+            completion_started.elapsed(),
+        );
+        Ok(())
     }
 
     pub fn commit(self) -> Result<(), FileError> {
@@ -306,14 +326,10 @@ impl BuildGuard {
     }
 }
 
-fn copy_file_atomic(source: &Path, destination: &Path) -> Result<(), FileError> {
-    let file = File::open(source).map_err(|error| io_error(source, error))?;
-    let mut reader = BufReader::new(file);
-    write_atomic_with(destination, |writer| {
-        io::copy(&mut reader, writer)
-            .map(|_| ())
-            .map_err(|error| io_error(source, error))
-    })
+fn profile_internal_duration(label: &str, elapsed: Duration) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!("[compass internal] {label}: {:.3}s", elapsed.as_secs_f64());
+    }
 }
 
 fn remove_file_if_exists(path: &Path) -> Result<(), FileError> {

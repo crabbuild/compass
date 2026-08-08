@@ -124,6 +124,9 @@ pub fn publish_resolved_routes(
     extraction: &mut Extraction,
     routes: &[ResolvedRoute],
 ) -> Result<(), FrameworkResolutionError> {
+    if routes.is_empty() {
+        return Ok(());
+    }
     let existing_nodes = extraction
         .nodes
         .iter()
