@@ -44,6 +44,7 @@ PY
 test "$(grep -Ec '^compass-(transcribe|whisper)$' "$test_root/publishable-crates.txt")" -eq 0
 
 mkdir -p "$test_root/fake-checksum-bin"
+mkdir -p "$test_root/manifest-dist"
 
 cat > "$test_root/fake-checksum-bin/shasum" <<'EOF'
 #!/bin/sh
@@ -82,6 +83,7 @@ do
     checksum="$archive.sha256"
     test -f "$archive"
     test -f "$checksum"
+    cp "$archive" "$checksum" "$test_root/manifest-dist/"
     (
         cd "$dist"
         PATH="$test_root/fake-checksum-bin:$PATH" \
@@ -90,6 +92,39 @@ do
     tar -tzf "$archive" | grep -Eq "(^|/)$binary_name$"
     test "$(tar -tzf "$archive" | grep -Ec "(^|/)$binary_name$")" -eq 1
 done
+
+python3 "$repo_root/scripts/generate_release_manifest.py" \
+    compass-v0.3.6 "$test_root/manifest-dist"
+python3 - "$test_root/manifest-dist/compass-release.json" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+manifest_path = pathlib.Path(sys.argv[1])
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+assert manifest["schema"] == "compass.release/1"
+assert manifest["version"] == "0.3.6"
+assert manifest["tag"] == "compass-v0.3.6"
+assert [artifact["target"] for artifact in manifest["artifacts"]] == [
+    "aarch64-apple-darwin",
+    "aarch64-pc-windows-msvc",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+]
+for artifact in manifest["artifacts"]:
+    archive = manifest_path.parent / artifact["archive"]
+    assert archive.is_file()
+    assert artifact["sha256"] == hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert len(artifact["sha256"]) == 64
+    assert artifact["bytes"] == archive.stat().st_size
+PY
+cp "$test_root/manifest-dist/compass-release.json" "$test_root/manifest-first.json"
+python3 "$repo_root/scripts/generate_release_manifest.py" \
+    compass-v0.3.6 "$test_root/manifest-dist"
+cmp "$test_root/manifest-first.json" "$test_root/manifest-dist/compass-release.json"
 
 if tar -tzf "$test_root/dist-aarch64-apple-darwin/compass-aarch64-apple-darwin.tar.gz" \
     | grep -Eiq '(^|/)(graph\.json|store\.(sqlite3|redb)|store\.ref|\.compass|credentials|\.env)(/|$|\.)'; then

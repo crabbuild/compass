@@ -197,9 +197,11 @@ Upgrade any installed Compass executable to the latest stable release with:
 compass upgrade
 ```
 
-Compass verifies the official release checksum before replacing the executable.
-If no newer release is available, it exits successfully and reports that the
-installed version is already the latest.
+Compass reads a bounded static release manifest, verifies the selected
+archive's size and SHA-256 digest, and checks the staged executable's version
+before replacing the running executable. The upgrade path does not use the
+rate-limited GitHub REST API. If no newer release is available, it exits
+successfully and reports that the installed version is already the latest.
 
 ### 2. Install the VS Code extension (optional)
 
