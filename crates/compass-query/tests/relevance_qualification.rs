@@ -13,8 +13,9 @@ use compass_model::query_contract::{
 };
 use compass_query::{
     EdgeIdentity, EdgeJudgment, IdJudgment, JudgedQuery, JudgmentCorpus, NaturalQueryRequest,
-    ObservedEdge, ObservedPath, PathJudgment, PathPattern, QUERY_PLANNER_PROFILE_V1, QueryClass,
-    QueryObservation, RelevanceError, WorkCounts, qualification_report, score,
+    ObservedEdge, ObservedPath, PathJudgment, PathPattern, QUERY_PLANNER_PROFILE_V1,
+    QUERY_RANKER_PROFILE_V2, QueryClass, QueryObservation, RelevanceError, WorkCounts,
+    qualification_report, score,
 };
 use compass_query::{EngineSelection, open_with_engine};
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
@@ -172,6 +173,10 @@ fn executable_corpus(graph_digest: String) -> JudgmentCorpus {
         id: id.to_owned(),
         grade: 3,
     };
+    let weak_node_judgment = |id: &str| IdJudgment {
+        id: id.to_owned(),
+        grade: 1,
+    };
     let edge_judgment = |source: &str, target: &str, kind: &str| EdgeJudgment {
         edge: EdgeIdentity {
             id: None,
@@ -196,101 +201,182 @@ fn executable_corpus(graph_digest: String) -> JudgmentCorpus {
         must_not_return: Vec::new(),
         notes: None,
     };
-    let mut search_list = query(
-        "exec-search-list",
-        "find definition of UserService.list",
-        QueryClass::Exact,
-        "search",
-    );
-    search_list.node_judgments = vec![node_judgment("n:list")];
-    let mut search_unicode = query(
-        "exec-search-cafe",
-        "where is cafe defined",
-        QueryClass::Lexical,
-        "search",
-    );
-    search_unicode.node_judgments = vec![node_judgment("n:unicode")];
-    let mut callers = query(
-        "exec-callers",
-        "who calls UserService.list?",
-        QueryClass::Edge,
-        "callers",
-    );
-    callers.node_judgments = vec![
-        node_judgment("n:caller"),
-        node_judgment("n:list"),
-        node_judgment("n:route"),
-    ];
-    callers.edge_judgments = vec![
-        edge_judgment("n:caller", "n:list", "calls"),
-        edge_judgment("n:route", "n:list", "routes_to"),
-    ];
-    let mut callees = query(
-        "exec-callees",
-        "what does Api.caller call?",
-        QueryClass::Edge,
-        "callees",
-    );
-    callees.node_judgments = vec![node_judgment("n:caller"), node_judgment("n:list")];
-    callees.edge_judgments = vec![edge_judgment("n:caller", "n:list", "calls")];
-    let mut impact = query(
-        "exec-impact",
-        "what depends on Api.caller?",
+    let search = |id: &str, text: &str, class: QueryClass, expected: &str| {
+        let mut judged = query(id, text, class, "search");
+        judged.node_judgments = vec![node_judgment(expected)];
+        judged
+    };
+    let callers = |id: &str, text: &str| {
+        let mut judged = query(id, text, QueryClass::Edge, "callers");
+        judged.node_judgments = vec![
+            node_judgment("n:caller"),
+            node_judgment("n:list"),
+            node_judgment("n:route"),
+        ];
+        judged.edge_judgments = vec![
+            edge_judgment("n:caller", "n:list", "calls"),
+            edge_judgment("n:route", "n:list", "routes_to"),
+        ];
+        judged
+    };
+    let callees = |id: &str, text: &str| {
+        let mut judged = query(id, text, QueryClass::Edge, "callees");
+        judged.node_judgments = vec![node_judgment("n:caller"), node_judgment("n:list")];
+        judged.edge_judgments = vec![edge_judgment("n:caller", "n:list", "calls")];
+        judged
+    };
+    let impact = |id: &str, text: &str| {
+        let mut judged = query(id, text, QueryClass::Intent, "impact");
+        judged.node_judgments = vec![node_judgment("n:caller"), node_judgment("n:dependent")];
+        judged.edge_judgments = vec![edge_judgment("n:dependent", "n:caller", "imports")];
+        judged
+    };
+    let trail = |id: &str, text: &str| {
+        let mut judged = query(id, text, QueryClass::Path, "node_trail");
+        judged.node_judgments = vec![
+            node_judgment("n:caller"),
+            node_judgment("n:list"),
+            node_judgment("n:callee"),
+        ];
+        judged.edge_judgments = vec![
+            edge_judgment("n:caller", "n:list", "calls"),
+            edge_judgment("n:list", "n:callee", "calls"),
+        ];
+        judged.path_judgments = vec![PathJudgment {
+            pattern: PathPattern {
+                edge_kinds: vec!["calls".to_owned(), "calls".to_owned()],
+                endpoint_ids: vec!["n:caller".to_owned(), "n:callee".to_owned()],
+            },
+            grade: 3,
+        }];
+        judged
+    };
+    let mut ambiguous_charge = search(
+        "exec-search-charge",
+        "find charge",
         QueryClass::Intent,
-        "impact",
+        "n:z-payment-charge",
     );
-    impact.node_judgments = vec![node_judgment("n:caller"), node_judgment("n:dependent")];
-    impact.edge_judgments = vec![edge_judgment("n:dependent", "n:caller", "imports")];
-    let mut trail = query(
-        "exec-trail",
-        "path from Api.caller to Store.callee",
-        QueryClass::Path,
-        "node_trail",
+    ambiguous_charge
+        .node_judgments
+        .push(weak_node_judgment("n:a-generated-charge"));
+    ambiguous_charge.notes = Some(
+        "Reviewed production-shaped ambiguity: source implementation must rank above generated test code."
+            .to_owned(),
     );
-    trail.node_judgments = vec![
-        node_judgment("n:caller"),
-        node_judgment("n:list"),
-        node_judgment("n:callee"),
-    ];
-    trail.edge_judgments = vec![
-        edge_judgment("n:caller", "n:list", "calls"),
-        edge_judgment("n:list", "n:callee", "calls"),
-    ];
-    trail.path_judgments = vec![PathJudgment {
-        pattern: PathPattern {
-            edge_kinds: vec!["calls".to_owned(), "calls".to_owned()],
-            endpoint_ids: vec!["n:caller".to_owned(), "n:callee".to_owned()],
-        },
-        grade: 3,
-    }];
     let mut missing = query(
         "exec-missing",
         "find definitely_missing",
         QueryClass::Negative,
         "search",
     );
-    missing.notes = Some("Reviewed compact fixture no-answer case.".to_owned());
+    missing.notes = Some("Reviewed no-answer case.".to_owned());
+    let mut domain_missing = query(
+        "exec-domain-missing",
+        "search for kafkaConsumerLagMonitor",
+        QueryClass::Negative,
+        "search",
+    );
+    domain_missing.notes = Some("Reviewed unseen-domain no-answer case.".to_owned());
     JudgmentCorpus {
         schema: compass_query::QUERY_JUDGMENTS_SCHEMA_V1.to_owned(),
         corpus_id: "compass-query-executable-reviewed-v1".to_owned(),
         graph_schema: "compass.graph/1".to_owned(),
         graph_digest,
-        repository_revision: "crates/compass-query/tests/support@v1".to_owned(),
+        repository_revision: "crates/compass-query/tests/support@v2".to_owned(),
         analyzer_version: "compass.search-term/1".to_owned(),
         queries: vec![
-            search_list,
-            search_unicode,
-            callers,
-            callees,
-            impact,
-            trail,
+            search(
+                "exec-search-list",
+                "find definition of UserService.list",
+                QueryClass::Exact,
+                "n:list",
+            ),
+            search(
+                "exec-search-list-paraphrase",
+                "definition of UserService.list",
+                QueryClass::Intent,
+                "n:list",
+            ),
+            search(
+                "exec-search-cafe",
+                "where is cafe defined",
+                QueryClass::Lexical,
+                "n:unicode",
+            ),
+            search(
+                "exec-search-resume",
+                "search for resume",
+                QueryClass::Lexical,
+                "n:resume",
+            ),
+            search(
+                "exec-search-snake",
+                "find cache_key",
+                QueryClass::Exact,
+                "n:snake",
+            ),
+            search(
+                "exec-search-camel",
+                "show fetchUserRecord",
+                QueryClass::Exact,
+                "n:camel",
+            ),
+            search(
+                "exec-search-typo",
+                "find litsing",
+                QueryClass::Fuzzy,
+                "n:listing",
+            ),
+            ambiguous_charge,
+            search(
+                "exec-search-qualified-charge",
+                "find definition of PaymentGateway.charge",
+                QueryClass::Exact,
+                "n:z-payment-charge",
+            ),
+            callers("exec-callers", "who calls UserService.list?"),
+            callers(
+                "exec-callers-find-paraphrase",
+                "find callers of UserService.list",
+            ),
+            callers(
+                "exec-callers-where-paraphrase",
+                "where is UserService.list called?",
+            ),
+            callees("exec-callees", "what does Api.caller call?"),
+            callees(
+                "exec-callees-made-by-paraphrase",
+                "calls made by Api.caller",
+            ),
+            callees(
+                "exec-callees-invoke-paraphrase",
+                "what functions does Api.caller invoke?",
+            ),
+            impact("exec-impact", "what depends on Api.caller?"),
+            impact(
+                "exec-impact-breaks-paraphrase",
+                "what breaks if Api.caller changes?",
+            ),
+            impact("exec-impact-of-paraphrase", "impact of Api.caller"),
+            trail("exec-trail", "path from Api.caller to Store.callee"),
+            trail(
+                "exec-trail-shortest-paraphrase",
+                "shortest path from Api.caller to Store.callee",
+            ),
+            trail(
+                "exec-trail-reach-paraphrase",
+                "how does Api.caller reach Store.callee?",
+            ),
             missing,
+            domain_missing,
         ],
     }
 }
 
 fn execute_subset(
     engine: &compass_query::CodeQueryEngine,
+    corpus: &JudgmentCorpus,
 ) -> Result<Vec<QueryObservation>, Box<dyn std::error::Error>> {
     let execute =
         |id: &str, operation: &dyn Fn() -> Result<CodeQueryResponse, compass_query::QueryError>| {
@@ -305,18 +391,11 @@ fn execute_subset(
             limits: CodeQueryLimits::default(),
         })
     };
-    [
-        ("exec-search-list", "find definition of UserService.list"),
-        ("exec-search-cafe", "where is cafe defined"),
-        ("exec-callers", "who calls UserService.list?"),
-        ("exec-callees", "what does Api.caller call?"),
-        ("exec-impact", "what depends on Api.caller?"),
-        ("exec-trail", "path from Api.caller to Store.callee"),
-        ("exec-missing", "find definitely_missing"),
-    ]
-    .into_iter()
-    .map(|(id, question)| execute(id, &|| natural(question)))
-    .collect()
+    corpus
+        .queries
+        .iter()
+        .map(|query| execute(&query.id, &|| natural(&query.text)))
+        .collect()
 }
 
 #[test]
@@ -440,9 +519,23 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
         &directory.path().join("json-cache"),
         EngineSelection::Json,
     )?;
-    let store_observations = execute_subset(&store)?;
-    let json_observations = execute_subset(&json)?;
-    let repeated_observations = execute_subset(&store)?;
+    let store_observations = execute_subset(&store, &corpus)?;
+    let json_observations = execute_subset(&json, &corpus)?;
+    let repeated_observations = execute_subset(&store, &corpus)?;
+    let charge_ranking = store.search(SearchRequest {
+        query: "charge".to_owned(),
+        limits: CodeQueryLimits::default(),
+    })?;
+    assert_eq!(
+        charge_ranking
+            .results
+            .first()
+            .map(|result| result.node_id.as_str()),
+        Some("n:z-payment-charge"),
+        "v2 must prefer source implementation over generated test ambiguity: results={:?}, nodes={:?}",
+        charge_ranking.results,
+        charge_ranking.nodes
+    );
     assert!(store_observations.iter().all(|observation| {
         observation.latency_micros.is_some() && observation.work.response_bytes > 0
     }));
@@ -485,11 +578,38 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
     let report = qualification_report(
         &corpus,
         &store_observations,
-        "code-query/1",
+        QUERY_RANKER_PROFILE_V2,
         QUERY_PLANNER_PROFILE_V1,
         "store",
         limits,
     )?;
+    let missed_top_results = corpus
+        .queries
+        .iter()
+        .zip(&store_observations)
+        .filter_map(|(query, observation)| {
+            let best_grade = query
+                .node_judgments
+                .iter()
+                .map(|judgment| judgment.grade)
+                .max()?;
+            let accepted = query
+                .node_judgments
+                .iter()
+                .filter(|judgment| judgment.grade == best_grade)
+                .map(|judgment| judgment.id.as_str())
+                .collect::<BTreeSet<_>>();
+            (!observation
+                .node_ids
+                .first()
+                .is_some_and(|id| accepted.contains(id.as_str())))
+            .then(|| (query.id.clone(), observation.node_ids.first().cloned()))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        missed_top_results.is_empty(),
+        "reviewed queries missed at rank 1: {missed_top_results:?}"
+    );
     assert_eq!(report.graph_digest, graph_digest);
     assert_eq!(report.metrics.success_at_1.value, Some(1.0));
     assert_eq!(report.metrics.intent_macro_f1.value, Some(1.0));
@@ -514,7 +634,7 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
     let deterministic_report = qualification_report(
         &corpus,
         &deterministic_observations,
-        "code-query/1",
+        QUERY_RANKER_PROFILE_V2,
         QUERY_PLANNER_PROFILE_V1,
         "store",
         BTreeMap::from([
@@ -527,7 +647,7 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
         serde_json::to_vec(&qualification_report(
             &corpus,
             &deterministic_observations,
-            "code-query/1",
+            QUERY_RANKER_PROFILE_V2,
             QUERY_PLANNER_PROFILE_V1,
             "store",
             BTreeMap::from([

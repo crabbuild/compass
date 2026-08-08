@@ -17,7 +17,7 @@ use crate::cql::{QueryError, QueryErrorKind};
 use crate::graph_engine::LocalStoreSnapshot;
 use crate::index::QueryEngineKind;
 use crate::join_program_evidence;
-use crate::ranking::{SearchRankProfile, rank_search_candidates};
+use crate::ranking::rank_search_candidates;
 use crate::recall::{CandidateSource, RecallBudget, SearchCandidatePool};
 use crate::source::{VerifiedSource, verified_source};
 use crate::text::strip_diacritics;
@@ -644,13 +644,7 @@ impl CodeQueryEngine {
         let candidates = pool.into_vec();
         let candidate_count = candidates.len();
         let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);
-        let ranked = rank_search_candidates(
-            SearchRankProfile::from_env(),
-            &request.query,
-            &terms,
-            candidates,
-            max_nodes,
-        );
+        let ranked = rank_search_candidates(&request.query, &terms, candidates, max_nodes);
         if candidate_count > max_nodes {
             response.truncated = true;
             response.diagnostics.push(QueryDiagnostic {

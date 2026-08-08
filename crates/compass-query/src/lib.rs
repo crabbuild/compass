@@ -30,6 +30,7 @@ pub use intent::{
     plan_natural_query,
 };
 pub use program_join::join_program_evidence;
+pub use ranking::QUERY_RANKER_PROFILE_V2;
 pub use relevance::{
     EdgeIdentity, EdgeJudgment, IdJudgment, IntentMetrics, JudgedQuery, JudgmentCorpus,
     MAX_JUDGMENTS_PER_QUERY, MAX_QUESTIONS, MAX_TEXT_BYTES, MetricValue, ObservedEdge,

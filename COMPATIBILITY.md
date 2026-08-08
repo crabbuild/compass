@@ -108,6 +108,18 @@ retain the established text-traversal behavior. Explicit typed query commands
 remain available and unchanged; ambiguous questions never invent a direction
 or select an arbitrary symbol.
 
+Typed symbol search now unconditionally uses `query-ranker/2`. The internal
+`COMPASS_QUERY_RANKER_PROFILE` experiment switch and v1 runtime fallback have
+been removed. This does not change the `compass.query/1` schema, but intentional
+score and ordering improvements can change which equally lexical candidate is
+ranked first; ordering remains deterministic and backend-neutral.
+
+Optional MCP query feedback remains local and disabled by default.
+`COMPASS_QUERY_LOG=<path>` writes the versioned `compass.query-log/1` JSONL
+contract up to a 16 MiB file bound. The review importer accepts only its
+bounded `question` field and emits a separate
+`compass.query-review-candidates/1` queue; neither format is a judgment corpus.
+
 Structural `init`, `update`, `extract`, and `watch` builds publish
 `program.json` only when `--program` or `--program-artifact` is selected. The
 legacy `--no-program` flag remains accepted and continues to request the

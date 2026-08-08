@@ -7,24 +7,7 @@ use compass_model::provenance::EvidenceConfidence;
 use crate::recall::{CandidateSource, SearchCandidate};
 use crate::text::strip_diacritics;
 
-const QUERY_RANKER_PROFILE_V1: &str = "query-ranker/1";
-const QUERY_RANKER_PROFILE_V2: &str = "query-ranker/2";
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum SearchRankProfile {
-    QueryRankerV1,
-    QueryRankerV2,
-}
-
-impl SearchRankProfile {
-    pub(crate) fn from_env() -> Self {
-        std::env::var("COMPASS_QUERY_RANKER_PROFILE")
-            .ok()
-            .as_deref()
-            .and_then(parse_query_ranker_profile)
-            .unwrap_or(Self::QueryRankerV1)
-    }
-}
+pub const QUERY_RANKER_PROFILE_V2: &str = "query-ranker/2";
 
 #[derive(Clone, Debug)]
 pub(crate) struct RankedSearchResult {
@@ -35,18 +18,15 @@ pub(crate) struct RankedSearchResult {
 }
 
 pub(crate) fn rank_search_candidates(
-    profile: SearchRankProfile,
     query: &str,
     terms: &[String],
     candidates: Vec<SearchCandidate>,
     limit: usize,
 ) -> Vec<RankedSearchResult> {
-    match profile {
-        SearchRankProfile::QueryRankerV1 => rank_legacy(query, candidates, limit),
-        SearchRankProfile::QueryRankerV2 => rank_v2(query, terms, candidates, limit),
-    }
+    rank_v2(query, terms, candidates, limit)
 }
 
+#[cfg(test)]
 fn rank_legacy(
     query: &str,
     candidates: Vec<SearchCandidate>,
@@ -179,6 +159,7 @@ fn retain_top_ranked<T>(ranked: &mut Vec<T>, limit: usize, compare: fn(&T, &T) -
     ranked.sort_by(compare);
 }
 
+#[cfg(test)]
 fn compare_ranked_results(left: &RankedSearchResult, right: &RankedSearchResult) -> Ordering {
     right
         .score
@@ -326,7 +307,11 @@ fn trust_score_v2(candidate: &SearchCandidate, matched_fields: usize) -> f64 {
 }
 
 fn semantic_signal_score(node: &NodeRecord) -> f64 {
-    f64::from(semantic_seed_rank(node)) * 650.0
+    let mut score = f64::from(semantic_seed_rank(node)) * 650.0;
+    if source_is_test_or_generated(node) {
+        score -= 5_000.0;
+    }
+    score
 }
 
 fn ambiguity_signal_score(candidate: &SearchCandidate) -> f64 {
@@ -376,14 +361,6 @@ fn source_is_test_or_generated(node: &NodeRecord) -> bool {
         .is_some_and(|name| name.starts_with("test_") || name.ends_with("_test.go"))
 }
 
-fn parse_query_ranker_profile(profile: &str) -> Option<SearchRankProfile> {
-    match profile {
-        QUERY_RANKER_PROFILE_V1 => Some(SearchRankProfile::QueryRankerV1),
-        QUERY_RANKER_PROFILE_V2 => Some(SearchRankProfile::QueryRankerV2),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -393,10 +370,7 @@ mod tests {
 
     use crate::recall::{CandidateSource, SearchCandidate};
 
-    use super::{
-        SearchRankProfile::QueryRankerV1, SearchRankProfile::QueryRankerV2,
-        parse_query_ranker_profile, rank_search_candidates,
-    };
+    use super::{rank_legacy, rank_search_candidates};
 
     fn anchor(path: &str) -> SourceAnchor {
         SourceAnchor {
@@ -443,19 +417,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_ranker_profile_unknown_values_fall_back_to_v1() {
-        assert_eq!(
-            parse_query_ranker_profile("query-ranker/1"),
-            Some(QueryRankerV1)
-        );
-        assert_eq!(
-            parse_query_ranker_profile("query-ranker/2"),
-            Some(QueryRankerV2)
-        );
-        assert_eq!(parse_query_ranker_profile("query-ranker/3"), None);
-    }
-
-    #[test]
     fn legacy_ranking_remains_deterministic_on_ties() {
         let candidates = vec![
             SearchCandidate {
@@ -467,13 +428,7 @@ mod tests {
                 sources: BTreeSet::from([CandidateSource::ExactName]),
             },
         ];
-        let ranked = rank_search_candidates(
-            QueryRankerV1,
-            "query",
-            std::slice::from_ref(&"query".to_owned()),
-            candidates,
-            usize::MAX,
-        );
+        let ranked = rank_legacy("query", candidates, usize::MAX);
         assert_eq!(ranked[0].node_id, "n:a");
         assert_eq!(ranked[1].node_id, "n:z");
     }
@@ -503,13 +458,48 @@ mod tests {
             },
         ];
         let ranked = rank_search_candidates(
-            QueryRankerV2,
             "search",
             std::slice::from_ref(&"search".to_owned()),
             candidates,
             usize::MAX,
         );
         assert_eq!(ranked[0].node_id, "n:source");
+    }
+
+    #[test]
+    fn v2_strictly_improves_the_reviewed_production_over_generated_ambiguity() {
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:a-generated-charge",
+                    "charge",
+                    NodeKind::Method,
+                    "tests/generated/payment_gateway.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::ExactName]),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:z-payment-charge",
+                    "charge",
+                    NodeKind::Method,
+                    "src/payments/gateway.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::ExactName]),
+            },
+        ];
+        let legacy = rank_legacy("charge", candidates.clone(), 1);
+        let current = rank_search_candidates(
+            "charge",
+            std::slice::from_ref(&"charge".to_owned()),
+            candidates,
+            1,
+        );
+
+        assert_eq!(legacy[0].node_id, "n:a-generated-charge");
+        assert_eq!(current[0].node_id, "n:z-payment-charge");
     }
 
     #[test]
@@ -525,7 +515,6 @@ mod tests {
             },
         ];
         let ranked = rank_search_candidates(
-            QueryRankerV2,
             "same",
             std::slice::from_ref(&"same".to_owned()),
             candidates,
@@ -545,14 +534,12 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let full = rank_search_candidates(
-            QueryRankerV2,
             "same",
             std::slice::from_ref(&"same".to_owned()),
             candidates.clone(),
             usize::MAX,
         );
         let bounded = rank_search_candidates(
-            QueryRankerV2,
             "same",
             std::slice::from_ref(&"same".to_owned()),
             candidates,

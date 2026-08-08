@@ -28,7 +28,8 @@ review and evidence explaining the tradeoff.
 
 The native query-relevance gate keeps two intentionally separate evidence
 sets: the checked-in 80-question reviewed synthetic corpus validates fixture,
-schema, scoring, and metric behavior; a compact executable subset runs actual
+schema, scoring, and metric behavior; a 23-question, production-shaped
+executable subset runs actual
 `CodeQueryEngine::query_natural` requests for search, callers, callees, impact,
 path, and no-answer cases against the support graph. The executable subset
 therefore qualifies the planner and typed operation together. It derives its
@@ -56,6 +57,15 @@ explicitly uninstrumented rather than inferred from output sizes.
 Refresh a judged corpus, executable request, digest expectation, or threshold
 only with a reviewed intent/identity change and updated deterministic evidence;
 never regenerate expected judgments or thresholds from a proposed ranker.
+
+The typed search path has hard-cut to `query-ranker/2`; no environment switch
+can restore v1. The gate includes a reviewed production-versus-generated
+exact-name ambiguity for which frozen test-only v1 loses at rank one and v2
+wins, while all executable questions retain perfect Success@1. To expand the
+baseline with real production vocabulary, run
+`scripts/prepare_query_relevance_review.py` on an approved local JSONL export,
+then follow the two-reviewer, graph-digest-pinned process in the relevance
+fixture README. Importer output is a review queue, never a generated truth set.
 
 ## Compass Store release qualification
 

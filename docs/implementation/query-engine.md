@@ -82,6 +82,14 @@ channels produce too few candidates. Diacritic normalization is attempted when
 it changes the term, then adjacent transpositions are tried before deletions so
 the fixed three-variant budget prioritizes common spelling mistakes. Fuzzy
 candidates retain their explicit source penalty in `query-ranker/2`.
+`query-ranker/2` is now the unconditional typed-search ranker. The former
+runtime selection and v1 fallback have been removed, so equivalent inputs do
+not depend on process environment. The ranker combines lexical coverage,
+candidate provenance, evidence confidence, semantic node kind, and bounded
+ambiguity penalties. Production source receives a deterministic advantage over
+otherwise equal generated/test declarations. A frozen v1 implementation exists
+only in unit tests to prove the reviewed production-versus-generated case is a
+strict v2 improvement; it is not a runtime fallback.
 
 ## Natural-language intent routing
 
@@ -109,7 +117,8 @@ rule for typed graphs unless a legacy `mode`, `depth`, `token_budget`, or
 ## Relevance qualification
 
 `crates/compass-query/tests/relevance_qualification.rs` separates the reviewed
-80-question synthetic corpus from a compact executable baseline. The larger
+80-question synthetic corpus from a 23-question, production-shaped executable
+baseline. The larger
 corpus exercises the versioned judgment and metric contract without pretending
 that its synthetic identities can execute on a production graph. The executable
 subset sends natural-language questions through `query_natural` on the
@@ -128,6 +137,13 @@ work fields as uninstrumented instead of fabricating candidate or posting work.
 The reviewed executable threshold block lives beside the test so a failure is
 local and deterministic. Updating its expected identities, graph digest, or
 minimums requires an intentional review rather than copying a new result.
+`scripts/prepare_query_relevance_review.py` turns approved local JSONL query
+logs into bounded, redacted, deterministic review candidates. It never sends
+data, invents expected results, or writes directly to the judgment corpus; a
+two-person review must bind every accepted question to an immutable graph
+revision and explicit expected identities. This supplies a safe feedback loop
+for unseen paraphrases and domain vocabulary without adding a runtime model,
+embedding service, or self-modifying ranker.
 
 ## Focused discovery path
 
