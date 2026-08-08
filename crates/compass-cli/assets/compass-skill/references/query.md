@@ -6,12 +6,21 @@ Load this reference for codebase questions when a graph exists.
 
 ```bash
 compass query "where is authentication enforced?"
+compass query "who calls PaymentGateway.charge?"
+compass query "path from CheckoutController.create to PaymentGateway.charge"
+compass query "payment retries" --traverse
 compass query "payment retries" --dfs
 compass query "payment retries" --budget 1500
 compass query "payment retries" --budget 8000
 compass query "payment retries" --budget 8000 --page 2
 compass query "payment retries" --context CheckoutService
 ```
+
+Clear search, callers, callees, impact, and path questions against a current
+typed graph use the bounded typed query framework automatically. Generic or
+contradictory questions retain broad relevance traversal. Use `--traverse` to
+select traversal explicitly; `--dfs`, `--context`, `--budget`, and `--page` do
+so as well. Historical `--at` queries always use traversal.
 
 The default traversal favors broad relevant context. Use `--dfs` when tracing a
 specific chain. A token budget bounds rendered output; it does not change graph
@@ -43,6 +52,8 @@ compass query "authentication flow" --at HEAD~20
 ## Focused graph operations
 
 ```bash
+compass ask "who calls PaymentGateway.charge?"
+compass ask "what depends on authorizePayment?"
 compass search PaymentGateway
 compass callers PaymentGateway.charge
 compass callees CheckoutController.create
@@ -56,6 +67,10 @@ compass affected authorizePayment --depth 3
 compass tree
 ```
 
+- `ask` requires deterministic routing of a direct natural-language question
+  to a bounded typed operation such as search, callers, callees, impact, or
+  node trail. Treat the reported operation and any ambiguity as part of the
+  result.
 - `search` resolves typed symbols by exact or fuzzy name.
 - `callers` and `callees` walk one attributable call-graph hop.
 - `impact` traverses a bounded transitive radius and excludes heuristic

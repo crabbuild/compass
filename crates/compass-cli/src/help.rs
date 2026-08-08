@@ -88,6 +88,7 @@ const GROUPS: &[Group] = &[
     Group {
         title: "Explore",
         commands: &[
+            "ask",
             "search",
             "callers",
             "callees",
@@ -142,6 +143,12 @@ const GROUPS: &[Group] = &[
 ];
 
 const PAGES: &[Page] = &[
+    page!(
+        "ask",
+        "Route a natural-language question to a typed code-graph query",
+        ["compass ask <QUESTION> [OPTIONS]"],
+        "Arguments:\n  <QUESTION>                    Natural-language code-graph question\n\nOptions:\n  --graph <PATH>                Typed graph [default: compass-out/graph.json]\n  --program <PATH>              Optional Program IR enrichment\n  --cache <DIR>                 Query-index cache directory\n  --engine <default|json|store> Graph storage engine [default: default]\n  --max-depth <N>               Traversal radius\n  --max-nodes <N>               Node bound\n  --max-edges <N>               Edge bound\n  --max-paths <N>               Path bound\n  --max-candidates <N>          Candidate bound\n  --include-heuristic           Include heuristic evidence\n  --format <text|json>          Output format [default: text]\n\nExamples:\n  compass ask \"who calls PaymentService.charge?\"\n  compass ask \"what does CheckoutController.create call?\" --format json\n  compass ask \"path from CheckoutController.create to PaymentGateway.charge\"\n\nNotes:\n  High-confidence callers, callees, impact, and path questions route to the matching typed operation. Contradictory or low-confidence input falls back to bounded symbol search. The response uses compass.query/1."
+    ),
     page!(
         "call-graph",
         "Trace callers and callees for a source position or symbol",
@@ -274,7 +281,7 @@ const PAGES: &[Page] = &[
             "compass query --cql --stdin",
             "compass query --cql --repl"
         ],
-        "Arguments:\n  <QUESTION>                      Natural-language graph question\n  <QUERY>                         Inline CompassQL query\n\nOptions:\n  --dfs                           Use depth-first traversal\n  --context <VALUE>               Add query context\n  --budget <N>                    Approximate tokens per natural-query page [default: 2000]\n  --page <N>                      Natural-query result page, starting at 1 [default: 1]\n  --graph <PATH>                  Read a graph JSON file\n  --at <REV>                      Query an immutable Git revision; conflicts with --graph\n  --cql                           Use CompassQL mode\n  --file <PATH>                   Read CompassQL from a file\n  --stdin                         Read CompassQL from standard input\n  --repl                          Start the interactive CompassQL shell\n  --param <NAME=VALUE>            Bind a parameter; repeatable\n  --params-file <PATH>            Read parameters from JSON\n  --format <table|json|jsonl>     Result format [default: table]\n  --output <PATH>                 Write results to a file\n  --timeout-ms <N>                Execution timeout [default: 5000]\n  --max-rows <N>                  Row limit [default: 10000]\n  --max-path-depth <N>            Path-depth limit [default: 32]\n  --max-expanded-relationships <N> Relationship expansion limit [default: 5000000]\n  --max-memory-bytes <N>          Memory limit [default: 268435456]\n\nExamples:\n  compass query \"authentication flow\"\n  compass query \"payment service\" --budget 8000\n  compass query \"payment service\" --page 2\n  compass query --cql \"MATCH (n) RETURN n LIMIT 10\" --format json\n  compass query --cql --file report.cql --params-file params.json\n\nTips:\n  Pagination metadata reports the next page; repeat the same natural query with that `--page`.\n  Use `compass path` when you know both endpoints of the relationship to trace."
+        "Arguments:\n  <QUESTION>                      Natural-language graph question\n  <QUERY>                         Inline CompassQL query\n\nOptions:\n  --traverse                      Force legacy relevance traversal instead of intent routing\n  --dfs                           Use depth-first traversal and disable intent routing\n  --context <VALUE>               Add query context and disable intent routing\n  --budget <N>                    Approximate tokens per traversal page [default: 2000]\n  --page <N>                      Traversal result page, starting at 1 [default: 1]\n  --graph <PATH>                  Read a graph JSON file\n  --at <REV>                      Query an immutable Git revision; conflicts with --graph\n  --cql                           Use CompassQL mode\n  --file <PATH>                   Read CompassQL from a file\n  --stdin                         Read CompassQL from standard input\n  --repl                          Start the interactive CompassQL shell\n  --param <NAME=VALUE>            Bind a parameter; repeatable\n  --params-file <PATH>            Read parameters from JSON\n  --format <table|json|jsonl>     CompassQL result format [default: table]\n  --output <PATH>                 Write CompassQL results to a file\n  --timeout-ms <N>                CompassQL execution timeout [default: 5000]\n  --max-rows <N>                  CompassQL row limit [default: 10000]\n  --max-path-depth <N>            CompassQL path-depth limit [default: 32]\n  --max-expanded-relationships <N> CompassQL relationship expansion limit [default: 5000000]\n  --max-memory-bytes <N>          CompassQL memory limit [default: 268435456]\n\nExamples:\n  compass query \"who calls PaymentService.charge?\"\n  compass query \"path from CheckoutController.create to PaymentGateway.charge\"\n  compass query \"authentication flow\"\n  compass query \"authentication flow\" --budget 8000 --page 2\n  compass query \"who calls PaymentService.charge?\" --traverse\n  compass query --cql \"MATCH (n) RETURN n LIMIT 10\" --format json\n  compass query --cql --file report.cql --params-file params.json\n\nTips:\n  High-confidence search, callers, callees, impact, and path questions use the bounded typed query framework. Generic, contradictory, historical, or explicitly traversed questions retain paginated relevance traversal.\n  Pagination metadata reports the next traversal page; repeat the same query with that `--page`."
     ),
     page!(
         "program",
@@ -1099,7 +1106,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 46);
+        assert_eq!(roots.len(), 47);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");

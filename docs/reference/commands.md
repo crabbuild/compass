@@ -194,12 +194,20 @@ Natural-language graph discovery:
 
 ```text
 compass query "<question>"
+  [--traverse]
   [--dfs]
   [--context VALUE]
   [--budget N]
   [--page N]
   [--graph PATH | --at REV]
 ```
+
+Clear symbol-search, callers, callees, impact, and source-to-target path
+questions against the current typed graph use the bounded `compass.query/1`
+framework automatically. Generic or contradictory questions and historical
+`--at` queries retain relevance traversal. Pass `--traverse`, or any explicit
+`--dfs`, `--context`, `--budget`, or `--page` control, to select traversal
+explicitly.
 
 `--budget` is the approximate token budget for one result page. It defaults to
 2,000 and may be raised when the caller has a larger context window.

@@ -70,11 +70,19 @@ fn tool_contract_and_all_local_tools_cover_success_and_validation_paths()
             ("question", json!("which calls Alpha")),
             ("mode", json!("dfs")),
             ("depth", json!("99")),
-            ("token_budget", json!(-1)),
+            ("token_budget", json!(2000)),
             ("context_filter", json!(["call", 4, "field"])),
         ]),
     );
-    assert!(query.contains("Traversal: DFS"));
+    assert!(query.contains("Traversal: DFS"), "{query}");
+    assert!(
+        server
+            .invoke(
+                "query_graph",
+                args(&[("question", json!("Alpha")), ("token_budget", json!(-1))]),
+            )
+            .contains("token budget must be greater than zero")
+    );
 
     assert!(
         server

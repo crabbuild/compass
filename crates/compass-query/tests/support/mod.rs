@@ -12,8 +12,12 @@ use compass_model::provenance::{
 use sha2::{Digest, Sha256};
 
 fn anchor() -> SourceAnchor {
+    anchor_for("src/lib.rs")
+}
+
+fn anchor_for(file: &str) -> SourceAnchor {
     SourceAnchor {
-        file: "src/lib.rs".to_owned(),
+        file: file.to_owned(),
         start_byte: 0,
         end_byte: 4,
         start_line: 1,
@@ -24,12 +28,16 @@ fn anchor() -> SourceAnchor {
 }
 
 fn evidence() -> Provenance {
+    evidence_for("src/lib.rs")
+}
+
+fn evidence_for(file: &str) -> Provenance {
     Provenance {
         origin: EvidenceOrigin::Ast,
         extractor: "test".to_owned(),
         confidence: EvidenceConfidence::Exact,
         rule: None,
-        anchors: vec![anchor()],
+        anchors: vec![anchor_for(file)],
         wiring_site: None,
         score: None,
         candidates: Vec::new(),
@@ -37,6 +45,16 @@ fn evidence() -> Provenance {
 }
 
 fn node(id: &str, kind: NodeKind, name: &str, qualified_name: &str) -> NodeRecord {
+    node_in_file(id, kind, name, qualified_name, "src/lib.rs")
+}
+
+fn node_in_file(
+    id: &str,
+    kind: NodeKind,
+    name: &str,
+    qualified_name: &str,
+    file: &str,
+) -> NodeRecord {
     NodeRecord {
         id: id.to_owned(),
         kind,
@@ -45,9 +63,9 @@ fn node(id: &str, kind: NodeKind, name: &str, qualified_name: &str) -> NodeRecor
         qualified_name: qualified_name.to_owned(),
         language: Some("rust".to_owned()),
         framework: None,
-        source: Some(anchor()),
+        source: Some(anchor_for(file)),
         details: None,
-        evidence: vec![evidence()],
+        evidence: vec![evidence_for(file)],
         coverage: Vec::new(),
         diagnostics: Vec::new(),
         community: None,
@@ -56,12 +74,17 @@ fn node(id: &str, kind: NodeKind, name: &str, qualified_name: &str) -> NodeRecor
 
 pub fn write_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let source = b"code";
-    let source_path = path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("src/lib.rs");
-    fs::create_dir_all(source_path.parent().unwrap_or_else(|| Path::new(".")))?;
-    fs::write(&source_path, source)?;
+    let root = path.parent().unwrap_or_else(|| Path::new("."));
+    let fixture_files = [
+        ("src/lib.rs", false),
+        ("src/payments/gateway.rs", false),
+        ("tests/generated/payment_gateway.rs", true),
+    ];
+    for (relative, _) in fixture_files {
+        let source_path = root.join(relative);
+        fs::create_dir_all(source_path.parent().unwrap_or(root))?;
+        fs::write(source_path, source)?;
+    }
     let mut graph = GraphDocument::empty_v1(BuildMetadata {
         builder_version: "test".to_owned(),
         schema_fingerprint: "sha256:schema".to_owned(),
@@ -77,18 +100,21 @@ pub fn write_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         anchor: None,
         related_ids: Vec::new(),
     });
-    graph.graph.files.push(FileRecord {
-        id: file_id("src/lib.rs"),
-        path: "src/lib.rs".to_owned(),
-        language: Some("rust".to_owned()),
-        content_digest: format!("sha256:{:x}", Sha256::digest(source)),
-        byte_size: 4,
-        generated: false,
-        extraction_status: ExtractionStatus::Extracted,
-        extractor_versions: vec!["test".to_owned()],
-        coverage: Vec::new(),
-        diagnostics: Vec::new(),
-    });
+    graph
+        .graph
+        .files
+        .extend(fixture_files.map(|(relative, generated)| FileRecord {
+            id: file_id(relative),
+            path: relative.to_owned(),
+            language: Some("rust".to_owned()),
+            content_digest: format!("sha256:{:x}", Sha256::digest(source)),
+            byte_size: 4,
+            generated,
+            extraction_status: ExtractionStatus::Extracted,
+            extractor_versions: vec!["test".to_owned()],
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+        }));
     graph.nodes = vec![
         node("n:list", NodeKind::Function, "list", "UserService.list"),
         node(
@@ -99,6 +125,25 @@ pub fn write_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         ),
         node("n:other", NodeKind::Function, "list", "Other.list"),
         node("n:unicode", NodeKind::Function, "café", "Menu.café"),
+        node("n:resume", NodeKind::Function, "résumé", "Profile.résumé"),
+        node(
+            "n:unicode-case",
+            NodeKind::Constant,
+            "Ångström",
+            "Units.Ångström",
+        ),
+        node(
+            "n:snake",
+            NodeKind::Function,
+            "cache_key",
+            "Cache.cache_key",
+        ),
+        node(
+            "n:camel",
+            NodeKind::Function,
+            "fetchUserRecord",
+            "Api.fetchUserRecord",
+        ),
         node("n:alias", NodeKind::TypeAlias, "fetchUsers", "fetchUsers"),
         node("n:caller", NodeKind::Function, "caller", "Api.caller"),
         node("n:callee", NodeKind::Function, "callee", "Store.callee"),
@@ -114,6 +159,20 @@ pub fn write_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
             NodeKind::Function,
             "dynamicCaller",
             "Api.dynamicCaller",
+        ),
+        node_in_file(
+            "n:a-generated-charge",
+            NodeKind::Method,
+            "charge",
+            "GeneratedPaymentGateway.charge",
+            "tests/generated/payment_gateway.rs",
+        ),
+        node_in_file(
+            "n:z-payment-charge",
+            NodeKind::Method,
+            "charge",
+            "PaymentGateway.charge",
+            "src/payments/gateway.rs",
         ),
     ];
     let alias_id = edge_id(

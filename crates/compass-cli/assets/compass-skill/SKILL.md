@@ -70,8 +70,10 @@ codebase question:
 1. Run `compass reflect --if-stale`.
 2. Read `compass-out/reflections/LESSONS.md` if it exists and is relevant.
 3. Run `compass query "<question>"` before broad source searches. Keep the
-   2,000-token default for a focused question, or set `--budget N` based on the
-   context available for graph evidence.
+   automatic typed result for a clear search, callers, callees, impact, or path
+   intent. For broader relevance traversal, pass `--traverse`; keep its
+   2,000-token default or set `--budget N` based on the context available for
+   graph evidence.
 4. Read the final `Pagination:` line when present. If it reports `next=N`,
    repeat the same query, graph/revision selector, contexts, traversal mode, and
    budget with `--page N`. Follow pages through `next=none` before making an
@@ -82,6 +84,8 @@ codebase question:
 
 Use the specialized navigation commands when they fit:
 
+- `compass ask "<question>"` to require bounded, typed intent routing directly;
+  inspect the reported operation and ambiguity.
 - `compass search "<symbol>"` for exact or fuzzy typed-symbol lookup.
 - `compass callers` or `compass callees` for one-hop call-graph evidence.
 - `compass call-graph` for a bounded caller/callee trace from a source position
@@ -117,9 +121,9 @@ debug a graph result; it should not silently replace the graph-first workflow.
 
 Classify the effect before selecting a command:
 
-- Read-only local: `search`, `callers`, `callees`, `impact`, `explore`, `node`,
-  `call-graph`, `query`, `program`, `path`, `explain`, `affected`, `tree`, and
-  local diagnostics.
+- Read-only local: `ask`, `search`, `callers`, `callees`, `impact`, `explore`,
+  `node`, `call-graph`, `query`, `program`, `path`, `explain`, `affected`,
+  `tree`, and local diagnostics.
 - Local publication: `init`, `update`, `extract`, `watch`, `cluster-only`,
   `label`, history materialization, installation, and file-based exports.
 - External or credentialed: semantic providers, URL ingestion, cloning, PR
@@ -171,6 +175,8 @@ Do not force every request through `query`:
 - Dependency route: `path`.
 - Change-review scope: `affected`.
 - Exact relationship or automation: `query --cql`.
+- Direct natural-language structural question: `ask`; inspect the typed
+  operation before using its evidence.
 - Exact symbol or call evidence: `search`, `callers`, `callees`, `call-graph`,
   `explore`, `node`, or `program`.
 - Repository structure: `tree`.

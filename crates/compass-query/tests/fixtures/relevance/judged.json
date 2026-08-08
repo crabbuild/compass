@@ -1,0 +1,2045 @@
+{
+  "schema": "compass.query-judgments/1",
+  "corpusId": "compass-query-synthetic-reviewed-v1",
+  "graphSchema": "compass.graph/1",
+  "graphDigest": "sha256:relevance-synthetic-v1",
+  "repositoryRevision": "fixtures/relevance@v1",
+  "analyzerVersion": "compass-query-fixture/1",
+  "queries": [
+    {
+      "id": "q01",
+      "text": "find stable node identifier",
+      "class": "exact",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:stable-id",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q01",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q02",
+      "text": "find exact service name",
+      "class": "exact",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:service",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q02",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q03",
+      "text": "find qualified platform::Service",
+      "class": "exact",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:qualified",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q03",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q04",
+      "text": "find fetchUsers alias",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:alias",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q04",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q05",
+      "text": "find route /users",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:route",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q05",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q06",
+      "text": "find controller role",
+      "class": "intent",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:controller",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q06",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q07",
+      "text": "find Rust declarations",
+      "class": "intent",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:rust",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q07",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q08",
+      "text": "find Axum route handler",
+      "class": "intent",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:framework",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q08",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q09",
+      "text": "find snake_case cache_key",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:snake",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q09",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q10",
+      "text": "find camelCase userToken",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:camel",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q10",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q11",
+      "text": "find PascalCase RequestRouter",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:pascal",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q11",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q12",
+      "text": "find punctuation GET /v1/users",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:punctuation",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q12",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q13",
+      "text": "find café menu",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:accent",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q13",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q14",
+      "text": "find 非拉丁 handler",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:nonlatin",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q14",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q15",
+      "text": "find HTTP API acronym",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:acronym",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q15",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q16",
+      "text": "find db",
+      "class": "exact",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:db",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q16",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q17",
+      "text": "find io",
+      "class": "exact",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:io",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q17",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q18",
+      "text": "find id",
+      "class": "exact",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:id",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q18",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q19",
+      "text": "find ui",
+      "class": "exact",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:ui",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q19",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q20",
+      "text": "find misspelled autentcation",
+      "class": "fuzzy",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:auth",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q20",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q21",
+      "text": "find overloaded run implementation",
+      "class": "fuzzy",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:run-prod",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q21",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q22",
+      "text": "find overloaded save implementation",
+      "class": "fuzzy",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:save-prod",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q22",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q23",
+      "text": "find overloaded handler implementation",
+      "class": "fuzzy",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:handler-prod",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q23",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q24",
+      "text": "find overloaded new constructor",
+      "class": "fuzzy",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:new-prod",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q24",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q25",
+      "text": "prefer source-backed declaration",
+      "class": "exact",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:source-backed",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q25",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q26",
+      "text": "exclude test alternative",
+      "class": "exact",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:production",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q26",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": [
+        "n:test-alternative"
+      ]
+    },
+    {
+      "id": "q27",
+      "text": "exclude generated alternative",
+      "class": "exact",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:authored",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q27",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": [
+        "n:generated-alternative"
+      ]
+    },
+    {
+      "id": "q28",
+      "text": "resolve ambiguous user service",
+      "class": "exact",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:user-a",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q28",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [
+        "n:user-a",
+        "n:user-b"
+      ],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q29",
+      "text": "resolve alternate user service",
+      "class": "exact",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:user-b",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q29",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [
+        "n:user-a",
+        "n:user-b"
+      ],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q30",
+      "text": "find partial coverage record",
+      "class": "intent",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:partial",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q30",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q31",
+      "text": "who calls service",
+      "class": "edge",
+      "expectedIntent": "callers",
+      "expectedSlots": {
+        "operation": "callers"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:caller",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q31",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q31",
+            "target": "n:caller",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q32",
+      "text": "what does service call",
+      "class": "edge",
+      "expectedIntent": "callees",
+      "expectedSlots": {
+        "operation": "callees"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:callee",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q32",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q32",
+            "target": "n:callee",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q33",
+      "text": "what is impacted by storage",
+      "class": "edge",
+      "expectedIntent": "impact",
+      "expectedSlots": {
+        "operation": "impact"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:impact",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q33",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q33",
+            "target": "n:impact",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q34",
+      "text": "show path from route to database",
+      "class": "path",
+      "expectedIntent": "node_trail",
+      "expectedSlots": {
+        "operation": "node_trail"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:path",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q34",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q34",
+            "target": "n:path",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [
+        {
+          "pattern": {
+            "edgeKinds": [
+              "calls"
+            ],
+            "endpointIds": [
+              "n:source-q34",
+              "n:path"
+            ]
+          },
+          "grade": 3
+        }
+      ],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q35",
+      "text": "explain the request flow",
+      "class": "architecture",
+      "expectedIntent": "explore",
+      "expectedSlots": {
+        "operation": "explore"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:explain",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q35",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q36",
+      "text": "show architecture boundary",
+      "class": "architecture",
+      "expectedIntent": "explore",
+      "expectedSlots": {
+        "operation": "explore"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:architecture",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q36",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q37",
+      "text": "trace data flow to store",
+      "class": "path",
+      "expectedIntent": "node_trail",
+      "expectedSlots": {
+        "operation": "node_trail"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:data-flow",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q37",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q37",
+            "target": "n:data-flow",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [
+        {
+          "pattern": {
+            "edgeKinds": [
+              "calls"
+            ],
+            "endpointIds": [
+              "n:source-q37",
+              "n:data-flow"
+            ]
+          },
+          "grade": 3
+        }
+      ],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q38",
+      "text": "which route reaches handler",
+      "class": "edge",
+      "expectedIntent": "explore",
+      "expectedSlots": {
+        "operation": "explore"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:route-handler",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q38",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q38",
+            "target": "n:route-handler",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q39",
+      "text": "who owns this module",
+      "class": "intent",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:owner",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q39",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q40",
+      "text": "bridge two communities",
+      "class": "architecture",
+      "expectedIntent": "explore",
+      "expectedSlots": {
+        "operation": "explore"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:bridge",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q40",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q41",
+      "text": "find import dependency",
+      "class": "edge",
+      "expectedIntent": "callees",
+      "expectedSlots": {
+        "operation": "callees"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:import",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q41",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q41",
+            "target": "n:import",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q42",
+      "text": "find export target",
+      "class": "edge",
+      "expectedIntent": "callees",
+      "expectedSlots": {
+        "operation": "callees"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:export",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q42",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q42",
+            "target": "n:export",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q43",
+      "text": "find inheritance path",
+      "class": "path",
+      "expectedIntent": "node_trail",
+      "expectedSlots": {
+        "operation": "node_trail"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:extends",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q43",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q43",
+            "target": "n:extends",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [
+        {
+          "pattern": {
+            "edgeKinds": [
+              "calls"
+            ],
+            "endpointIds": [
+              "n:source-q43",
+              "n:extends"
+            ]
+          },
+          "grade": 3
+        }
+      ],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q44",
+      "text": "find implementation edge",
+      "class": "edge",
+      "expectedIntent": "callees",
+      "expectedSlots": {
+        "operation": "callees"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:implements",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q44",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q44",
+            "target": "n:implements",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q45",
+      "text": "find alias target",
+      "class": "edge",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:alias-target",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q45",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q45",
+            "target": "n:alias-target",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q46",
+      "text": "find registration point",
+      "class": "edge",
+      "expectedIntent": "explore",
+      "expectedSlots": {
+        "operation": "explore"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:register",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q46",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q46",
+            "target": "n:register",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q47",
+      "text": "find message consumer",
+      "class": "edge",
+      "expectedIntent": "callees",
+      "expectedSlots": {
+        "operation": "callees"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:consumer",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q47",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q47",
+            "target": "n:consumer",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q48",
+      "text": "find event publisher",
+      "class": "edge",
+      "expectedIntent": "callees",
+      "expectedSlots": {
+        "operation": "callees"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:publisher",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q48",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q48",
+            "target": "n:publisher",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q49",
+      "text": "find scheduler job",
+      "class": "edge",
+      "expectedIntent": "callees",
+      "expectedSlots": {
+        "operation": "callees"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:job",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q49",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q49",
+            "target": "n:job",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q50",
+      "text": "find test relation",
+      "class": "edge",
+      "expectedIntent": "explore",
+      "expectedSlots": {
+        "operation": "explore"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:test-relation",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q50",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q50",
+            "target": "n:test-relation",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q51",
+      "text": "find module containment",
+      "class": "path",
+      "expectedIntent": "node_trail",
+      "expectedSlots": {
+        "operation": "node_trail"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:contains",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q51",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q51",
+            "target": "n:contains",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [
+        {
+          "pattern": {
+            "edgeKinds": [
+              "calls"
+            ],
+            "endpointIds": [
+              "n:source-q51",
+              "n:contains"
+            ]
+          },
+          "grade": 3
+        }
+      ],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q52",
+      "text": "find configuration key",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:config",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q52",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q53",
+      "text": "find database table",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:table",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q53",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q54",
+      "text": "find database column",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:column",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q54",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q55",
+      "text": "find queue producer",
+      "class": "edge",
+      "expectedIntent": "callees",
+      "expectedSlots": {
+        "operation": "callees"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:producer",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q55",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q55",
+            "target": "n:producer",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q56",
+      "text": "find topic subscriber",
+      "class": "edge",
+      "expectedIntent": "callers",
+      "expectedSlots": {
+        "operation": "callers"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:subscriber",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q56",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q56",
+            "target": "n:subscriber",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q57",
+      "text": "find ownership boundary",
+      "class": "architecture",
+      "expectedIntent": "explore",
+      "expectedSlots": {
+        "operation": "explore"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:ownership",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q57",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q58",
+      "text": "find cross-language bridge",
+      "class": "architecture",
+      "expectedIntent": "explore",
+      "expectedSlots": {
+        "operation": "explore"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:cross-language",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q58",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q59",
+      "text": "find unresolved placeholder",
+      "class": "intent",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:placeholder",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q59",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q60",
+      "text": "find incomplete coverage diagnostic",
+      "class": "intent",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:coverage",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q60",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q61",
+      "text": "missing retired symbol",
+      "class": "negative",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": [],
+      "notes": "Reviewed no-answer: the synthetic fixture intentionally has no matching fact."
+    },
+    {
+      "id": "q62",
+      "text": "missing deleted endpoint",
+      "class": "negative",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": [],
+      "notes": "Reviewed no-answer: the synthetic fixture intentionally has no matching fact."
+    },
+    {
+      "id": "q63",
+      "text": "missing framework fact",
+      "class": "negative",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": [],
+      "notes": "Reviewed no-answer: the synthetic fixture intentionally has no matching fact."
+    },
+    {
+      "id": "q64",
+      "text": "missing private implementation",
+      "class": "negative",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": [],
+      "notes": "Reviewed no-answer: the synthetic fixture intentionally has no matching fact."
+    },
+    {
+      "id": "q65",
+      "text": "no route for unknown path",
+      "class": "negative",
+      "expectedIntent": "explore",
+      "expectedSlots": {
+        "operation": "explore"
+      },
+      "nodeJudgments": [],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": [],
+      "notes": "Reviewed no-answer: the synthetic fixture intentionally has no matching fact."
+    },
+    {
+      "id": "q66",
+      "text": "no caller for external symbol",
+      "class": "negative",
+      "expectedIntent": "callers",
+      "expectedSlots": {
+        "operation": "callers"
+      },
+      "nodeJudgments": [],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": [],
+      "notes": "Reviewed no-answer: the synthetic fixture intentionally has no matching fact."
+    },
+    {
+      "id": "q67",
+      "text": "no path across disconnected graph",
+      "class": "negative",
+      "expectedIntent": "node_trail",
+      "expectedSlots": {
+        "operation": "node_trail"
+      },
+      "nodeJudgments": [],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": [],
+      "notes": "Reviewed no-answer: the synthetic fixture intentionally has no matching fact."
+    },
+    {
+      "id": "q68",
+      "text": "no owner for unindexed file",
+      "class": "negative",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": [],
+      "notes": "Reviewed no-answer: the synthetic fixture intentionally has no matching fact."
+    },
+    {
+      "id": "q69",
+      "text": "no data flow for literal",
+      "class": "negative",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": [],
+      "notes": "Reviewed no-answer: the synthetic fixture intentionally has no matching fact."
+    },
+    {
+      "id": "q70",
+      "text": "no answer for typo gibberish",
+      "class": "negative",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": [],
+      "notes": "Reviewed no-answer: the synthetic fixture intentionally has no matching fact."
+    },
+    {
+      "id": "q71",
+      "text": "find semantic resolver",
+      "class": "exact",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:resolver",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q71",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q72",
+      "text": "find middleware role",
+      "class": "intent",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:middleware",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q72",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q73",
+      "text": "find model role",
+      "class": "intent",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:model",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q73",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q74",
+      "text": "find repository role",
+      "class": "intent",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:repository",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q74",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q75",
+      "text": "find Unicode résumé",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:resume",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q75",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q76",
+      "text": "find hyphenated web-hook",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:webhook",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q76",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q77",
+      "text": "find dotted package.name",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:package",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q77",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q78",
+      "text": "find generic Vec<T>",
+      "class": "lexical",
+      "expectedIntent": "search",
+      "expectedSlots": {
+        "operation": "search"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:generic",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q78",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q79",
+      "text": "find shortest dependency path",
+      "class": "path",
+      "expectedIntent": "node_trail",
+      "expectedSlots": {
+        "operation": "node_trail"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:shortest",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q79",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [
+        {
+          "edge": {
+            "source": "n:source-q79",
+            "target": "n:shortest",
+            "kind": "calls",
+            "direction": "outgoing"
+          },
+          "grade": 3
+        }
+      ],
+      "pathJudgments": [
+        {
+          "pattern": {
+            "edgeKinds": [
+              "calls"
+            ],
+            "endpointIds": [
+              "n:source-q79",
+              "n:shortest"
+            ]
+          },
+          "grade": 3
+        }
+      ],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    },
+    {
+      "id": "q80",
+      "text": "explain cross-community architecture",
+      "class": "architecture",
+      "expectedIntent": "explore",
+      "expectedSlots": {
+        "operation": "explore"
+      },
+      "nodeJudgments": [
+        {
+          "id": "n:community",
+          "grade": 3
+        },
+        {
+          "id": "n:context-q80",
+          "grade": 1
+        }
+      ],
+      "edgeJudgments": [],
+      "pathJudgments": [],
+      "acceptableAmbiguity": [],
+      "mustNotReturn": []
+    }
+  ]
+}

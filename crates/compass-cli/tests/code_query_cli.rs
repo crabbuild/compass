@@ -19,6 +19,7 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
     let cache = cache.to_string_lossy().into_owned();
     let root = directory.path().to_string_lossy().into_owned();
     for (command, positional, operation) in [
+        ("ask", vec!["who calls Target?"], "callers"),
         ("search", vec!["Target"], "search"),
         ("callers", vec!["Target"], "callers"),
         ("callees", vec!["Caller"], "callees"),
@@ -44,6 +45,70 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
         assert_eq!(response["schema"], "compass.query/1");
         assert_eq!(response["operation"], operation);
     }
+    Ok(())
+}
+
+#[test]
+fn natural_query_routes_clear_intents_and_preserves_traversal_fallback()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+
+    for (question, operation, expected_node) in [
+        ("who calls Target?", "Callers:", "Fixture.Caller"),
+        ("what does Caller call?", "Callees:", "Fixture.Target"),
+        ("what depends on Target?", "Impact:", "Fixture.Caller"),
+        ("path from Caller to Target", "NodeTrail:", "Fixture.Target"),
+        ("where is Target defined?", "Search:", "Fixture.Target"),
+    ] {
+        let outcome = run(
+            Frontend::Compass,
+            [
+                OsString::from("query"),
+                OsString::from(question),
+                OsString::from("--graph"),
+                graph.clone().into_os_string(),
+            ],
+        );
+        assert_eq!(outcome.code, 0, "{question}: {}", outcome.stderr);
+        assert!(outcome.stdout.starts_with(operation), "{question}");
+        assert!(outcome.stdout.contains(expected_node), "{question}");
+        assert!(!outcome.stdout.contains("Pagination:"), "{question}");
+    }
+
+    for question in ["authentication flow", "where is authentication enforced?"] {
+        let generic = run(
+            Frontend::Compass,
+            [
+                OsString::from("query"),
+                OsString::from(question),
+                OsString::from("--graph"),
+                graph.clone().into_os_string(),
+            ],
+        );
+        assert_eq!(generic.code, 0, "{}", generic.stderr);
+        assert_eq!(generic.stdout, "No matching nodes found.", "{question}");
+    }
+
+    for arguments in [
+        vec!["query", "who calls Target?", "--traverse"],
+        vec!["query", "who calls Target?", "--budget", "2000"],
+    ] {
+        let description = format!("{arguments:?}");
+        let mut args = arguments
+            .into_iter()
+            .map(OsString::from)
+            .collect::<Vec<_>>();
+        args.extend([OsString::from("--graph"), graph.clone().into_os_string()]);
+        let outcome = run(Frontend::Compass, args);
+        assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+        assert!(
+            outcome.stdout.contains("Pagination:"),
+            "arguments={description} stdout={}",
+            outcome.stdout
+        );
+    }
+
     Ok(())
 }
 

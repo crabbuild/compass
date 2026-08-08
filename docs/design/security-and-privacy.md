@@ -46,6 +46,29 @@ For structural source analysis:
 Your operating environment can still copy, back up, index, or monitor these
 files. “Local” describes Compass's data path, not the entire host.
 
+### Local query-feedback review
+
+Compass does not transmit query telemetry. Operators may separately collect an
+approved local JSONL query export and run
+`scripts/prepare_query_relevance_review.py` to create a bounded review queue for
+relevance qualification. The importer reads at most 16 MiB/10,000 JSONL lines,
+applies deterministic best-effort redaction, omits responses and repository
+paths, and emits no more than 256 candidates. It makes no network requests and
+never modifies the shipped ranker or judgment corpus.
+
+MCP `query_graph` logging remains disabled by default. Setting
+`COMPASS_QUERY_LOG` opts into a local `compass.query-log/1` JSONL file capped at
+16 MiB; both typed and compatibility-traversal questions are represented.
+Typed responses are never logged. Compatibility-traversal response logging is a
+separate opt-in and should remain disabled for relevance sampling.
+
+Query text can reveal internal symbols, business terms, paths, identities, or
+secrets, and best-effort redaction is not anonymization. Store both raw logs and
+review queues outside the repository with source-equivalent access controls,
+minimize collection, define a retention period, and require human review before
+committing a de-identified case. Do not enable response capture for relevance
+sampling.
+
 ## When data can leave the machine
 
 ### Semantic providers
