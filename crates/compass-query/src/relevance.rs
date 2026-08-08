@@ -8,6 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::telemetry::WorkCounts;
+
 pub const QUERY_JUDGMENTS_SCHEMA_V1: &str = "compass.query-judgments/1";
 pub const QUERY_QUALIFICATION_SCHEMA_V1: &str = "compass.query-qualification/1";
 pub const MAX_QUESTIONS: usize = 256;
@@ -341,16 +343,6 @@ fn path_key(pattern: &PathPattern) -> String {
         pattern.edge_kinds.join(">"),
         pattern.endpoint_ids.join(">")
     )
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WorkCounts {
-    pub candidates_read: u64,
-    pub postings_decoded: u64,
-    pub nodes_expanded: u64,
-    pub edges_expanded: u64,
-    pub response_bytes: u64,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

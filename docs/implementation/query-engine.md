@@ -119,6 +119,21 @@ on the established relevance traversal. MCP `query_graph` uses the same routing
 rule for typed graphs unless a legacy `mode`, `depth`, `token_budget`, or
 `context_filter` field is present.
 
+Structural operand resolution uses the same bounded exact-ID, normalized-name,
+alias, term-posting, and typo recall assembly as search. Duplicate exact names
+remain ambiguous. For a non-exact operand, a candidate with unique evidence in
+the operation's required relationship role can resolve the operand; otherwise
+the engine returns `ambiguous_match` rather than selecting the top-ranked
+candidate. Relation probes are bounded by the request's candidate limit and a
+one-edge existence check per candidate.
+
+Node trails traverse published edges from source to target. When no directed
+path is found, one undirected probe using the remaining traversal budget
+distinguishes a true no-match from
+a route that requires traversing at least one edge backward. The latter returns
+`direction_mismatch` and publishes no
+path, preventing consumers from treating an inverted relationship as valid.
+
 ## Relevance qualification
 
 `crates/compass-query/tests/relevance_qualification.rs` separates the reviewed
@@ -126,7 +141,7 @@ rule for typed graphs unless a legacy `mode`, `depth`, `token_budget`, or
 baseline. The larger
 corpus exercises the versioned judgment and metric contract without pretending
 that its synthetic identities can execute on a production graph. The executable
-subset sends natural-language questions through `query_natural` on the
+subset sends natural-language questions through `query_natural_profiled` on the
 checked-in support graph, derives its canonical graph digest, and maps actual
 `CodeQueryResponse` values into ordered node IDs, directed edges, paths,
 truncation/no-answer state, measured latency, and serialized response bytes.
@@ -136,9 +151,11 @@ normalized away.
 Run `python3 scripts/qualify_query_relevance.py` with an external
 `CARGO_TARGET_DIR`. The native gate evaluates Success@1, MRR, Recall@k, nDCG,
 intent macro-F1, edge direction, path acceptance, no-answer precision,
-backend parity, deterministic ordering, and latency percentiles. Only response
-bytes are directly observable work counts today; the harness records the other
-work fields as uninstrumented instead of fabricating candidate or posting work.
+backend parity, deterministic ordering, and latency percentiles. The separate
+`compass.query-execution-profile/1` envelope records intent, recall, ranking,
+execution, and total timing plus candidates read, postings decoded, nodes and
+edges expanded, and serialized response bytes. Ordinary `compass.query/1`
+responses contain no timing fields and remain byte-deterministic.
 The reviewed executable threshold block lives beside the test so a failure is
 local and deterministic. Updating its expected identities, graph digest, or
 minimums requires an intentional review rather than copying a new result.

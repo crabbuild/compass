@@ -9,6 +9,14 @@
   while ambiguous symbols remain explicit instead of selecting an arbitrary
   candidate.
 
+- Reuse bounded alias, term, typo, and relation-seeded recall when resolving
+  structural query operands. Node trails now follow edge direction from source
+  to target and report `direction_mismatch` when a route exists only by
+  ignoring one or more edge directions.
+  Add a versioned profiled library response with intent, recall, ranking, and
+  execution timings plus real candidate, posting, expansion, and response-byte
+  work counts without changing the deterministic `compass.query/1` response.
+
 - Hard-cut typed symbol search to the deterministic `query-ranker/2`, add a
   23-question executable relevance baseline with reviewed paraphrase,
   production-versus-generated ambiguity, domain, and no-answer cases, and add

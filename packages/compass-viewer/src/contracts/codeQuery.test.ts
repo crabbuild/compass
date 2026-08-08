@@ -96,4 +96,15 @@ describe("compass.query/1", () => {
     const decoded = decodeCodeQueryResponse(value);
     expect(decoded.edges[0]?.evidence[0]?.candidates[0]?.nodeId).toBe("b");
   });
+
+  it("decodes directed-path mismatch diagnostics", () => {
+    const value = example() as Record<string, unknown>;
+    value.diagnostics = [{
+      code: "direction_mismatch",
+      message: "A trail exists only from the target back to the source.",
+      nodeId: null,
+      path: null
+    }];
+    expect(decodeCodeQueryResponse(value).diagnostics[0]?.code).toBe("direction_mismatch");
+  });
 });

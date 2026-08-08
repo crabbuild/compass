@@ -145,6 +145,23 @@ Downgrades must validate the output with the target binary. Do not reuse a
 newer physical SQLite/redb file merely because its filename matches. Rebuild
 when the target binary reports an unsupported major or adapter.
 
+## Update node-trail direction handling
+
+Typed node-trail queries now interpret operands as source then target and only
+follow edges in their published direction. A route requiring reverse traversal no longer
+appears as if it were a valid forward dependency; the response contains the
+typed `direction_mismatch` diagnostic instead.
+
+If a workflow intentionally needs the reverse route, swap its operands:
+
+```bash
+compass path "former-target" "former-source"
+compass ask "path from former-target to former-source"
+```
+
+Consumers that exhaustively decode `compass.query/1` diagnostic codes must add
+`direction_mismatch` before upgrading.
+
 ## Regenerate HTML graph exports
 
 Normal builds now write the self-contained page directly to

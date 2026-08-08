@@ -45,6 +45,27 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
         assert_eq!(response["schema"], "compass.query/1");
         assert_eq!(response["operation"], operation);
     }
+
+    let reverse = run(
+        Frontend::Compass,
+        [
+            OsString::from("node"),
+            OsString::from("Target"),
+            OsString::from("Caller"),
+            OsString::from("--graph"),
+            OsString::from(&graph),
+            OsString::from("--cache"),
+            OsString::from(&cache),
+            OsString::from("--root"),
+            OsString::from(&root),
+            OsString::from("--format"),
+            OsString::from("json"),
+        ],
+    );
+    assert_eq!(reverse.code, 0, "{}", reverse.stderr);
+    let response: Value = serde_json::from_str(&reverse.stdout)?;
+    assert_eq!(response["paths"], serde_json::json!([]));
+    assert_eq!(response["diagnostics"][0]["code"], "direction_mismatch");
     Ok(())
 }
 

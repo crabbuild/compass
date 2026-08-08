@@ -6,7 +6,9 @@ use std::fs;
 use compass_model::code_graph::{EdgeKind, GraphDocument};
 use compass_model::identity::edge_id;
 use compass_model::provenance::{OccurrenceRule, SourceAnchor};
-use compass_model::query_contract::{CallRequest, CodeQueryLimits, NodeTrailRequest};
+use compass_model::query_contract::{
+    CallRequest, CodeQueryLimits, NodeTrailRequest, QueryDiagnosticCode,
+};
 use compass_query::open;
 
 #[test]
@@ -181,6 +183,30 @@ fn node_trail_returns_a_stable_evidence_aware_path() -> Result<(), Box<dyn std::
         ["n:dependent", "n:caller", "n:list", "n:callee"]
     );
     assert_eq!(trail.paths[0].edge_ids.len(), 3);
+    Ok(())
+}
+
+#[test]
+fn node_trail_rejects_reverse_only_paths_with_a_typed_diagnostic()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
+    let trail = engine.node_trail(NodeTrailRequest {
+        source: "Store.callee".to_owned(),
+        target: "dependent".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits::default(),
+    })?;
+
+    assert!(trail.paths.is_empty());
+    assert!(trail.nodes.is_empty());
+    assert!(trail.edges.is_empty());
+    assert!(trail.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == QueryDiagnosticCode::DirectionMismatch
+            && diagnostic.message.contains("source-to-target direction")
+    }));
     Ok(())
 }
 
