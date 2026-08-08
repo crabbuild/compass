@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -11,25 +12,48 @@ use sha2::{Digest, Sha256};
 
 use crate::Outcome;
 
-const RELEASE_API_URL: &str = "https://api.github.com/repos/crabbuild/compass/releases/latest";
+const RELEASE_MANIFEST_URL: &str =
+    "https://github.com/crabbuild/compass/releases/latest/download/compass-release.json";
+const RELEASE_DOWNLOAD_BASE_URL: &str = "https://github.com/crabbuild/compass/releases/download";
+const RELEASE_MANIFEST_SCHEMA: &str = "compass.release/1";
 const USER_AGENT: &str = concat!("compass/", env!("CARGO_PKG_VERSION"));
-const METADATA_LIMIT: usize = 1024 * 1024;
-const CHECKSUM_LIMIT: usize = 4096;
+const MANIFEST_LIMIT: usize = 64 * 1024;
+const MAX_RELEASE_ARTIFACTS: usize = 32;
+const MAX_TARGET_LENGTH: usize = 128;
 const ARCHIVE_LIMIT: usize = 512 * 1024 * 1024;
 const BINARY_LIMIT: u64 = 512 * 1024 * 1024;
+const SUPPORTED_TARGETS: [&str; 6] = [
+    "aarch64-apple-darwin",
+    "aarch64-pc-windows-msvc",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+];
 
 #[derive(Debug, Deserialize)]
-struct Release {
-    tag_name: String,
-    draft: bool,
-    prerelease: bool,
-    assets: Vec<ReleaseAsset>,
+struct ReleaseManifest {
+    schema: String,
+    version: String,
+    tag: String,
+    artifacts: Vec<ReleaseArtifact>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ReleaseAsset {
-    name: String,
-    browser_download_url: String,
+struct ReleaseArtifact {
+    target: String,
+    archive: String,
+    sha256: String,
+    bytes: u64,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct ReleasePlan {
+    version: Version,
+    tag: String,
+    archive: String,
+    sha256: String,
+    bytes: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -55,11 +79,12 @@ fn upgrade() -> Result<String, String> {
     let current = Version::parse(env!("CARGO_PKG_VERSION"))
         .map_err(|error| format!("invalid installed Compass version: {error}"))?;
     let agent = http_agent();
-    let release: Release = serde_json::from_slice(&fetch(&agent, RELEASE_API_URL, METADATA_LIMIT)?)
-        .map_err(|error| format!("invalid GitHub release metadata: {error}"))?;
-    let latest = release_version(&release)?;
+    let manifest = fetch(&agent, RELEASE_MANIFEST_URL, MANIFEST_LIMIT)
+        .map_err(|error| format!("could not download Compass release manifest: {error}"))?;
+    let plan = parse_release_manifest(&manifest, target)?;
+    let latest = &plan.version;
 
-    match version_decision(&current, &latest) {
+    match version_decision(&current, latest) {
         VersionDecision::Current => {
             return Ok(format!("Compass {current} is already the latest version."));
         }
@@ -71,24 +96,20 @@ fn upgrade() -> Result<String, String> {
         VersionDecision::Upgrade => {}
     }
 
-    let archive_name = format!("compass-{target}.tar.gz");
-    let checksum_name = format!("{archive_name}.sha256");
-    let archive_asset = release_asset(&release, &archive_name)?;
-    let checksum_asset = release_asset(&release, &checksum_name)?;
     let temporary = tempfile::tempdir()
         .map_err(|error| format!("could not create upgrade directory: {error}"))?;
-    let archive_path = temporary.path().join(&archive_name);
+    let archive_path = temporary.path().join(&plan.archive);
+    let archive_url = format!("{RELEASE_DOWNLOAD_BASE_URL}/{}/{}", plan.tag, plan.archive);
 
-    download(
-        &agent,
-        &archive_asset.browser_download_url,
-        &archive_path,
-        ARCHIVE_LIMIT,
-    )
-    .map_err(|error| format!("could not download {archive_name}: {error}"))?;
-    let checksum = fetch(&agent, &checksum_asset.browser_download_url, CHECKSUM_LIMIT)
-        .map_err(|error| format!("could not download {checksum_name}: {error}"))?;
-    verify_checksum(&archive_path, &archive_name, &checksum)?;
+    let downloaded = download(&agent, &archive_url, &archive_path, ARCHIVE_LIMIT)
+        .map_err(|error| format!("could not download {}: {error}", plan.archive))?;
+    if downloaded != plan.bytes {
+        return Err(format!(
+            "release archive size mismatch for {}: expected {} bytes, downloaded {downloaded}",
+            plan.archive, plan.bytes
+        ));
+    }
+    verify_checksum(&archive_path, &plan.sha256)?;
 
     let executable_name = if target.contains("windows") {
         "compass.exe"
@@ -98,7 +119,7 @@ fn upgrade() -> Result<String, String> {
     let packaged_path = PathBuf::from(format!("compass-{target}")).join(executable_name);
     let staged_path = temporary.path().join(format!("staged-{executable_name}"));
     extract_executable(&archive_path, &packaged_path, &staged_path)?;
-    validate_executable(&staged_path, &latest)?;
+    validate_executable(&staged_path, latest)?;
     self_replace::self_replace(&staged_path).map_err(|error| {
         let installed = std::env::current_exe()
             .map_or_else(|_| "the running executable".to_owned(), |path| path.display().to_string());
@@ -121,7 +142,7 @@ fn http_agent() -> ureq::Agent {
 fn fetch(agent: &ureq::Agent, url: &str, max_bytes: usize) -> Result<Vec<u8>, String> {
     let response = agent
         .get(url)
-        .header("Accept", "application/vnd.github+json")
+        .header("Accept", "application/json")
         .header("User-Agent", USER_AGENT)
         .call()
         .map_err(|error| error.to_string())?;
@@ -149,7 +170,7 @@ fn download(
     url: &str,
     destination: &Path,
     max_bytes: usize,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let response = agent
         .get(url)
         .header("Accept", "application/octet-stream")
@@ -170,39 +191,98 @@ fn download(
     if written > u64::try_from(max_bytes).map_err(|_| "download size limit is invalid")? {
         return Err(format!("response exceeded {max_bytes} bytes"));
     }
-    output.sync_all().map_err(|error| error.to_string())
+    output.sync_all().map_err(|error| error.to_string())?;
+    Ok(written)
 }
 
-fn release_version(release: &Release) -> Result<Version, String> {
-    if release.draft || release.prerelease {
-        return Err("GitHub latest release is not a stable published release".to_owned());
+fn parse_release_manifest(bytes: &[u8], target: &str) -> Result<ReleasePlan, String> {
+    let manifest: ReleaseManifest = serde_json::from_slice(bytes)
+        .map_err(|error| format!("invalid Compass release manifest: {error}"))?;
+    release_plan(manifest, target)
+}
+
+fn release_plan(manifest: ReleaseManifest, target: &str) -> Result<ReleasePlan, String> {
+    if manifest.schema != RELEASE_MANIFEST_SCHEMA {
+        return Err(format!(
+            "unsupported Compass release manifest schema '{}'",
+            manifest.schema
+        ));
     }
-    let raw = release
-        .tag_name
-        .strip_prefix("compass-v")
-        .ok_or_else(|| format!("invalid Compass release tag '{}'", release.tag_name))?;
-    let version =
-        Version::parse(raw).map_err(|error| format!("invalid Compass release tag: {error}"))?;
+    let version = Version::parse(&manifest.version)
+        .map_err(|error| format!("invalid Compass release version: {error}"))?;
     if !version.pre.is_empty() {
         return Err(format!(
-            "latest Compass release '{}' is a prerelease",
-            release.tag_name
+            "Compass release manifest version '{}' is a prerelease",
+            manifest.version
         ));
     }
-    Ok(version)
-}
-
-fn release_asset<'a>(release: &'a Release, name: &str) -> Result<&'a ReleaseAsset, String> {
-    let mut matches = release.assets.iter().filter(|asset| asset.name == name);
-    let asset = matches
-        .next()
-        .ok_or_else(|| format!("latest Compass release is missing asset {name}"))?;
-    if matches.next().is_some() {
+    let expected_tag = format!("compass-v{version}");
+    if manifest.tag != expected_tag {
         return Err(format!(
-            "latest Compass release contains duplicate asset {name}"
+            "Compass release manifest tag '{}' does not match version {version}",
+            manifest.tag
         ));
     }
-    Ok(asset)
+    if manifest.artifacts.is_empty() || manifest.artifacts.len() > MAX_RELEASE_ARTIFACTS {
+        return Err(format!(
+            "Compass release manifest must contain between 1 and {MAX_RELEASE_ARTIFACTS} artifacts"
+        ));
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut selected = None;
+    for artifact in manifest.artifacts {
+        if artifact.target.is_empty()
+            || artifact.target.len() > MAX_TARGET_LENGTH
+            || !artifact.target.bytes().all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'-' | b'_' | b'.')
+            })
+        {
+            return Err(format!(
+                "Compass release manifest contains invalid target '{}'",
+                artifact.target
+            ));
+        }
+        if !seen.insert(artifact.target.clone()) {
+            return Err(format!(
+                "Compass release manifest contains duplicate target '{}'",
+                artifact.target
+            ));
+        }
+        let expected_archive = format!("compass-{}.tar.gz", artifact.target);
+        if artifact.archive != expected_archive {
+            return Err(format!(
+                "Compass release manifest archive '{}' does not match target '{}'",
+                artifact.archive, artifact.target
+            ));
+        }
+        if artifact.sha256.len() != 64
+            || !artifact.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(format!(
+                "Compass release manifest contains an invalid SHA-256 digest for '{}'",
+                artifact.target
+            ));
+        }
+        if artifact.bytes == 0 || artifact.bytes > ARCHIVE_LIMIT as u64 {
+            return Err(format!(
+                "Compass release manifest contains an invalid archive size for '{}'",
+                artifact.target
+            ));
+        }
+        if artifact.target == target {
+            selected = Some(ReleasePlan {
+                version: version.clone(),
+                tag: expected_tag.clone(),
+                archive: artifact.archive,
+                sha256: artifact.sha256,
+                bytes: artifact.bytes,
+            });
+        }
+    }
+    selected.ok_or_else(|| format!("Compass release manifest is missing target '{target}'"))
 }
 
 fn version_decision(current: &Version, latest: &Version) -> VersionDecision {
@@ -214,15 +294,10 @@ fn version_decision(current: &Version, latest: &Version) -> VersionDecision {
 }
 
 fn supported_target(target: &str) -> Option<&'static str> {
-    match target {
-        "x86_64-apple-darwin" => Some("x86_64-apple-darwin"),
-        "aarch64-apple-darwin" => Some("aarch64-apple-darwin"),
-        "x86_64-unknown-linux-gnu" => Some("x86_64-unknown-linux-gnu"),
-        "aarch64-unknown-linux-gnu" => Some("aarch64-unknown-linux-gnu"),
-        "x86_64-pc-windows-msvc" => Some("x86_64-pc-windows-msvc"),
-        "aarch64-pc-windows-msvc" => Some("aarch64-pc-windows-msvc"),
-        _ => None,
-    }
+    SUPPORTED_TARGETS
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == target)
 }
 
 fn current_target() -> Result<&'static str, String> {
@@ -230,21 +305,9 @@ fn current_target() -> Result<&'static str, String> {
     supported_target(target).ok_or_else(|| format!("unsupported upgrade target: {target}"))
 }
 
-fn verify_checksum(archive: &Path, archive_name: &str, checksum: &[u8]) -> Result<(), String> {
-    let checksum =
-        std::str::from_utf8(checksum).map_err(|_| "release checksum is not UTF-8".to_owned())?;
-    let mut fields = checksum.split_whitespace();
-    let expected = fields
-        .next()
-        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .ok_or_else(|| "release checksum does not contain a valid SHA-256 digest".to_owned())?;
-    let filename = fields
-        .next()
-        .ok_or_else(|| "release checksum does not name its archive".to_owned())?;
-    if fields.next().is_some() || filename.trim_start_matches('*') != archive_name {
-        return Err(format!(
-            "release checksum does not match archive {archive_name}"
-        ));
+fn verify_checksum(archive: &Path, expected: &str) -> Result<(), String> {
+    if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("release manifest does not contain a valid SHA-256 digest".to_owned());
     }
 
     let mut file = File::open(archive)
@@ -364,12 +427,20 @@ fn validate_executable(path: &Path, expected: &Version) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    fn release(tag: &str) -> Release {
-        Release {
-            tag_name: tag.to_owned(),
-            draft: false,
-            prerelease: false,
-            assets: Vec::new(),
+    fn manifest(version: &str) -> ReleaseManifest {
+        ReleaseManifest {
+            schema: RELEASE_MANIFEST_SCHEMA.to_owned(),
+            version: version.to_owned(),
+            tag: format!("compass-v{version}"),
+            artifacts: SUPPORTED_TARGETS
+                .iter()
+                .map(|target| ReleaseArtifact {
+                    target: (*target).to_owned(),
+                    archive: format!("compass-{target}.tar.gz"),
+                    sha256: "a".repeat(64),
+                    bytes: 42,
+                })
+                .collect(),
         }
     }
 
@@ -388,13 +459,6 @@ mod tests {
             version_decision(&current, &Version::new(1, 2, 2)),
             VersionDecision::Newer
         );
-
-        assert_eq!(release_version(&release("compass-v1.2.3")), Ok(current));
-        assert!(release_version(&release("v1.2.3")).is_err());
-        assert!(release_version(&release("compass-v1.2.4-beta.1")).is_err());
-        let mut prerelease = release("compass-v1.2.4");
-        prerelease.prerelease = true;
-        assert!(release_version(&prerelease).is_err());
     }
 
     #[test]
@@ -414,36 +478,99 @@ mod tests {
     }
 
     #[test]
-    fn release_assets_must_be_present_once() {
-        let mut release = release("compass-v1.2.3");
-        release.assets.push(ReleaseAsset {
-            name: "compass-a.tar.gz".to_owned(),
-            browser_download_url: "https://example.test/a".to_owned(),
+    fn release_manifest_selects_one_validated_target() -> Result<(), Box<dyn std::error::Error>> {
+        let fixture = serde_json::json!({
+            "schema": RELEASE_MANIFEST_SCHEMA,
+            "version": "1.2.3",
+            "tag": "compass-v1.2.3",
+            "artifacts": SUPPORTED_TARGETS.iter().map(|target| serde_json::json!({
+                "target": target,
+                "archive": format!("compass-{target}.tar.gz"),
+                "sha256": "a".repeat(64),
+                "bytes": 42,
+            })).collect::<Vec<_>>(),
         });
-        assert!(release_asset(&release, "compass-a.tar.gz").is_ok());
-        assert!(release_asset(&release, "missing").is_err());
-        release.assets.push(ReleaseAsset {
-            name: "compass-a.tar.gz".to_owned(),
-            browser_download_url: "https://example.test/b".to_owned(),
-        });
-        assert!(release_asset(&release, "compass-a.tar.gz").is_err());
+        let bytes = serde_json::to_vec(&fixture)?;
+        let plan =
+            parse_release_manifest(&bytes, "aarch64-apple-darwin").map_err(io::Error::other)?;
+        assert_eq!(plan.version, Version::new(1, 2, 3));
+        assert_eq!(plan.tag, "compass-v1.2.3");
+        assert_eq!(plan.archive, "compass-aarch64-apple-darwin.tar.gz");
+        assert_eq!(plan.sha256, "a".repeat(64));
+        assert_eq!(plan.bytes, 42);
+        Ok(())
     }
 
     #[test]
-    fn checksum_verification_requires_the_expected_name_and_digest()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn release_manifest_rejects_unknown_schema_prerelease_and_mismatched_tag() {
+        let mut unknown = manifest("1.2.3");
+        unknown.schema = "compass.release/2".to_owned();
+        assert!(release_plan(unknown, "aarch64-apple-darwin").is_err());
+
+        assert!(release_plan(manifest("1.2.4-beta.1"), "aarch64-apple-darwin").is_err());
+
+        let mut mismatched = manifest("1.2.3");
+        mismatched.tag = "compass-v1.2.4".to_owned();
+        assert!(release_plan(mismatched, "aarch64-apple-darwin").is_err());
+    }
+
+    #[test]
+    fn release_manifest_rejects_incomplete_or_ambiguous_artifacts() {
+        let mut incomplete = manifest("1.2.3");
+        incomplete
+            .artifacts
+            .retain(|artifact| artifact.target != "aarch64-apple-darwin");
+        assert!(release_plan(incomplete, "aarch64-apple-darwin").is_err());
+
+        let mut duplicate = manifest("1.2.3");
+        duplicate.artifacts[5] = ReleaseArtifact {
+            target: duplicate.artifacts[0].target.clone(),
+            archive: duplicate.artifacts[0].archive.clone(),
+            sha256: duplicate.artifacts[0].sha256.clone(),
+            bytes: duplicate.artifacts[0].bytes,
+        };
+        assert!(release_plan(duplicate, "aarch64-apple-darwin").is_err());
+    }
+
+    #[test]
+    fn release_manifest_accepts_a_bounded_future_target() {
+        let mut future = manifest("1.2.3");
+        future.artifacts.push(ReleaseArtifact {
+            target: "riscv64gc-unknown-linux-gnu".to_owned(),
+            archive: "compass-riscv64gc-unknown-linux-gnu.tar.gz".to_owned(),
+            sha256: "b".repeat(64),
+            bytes: 42,
+        });
+        assert!(release_plan(future, "aarch64-apple-darwin").is_ok());
+    }
+
+    #[test]
+    fn release_manifest_rejects_invalid_artifact_contracts() {
+        let mut invalid_archive = manifest("1.2.3");
+        invalid_archive.artifacts[0].archive = "../compass.tar.gz".to_owned();
+        assert!(release_plan(invalid_archive, "aarch64-apple-darwin").is_err());
+
+        let mut invalid_digest = manifest("1.2.3");
+        invalid_digest.artifacts[0].sha256 = "not-a-digest".to_owned();
+        assert!(release_plan(invalid_digest, "aarch64-apple-darwin").is_err());
+
+        let mut invalid_size = manifest("1.2.3");
+        invalid_size.artifacts[0].bytes = 0;
+        assert!(release_plan(invalid_size, "aarch64-apple-darwin").is_err());
+    }
+
+    #[test]
+    fn checksum_verification_requires_the_expected_digest() -> Result<(), Box<dyn std::error::Error>>
+    {
         let directory = tempfile::tempdir()?;
         let archive = directory.path().join("compass-test.tar.gz");
         std::fs::write(&archive, b"verified archive")?;
         let digest = format!("{:x}", Sha256::digest(b"verified archive"));
-        let checksum = format!("{digest}  compass-test.tar.gz\n");
-        assert!(verify_checksum(&archive, "compass-test.tar.gz", checksum.as_bytes()).is_ok());
-        assert!(verify_checksum(&archive, "other.tar.gz", checksum.as_bytes()).is_err());
+        assert!(verify_checksum(&archive, &digest).is_ok());
         assert!(
             verify_checksum(
                 &archive,
-                "compass-test.tar.gz",
-                b"0000000000000000000000000000000000000000000000000000000000000000  compass-test.tar.gz"
+                "0000000000000000000000000000000000000000000000000000000000000000"
             )
             .is_err()
         );

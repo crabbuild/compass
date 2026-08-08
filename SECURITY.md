@@ -46,6 +46,11 @@ Compass parses untrusted project content and graph files. Its default structural
 - Assistant setup can register local command hooks. Review generated hook files
   before trusting them in the host, and reinstall after moving the Compass
   executable so the managed command path remains accurate.
+- `compass upgrade` downloads the bounded `compass.release/1` manifest and the
+  selected archive from official GitHub release URLs. It validates the schema,
+  stable tag/version binding, bounded unique targets, selected archive name and
+  size, SHA-256 digest, archive path, and staged executable version before
+  replacing the running binary.
 
 Include the selected options and endpoint type in reports about these features. Never include live credentials.
 
