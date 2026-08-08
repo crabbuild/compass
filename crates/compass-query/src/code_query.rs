@@ -16,7 +16,9 @@ use crate::cql::{QueryError, QueryErrorKind};
 use crate::graph_engine::LocalStoreSnapshot;
 use crate::index::QueryEngineKind;
 use crate::join_program_evidence;
+use crate::recall::{CandidateSource, RecallBudget, SearchCandidatePool};
 use crate::source::{VerifiedSource, verified_source};
+use crate::text::strip_diacritics;
 
 type GraphPath = (Vec<String>, Vec<String>);
 type BoundedPathResult = (Option<GraphPath>, bool);
@@ -528,60 +530,43 @@ impl CodeQueryEngine {
         let candidate_limit =
             usize::try_from(request.limits.max_candidates.max(request.limits.max_nodes))
                 .unwrap_or(usize::MAX);
-        let (candidates, candidate_truncated) = if let Some(candidates) = self
+        let budget = RecallBudget {
+            max_total_candidates: candidate_limit,
+            max_per_source: candidate_limit,
+        };
+        let mut pool = SearchCandidatePool::new(budget);
+
+        if let Some(node) = self.backend.node_by_id(&request.query)? {
+            pool.add(CandidateSource::ExactId, node);
+        }
+
+        let normalized_name_query = normalize_symbol(&request.query);
+        let (exact_name_nodes, exact_name_truncated) = self
+            .backend
+            .nodes_by_normalized_name(&normalized_name_query, candidate_limit)?;
+        pool.add_many(CandidateSource::ExactName, exact_name_nodes);
+        response.truncated |= exact_name_truncated;
+
+        let (term_nodes, term_truncated) = if let Some(candidates) = self
             .backend
             .store_term_candidates(&terms, candidate_limit)?
         {
             candidates
         } else {
-            let connection = self.connection.as_ref().ok_or_else(|| {
-                QueryError::new(
-                    QueryErrorKind::Internal,
-                    "query_index_missing",
-                    "materialized query engine has no search index",
-                )
-            })?;
-            let mut statement = connection
-                .prepare(
-                    // Candidate truncation is part of the public response. Keep
-                    // it backend-neutral: immutable term postings and the JSON
-                    // FTS accelerator both select IDs in canonical byte order;
-                    // common Rust ranking is applied only after that bound.
-                    "SELECT n.id
-                         FROM node_fts JOIN nodes n ON n.id = node_fts.node_id
-                         WHERE node_fts MATCH ?1
-                         ORDER BY n.id
-                         LIMIT ?2",
-                )
-                .map_err(sql_error)?;
-            let sql_limit = i64::try_from(candidate_limit.saturating_add(1)).unwrap_or(i64::MAX);
-            let mut rows = statement
-                .query(params![query, sql_limit])
-                .map_err(sql_error)?;
-            let mut nodes = Vec::new();
-            while let Some(row) = rows.next().map_err(sql_error)? {
-                let id: String = row.get(0).map_err(sql_error)?;
-                let node = self.backend.node_by_id(&id)?.ok_or_else(|| {
-                    QueryError::new(
-                        QueryErrorKind::GraphInvariant,
-                        "query_graph_invariant",
-                        format!("index references absent graph node {id}"),
-                    )
-                })?;
-                nodes.push(node);
-            }
-            let truncated = nodes.len() > candidate_limit;
-            if truncated {
-                nodes.truncate(candidate_limit);
-            }
-            (nodes, truncated)
+            self.materialized_term_candidates(&query, candidate_limit)?
         };
-        response.truncated |= candidate_truncated;
-        let normalized_query = request.query.trim().to_lowercase();
+        pool.add_many(CandidateSource::TermIndex, term_nodes);
+        response.truncated |= term_truncated;
+
+        response.truncated |= pool.truncated;
+        let candidates = pool.into_vec();
+        let normalized_query = strip_diacritics(request.query.trim()).to_lowercase();
         let mut ranked = Vec::new();
-        for node in candidates {
-            let normalized_name = node.name.to_lowercase();
-            let normalized_qualified = node.qualified_name.to_lowercase();
+        for candidate in candidates {
+            let source_rank = candidate.best_source_rank();
+            let node = candidate.node;
+            let normalized_name = strip_diacritics(&node.name).to_lowercase();
+            let normalized_qualified = strip_diacritics(&node.qualified_name).to_lowercase();
             let tier = if normalized_qualified == normalized_query {
                 4_u8
             } else if normalized_name == normalized_query {
@@ -600,9 +585,21 @@ impl CodeQueryEngine {
             if normalized_qualified.contains(&normalized_query) {
                 matched_fields.push("qualified_name".to_owned());
             }
-            ranked.push((tier, node.id.clone(), matched_fields, node));
+            ranked.push((
+                f64::from(tier) * 1_000_000.0
+                    + f64::from(source_rank)
+                    + matched_fields.len() as f64,
+                node.id.clone(),
+                matched_fields,
+                node,
+            ));
         }
-        ranked.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+        ranked.sort_by(|left, right| {
+            right
+                .0
+                .total_cmp(&left.0)
+                .then_with(|| left.1.cmp(&right.1))
+        });
         let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);
         if ranked.len() > max_nodes {
             ranked.truncate(max_nodes);
@@ -614,10 +611,10 @@ impl CodeQueryEngine {
                 path: None,
             });
         }
-        for (tier, id, matched_fields, node) in ranked {
+        for (score, id, matched_fields, node) in ranked {
             response.results.push(SearchHit {
                 node_id: id,
-                score: f64::from(tier) * 1_000_000.0 + matched_fields.len() as f64,
+                score,
                 matched_fields,
             });
             response.nodes.push(query_node(&node));
@@ -631,6 +628,54 @@ impl CodeQueryEngine {
             });
         }
         self.finish_response(&mut response)
+    }
+
+    fn materialized_term_candidates(
+        &self,
+        query: &str,
+        candidate_limit: usize,
+    ) -> Result<(Vec<NodeRecord>, bool), QueryError> {
+        let connection = self.connection.as_ref().ok_or_else(|| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "query_index_missing",
+                "materialized query engine has no search index",
+            )
+        })?;
+        let mut statement = connection
+            .prepare(
+                // Candidate truncation is part of the public response. Keep
+                // it backend-neutral: immutable term postings and the JSON
+                // FTS accelerator both select IDs in canonical byte order;
+                // common Rust ranking is applied only after that bound.
+                "SELECT n.id
+                     FROM node_fts JOIN nodes n ON n.id = node_fts.node_id
+                     WHERE node_fts MATCH ?1
+                     ORDER BY n.id
+                     LIMIT ?2",
+            )
+            .map_err(sql_error)?;
+        let sql_limit = i64::try_from(candidate_limit.saturating_add(1)).unwrap_or(i64::MAX);
+        let mut rows = statement
+            .query(params![query, sql_limit])
+            .map_err(sql_error)?;
+        let mut nodes = Vec::new();
+        while let Some(row) = rows.next().map_err(sql_error)? {
+            let id: String = row.get(0).map_err(sql_error)?;
+            let node = self.backend.node_by_id(&id)?.ok_or_else(|| {
+                QueryError::new(
+                    QueryErrorKind::GraphInvariant,
+                    "query_graph_invariant",
+                    format!("index references absent graph node {id}"),
+                )
+            })?;
+            nodes.push(node);
+        }
+        let truncated = nodes.len() > candidate_limit;
+        if truncated {
+            nodes.truncate(candidate_limit);
+        }
+        Ok((nodes, truncated))
     }
 
     pub fn callers(&self, request: CallRequest) -> Result<CodeQueryResponse, QueryError> {

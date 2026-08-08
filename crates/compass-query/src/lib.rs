@@ -7,6 +7,7 @@ mod cql;
 mod graph_engine;
 mod index;
 mod program_join;
+mod recall;
 mod relevance;
 mod score;
 mod source;
