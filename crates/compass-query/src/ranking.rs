@@ -39,14 +39,19 @@ pub(crate) fn rank_search_candidates(
     query: &str,
     terms: &[String],
     candidates: Vec<SearchCandidate>,
+    limit: usize,
 ) -> Vec<RankedSearchResult> {
     match profile {
-        SearchRankProfile::QueryRankerV1 => rank_legacy(query, candidates),
-        SearchRankProfile::QueryRankerV2 => rank_v2(query, terms, candidates),
+        SearchRankProfile::QueryRankerV1 => rank_legacy(query, candidates, limit),
+        SearchRankProfile::QueryRankerV2 => rank_v2(query, terms, candidates, limit),
     }
 }
 
-fn rank_legacy(query: &str, candidates: Vec<SearchCandidate>) -> Vec<RankedSearchResult> {
+fn rank_legacy(
+    query: &str,
+    candidates: Vec<SearchCandidate>,
+    limit: usize,
+) -> Vec<RankedSearchResult> {
     let normalized_query = strip_diacritics(query).to_lowercase();
     let mut ranked = Vec::new();
 
@@ -86,12 +91,7 @@ fn rank_legacy(query: &str, candidates: Vec<SearchCandidate>) -> Vec<RankedSearc
         });
     }
 
-    ranked.sort_by(|left, right| {
-        right
-            .score
-            .total_cmp(&left.score)
-            .then_with(|| left.node_id.cmp(&right.node_id))
-    });
+    retain_top_ranked(&mut ranked, limit, compare_ranked_results);
     ranked
 }
 
@@ -99,6 +99,7 @@ fn rank_v2(
     query: &str,
     terms: &[String],
     candidates: Vec<SearchCandidate>,
+    limit: usize,
 ) -> Vec<RankedSearchResult> {
     let normalized_query = strip_diacritics(query).to_lowercase();
     let mut ranked_terms = terms
@@ -162,8 +163,27 @@ fn rank_v2(
         });
     }
 
-    ranked.sort_by(compare_ranked_candidates);
+    retain_top_ranked(&mut ranked, limit, compare_ranked_candidates);
     ranked.into_iter().map(|entry| entry.result).collect()
+}
+
+fn retain_top_ranked<T>(ranked: &mut Vec<T>, limit: usize, compare: fn(&T, &T) -> Ordering) {
+    if ranked.len() > limit {
+        if limit == 0 {
+            ranked.clear();
+            return;
+        }
+        ranked.select_nth_unstable_by(limit, compare);
+        ranked.truncate(limit);
+    }
+    ranked.sort_by(compare);
+}
+
+fn compare_ranked_results(left: &RankedSearchResult, right: &RankedSearchResult) -> Ordering {
+    right
+        .score
+        .total_cmp(&left.score)
+        .then_with(|| left.node_id.cmp(&right.node_id))
 }
 
 #[derive(Debug)]
@@ -452,6 +472,7 @@ mod tests {
             "query",
             std::slice::from_ref(&"query".to_owned()),
             candidates,
+            usize::MAX,
         );
         assert_eq!(ranked[0].node_id, "n:a");
         assert_eq!(ranked[1].node_id, "n:z");
@@ -486,6 +507,7 @@ mod tests {
             "search",
             std::slice::from_ref(&"search".to_owned()),
             candidates,
+            usize::MAX,
         );
         assert_eq!(ranked[0].node_id, "n:source");
     }
@@ -507,8 +529,44 @@ mod tests {
             "same",
             std::slice::from_ref(&"same".to_owned()),
             candidates,
+            usize::MAX,
         );
         assert_eq!(ranked[0].node_id, "n:aa");
         assert_eq!(ranked[1].node_id, "n:ab");
+    }
+
+    #[test]
+    fn bounded_ranking_matches_the_prefix_of_a_full_ranking() {
+        let candidates = ["n:d", "n:b", "n:a", "n:c"]
+            .into_iter()
+            .map(|id| SearchCandidate {
+                node: node(id, "same", NodeKind::Function, "src/lib.rs", false),
+                sources: BTreeSet::from([CandidateSource::Alias]),
+            })
+            .collect::<Vec<_>>();
+        let full = rank_search_candidates(
+            QueryRankerV2,
+            "same",
+            std::slice::from_ref(&"same".to_owned()),
+            candidates.clone(),
+            usize::MAX,
+        );
+        let bounded = rank_search_candidates(
+            QueryRankerV2,
+            "same",
+            std::slice::from_ref(&"same".to_owned()),
+            candidates,
+            2,
+        );
+        assert_eq!(
+            bounded
+                .iter()
+                .map(|result| result.node_id.as_str())
+                .collect::<Vec<_>>(),
+            full.iter()
+                .take(2)
+                .map(|result| result.node_id.as_str())
+                .collect::<Vec<_>>()
+        );
     }
 }

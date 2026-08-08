@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use compass_graph::{GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS, SnapshotReadLimits};
 use compass_ir::ProgramBundle;
@@ -26,6 +27,7 @@ type BoundedPathResult = (Option<GraphPath>, bool);
 const MAX_CODE_QUERY_CANDIDATES: u32 = 256;
 const MAX_RECALL_FUZZY_VARIANTS_PER_TERM: usize = 3;
 const MIN_RECALL_CANDIDATES_BEFORE_FUZZY: usize = 4;
+const SEARCH_QUERY_CACHE_CAPACITY: usize = 64;
 
 struct TraversalBudget {
     remaining_nodes: usize,
@@ -89,6 +91,51 @@ pub struct CodeQueryEngine {
     pub(crate) index_path: PathBuf,
     pub(crate) partial_graph_message: Option<String>,
     pub(crate) engine_kind: QueryEngineKind,
+    pub(crate) search_query_cache: Mutex<SearchQueryCache>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PreparedSearchQuery {
+    terms: Vec<String>,
+    fts_query: String,
+}
+
+#[derive(Debug)]
+pub(crate) struct SearchQueryCache {
+    entries: HashMap<String, PreparedSearchQuery>,
+    order: VecDeque<String>,
+    capacity: usize,
+}
+
+impl Default for SearchQueryCache {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::with_capacity(SEARCH_QUERY_CACHE_CAPACITY),
+            order: VecDeque::with_capacity(SEARCH_QUERY_CACHE_CAPACITY),
+            capacity: SEARCH_QUERY_CACHE_CAPACITY,
+        }
+    }
+}
+
+impl SearchQueryCache {
+    fn get(&mut self, query: &str) -> Option<PreparedSearchQuery> {
+        let prepared = self.entries.get(query)?.clone();
+        self.order.retain(|cached| cached != query);
+        self.order.push_back(query.to_owned());
+        Some(prepared)
+    }
+
+    fn insert(&mut self, query: String, prepared: PreparedSearchQuery) {
+        self.order.retain(|cached| cached != &query);
+        while self.entries.len() >= self.capacity {
+            let Some(expired) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&expired);
+        }
+        self.order.push_back(query.clone());
+        self.entries.insert(query, prepared);
+    }
 }
 
 pub(crate) enum CodeGraphBackend {
@@ -517,8 +564,9 @@ fn sort_edge_indices(edges: &mut [usize], graph: &GraphDocument) {
 impl CodeQueryEngine {
     pub fn search(&self, request: SearchRequest) -> Result<CodeQueryResponse, QueryError> {
         validate_limits(&request.limits)?;
-        let terms = search_query_terms(&request.query)?;
-        let query = fts_query(&request.query)?;
+        let prepared = self.prepare_search_query(&request.query)?;
+        let terms = prepared.terms;
+        let query = prepared.fts_query;
         let mut response =
             CodeQueryResponse::empty(CodeQueryOperation::Search, request.limits.clone());
         if query.is_empty() {
@@ -594,14 +642,16 @@ impl CodeQueryEngine {
 
         response.truncated |= pool.is_truncated();
         let candidates = pool.into_vec();
+        let candidate_count = candidates.len();
+        let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);
         let ranked = rank_search_candidates(
             SearchRankProfile::from_env(),
             &request.query,
             &terms,
             candidates,
+            max_nodes,
         );
-        let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);
-        if ranked.len() > max_nodes {
+        if candidate_count > max_nodes {
             response.truncated = true;
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::BoundedTruncation,
@@ -610,7 +660,7 @@ impl CodeQueryEngine {
                 path: None,
             });
         }
-        for result in ranked.into_iter().take(max_nodes) {
+        for result in ranked {
             let score = result.score;
             let id = result.node_id;
             let matched_fields = result.matched_fields;
@@ -631,6 +681,31 @@ impl CodeQueryEngine {
             });
         }
         self.finish_response(&mut response)
+    }
+
+    fn prepare_search_query(&self, query: &str) -> Result<PreparedSearchQuery, QueryError> {
+        validate_search_query_size(query)?;
+        {
+            let mut cache = match self.search_query_cache.lock() {
+                Ok(cache) => cache,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if let Some(prepared) = cache.get(query) {
+                return Ok(prepared);
+            }
+        }
+
+        let terms = search_query_terms(query)?;
+        let prepared = PreparedSearchQuery {
+            fts_query: fts_query_from_terms(&terms),
+            terms,
+        };
+        let mut cache = match self.search_query_cache.lock() {
+            Ok(cache) => cache,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        cache.insert(query.to_owned(), prepared.clone());
+        Ok(prepared)
     }
 
     fn materialized_term_candidates(
@@ -1344,15 +1419,15 @@ pub(crate) fn validate_limits(
     Ok(())
 }
 
-fn fts_query(value: &str) -> Result<String, QueryError> {
-    Ok(search_query_terms(value)?
-        .into_iter()
+fn fts_query_from_terms(terms: &[String]) -> String {
+    terms
+        .iter()
         .map(|term| format!("\"{}\"*", term.replace('"', "\"\"")))
         .collect::<Vec<_>>()
-        .join(" AND "))
+        .join(" AND ")
 }
 
-fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
+fn validate_search_query_size(value: &str) -> Result<(), QueryError> {
     if value.len() > 4_096 {
         return Err(QueryError::new(
             QueryErrorKind::InvalidParameter,
@@ -1360,6 +1435,11 @@ fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
             "search query exceeds 4096 bytes",
         ));
     }
+    Ok(())
+}
+
+fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
+    validate_search_query_size(value)?;
     let terms = value
         .split(|character: char| !(character.is_alphanumeric() || character == '_'))
         .filter(|term| {
@@ -1383,7 +1463,8 @@ fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
 }
 
 fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
-    let mut variants = BTreeSet::new();
+    let mut seen = BTreeSet::new();
+    let mut variants = Vec::new();
     let max_total_variants = terms
         .len()
         .saturating_mul(MAX_RECALL_FUZZY_VARIANTS_PER_TERM)
@@ -1401,27 +1482,13 @@ fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
         let per_term_target = remaining_capacity.min(MAX_RECALL_FUZZY_VARIANTS_PER_TERM);
         let mut emitted = 0_usize;
         let stripped = strip_diacritics(term);
-        if stripped.len() >= 3 && variants.insert(stripped) {
+        if stripped != *term && stripped.len() >= 3 && seen.insert(stripped.clone()) {
+            variants.push(stripped);
             emitted = emitted.saturating_add(1);
         }
 
-        for index in 0..chars.len() {
-            if emitted >= per_term_target {
-                break;
-            }
-            let mut variant = chars.clone();
-            variant.remove(index);
-            if variant.len() < 3 {
-                continue;
-            }
-            if variants.insert(variant.iter().collect()) {
-                emitted = emitted.saturating_add(1);
-            }
-        }
-
-        if emitted >= per_term_target {
-            continue;
-        }
+        // A transposition is a common typo and can recover the exact indexed
+        // symbol without broadening the prefix scan.
         for index in 0..chars.len().saturating_sub(1) {
             if emitted >= per_term_target {
                 break;
@@ -1431,7 +1498,9 @@ fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
             if variant == chars {
                 continue;
             }
-            if variants.insert(variant.iter().collect()) {
+            let variant = variant.iter().collect::<String>();
+            if seen.insert(variant.clone()) {
+                variants.push(variant);
                 emitted = emitted.saturating_add(1);
             }
         }
@@ -1439,15 +1508,24 @@ fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
         if emitted >= per_term_target {
             continue;
         }
-        if chars.len() > 3 && variants.insert(chars[..chars.len() - 1].iter().collect()) {
-            emitted = emitted.saturating_add(1);
-        }
-        if chars.len() > 4 && emitted < per_term_target {
-            variants.insert(chars[1..].iter().collect());
+        for index in 0..chars.len() {
+            if emitted >= per_term_target {
+                break;
+            }
+            let mut variant = chars.clone();
+            variant.remove(index);
+            if variant.len() < 3 {
+                continue;
+            }
+            let variant = variant.iter().collect::<String>();
+            if seen.insert(variant.clone()) {
+                variants.push(variant);
+                emitted = emitted.saturating_add(1);
+            }
         }
     }
 
-    variants.into_iter().collect()
+    variants
 }
 
 pub(crate) fn enforce_response_size(response: &mut CodeQueryResponse) -> Result<(), QueryError> {
@@ -1726,7 +1804,10 @@ mod adjacency_tests {
 
 #[cfg(test)]
 mod fuzzy_term_variant_tests {
-    use super::{MAX_RECALL_FUZZY_VARIANTS_PER_TERM, recall_fuzzy_term_variants};
+    use super::{
+        MAX_RECALL_FUZZY_VARIANTS_PER_TERM, PreparedSearchQuery, SearchQueryCache,
+        recall_fuzzy_term_variants,
+    };
 
     #[test]
     fn recall_fuzzy_term_variants_is_deterministic_and_bounded() {
@@ -1760,5 +1841,37 @@ mod fuzzy_term_variant_tests {
                 .iter()
                 .any(|variant| variant == "a" || variant == "ab" || variant == "abc")
         );
+    }
+
+    #[test]
+    fn recall_fuzzy_term_variants_prioritizes_transpositions() {
+        let variants = recall_fuzzy_term_variants(&["lits".to_owned()]);
+        assert_eq!(variants.first().map(String::as_str), Some("ilts"));
+        assert!(variants.iter().any(|variant| variant == "list"));
+    }
+
+    fn prepared(term: &str) -> PreparedSearchQuery {
+        PreparedSearchQuery {
+            terms: vec![term.to_owned()],
+            fts_query: format!("\"{term}\"*"),
+        }
+    }
+
+    #[test]
+    fn search_query_cache_is_bounded_and_refreshes_recent_entries() {
+        let mut cache = SearchQueryCache {
+            entries: Default::default(),
+            order: Default::default(),
+            capacity: 2,
+        };
+        cache.insert("one".to_owned(), prepared("one"));
+        cache.insert("two".to_owned(), prepared("two"));
+        assert!(cache.get("one").is_some());
+        cache.insert("three".to_owned(), prepared("three"));
+
+        assert!(cache.get("one").is_some());
+        assert!(cache.get("two").is_none());
+        assert!(cache.get("three").is_some());
+        assert_eq!(cache.entries.len(), 2);
     }
 }

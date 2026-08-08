@@ -68,6 +68,21 @@ complete bounded posting range before retaining the smallest candidate IDs;
 the posting-chunk count cannot consume a node-candidate limit. Differential
 tests include more matching vocabulary entries than the public candidate bound.
 
+Each opened code-query engine keeps a 64-entry LRU cache of validated search
+preparations. The cache stores only bounded query terms and the derived FTS
+expression, is scoped to one graph engine, and is discarded when that engine
+closes, so it cannot outlive or cross graph realizations. Ranking retains the
+same total deterministic comparator but uses partial top-k selection before
+sorting when `maxNodes` is smaller than the candidate set. This avoids sorting
+results that the response budget will discard without changing the returned
+prefix or truncation semantics.
+
+Bounded typo variants are generated only when the higher-confidence recall
+channels produce too few candidates. Diacritic normalization is attempted when
+it changes the term, then adjacent transpositions are tried before deletions so
+the fixed three-variant budget prioritizes common spelling mistakes. Fuzzy
+candidates retain their explicit source penalty in `query-ranker/2`.
+
 ## Relevance qualification
 
 `crates/compass-query/tests/relevance_qualification.rs` separates the reviewed

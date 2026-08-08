@@ -567,6 +567,7 @@ fn backend_parity_subset_preserves_normalized_search_ids_and_edges()
         ("ångström", vec!["n:unicode-case"]),
         ("cache_key", vec!["n:snake"]),
         ("fetchUserRecord", vec!["n:camel"]),
+        ("litsing", vec!["n:listing"]),
         ("definitely_missing", Vec::new()),
     ];
     for (query, expected_ids) in searches {

@@ -4,9 +4,9 @@ use compass_model::code_graph::NodeRecord;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum RecallTruncationReason {
-    TotalCapacity,
-    SourceCapacity,
-    FuzzyCapacity,
+    Total,
+    PerSource,
+    Fuzzy,
 }
 
 #[allow(dead_code)]
@@ -97,17 +97,17 @@ impl SearchCandidatePool {
             return false;
         }
         if self.candidates.len() >= self.budget.max_total_candidates {
-            self.mark_truncated(RecallTruncationReason::TotalCapacity);
+            self.mark_truncated(RecallTruncationReason::Total);
             return false;
         }
         if !self.has_capacity_for_source(source) {
-            self.mark_truncated(RecallTruncationReason::SourceCapacity);
+            self.mark_truncated(RecallTruncationReason::PerSource);
             return false;
         }
         if source == CandidateSource::Fuzzy
             && self.fuzzy_candidates_added >= self.budget.max_fuzzy_candidates
         {
-            self.mark_truncated(RecallTruncationReason::FuzzyCapacity);
+            self.mark_truncated(RecallTruncationReason::Fuzzy);
             self.fuzzy_limit_reached = true;
             return false;
         }
