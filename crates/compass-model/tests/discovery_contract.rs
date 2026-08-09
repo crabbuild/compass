@@ -1,6 +1,7 @@
 use compass_model::query_contract::{
-    DiscoveryLimits, DiscoveryQueryRequest, DiscoveryQueryResponse,
+    DiscoveryEdge, DiscoveryLimits, DiscoveryQueryRequest, DiscoveryQueryResponse,
 };
+use serde_json::json;
 
 const LIMITS: &str = include_str!("fixtures/discovery_limits_v1.json");
 const REQUEST: &str = include_str!("fixtures/discovery_request_v1.json");
@@ -26,5 +27,25 @@ fn stable_discovery_json_fixtures_round_trip_exactly() -> Result<(), Box<dyn std
         serde_json::to_value(&response)?,
         serde_json::from_str::<serde_json::Value>(RESPONSE)?
     );
+    Ok(())
+}
+
+#[test]
+fn discovery_edge_preserves_an_explicitly_missing_legacy_id()
+-> Result<(), Box<dyn std::error::Error>> {
+    let value = json!({
+        "id": null,
+        "source": "caller",
+        "target": "callee",
+        "kind": "calls",
+        "occurrenceRule": null,
+        "relationshipSite": null,
+        "details": null,
+        "evidence": [],
+        "context": "call"
+    });
+    let edge = serde_json::from_value::<DiscoveryEdge>(value.clone())?;
+    assert_eq!(edge.id, None);
+    assert_eq!(serde_json::to_value(edge)?, value);
     Ok(())
 }

@@ -308,7 +308,20 @@ impl Graph {
 
     #[must_use]
     pub fn edge_between(&self, source: NodeIndex, target: NodeIndex) -> Option<EdgeIndex> {
-        self.outgoing_edges(source).find(|&edge| {
+        self.edges_between(source, target).next()
+    }
+
+    /// Return every stored edge between two nodes in deterministic graph order.
+    ///
+    /// Directed graphs match the requested source and target exactly. Undirected
+    /// graphs also match the reverse stored orientation. Parallel edges are
+    /// returned independently, including edges without a stored public ID.
+    pub fn edges_between(
+        &self,
+        source: NodeIndex,
+        target: NodeIndex,
+    ) -> impl Iterator<Item = EdgeIndex> + '_ {
+        self.outgoing_edges(source).filter(move |&edge| {
             let record = &self.edges[edge];
             (self.node_index(&record.source) == Some(source)
                 && self.node_index(&record.target) == Some(target))
@@ -438,5 +451,26 @@ mod tests {
         assert_eq!(graph.degree(0), 2);
         assert_eq!(graph.successors(0).collect::<Vec<_>>(), vec![1]);
         assert_eq!(graph.predecessors(1).collect::<Vec<_>>(), vec![0]);
+        assert_eq!(graph.edges_between(0, 1).collect::<Vec<_>>(), [0, 1]);
+        assert_eq!(graph.edges_between(1, 0).collect::<Vec<_>>(), [0, 1]);
+    }
+
+    #[test]
+    fn directed_edges_between_preserves_parallel_order_and_stored_direction() {
+        let raw = r#"{
+            "directed": true,
+            "multigraph": true,
+            "nodes": [{"id":"a"},{"id":"b"}],
+            "links": [
+                {"source":"a","target":"b","relation":"calls"},
+                {"source":"b","target":"a","relation":"calls"},
+                {"source":"a","target":"b","relation":"calls"}
+            ]
+        }"#;
+        let document: GraphDocument =
+            serde_json::from_str(raw).unwrap_or_else(|_| std::process::abort());
+        let graph = Graph::from_document(document).unwrap_or_else(|_| std::process::abort());
+        assert_eq!(graph.edges_between(0, 1).collect::<Vec<_>>(), [0, 2]);
+        assert_eq!(graph.edges_between(1, 0).collect::<Vec<_>>(), [1]);
     }
 }

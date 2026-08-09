@@ -31,10 +31,10 @@
     "returnedEdges": 0
   },
   "omissions": {
-    "candidates": null,
-    "nodes": null,
-    "edges": null,
-    "expandedRelationships": null
+    "candidates": 0,
+    "nodes": 0,
+    "edges": 0,
+    "expandedRelationships": 0
   },
   "truncated": false
 }

@@ -6,9 +6,9 @@ use compass_model::code_graph::{EdgeKind, EdgeRecord, NodeRecord};
 use compass_model::provenance::EvidenceOrigin;
 use compass_model::query_contract::{
     DISCOVERY_QUERY_SCHEMA_V1, DiscoveryAlternative, DiscoveryDirection, DiscoveryDirectionSource,
-    DiscoveryLimits, DiscoveryOmissions, DiscoveryQueryRequest, DiscoveryQueryResponse,
-    DiscoveryScope, DiscoveryScopeKind, DiscoveryScoreTier, DiscoverySeed, DiscoverySeedSource,
-    DiscoveryStats, MAX_DISCOVERY_FILTER_BYTES, MAX_DISCOVERY_FILTERS,
+    DiscoveryEdge, DiscoveryLimits, DiscoveryOmissions, DiscoveryQueryRequest,
+    DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind, DiscoveryScoreTier, DiscoverySeed,
+    DiscoverySeedSource, DiscoveryStats, MAX_DISCOVERY_FILTER_BYTES, MAX_DISCOVERY_FILTERS,
     MAX_DISCOVERY_QUESTION_BYTES, QueryDiagnostic, QueryDiagnosticCode,
 };
 
@@ -147,6 +147,8 @@ impl CodeQueryEngine {
         response.stats.candidates_admitted = u64::try_from(candidates.0.len()).unwrap_or(u64::MAX);
         if candidate_truncated {
             response.truncated = true;
+        } else {
+            response.omissions.candidates = Some(0);
         }
 
         let max_seeds = usize::try_from(request.limits.max_seeds)
@@ -155,6 +157,9 @@ impl CodeQueryEngine {
         candidates.0.truncate(max_seeds);
         response.seeds = discovery_seeds(&candidates.0);
         if response.seeds.is_empty() {
+            response.omissions.nodes = Some(0);
+            response.omissions.edges = Some(0);
+            response.omissions.expanded_relationships = Some(0);
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::NoMatch,
                 message: format!("No node matched {:?}", request.question),
@@ -227,16 +232,13 @@ impl CodeQueryEngine {
         response: &mut DiscoveryQueryResponse,
     ) -> Result<(), QueryError> {
         let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);
-        let max_edges = usize::try_from(request.limits.max_edges).unwrap_or(usize::MAX);
         let max_expanded = request.limits.max_expanded_relationships;
         let max_depth = usize::try_from(request.limits.max_depth).unwrap_or(usize::MAX);
         let mut selected_nodes = BTreeMap::<String, NodeRecord>::new();
-        let mut selected_edges = BTreeMap::<String, EdgeRecord>::new();
-        let mut selected_relationships = BTreeSet::<(String, String, String)>::new();
         let mut omitted_node_ids = BTreeSet::new();
-        let mut omitted_edge_ids = BTreeSet::new();
         let mut visited = BTreeSet::new();
         let mut frontier = VecDeque::new();
+        let mut membership_complete = true;
 
         for seed in &response.seeds {
             guard.check()?;
@@ -258,8 +260,9 @@ impl CodeQueryEngine {
         } {
             guard.check()?;
             if depth >= max_depth || response.stats.expanded_relationships >= max_expanded {
-                if response.stats.expanded_relationships >= max_expanded && !frontier.is_empty() {
+                if response.stats.expanded_relationships >= max_expanded {
                     mark_expansion_truncated(response);
+                    membership_complete = false;
                 }
                 continue;
             }
@@ -275,6 +278,7 @@ impl CodeQueryEngine {
             )?;
             if truncated {
                 mark_expansion_truncated(response);
+                membership_complete = false;
             }
             for edge in edges {
                 guard.check()?;
@@ -282,6 +286,7 @@ impl CodeQueryEngine {
                     response.stats.expanded_relationships.saturating_add(1);
                 if response.stats.expanded_relationships > max_expanded {
                     mark_expansion_truncated(response);
+                    membership_complete = false;
                     break;
                 }
                 if !edge_matches_context(&edge, &response.relation_contexts)
@@ -309,22 +314,7 @@ impl CodeQueryEngine {
                     omitted_node_ids.insert(other_id);
                     continue;
                 }
-                let relationship = (
-                    edge.source.clone(),
-                    edge.target.clone(),
-                    edge.kind.as_str().to_owned(),
-                );
-                if selected_edges.len() >= max_edges
-                    && !selected_relationships.contains(&relationship)
-                {
-                    response.truncated = true;
-                    omitted_edge_ids.insert(edge.id.clone());
-                    continue;
-                }
                 selected_nodes.entry(other.id.clone()).or_insert(other);
-                if selected_relationships.insert(relationship) {
-                    selected_edges.insert(edge.id.clone(), edge);
-                }
                 if visited.insert(other_id.clone()) {
                     frontier.push_back((other_id, depth.saturating_add(1)));
                 }
@@ -332,17 +322,80 @@ impl CodeQueryEngine {
         }
 
         response.nodes = selected_nodes.values().map(query_node).collect();
-        response.edges = selected_edges.values().map(query_edge).collect();
-        if !omitted_node_ids.is_empty() {
-            response.omissions.nodes =
-                Some(u64::try_from(omitted_node_ids.len()).unwrap_or(u64::MAX));
-        }
-        if !omitted_edge_ids.is_empty() {
-            response.omissions.edges =
-                Some(u64::try_from(omitted_edge_ids.len()).unwrap_or(u64::MAX));
-        }
+        response.omissions.nodes =
+            membership_complete.then(|| u64::try_from(omitted_node_ids.len()).unwrap_or(u64::MAX));
+        let edge_assembly_complete =
+            self.assemble_selected_edges(request, guard, &selected_nodes, response)?;
+        response.omissions.expanded_relationships =
+            (membership_complete && edge_assembly_complete).then_some(0);
         response.stats.visited_nodes = u64::try_from(visited.len()).unwrap_or(u64::MAX);
         Ok(())
+    }
+
+    fn assemble_selected_edges(
+        &self,
+        request: &DiscoveryQueryRequest,
+        guard: &DiscoveryGuard<'_>,
+        selected_nodes: &BTreeMap<String, NodeRecord>,
+        response: &mut DiscoveryQueryResponse,
+    ) -> Result<bool, QueryError> {
+        let max_edges = usize::try_from(request.limits.max_edges).unwrap_or(usize::MAX);
+        let max_expanded = request.limits.max_expanded_relationships;
+        let mut selected_edges = Vec::<(usize, EdgeRecord)>::new();
+        let mut complete = true;
+        for node_id in selected_nodes.keys() {
+            guard.check()?;
+            let remaining =
+                usize::try_from(max_expanded.saturating_sub(response.stats.expanded_relationships))
+                    .unwrap_or(usize::MAX);
+            if remaining == 0 {
+                complete = false;
+                mark_expansion_truncated(response);
+                break;
+            }
+            let (edges, truncated) = self.backend.matching_bounded(
+                node_id,
+                false,
+                ALL_EDGE_KINDS,
+                request.include_heuristic,
+                remaining,
+            )?;
+            if truncated {
+                complete = false;
+                mark_expansion_truncated(response);
+            }
+            for edge in edges {
+                guard.check()?;
+                response.stats.expanded_relationships =
+                    response.stats.expanded_relationships.saturating_add(1);
+                if !edge_matches_context(&edge, &response.relation_contexts)
+                    || !selected_nodes.contains_key(&edge.target)
+                {
+                    continue;
+                }
+                // Each stored outgoing occurrence is visited exactly once for
+                // its authoritative source node. The encounter ordinal is a
+                // final tie-break only; optional public IDs are never used as
+                // multigraph deduplication keys.
+                selected_edges.push((selected_edges.len(), edge));
+            }
+            if truncated {
+                break;
+            }
+        }
+        selected_edges.sort_by(compare_discovery_edge_occurrences);
+        let omitted_edges = selected_edges.len().saturating_sub(max_edges);
+        if omitted_edges > 0 {
+            response.truncated = true;
+            selected_edges.truncate(max_edges);
+        }
+        response.edges = selected_edges
+            .iter()
+            .map(|(_, edge)| discovery_edge(edge))
+            .collect();
+        response.omissions.edges =
+            complete.then(|| u64::try_from(omitted_edges).unwrap_or(u64::MAX));
+        Ok(complete)
     }
 }
 
@@ -581,6 +634,68 @@ fn edge_matches_context(edge: &EdgeRecord, contexts: &[String]) -> bool {
             .is_some_and(|context| contexts.iter().any(|candidate| candidate == context))
 }
 
+fn discovery_edge(edge: &EdgeRecord) -> DiscoveryEdge {
+    let projected = query_edge(edge);
+    DiscoveryEdge {
+        id: (!projected.id.is_empty()).then_some(projected.id),
+        source: projected.source,
+        target: projected.target,
+        kind: projected.kind,
+        occurrence_rule: edge.occurrence_rule.clone(),
+        relationship_site: projected.relationship_site,
+        details: projected.details,
+        evidence: projected.evidence,
+        context: edge.context.clone(),
+    }
+}
+
+fn compare_discovery_edge_occurrences(
+    (left_ordinal, left): &(usize, EdgeRecord),
+    (right_ordinal, right): &(usize, EdgeRecord),
+) -> std::cmp::Ordering {
+    match (left.id.is_empty(), right.id.is_empty()) {
+        (false, false) => left
+            .id
+            .cmp(&right.id)
+            .then_with(|| left_ordinal.cmp(right_ordinal)),
+        (false, true) => std::cmp::Ordering::Less,
+        (true, false) => std::cmp::Ordering::Greater,
+        (true, true) => left
+            .source
+            .cmp(&right.source)
+            .then_with(|| left.target.cmp(&right.target))
+            .then_with(|| left.kind.as_str().cmp(right.kind.as_str()))
+            .then_with(|| left.occurrence_rule.cmp(&right.occurrence_rule))
+            .then_with(|| {
+                compare_source_anchors(
+                    left.relationship_site.as_ref(),
+                    right.relationship_site.as_ref(),
+                )
+            })
+            .then_with(|| left_ordinal.cmp(right_ordinal)),
+    }
+}
+
+fn compare_source_anchors(
+    left: Option<&compass_model::provenance::SourceAnchor>,
+    right: Option<&compass_model::provenance::SourceAnchor>,
+) -> std::cmp::Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left
+            .file
+            .cmp(&right.file)
+            .then_with(|| left.start_byte.cmp(&right.start_byte))
+            .then_with(|| left.end_byte.cmp(&right.end_byte))
+            .then_with(|| left.start_line.cmp(&right.start_line))
+            .then_with(|| left.start_column.cmp(&right.start_column))
+            .then_with(|| left.end_line.cmp(&right.end_line))
+            .then_with(|| left.end_column.cmp(&right.end_column)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    }
+}
+
 fn is_heuristic(edge: &EdgeRecord) -> bool {
     edge.evidence
         .iter()
@@ -598,7 +713,6 @@ fn finish_response(
     guard.check()?;
     response.seeds.sort_by_key(|seed| seed.rank);
     response.nodes.sort_by(|left, right| left.id.cmp(&right.id));
-    response.edges.sort_by(|left, right| left.id.cmp(&right.id));
     response.diagnostics.sort_by(|left, right| {
         left.code
             .cmp(&right.code)
@@ -696,6 +810,7 @@ mod tests {
     use compass_model::code_graph::{
         BuildMetadata, EdgeKind, EdgeRecord, GraphDocument, NodeKind, NodeRecord,
     };
+    use compass_model::provenance::{OccurrenceRule, SourceAnchor};
     use compass_model::query_contract::{
         DiscoveryDirection, DiscoveryDirectionSource, DiscoveryLimits, DiscoveryQueryRequest,
         DiscoveryScope, DiscoveryScopeKind, DiscoveryTraversal, MAX_DISCOVERY_FILTER_BYTES,
@@ -741,6 +856,21 @@ mod tests {
             deferred: false,
             diagnostics: Vec::new(),
         }
+    }
+
+    fn evidenced_edge(id: &str, source: &str, target: &str, rule: &str, line: u32) -> EdgeRecord {
+        let mut edge = edge(id, source, target);
+        edge.occurrence_rule = OccurrenceRule::new(rule);
+        edge.relationship_site = Some(SourceAnchor {
+            file: "src/wiring.rs".to_owned(),
+            start_byte: u64::from(line),
+            end_byte: u64::from(line).saturating_add(1),
+            start_line: line,
+            start_column: 0,
+            end_line: line,
+            end_column: 1,
+        });
+        edge
     }
 
     fn engine(nodes: Vec<NodeRecord>, edges: Vec<EdgeRecord>) -> CodeQueryEngine {
@@ -903,6 +1033,10 @@ mod tests {
         assert!(first.seeds.is_empty());
         assert!(first.nodes.is_empty());
         assert!(first.edges.is_empty());
+        assert_eq!(first.omissions.candidates, Some(0));
+        assert_eq!(first.omissions.nodes, Some(0));
+        assert_eq!(first.omissions.edges, Some(0));
+        assert_eq!(first.omissions.expanded_relationships, Some(0));
         assert!(
             first
                 .diagnostics
@@ -1033,6 +1167,138 @@ mod tests {
             assert!(response.truncated);
             assert_eq!(response.omissions.expanded_relationships, None);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn direction_and_parallel_edge_evidence_are_preserved() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let engine = engine(
+            vec![
+                node("n:alpha", "alpha"),
+                node("n:caller", "caller"),
+                node("n:callee", "callee"),
+            ],
+            vec![
+                edge("e:incoming:first", "n:caller", "n:alpha"),
+                edge("e:incoming:second", "n:caller", "n:alpha"),
+                edge("e:outgoing", "n:alpha", "n:callee"),
+            ],
+        );
+        let incoming = engine.discover(request(DiscoveryDirection::Incoming))?;
+        assert_eq!(incoming.edges.len(), 2);
+        assert!(
+            incoming
+                .edges
+                .iter()
+                .all(|edge| edge.source == "n:caller" && edge.target == "n:alpha")
+        );
+
+        let outgoing = engine.discover(request(DiscoveryDirection::Outgoing))?;
+        assert_eq!(outgoing.edges.len(), 1);
+        assert_eq!(outgoing.edges[0].id.as_deref(), Some("e:outgoing"));
+
+        let both = engine.discover(request(DiscoveryDirection::Both))?;
+        assert_eq!(both.edges.len(), 3);
+        assert_eq!(
+            both.edges
+                .iter()
+                .map(|edge| edge.id.as_deref())
+                .collect::<Vec<_>>(),
+            [
+                Some("e:incoming:first"),
+                Some("e:incoming:second"),
+                Some("e:outgoing")
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn empty_id_parallel_edges_remain_distinct_without_synthesized_ids()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![node("n:alpha", "alpha"), node("n:callee", "callee")],
+            vec![
+                evidenced_edge("", "n:alpha", "n:callee", "first", 10),
+                evidenced_edge("", "n:alpha", "n:callee", "second", 20),
+                evidenced_edge("", "n:alpha", "n:callee", "third", 30),
+            ],
+        );
+        let response = engine.discover(request(DiscoveryDirection::Outgoing))?;
+        assert_eq!(response.edges.len(), 3);
+        assert!(response.edges.iter().all(|edge| edge.id.is_none()));
+        assert_eq!(
+            response
+                .edges
+                .iter()
+                .map(|edge| {
+                    edge.occurrence_rule
+                        .as_ref()
+                        .map(|rule| rule.as_str().to_owned())
+                })
+                .collect::<Vec<_>>(),
+            [
+                Some("first".to_owned()),
+                Some("second".to_owned()),
+                Some("third".to_owned())
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn final_edge_assembly_includes_asymmetric_boundary_multigraph_evidence()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![
+                node("n:alpha", "alpha"),
+                node("n:left", "left"),
+                node("n:right", "right"),
+            ],
+            vec![
+                edge("e:seed-left", "n:alpha", "n:left"),
+                edge("e:right-seed", "n:right", "n:alpha"),
+                evidenced_edge(
+                    "e:boundary:first",
+                    "n:left",
+                    "n:right",
+                    "boundary-first",
+                    10,
+                ),
+                evidenced_edge(
+                    "e:boundary:second",
+                    "n:left",
+                    "n:right",
+                    "boundary-second",
+                    20,
+                ),
+            ],
+        );
+        let response = engine.discover(request(DiscoveryDirection::Both))?;
+        assert_eq!(response.edges.len(), 4);
+        let boundary = response
+            .edges
+            .iter()
+            .filter(|edge| edge.source == "n:left" && edge.target == "n:right")
+            .collect::<Vec<_>>();
+        assert_eq!(boundary.len(), 2);
+        assert_eq!(
+            boundary
+                .iter()
+                .filter_map(|edge| edge.occurrence_rule.as_ref().map(|rule| rule.as_str()))
+                .collect::<Vec<_>>(),
+            ["boundary-first", "boundary-second"]
+        );
+        assert_eq!(
+            boundary
+                .iter()
+                .filter_map(|edge| edge.relationship_site.as_ref().map(|site| site.start_line))
+                .collect::<Vec<_>>(),
+            [10, 20]
+        );
+        assert_eq!(response.omissions.edges, Some(0));
+        assert_eq!(response.omissions.expanded_relationships, Some(0));
         Ok(())
     }
 }

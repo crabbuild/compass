@@ -19,7 +19,7 @@ fn graph(nodes: serde_json::Value, links: serde_json::Value) -> Graph {
 }
 
 #[test]
-fn compatibility_discovery_is_outgoing_only() {
+fn natural_discovery_preserves_incoming_and_outgoing_direction() {
     let graph = graph(
         json!([
             {"id":"caller","label":"caller","source_file":"src/caller.rs"},
@@ -41,7 +41,9 @@ fn compatibility_discovery_is_outgoing_only() {
         &HashMap::new(),
     );
     assert!(output.contains("callee"));
-    assert!(!output.contains("NODE caller"));
+    assert!(output.contains("NODE caller"));
+    assert!(output.contains("EDGE caller --calls"));
+    assert!(output.contains("EDGE target --calls"));
 }
 
 #[test]
@@ -73,13 +75,14 @@ fn natural_discovery_enforces_the_three_seed_cap() {
 }
 
 #[test]
-fn compatibility_discovery_renders_only_one_parallel_edge() {
+fn natural_discovery_renders_every_parallel_edge() {
     let graph = graph(
         json!([
             {"id":"seed","label":"target"},
             {"id":"callee","label":"callee"}
         ]),
         json!([
+            {"source":"seed","target":"callee","relation":"calls","context":"call"},
             {"source":"seed","target":"callee","relation":"calls","context":"call"},
             {"source":"seed","target":"callee","relation":"registers","context":"registration"}
         ]),
@@ -93,7 +96,12 @@ fn compatibility_discovery_renders_only_one_parallel_edge() {
         &[],
         &HashMap::new(),
     );
-    assert_eq!(output.matches("EDGE ").count(), 1);
+    assert_eq!(output.matches("EDGE ").count(), 3);
+    assert!(output.contains("order=0"));
+    assert!(output.contains("order=1"));
+    assert!(output.contains("order=2"));
+    assert!(output.contains("--calls"));
+    assert!(output.contains("--registers"));
 }
 
 #[test]
@@ -180,4 +188,50 @@ fn compatibility_high_degree_seed_expands_the_entire_wide_frontier() {
     assert!(output.contains("61 nodes found"));
     assert_eq!(output.matches("NODE ").count(), 61);
     assert_eq!(output.matches("EDGE ").count(), 60);
+}
+
+#[test]
+fn natural_discovery_collects_boundary_edges_with_occurrence_and_site_evidence() {
+    let graph = graph(
+        json!([
+            {"id":"seed","label":"target"},
+            {"id":"left","label":"left boundary"},
+            {"id":"right","label":"right boundary"}
+        ]),
+        json!([
+            {"source":"seed","target":"left","relation":"calls"},
+            {"source":"right","target":"seed","relation":"imports"},
+            {
+                "source":"left",
+                "target":"right",
+                "relation":"maps_to",
+                "occurrenceRule":"boundary-first",
+                "source_file":"src/wiring.rs",
+                "source_location":"L10"
+            },
+            {
+                "source":"left",
+                "target":"right",
+                "relation":"maps_to",
+                "occurrenceRule":"boundary-second",
+                "source_file":"src/wiring.rs",
+                "source_location":"L20"
+            }
+        ]),
+    );
+    let output = query_graph_text(
+        &graph,
+        "target",
+        TraversalMode::Bfs,
+        1,
+        4_000,
+        &[],
+        &HashMap::new(),
+    );
+    assert_eq!(output.matches("--maps_to").count(), 2, "{output}");
+    assert!(output.contains("src/wiring.rs:L10"), "{output}");
+    assert!(output.contains("src/wiring.rs:L20"), "{output}");
+    assert!(output.contains("boundary-first"), "{output}");
+    assert!(output.contains("boundary-second"), "{output}");
+    assert!(output.contains("EDGE right boundary --imports"), "{output}");
 }

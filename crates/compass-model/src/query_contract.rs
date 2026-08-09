@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::code_graph::{EdgeDetails, EdgeKind, NodeDetails, NodeKind, NodeRole};
 use crate::provenance::{
-    EvidenceConfidence, EvidenceOrigin, ResolutionCandidate, ResolutionState, SourceAnchor,
+    EvidenceConfidence, EvidenceOrigin, OccurrenceRule, ResolutionCandidate, ResolutionState,
+    SourceAnchor,
 };
 
 pub const CODE_QUERY_SCHEMA_V1: &str = "compass.query/1";
@@ -205,12 +206,26 @@ pub struct DiscoveryQueryResponse {
     pub traversal: DiscoveryTraversal,
     pub seeds: Vec<DiscoverySeed>,
     pub nodes: Vec<QueryNode>,
-    pub edges: Vec<QueryEdge>,
+    pub edges: Vec<DiscoveryEdge>,
     pub diagnostics: Vec<QueryDiagnostic>,
     pub limits: DiscoveryLimits,
     pub stats: DiscoveryStats,
     pub omissions: DiscoveryOmissions,
     pub truncated: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DiscoveryEdge {
+    pub id: Option<String>,
+    pub source: String,
+    pub target: String,
+    pub kind: EdgeKind,
+    pub occurrence_rule: Option<OccurrenceRule>,
+    pub relationship_site: Option<SourceAnchor>,
+    pub details: Option<EdgeDetails>,
+    pub evidence: Vec<QueryEvidence>,
+    pub context: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
