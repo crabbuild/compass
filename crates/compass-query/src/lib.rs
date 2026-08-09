@@ -25,8 +25,13 @@ pub use cql::{
     CacheStats, ExplainPlan, OperatorProfile, PlanCache, PlanCacheConfig, QueryError,
     QueryErrorKind, QueryLimits, QueryProfile, QueryRequest, QueryResult, execute,
 };
-pub use graph_engine::{GraphEngine, JsonGraphEngine, StoreGraphEngine, open_graph_engine};
-pub use index::{EngineSelection, QueryEngineKind, open, open_with_engine, open_with_store};
+pub use graph_engine::{
+    DirectGraphEngine, GraphEngine, JsonGraphEngine, StoreGraphEngine, open_graph_engine,
+};
+pub use index::{
+    EngineSelection, QueryEngineKind, open, open_with_document, open_with_engine, open_with_store,
+    open_with_store_selector,
+};
 pub use intent::{
     NaturalQueryIntent, NaturalQueryPlan, NaturalQueryRequest, QUERY_PLANNER_PROFILE_V1,
     plan_natural_query,

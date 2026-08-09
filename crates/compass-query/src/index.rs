@@ -5,6 +5,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use compass_graph::SnapshotSelector;
 use compass_ir::{PROGRAM_SCHEMA, ProgramBundle};
 use compass_model::code_graph::GraphDocument;
 use compass_model::query_contract::CODE_QUERY_SCHEMA_V1;
@@ -15,7 +16,9 @@ use sha2::{Digest, Sha256};
 use crate::CodeQueryEngine;
 use crate::code_query::CodeGraphBackend;
 use crate::cql::{QueryError, QueryErrorKind};
-use crate::graph_engine::{open_graph_engine, open_local_store_snapshot};
+use crate::graph_engine::{
+    DirectGraphEngine, StoreGraphEngine, open_graph_engine, open_local_store_snapshot,
+};
 
 const INDEX_FORMAT_VERSION: &str = "compass-code-index/3";
 
@@ -35,6 +38,7 @@ pub enum EngineSelection {
 pub enum QueryEngineKind {
     Json,
     Store,
+    Memory,
 }
 
 pub fn open(
@@ -87,6 +91,31 @@ pub fn open_with_store<S: Store + ?Sized>(
     cache_root: &Path,
 ) -> Result<CodeQueryEngine, QueryError> {
     let graph_engine = Box::new(crate::graph_engine::StoreGraphEngine::from_store(store)?);
+    open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
+}
+
+/// Hydrate the typed query engine from one exact immutable store selector.
+/// The active selector and JSON artifacts are never consulted.
+pub fn open_with_store_selector<S: Store + ?Sized>(
+    store: &S,
+    selector: SnapshotSelector,
+    graph_path: &Path,
+    program_path: Option<&Path>,
+    cache_root: &Path,
+) -> Result<CodeQueryEngine, QueryError> {
+    let graph_engine = Box::new(StoreGraphEngine::from_store_selector(store, selector)?);
+    open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
+}
+
+/// Hydrate a long-lived typed query engine from a validated in-memory graph.
+/// Its materialized index and caches are keyed by the canonical graph identity.
+pub fn open_with_document(
+    graph: GraphDocument,
+    graph_path: &Path,
+    program_path: Option<&Path>,
+    cache_root: &Path,
+) -> Result<CodeQueryEngine, QueryError> {
+    let graph_engine = Box::new(DirectGraphEngine::from_document(graph)?);
     open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
 }
 

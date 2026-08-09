@@ -2,12 +2,16 @@ mod support;
 
 use std::fs;
 
-use compass_graph::GraphSnapshotBuilder;
+use compass_graph::{GraphSnapshotBuilder, GraphSnapshotReader};
 use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
 use compass_model::query_contract::{
-    CallRequest, CodeQueryLimits, ExploreRequest, ImpactRequest, NodeTrailRequest, SearchRequest,
+    CallRequest, CodeQueryLimits, DiscoveryDirection, DiscoveryLimits, DiscoveryQueryRequest,
+    DiscoveryTraversal, ExploreRequest, ImpactRequest, NodeTrailRequest, SearchRequest,
 };
-use compass_query::{EngineSelection, QueryEngineKind, open, open_with_engine, open_with_store};
+use compass_query::{
+    EngineSelection, QueryEngineKind, open, open_with_document, open_with_engine, open_with_store,
+    open_with_store_selector,
+};
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
 use compass_store_redb::RedbStore;
 
@@ -26,6 +30,185 @@ fn publish_phase2_snapshot(
     )?;
     store.checkpoint()?;
     Ok(store)
+}
+
+fn discovery_request(question: &str) -> DiscoveryQueryRequest {
+    DiscoveryQueryRequest {
+        question: question.to_owned(),
+        direction: DiscoveryDirection::Both,
+        relation_contexts: Vec::new(),
+        scope: Vec::new(),
+        traversal: DiscoveryTraversal::Bfs,
+        include_heuristic: false,
+        limits: DiscoveryLimits::default(),
+    }
+}
+
+#[test]
+fn discovery_is_identical_for_json_store_direct_document_and_immutable_selectors()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let first_graph = GraphDocument::load(&graph_path)?;
+    let store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+    let first_selector = GraphSnapshotReader::open_active(&store)?
+        .ok_or("first snapshot missing")?
+        .selector()
+        .clone();
+
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let active = open_with_store(
+        &store,
+        &graph_path,
+        None,
+        &directory.path().join("active-cache"),
+    )?;
+    let local_direct = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("local-direct-cache"),
+        EngineSelection::Store,
+    )?;
+    let selected = open_with_store_selector(
+        &store,
+        first_selector.clone(),
+        &graph_path,
+        None,
+        &directory.path().join("selector-cache"),
+    )?;
+    let direct = open_with_document(
+        first_graph.clone(),
+        &graph_path,
+        None,
+        &directory.path().join("shared-direct-cache"),
+    )?;
+    let direct_reopened = open_with_document(
+        first_graph.clone(),
+        &graph_path,
+        None,
+        &directory.path().join("shared-direct-cache"),
+    )?;
+    assert_eq!(direct.engine_kind(), QueryEngineKind::Memory);
+    assert_eq!(direct.index_path(), direct_reopened.index_path());
+    let request = discovery_request("UserService.list");
+    let expected = serde_json::to_vec(&json.discover(request.clone())?)?;
+    assert_eq!(
+        serde_json::to_vec(&active.discover(request.clone())?)?,
+        expected
+    );
+    assert_eq!(
+        serde_json::to_vec(&local_direct.discover(request.clone())?)?,
+        expected
+    );
+    assert_eq!(
+        serde_json::to_vec(&selected.discover(request.clone())?)?,
+        expected
+    );
+    assert_eq!(
+        serde_json::to_vec(&direct.discover(request.clone())?)?,
+        expected
+    );
+    assert_eq!(
+        serde_json::to_vec(&direct_reopened.discover(request.clone())?)?,
+        expected
+    );
+    assert_eq!(
+        serde_json::to_vec(&direct.discover(request.clone())?)?,
+        expected
+    );
+
+    let boolean_only = discovery_request("AND OR NOT NEAR");
+    let empty_expected = serde_json::to_vec(&json.discover(boolean_only.clone())?)?;
+    assert_eq!(
+        serde_json::to_vec(&local_direct.discover(boolean_only.clone())?)?,
+        empty_expected
+    );
+    assert_eq!(
+        serde_json::to_vec(&selected.discover(boolean_only.clone())?)?,
+        empty_expected
+    );
+    assert_eq!(
+        serde_json::to_vec(&direct.discover(boolean_only)?)?,
+        empty_expected
+    );
+
+    let mut second_graph = first_graph;
+    let mut added = second_graph.nodes[0].clone();
+    added.id = "n:new-realization".to_owned();
+    added.name = "new_realization".to_owned();
+    added.qualified_name = "History.new_realization".to_owned();
+    second_graph.nodes.push(added);
+    second_graph
+        .nodes
+        .sort_by(|left, right| left.id.cmp(&right.id));
+    let replacement = open_with_document(
+        second_graph.clone(),
+        &graph_path,
+        None,
+        &directory.path().join("shared-direct-cache"),
+    )?;
+    assert_ne!(direct.index_path(), replacement.index_path());
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &second_graph)?;
+    let second_selector = GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    let historical = open_with_store_selector(
+        &store,
+        first_selector.clone(),
+        &graph_path,
+        None,
+        &directory.path().join("historical-cache"),
+    )?;
+    assert_eq!(
+        serde_json::to_vec(&historical.discover(request.clone())?)?,
+        expected
+    );
+    let current = open_with_store_selector(
+        &store,
+        second_selector,
+        &graph_path,
+        None,
+        &directory.path().join("current-cache"),
+    )?;
+    let current_response = current.discover(discovery_request("new_realization"))?;
+    assert!(
+        current_response
+            .nodes
+            .iter()
+            .any(|node| node.id == "n:new-realization")
+    );
+    assert_ne!(historical.index_path(), current.index_path());
+
+    let mut corrupt = first_selector.clone();
+    corrupt.schema = "corrupt-selector".to_owned();
+    let error = open_with_store_selector(
+        &store,
+        corrupt,
+        &graph_path,
+        None,
+        &directory.path().join("corrupt-selector-cache"),
+    )
+    .err()
+    .ok_or("corrupt selector unexpectedly opened")?;
+    assert_eq!(error.code(), "store_graph_snapshot_failed");
+
+    let mut mismatched = first_selector;
+    mismatched.snapshot_id = "0".repeat(64);
+    let error = open_with_store_selector(
+        &store,
+        mismatched,
+        &graph_path,
+        None,
+        &directory.path().join("mismatch-cache"),
+    )
+    .err()
+    .ok_or("mismatched selector unexpectedly opened")?;
+    assert_eq!(error.code(), "store_graph_snapshot_failed");
+    Ok(())
 }
 
 #[test]

@@ -8,7 +8,9 @@ use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
-use compass_graph::{GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotReader, SnapshotSelector};
+use compass_graph::{
+    GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotReader, SnapshotSelector, canonical_graph_json,
+};
 use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
 use compass_store::{STORE_REF_FILE_NAME, SqliteStore, Store, StoreRef, local_sqlite_store_path};
 use sha2::{Digest, Sha256};
@@ -34,6 +36,51 @@ pub trait GraphEngine: Send + Sync {
 pub struct JsonGraphEngine {
     graph: GraphDocument,
     graph_identity: String,
+}
+
+/// Validated in-memory graph source with a canonical content identity.
+pub struct DirectGraphEngine {
+    graph: GraphDocument,
+    graph_identity: String,
+}
+
+impl DirectGraphEngine {
+    pub fn from_document(graph: GraphDocument) -> Result<Self, QueryError> {
+        validate_graph_schema(&graph)?;
+        compass_model::validate_code_graph(&graph).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "direct_graph_validation_failed",
+                error.to_string(),
+            )
+        })?;
+        let bytes = canonical_graph_json(&graph).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "direct_graph_identity_failed",
+                error.to_string(),
+            )
+        })?;
+        let graph_identity = format!("{:x}", Sha256::digest(&bytes));
+        Ok(Self {
+            graph,
+            graph_identity,
+        })
+    }
+}
+
+impl GraphEngine for DirectGraphEngine {
+    fn kind(&self) -> QueryEngineKind {
+        QueryEngineKind::Memory
+    }
+
+    fn graph(&self) -> &GraphDocument {
+        &self.graph
+    }
+
+    fn graph_identity(&self) -> &str {
+        &self.graph_identity
+    }
 }
 
 impl JsonGraphEngine {
@@ -113,6 +160,35 @@ impl StoreGraphEngine {
                 "store has no active immutable graph snapshot",
             ));
         };
+        let manifest = reader.manifest();
+        let graph_bytes = reader.export_json_bytes().map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_export_failed",
+                error.to_string(),
+            )
+        })?;
+        Self::from_parts(
+            manifest.graph_schema.clone(),
+            manifest.node_count,
+            manifest.edge_count,
+            graph_bytes,
+            manifest.graph_digest.clone(),
+        )
+    }
+
+    /// Open one exact immutable selector without consulting the active ref.
+    pub fn from_store_selector<S: Store + ?Sized>(
+        store: &S,
+        selector: SnapshotSelector,
+    ) -> Result<Self, QueryError> {
+        let reader = GraphSnapshotReader::open_selector(store, selector).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_snapshot_failed",
+                error.to_string(),
+            )
+        })?;
         let manifest = reader.manifest();
         let graph_bytes = reader.export_json_bytes().map_err(|error| {
             QueryError::new(

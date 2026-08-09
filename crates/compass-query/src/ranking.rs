@@ -15,6 +15,7 @@ pub(crate) struct RankedSearchResult {
     pub(crate) node_id: String,
     pub(crate) matched_fields: Vec<String>,
     pub(crate) node: NodeRecord,
+    pub(crate) candidate_source: CandidateSource,
 }
 
 pub(crate) fn rank_search_candidates(
@@ -37,6 +38,7 @@ fn rank_legacy(
 
     for candidate in candidates {
         let source_rank = candidate.best_source_rank();
+        let candidate_source = candidate.best_source();
         let node = candidate.node;
         let normalized_name = strip_diacritics(&node.name).to_lowercase();
         let normalized_qualified = strip_diacritics(&node.qualified_name).to_lowercase();
@@ -68,6 +70,7 @@ fn rank_legacy(
             node_id: node.id.clone(),
             matched_fields,
             node,
+            candidate_source,
         });
     }
 
@@ -95,6 +98,7 @@ fn rank_v2(
 
     for candidate in candidates {
         let source_rank = candidate.best_source_rank();
+        let candidate_source = candidate.best_source();
         let normalized_name = normalize_symbol_name(&candidate.node.name);
         let normalized_qualified = normalize_symbol_name(&candidate.node.qualified_name);
         let normalized_id = strip_diacritics(&candidate.node.id).to_lowercase();
@@ -139,6 +143,7 @@ fn rank_v2(
                 node_id: node.id.clone(),
                 matched_fields,
                 node,
+                candidate_source,
             },
         });
     }

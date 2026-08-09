@@ -8,14 +8,15 @@ use compass_model::query_contract::{
     DISCOVERY_QUERY_SCHEMA_V1, DiscoveryAlternative, DiscoveryDirection, DiscoveryDirectionSource,
     DiscoveryEdge, DiscoveryLimits, DiscoveryOmissions, DiscoveryQueryRequest,
     DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind, DiscoveryScoreTier, DiscoverySeed,
-    DiscoverySeedSource, DiscoveryStats, MAX_DISCOVERY_FILTER_BYTES, MAX_DISCOVERY_FILTERS,
-    MAX_DISCOVERY_QUESTION_BYTES, QueryDiagnostic, QueryDiagnosticCode,
+    DiscoverySeedSource, DiscoveryStats, MAX_DISCOVERY_CANDIDATE_NODES_READ,
+    MAX_DISCOVERY_FILTER_BYTES, MAX_DISCOVERY_FILTERS, MAX_DISCOVERY_QUESTION_BYTES,
+    QueryDiagnostic, QueryDiagnosticCode,
 };
 
-use crate::code_query::{query_edge, query_node};
+use crate::code_query::{CandidateAssemblyPolicy, query_edge, query_node, search_query_terms};
 use crate::ranking::rank_search_candidates;
-use crate::recall::{CandidateSource, RecallBudget, SearchCandidatePool};
-use crate::text::{normalize_context_filters, query_terms, search_tokens, strip_diacritics};
+use crate::recall::CandidateSource;
+use crate::text::{normalize_context_filters, search_tokens};
 use crate::{CodeQueryEngine, QueryError, QueryErrorKind};
 
 const ALL_EDGE_KINDS: &[EdgeKind] = &[
@@ -50,13 +51,22 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
     EdgeKind::MapsTo,
 ];
 
+const DISCOVERY_SCOPE_OVERSAMPLE: usize = 8;
+
 #[derive(Clone, Debug)]
-struct RankedReferenceCandidate {
+struct RankedDiscoveryCandidate {
     node: NodeRecord,
     score: f64,
     matched_terms: Vec<String>,
     matched_fields: Vec<String>,
     source: DiscoverySeedSource,
+}
+
+struct DiscoveryCandidateSelection {
+    candidates: Vec<RankedDiscoveryCandidate>,
+    nodes_read: u64,
+    probes: u64,
+    truncated: bool,
 }
 
 struct DiscoveryGuard<'a> {
@@ -141,11 +151,13 @@ impl CodeQueryEngine {
             truncated: false,
         };
 
-        let (mut candidates, candidate_truncated) =
-            self.reference_candidates(&request.question, &response.scope, &request.limits, &guard)?;
-        response.stats.candidate_nodes = u64::try_from(candidates.1).unwrap_or(u64::MAX);
-        response.stats.candidates_admitted = u64::try_from(candidates.0.len()).unwrap_or(u64::MAX);
-        if candidate_truncated {
+        let mut selection =
+            self.indexed_candidates(&request.question, &response.scope, &request.limits, &guard)?;
+        response.stats.candidate_nodes = selection.nodes_read;
+        response.stats.candidate_probes = selection.probes;
+        response.stats.candidates_admitted =
+            u64::try_from(selection.candidates.len()).unwrap_or(u64::MAX);
+        if selection.truncated {
             response.truncated = true;
         } else {
             response.omissions.candidates = Some(0);
@@ -154,8 +166,8 @@ impl CodeQueryEngine {
         let max_seeds = usize::try_from(request.limits.max_seeds)
             .unwrap_or(usize::MAX)
             .min(usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX));
-        candidates.0.truncate(max_seeds);
-        response.seeds = discovery_seeds(&candidates.0);
+        selection.candidates.truncate(max_seeds);
+        response.seeds = discovery_seeds(&selection.candidates);
         if response.seeds.is_empty() {
             response.omissions.nodes = Some(0);
             response.omissions.edges = Some(0);
@@ -183,46 +195,79 @@ impl CodeQueryEngine {
         Ok(response)
     }
 
-    fn reference_candidates(
+    fn indexed_candidates(
         &self,
         question: &str,
         scope: &[DiscoveryScope],
         limits: &DiscoveryLimits,
         guard: &DiscoveryGuard<'_>,
-    ) -> Result<((Vec<RankedReferenceCandidate>, usize), bool), QueryError> {
-        let max_candidates = usize::try_from(limits.max_candidates).unwrap_or(usize::MAX);
-        let (mut nodes, truncated) = self.backend.reference_nodes_bounded(max_candidates)?;
-        nodes.sort_by(|left, right| left.id.cmp(&right.id));
-        let examined = nodes.len();
-        let terms = query_terms(question);
-        let mut pool = SearchCandidatePool::new(RecallBudget {
-            max_total_candidates: max_candidates,
-            max_per_source: max_candidates,
-            max_fuzzy_candidates: 0,
-        });
-        for node in nodes {
-            guard.check()?;
-            if !scope_matches(&node, scope) {
-                continue;
-            }
-            if let Some(source) = reference_candidate_source(question, &terms, &node) {
-                let _ = pool.add(source, node);
-            }
+    ) -> Result<DiscoveryCandidateSelection, QueryError> {
+        guard.check()?;
+        let prepared = self.prepare_search_query(question)?;
+        if prepared.fts_query.is_empty() {
+            return Ok(DiscoveryCandidateSelection {
+                candidates: Vec::new(),
+                nodes_read: 0,
+                probes: 0,
+                truncated: false,
+            });
         }
-        let candidates = rank_search_candidates(question, &terms, pool.into_vec(), max_candidates)
-            .into_iter()
-            .map(|ranked| {
-                let source = discovery_candidate_source(question, &ranked.node);
-                RankedReferenceCandidate {
-                    matched_terms: matched_terms(&terms, &ranked.node),
-                    matched_fields: ranked.matched_fields,
-                    node: ranked.node,
-                    score: ranked.score,
-                    source,
-                }
-            })
-            .collect();
-        Ok(((candidates, examined), truncated))
+        let candidate_limit = usize::try_from(limits.max_candidates).unwrap_or(usize::MAX);
+        let source_limit = candidate_limit
+            .saturating_mul(DISCOVERY_SCOPE_OVERSAMPLE)
+            .min(
+                usize::try_from(compass_model::query_contract::MAX_DISCOVERY_CANDIDATES)
+                    .unwrap_or(usize::MAX),
+            );
+        let admit = |node: &NodeRecord| scope_matches(node, scope);
+        let mut check = || guard.check();
+        let assembly = self.assemble_search_candidates(
+            question,
+            &prepared.terms,
+            &prepared.fts_query,
+            CandidateAssemblyPolicy {
+                max_candidates: candidate_limit,
+                source_lookup_limit: source_limit,
+                max_candidate_reads: usize::try_from(MAX_DISCOVERY_CANDIDATE_NODES_READ)
+                    .unwrap_or(usize::MAX),
+                max_candidate_probes: usize::try_from(
+                    compass_model::query_contract::MAX_DISCOVERY_CANDIDATE_PROBES,
+                )
+                .unwrap_or(usize::MAX),
+                admit: &admit,
+                check: &mut check,
+            },
+            None,
+            false,
+        )?;
+        let truncated = assembly.truncated;
+        let candidate_nodes_read = assembly.candidate_nodes_read;
+        let candidate_probes = assembly.candidate_probes;
+        let ranked = rank_search_candidates(
+            question,
+            &prepared.terms,
+            assembly.pool.into_vec(),
+            candidate_limit,
+        );
+        guard.check()?;
+        let mut candidates = Vec::with_capacity(ranked.len());
+        for result in ranked {
+            guard.check()?;
+            let node = result.node;
+            candidates.push(RankedDiscoveryCandidate {
+                matched_terms: matched_terms(&prepared.terms, &node),
+                matched_fields: result.matched_fields,
+                source: discovery_candidate_source(result.candidate_source),
+                node,
+                score: result.score,
+            });
+        }
+        Ok(DiscoveryCandidateSelection {
+            candidates,
+            nodes_read: candidate_nodes_read,
+            probes: candidate_probes,
+            truncated,
+        })
     }
 
     fn expand_reference_neighborhood(
@@ -414,6 +459,7 @@ fn validate_request(request: &DiscoveryQueryRequest) -> Result<(), QueryError> {
             format!("discovery question must contain 1 to {MAX_DISCOVERY_QUESTION_BYTES} bytes"),
         ));
     }
+    let _ = search_query_terms(&request.question)?;
     validate_filters("relationContexts", &request.relation_contexts)?;
     if request.scope.len() > MAX_DISCOVERY_FILTERS
         || request
@@ -506,33 +552,15 @@ fn scope_matches(node: &NodeRecord, scope: &[DiscoveryScope]) -> bool {
         })
 }
 
-fn reference_candidate_source(
-    question: &str,
-    terms: &[String],
-    node: &NodeRecord,
-) -> Option<CandidateSource> {
-    let normalized_question = normalize_discovery_text(question);
-    if node.id.to_lowercase() == normalized_question {
-        return Some(CandidateSource::ExactId);
-    }
-    if normalize_discovery_text(&node.name) == normalized_question
-        || normalize_discovery_text(&node.qualified_name) == normalized_question
-    {
-        return Some(CandidateSource::ExactName);
-    }
-    (!matched_terms(terms, node).is_empty()).then_some(CandidateSource::HeuristicFallback)
-}
-
-fn discovery_candidate_source(question: &str, node: &NodeRecord) -> DiscoverySeedSource {
-    let normalized_question = normalize_discovery_text(question);
-    if node.id.to_lowercase() == normalized_question {
-        DiscoverySeedSource::ExactId
-    } else if normalize_discovery_text(&node.name) == normalized_question
-        || normalize_discovery_text(&node.qualified_name) == normalized_question
-    {
-        DiscoverySeedSource::ExactName
-    } else {
-        DiscoverySeedSource::ReferenceScan
+fn discovery_candidate_source(source: CandidateSource) -> DiscoverySeedSource {
+    match source {
+        CandidateSource::ExactId => DiscoverySeedSource::ExactId,
+        CandidateSource::ExactName => DiscoverySeedSource::ExactName,
+        CandidateSource::Alias => DiscoverySeedSource::Alias,
+        CandidateSource::TermIndex => DiscoverySeedSource::TermIndex,
+        CandidateSource::RelationSeed => DiscoverySeedSource::RelationSeed,
+        CandidateSource::Fuzzy => DiscoverySeedSource::Fuzzy,
+        CandidateSource::HeuristicFallback => DiscoverySeedSource::HeuristicFallback,
     }
 }
 
@@ -554,15 +582,7 @@ fn matched_terms(terms: &[String], node: &NodeRecord) -> Vec<String> {
         .collect()
 }
 
-fn normalize_discovery_text(value: &str) -> String {
-    strip_diacritics(value)
-        .trim()
-        .trim_end_matches("()")
-        .trim_start_matches('.')
-        .to_lowercase()
-}
-
-fn discovery_seeds(candidates: &[RankedReferenceCandidate]) -> Vec<DiscoverySeed> {
+fn discovery_seeds(candidates: &[RankedDiscoveryCandidate]) -> Vec<DiscoverySeed> {
     candidates
         .iter()
         .enumerate()
@@ -586,9 +606,11 @@ fn discovery_seeds(candidates: &[RankedReferenceCandidate]) -> Vec<DiscoverySeed
                 score_tier: match candidate.source {
                     DiscoverySeedSource::ExactId => DiscoveryScoreTier::ExactId,
                     DiscoverySeedSource::ExactName => DiscoveryScoreTier::ExactName,
-                    DiscoverySeedSource::ReferenceScan
+                    DiscoverySeedSource::Alias
                     | DiscoverySeedSource::TermIndex
-                    | DiscoverySeedSource::Fuzzy => DiscoveryScoreTier::Lexical,
+                    | DiscoverySeedSource::RelationSeed
+                    | DiscoverySeedSource::Fuzzy
+                    | DiscoverySeedSource::HeuristicFallback => DiscoveryScoreTier::Lexical,
                 },
                 rank: u32::try_from(index.saturating_add(1)).unwrap_or(u32::MAX),
                 matched_terms: candidate.matched_terms.clone(),
@@ -813,13 +835,17 @@ mod tests {
     use compass_model::provenance::{OccurrenceRule, SourceAnchor};
     use compass_model::query_contract::{
         DiscoveryDirection, DiscoveryDirectionSource, DiscoveryLimits, DiscoveryQueryRequest,
-        DiscoveryScope, DiscoveryScopeKind, DiscoveryTraversal, MAX_DISCOVERY_FILTER_BYTES,
-        MAX_DISCOVERY_FILTERS, MAX_DISCOVERY_QUESTION_BYTES, QueryDiagnosticCode,
+        DiscoveryScope, DiscoveryScopeKind, DiscoverySeedSource, DiscoveryTraversal,
+        MAX_DISCOVERY_CANDIDATE_NODES_READ, MAX_DISCOVERY_CANDIDATE_PROBES,
+        MAX_DISCOVERY_FILTER_BYTES, MAX_DISCOVERY_FILTERS, MAX_DISCOVERY_QUESTION_BYTES,
+        QueryDiagnosticCode,
     };
 
     use crate::code_query::{
         CodeAdjacencyIndex, CodeGraphBackend, CodeLookupIndex, FuzzyLookupCache, SearchQueryCache,
     };
+    use crate::ranking::rank_search_candidates;
+    use crate::recall::{CandidateSource, RecallBudget, SearchCandidatePool};
     use crate::{CodeQueryEngine, QueryEngineKind};
 
     fn node(id: &str, name: &str) -> NodeRecord {
@@ -888,6 +914,39 @@ mod tests {
         graph.links.sort_by(|left, right| left.id.cmp(&right.id));
         let adjacency = CodeAdjacencyIndex::build(&graph);
         let lookup = CodeLookupIndex::build(&graph);
+        let connection =
+            rusqlite::Connection::open_in_memory().unwrap_or_else(|_| std::process::abort());
+        connection
+            .execute_batch(
+                r#"CREATE TABLE nodes(id TEXT PRIMARY KEY);
+                   CREATE VIRTUAL TABLE node_fts USING fts5(
+                     node_id UNINDEXED, name, qualified_name, aliases, kind, roles,
+                     language, framework, normalized_path,
+                     tokenize="unicode61 remove_diacritics 2 tokenchars '_'"
+                   );"#,
+            )
+            .unwrap_or_else(|_| std::process::abort());
+        for node in &graph.nodes {
+            connection
+                .execute("INSERT INTO nodes VALUES(?1)", rusqlite::params![node.id])
+                .unwrap_or_else(|_| std::process::abort());
+            connection
+                .execute(
+                    "INSERT INTO node_fts VALUES(?1,?2,?3,'',?4,'',?5,?6,?7)",
+                    rusqlite::params![
+                        node.id,
+                        node.name,
+                        node.qualified_name,
+                        node.kind.as_str(),
+                        node.language.as_deref().unwrap_or_default(),
+                        node.framework.as_deref().unwrap_or_default(),
+                        node.source
+                            .as_ref()
+                            .map_or("", |source| source.file.as_str()),
+                    ],
+                )
+                .unwrap_or_else(|_| std::process::abort());
+        }
         CodeQueryEngine {
             backend: CodeGraphBackend::Materialized {
                 graph: Box::new(graph),
@@ -895,7 +954,7 @@ mod tests {
                 lookup: Box::new(lookup),
             },
             program: None,
-            connection: None,
+            connection: Some(connection),
             graph_path: PathBuf::from("graph.json"),
             index_path: PathBuf::from("index.sqlite3"),
             partial_graph_message: None,
@@ -936,6 +995,180 @@ mod tests {
         assert_eq!(response.selected_direction, DiscoveryDirection::Both);
         assert_eq!(response.direction_source, DiscoveryDirectionSource::Neutral);
         Ok(())
+    }
+
+    #[test]
+    fn discovery_reports_the_actual_index_candidate_source()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let cases = [
+            (
+                "n:alpha",
+                node("n:alpha", "alpha"),
+                DiscoverySeedSource::ExactId,
+            ),
+            (
+                "alpha",
+                node("n:alpha", "alpha"),
+                DiscoverySeedSource::ExactName,
+            ),
+            (
+                "alpha routing",
+                node("n:alpha", "alpha"),
+                DiscoverySeedSource::Alias,
+            ),
+            (
+                "alpha",
+                node("n:alpha", "alpha_handler"),
+                DiscoverySeedSource::TermIndex,
+            ),
+            ("lits", node("n:list", "list"), DiscoverySeedSource::Fuzzy),
+        ];
+        for (question, candidate, expected_source) in cases {
+            let engine = engine(vec![candidate], Vec::new());
+            let mut query = request(DiscoveryDirection::Both);
+            query.question = question.to_owned();
+            let response = engine.discover(query)?;
+            assert_eq!(response.seeds.len(), 1, "{question:?}");
+            assert_eq!(
+                response.seeds[0].candidate_source, expected_source,
+                "{question:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn indexed_seeds_match_an_exhaustive_small_graph_oracle()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let nodes = vec![
+            node("n:alpha:a", "alpha"),
+            node("n:alpha:b", "alpha"),
+            node("n:beta", "beta"),
+        ];
+        let engine = engine(nodes.clone(), Vec::new());
+        let response = engine.discover(request(DiscoveryDirection::Both))?;
+
+        let mut exhaustive = SearchCandidatePool::new(RecallBudget {
+            max_total_candidates: 256,
+            max_per_source: 256,
+            max_fuzzy_candidates: 16,
+        });
+        for candidate in nodes {
+            if candidate.name == "alpha" || candidate.qualified_name == "alpha" {
+                let _ = exhaustive.add(CandidateSource::ExactName, candidate.clone());
+                let _ = exhaustive.add(CandidateSource::Alias, candidate.clone());
+                let _ = exhaustive.add(CandidateSource::TermIndex, candidate);
+            }
+        }
+        let expected_ranked =
+            rank_search_candidates("alpha", &["alpha".to_owned()], exhaustive.into_vec(), 256);
+        let expected = expected_ranked
+            .iter()
+            .map(|candidate| {
+                (
+                    candidate.node_id.clone(),
+                    super::format_discovery_score(candidate.score),
+                    expected_ranked.iter().any(|other| {
+                        other.node_id != candidate.node_id
+                            && other.score.total_cmp(&candidate.score).is_eq()
+                    }),
+                )
+            })
+            .collect::<Vec<_>>();
+        let actual = response
+            .seeds
+            .iter()
+            .map(|seed| (seed.node_id.clone(), seed.score.clone(), seed.ambiguous))
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
+        assert!(
+            response
+                .seeds
+                .iter()
+                .all(|seed| seed.candidate_source == DiscoverySeedSource::ExactName)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn indexed_candidate_work_is_bounded_independent_of_graph_size()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut observed = Vec::new();
+        for noise_count in [8_usize, 4_096] {
+            let mut nodes = vec![node("n:alpha", "alpha")];
+            for index in 0..noise_count {
+                nodes.push(node(
+                    &format!("n:noise:{index:05}"),
+                    &format!("unrelated_{index:05}"),
+                ));
+            }
+            let engine = engine(nodes, Vec::new());
+            let response = engine.discover(request(DiscoveryDirection::Both))?;
+            assert!(response.stats.candidate_nodes <= MAX_DISCOVERY_CANDIDATE_NODES_READ);
+            assert!(response.stats.candidate_probes <= MAX_DISCOVERY_CANDIDATE_PROBES);
+            assert!(
+                response.stats.candidates_admitted <= u64::from(response.limits.max_candidates)
+            );
+            observed.push((
+                response.stats.candidate_nodes,
+                response.stats.candidates_admitted,
+            ));
+        }
+        assert_eq!(observed[0], observed[1]);
+        Ok(())
+    }
+
+    #[test]
+    fn scoped_recall_oversamples_before_admission() -> Result<(), Box<dyn std::error::Error>> {
+        let nodes = (0..6)
+            .map(|index| node(&format!("n:{index:02}"), "alpha"))
+            .collect::<Vec<_>>();
+        let engine = engine(nodes, Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.limits.max_candidates = 1;
+        query.scope = vec![DiscoveryScope {
+            kind: DiscoveryScopeKind::Node,
+            value: "n:04".to_owned(),
+        }];
+        let response = engine.discover(query)?;
+        assert_eq!(response.seeds.len(), 1);
+        assert_eq!(response.seeds[0].node_id, "n:04");
+        assert_eq!(response.stats.candidates_admitted, 1);
+        assert!(response.stats.candidate_nodes > response.stats.candidates_admitted);
+        Ok(())
+    }
+
+    #[test]
+    fn maximum_term_question_stays_inside_read_and_probe_budgets()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(vec![node("n:alpha", "alpha")], Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = (0..32)
+            .map(|index| format!("missingterm{index:02}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let response = engine.discover(query)?;
+        assert!(response.stats.candidate_nodes <= MAX_DISCOVERY_CANDIDATE_NODES_READ);
+        assert!(response.stats.candidate_probes <= MAX_DISCOVERY_CANDIDATE_PROBES);
+        assert!(response.stats.candidate_probes >= 34);
+        assert_eq!(response.stats.candidates_admitted, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn expired_guard_stops_indexed_recall_before_a_probe() {
+        let engine = engine(vec![node("n:alpha", "alpha")], Vec::new());
+        let guard = super::DiscoveryGuard {
+            deadline: std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_millis(1))
+                .unwrap_or_else(std::time::Instant::now),
+            cancelled: None,
+        };
+        let error = engine
+            .indexed_candidates("alpha", &[], &DiscoveryLimits::default(), &guard)
+            .err()
+            .unwrap_or_else(|| std::process::abort());
+        assert_eq!(error.kind(), crate::QueryErrorKind::Timeout);
     }
 
     #[test]
@@ -1116,6 +1349,58 @@ mod tests {
             };
             assert_eq!(error.kind(), crate::QueryErrorKind::InvalidParameter);
         }
+    }
+
+    #[test]
+    fn discovery_enforces_shared_query_boundaries_before_recall()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(vec![node("n:alpha", "alpha")], Vec::new());
+        let mut at_limit = request(DiscoveryDirection::Both);
+        at_limit.question = "x".repeat(MAX_DISCOVERY_QUESTION_BYTES);
+        let response = engine.discover(at_limit)?;
+        assert!(response.seeds.is_empty());
+
+        let mut over_bytes = request(DiscoveryDirection::Both);
+        over_bytes.question = "x".repeat(MAX_DISCOVERY_QUESTION_BYTES + 1);
+        let error = engine
+            .discover(over_bytes)
+            .err()
+            .unwrap_or_else(|| std::process::abort());
+        assert_eq!(error.code(), "invalid_discovery_question");
+
+        let mut over_terms = request(DiscoveryDirection::Both);
+        over_terms.question = (0..33)
+            .map(|index| format!("term{index:02}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let error = engine
+            .discover(over_terms)
+            .err()
+            .unwrap_or_else(|| std::process::abort());
+        assert_eq!(error.code(), "too_many_search_terms");
+        Ok(())
+    }
+
+    #[test]
+    fn boolean_only_question_is_a_deterministic_no_match() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let engine = engine(vec![node("n:alpha", "alpha")], Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "AND OR NOT NEAR".to_owned();
+        let first = engine.discover(query.clone())?;
+        let second = engine.discover(query)?;
+        assert_eq!(serde_json::to_vec(&first)?, serde_json::to_vec(&second)?);
+        assert!(first.seeds.is_empty());
+        assert_eq!(first.stats.candidate_probes, 0);
+        assert_eq!(first.stats.candidate_nodes, 0);
+        assert_eq!(first.stats.candidates_admitted, 0);
+        assert!(
+            first
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == QueryDiagnosticCode::NoMatch)
+        );
+        Ok(())
     }
 
     #[test]

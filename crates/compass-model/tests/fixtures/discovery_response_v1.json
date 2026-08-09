@@ -23,6 +23,7 @@
     "timeoutMs": 30000
   },
   "stats": {
+    "candidateProbes": 1,
     "candidateNodes": 1,
     "candidatesAdmitted": 0,
     "visitedNodes": 0,

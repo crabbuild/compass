@@ -66,7 +66,7 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
 ];
 
 #[derive(Clone, Copy, Debug)]
-enum StructuralOperandRole {
+pub(crate) enum StructuralOperandRole {
     CallersTarget,
     CalleesSource,
     ImpactTarget,
@@ -86,11 +86,65 @@ impl StructuralOperandRole {
     }
 }
 
-struct CandidateAssembly {
-    pool: SearchCandidatePool,
+pub(crate) struct CandidateAssembly {
+    pub(crate) pool: SearchCandidatePool,
+    pub(crate) truncated: bool,
+    pub(crate) candidate_nodes_read: u64,
+    pub(crate) candidate_probes: u64,
+    pub(crate) postings_decoded: u64,
+    pub(crate) relation_edges_examined: u64,
+}
+
+pub(crate) struct CandidateAssemblyPolicy<'a> {
+    pub(crate) max_candidates: usize,
+    pub(crate) source_lookup_limit: usize,
+    pub(crate) max_candidate_reads: usize,
+    pub(crate) max_candidate_probes: usize,
+    pub(crate) admit: &'a dyn Fn(&NodeRecord) -> bool,
+    pub(crate) check: &'a mut dyn FnMut() -> Result<(), QueryError>,
+}
+
+struct CandidateReadBudget {
+    remaining: usize,
+    read: u64,
+    probes_remaining: usize,
+    probes: u64,
     truncated: bool,
-    postings_decoded: u64,
-    relation_edges_examined: u64,
+}
+
+impl CandidateReadBudget {
+    const fn new(read_limit: usize, probe_limit: usize) -> Self {
+        Self {
+            remaining: read_limit,
+            read: 0,
+            probes_remaining: probe_limit,
+            probes: 0,
+            truncated: false,
+        }
+    }
+
+    fn begin_probe(&mut self) -> bool {
+        if self.probes_remaining == 0 {
+            self.truncated = true;
+            return false;
+        }
+        self.probes_remaining = self.probes_remaining.saturating_sub(1);
+        self.probes = self.probes.saturating_add(1);
+        true
+    }
+
+    fn lookup_limit(&self, desired: usize) -> usize {
+        desired.min(self.remaining.saturating_sub(1))
+    }
+
+    fn record(&mut self, returned: usize, source_truncated: bool) {
+        let examined = returned.saturating_add(usize::from(source_truncated));
+        self.remaining = self.remaining.saturating_sub(examined);
+        self.read = self
+            .read
+            .saturating_add(u64::try_from(examined).unwrap_or(u64::MAX));
+        self.truncated |= source_truncated || self.remaining == 0;
+    }
 }
 
 struct TraversalBudget {
@@ -177,9 +231,9 @@ pub struct CodeQueryEngine {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct PreparedSearchQuery {
-    terms: Vec<String>,
-    fts_query: String,
+pub(crate) struct PreparedSearchQuery {
+    pub(crate) terms: Vec<String>,
+    pub(crate) fts_query: String,
 }
 
 #[derive(Debug)]
@@ -220,7 +274,7 @@ impl SearchQueryCache {
     }
 }
 
-type FuzzyLookupValue = (Vec<NodeRecord>, bool);
+pub(crate) type FuzzyLookupValue = (Vec<NodeRecord>, bool);
 
 #[derive(Debug)]
 pub(crate) struct FuzzyLookupCache {
@@ -482,7 +536,7 @@ impl CodeGraphBackend {
         }
     }
 
-    fn nodes_by_normalized_name(
+    pub(crate) fn nodes_by_normalized_name(
         &self,
         name: &str,
         limit: usize,
@@ -619,7 +673,7 @@ impl CodeGraphBackend {
         }
     }
 
-    fn store_term_candidates(
+    pub(crate) fn store_term_candidates(
         &self,
         terms: &[String],
         limit: usize,
@@ -636,32 +690,6 @@ impl CodeGraphBackend {
             nodes.truncate(limit);
         }
         Ok(Some((nodes, truncated)))
-    }
-
-    pub(crate) fn reference_nodes_bounded(
-        &self,
-        limit: usize,
-    ) -> Result<(Vec<NodeRecord>, bool), QueryError> {
-        match self {
-            Self::Materialized { graph, .. } => {
-                let retained = limit.saturating_add(1);
-                let mut nodes = graph
-                    .nodes
-                    .iter()
-                    .take(retained)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let truncated = nodes.len() > limit;
-                if truncated {
-                    nodes.truncate(limit);
-                }
-                Ok((nodes, truncated))
-            }
-            Self::Store(snapshot) => snapshot
-                .reader()?
-                .nodes_bounded(snapshot_limits(limit)?)
-                .map_err(snapshot_error),
-        }
     }
 }
 
@@ -742,18 +770,33 @@ impl CodeQueryEngine {
             return response;
         }
         let candidate_limit = usize::try_from(request.limits.max_candidates).unwrap_or(usize::MAX);
+        let admit = |_: &NodeRecord| true;
+        let mut check = || Ok(());
         let assembly = self.assemble_search_candidates(
             &request.query,
             &terms,
             &query,
-            candidate_limit,
+            CandidateAssemblyPolicy {
+                max_candidates: candidate_limit,
+                source_lookup_limit: candidate_limit,
+                max_candidate_reads: usize::try_from(
+                    compass_model::query_contract::MAX_INDEXED_CANDIDATE_NODES_READ,
+                )
+                .unwrap_or(usize::MAX),
+                max_candidate_probes: usize::try_from(
+                    compass_model::query_contract::MAX_INDEXED_CANDIDATE_PROBES,
+                )
+                .unwrap_or(usize::MAX),
+                admit: &admit,
+                check: &mut check,
+            },
             None,
             false,
         )?;
         instrumentation.work.candidates_read = instrumentation
             .work
             .candidates_read
-            .saturating_add(assembly.pool.candidates_read());
+            .saturating_add(assembly.candidate_nodes_read);
         instrumentation.work.postings_decoded = instrumentation
             .work
             .postings_decoded
@@ -822,15 +865,16 @@ impl CodeQueryEngine {
         response
     }
 
-    fn assemble_search_candidates(
+    pub(crate) fn assemble_search_candidates(
         &self,
         raw_query: &str,
         terms: &[String],
         fts_query: &str,
-        candidate_limit: usize,
+        policy: CandidateAssemblyPolicy<'_>,
         role: Option<StructuralOperandRole>,
         include_heuristic: bool,
     ) -> Result<CandidateAssembly, QueryError> {
+        let candidate_limit = policy.max_candidates;
         let budget = RecallBudget {
             max_total_candidates: candidate_limit,
             max_per_source: candidate_limit,
@@ -838,57 +882,107 @@ impl CodeQueryEngine {
         };
         let mut pool = SearchCandidatePool::new(budget);
         let mut truncated = false;
+        let mut candidate_work =
+            CandidateReadBudget::new(policy.max_candidate_reads, policy.max_candidate_probes);
         let mut postings_decoded = 0_u64;
         let mut relation_edges_examined = 0_u64;
 
-        if let Some(node) = self.backend.node_by_id(raw_query)? {
-            let _ = pool.add(CandidateSource::ExactId, node);
+        (policy.check)()?;
+        if candidate_work.remaining > 0
+            && candidate_work.begin_probe()
+            && let Some(node) = self.backend.node_by_id(raw_query)?
+        {
+            candidate_work.record(1, false);
+            if (policy.admit)(&node) {
+                let _ = pool.add(CandidateSource::ExactId, node);
+            }
+        } else if candidate_work.remaining == 0 {
+            candidate_work.truncated = true;
         }
 
+        (policy.check)()?;
         let normalized_name_query = normalize_symbol(raw_query);
-        let (exact_name_nodes, exact_name_truncated) = self
-            .backend
-            .nodes_by_normalized_name(&normalized_name_query, candidate_limit)?;
-        pool.add_many(CandidateSource::ExactName, exact_name_nodes);
-        truncated |= exact_name_truncated;
+        let exact_limit = candidate_work.lookup_limit(policy.source_lookup_limit);
+        if exact_limit > 0 && candidate_work.begin_probe() {
+            let (exact_name_nodes, exact_name_truncated) = self
+                .backend
+                .nodes_by_normalized_name(&normalized_name_query, exact_limit)?;
+            candidate_work.record(exact_name_nodes.len(), exact_name_truncated);
+            add_admitted_candidates(
+                &mut pool,
+                CandidateSource::ExactName,
+                exact_name_nodes,
+                policy.admit,
+            );
+        } else if policy.source_lookup_limit > 0 {
+            candidate_work.truncated = true;
+        }
 
         for term in terms {
+            (policy.check)()?;
             if term.chars().count() < 3 {
                 continue;
             }
-            let (alias_nodes, alias_truncated) = self
-                .backend
-                .nodes_by_normalized_name(term, candidate_limit)?;
-            pool.add_many(CandidateSource::Alias, alias_nodes);
-            truncated |= alias_truncated;
+            let alias_limit = candidate_work.lookup_limit(policy.source_lookup_limit);
+            if alias_limit == 0 || !candidate_work.begin_probe() {
+                candidate_work.truncated = true;
+                break;
+            }
+            let (alias_nodes, alias_truncated) =
+                self.backend.nodes_by_normalized_name(term, alias_limit)?;
+            candidate_work.record(alias_nodes.len(), alias_truncated);
+            add_admitted_candidates(&mut pool, CandidateSource::Alias, alias_nodes, policy.admit);
         }
 
-        let (term_nodes, term_truncated) =
-            if let Some(candidates) = self.backend.store_term_candidates(terms, candidate_limit)? {
-                candidates
-            } else {
-                self.materialized_term_candidates(fts_query, candidate_limit)?
-            };
-        postings_decoded =
-            postings_decoded.saturating_add(u64::try_from(term_nodes.len()).unwrap_or(u64::MAX));
-        if term_truncated {
-            postings_decoded = postings_decoded.saturating_add(1);
+        (policy.check)()?;
+        let term_limit = candidate_work.lookup_limit(policy.source_lookup_limit);
+        if term_limit > 0 && candidate_work.begin_probe() {
+            let (term_nodes, term_truncated) =
+                if let Some(candidates) = self.backend.store_term_candidates(terms, term_limit)? {
+                    candidates
+                } else {
+                    self.materialized_term_candidates(fts_query, term_limit)?
+                };
+            postings_decoded = postings_decoded
+                .saturating_add(u64::try_from(term_nodes.len()).unwrap_or(u64::MAX));
+            if term_truncated {
+                postings_decoded = postings_decoded.saturating_add(1);
+            }
+            candidate_work.record(term_nodes.len(), term_truncated);
+            add_admitted_candidates(
+                &mut pool,
+                CandidateSource::TermIndex,
+                term_nodes,
+                policy.admit,
+            );
+        } else if !fts_query.is_empty() && policy.source_lookup_limit > 0 {
+            candidate_work.truncated = true;
         }
-        pool.add_many(CandidateSource::TermIndex, term_nodes);
-        truncated |= term_truncated;
 
         if pool.len() < candidate_limit.min(MIN_RECALL_CANDIDATES_BEFORE_FUZZY) {
             for variant in recall_fuzzy_term_variants(terms) {
+                (policy.check)()?;
                 if variant.len() < 3 {
                     continue;
                 }
                 if pool.len() >= candidate_limit {
                     break;
                 }
+                let fuzzy_limit = candidate_work
+                    .lookup_limit(policy.source_lookup_limit.min(budget.max_fuzzy_candidates));
+                if fuzzy_limit == 0 || !candidate_work.begin_probe() {
+                    candidate_work.truncated = true;
+                    break;
+                }
                 let (fuzzy_nodes, fuzzy_truncated) =
-                    self.cached_fuzzy_nodes(&variant, budget.max_fuzzy_candidates)?;
-                pool.add_many(CandidateSource::Fuzzy, fuzzy_nodes);
-                truncated |= fuzzy_truncated;
+                    self.cached_fuzzy_nodes(&variant, fuzzy_limit)?;
+                candidate_work.record(fuzzy_nodes.len(), fuzzy_truncated);
+                add_admitted_candidates(
+                    &mut pool,
+                    CandidateSource::Fuzzy,
+                    fuzzy_nodes,
+                    policy.admit,
+                );
                 if pool.truncated_by_fuzzy_capacity() {
                     break;
                 }
@@ -898,6 +992,7 @@ impl CodeQueryEngine {
         if let Some(role) = role {
             let (inbound, kinds) = role.relation_probe();
             for node_id in pool.candidate_ids() {
+                (policy.check)()?;
                 let (edges, probe_truncated) = self.backend.matching_bounded(
                     &node_id,
                     inbound,
@@ -915,16 +1010,22 @@ impl CodeQueryEngine {
                 }
             }
         }
-        truncated |= pool.is_truncated();
+        truncated |= candidate_work.truncated || pool.is_truncated();
         Ok(CandidateAssembly {
             pool,
             truncated,
+            candidate_nodes_read: candidate_work.read,
+            candidate_probes: candidate_work.probes,
             postings_decoded,
             relation_edges_examined,
         })
     }
 
-    fn cached_fuzzy_nodes(&self, name: &str, limit: usize) -> Result<FuzzyLookupValue, QueryError> {
+    pub(crate) fn cached_fuzzy_nodes(
+        &self,
+        name: &str,
+        limit: usize,
+    ) -> Result<FuzzyLookupValue, QueryError> {
         {
             let mut cache = match self.fuzzy_lookup_cache.lock() {
                 Ok(cache) => cache,
@@ -943,7 +1044,10 @@ impl CodeQueryEngine {
         Ok(value)
     }
 
-    fn prepare_search_query(&self, query: &str) -> Result<PreparedSearchQuery, QueryError> {
+    pub(crate) fn prepare_search_query(
+        &self,
+        query: &str,
+    ) -> Result<PreparedSearchQuery, QueryError> {
         validate_search_query_size(query)?;
         {
             let mut cache = match self.search_query_cache.lock() {
@@ -968,7 +1072,7 @@ impl CodeQueryEngine {
         Ok(prepared)
     }
 
-    fn materialized_term_candidates(
+    pub(crate) fn materialized_term_candidates(
         &self,
         query: &str,
         candidate_limit: usize,
@@ -1439,18 +1543,33 @@ impl CodeQueryEngine {
             });
             return Ok(None);
         }
+        let admit = |_: &NodeRecord| true;
+        let mut check = || Ok(());
         let assembly = self.assemble_search_candidates(
             query,
             &prepared.terms,
             &prepared.fts_query,
-            candidate_limit,
+            CandidateAssemblyPolicy {
+                max_candidates: candidate_limit,
+                source_lookup_limit: candidate_limit,
+                max_candidate_reads: usize::try_from(
+                    compass_model::query_contract::MAX_INDEXED_CANDIDATE_NODES_READ,
+                )
+                .unwrap_or(usize::MAX),
+                max_candidate_probes: usize::try_from(
+                    compass_model::query_contract::MAX_INDEXED_CANDIDATE_PROBES,
+                )
+                .unwrap_or(usize::MAX),
+                admit: &admit,
+                check: &mut check,
+            },
             role,
             include_heuristic,
         )?;
         instrumentation.work.candidates_read = instrumentation
             .work
             .candidates_read
-            .saturating_add(assembly.pool.candidates_read());
+            .saturating_add(assembly.candidate_nodes_read);
         instrumentation.work.postings_decoded = instrumentation
             .work
             .postings_decoded
@@ -1817,12 +1936,25 @@ fn path_record(nodes: &[String], edges: &[String], selected: &[EdgeRecord]) -> Q
     }
 }
 
-fn normalize_symbol(value: &str) -> String {
+pub(crate) fn normalize_symbol(value: &str) -> String {
     value
         .trim()
         .trim_end_matches("()")
         .trim_start_matches('.')
         .to_lowercase()
+}
+
+fn add_admitted_candidates(
+    pool: &mut SearchCandidatePool,
+    source: CandidateSource,
+    nodes: Vec<NodeRecord>,
+    admit: &dyn Fn(&NodeRecord) -> bool,
+) {
+    for node in nodes {
+        if admit(&node) {
+            let _ = pool.add(source, node);
+        }
+    }
 }
 
 fn is_heuristic(edge: &EdgeRecord) -> bool {
@@ -1926,17 +2058,20 @@ fn fts_query_from_terms(terms: &[String]) -> String {
 }
 
 fn validate_search_query_size(value: &str) -> Result<(), QueryError> {
-    if value.len() > 4_096 {
+    if value.len() > compass_model::query_contract::MAX_INDEXED_QUERY_BYTES {
         return Err(QueryError::new(
             QueryErrorKind::InvalidParameter,
             "search_query_too_large",
-            "search query exceeds 4096 bytes",
+            format!(
+                "search query exceeds {} bytes",
+                compass_model::query_contract::MAX_INDEXED_QUERY_BYTES
+            ),
         ));
     }
     Ok(())
 }
 
-fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
+pub(crate) fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
     validate_search_query_size(value)?;
     let terms = value
         .split(|character: char| !(character.is_alphanumeric() || character == '_'))
@@ -1948,19 +2083,22 @@ fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
                 )
         })
         .map(str::to_lowercase)
-        .take(33)
+        .take(compass_model::query_contract::MAX_INDEXED_QUERY_TERMS.saturating_add(1))
         .collect::<Vec<_>>();
-    if terms.len() > 32 {
+    if terms.len() > compass_model::query_contract::MAX_INDEXED_QUERY_TERMS {
         return Err(QueryError::new(
             QueryErrorKind::InvalidParameter,
             "too_many_search_terms",
-            "search query exceeds 32 terms",
+            format!(
+                "search query exceeds {} terms",
+                compass_model::query_contract::MAX_INDEXED_QUERY_TERMS
+            ),
         ));
     }
     Ok(terms)
 }
 
-fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
+pub(crate) fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
     let mut seen = terms.iter().cloned().collect::<BTreeSet<_>>();
     let mut variants = Vec::new();
     let eligible_terms = terms

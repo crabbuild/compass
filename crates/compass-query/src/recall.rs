@@ -57,7 +57,6 @@ pub(crate) struct SearchCandidatePool {
     truncation_reasons: BTreeSet<RecallTruncationReason>,
     fuzzy_limit_reached: bool,
     fuzzy_candidates_added: usize,
-    candidates_read: u64,
 }
 
 impl SearchCandidatePool {
@@ -69,7 +68,6 @@ impl SearchCandidatePool {
             truncation_reasons: BTreeSet::new(),
             fuzzy_limit_reached: false,
             fuzzy_candidates_added: 0,
-            candidates_read: 0,
         }
     }
 
@@ -94,7 +92,6 @@ impl SearchCandidatePool {
     }
 
     pub(crate) fn add(&mut self, source: CandidateSource, node: NodeRecord) -> bool {
-        self.candidates_read = self.candidates_read.saturating_add(1);
         if let Some(record) = self.candidates.get_mut(&node.id) {
             record.sources.insert(source);
             return false;
@@ -131,23 +128,9 @@ impl SearchCandidatePool {
         true
     }
 
-    pub(crate) fn add_many<I>(&mut self, source: CandidateSource, nodes: I)
-    where
-        I: IntoIterator<Item = NodeRecord>,
-    {
-        for node in nodes {
-            self.add(source, node);
-        }
-    }
-
     #[must_use]
     pub(crate) fn into_vec(self) -> Vec<SearchCandidate> {
         self.candidates.into_values().collect()
-    }
-
-    #[must_use]
-    pub(crate) fn candidates_read(&self) -> u64 {
-        self.candidates_read
     }
 
     pub(crate) fn candidate_ids(&self) -> Vec<String> {
@@ -169,12 +152,17 @@ impl SearchCandidatePool {
 
 impl SearchCandidate {
     #[must_use]
-    pub(crate) fn best_source_rank(&self) -> u8 {
+    pub(crate) fn best_source(&self) -> CandidateSource {
         self.sources
             .iter()
-            .map(|source| source.priority())
-            .max()
-            .unwrap_or(0)
+            .copied()
+            .max_by_key(|source| source.priority())
+            .unwrap_or(CandidateSource::HeuristicFallback)
+    }
+
+    #[must_use]
+    pub(crate) fn best_source_rank(&self) -> u8 {
+        self.best_source().priority()
     }
 }
 

@@ -10,14 +10,28 @@ pub const CODE_QUERY_SCHEMA_V1: &str = "compass.query/1";
 pub const DISCOVERY_QUERY_SCHEMA_V1: &str = "compass.query.discovery/1";
 
 pub const MAX_DISCOVERY_DEPTH: u32 = 8;
-pub const MAX_DISCOVERY_SEEDS: u32 = 10;
+pub const MAX_DISCOVERY_SEEDS: u32 = 3;
 pub const MAX_DISCOVERY_CANDIDATES: u32 = 256;
 pub const MAX_DISCOVERY_NODES: u32 = 500;
 pub const MAX_DISCOVERY_EDGES: u32 = 1_000;
 pub const MAX_DISCOVERY_EXPANDED_RELATIONSHIPS: u64 = 10_000;
+/// Maximum indexed candidate records read across exact-ID, exact-name, alias,
+/// term, and fuzzy recall for one typed query. This bound is independent of
+/// graph size and may exceed the admitted-candidate limit because the shared
+/// recall engine probes several independently bounded sources.
+pub const MAX_INDEXED_CANDIDATE_NODES_READ: u64 = 12_801;
+/// Maximum exact/name/alias/term/fuzzy index probes for one typed query.
+pub const MAX_INDEXED_CANDIDATE_PROBES: u64 = 291;
+/// Discovery uses the shared indexed-recall work ceiling.
+pub const MAX_DISCOVERY_CANDIDATE_NODES_READ: u64 = MAX_INDEXED_CANDIDATE_NODES_READ;
+/// Discovery uses the shared indexed-recall probe ceiling.
+pub const MAX_DISCOVERY_CANDIDATE_PROBES: u64 = MAX_INDEXED_CANDIDATE_PROBES;
 pub const MAX_DISCOVERY_RESPONSE_BYTES: u64 = 8_388_608;
 pub const MAX_DISCOVERY_TIMEOUT_MS: u64 = 30_000;
-pub const MAX_DISCOVERY_QUESTION_BYTES: usize = 16_384;
+pub const MAX_INDEXED_QUERY_BYTES: usize = 4_096;
+pub const MAX_INDEXED_QUERY_TERMS: usize = 32;
+pub const MAX_DISCOVERY_QUESTION_BYTES: usize = MAX_INDEXED_QUERY_BYTES;
+pub const MAX_DISCOVERY_QUERY_TERMS: usize = MAX_INDEXED_QUERY_TERMS;
 pub const MAX_DISCOVERY_FILTERS: usize = 32;
 pub const MAX_DISCOVERY_FILTER_BYTES: usize = 1_024;
 
@@ -137,9 +151,11 @@ pub struct DiscoveryQueryRequest {
 pub enum DiscoverySeedSource {
     ExactId,
     ExactName,
-    ReferenceScan,
+    Alias,
     TermIndex,
+    RelationSeed,
     Fuzzy,
+    HeuristicFallback,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -186,7 +202,12 @@ pub struct DiscoveryOmissions {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DiscoveryStats {
+    /// Independently bounded index probes performed by candidate recall.
+    pub candidate_probes: u64,
+    /// Candidate records read from all bounded recall sources before
+    /// deduplication, scope filtering, and ranking.
     pub candidate_nodes: u64,
+    /// Deduplicated, scoped, ranked candidates admitted to seed selection.
     pub candidates_admitted: u64,
     pub visited_nodes: u64,
     pub expanded_relationships: u64,
