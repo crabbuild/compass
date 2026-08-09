@@ -760,6 +760,7 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                         manifest: artifacts.artifacts.manifest.as_ref(),
                         authoritative_sidecars: &authoritative_sidecars,
                         semantic_marker: &marker,
+                        publication_evidence: None,
                         derived: &derived,
                     },
                 )

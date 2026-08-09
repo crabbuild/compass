@@ -11,8 +11,9 @@ use compass_graph::{
 };
 use compass_model::GraphDocument;
 use compass_output::{
-    DetectionSummary, HtmlOptions, JsonExportOptions, ReportOptions, TokenCost,
-    backup_if_protected, generate_report, write_html, write_json,
+    DetectionSummary, FreshnessBasis, FreshnessStatus, HtmlOptions, JsonExportOptions,
+    OrientationHealth, ReportOptions, TokenCost, backup_if_protected, generate_report, write_html,
+    write_json,
 };
 use serde_json::{Value, json};
 
@@ -181,9 +182,8 @@ where
     let commit_root = std::env::current_dir().unwrap_or_else(|_| options.root.clone());
     let commit = git_commit(&commit_root);
     let report_root = options.root.to_string_lossy();
-    let mut report_options = ReportOptions::new(&report_root);
-    report_options.min_community_size = options.min_community_size;
-    report_options.built_at_commit = commit.as_deref();
+    let report_options =
+        cluster_only_report_options(&report_root, options.min_community_size, commit.as_deref());
     let learning = load_learning_for_report(&options.output_dir.join("graph.json"));
     let report = generate_report(
         &document,
@@ -282,6 +282,29 @@ where
     })
 }
 
+fn cluster_only_orientation_health() -> OrientationHealth {
+    OrientationHealth {
+        freshness: FreshnessStatus::Unknown,
+        freshness_basis: FreshnessBasis::Unavailable,
+        publication: None,
+        build_profile: Some("cluster-only".to_owned()),
+        corpus_measurements_available: false,
+        ..OrientationHealth::default()
+    }
+}
+
+fn cluster_only_report_options<'a>(
+    root: &'a str,
+    min_community_size: usize,
+    commit: Option<&'a str>,
+) -> ReportOptions<'a> {
+    let mut options = ReportOptions::new(root);
+    options.min_community_size = min_community_size;
+    options.built_at_commit = commit;
+    options.health = cluster_only_orientation_health();
+    options
+}
+
 /// Python's cluster-only path deliberately rebuilds extraction JSON through
 /// `build_from_json`, which always creates a simple Graph/DiGraph regardless
 /// of node-link metadata. Preserve that command-specific contract without
@@ -351,6 +374,26 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
+
+    #[test]
+    fn cluster_only_health_does_not_invent_completeness_or_freshness() {
+        let health = cluster_only_orientation_health();
+        assert_eq!(health.freshness, FreshnessStatus::Unknown);
+        assert_eq!(health.freshness_basis, FreshnessBasis::Unavailable);
+        assert_eq!(health.publication, None);
+        assert_eq!(health.omitted_nodes, None);
+        assert!(!health.corpus_measurements_available);
+        assert_eq!(health.build_profile.as_deref(), Some("cluster-only"));
+    }
+
+    #[test]
+    fn cluster_only_report_preserves_commit_identity_without_claiming_freshness() {
+        let options = cluster_only_report_options("fixture", 7, Some("abc123"));
+        assert_eq!(options.built_at_commit, Some("abc123"));
+        assert_eq!(options.min_community_size, 7);
+        assert_eq!(options.health.freshness, FreshnessStatus::Unknown);
+        assert_eq!(options.health.freshness_basis, FreshnessBasis::Unavailable);
+    }
 
     #[test]
     fn recluster_normalization_matches_python_simple_graph_edges() {

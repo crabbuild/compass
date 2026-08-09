@@ -46,8 +46,9 @@ use compass_model::provenance::{
 };
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
-    DetectionSummary, GraphViewModel, HtmlOptions, OutputError, ReportOptions, TokenCost,
-    generate_report, graph_view_model_document, write_html,
+    DetectionSummary, FreshnessBasis, FreshnessStatus, GraphViewModel, HtmlOptions,
+    OrientationHealth, OutputError, PublicationStatus, ReportOptions, TokenCost, generate_report,
+    graph_view_model_document, write_html,
 };
 use compass_resolve::{
     apply_program_projection, collect_program_projection_sites, merge_decl_def_classes_if_needed,
@@ -3726,6 +3727,7 @@ fn build_graph_inner_unscoped(
     if published.document.nodes.is_empty() {
         return Err(CoreError::EmptyGraph);
     }
+    let report_health = current_orientation_health(options, published.omissions);
     let document = published.document.to_legacy_document()?;
 
     // A history realization must depend only on the target commit and build
@@ -3805,17 +3807,16 @@ fn build_graph_inner_unscoped(
             })?;
             write_text_atomic(output_dir.join("labels.json"), &format!("{labels_json}\n"))?;
         }
-        let detection_summary = DetectionSummary {
-            total_files: detection.total_files,
-            total_words: usize::try_from(detection.total_words).unwrap_or(usize::MAX),
-            warning: (options.purpose == BuildPurpose::Extract)
-                .then(|| detection.warning.clone())
-                .flatten(),
-        };
+        let detection_summary = report_detection_summary(
+            detection.total_files,
+            detection.total_words,
+            detection.warning.clone(),
+        );
         let html_written = if options.purpose == BuildPurpose::Update {
             let report_root = report_root_label(&options.root);
             let mut report_options = ReportOptions::new(&report_root);
             report_options.built_at_commit = commit.as_deref();
+            report_options.health = report_health.clone();
             let report = generate_report(
                 &document,
                 &communities,
@@ -4191,6 +4192,61 @@ fn build_profile(options: &BuildOptions) -> BuildProfile {
         }
         .to_owned(),
         max_source_bytes: options.max_source_bytes,
+    }
+}
+
+fn current_orientation_health(
+    options: &BuildOptions,
+    omissions: PublicationOmissions,
+) -> OrientationHealth {
+    let publication = if omissions.is_partial() {
+        PublicationStatus::Partial
+    } else {
+        PublicationStatus::Complete
+    };
+    let profile = format!(
+        "{}; cluster={}; code_only={}; program={}; storage={}",
+        match options.purpose {
+            BuildPurpose::Update => "update",
+            BuildPurpose::Extract => "extract",
+        },
+        !options.no_cluster,
+        options.code_only,
+        options.program_analysis,
+        match options.graph_storage {
+            GraphStorage::Json => "json",
+            GraphStorage::Sqlite => "sqlite",
+        }
+    );
+    let mut exclusions = options.scope.exclude.clone();
+    exclusions.extend(options.extra_excludes.iter().cloned());
+    exclusions.sort();
+    exclusions.dedup();
+    OrientationHealth {
+        freshness: FreshnessStatus::Current,
+        freshness_basis: FreshnessBasis::JustBuiltSelectedInputs,
+        publication: Some(publication),
+        omitted_nodes: Some(omissions.nodes),
+        omitted_edges: Some(omissions.edges),
+        identity_collisions: Some(omissions.identity_collisions),
+        diagnostic_examples_omitted: Some(omissions.examples_omitted),
+        build_profile: Some(profile),
+        scope_includes: options.scope.include.clone(),
+        configured_exclusions: exclusions,
+        corpus_measurements_available: true,
+        ..OrientationHealth::default()
+    }
+}
+
+fn report_detection_summary(
+    total_files: usize,
+    total_words: u64,
+    warning: Option<String>,
+) -> DetectionSummary {
+    DetectionSummary {
+        total_files,
+        total_words: usize::try_from(total_words).unwrap_or(usize::MAX),
+        warning,
     }
 }
 
@@ -7028,6 +7084,51 @@ mod tests {
     use serde_json::{Map, Value};
 
     use super::*;
+
+    #[test]
+    fn current_orientation_health_preserves_scope_and_partial_publication() {
+        let mut options = BuildOptions::new(".");
+        options.scope.include = vec!["src/".to_owned()];
+        options.scope.exclude = vec!["src/generated/".to_owned()];
+        options.extra_excludes = vec!["vendor".to_owned(), "src/generated/".to_owned()];
+        options.code_only = true;
+        let health = current_orientation_health(
+            &options,
+            PublicationOmissions {
+                nodes: 7,
+                edges: 11,
+                identity_collisions: 2,
+                examples_omitted: 3,
+            },
+        );
+        assert_eq!(health.freshness, FreshnessStatus::Current);
+        assert_eq!(
+            health.freshness_basis,
+            FreshnessBasis::JustBuiltSelectedInputs
+        );
+        assert_eq!(health.publication, Some(PublicationStatus::Partial));
+        assert_eq!(health.omitted_nodes, Some(7));
+        assert_eq!(health.omitted_edges, Some(11));
+        assert_eq!(health.identity_collisions, Some(2));
+        assert_eq!(health.diagnostic_examples_omitted, Some(3));
+        assert_eq!(health.scope_includes, ["src/"]);
+        assert_eq!(health.configured_exclusions, ["src/generated/", "vendor"]);
+        assert!(health.corpus_measurements_available);
+        assert!(
+            health.build_profile.as_deref().is_some_and(|value| {
+                value.contains("update") && value.contains("code_only=true")
+            })
+        );
+    }
+
+    #[test]
+    fn current_report_preserves_detection_warning_for_every_build_purpose() {
+        let warning = "small corpus warning".to_owned();
+        let summary = report_detection_summary(4, 99, Some(warning.clone()));
+        assert_eq!(summary.total_files, 4);
+        assert_eq!(summary.total_words, 99);
+        assert_eq!(summary.warning, Some(warning));
+    }
 
     #[test]
     fn force_cache_reuse_never_authorizes_prior_published_graph_input() {
