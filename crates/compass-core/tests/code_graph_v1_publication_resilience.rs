@@ -377,7 +377,7 @@ fn typescript_type_star_reexport_keeps_barrel_file_exact() -> Result<(), Box<dyn
                 evidence.rule.as_deref(),
                 Some("universal-reexport-project-module-binding")
             );
-            assert_eq!(evidence.anchors, [site.clone()]);
+            assert_eq!(evidence.anchors.as_slice(), std::slice::from_ref(site));
             assert_eq!(evidence.wiring_site, None);
             Ok((site.start_line, edge.target.as_str()))
         })
