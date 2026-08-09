@@ -4438,6 +4438,18 @@ fn graph_delta_candidate(previous: &V1GraphDocument, current: &V1GraphDocument) 
     if previous.directed != current.directed || previous.multigraph != current.multigraph {
         return false;
     }
+    // The normal publication path emits both collections in stable-ID order,
+    // but graph.json is still an input boundary: an older, hand-authored, or
+    // otherwise non-canonical yet structurally valid artifact can reach this
+    // check. Never feed such records to the merge walk. Falling back to full
+    // publication preserves correctness and restores canonical order on disk.
+    if !records_are_sorted_by(&previous.nodes, |node| node.id.as_str())
+        || !records_are_sorted_by(&previous.links, |edge| edge.id.as_str())
+        || !records_are_sorted_by(&current.nodes, |node| node.id.as_str())
+        || !records_are_sorted_by(&current.links, |edge| edge.id.as_str())
+    {
+        return false;
+    }
     // V1 publication sorts both records by stable ID. A merge walk avoids
     // four BTreeMap allocations on every incremental build while preserving
     // the same changed-record count. The snapshot layer repeats its complete
@@ -4462,21 +4474,22 @@ fn graph_delta_candidate(previous: &V1GraphDocument, current: &V1GraphDocument) 
     true
 }
 
+fn records_are_sorted_by<T, F>(records: &[T], key: F) -> bool
+where
+    F: Fn(&T) -> &str,
+{
+    records
+        .windows(2)
+        .all(|records| key(&records[0]) <= key(&records[1]))
+}
+
 fn changed_record_count<T, F>(previous: &[T], current: &[T], key: F) -> usize
 where
     T: PartialEq,
     F: Fn(&T) -> &str,
 {
-    debug_assert!(
-        previous
-            .windows(2)
-            .all(|records| key(&records[0]) <= key(&records[1]))
-    );
-    debug_assert!(
-        current
-            .windows(2)
-            .all(|records| key(&records[0]) <= key(&records[1]))
-    );
+    debug_assert!(records_are_sorted_by(previous, &key));
+    debug_assert!(records_are_sorted_by(current, &key));
 
     let mut previous_index = 0;
     let mut current_index = 0;
@@ -7376,6 +7389,46 @@ mod tests {
             changed_record_count(&current, &previous, |record| record.0),
             2
         );
+    }
+
+    #[test]
+    fn graph_delta_candidate_falls_back_for_unsorted_records() {
+        let build = compass_model::code_graph::BuildMetadata {
+            builder_version: "test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "source".to_owned(),
+            configuration_digest: "configuration".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        };
+        let node = |id: &str| compass_model::code_graph::NodeRecord {
+            id: id.to_owned(),
+            kind: compass_model::code_graph::NodeKind::Function,
+            roles: Vec::new(),
+            name: id.to_owned(),
+            qualified_name: id.to_owned(),
+            language: Some("rust".to_owned()),
+            framework: None,
+            source: None,
+            details: None,
+            evidence: Vec::new(),
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+            community: None,
+        };
+        let mut previous = V1GraphDocument::empty_v1(build);
+        previous.nodes = vec![node("a"), node("b")];
+        let mut current = previous.clone();
+        current.nodes[0].name = "changed".to_owned();
+        assert!(graph_delta_candidate(&previous, &current));
+
+        let mut unsorted_previous = previous.clone();
+        unsorted_previous.nodes.reverse();
+        assert!(!graph_delta_candidate(&unsorted_previous, &current));
+
+        let mut unsorted_current = current;
+        unsorted_current.nodes.reverse();
+        assert!(!graph_delta_candidate(&previous, &unsorted_current));
     }
 
     #[test]
