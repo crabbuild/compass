@@ -50,6 +50,28 @@
   repository-relative identity for universal framework facts so shallow source
   paths are published instead of being mistaken for temporary-directory paths.
 
+## 0.3.7 - 2026-08-08
+
+- Improve natural-language query recall and ranking with bounded exact, alias,
+  term, typo, and relationship-seeded channels, deterministic intent routing,
+  direction-aware node trails, and explicit ambiguity/no-answer diagnostics.
+  Add a digest-pinned 500-question relevance qualification matrix and a local,
+  bounded feedback workflow for reviewing future query samples.
+
+- Route JavaScript and TypeScript production extraction through the universal
+  semantic candidate with source-backed declarations, imports, re-exports,
+  calls, references, heritage, aliases, framework routes, and bounded
+  cross-file resolution. Preserve repository-relative identities and qualify
+  the expanded TypeScript/JavaScript evidence paths.
+
+- Make `compass upgrade` use a bounded, versioned static release manifest with
+  exact target, tag, size, and SHA-256 validation, avoiding unauthenticated
+  GitHub API rate limits while keeping fail-closed artifact selection.
+
+- Expose profiled natural-query execution through a separate versioned library
+  envelope, cap recall and query-log work, and keep the deterministic
+  `compass.query/1` response contract unchanged.
+
 ## 0.3.6 - 2026-08-06
 
 - Simplify every Compass-owned current-output path beneath `compass-out/`.
