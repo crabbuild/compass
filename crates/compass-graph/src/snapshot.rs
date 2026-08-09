@@ -1693,6 +1693,23 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             .collect()
     }
 
+    /// Return a canonical prefix of nodes and report whether more nodes exist.
+    ///
+    /// Query surfaces use this only as a bounded compatibility path. Normal
+    /// discovery should use the immutable term indexes instead of scanning the
+    /// node realization.
+    pub fn nodes_bounded(
+        &self,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<NodeRecord>, bool), SnapshotError> {
+        let (values, truncated) = self.scan_values_bounded(IndexKind::Nodes, None, limits)?;
+        let nodes = values
+            .into_iter()
+            .map(|value| decode_json::<NodeRecord>(&value))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((nodes, truncated))
+    }
+
     pub fn edges(&self, limits: SnapshotReadLimits) -> Result<Vec<EdgeRecord>, SnapshotError> {
         self.scan_values(IndexKind::Edges, None, limits)?
             .into_iter()

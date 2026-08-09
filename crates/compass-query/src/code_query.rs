@@ -464,7 +464,7 @@ impl CodeAdjacencyIndex {
 }
 
 impl CodeGraphBackend {
-    fn node_by_id(&self, id: &str) -> Result<Option<NodeRecord>, QueryError> {
+    pub(crate) fn node_by_id(&self, id: &str) -> Result<Option<NodeRecord>, QueryError> {
         match self {
             Self::Materialized { graph, lookup, .. } => Ok(lookup
                 .node_by_id(id)
@@ -516,7 +516,7 @@ impl CodeGraphBackend {
         }
     }
 
-    fn matching_bounded(
+    pub(crate) fn matching_bounded(
         &self,
         node: &str,
         inbound: bool,
@@ -567,7 +567,7 @@ impl CodeGraphBackend {
         }
     }
 
-    fn incident_bounded(
+    pub(crate) fn incident_bounded(
         &self,
         node: &str,
         include_heuristic: bool,
@@ -636,6 +636,32 @@ impl CodeGraphBackend {
             nodes.truncate(limit);
         }
         Ok(Some((nodes, truncated)))
+    }
+
+    pub(crate) fn reference_nodes_bounded(
+        &self,
+        limit: usize,
+    ) -> Result<(Vec<NodeRecord>, bool), QueryError> {
+        match self {
+            Self::Materialized { graph, .. } => {
+                let retained = limit.saturating_add(1);
+                let mut nodes = graph
+                    .nodes
+                    .iter()
+                    .take(retained)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let truncated = nodes.len() > limit;
+                if truncated {
+                    nodes.truncate(limit);
+                }
+                Ok((nodes, truncated))
+            }
+            Self::Store(snapshot) => snapshot
+                .reader()?
+                .nodes_bounded(snapshot_limits(limit)?)
+                .map_err(snapshot_error),
+        }
     }
 }
 

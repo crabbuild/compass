@@ -1,0 +1,40 @@
+{
+  "schema": "compass.query.discovery/1",
+  "question": "missing symbol",
+  "selectedDirection": "both",
+  "directionSource": "neutral",
+  "relationContexts": [],
+  "scope": [],
+  "traversal": "bfs",
+  "seeds": [],
+  "nodes": [],
+  "edges": [],
+  "diagnostics": [
+    {"code": "no_match", "message": "No node matched \"missing symbol\"", "nodeId": null, "path": null}
+  ],
+  "limits": {
+    "maxDepth": 2,
+    "maxSeeds": 3,
+    "maxCandidates": 256,
+    "maxNodes": 500,
+    "maxEdges": 1000,
+    "maxExpandedRelationships": 10000,
+    "maxResponseBytes": 8388608,
+    "timeoutMs": 30000
+  },
+  "stats": {
+    "candidateNodes": 1,
+    "candidatesAdmitted": 0,
+    "visitedNodes": 0,
+    "expandedRelationships": 0,
+    "returnedNodes": 0,
+    "returnedEdges": 0
+  },
+  "omissions": {
+    "candidates": null,
+    "nodes": null,
+    "edges": null,
+    "expandedRelationships": null
+  },
+  "truncated": false
+}

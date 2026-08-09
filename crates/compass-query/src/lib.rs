@@ -4,6 +4,7 @@ mod affected;
 mod benchmark;
 mod code_query;
 mod cql;
+mod discovery;
 mod graph_engine;
 mod index;
 mod intent;

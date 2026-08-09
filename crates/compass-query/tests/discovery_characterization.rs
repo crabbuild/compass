@@ -45,7 +45,7 @@ fn compatibility_discovery_is_outgoing_only() {
 }
 
 #[test]
-fn compatibility_per_term_seed_additions_can_exceed_the_nominal_cap() {
+fn natural_discovery_enforces_the_three_seed_cap() {
     let graph = graph(
         json!([
             {"id":"alpha","label":"alpha"},
@@ -69,10 +69,7 @@ fn compatibility_per_term_seed_additions_can_exceed_the_nominal_cap() {
         .nth(1)
         .and_then(|value| value.split(']').next())
         .unwrap_or_default();
-    assert_eq!(start.matches('\'').count(), 8, "{output}");
-    for label in ["alpha", "beta", "gamma", "delta"] {
-        assert!(start.contains(label), "{output}");
-    }
+    assert_eq!(start.matches('\'').count(), 6, "{output}");
 }
 
 #[test]
