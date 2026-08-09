@@ -1485,12 +1485,10 @@ fn normalize_v1_with_mode(
 fn normalize_trusted_node(value: Value, raw_id: &str) -> Result<NodeRecord, GraphError> {
     let mut node = serde_json::from_value::<NodeRecord>(value)
         .map_err(|error| raw_error(raw_id, &error.to_string()))?;
-    // Trusted records already carry typed semantics, but older producers used a
-    // global qualified-name identity for document blocks.  Documents are
-    // occurrences: preserve their source anchor in the canonical identity even
-    // when they arrive through the trusted path (which bypasses raw
-    // normalization).  This prevents repeated Markdown/HTML blocks with the
-    // same heading from quarantining one another.
+    // Trusted records already carry typed semantics. Markdown headings with a
+    // retained fragment URI have a hierarchical identity that survives source
+    // movement; other document resources remain positional occurrences so
+    // repeated blocks cannot quarantine one another.
     if node.kind == NodeKind::Resource
         && matches!(
             node.details,
@@ -1501,11 +1499,15 @@ fn normalize_trusted_node(value: Value, raw_id: &str) -> Result<NodeRecord, Grap
         )
         && let Some(site) = node.source.as_ref()
     {
-        let positional_name = format!(
-            "{}@{}:{}",
-            node.qualified_name, site.start_byte, site.end_byte
-        );
-        node.id = domain_id(NodeKind::Resource, &site.file, &positional_name);
+        node.id = if typed_markdown_heading(&node) {
+            domain_id(NodeKind::Resource, &site.file, &node.qualified_name)
+        } else {
+            let positional_name = format!(
+                "{}@{}:{}",
+                node.qualified_name, site.start_byte, site.end_byte
+            );
+            domain_id(NodeKind::Resource, &site.file, &positional_name)
+        };
     }
     if node.source.is_none() {
         for evidence in &mut node.evidence {
@@ -4229,7 +4231,12 @@ fn node_details(
         })),
         NodeKind::Resource => Some(NodeDetails::Resource(ResourceNodeDetails {
             resource_kind: resource_kind.unwrap_or(ResourceKind::Document),
-            uri: optional_string(attributes, "uri"),
+            uri: optional_string(attributes, "uri").or_else(|| {
+                raw_markdown_heading(attributes)
+                    .then(|| optional_string(attributes, "anchor_slug"))
+                    .flatten()
+                    .map(|slug| format!("#{slug}"))
+            }),
             media_type: optional_string(attributes, "media_type"),
         })),
         NodeKind::Event | NodeKind::Message | NodeKind::Topic | NodeKind::Queue => {
@@ -4415,6 +4422,17 @@ fn node_identity(
                     resource_kind: ResourceKind::Document,
                     ..
                 }))
+            ) && raw_markdown_heading(attributes) =>
+        {
+            domain_id(kind, source_path, qualified_name)
+        }
+        NodeKind::Resource
+            if matches!(
+                details,
+                Some(NodeDetails::Resource(ResourceNodeDetails {
+                    resource_kind: ResourceKind::Document,
+                    ..
+                }))
             ) =>
         {
             // Markdown/HTML blocks are occurrences, not global concepts. The
@@ -4491,6 +4509,27 @@ fn node_identity(
         }
     };
     Ok(id)
+}
+
+fn raw_markdown_heading(attributes: &Map<String, Value>) -> bool {
+    optional_any_string(attributes, &["language", "lang"]).as_deref() == Some("markdown")
+        && optional_string(attributes, "document_kind").as_deref() == Some("heading")
+        && matches!(
+            optional_string(attributes, "heading_style").as_deref(),
+            Some("atx" | "setext")
+        )
+}
+
+fn typed_markdown_heading(node: &NodeRecord) -> bool {
+    node.language.as_deref() == Some("markdown")
+        && matches!(
+            node.details.as_ref(),
+            Some(NodeDetails::Resource(ResourceNodeDetails {
+                resource_kind: ResourceKind::Document,
+                uri: Some(uri),
+                ..
+            })) if uri.starts_with('#')
+        )
 }
 
 fn raw_anchor(

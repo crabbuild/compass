@@ -4,7 +4,7 @@ use std::fs;
 
 use compass_graph::{build_from_extraction, normalize_document_v1};
 use compass_languages::Engine;
-use compass_model::code_graph::NodeKind;
+use compass_model::code_graph::{NodeDetails, NodeKind};
 
 #[test]
 fn repeated_markdown_headings_use_stable_hierarchical_identities() -> Result<(), Box<dyn Error>> {
@@ -26,6 +26,12 @@ Second problem.
         let extraction = Engine::default().extract(path)?;
         let flexible = build_from_extraction(&extraction, true, Some(root));
         let graph = normalize_document_v1(&flexible, root, "sha256:test", None)?;
+        assert!(graph.nodes.iter().filter(|node| {
+            node.kind == NodeKind::Resource && node.name == "Problem"
+        }).all(|node| matches!(
+            node.details.as_ref(),
+            Some(NodeDetails::Resource(resource)) if resource.uri.as_deref() == Some("#problem")
+        )));
         Ok(graph
             .nodes
             .iter()

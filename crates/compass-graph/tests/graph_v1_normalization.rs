@@ -234,6 +234,65 @@ fn repeated_document_blocks_use_occurrence_stable_identity()
 }
 
 #[test]
+fn markdown_heading_identity_uses_hierarchy_and_survives_source_movement()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let heading = |start| RawNodeRecord {
+        id: format!("raw:heading:{start}"),
+        attributes: Map::from_iter([
+            ("label".to_owned(), json!("Problem")),
+            (
+                "qualified_name".to_owned(),
+                json!("Cookbook::Recipe 1::Problem"),
+            ),
+            ("symbol_kind".to_owned(), json!("markdown_block")),
+            ("file_type".to_owned(), json!("document")),
+            ("document_kind".to_owned(), json!("heading")),
+            ("heading_style".to_owned(), json!("atx")),
+            ("anchor_slug".to_owned(), json!("problem")),
+            ("language".to_owned(), json!("markdown")),
+            ("extractor".to_owned(), json!("compass.markdown")),
+            ("source_file".to_owned(), json!("src/lib.rs")),
+            ("source_anchor".to_owned(), anchor(root, start)),
+        ]),
+    };
+
+    let before = normalize_v1(
+        Extraction {
+            nodes: vec![heading(10)],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+    let after = normalize_v1(
+        Extraction {
+            nodes: vec![heading(30)],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+
+    assert_eq!(before.nodes[0].id, after.nodes[0].id);
+    assert_ne!(before.nodes[0].source, after.nodes[0].source);
+    let round_trip = normalize_v1(extraction_from_v1(&after), build_evidence(root)?)?;
+    assert_eq!(round_trip.nodes[0].id, after.nodes[0].id);
+    assert_eq!(
+        round_trip.nodes[0]
+            .details
+            .as_ref()
+            .and_then(|details| match details {
+                compass_model::code_graph::NodeDetails::Resource(resource) => {
+                    resource.uri.as_deref()
+                }
+                _ => None,
+            }),
+        Some("#problem")
+    );
+    Ok(())
+}
+
+#[test]
 fn trusted_document_blocks_repair_legacy_global_identity() -> Result<(), Box<dyn std::error::Error>>
 {
     let directory = tempfile::tempdir()?;
