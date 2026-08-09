@@ -4,7 +4,7 @@ use std::path::Path;
 
 use compass_model::{Graph, NodeIndex, NodeRecord};
 
-use crate::text::{search_tokens, strip_diacritics};
+use crate::text::{canonical_query_token, search_tokens, strip_diacritics};
 
 const EXACT_MATCH_BONUS: f64 = 1000.0;
 const PREFIX_MATCH_BONUS: f64 = 100.0;
@@ -21,6 +21,13 @@ pub struct ScoredNode {
 pub struct QueryScores {
     pub ranked: Vec<ScoredNode>,
     pub best_seed_by_term: HashMap<String, NodeIndex>,
+}
+
+struct NodeText {
+    node: NodeIndex,
+    normalized_label: String,
+    bare_label: String,
+    label_tokens: String,
 }
 
 #[must_use]
@@ -45,6 +52,7 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
     let mut seen = HashSet::new();
     for term in terms {
         for token in search_tokens(term) {
+            let token = canonical_query_token(token);
             if seen.insert(token.clone()) {
                 normalized_terms.push(token);
             }
@@ -54,7 +62,21 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
     if term_count == 0 {
         return QueryScores::default();
     }
-    let idf = compute_idf(graph, &normalized_terms);
+    let node_text = graph
+        .nodes()
+        .map(|(node, record)| {
+            let normalized_label = normalized_label(record);
+            let bare_label = normalized_label.trim_end_matches(['(', ')']).to_owned();
+            let label_tokens = canonical_label_tokens(record.label());
+            NodeText {
+                node,
+                normalized_label,
+                bare_label,
+                label_tokens,
+            }
+        })
+        .collect::<Vec<_>>();
+    let idf = compute_idf(&node_text, &normalized_terms);
     let joined = normalized_terms.join(" ");
     let joined_weight = normalized_terms
         .iter()
@@ -65,18 +87,24 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
     let mut ranked = Vec::new();
     let mut best: HashMap<String, BestSeed> = HashMap::new();
     let mut tie_breakers = HashMap::new();
-    for (node_index, node) in graph.nodes() {
-        let norm_label = normalized_label(node);
-        let bare_label = norm_label.trim_end_matches(['(', ')']);
-        let label_tokens = search_tokens(&node.string("label")).join(" ");
+    for text in &node_text {
+        let node_index = text.node;
+        let node = graph.node(node_index);
+        let norm_label = text.normalized_label.as_str();
+        let bare_label = text.bare_label.as_str();
+        let label_tokens = text.label_tokens.as_str();
         let source = node.string("source_file").to_lowercase();
         let node_id = node.id.to_lowercase();
         let mut tie_breaker = None;
         let mut score = 0.0;
+        let compound_term_matches = normalized_terms
+            .iter()
+            .filter(|term| term.len() >= 3 && label_has_exact_term(&text.label_tokens, term))
+            .count();
         score += query_match_tier(
-            &norm_label,
+            norm_label,
             bare_label,
-            &label_tokens,
+            label_tokens,
             &node_id,
             &joined,
             joined_weight,
@@ -89,7 +117,11 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
             let mut tier_value = 0.0;
             let mut substring_value = 0.0;
             let mut source_value = 0.0;
-            if term == &norm_label || term == bare_label {
+            let compound_token_match = compound_term_matches >= 2
+                && term.len() >= 3
+                && (semantic_seed_rank(node) >= 3 || node.kind_name() == "symbol")
+                && label_has_exact_term(&text.label_tokens, term);
+            if term == norm_label || term == bare_label || compound_token_match {
                 tier_value = EXACT_MATCH_BONUS * weight;
                 matched += 1;
             } else if norm_label.starts_with(term) {
@@ -107,14 +139,8 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
             tiered += tier_value;
 
             if collect_per_term_seeds {
-                let joined_tier = query_match_tier(
-                    &norm_label,
-                    bare_label,
-                    &label_tokens,
-                    &node_id,
-                    term,
-                    weight,
-                );
+                let joined_tier =
+                    query_match_tier(norm_label, bare_label, label_tokens, &node_id, term, weight);
                 let singleton =
                     singleton_score(joined_tier, tier_value, substring_value, source_value);
                 if singleton > 0.0 {
@@ -353,22 +379,22 @@ pub(crate) fn find_exact_nodes(graph: &Graph, label: &str) -> Vec<NodeIndex> {
         .collect()
 }
 
-fn compute_idf(graph: &Graph, terms: &[String]) -> HashMap<String, f64> {
+fn compute_idf(nodes: &[NodeText], terms: &[String]) -> HashMap<String, f64> {
     let mut frequencies = terms
         .iter()
         .map(|term| (term.clone(), 0_usize))
         .collect::<HashMap<_, _>>();
-    for (_, node) in graph.nodes() {
-        let label = normalized_label(node);
+    for node in nodes {
+        let label = &node.normalized_label;
         for term in terms {
-            if label.contains(term)
+            if (label.contains(term) || label_has_exact_term(&node.label_tokens, term))
                 && let Some(frequency) = frequencies.get_mut(term)
             {
                 *frequency += 1;
             }
         }
     }
-    let node_count = graph.node_count().max(1) as f64;
+    let node_count = nodes.len().max(1) as f64;
     frequencies
         .into_iter()
         .map(|(term, frequency)| {
@@ -381,11 +407,35 @@ fn compute_idf(graph: &Graph, terms: &[String]) -> HashMap<String, f64> {
 pub(crate) fn normalized_label(node: &NodeRecord) -> String {
     let stored = node.string("norm_label");
     let normalized = if stored.is_empty() {
-        strip_diacritics(&node.string("label")).to_lowercase()
+        strip_diacritics(node.label()).to_lowercase()
     } else {
         stored.to_lowercase()
     };
     normalized.trim_start_matches('.').to_owned()
+}
+
+fn canonical_label_tokens(label: &str) -> String {
+    let mut terms = String::new();
+    for token in search_tokens(label) {
+        append_label_token(&mut terms, canonical_query_token(token.clone()));
+        for component in token.split('_').filter(|component| !component.is_empty()) {
+            append_label_token(&mut terms, canonical_query_token(component.to_owned()));
+        }
+    }
+    terms
+}
+
+fn append_label_token(tokens: &mut String, token: String) {
+    if !tokens.is_empty() {
+        tokens.push(' ');
+    }
+    tokens.push_str(&token);
+}
+
+fn label_has_exact_term(label_tokens: &str, term: &str) -> bool {
+    label_tokens
+        .split_whitespace()
+        .any(|label_term| label_term == term)
 }
 
 fn semantic_seed_rank(node: &NodeRecord) -> u8 {

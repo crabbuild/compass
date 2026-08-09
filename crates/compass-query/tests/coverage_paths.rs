@@ -255,3 +255,25 @@ fn benchmark_and_text_helpers_cover_unicode_ascii_and_error_modes() -> Result<()
     assert_eq!(sanitize_label(&"x".repeat(300)).chars().count(), 256);
     Ok(())
 }
+
+#[test]
+fn natural_query_terms_are_independently_golden_for_common_code_inflections() {
+    let cases = [
+        ("how are routes registered", &["route", "register"][..]),
+        ("how are dependencies solved", &["dependency", "solve"][..]),
+        ("how are collections mapped", &["collection", "map"][..]),
+        (
+            "how are log records represented",
+            &["log", "record", "represent"][..],
+        ),
+    ];
+
+    for (question, expected) in cases {
+        assert_eq!(query_terms(question), expected, "question: {question:?}");
+    }
+
+    assert_eq!(
+        query_terms("how is routing aliases using"),
+        ["route", "alias", "use"]
+    );
+}
