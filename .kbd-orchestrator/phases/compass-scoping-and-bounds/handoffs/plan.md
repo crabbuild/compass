@@ -25,12 +25,10 @@ sequenced after C-001 so the extraction happens against an honest read path.
   it. If C-004 slips, C-002's message stays permanently incomplete — track explicitly.
 - C-005's dependency rule (no prolly-map / prolly-store-sqlite / compass-ir /
   compass-analysis) is a stop-and-report gate, not a preference.
-- Every acceptance box is unverifiable while /Volumes/Workspace is unmounted.
 
 ## Blockers
 
-1. **/Volumes/Workspace NOT mounted** — blocks all verification. Re-checked at plan time.
-2. Identity/namespacing for shared record keys — blocks C-005 adoption, not extraction.
+1. Identity/namespacing for shared record keys — blocks C-005 adoption, not extraction.
 
 ## Unmeasured
 

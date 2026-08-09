@@ -10,28 +10,21 @@ conventions, test/fixture policy, public-contract rules, and the completion
 checklist. Read it before editing. This file only adds the mechanics AGENTS.md
 does not spell out.
 
-## Build target directory (mandatory)
+## Build artifacts
 
-The main disk is capped at 100 GB, so Cargo artifacts live on a mounted volume.
-**Set `CARGO_TARGET_DIR` on every invocation that can compile** — `build`,
-`check`, `test`, `clippy`, `bench`, `doc`, `install`, `package`, and any Make
-target wrapping them. The variable does not persist between tool calls.
+Compass build artifacts are large. Where they live is a per-contributor
+environment choice — this repository mandates no specific path or volume.
 
-```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main \
-  cargo test -p compass-model --locked
-```
+If you redirect Cargo output with `CARGO_TARGET_DIR`, set it on every invocation
+that can compile (it does not persist between tool calls), and give each
+checkout and worktree its own directory — never share one across repositories or
+concurrent worktrees, since feature sets, build scripts, and locks can collide.
 
-Each checkout and worktree needs its own directory
-(`compass-<worktree-name>` for other worktrees). Never share one across
-repositories or concurrent worktrees. If `/Volumes/Workspace` is not mounted,
-stop and report it rather than falling back to local `target/`.
-
-Note the conflict this creates with the Makefile: several targets (`install`,
-`dist`, `release-check`) look up binaries through a literal `target/` path after
-Cargo finishes. Prefer direct `cargo` commands for verification, and inspect any
-packaging/install target before running it so it does not silently trigger a
-second local build.
+Note a related Makefile wrinkle: several targets (`install`, `dist`,
+`release-check`) look up binaries through a literal `target/` path after Cargo
+finishes. If you have redirected `CARGO_TARGET_DIR`, prefer direct `cargo`
+commands for verification, and inspect any packaging/install target before
+running it so it does not silently trigger a second build.
 
 ## Commands
 

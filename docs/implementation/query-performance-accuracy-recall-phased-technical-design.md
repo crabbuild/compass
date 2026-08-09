@@ -428,7 +428,7 @@ Tune weights via relevance corpus; keep profile IDs for quick A/B.
 
 For each phase, run at least:
 
-- `CARGO_TARGET_DIR=/Volumes/Workspace/crubuild-target/compass-main cargo test -p compass-query --test relevance_qualification --locked`
+- `CARGO_TARGET_DIR=<qualification-corpus-root>/crubuild-target/compass-main cargo test -p compass-query --test relevance_qualification --locked`
 - `python3 scripts/qualify_query_relevance.py`
 - phase-specific targeted tests:
   - intent parser unit tests,

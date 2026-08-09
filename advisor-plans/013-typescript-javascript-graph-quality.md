@@ -2334,23 +2334,23 @@ syntax behavior changes over time.
 
 All Cargo commands that compile must use this worktree's unique external target:
 
-`CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923`
+`CARGO_TARGET_DIR=<qualification-corpus-root>/crabbuild-target/compass-6923`
 
-Verify `/Volumes/Workspace` is mounted and the directory is writable before the
+Verify the qualification corpus root and Cargo target directory are writable before the
 first build. Stop rather than falling back to `target/`.
 
 | Purpose | Command | Expected result |
 |---|---|---|
-| language tests | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923 cargo test -p compass-languages --locked` | exit 0 |
-| resolver tests | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923 cargo test -p compass-resolve --locked` | exit 0 |
-| program/core tests | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923 cargo test -p compass-program -p compass-core --locked` | exit 0 |
+| language tests | `cargo test -p compass-languages --locked` | exit 0 |
+| resolver tests | `cargo test -p compass-resolve --locked` | exit 0 |
+| program/core tests | `cargo test -p compass-program -p compass-core --locked` | exit 0 |
 | qualification unit tests | `python3 -m unittest benchmarks.performance.tests.test_audit benchmarks.performance.tests.test_correctness benchmarks.performance.tests.test_language_fixture_compare` | exit 0 |
-| fixture qualification | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923 ./scripts/qualify_code_graph_v1.sh --fixtures-only` | all cases pass |
+| fixture qualification | `./scripts/qualify_code_graph_v1.sh --fixtures-only` | all cases pass |
 | JavaScript package checks | `npm ci && npm run typecheck:js && npm run test:js` | exit 0 |
 | product boundary | `sh scripts/check_product_boundary.sh` | no Graphify/runtime boundary violation |
 | format | `cargo fmt --all -- --check` | exit 0 |
-| workspace lint | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923 cargo clippy --workspace --lib --bins --locked -- -D warnings` | exit 0 |
-| workspace tests | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923 cargo test --workspace --lib --bins --locked` | exit 0 |
+| workspace lint | `cargo clippy --workspace --lib --bins --locked -- -D warnings` | exit 0 |
+| workspace tests | `cargo test --workspace --lib --bins --locked` | exit 0 |
 
 Each phase below adds a narrower verification command. Keep those commands in
 the final PR description with the exact commit, tool versions, and corpus pins.
@@ -2878,7 +2878,7 @@ the exact release candidate, not an earlier feature commit or a working tree.
 
 1. Promote the four audited corpora to pinned release gates after license and
    disk policy review. Store external read-only repositories beneath
-   `/Volumes/Workspace/Github/<owner>/<repository>`; keep generated graphs and
+   `<qualification-corpus-root>/<owner>/<repository>`; keep generated graphs and
    audit artifacts outside tracked sources.
 2. Add extended regression corpora for a large monorepo, current TypeScript
    compiler syntax, React/Next, Angular, Vue/Nuxt, Svelte/SvelteKit, and Astro.
@@ -3012,7 +3012,7 @@ Stop and report rather than weakening the design if:
 - competitor inputs cannot be configured equivalently enough for a defensible
   comparison;
 - performance results are too noisy or incomplete for a public claim;
-- `/Volumes/Workspace` is unavailable for a Cargo build or real-corpus checkout;
+- `<qualification-corpus-root>` is unavailable for a Cargo build or real-corpus checkout;
 - pre-existing user changes cannot be preserved.
 
 ## Maintenance notes

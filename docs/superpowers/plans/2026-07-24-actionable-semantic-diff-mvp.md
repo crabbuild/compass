@@ -1373,10 +1373,10 @@ Expected: every command exits `0`; no warnings; graph report regenerates success
 
 - [ ] **Step 4: Rebuild and inspect the real cocoindex comparison**
 
-First replay the established LevelDB cases from `/Volumes/Workspace/Github/leveldb`:
+First replay the established LevelDB cases from `<qualification-corpus-root>/leveldb`:
 
 ```bash
-cd /Volumes/Workspace/Github/leveldb
+cd <qualification-corpus-root>/leveldb
 /Users/haipingfu/graphify/compass/target/debug/compass history build 78a352f
 /Users/haipingfu/graphify/compass/target/debug/compass history build 4a0c572 --profile-from 78a352f
 /Users/haipingfu/graphify/compass/target/debug/compass diff 78a352f 4a0c572
@@ -1388,7 +1388,7 @@ git status --short
 
 Expected: the deadlock body edit is either explained from supported summaries or explicitly indeterminate, never reduced to location churn; the Zstd addition reports retained symbols/call/dependency evidence; the original checkout remains clean.
 
-From `/Volumes/Workspace/Github/cocoindex`, using the newly built Compass binary:
+From `<qualification-corpus-root>/cocoindex`, using the newly built Compass binary:
 
 ```bash
 /Users/haipingfu/graphify/compass/target/debug/compass history build 90571539 --profile-from 71f9cc9

@@ -47,8 +47,8 @@ Host:
 The source checkouts and generated evidence are retained under:
 
 ```text
-/Volumes/Workspace/compass-heavy-framework-perf-20260729/repos
-/Volumes/Workspace/compass-heavy-framework-best-effort-20260730
+<qualification-corpus-root>/compass-heavy-framework-perf-20260729/repos
+<qualification-corpus-root>/compass-heavy-framework-best-effort-20260730
 ```
 
 ## Build Results

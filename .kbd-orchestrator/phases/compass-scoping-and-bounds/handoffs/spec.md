@@ -37,8 +37,3 @@ decision below.
 2. Payload composition unmeasured — blocks C-003 calibration.
 3. Untested: whether --exclude on universal-agent-runtime lands under 2 GiB.
 
-## Environment blocker
-
-/Volumes/Workspace is NOT mounted. Every compiling command requires
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main. Execution cannot
-verify anything until that volume is available.

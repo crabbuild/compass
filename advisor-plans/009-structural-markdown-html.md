@@ -70,13 +70,13 @@ local graphs without runtime downloads or model dependence.
 
 | Purpose | Command | Expected on success |
 |---|---|---|
-| Languages | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-languages --locked` | exit 0 |
-| Markdown coverage | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-languages --test markdown_coverage --locked` | exit 0 |
-| Media | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-media --locked` | exit 0 |
-| Ingest | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-ingest --locked` | exit 0 |
-| Core | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-core --locked` | exit 0 |
-| Qualification | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main ./scripts/qualify_code_graph_v1.sh --fixtures-only` | exit 0 |
-| Lint | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo clippy -p compass-languages -p compass-media -p compass-ingest -p compass-core --all-targets --all-features --locked -- -D warnings` | exit 0 |
+| Languages | `cargo test -p compass-languages --locked` | exit 0 |
+| Markdown coverage | `cargo test -p compass-languages --test markdown_coverage --locked` | exit 0 |
+| Media | `cargo test -p compass-media --locked` | exit 0 |
+| Ingest | `cargo test -p compass-ingest --locked` | exit 0 |
+| Core | `cargo test -p compass-core --locked` | exit 0 |
+| Qualification | `./scripts/qualify_code_graph_v1.sh --fixtures-only` | exit 0 |
+| Lint | `cargo clippy -p compass-languages -p compass-media -p compass-ingest -p compass-core --all-targets --all-features --locked -- -D warnings` | exit 0 |
 | Format | `cargo fmt --all -- --check` | exit 0 |
 
 ## Scope

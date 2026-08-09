@@ -153,13 +153,6 @@ deliver it. That is a further change requiring the identity decision below.
 
 ## Blocked before execution
 
-### Environment — blocks all verification
-
-`/Volumes/Workspace` is **not mounted** (re-checked at plan time). Every compiling command
-requires `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main`. Per AGENTS.md,
-falling back to a local `target/` is forbidden — stop and report instead. **No change can be
-verified until that volume is available.**
-
 ### Decision — blocks C-005 adoption (not extraction)
 
 Identity/namespacing for shared record keys. History fingerprints are meaning-affecting and
@@ -191,5 +184,6 @@ change itself.
   C-004 must add it. If C-004 slips, C-002's message stays permanently incomplete — track
   it rather than assuming the follow-up happens.
 - C-005's dependency rule is a stop-and-report gate, not a preference.
-- Every "done when" box is unverifiable while `/Volumes/Workspace` is unmounted. This plan
-  is executable only after that is resolved.
+- The earlier "environment blocker" in this plan was withdrawn: it derived from an
+  AGENTS.md rule hardcoding one contributor's mount path, which has since been removed.
+  Builds run with ordinary Cargo defaults.

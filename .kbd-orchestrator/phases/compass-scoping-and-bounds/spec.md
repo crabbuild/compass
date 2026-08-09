@@ -219,8 +219,6 @@ C-002, C-003, C-006  — independent, parallel with C-001
 
 Per `.kbd-orchestrator/constraints.md` and AGENTS.md:
 
-- `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main` on every compiling
-  command. **`/Volumes/Workspace` is not currently mounted** — verify before execution.
 - No `unsafe`; no `unwrap_used` / `expect_used` / `panic`.
 - Determinism: `BTreeMap`/`BTreeSet` or explicit sorting at contract boundaries.
 - Bounded work: a limit error stays distinct from an empty result.

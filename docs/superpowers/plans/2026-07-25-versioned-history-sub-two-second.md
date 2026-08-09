@@ -145,7 +145,7 @@ Keep the strict wall-clock assertion ignored in ordinary debug test runs and exe
 
 - [ ] **Step 2: Verify the pre-fix release gate fails**
 
-Run the release CLI against `/Volumes/Workspace/Github/fjall` in a fresh shared clone.
+Run the release CLI against `<qualification-corpus-root>/fjall` in a fresh shared clone.
 
 Expected baseline: approximately 3.94 seconds, exceeding the 2.0-second limit.
 

@@ -463,7 +463,7 @@ git commit -m "feat: add graph superset parity checker"
 **Interfaces:**
 
 - Environment:
-  - `PODMAN_ROOT`, default `/Volumes/Workspace/Github/podman`
+  - `PODMAN_ROOT`, default `<qualification-corpus-root>/podman`
   - `COMPASS_BIN`, default `target/release/compass` resolved from the Compass repository root
   - `GRAPHIFY_PYTHON`, default `/Users/haipingfu/graphify/.venv/bin/python`
   - `PARITY_SAMPLES`, default `3`
@@ -524,7 +524,7 @@ Capture query output outside the timed result. Before reporting latency, normali
 Add a `Graphify superset qualification` subsection to `docs/implementation/extraction-pipeline.md` with:
 
 ```bash
-PODMAN_ROOT=/Volumes/Workspace/Github/podman \
+PODMAN_ROOT=<qualification-corpus-root>/podman \
   bash scripts/qualify_graphify_superset.sh
 ```
 
@@ -590,7 +590,7 @@ Expected: the graph update exits successfully. Do not stage generated `graphify-
 Run:
 
 ```bash
-PODMAN_ROOT=/Volumes/Workspace/Github/podman \
+PODMAN_ROOT=<qualification-corpus-root>/podman \
   COMPASS_BIN=/Users/haipingfu/graphify/compass/target/release/compass \
   GRAPHIFY_PYTHON=/Users/haipingfu/graphify/.venv/bin/python \
   bash scripts/qualify_graphify_superset.sh

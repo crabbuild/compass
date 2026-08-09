@@ -11,10 +11,9 @@
   ],
   "openspec_available": true,
   "constraint_file": ".kbd-orchestrator/constraints.md",
-  "__command_note": "AGENTS.md requires CARGO_TARGET_DIR on EVERY invocation that can compile; the main disk is capped at 100 GB and each checkout/worktree needs its own target directory. Never share one across repositories or concurrent worktrees. If /Volumes/Workspace is unmounted, stop and report rather than falling back to a local target/.",
-  "build_health_command": "CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo check --workspace --locked",
-  "test_command": "CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test --workspace --lib --bins --locked",
-  "lint_command": "CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo clippy --workspace --lib --bins --locked -- -D warnings",
+  "build_health_command": "cargo check --workspace --locked",
+  "test_command": "cargo test --workspace --lib --bins --locked",
+  "lint_command": "cargo clippy --workspace --lib --bins --locked -- -D warnings",
   "dev_command": null,
   "preferred_planning_agent": "claude",
   "preferred_execution_agents": [

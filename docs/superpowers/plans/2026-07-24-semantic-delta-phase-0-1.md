@@ -1750,7 +1750,7 @@ git log --stat --oneline HEAD~10..HEAD
 
 - [ ] **Step 5: Run a real-repository smoke test**
 
-From `/Volumes/Workspace/Github/cocoindex`, using the newly built binary:
+From `<qualification-corpus-root>/cocoindex`, using the newly built binary:
 
 ```bash
 /Users/haipingfu/graphify/compass/target/debug/compass history build HEAD~1 --code-only

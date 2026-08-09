@@ -5,10 +5,9 @@ QUALIFY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 QUALIFY_TMP="$(mktemp -d "${TMPDIR:-/tmp}/compass-code-graph-v1.XXXXXX")"
 trap 'chmod -R u+w "$QUALIFY_TMP" 2>/dev/null || true; rm -rf -- "$QUALIFY_TMP"' EXIT
 
-# Keep Rust build artifacts on the mounted workspace volume. Qualification
-# intentionally exercises large repositories and must not fill the checkout's
-# disk with a second target tree.
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/Volumes/Workspace/crabbuild-target/compass-main}"
+# Qualification intentionally exercises large repositories. Set CARGO_TARGET_DIR
+# before running if you want those build artifacts somewhere other than the
+# checkout's own target directory.
 
 usage() {
   cat >&2 <<EOF

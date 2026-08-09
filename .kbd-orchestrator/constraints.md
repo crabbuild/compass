@@ -6,11 +6,6 @@ invariants, Rust conventions, tests and fixtures) and `docs/design/principles.md
 `AGENTS.md` remains authoritative. This file encodes the machine-checkable
 subset for automated verification; it does not replace the completion checklist.
 
-> **Every command below that can compile must run with `CARGO_TARGET_DIR` set**
-> to `/Volumes/Workspace/crabbuild-target/compass-main` (or the per-worktree
-> equivalent). The main disk is capped at 100 GB. If `/Volumes/Workspace` is not
-> mounted, stop and report — never fall back to a local `target/`.
-
 ---
 
 ## Blocking Constraints (prevent archiving until resolved)
@@ -120,7 +115,7 @@ constraints:
 - id: compassql-gates
   severity: warning
   description: 'CompassQL grammar, execution, or support claims run their gates'
-  command: 'CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-cypher --test tck --locked && CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-query --test opencypher_tck --locked && python3 scripts/check_compassql_support.py'
+  command: 'cargo test -p compass-cypher --test tck --locked && cargo test -p compass-query --test opencypher_tck --locked && python3 scripts/check_compassql_support.py'
 
 - id: code-graph-qualification
   severity: warning
@@ -135,7 +130,7 @@ constraints:
 - id: cli-product-contract
   severity: warning
   description: 'Public CLI or product identity changes run the product contract test'
-  command: 'CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-cli --test compass_product --locked'
+  command: 'cargo test -p compass-cli --test compass_product --locked'
 
 - id: ambiguity-and-negative-cases
   severity: warning

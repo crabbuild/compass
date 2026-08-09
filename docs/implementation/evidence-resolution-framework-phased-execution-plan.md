@@ -883,23 +883,18 @@ Every Cargo command must use a per-worktree target directory on the mounted
 workspace volume:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main \
-  cargo test -p compass-resolve --test universal_evidence --locked
+cargo test -p compass-resolve --test universal_evidence --locked
 
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main \
-  cargo test -p compass-resolve --test universal_resolution --locked
+cargo test -p compass-resolve --test universal_resolution --locked
 
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main \
-  cargo clippy -p compass-resolve --all-targets --all-features --locked -- -D warnings
+cargo clippy -p compass-resolve --all-targets --all-features --locked -- -D warnings
 
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main \
-  cargo test -p compass-resolve --locked
+cargo test -p compass-resolve --locked
 
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main \
-  ./scripts/qualify_code_graph_v1.sh --fixtures-only
+./scripts/qualify_code_graph_v1.sh --fixtures-only
 ```
 
-Before a long build, confirm `/Volumes/Workspace` is mounted and the selected
+Before a long build, confirm `<qualification-corpus-root>` is mounted and the selected
 target directory belongs only to this checkout.
 
 ## Phase dependencies

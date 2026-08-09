@@ -12,9 +12,6 @@ Owner: `compass-store`. Wave 1. Unblocks C-004 and C-005.
 
 ## Blockers
 
-- **/Volumes/Workspace is NOT mounted.** Every compiling command requires
-  CARGO_TARGET_DIR beneath it; AGENTS.md forbids falling back to a local target/.
-  No change can be verified until this is resolved.
 - Identity/namespacing decision blocks C-005 *adoption* (not extraction).
 
 ## Waves

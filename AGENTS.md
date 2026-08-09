@@ -21,54 +21,33 @@ Before editing:
 `CONTRIBUTING.md` is the canonical human contribution guide. The design rules
 behind this file live in `docs/design/principles.md`.
 
-## Disk and external-checkout policy
+## Build artifacts and external checkouts
 
-The main disk is limited to 100 GB. Rust build artifacts and repositories used
-for real-repository code-graph qualification belong on the mounted workspace
-volume, not in this checkout or the main disk.
+Compass build artifacts are large. Where they live is a per-contributor
+environment choice, not a repository rule — this guide does not mandate any
+specific path or volume.
 
-- Before any Cargo command that can compile (`build`, `check`, `test`,
-  `clippy`, `bench`, `doc`, `install`, `package`, or a Make target that invokes
-  one), set `CARGO_TARGET_DIR` beneath `/Volumes/Workspace/crabbuild-target`.
-- Every repository checkout and worktree must have its own target directory.
-  Never share one Cargo target directory between different repositories or
-  concurrent worktrees: feature sets, build scripts, and locks can collide.
-- Use a stable, descriptive directory such as
-  `/Volumes/Workspace/crabbuild-target/compass-main` for this checkout and
-  `/Volumes/Workspace/crabbuild-target/compass-<worktree-name>` for another
-  Compass worktree. For another repository, include that repository and
-  checkout/worktree name.
-- Set the variable on every new shell/tool invocation; do not assume an export
-  from an earlier command persists. For example:
-
-  ```bash
-  CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main \
-    cargo test -p compass-model --locked
-  ```
-
-- Verify the volume is mounted and the chosen directory is writable before a
-  long build. Create only the specific per-checkout directory needed. If
-  `/Volumes/Workspace` is unavailable, stop and report it rather than falling
-  back to a local `target/` directory.
-- Do not delete, clean, or reuse another repository's target directory. Run
-  `cargo clean` only with the intended `CARGO_TARGET_DIR` explicitly set and
-  only when the task actually requires reclaiming or invalidating those
-  artifacts.
-- Find repositories used to qualify Compass code graphs under
-  `/Volumes/Workspace/Github` first. When a task genuinely requires a missing
-  public repository, clone it under
-  `/Volumes/Workspace/Github/<owner>/<repository>`; do not clone qualification
-  repositories into the Compass tree, `/tmp`, or the main-disk GitHub folder.
-- Treat external qualification repositories as read-only inputs. Do not modify,
-  update, reset, or clean an existing checkout unless the task explicitly
-  requires it. Keep generated Compass artifacts outside their tracked source
-  or remove only artifacts created by the current task.
+- If you redirect Cargo output with `CARGO_TARGET_DIR`, give every repository
+  checkout and worktree its own directory. Never share one target directory
+  between different repositories or concurrent worktrees: feature sets, build
+  scripts, and locks can collide.
+- `CARGO_TARGET_DIR` does not persist between shell or tool invocations. Set it
+  on each command that can compile (`build`, `check`, `test`, `clippy`, `bench`,
+  `doc`, `install`, `package`, or a Make target that invokes one).
+- Verify the chosen directory exists and is writable before a long build.
+- Run `cargo clean` only with the intended `CARGO_TARGET_DIR` explicitly set,
+  and only when the task actually requires reclaiming or invalidating those
+  artifacts. Never clean another repository's target directory.
+- Treat external repositories used to qualify Compass code graphs as read-only
+  inputs. Do not modify, update, reset, or clean an existing checkout unless the
+  task explicitly requires it. Keep generated Compass artifacts outside their
+  tracked source, or remove only artifacts created by the current task. Do not
+  clone qualification repositories into the Compass tree.
 
 Some Makefile targets consume binaries through a literal local `target/` path
-after Cargo finishes. Prefer direct Cargo commands with `CARGO_TARGET_DIR` for
-normal verification. Before using packaging, install, or release targets,
-inspect the target and ensure its artifact lookup also points at the selected
-external directory; never allow it to trigger a second local build silently.
+after Cargo finishes. If you have redirected `CARGO_TARGET_DIR`, prefer direct
+Cargo commands for normal verification, and inspect packaging, install, or
+release targets before use so they do not silently trigger a second build.
 
 ## Prometheus state ownership
 
