@@ -271,7 +271,7 @@ impl CodeQueryEngine {
         guard: &DiscoveryGuard<'_>,
     ) -> Result<DiscoveryCandidateSelection, QueryError> {
         guard.check()?;
-        let prepared = self.prepare_search_query(question)?;
+        let prepared = self.prepare_discovery_query(question)?;
         if prepared.fts_query.is_empty() {
             return Ok(DiscoveryCandidateSelection {
                 candidates: Vec::new(),
@@ -310,7 +310,7 @@ impl CodeQueryEngine {
         let candidate_probes = assembly.candidate_probes;
         let ranked = rank_search_candidates(
             question,
-            &prepared.terms,
+            &prepared.ranking_terms,
             assembly.pool.into_vec(),
             candidate_limit,
         );
@@ -320,7 +320,7 @@ impl CodeQueryEngine {
             guard.check()?;
             let node = result.node;
             candidates.push(RankedDiscoveryCandidate {
-                matched_terms: matched_terms(&prepared.terms, &node),
+                matched_terms: matched_terms(&prepared.ranking_terms, &node),
                 matched_fields: result.matched_fields,
                 source: discovery_candidate_source(result.candidate_source),
                 node,

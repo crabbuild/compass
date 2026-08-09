@@ -23,7 +23,7 @@ use crate::ranking::rank_search_candidates;
 use crate::recall::{CandidateSource, RecallBudget, SearchCandidatePool};
 use crate::source::{VerifiedSource, verified_source};
 use crate::telemetry::QueryInstrumentation;
-use crate::text::strip_diacritics;
+use crate::text::{canonical_query_token, query_recall_terms, strip_diacritics};
 
 type GraphPath = (Vec<String>, Vec<String>);
 type BoundedPathResult = (Option<GraphPath>, bool);
@@ -263,6 +263,7 @@ pub struct CodeQueryEngine {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PreparedSearchQuery {
     pub(crate) terms: Vec<String>,
+    pub(crate) ranking_terms: Vec<String>,
     pub(crate) fts_query: String,
 }
 
@@ -1232,6 +1233,7 @@ impl CodeQueryEngine {
         let terms = search_query_terms(query)?;
         let prepared = PreparedSearchQuery {
             fts_query: fts_query_from_terms(&terms),
+            ranking_terms: terms.clone(),
             terms,
         };
         let mut cache = match self.search_query_cache.lock() {
@@ -1239,6 +1241,62 @@ impl CodeQueryEngine {
             Err(poisoned) => poisoned.into_inner(),
         };
         cache.insert(query.to_owned(), prepared.clone());
+        Ok(prepared)
+    }
+
+    pub(crate) fn prepare_discovery_query(
+        &self,
+        query: &str,
+    ) -> Result<PreparedSearchQuery, QueryError> {
+        validate_search_query_size(query)?;
+        let cache_key = format!("discovery\0{query}");
+        {
+            let mut cache = match self.search_query_cache.lock() {
+                Ok(cache) => cache,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if let Some(prepared) = cache.get(&cache_key) {
+                return Ok(prepared);
+            }
+        }
+
+        let recall_terms = query_recall_terms(query)
+            .into_iter()
+            .filter(|term| {
+                !matches!(
+                    term.to_ascii_uppercase().as_str(),
+                    "AND" | "OR" | "NOT" | "NEAR"
+                )
+            })
+            .take(compass_model::query_contract::MAX_INDEXED_QUERY_TERMS.saturating_add(1))
+            .collect::<Vec<_>>();
+        validate_search_term_count(&recall_terms)?;
+        let ranking_terms = recall_terms
+            .iter()
+            .cloned()
+            .map(canonical_query_token)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut terms = recall_terms.clone();
+        for term in &ranking_terms {
+            if terms.len() >= compass_model::query_contract::MAX_INDEXED_QUERY_TERMS {
+                break;
+            }
+            if !terms.contains(term) {
+                terms.push(term.clone());
+            }
+        }
+        let prepared = PreparedSearchQuery {
+            fts_query: fts_query_from_terms(&recall_terms),
+            ranking_terms,
+            terms,
+        };
+        let mut cache = match self.search_query_cache.lock() {
+            Ok(cache) => cache,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        cache.insert(cache_key, prepared.clone());
         Ok(prepared)
     }
 
@@ -2268,6 +2326,11 @@ pub(crate) fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError>
         .map(str::to_lowercase)
         .take(compass_model::query_contract::MAX_INDEXED_QUERY_TERMS.saturating_add(1))
         .collect::<Vec<_>>();
+    validate_search_term_count(&terms)?;
+    Ok(terms)
+}
+
+fn validate_search_term_count(terms: &[String]) -> Result<(), QueryError> {
     if terms.len() > compass_model::query_contract::MAX_INDEXED_QUERY_TERMS {
         return Err(QueryError::new(
             QueryErrorKind::InvalidParameter,
@@ -2278,7 +2341,7 @@ pub(crate) fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError>
             ),
         ));
     }
-    Ok(terms)
+    Ok(())
 }
 
 pub(crate) fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
@@ -2762,6 +2825,7 @@ mod fuzzy_term_variant_tests {
     fn prepared(term: &str) -> PreparedSearchQuery {
         PreparedSearchQuery {
             terms: vec![term.to_owned()],
+            ranking_terms: vec![term.to_owned()],
             fts_query: format!("\"{term}\"*"),
         }
     }

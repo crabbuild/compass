@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import replace
 import hashlib
 import json
+import math
 from pathlib import Path
 import sqlite3
 import subprocess
 import shutil
+import sys
 from typing import Iterator
 
 from .adapters import ToolAdapter
@@ -55,6 +58,17 @@ _COMPASSQL_QUERIES = (
     ),
 )
 
+_DISCOVERY_WORK_LIMITS = {
+    "candidateProbes": 291,
+    "candidateNodes": 12_801,
+    "candidatesAdmitted": 256,
+    "visitedNodes": 500,
+    "expandedRelationships": 10_000,
+    "returnedNodes": 500,
+    "returnedEdges": 1_000,
+}
+_MAX_QUERY_OUTPUT_BYTES = 20 * 1024 * 1024
+
 
 def _git(checkout: Path, *arguments: str) -> str:
     completed = subprocess.run(
@@ -76,6 +90,12 @@ def _file_sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _read_query_output(path: Path) -> str:
+    if path.stat().st_size > _MAX_QUERY_OUTPUT_BYTES:
+        raise RuntimeError("query output exceeded the 20 MiB harness bound")
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def _prune_graphify_mutation_artifacts(checkout: Path) -> None:
@@ -187,7 +207,11 @@ def _result(
         failures=tuple(failures),
     )
     aggregate = None
-    if correctness.passed:
+    legacy_digests = {sample.correctness_digest for sample in samples}
+    legacy_reference = bool(samples) and len(legacy_digests) == 1 and "" not in legacy_digests and all(
+        sample.evidence.get("legacy_semantic_digest") is True for sample in samples
+    )
+    if correctness.passed or legacy_reference:
         try:
             aggregate = summarize(samples)
         except ValueError as error:
@@ -380,6 +404,68 @@ def run_build_matrix(
     )
 
 
+def prepare_query_artifact(
+    adapter: ToolAdapter,
+    checkout: Path,
+    artifact_root: Path,
+    spec: RepositorySpec,
+    *,
+    reuse_root: Path | None = None,
+    timeout_seconds: float = 1800,
+) -> Path:
+    """Materialize or validate one persistent query backend for a repository."""
+    root = reuse_root if reuse_root is not None else artifact_root / "query-artifacts"
+    output = root / adapter.name / spec.name
+    if reuse_root is None:
+        if output.exists():
+            guarded_remove(output)
+        logs = artifact_root / "logs" / adapter.name / spec.name / "query-materialization"
+        logs.mkdir(parents=True, exist_ok=True)
+        metrics = run_measured(
+            ProcessSpec(
+                command=adapter.query_artifact_command(checkout, output),
+                cwd=checkout,
+                stdout_path=logs / "1.out",
+                stderr_path=logs / "1.err",
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        if metrics.return_code != 0 or metrics.timed_out:
+            detail = _read_query_output(Path(metrics.stderr_path)).strip()
+            raise RuntimeError(
+                f"query artifact materialization failed for {spec.name}: "
+                f"{detail or f'return code {metrics.return_code}'}"
+            )
+    graph = adapter.graph_path(output)
+    evidence = adapter.validate_query_artifact(graph, timeout_seconds=timeout_seconds)
+    correctness = _validate_graph(adapter.name, graph)
+    if not correctness.passed:
+        raise RuntimeError("; ".join(correctness.failures))
+    evidence.update(
+        {
+            "canonical_graph_digest": correctness.digest,
+            **correctness.metrics,
+            "graph_path": str(graph.resolve()),
+            "read_only_reuse": str(reuse_root is not None).lower(),
+        }
+    )
+    evidence_path = (
+        artifact_root
+        / "logs"
+        / adapter.name
+        / spec.name
+        / "query-artifact-evidence.json"
+    )
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    evidence_path.write_text(
+        json.dumps(evidence, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    if reuse_root is None:
+        adapter.prune_superseded_artifacts(output, graph)
+    return graph
+
+
 def _source_file(record: dict[str, object]) -> str:
     source = record.get("source")
     return str(source.get("file", "")) if isinstance(source, dict) else ""
@@ -411,12 +497,24 @@ def _pair_matches(
     )
 
 
-def _validate_compass_discovery(text: str, oracle: QueryOracle) -> CorrectnessResult:
+def _validate_compass_discovery(
+    text: str, oracle: QueryOracle, *, allow_legacy_digest: bool = False
+) -> CorrectnessResult:
     try:
         payload = json.loads(text)
     except json.JSONDecodeError as error:
         message = f"invalid Compass discovery JSON: {error}"
         return CorrectnessResult(False, hashlib.sha256(message.encode()).hexdigest(), (message,))
+    if isinstance(payload, dict) and payload.get("schema") == "compass.query.discovery-result/1":
+        envelope_digest = payload.get("semanticResultDigest")
+        result = payload.get("result")
+        if not isinstance(envelope_digest, str) or not isinstance(result, dict):
+            message = "Compass discovery result envelope is malformed"
+            return CorrectnessResult(
+                False, hashlib.sha256(message.encode()).hexdigest(), (message,)
+            )
+        payload = dict(result)
+        payload["__semanticResultDigest"] = envelope_digest
     if not isinstance(payload, dict) or payload.get("schema") != "compass.query.discovery/1":
         message = "Compass query did not emit compass.query.discovery/1"
         return CorrectnessResult(False, hashlib.sha256(message.encode()).hexdigest(), (message,))
@@ -533,10 +631,46 @@ def _validate_compass_discovery(text: str, oracle: QueryOracle) -> CorrectnessRe
             reciprocal_rank_at_ten = 1.0 / rank
             break
     stats = payload.get("stats") if isinstance(payload.get("stats"), dict) else {}
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    work: dict[str, int] = {}
+    for field, ceiling in _DISCOVERY_WORK_LIMITS.items():
+        value = stats.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            failures.append(f"discovery stats field {field} must be a nonnegative integer")
+            continue
+        work[field] = value
+        if value > ceiling:
+            failures.append(f"discovery stats field {field} exceeds {ceiling}: {value}")
+    for field, observed in (("returnedNodes", len(node_records)), ("returnedEdges", len(edge_records))):
+        if field in work and work[field] != observed:
+            failures.append(
+                f"discovery stats field {field} is {work[field]}, expected {observed}"
+            )
+    if "candidatesAdmitted" in work and work["candidatesAdmitted"] < len(seed_records):
+        failures.append("candidatesAdmitted is smaller than the returned seed count")
+    transport_digest = payload.pop("__semanticResultDigest", None)
+    semantic_digest = transport_digest
+    if semantic_digest is None and allow_legacy_digest:
+        canonical = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        semantic_digest = (
+            "legacy-python-full-payload:sha256:" + hashlib.sha256(canonical).hexdigest()
+        )
+    legacy_digest = isinstance(semantic_digest, str) and semantic_digest.startswith(
+        "legacy-python-full-payload:sha256:"
+    )
+    if legacy_digest:
+        digest = semantic_digest.removeprefix("legacy-python-full-payload:sha256:")
+    elif not isinstance(semantic_digest, str) or not semantic_digest.startswith("sha256:"):
+        failures.append("query transport omitted the Rust-owned semantic result digest")
+        digest = hashlib.sha256(b"missing semantic result digest").hexdigest()
+    else:
+        digest = semantic_digest.removeprefix("sha256:")
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        failures.append("query transport emitted an invalid semantic result digest")
     return CorrectnessResult(
         passed=not failures,
-        digest=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        digest=digest,
         failures=tuple(failures),
         metrics={
             "top1": top_one,
@@ -546,18 +680,28 @@ def _validate_compass_discovery(text: str, oracle: QueryOracle) -> CorrectnessRe
             "ambiguity_correct": ambiguous == oracle.expected_ambiguous,
             "source_anchor_count": source_anchor_count,
             "no_match_false_positive": no_match_false_positive,
-            "candidate_nodes": int(stats.get("candidateNodes", 0)),
-            "expanded_relationships": int(stats.get("expandedRelationships", 0)),
+            **{_camel_to_snake(field): value for field, value in work.items()},
             "complete": not bool(payload.get("truncated")),
+            "legacy_semantic_digest": legacy_digest,
         },
     )
 
 
+def _camel_to_snake(value: str) -> str:
+    return "".join(f"_{character.lower()}" if character.isupper() else character for character in value)
+
+
 def validate_query_output(
-    text: str, oracle: QueryOracle, *, tool: str = "cross-tool"
+    text: str,
+    oracle: QueryOracle,
+    *,
+    tool: str = "cross-tool",
+    allow_legacy_digest: bool = False,
 ) -> CorrectnessResult:
     if tool == "compass":
-        return _validate_compass_discovery(text, oracle)
+        return _validate_compass_discovery(
+            text, oracle, allow_legacy_digest=allow_legacy_digest
+        )
     folded = text.casefold()
     failures = [
         f"missing required query evidence: {required}"
@@ -577,6 +721,336 @@ def validate_query_output(
     )
 
 
+def _mcp_worker_command(
+    adapter: ToolAdapter,
+    graph: Path,
+    questions: Path,
+    output: Path,
+    server_stderr: Path,
+    batches: int,
+    timeout_seconds: float,
+    allow_legacy_digest: bool = False,
+) -> tuple[str, ...]:
+    command = (
+        sys.executable,
+        str(Path(__file__).with_name("mcp_query_session.py")),
+        "--binary",
+        str(adapter.executable),
+        "--graph",
+        str(graph),
+        "--questions",
+        str(questions),
+        "--output",
+        str(output),
+        "--server-stderr",
+        str(server_stderr),
+        "--batches",
+        str(batches),
+        "--timeout-seconds",
+        str(timeout_seconds),
+    )
+    return (*command, "--allow-legacy-digest") if allow_legacy_digest else command
+
+
+def _mcp_records(
+    metrics,
+    output_root: Path,
+    *,
+    query_count: int,
+    batches: int,
+) -> list[dict[str, object]]:
+    if metrics.return_code != 0 or metrics.timed_out:
+        detail_path = Path(metrics.stderr_path)
+        detail = (
+            _read_query_output(detail_path)
+            if detail_path.is_file()
+            else "worker stderr unavailable"
+        )
+        raise RuntimeError(f"MCP query worker failed: {detail.strip()}")
+    value = json.loads(_read_query_output(Path(metrics.stdout_path)))
+    if not isinstance(value, dict) or value.get("schema") != "compass.performance.mcp-query-session/1":
+        raise RuntimeError("MCP query worker returned an unsupported session schema")
+    records = value.get("records")
+    if not isinstance(records, list) or not all(isinstance(item, dict) for item in records):
+        raise RuntimeError("MCP query worker returned malformed records")
+    expected_pairs = {
+        (query_index, iteration)
+        for query_index in range(1, query_count + 1)
+        for iteration in range(batches + 1)
+    }
+    observed_pairs: set[tuple[int, int]] = set()
+    resolved_root = output_root.resolve()
+    for record in records:
+        if record.get("schema") != "compass.performance.mcp-query-session-record/1":
+            raise RuntimeError("MCP query worker returned an unsupported record schema")
+        query_index = record.get("query_index")
+        iteration = record.get("iteration")
+        wall_seconds = record.get("wall_seconds")
+        peak_rss_kib = record.get("peak_rss_kib")
+        if (
+            not isinstance(query_index, int)
+            or isinstance(query_index, bool)
+            or not isinstance(iteration, int)
+            or isinstance(iteration, bool)
+        ):
+            raise RuntimeError("MCP query worker returned invalid record coordinates")
+        pair = (query_index, iteration)
+        if pair in observed_pairs:
+            raise RuntimeError("MCP query worker returned duplicate record coordinates")
+        observed_pairs.add(pair)
+        if (
+            not isinstance(wall_seconds, (int, float))
+            or isinstance(wall_seconds, bool)
+            or not math.isfinite(float(wall_seconds))
+            or float(wall_seconds) < 0
+        ):
+            raise RuntimeError("MCP query worker returned invalid wall time")
+        if (
+            not isinstance(peak_rss_kib, int)
+            or isinstance(peak_rss_kib, bool)
+            or peak_rss_kib < 0
+        ):
+            raise RuntimeError("MCP query worker returned invalid peak RSS")
+        output = Path(str(record.get("output", ""))).resolve()
+        if not output.is_relative_to(resolved_root) or not output.is_file():
+            raise RuntimeError("MCP query worker record escaped its output directory")
+        if output.stat().st_size > 20 * 1024 * 1024:
+            raise RuntimeError("MCP query worker response exceeded the 20 MiB bound")
+    if observed_pairs != expected_pairs:
+        raise RuntimeError("MCP query worker returned incomplete record coordinates")
+    return records
+
+
+def _record_metrics(session_metrics, record: dict[str, object], *, fresh: bool):
+    output = Path(str(record["output"]))
+    wall = session_metrics.wall_seconds if fresh else float(record["wall_seconds"])
+    return replace(
+        session_metrics,
+        wall_seconds=wall,
+        user_seconds=session_metrics.user_seconds if fresh else 0.0,
+        system_seconds=session_metrics.system_seconds if fresh else 0.0,
+        peak_rss_kib=(
+            session_metrics.peak_rss_kib
+            if fresh
+            else int(record["peak_rss_kib"])
+        ),
+        stdout_path=str(output),
+        stdout_sha256=_file_sha256(output),
+    )
+
+
+def _append_query_sample(
+    samples: list[Sample],
+    failures: list[str],
+    adapter: ToolAdapter,
+    spec: RepositorySpec,
+    workload: str,
+    iteration: int,
+    metrics,
+    oracle: QueryOracle,
+    artifact_evidence: dict[str, str],
+    *,
+    allow_legacy_digest: bool = False,
+) -> str:
+    output = _read_query_output(Path(metrics.stdout_path))
+    correctness = validate_query_output(
+        output,
+        oracle,
+        tool=adapter.name,
+        allow_legacy_digest=allow_legacy_digest,
+    )
+    errors: list[str] = []
+    if metrics.timed_out:
+        errors.append("query timed out")
+    elif metrics.return_code != 0:
+        errors.append(f"query failed with return code {metrics.return_code}")
+    if not correctness.passed and not allow_legacy_digest:
+        errors.extend(correctness.failures)
+    error = "; ".join(errors) if errors else None
+    if error:
+        failures.append(f"{workload}[{iteration}]: {error}")
+    elif not correctness.passed:
+        failures.append(
+            f"{workload}[{iteration}]: {'; '.join(correctness.failures)}"
+        )
+    samples.append(
+        Sample(
+            sample_id=f"{adapter.name}:{spec.name}:{workload}:{iteration}",
+            tool=adapter.name,
+            repository=spec.name,
+            workload=workload,
+            iteration=iteration,
+            eligible=error is None,
+            metrics=metrics,
+            correctness_digest=correctness.digest,
+            error=error,
+            evidence={**correctness.metrics, **artifact_evidence},
+        )
+    )
+    return correctness.digest
+
+
+def run_compass_mcp_query_matrix(
+    adapter: ToolAdapter,
+    graph: Path,
+    artifact_root: Path,
+    spec: RepositorySpec,
+    *,
+    batches: int,
+    timeout_seconds: float,
+    allow_legacy_digest: bool = False,
+) -> tuple[WorkloadResult, ...]:
+    root = artifact_root / "logs" / adapter.name / spec.name / "mcp"
+    root.mkdir(parents=True, exist_ok=True)
+    results: list[WorkloadResult] = []
+    expected_digests: dict[int, str] = {}
+    artifact_evidence_value = json.loads(
+        (root.parent / "query-artifact-evidence.json").read_text(encoding="utf-8")
+    )
+    if not isinstance(artifact_evidence_value, dict):
+        raise RuntimeError("query artifact evidence must be an object")
+    artifact_evidence = {
+        str(key): str(value) for key, value in artifact_evidence_value.items()
+    }
+    for query_index, oracle in enumerate(spec.queries, 1):
+        workload = f"query-{query_index}-fresh"
+        samples: list[Sample] = []
+        failures: list[str] = []
+        for iteration in range(batches + 1):
+            run_root = root / workload / str(iteration)
+            metrics = run_measured(
+                ProcessSpec(
+                    command=(
+                        adapter.query_command(graph, oracle.question)
+                        if allow_legacy_digest
+                        else (*adapter.query_command(graph, oracle.question), "--result-envelope")
+                    ),
+                    cwd=graph.parent,
+                    stdout_path=run_root / "query.out",
+                    stderr_path=run_root / "query.err",
+                    timeout_seconds=timeout_seconds,
+                )
+            )
+            if iteration == 0:
+                warmup = validate_query_output(
+                    _read_query_output(Path(metrics.stdout_path)),
+                    oracle,
+                    tool=adapter.name,
+                    allow_legacy_digest=allow_legacy_digest,
+                )
+                warmup_failures = list(warmup.failures)
+                if metrics.timed_out:
+                    warmup_failures.insert(0, "query timed out")
+                elif metrics.return_code != 0:
+                    warmup_failures.insert(
+                        0, f"query failed with return code {metrics.return_code}"
+                    )
+                if warmup_failures:
+                    failures.append(f"{workload}[warmup]: {'; '.join(warmup_failures)}")
+                expected_digests[query_index] = warmup.digest
+                continue
+            digest = _append_query_sample(
+                samples,
+                failures,
+                adapter,
+                spec,
+                workload,
+                iteration,
+                metrics,
+                oracle,
+                artifact_evidence,
+                allow_legacy_digest=allow_legacy_digest,
+            )
+            if digest != expected_digests[query_index]:
+                failures.append(f"{workload}[{iteration}]: semantic digest changed")
+                samples[-1] = replace(
+                    samples[-1], eligible=False, error="semantic digest changed"
+                )
+        results.append(_result(adapter.name, spec.name, workload, samples, failures))
+
+    questions = root / "warm-questions.json"
+    questions.write_text(
+        json.dumps([oracle.question for oracle in spec.queries]), encoding="utf-8"
+    )
+    session_metrics = run_measured(
+        ProcessSpec(
+            command=_mcp_worker_command(
+                adapter,
+                graph,
+                questions,
+                root / "warm-responses",
+                root / "warm-server.err",
+                batches,
+                timeout_seconds,
+                allow_legacy_digest,
+            ),
+            cwd=graph.parent,
+            stdout_path=root / "warm-worker.out",
+            stderr_path=root / "warm-worker.err",
+            timeout_seconds=(batches + 1) * len(spec.queries) * timeout_seconds + 30,
+        )
+    )
+    try:
+        records = _mcp_records(
+            session_metrics,
+            root / "warm-responses",
+            query_count=len(spec.queries),
+            batches=batches,
+        )
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as error:
+        if not allow_legacy_digest:
+            raise RuntimeError("current persistent MCP warm session failed") from error
+        limitation = f"persistent MCP warm session unavailable: {error}"
+        for query_index, _oracle in enumerate(spec.queries, 1):
+            workload = f"query-{query_index}-warm"
+            results.append(_result(adapter.name, spec.name, workload, [], [limitation]))
+        return tuple(results)
+    for query_index, oracle in enumerate(spec.queries, 1):
+        workload = f"query-{query_index}-warm"
+        samples = []
+        failures = []
+        selected = [
+            record for record in records if int(record.get("query_index", 0)) == query_index
+        ]
+        for record in selected:
+            iteration = int(record["iteration"])
+            metrics = _record_metrics(session_metrics, record, fresh=False)
+            correctness = validate_query_output(
+                _read_query_output(Path(metrics.stdout_path)),
+                oracle,
+                tool=adapter.name,
+                allow_legacy_digest=allow_legacy_digest,
+            )
+            if correctness.digest != expected_digests[query_index]:
+                failures.append(f"{workload}[{iteration}]: fresh/warm semantic digest mismatch")
+            if iteration == 0:
+                if not correctness.passed:
+                    failures.append(
+                        f"{workload}[warmup]: {'; '.join(correctness.failures)}"
+                    )
+                continue
+            _append_query_sample(
+                samples,
+                failures,
+                adapter,
+                spec,
+                workload,
+                iteration,
+                metrics,
+                oracle,
+                artifact_evidence,
+                allow_legacy_digest=allow_legacy_digest,
+            )
+            if correctness.digest != expected_digests[query_index]:
+                samples[-1] = replace(
+                    samples[-1],
+                    eligible=False,
+                    error="fresh/warm semantic digest mismatch",
+                )
+        results.append(_result(adapter.name, spec.name, workload, samples, failures))
+    return tuple(results)
+
+
 def run_query_matrix(
     adapter: ToolAdapter,
     graph: Path,
@@ -585,12 +1059,23 @@ def run_query_matrix(
     *,
     batches: int = 10,
     timeout_seconds: float = 120,
+    allow_legacy_digest: bool = False,
 ) -> tuple[WorkloadResult, ...]:
     if batches < 10:
         raise ValueError("query qualification requires at least ten batches")
+    if adapter.supports_persistent_queries:
+        return run_compass_mcp_query_matrix(
+            adapter,
+            graph,
+            artifact_root,
+            spec,
+            batches=batches,
+            timeout_seconds=timeout_seconds,
+            allow_legacy_digest=allow_legacy_digest,
+        )
     results: list[WorkloadResult] = []
     for query_index, oracle in enumerate(spec.queries):
-        workload = f"query-{query_index + 1}"
+        workload = f"query-{query_index + 1}-fresh"
         samples: list[Sample] = []
         failures: list[str] = []
         logs = artifact_root / "logs" / adapter.name / spec.name / workload
@@ -605,7 +1090,7 @@ def run_query_matrix(
                     timeout_seconds=timeout_seconds,
                 )
             )
-            output = Path(metrics.stdout_path).read_text(encoding="utf-8", errors="replace")
+            output = _read_query_output(Path(metrics.stdout_path))
             correctness = validate_query_output(output, oracle, tool=adapter.name)
             error = None
             if metrics.return_code != 0 or metrics.timed_out:
@@ -686,9 +1171,7 @@ def run_compassql_matrix(
                     timeout_seconds=timeout_seconds,
                 )
             )
-            output = Path(metrics.stdout_path).read_text(
-                encoding="utf-8", errors="replace"
-            )
+            output = _read_query_output(Path(metrics.stdout_path))
             correctness = _canonical_json_output(output)
             error = None
             if metrics.return_code != 0 or metrics.timed_out:

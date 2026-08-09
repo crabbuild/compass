@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use compass_core::{ClusterExistingOptions, cluster_existing_graph};
 use compass_files::BuildGuard;
-use compass_graph::{GodNode, SurpriseConnection};
+use compass_graph::{GodNode, GraphSnapshotBuilder, SurpriseConnection};
 use compass_mcp::CompassMcp;
 use compass_model::code_graph::{
     BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord, GraphDocument, NodeKind,
@@ -16,6 +16,7 @@ use compass_output::{
     DetectionSummary, ReportOptions, TokenCost, agent_orientation, graph_artifact_identity,
     render_orientation_json,
 };
+use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 use rmcp::ServiceExt;
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Map, Value, json};
@@ -124,6 +125,19 @@ fn write_typed_graph(root: &Path) -> Result<PathBuf, Box<dyn Error>> {
         render_orientation_json(&orientation)?,
     )?;
     Ok(graph_path)
+}
+
+fn publish_store(root: &Path, graph_path: &Path) -> Result<(), Box<dyn Error>> {
+    let store = SqliteStore::open(root.join(STORE_FILE_NAME))?;
+    let graph = GraphDocument::load(graph_path)?;
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &graph)?;
+    GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    fs::write(
+        root.join(STORE_REF_FILE_NAME),
+        serde_json::to_vec(&store.snapshot_reference()?)?,
+    )?;
+    store.checkpoint()?;
+    Ok(())
 }
 
 fn add_parallel_call_edge(graph_path: &Path) -> Result<(), Box<dyn Error>> {
@@ -523,6 +537,53 @@ fn explicit_discovery_controls_fail_on_legacy_graphs_instead_of_falling_through(
     assert!(
         explicit.contains("discovery controls require a typed compass.graph/1 artifact"),
         "{explicit}"
+    );
+    Ok(())
+}
+
+#[test]
+fn discovery_with_a_store_reference_bypasses_eager_json_graph_loading() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let graph = directory.path().join("graph.json");
+    fs::write(&graph, b"not a graph")?;
+    fs::write(directory.path().join("store.ref"), b"not a store reference")?;
+
+    let output = CompassMcp::new(graph).invoke(
+        "query_graph",
+        Map::from_iter([("question".to_owned(), json!("where is Target"))]),
+    );
+
+    assert!(output.contains("store_ref_decode_failed"), "{output}");
+    Ok(())
+}
+
+#[test]
+fn typed_store_tools_do_not_load_the_compatibility_json_graph() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = write_typed_graph(directory.path())?;
+    publish_store(directory.path(), &graph)?;
+    fs::write(&graph, b"not a graph")?;
+    let server = CompassMcp::new(graph);
+
+    let search: Value = serde_json::from_str(&server.invoke(
+        "search_symbols",
+        Map::from_iter([("query".to_owned(), json!("Target"))]),
+    ))?;
+    assert_eq!(search["result"]["operation"], "search");
+    let discovery: Value = serde_json::from_str(&server.invoke(
+        "query_graph",
+        Map::from_iter([("question".to_owned(), json!("where is Target"))]),
+    ))?;
+    assert_eq!(discovery["result"]["schema"], "compass.query.discovery/1");
+    let response: compass_model::query_contract::DiscoveryQueryResponse =
+        serde_json::from_value(discovery["result"].clone())?;
+    assert_eq!(
+        discovery["semanticResultDigest"],
+        format!(
+            "sha256:{}",
+            compass_query::discovery_response_digest(&response)?
+        )
     );
     Ok(())
 }

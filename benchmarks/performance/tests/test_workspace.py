@@ -12,6 +12,7 @@ from benchmarks.performance.compass.workspace import (
     guarded_remove,
     prepare_checkout,
     resolve_remote_head,
+    validate_reused_checkout,
 )
 
 
@@ -122,6 +123,41 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(first_commit, identity.commit)
             self.assertEqual(first_commit, git(destination, "rev-parse", "HEAD"))
             self.assertEqual("first = 1\n", (destination / "main.py").read_text())
+
+    def test_reused_checkout_validation_is_read_only_and_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source = base / "source"
+            remote = base / "remote.git"
+            source.mkdir()
+            git(source, "init", "-q", "-b", "main")
+            git(source, "config", "user.name", "Compass")
+            git(source, "config", "user.email", "compass@example.invalid")
+            (source / "main.py").write_text("value = 1\n", encoding="utf-8")
+            git(source, "add", "main.py")
+            git(source, "commit", "-q", "-m", "fixture")
+            commit = git(source, "rev-parse", "HEAD")
+            git(base, "clone", "-q", "--bare", str(source), str(remote))
+            checkout = base / "reuse" / "fixture"
+            checkout.parent.mkdir()
+            git(base, "clone", "-q", str(remote), str(checkout))
+            git(checkout, "checkout", "-q", "--detach", commit)
+            spec = RepositorySpec("fixture", str(remote), ".py", ())
+
+            identity = validate_reused_checkout(spec, commit, checkout)
+            self.assertEqual(identity.commit, commit)
+            self.assertEqual(identity.branch, "detached")
+            with self.assertRaisesRegex(RuntimeError, "commit mismatch"):
+                validate_reused_checkout(spec, "0" * 40, checkout)
+
+            (checkout / "main.py").write_text("dirty = True\n", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "dirty"):
+                validate_reused_checkout(spec, commit, checkout)
+            git(checkout, "restore", "main.py")
+
+            git(checkout, "remote", "set-url", "origin", str(base / "wrong.git"))
+            with self.assertRaisesRegex(RuntimeError, "origin mismatch"):
+                validate_reused_checkout(spec, commit, checkout)
 
 
 if __name__ == "__main__":

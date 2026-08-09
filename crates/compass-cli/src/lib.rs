@@ -3698,6 +3698,7 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
     let mut discovery_include_heuristic = false;
     let mut discovery_limits = DiscoveryLimits::default();
     let mut discovery_format = "text".to_owned();
+    let mut discovery_result_envelope = false;
     let mut seen_discovery_options = HashSet::new();
     let mut index = 1;
     while index < args.len() {
@@ -3789,6 +3790,16 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                     );
                 }
                 discovery_include_heuristic = true;
+                discovery_requested = true;
+                index += 1;
+            }
+            "--result-envelope" => {
+                if !seen_discovery_options.insert("--result-envelope".to_owned()) {
+                    return Outcome::failure(
+                        "error: --result-envelope must not be repeated".to_owned(),
+                    );
+                }
+                discovery_result_envelope = true;
                 discovery_requested = true;
                 index += 1;
             }
@@ -3899,6 +3910,9 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                     .to_owned(),
             );
         }
+        if discovery_result_envelope && discovery_format != "json" {
+            return Outcome::failure("error: --result-envelope requires --format json".to_owned());
+        }
         let request = DiscoveryQueryRequest {
             question: question.clone(),
             direction: discovery_direction,
@@ -3914,6 +3928,7 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
             &discovery_format,
             discovery_text_budget,
             discovery_cursor.as_deref(),
+            discovery_result_envelope,
         );
         if outcome.code == 0 {
             touch_selected_query_stamp(&selection);
@@ -4047,6 +4062,7 @@ fn command_discovery_query(
     format: &str,
     text_budget: usize,
     cursor: Option<&str>,
+    result_envelope: bool,
 ) -> Outcome {
     let include_heuristic = request.include_heuristic;
     let execution = match discovery_query(selection, request) {
@@ -4054,7 +4070,16 @@ fn command_discovery_query(
         Err(error) => return Outcome::failure(format!("error: {error}")),
     };
     if format == "json" {
-        match serde_json::to_string_pretty(&execution.response) {
+        let output = if result_envelope {
+            let envelope = match compass_query::discovery_result_envelope(execution.response) {
+                Ok(envelope) => envelope,
+                Err(error) => return Outcome::failure(format!("error: {error}")),
+            };
+            serde_json::to_string_pretty(&envelope)
+        } else {
+            serde_json::to_string_pretty(&execution.response)
+        };
+        match output {
             Ok(output) => Outcome::success(output),
             Err(error) => Outcome::failure(format!("error: {error}")),
         }
@@ -4436,8 +4461,11 @@ fn touch_selected_query_stamp(selection: &GraphSelection) {
 
 fn query_help(frontend: Frontend) -> String {
     let prefix = frontend_name(frontend);
-    format!(
+    let help = format!(
         "Usage: {prefix} query \"<question>\" [--direction auto|incoming|outgoing|both] [--scope KIND:VALUE] [--context VALUE] [--dfs] [--format text|json] [--graph PATH|--at REV]\n\nNatural discovery options (default for a typed graph):\n  --direction <VALUE>               Direction: auto, incoming, outgoing, or both [default: auto]\n  --scope <KIND:VALUE>              Repeatable OR scope; KIND is community, source, package, or node\n  --context <VALUE>                 Repeatable strict relationship-context filter\n  --dfs                             Use depth-first expansion [default: breadth-first]\n  --include-heuristic               Include heuristic evidence [default: excluded]\n  --format <text|json>              Discovery output [default: text]\n  --text-budget <N>                 Approximate tokens in one text page [default: 2000]\n  --cursor <TOKEN>                  Continue the same immutable semantic result (text only)\n  --max-depth <N>                   Traversal depth [default: 2; hard maximum: 8]\n  --max-seeds <N>                   Ranked seed count [default: 3; hard maximum: 3]\n  --max-candidates <N>              Ranked candidate count [default/hard maximum: 256]\n  --max-nodes <N>                   Returned node count [default/hard maximum: 500]\n  --max-edges <N>                   Returned edge count [default/hard maximum: 1000]\n  --max-expanded-relationships <N>  Examined relationships [default/hard maximum: 10000]\n  --max-response-bytes <N>          Serialized response bytes [default/hard maximum: 8388608]\n  --timeout-ms <N>                  Discovery deadline in milliseconds [default/hard maximum: 30000]\n\nLegacy traversal options:\n  --traverse                        Force legacy relevance traversal\n  --budget <N>                      Approximate tokens per page [default: 2000]\n  --page <N>                        Result page, starting at 1 [default: 1]\n\nGraph selection:\n  --graph <PATH>                    Read a graph JSON file\n  --at <REV>                        Resolve REV once to an immutable typed realization; conflicts with --graph\n\nCompassQL options:\n  --cql                             Use CompassQL mode\n  --timeout-ms <N>                  CompassQL execution timeout\n  --max-expanded-relationships <N>  CompassQL relationship expansion limit\n  Run `{prefix} help query` for all CompassQL controls and examples.\n\nDiscovery limits must be positive; values above a hard maximum are rejected rather than clamped. JSON rejects text pagination controls. Legacy --traverse, --budget, and --page cannot be mixed with discovery controls."
+    );
+    format!(
+        "{help}\n  --result-envelope                 Wrap JSON with a query-owned semantic digest"
     )
 }
 

@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use compass_core::LoadedGraph;
 use compass_graph::{Communities, god_nodes, suggest_questions, surprising_connections};
+use compass_model::code_graph::GraphDocument as CodeGraphDocument;
 use compass_model::query_contract::{
     MAX_DISCOVERY_CANDIDATES, MAX_DISCOVERY_DEPTH, MAX_DISCOVERY_EDGES,
     MAX_DISCOVERY_EXPANDED_RELATIONSHIPS, MAX_DISCOVERY_FILTER_BYTES, MAX_DISCOVERY_FILTERS,
@@ -123,12 +124,19 @@ struct GraphContext {
     overlay: HashMap<String, Map<String, Value>>,
     communities: BTreeMap<usize, Vec<NodeIndex>>,
     typed_query_supported: bool,
+    typed_document: Option<CodeGraphDocument>,
+    typed_graph_identity: Option<String>,
 }
 
 impl GraphContext {
     fn load(path: &Path) -> Result<Self, String> {
         let loaded = LoadedGraph::load_directed(path).map_err(|error| error.to_string())?;
-        let typed_query_supported = compass_model::code_graph::GraphDocument::load(path).is_ok();
+        let (typed_document, typed_graph_identity) =
+            match CodeGraphDocument::load_with_artifact_digest(path) {
+                Ok((document, identity)) => (Some(document), Some(identity)),
+                Err(_) => (None, None),
+            };
+        let typed_query_supported = typed_document.is_some();
         let mut communities = BTreeMap::<usize, Vec<NodeIndex>>::new();
         for (index, node) in loaded.graph.nodes() {
             if let Some(community) = node
@@ -145,6 +153,8 @@ impl GraphContext {
             overlay: loaded.overlay,
             communities,
             typed_query_supported,
+            typed_document,
+            typed_graph_identity,
         })
     }
 
@@ -174,16 +184,26 @@ struct CacheEntry {
     context: Arc<GraphContext>,
 }
 
-#[derive(Debug)]
 struct StoreInner {
     default_graph: PathBuf,
     cache: Mutex<HashMap<PathBuf, CacheEntry>>,
+    typed_queries: compass_query::QueryEngineCache,
 }
 
 /// Hot-reloading, multi-project graph store shared by every MCP session.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct GraphStore {
     inner: Arc<StoreInner>,
+}
+
+impl std::fmt::Debug for GraphStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GraphStore")
+            .field("default_graph", &self.inner.default_graph)
+            .field("typed_query_engines", &self.inner.typed_queries.len())
+            .finish()
+    }
 }
 
 impl GraphStore {
@@ -193,6 +213,7 @@ impl GraphStore {
             inner: Arc::new(StoreInner {
                 default_graph: default_graph.into(),
                 cache: Mutex::new(HashMap::new()),
+                typed_queries: compass_query::QueryEngineCache::default(),
             }),
         }
     }
@@ -409,39 +430,14 @@ impl CompassMcp {
         let project_path = arguments
             .remove("project_path")
             .and_then(|value| value.as_str().map(str::to_owned));
-        let context = self
-            .store
-            .load(project_path.as_deref())
-            .map_err(InvocationError::Internal)?;
-        if name == "query_graph" && should_route_natural_query(arguments, &context)? {
-            if !context.typed_query_supported {
-                return Err(InvocationError::InvalidParams(
-                    "discovery controls require a typed compass.graph/1 artifact".to_owned(),
-                ));
+        if name == "query_graph" && natural_discovery_requested(arguments) {
+            let graph_path = self
+                .store
+                .resolve(project_path.as_deref())
+                .map_err(InvocationError::Internal)?;
+            if compass_query::has_published_store(&graph_path) {
+                return invoke_discovery_tool(&self.store, arguments, &graph_path, None);
             }
-            let started = Instant::now();
-            let response = code_query::invoke_discovery(arguments, &context.path)?;
-            let text = format!(
-                "Discovery: {} seeds, {} nodes, {} edges{}",
-                response.seeds.len(),
-                response.nodes.len(),
-                response.edges.len(),
-                if response.truncated {
-                    " (truncated)"
-                } else {
-                    ""
-                }
-            );
-            if let Some(question) = arguments.get("question").and_then(Value::as_str) {
-                log_discovery_mcp_query(question, &context.path, &response, started.elapsed());
-            }
-            return Ok(ToolInvocation {
-                text,
-                structured_content: Some(transport_envelope(
-                    serde_json::to_value(response)
-                        .map_err(|error| InvocationError::Internal(error.to_string()))?,
-                )?),
-            });
         }
         let typed_query = matches!(
             name,
@@ -453,38 +449,144 @@ impl CompassMcp {
                 | "get_node"
         );
         if typed_query {
-            let started = Instant::now();
-            let response = code_query::invoke(name, arguments, &context.path)?;
-            let text = format!(
-                "{:?}: {} nodes, {} edges, {} paths{}",
-                response.operation,
-                response.nodes.len(),
-                response.edges.len(),
-                response.paths.len(),
-                if response.truncated {
-                    " (truncated)"
-                } else {
-                    ""
-                }
-            );
-            if name == "query_graph"
-                && let Some(question) = arguments.get("question").and_then(Value::as_str)
-            {
-                log_typed_mcp_query(question, &context.path, &response, started.elapsed());
+            let graph_path = self
+                .store
+                .resolve(project_path.as_deref())
+                .map_err(InvocationError::Internal)?;
+            if compass_query::has_published_store(&graph_path) {
+                return invoke_typed_tool(&self.store, name, arguments, &graph_path, None);
             }
-            return Ok(ToolInvocation {
-                text,
-                structured_content: Some(transport_envelope(
-                    serde_json::to_value(response)
-                        .map_err(|error| InvocationError::Internal(error.to_string()))?,
-                )?),
-            });
+        }
+        let context = self
+            .store
+            .load(project_path.as_deref())
+            .map_err(InvocationError::Internal)?;
+        if name == "query_graph" && should_route_natural_query(arguments, &context)? {
+            return invoke_discovery_tool(&self.store, arguments, &context.path, Some(&context));
+        }
+        if typed_query {
+            return invoke_typed_tool(&self.store, name, arguments, &context.path, Some(&context));
         }
         Ok(ToolInvocation {
             text: invoke_tool(name, arguments, &context).map_err(InvocationError::InvalidParams)?,
             structured_content: None,
         })
     }
+}
+
+fn invoke_typed_tool(
+    store: &GraphStore,
+    name: &str,
+    arguments: &Map<String, Value>,
+    graph_path: &Path,
+    context: Option<&GraphContext>,
+) -> Result<ToolInvocation, InvocationError> {
+    let engine = cached_typed_engine(store, graph_path, context)?;
+    let engine = engine
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let response = code_query::invoke_with_engine(name, arguments, &engine)?;
+    let text = format!(
+        "{:?}: {} nodes, {} edges, {} paths{}",
+        response.operation,
+        response.nodes.len(),
+        response.edges.len(),
+        response.paths.len(),
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
+    Ok(ToolInvocation {
+        text,
+        structured_content: Some(transport_envelope(
+            serde_json::to_value(response)
+                .map_err(|error| InvocationError::Internal(error.to_string()))?,
+        )?),
+    })
+}
+
+fn natural_discovery_requested(arguments: &Map<String, Value>) -> bool {
+    !["mode", "depth", "token_budget", "context_filter"]
+        .iter()
+        .any(|name| arguments.contains_key(*name))
+        && arguments
+            .get("question")
+            .and_then(Value::as_str)
+            .is_some_and(|question| !question.is_empty())
+}
+
+fn invoke_discovery_tool(
+    store: &GraphStore,
+    arguments: &Map<String, Value>,
+    graph_path: &Path,
+    context: Option<&GraphContext>,
+) -> Result<ToolInvocation, InvocationError> {
+    let started = Instant::now();
+    let engine = cached_typed_engine(store, graph_path, context)?;
+    let engine = engine
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let response = code_query::invoke_discovery_with_engine(arguments, &engine)?;
+    let text = format!(
+        "Discovery: {} seeds, {} nodes, {} edges{}",
+        response.seeds.len(),
+        response.nodes.len(),
+        response.edges.len(),
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
+    if let Some(question) = arguments.get("question").and_then(Value::as_str) {
+        log_discovery_mcp_query(question, graph_path, &response, started.elapsed());
+    }
+    let semantic_result_digest = compass_query::discovery_response_digest(&response)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    Ok(ToolInvocation {
+        text,
+        structured_content: Some(transport_envelope_with_digest(
+            serde_json::to_value(response)
+                .map_err(|error| InvocationError::Internal(error.to_string()))?,
+            Some(&semantic_result_digest),
+        )?),
+    })
+}
+
+fn cached_typed_engine(
+    store: &GraphStore,
+    graph_path: &Path,
+    context: Option<&GraphContext>,
+) -> Result<compass_query::CachedQueryEngine, InvocationError> {
+    if compass_query::has_published_store(graph_path) {
+        return store
+            .inner
+            .typed_queries
+            .open_published_store(graph_path)
+            .map_err(|error| InvocationError::Internal(error.to_string()));
+    }
+    let context = context.ok_or_else(|| {
+        InvocationError::Internal("typed JSON query context is unavailable".to_owned())
+    })?;
+    let document = context.typed_document.as_ref().ok_or_else(|| {
+        InvocationError::InvalidParams(
+            "discovery controls require a typed compass.graph/1 artifact".to_owned(),
+        )
+    })?;
+    let identity = context.typed_graph_identity.as_deref().ok_or_else(|| {
+        InvocationError::Internal("typed graph identity is unavailable".to_owned())
+    })?;
+    let cache_root = graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("cache");
+    store
+        .inner
+        .typed_queries
+        .open_verified_document(document, identity, graph_path, &cache_root)
+        .map_err(|error| InvocationError::Internal(error.to_string()))
 }
 
 fn should_route_natural_query(
@@ -516,6 +618,13 @@ fn should_route_natural_query(
 }
 
 fn transport_envelope(result: Value) -> Result<Value, InvocationError> {
+    transport_envelope_with_digest(result, None)
+}
+
+fn transport_envelope_with_digest(
+    result: Value,
+    semantic_result_digest: Option<&str>,
+) -> Result<Value, InvocationError> {
     let mut envelope = json!({
         "schema": MCP_TOOL_RESULT_SCHEMA,
         "result": result,
@@ -527,6 +636,9 @@ fn transport_envelope(result: Value) -> Result<Value, InvocationError> {
             "omittedBytes": 0,
         }
     });
+    if let Some(digest) = semantic_result_digest {
+        envelope["semanticResultDigest"] = json!(format!("sha256:{digest}"));
+    }
     for _ in 0..8 {
         let required_bytes = serde_json::to_vec(&envelope)
             .map_err(|error| InvocationError::Internal(error.to_string()))?
@@ -857,29 +969,6 @@ fn log_mcp_query(
         object.insert("response".to_owned(), Value::String(result.to_owned()));
     }
     append_query_log(record);
-}
-
-fn log_typed_mcp_query(
-    question: &str,
-    corpus: &Path,
-    response: &compass_model::query_contract::CodeQueryResponse,
-    duration: Duration,
-) {
-    if question.len() > MAX_LOGGED_QUESTION_BYTES {
-        return;
-    }
-    append_query_log(json!({
-        "schema": "compass.query-log/1",
-        "ts": OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_default(),
-        "kind": "mcp_query",
-        "question": question,
-        "corpus": corpus.to_string_lossy(),
-        "nodes_returned": response.nodes.len(),
-        "result_chars": 0,
-        "duration_ms": (duration.as_secs_f64() * 1000.0 * 1000.0).round() / 1000.0,
-        "operation": response.operation,
-        "truncated": response.truncated,
-    }));
 }
 
 fn log_discovery_mcp_query(

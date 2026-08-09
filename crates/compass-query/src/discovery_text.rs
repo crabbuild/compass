@@ -2,9 +2,9 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use compass_model::provenance::SourceAnchor;
 use compass_model::query_contract::{
-    DiscoveryDirection, DiscoveryDirectionSource, DiscoveryQueryResponse, DiscoveryScopeKind,
-    DiscoveryScoreTier, DiscoverySeedSource, DiscoveryTraversal, QueryDiagnosticCode,
-    QueryEvidence,
+    DiscoveryDirection, DiscoveryDirectionSource, DiscoveryQueryResponse, DiscoveryResultEnvelope,
+    DiscoveryScopeKind, DiscoveryScoreTier, DiscoverySeedSource, DiscoveryTraversal,
+    QueryDiagnosticCode, QueryEvidence,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -92,6 +92,8 @@ pub enum DiscoveryTextPageError {
     PageMetadataTooLarge,
     #[error("could not serialize the discovery result: {0}")]
     Serialization(#[from] serde_json::Error),
+    #[error("could not construct the discovery result envelope: {0}")]
+    InvalidEnvelope(String),
 }
 
 #[derive(Clone, Debug)]
@@ -129,7 +131,7 @@ pub fn render_discovery_text_page(
     if options.graph_identity.is_empty() || options.graph_identity.len() > 512 {
         return Err(DiscoveryTextPageError::InvalidCursorEncoding);
     }
-    let semantic_result_digest = digest(&canonical_response_bytes(response)?);
+    let semantic_result_digest = discovery_response_digest(response)?;
     let entries = entries(response);
     let start = match options.cursor {
         Some(cursor) => {
@@ -463,6 +465,22 @@ fn canonical_response_bytes(
         .scope
         .dedup_by(|left, right| left.kind == right.kind && left.value == right.value);
     serde_json::to_vec(&canonical)
+}
+
+/// Return the canonical semantic-result digest used by discovery pagination.
+pub fn discovery_response_digest(
+    response: &DiscoveryQueryResponse,
+) -> Result<String, serde_json::Error> {
+    Ok(digest(&canonical_response_bytes(response)?))
+}
+
+/// Wrap a discovery response in the opt-in typed result envelope.
+pub fn discovery_result_envelope(
+    response: DiscoveryQueryResponse,
+) -> Result<DiscoveryResultEnvelope, DiscoveryTextPageError> {
+    let digest = format!("sha256:{}", discovery_response_digest(&response)?);
+    DiscoveryResultEnvelope::new(response, digest)
+        .map_err(|error| DiscoveryTextPageError::InvalidEnvelope(error.to_owned()))
 }
 
 fn validate_cursor(

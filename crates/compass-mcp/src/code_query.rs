@@ -1,12 +1,9 @@
-use std::path::Path;
-
 use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, CodeQueryResponse, DiscoveryDirection, DiscoveryLimits,
     DiscoveryQueryRequest, DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind,
     DiscoveryTraversal, ExploreRequest, ImpactRequest, NodeTrailRequest, SearchRequest,
 };
-use compass_query::open;
-use compass_query::{NaturalQueryRequest, QueryErrorKind};
+use compass_query::{CodeQueryEngine, NaturalQueryRequest, QueryErrorKind};
 use serde_json::{Map, Value, json};
 
 pub(super) fn schema(required: &[&str]) -> Value {
@@ -48,17 +45,11 @@ pub(super) fn schema(required: &[&str]) -> Value {
     })
 }
 
-pub(super) fn invoke(
+pub(super) fn invoke_with_engine(
     name: &str,
     arguments: &Map<String, Value>,
-    graph_path: &Path,
+    engine: &CodeQueryEngine,
 ) -> Result<CodeQueryResponse, super::InvocationError> {
-    let cache = graph_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("cache");
-    let engine = open(graph_path, None, &cache)
-        .map_err(|error| super::InvocationError::Internal(error.to_string()))?;
     let limits = limits(arguments)?;
     match name {
         "query_graph" => engine.query_natural(NaturalQueryRequest {
@@ -189,16 +180,10 @@ pub(super) fn validate_query_graph_arguments(
     Ok(())
 }
 
-pub(super) fn invoke_discovery(
+pub(super) fn invoke_discovery_with_engine(
     arguments: &Map<String, Value>,
-    graph_path: &Path,
+    engine: &CodeQueryEngine,
 ) -> Result<DiscoveryQueryResponse, super::InvocationError> {
-    let cache = graph_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("cache");
-    let engine = open(graph_path, None, &cache)
-        .map_err(|error| super::InvocationError::Internal(error.to_string()))?;
     let defaults = DiscoveryLimits::default();
     let request = DiscoveryQueryRequest {
         question: required_string(arguments, "question")?,

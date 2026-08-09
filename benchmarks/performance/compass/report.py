@@ -18,6 +18,16 @@ from .model import (
 )
 
 _PRIMARY_BUILDS = {"cold", "warm", "incremental"}
+_QUERY_ARTIFACT_IDENTITY_FIELDS = (
+    "canonical_graph_digest",
+    "graph_sha256",
+    "store_ref_sha256",
+    "store_snapshot_id",
+    "store_manifest_digest",
+    "store_graph_digest",
+)
+_LARGE_CORPUS_NODES = 50_000
+_MAX_CANDIDATE_FRACTION = 0.25
 
 
 def _result_key(result: WorkloadResult) -> tuple[str, str]:
@@ -25,7 +35,9 @@ def _result_key(result: WorkloadResult) -> tuple[str, str]:
 
 
 def _is_comparable(workload: str) -> bool:
-    return workload in _PRIMARY_BUILDS or workload.startswith("query-")
+    return workload in _PRIMARY_BUILDS or (
+        workload.startswith("query-") and workload.endswith("-fresh")
+    )
 
 
 def compare_tools(results: Sequence[WorkloadResult]) -> GateReport:
@@ -173,6 +185,23 @@ def compare_baseline(run: QualificationRun, baseline: QualificationRun) -> GateR
         for result in baseline.results
         if result.tool == "compass"
     }
+    for (repository, workload), result in sorted(current.items()):
+        if workload.startswith("query-") and any(
+            sample.evidence.get("legacy_semantic_digest") is True
+            for sample in result.samples
+        ):
+            issues.append(
+                GateIssue(
+                    "legacy-digest-in-candidate",
+                    repository,
+                    workload,
+                    "current candidate must provide a Rust-owned semantic digest",
+                )
+            )
+    issues.extend(_query_artifact_identity_issues(current, previous))
+    issues.extend(
+        _candidate_reduction_issues(current, require_large=len(run.corpora) == 8)
+    )
     for key in sorted(previous):
         repository, workload = key
         candidate = current.get(key)
@@ -187,10 +216,33 @@ def compare_baseline(run: QualificationRun, baseline: QualificationRun) -> GateR
                 )
             )
             continue
+        reference_digests = {
+            sample.correctness_digest for sample in reference.samples
+        }
+        legacy_reference = (
+            bool(reference.samples)
+            and len(reference_digests) == 1
+            and "" not in reference_digests
+            and all(
+                sample.eligible
+                and sample.evidence.get("legacy_semantic_digest") is True
+                for sample in reference.samples
+            )
+        )
+        legacy_warm_limitation = (
+            reference.aggregate is None
+            and reference.workload.endswith("-warm")
+            and any(
+                failure.startswith("persistent MCP warm session unavailable:")
+                for failure in reference.correctness.failures
+            )
+        )
+        if legacy_warm_limitation:
+            continue
         if (
             not candidate.correctness.passed
             or candidate.aggregate is None
-            or not reference.correctness.passed
+            or (not reference.correctness.passed and not legacy_reference)
             or reference.aggregate is None
         ):
             issues.append(
@@ -230,6 +282,85 @@ def compare_baseline(run: QualificationRun, baseline: QualificationRun) -> GateR
                     )
                 )
     return GateReport(not issues, tuple(issues))
+
+
+def _query_artifact_identity_issues(
+    current: dict[tuple[str, str], WorkloadResult],
+    previous: dict[tuple[str, str], WorkloadResult],
+) -> list[GateIssue]:
+    issues: list[GateIssue] = []
+    for key in sorted(set(current) & set(previous)):
+        repository, workload = key
+        if not workload.startswith("query-"):
+            continue
+        if not previous[key].samples and any(
+            failure.startswith("persistent MCP warm session unavailable:")
+            for failure in previous[key].correctness.failures
+        ):
+            continue
+        for field in _QUERY_ARTIFACT_IDENTITY_FIELDS:
+            current_values = {
+                sample.evidence.get(field) for sample in current[key].samples
+            }
+            previous_values = {
+                sample.evidence.get(field) for sample in previous[key].samples
+            }
+            if len(current_values) != 1 or len(previous_values) != 1 or current_values != previous_values:
+                issues.append(
+                    GateIssue(
+                        "query-artifact-identity",
+                        repository,
+                        workload,
+                        f"query artifact evidence differs for {field}",
+                    )
+                )
+    return issues
+
+
+def _candidate_reduction_issues(
+    current: dict[tuple[str, str], WorkloadResult],
+    *,
+    require_large: bool,
+) -> list[GateIssue]:
+    issues: list[GateIssue] = []
+    if not any(workload.startswith("query-") for _repository, workload in current):
+        return issues
+    large_repositories: set[str] = set()
+    qualifying_reduction = False
+    for (repository, workload), result in sorted(current.items()):
+        if not workload.startswith("query-"):
+            continue
+        for sample in result.samples:
+            try:
+                nodes = int(sample.evidence.get("compass_nodes", 0))
+                candidates = int(sample.evidence.get("candidate_nodes", nodes))
+            except (TypeError, ValueError):
+                nodes = 0
+                candidates = 0
+            if nodes < _LARGE_CORPUS_NODES:
+                continue
+            large_repositories.add(repository)
+            if candidates <= nodes * _MAX_CANDIDATE_FRACTION:
+                qualifying_reduction = True
+    if not large_repositories and require_large:
+        issues.append(
+            GateIssue(
+                "missing-large-corpus",
+                "*",
+                "query-*",
+                "candidate-reduction qualification requires a corpus with at least 50000 nodes",
+            )
+        )
+    elif large_repositories and not qualifying_reduction:
+        issues.append(
+            GateIssue(
+                "candidate-reduction",
+                ",".join(sorted(large_repositories)),
+                "query-*",
+                "at least one large-corpus query must read no more than 25% of graph nodes",
+            )
+        )
+    return issues
 
 
 def _atomic_text(path: Path, content: str) -> None:
@@ -375,7 +506,6 @@ def promote_baseline(run_path: Path, destination: Path) -> Path:
     compact = dict(payload)
     for result in compact["results"]:
         for sample in result.get("samples", []):
-            sample.pop("evidence", None)
             metrics = sample.get("metrics", {})
             metrics.pop("stdout_path", None)
             metrics.pop("stderr_path", None)

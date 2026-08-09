@@ -199,6 +199,8 @@ compass query "<question>"
   [--context VALUE]
   [--direction auto|incoming|outgoing|both]
   [--scope KIND:VALUE]
+  [--format text|json]
+  [--result-envelope]
   [--text-budget N]
   [--cursor TOKEN]
   [--budget N]
@@ -208,7 +210,10 @@ compass query "<question>"
 
 Plain questions against a typed graph use bounded
 `compass.query.discovery/1` discovery. Direction, repeatable OR scope,
-relationship context, and DFS compose within that contract. `--traverse`,
+relationship context, and DFS compose within that contract. `--result-envelope`
+requires `--format json` and opt-in wraps the unchanged discovery result in
+`compass.query.discovery-result/1` with a query-owned `semanticResultDigest`.
+Without this flag, the existing JSON shape remains unchanged. `--traverse`,
 `--budget`, or `--page` explicitly select legacy relevance traversal and cannot
 be mixed with discovery controls. CompassQL routing is unchanged.
 

@@ -5,7 +5,7 @@ use compass_model::code_graph::{NodeKind, NodeRecord};
 use compass_model::provenance::EvidenceConfidence;
 
 use crate::recall::{CandidateSource, SearchCandidate};
-use crate::text::strip_diacritics;
+use crate::text::{canonical_query_token, search_tokens, strip_diacritics};
 
 pub const QUERY_RANKER_PROFILE_V2: &str = "query-ranker/2";
 
@@ -87,7 +87,7 @@ fn rank_v2(
     let normalized_query = strip_diacritics(query).to_lowercase();
     let mut ranked_terms = terms
         .iter()
-        .map(|term| strip_diacritics(term).to_lowercase())
+        .map(|term| canonical_query_token(strip_diacritics(term).to_lowercase()))
         .filter(|term| !term.is_empty())
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -129,11 +129,17 @@ fn rank_v2(
         let evidence_score = evidence_score(&candidate.node);
         let trust_score = trust_score_v2(&candidate, matched_fields.len());
         let semantic_score = semantic_signal_score(&candidate.node);
+        let field_score = semantic_field_score(&candidate.node, &query_terms);
         let ambiguity_score = ambiguity_signal_score(&candidate);
         let node = candidate.node;
 
         let tie = SearchCandidateTiebreak::new(source_rank, &node);
-        let score = lexical_score + evidence_score + trust_score + semantic_score + ambiguity_score;
+        let score = lexical_score
+            + evidence_score
+            + trust_score
+            + semantic_score
+            + field_score
+            + ambiguity_score;
 
         ranked.push(RankedSearchCandidate {
             score,
@@ -319,6 +325,46 @@ fn semantic_signal_score(node: &NodeRecord) -> f64 {
     score
 }
 
+fn semantic_field_score(node: &NodeRecord, terms: &[String]) -> f64 {
+    let behavior = canonical_field_tokens(&node.name);
+    let owner = symbol_owner(&node.qualified_name)
+        .as_deref()
+        .map(canonical_field_tokens)
+        .unwrap_or_default();
+    terms.iter().fold(0.0, |score, term| {
+        score
+            + if behavior.contains(term) {
+                18_000.0
+            } else {
+                0.0
+            }
+            + if owner.contains(term) { 32_000.0 } else { 0.0 }
+    })
+}
+
+fn canonical_field_tokens(value: &str) -> BTreeSet<String> {
+    search_tokens(&value.replace('_', " "))
+        .into_iter()
+        .map(canonical_query_token)
+        .collect()
+}
+
+fn symbol_owner(qualified_name: &str) -> Option<String> {
+    if let Some((owner, _)) = qualified_name.rsplit_once("::") {
+        return owner
+            .rsplit("::")
+            .next()
+            .and_then(|segment| segment.rsplit('.').next())
+            .filter(|segment| !segment.is_empty())
+            .map(str::to_owned);
+    }
+    qualified_name
+        .rsplit_once('.')
+        .and_then(|(owner, _)| owner.rsplit('.').next())
+        .filter(|owner| !owner.is_empty())
+        .map(str::to_owned)
+}
+
 fn ambiguity_signal_score(candidate: &SearchCandidate) -> f64 {
     let source_rank = candidate.best_source_rank();
     let mut score = f64::from(source_rank) * 1_000.0;
@@ -419,6 +465,12 @@ mod tests {
             diagnostics: Vec::new(),
             community: None,
         }
+    }
+
+    fn owned_node(id: &str, name: &str, qualified_name: &str, source: &str) -> NodeRecord {
+        let mut record = node(id, name, NodeKind::Method, source, false);
+        record.qualified_name = qualified_name.to_owned();
+        record
     }
 
     #[test]
@@ -560,5 +612,69 @@ mod tests {
                 .map(|result| result.node_id.as_str())
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn owner_terms_beat_unrelated_methods_with_the_same_behavior_across_languages() {
+        for (question, expected, distractor) in [
+            (
+                "how does a model save data",
+                owned_node(
+                    "n:model-save",
+                    ".save()",
+                    "django.db.models.base.Model::save",
+                    "django/db/models/base.py",
+                ),
+                owned_node(
+                    "n:file-save",
+                    ".save()",
+                    "django.db.models.fields.files.FieldFile::save",
+                    "django/db/models/fields/files.py",
+                ),
+            ),
+            (
+                "how does the service container resolve bindings",
+                owned_node(
+                    "n:container-resolve",
+                    ".resolve()",
+                    "Container::resolve",
+                    "src/Container/Container.php",
+                ),
+                owned_node(
+                    "n:authenticated-resolve",
+                    ".resolve()",
+                    "Authenticated::resolve",
+                    "src/Container/Attributes/Authenticated.php",
+                ),
+            ),
+            (
+                "how does the world add components",
+                owned_node(
+                    "n:world-add",
+                    "add",
+                    "bevy::ecs::world::World::add",
+                    "crates/bevy_ecs/src/world/mod.rs",
+                ),
+                owned_node(
+                    "n:ecs-add",
+                    "add",
+                    "bevy::world::ecs::Commands::add",
+                    "crates/bevy_ecs/src/system/commands.rs",
+                ),
+            ),
+        ] {
+            let candidates = [distractor, expected.clone()]
+                .into_iter()
+                .map(|node| SearchCandidate {
+                    node,
+                    sources: BTreeSet::from([CandidateSource::Alias]),
+                })
+                .collect();
+            let terms = crate::text::query_terms(question);
+
+            let ranked = rank_search_candidates(question, &terms, candidates, usize::MAX);
+
+            assert_eq!(ranked[0].node_id, expected.id, "{question}");
+        }
     }
 }

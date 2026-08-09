@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import json
 import subprocess
 import sys
@@ -9,14 +10,19 @@ import unittest
 
 from benchmarks.performance.compass.adapters import GraphifyAdapter, ToolAdapter
 from benchmarks.performance.compass.model import (
+    ProcessMetrics,
     QueryEdgeOracle,
     QueryNodeOracle,
     QueryOracle,
     QuerySourceAnchorOracle,
     RepositorySpec,
+    Sample,
     ToolRevision,
 )
 from benchmarks.performance.compass.workloads import (
+    _result,
+    _mcp_records,
+    _append_query_sample,
     graph_neutral_mutation,
     run_build_matrix,
     run_compassql_matrix,
@@ -33,6 +39,33 @@ FAKE_TOOL = Path(__file__).parent / "helpers" / "fake_tool.py"
 
 def node_oracle(qualified_name: str, source: str) -> QueryNodeOracle:
     return QueryNodeOracle(qualified_name, QuerySourceAnchorOracle(source))
+
+
+def discovery_json(payload: dict[str, object]) -> str:
+    payload = dict(payload)
+    seeds = payload.get("seeds", [])
+    nodes = payload.get("nodes", [])
+    edges = payload.get("edges", [])
+    stats = dict(payload.get("stats", {}))
+    stats.setdefault("candidateProbes", 1)
+    stats.setdefault("candidateNodes", len(nodes))
+    stats.setdefault("candidatesAdmitted", len(seeds))
+    stats.setdefault("visitedNodes", len(nodes))
+    stats.setdefault("expandedRelationships", len(edges))
+    stats.setdefault("returnedNodes", len(nodes))
+    stats.setdefault("returnedEdges", len(edges))
+    payload["stats"] = stats
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    return json.dumps(
+        {
+            "schema": "compass.query.discovery-result/1",
+            "result": payload,
+            "semanticResultDigest": "sha256:" + hashlib.sha256(canonical).hexdigest(),
+        },
+        sort_keys=True,
+    )
 
 
 class FakeAdapter(ToolAdapter):
@@ -72,7 +105,7 @@ class FakeAdapter(ToolAdapter):
             str(FAKE_TOOL),
             "query",
             "--text",
-            json.dumps(payload, sort_keys=True),
+            discovery_json(payload),
         )
 
     def compassql_command(self, graph: Path, query: str):
@@ -109,6 +142,162 @@ def git(cwd: Path, *arguments: str) -> str:
 
 
 class WorkloadTests(unittest.TestCase):
+    def test_query_sample_rejects_valid_output_with_nonzero_status_or_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "query.json"
+            payload = {
+                "schema": "compass.query.discovery/1",
+                "selectedDirection": "both",
+                "seeds": [],
+                "nodes": [],
+                "edges": [],
+                "diagnostics": [{"code": "no_match"}],
+                "stats": {},
+                "truncated": False,
+            }
+            output.write_text(discovery_json(payload), encoding="utf-8")
+            oracle = QueryOracle("absent", allow_no_match=True)
+            spec = RepositorySpec(
+                "repo", "https://example.invalid/repo.git", ".rs", (oracle,)
+            )
+            for return_code, timed_out, expected in [
+                (7, False, "return code 7"),
+                (0, True, "timed out"),
+            ]:
+                metrics = ProcessMetrics(
+                    1.0,
+                    0.0,
+                    0.0,
+                    1,
+                    return_code,
+                    None,
+                    timed_out,
+                    ("query",),
+                    str(root),
+                    str(output),
+                    str(root / "query.err"),
+                    "a",
+                    "b",
+                )
+                samples: list[Sample] = []
+                failures: list[str] = []
+                _append_query_sample(
+                    samples,
+                    failures,
+                    self.adapter(),
+                    spec,
+                    "query-1-fresh",
+                    1,
+                    metrics,
+                    oracle,
+                    {},
+                )
+                self.assertFalse(samples[0].eligible)
+                self.assertIn(expected, samples[0].error or "")
+
+    def test_mcp_record_validation_rejects_path_escape_and_missing_iterations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output_root = root / "responses"
+            output_root.mkdir()
+            escaped = root / "escaped.json"
+            escaped.write_text("{}", encoding="utf-8")
+            worker = root / "worker.json"
+            record = {
+                "schema": "compass.performance.mcp-query-session-record/1",
+                "query_index": 1,
+                "iteration": 0,
+                "wall_seconds": 0.1,
+                "peak_rss_kib": 1,
+                "output": str(escaped),
+            }
+            worker.write_text(
+                json.dumps(
+                    {
+                        "schema": "compass.performance.mcp-query-session/1",
+                        "records": [record],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            metrics = ProcessMetrics(
+                1.0,
+                0.0,
+                0.0,
+                1,
+                0,
+                None,
+                False,
+                ("worker",),
+                str(root),
+                str(worker),
+                str(root / "worker.err"),
+                "a",
+                "b",
+            )
+            with self.assertRaisesRegex(RuntimeError, "escaped"):
+                _mcp_records(metrics, output_root, query_count=1, batches=0)
+            response = output_root / "query-1-0.json"
+            response.write_text("{}", encoding="utf-8")
+            record["output"] = str(response)
+            worker.write_text(
+                json.dumps(
+                    {
+                        "schema": "compass.performance.mcp-query-session/1",
+                        "records": [record],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "incomplete"):
+                _mcp_records(metrics, output_root, query_count=1, batches=1)
+
+    def test_legacy_quality_failures_preserve_performance_aggregate_and_failures(self) -> None:
+        samples = []
+        for iteration in range(1, 4):
+            metrics = ProcessMetrics(
+                float(iteration),
+                0.0,
+                0.0,
+                100,
+                0,
+                None,
+                False,
+                ("legacy",),
+                "/tmp",
+                "/tmp/out",
+                "/tmp/err",
+                "a",
+                "b",
+            )
+            samples.append(
+                Sample(
+                    f"compass:repo:query-1-fresh:{iteration}",
+                    "compass",
+                    "repo",
+                    "query-1-fresh",
+                    iteration,
+                    True,
+                    metrics,
+                    "digest",
+                    evidence={"legacy_semantic_digest": True},
+                )
+            )
+        result = _result(
+            "compass",
+            "repo",
+            "query-1-fresh",
+            samples,
+            ["query-1-fresh[1]: strict rank miss"],
+        )
+        self.assertIsNotNone(result.aggregate)
+        self.assertFalse(result.correctness.passed)
+        self.assertEqual(
+            result.correctness.failures,
+            ("query-1-fresh[1]: strict rank miss",),
+        )
+
     def make_checkout(self, root: Path) -> Path:
         checkout = root / "checkout"
         checkout.mkdir()
@@ -300,13 +489,13 @@ class WorkloadTests(unittest.TestCase):
             expected_direction="both",
         )
         result = validate_query_output(
-            """{
+            discovery_json(json.loads("""{
               "schema":"compass.query.discovery/1",
               "selectedDirection":"both",
               "seeds":[{"nodeId":"n:url","source":{"file":"django/urls/resolvers.py"},"ambiguous":false}],
               "nodes":[{"id":"n:url","qualifiedName":"django.urls.resolvers.URLResolver","source":{"file":"django/urls/resolvers.py"}}],
               "edges":[],"diagnostics":[],"stats":{"candidateNodes":4,"expandedRelationships":2},"truncated":false
-            }""",
+            }""")),
             oracle,
             tool="compass",
         )
@@ -337,10 +526,10 @@ class WorkloadTests(unittest.TestCase):
             expected_seeds=(node_oracle("pkg.Target", "src/target.rs"),),
         )
         result = validate_query_output(
-            '{"schema":"compass.query.discovery/1","selectedDirection":"both",'
+            discovery_json(json.loads('{"schema":"compass.query.discovery/1","selectedDirection":"both",'
             '"seeds":[{"nodeId":"n:target","qualifiedName":"spoofed","ambiguous":false}],'
             '"nodes":[{"id":"n:target","qualifiedName":"pkg.Target","source":{"file":"src/target.rs"}}],'
-            '"edges":[],"diagnostics":[],"stats":{},"truncated":false}',
+            '"edges":[],"diagnostics":[],"stats":{},"truncated":false}')),
             oracle,
             tool="compass",
         )
@@ -364,7 +553,7 @@ class WorkloadTests(unittest.TestCase):
         }
         accepted = dict(base, seeds=[{"nodeId": "alias", "ambiguous": False}, {"nodeId": "target", "ambiguous": False}])
         rejected = dict(base, seeds=[{"nodeId": "other", "ambiguous": False}, {"nodeId": "target", "ambiguous": False}])
-        self.assertTrue(validate_query_output(json.dumps(accepted), oracle, tool="compass").passed)
+        self.assertTrue(validate_query_output(discovery_json(accepted), oracle, tool="compass").passed)
         failure = validate_query_output(json.dumps(rejected), oracle, tool="compass")
         self.assertFalse(failure.passed)
         self.assertTrue(any("top-ranked" in item for item in failure.failures))
@@ -436,7 +625,7 @@ class WorkloadTests(unittest.TestCase):
             "truncated": False,
         }
         self.assertTrue(
-            validate_query_output(json.dumps(valid), oracle, tool="compass").passed
+            validate_query_output(discovery_json(valid), oracle, tool="compass").passed
         )
 
         missing_diagnostic = dict(valid, diagnostics=[])
@@ -505,7 +694,7 @@ class WorkloadTests(unittest.TestCase):
             "stats": {},
             "truncated": False,
         }
-        result = validate_query_output(json.dumps(payload), oracle, tool="compass")
+        result = validate_query_output(discovery_json(payload), oracle, tool="compass")
         self.assertTrue(result.passed, result.failures)
         self.assertEqual(result.metrics["mrr_at_10"], 1.0)
         self.assertEqual(result.metrics["recall_at_10"], 0.5)
@@ -517,7 +706,7 @@ class WorkloadTests(unittest.TestCase):
             relevant_nodes=(target_two,),
         )
         cutoff = validate_query_output(
-            json.dumps(payload), cutoff_oracle, tool="compass"
+            discovery_json(payload), cutoff_oracle, tool="compass"
         )
         self.assertTrue(cutoff.passed, cutoff.failures)
         self.assertEqual(cutoff.metrics["mrr_at_10"], 0.0)

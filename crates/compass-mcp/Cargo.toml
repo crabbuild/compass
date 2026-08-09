@@ -28,6 +28,7 @@ compass-prs = { path = "../compass-prs", version = "0.3.6" }
 compass-query = { path = "../compass-query", version = "0.3.6" }
 
 [dev-dependencies]
+compass-store = { path = "../compass-store", version = "0.3.6" }
 rmcp = { workspace = true, features = ["client"] }
 tempfile.workspace = true
 

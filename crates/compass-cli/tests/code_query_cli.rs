@@ -283,6 +283,72 @@ fn natural_discovery_exposes_the_public_json_contract_and_repeatable_or_scopes()
 }
 
 #[test]
+fn natural_discovery_result_envelope_is_opt_in_typed_and_digest_stable()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    let base_arguments = [
+        OsString::from("query"),
+        OsString::from("Target"),
+        OsString::from("--graph"),
+        graph.into_os_string(),
+        OsString::from("--format=json"),
+    ];
+    let direct = run(Frontend::Compass, base_arguments.clone());
+    assert_eq!(direct.code, 0, "{}", direct.stderr);
+    let direct_value: Value = serde_json::from_str(&direct.stdout)?;
+    assert_eq!(direct_value["schema"], "compass.query.discovery/1");
+    assert!(direct_value.get("semanticResultDigest").is_none());
+
+    let mut envelope_arguments = base_arguments.to_vec();
+    envelope_arguments.push(OsString::from("--result-envelope"));
+    let enveloped = run(Frontend::Compass, envelope_arguments);
+    assert_eq!(enveloped.code, 0, "{}", enveloped.stderr);
+    let envelope: compass_model::query_contract::DiscoveryResultEnvelope =
+        serde_json::from_str(&enveloped.stdout)?;
+    envelope.validate().map_err(std::io::Error::other)?;
+    assert_eq!(serde_json::to_value(&envelope.result)?, direct_value);
+    assert_eq!(
+        envelope.semantic_result_digest,
+        format!(
+            "sha256:{}",
+            compass_query::discovery_response_digest(&envelope.result)?
+        )
+    );
+    let mut invalid_schema = envelope.clone();
+    invalid_schema.schema = "compass.query.discovery-result/2".to_owned();
+    assert!(invalid_schema.validate().is_err());
+    let mut invalid_digest = envelope.clone();
+    invalid_digest.semantic_result_digest = "sha256:not-a-digest".to_owned();
+    assert!(invalid_digest.validate().is_err());
+    assert!(
+        serde_json::from_value::<compass_model::query_contract::DiscoveryResultEnvelope>(
+            serde_json::json!({
+                "schema": "compass.query.discovery-result/2",
+                "result": envelope.result,
+                "semanticResultDigest": envelope.semantic_result_digest,
+                "unknown": true,
+            })
+        )
+        .is_err()
+    );
+
+    let invalid = run(
+        Frontend::Compass,
+        [
+            OsString::from("query"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            directory.path().join("graph.json").into_os_string(),
+            OsString::from("--result-envelope"),
+        ],
+    );
+    assert_ne!(invalid.code, 0);
+    assert!(invalid.stderr.contains("requires --format json"));
+    Ok(())
+}
+
+#[test]
 fn natural_discovery_rejects_invalid_duplicate_and_mixed_public_controls()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
@@ -364,6 +430,7 @@ fn natural_discovery_help_documents_only_the_public_contract() {
         "Repeatable OR scope",
         "--context <VALUE>",
         "--format <text|json>",
+        "--result-envelope",
         "--text-budget <N>",
         "--cursor <TOKEN>",
         "Natural discovery:",
@@ -385,7 +452,11 @@ fn natural_discovery_help_documents_only_the_public_contract() {
         "--at <REV>",
         "Resolve REV once to an immutable typed realization",
     ] {
-        assert!(outcome.stdout.contains(expected), "missing {expected}");
+        assert!(
+            outcome.stdout.contains(expected),
+            "missing {expected} in {}",
+            outcome.stdout
+        );
     }
     assert!(!outcome.stdout.contains("--relation-context"));
     assert!(!outcome.stdout.contains("--realization"));

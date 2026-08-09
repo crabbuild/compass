@@ -38,6 +38,7 @@ def result(
     rss: int = 100,
     *,
     eligible: bool = True,
+    evidence: dict[str, object] | None = None,
 ) -> WorkloadResult:
     metrics = ProcessMetrics(
         seconds,
@@ -62,7 +63,9 @@ def result(
         1,
         eligible,
         metrics,
+        correctness_digest="digest",
         error=None if eligible else "bad output",
+        evidence=evidence or {},
     )
     correctness = CorrectnessResult(eligible, "digest", () if eligible else ("bad",))
     return WorkloadResult(
@@ -105,6 +108,120 @@ def run(results: tuple[WorkloadResult, ...]) -> QualificationRun:
 
 
 class ReportTests(unittest.TestCase):
+    def test_legacy_quality_failure_can_reference_performance_but_not_candidate(self) -> None:
+        identity = {
+            "canonical_graph_digest": "a",
+            "graph_sha256": "b",
+            "store_ref_sha256": "c",
+            "store_snapshot_id": "d",
+            "store_manifest_digest": "e",
+            "store_graph_digest": "f",
+            "compass_nodes": 100_000,
+            "candidate_nodes": 1_000,
+        }
+        legacy = result(
+            "compass",
+            "repo",
+            "query-1-fresh",
+            10.0,
+            evidence={**identity, "legacy_semantic_digest": True},
+        )
+        legacy = replace(
+            legacy,
+            correctness=CorrectnessResult(False, "quality", ("strict rank miss",)),
+        )
+        candidate = result(
+            "compass",
+            "repo",
+            "query-1-fresh",
+            10.5,
+            evidence={**identity, "legacy_semantic_digest": False},
+        )
+        self.assertTrue(compare_baseline(run((candidate,)), run((legacy,))).passed)
+        legacy_candidate = replace(
+            candidate,
+            samples=(
+                replace(
+                    candidate.samples[0],
+                    evidence={**identity, "legacy_semantic_digest": True},
+                ),
+            ),
+        )
+        report = compare_baseline(run((legacy_candidate,)), run((legacy,)))
+        self.assertTrue(
+            any(issue.code == "legacy-digest-in-candidate" for issue in report.issues)
+        )
+
+    def test_candidate_reduction_requires_one_large_corpus_query_below_25_percent(self) -> None:
+        identity = {
+            "canonical_graph_digest": "a",
+            "graph_sha256": "b",
+            "store_ref_sha256": "c",
+            "store_snapshot_id": "d",
+            "store_manifest_digest": "e",
+            "store_graph_digest": "f",
+            "compass_nodes": 100_000,
+            "legacy_semantic_digest": False,
+        }
+        baseline = run(
+            (
+                result(
+                    "compass",
+                    "repo",
+                    "query-1-fresh",
+                    1.0,
+                    evidence={**identity, "candidate_nodes": 30_000},
+                ),
+            )
+        )
+        reduced = run(
+            (
+                result(
+                    "compass",
+                    "repo",
+                    "query-1-fresh",
+                    1.0,
+                    evidence={**identity, "candidate_nodes": 25_000},
+                ),
+            )
+        )
+        self.assertTrue(compare_baseline(reduced, baseline).passed)
+        exhaustive = replace(
+            reduced,
+            results=(
+                result(
+                    "compass",
+                    "repo",
+                    "query-1-fresh",
+                    1.0,
+                    evidence={**identity, "candidate_nodes": 25_001},
+                ),
+            ),
+        )
+        report = compare_baseline(exhaustive, baseline)
+        self.assertTrue(any(issue.code == "candidate-reduction" for issue in report.issues))
+
+    def test_partial_small_corpus_query_comparison_does_not_require_large_corpus(self) -> None:
+        identity = {
+            "canonical_graph_digest": "a",
+            "graph_sha256": "b",
+            "store_ref_sha256": "c",
+            "store_snapshot_id": "d",
+            "store_manifest_digest": "e",
+            "store_graph_digest": "f",
+            "compass_nodes": 1_000,
+            "candidate_nodes": 100,
+            "legacy_semantic_digest": False,
+        }
+        query = result(
+            "compass", "repo", "query-1-fresh", 1.0, evidence=identity
+        )
+        baseline = run((query,))
+        candidate = run((query,))
+        baseline = replace(baseline, corpora=baseline.corpora[:1])
+        candidate = replace(candidate, corpora=candidate.corpora[:1])
+        self.assertTrue(compare_baseline(candidate, baseline).passed)
+
     def test_exact_five_times_passes(self) -> None:
         report = compare_tools(
             (

@@ -1212,6 +1212,7 @@ dependencies = [
  "compass-output",
  "compass-prs",
  "compass-query",
+ "compass-store",
  "rmcp",
  "serde_json",
  "tempfile",

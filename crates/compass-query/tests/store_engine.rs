@@ -1,6 +1,8 @@
 mod support;
 
 use std::fs;
+use std::sync::{Arc, Barrier};
+use std::thread;
 
 use compass_graph::{GraphSnapshotBuilder, GraphSnapshotReader};
 use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
@@ -11,8 +13,8 @@ use compass_model::query_contract::{
     NodeTrailRequest, SearchRequest,
 };
 use compass_query::{
-    EngineSelection, QueryEngineKind, open, open_with_document, open_with_engine, open_with_store,
-    open_with_store_selector,
+    EngineSelection, QueryEngineCache, QueryEngineKind, open, open_with_document, open_with_engine,
+    open_with_store, open_with_store_selector,
 };
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
 use compass_store_redb::RedbStore;
@@ -321,6 +323,210 @@ fn default_query_open_prefers_published_store_and_matches_json()
     drop(store_engine);
     let reopened = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
     assert_eq!(reopened.engine_kind(), QueryEngineKind::Store);
+    Ok(())
+}
+
+#[test]
+fn store_query_engine_cache_reuses_exact_identity_invalidates_and_evicts()
+-> Result<(), Box<dyn std::error::Error>> {
+    let first_directory = tempfile::tempdir()?;
+    let first_graph = first_directory.path().join("graph.json");
+    support::write_graph(&first_graph)?;
+    publish_phase2_snapshot(first_directory.path(), &first_graph)?;
+    let cache = QueryEngineCache::new(1)?;
+
+    let original = cache.open_published_store(&first_graph)?;
+    let repeated = cache.open_published_store(&first_graph)?;
+    assert!(Arc::ptr_eq(&original, &repeated));
+
+    let mut changed = GraphDocument::load(&first_graph)?;
+    let mut added = changed.nodes[0].clone();
+    added.id = "n:cache-generation".to_owned();
+    added.name = "cache_generation".to_owned();
+    added.qualified_name = "Cache.cache_generation".to_owned();
+    changed.nodes.push(added);
+    changed.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&first_graph, serde_json::to_vec_pretty(&changed)?)?;
+    publish_phase2_snapshot(first_directory.path(), &first_graph)?;
+
+    let changed_engine = cache.open_published_store(&first_graph)?;
+    assert!(!Arc::ptr_eq(&original, &changed_engine));
+    assert!(
+        changed_engine
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .discover(discovery_request("cache_generation"))?
+            .nodes
+            .iter()
+            .any(|node| node.id == "n:cache-generation")
+    );
+
+    let second_directory = tempfile::tempdir()?;
+    let second_graph = second_directory.path().join("graph.json");
+    support::write_graph(&second_graph)?;
+    publish_phase2_snapshot(second_directory.path(), &second_graph)?;
+    cache.open_published_store(&second_graph)?;
+    assert_eq!(cache.len(), 1);
+    let reopened = cache.open_published_store(&first_graph)?;
+    assert!(!Arc::ptr_eq(&changed_engine, &reopened));
+    assert_eq!(cache.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn query_engine_cache_reuses_and_invalidates_verified_documents()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let (document, identity) = GraphDocument::load_with_artifact_digest(&graph_path)?;
+    let cache = QueryEngineCache::new(2)?;
+    let cache_root = directory.path().join("cache");
+
+    let original = cache.open_verified_document(&document, &identity, &graph_path, &cache_root)?;
+    let repeated = cache.open_verified_document(&document, &identity, &graph_path, &cache_root)?;
+    assert!(Arc::ptr_eq(&original, &repeated));
+
+    let mut changed = document;
+    let mut added = changed.nodes[0].clone();
+    added.id = "n:verified-generation".to_owned();
+    added.name = "verified_generation".to_owned();
+    added.qualified_name = "Cache.verified_generation".to_owned();
+    changed.nodes.push(added);
+    changed.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&graph_path, serde_json::to_vec_pretty(&changed)?)?;
+    let (changed, changed_identity) = GraphDocument::load_with_artifact_digest(&graph_path)?;
+    let replacement =
+        cache.open_verified_document(&changed, &changed_identity, &graph_path, &cache_root)?;
+    assert!(!Arc::ptr_eq(&original, &replacement));
+    assert!(
+        replacement
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .discover(discovery_request("verified_generation"))?
+            .nodes
+            .iter()
+            .any(|node| node.id == "n:verified-generation")
+    );
+    Ok(())
+}
+
+#[test]
+fn query_engine_cache_constructs_one_engine_for_concurrent_exact_identity()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let (document, identity) = GraphDocument::load_with_artifact_digest(&graph_path)?;
+    let cache = Arc::new(QueryEngineCache::new(2)?);
+    let barrier = Arc::new(Barrier::new(8));
+    let mut threads = Vec::new();
+    for _ in 0..8 {
+        let cache = Arc::clone(&cache);
+        let barrier = Arc::clone(&barrier);
+        let document = document.clone();
+        let identity = identity.clone();
+        let graph_path = graph_path.clone();
+        let cache_root = directory.path().join("cache");
+        threads.push(thread::spawn(move || {
+            barrier.wait();
+            cache.open_verified_document(&document, &identity, &graph_path, &cache_root)
+        }));
+    }
+    let mut engines = Vec::new();
+    for handle in threads {
+        engines.push(handle.join().map_err(|_| "cache thread panicked")??);
+    }
+    let first = engines
+        .first()
+        .ok_or("concurrent cache returned no engines")?;
+    assert!(engines.iter().all(|engine| Arc::ptr_eq(first, engine)));
+    assert_eq!(cache.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn query_engine_cache_keeps_lru_coherent_during_hits_and_evictions()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let cache = Arc::new(QueryEngineCache::new(2)?);
+    let mut inputs = Vec::new();
+    for name in ["first", "second", "third"] {
+        let directory = root.path().join(name);
+        fs::create_dir_all(&directory)?;
+        let graph_path = directory.join("graph.json");
+        support::write_graph(&graph_path)?;
+        let (document, identity) = GraphDocument::load_with_artifact_digest(&graph_path)?;
+        inputs.push((document, identity, graph_path, directory.join("cache")));
+    }
+
+    let barrier = Arc::new(Barrier::new(4));
+    let mut threads = Vec::new();
+    for worker in 0..4 {
+        let cache = Arc::clone(&cache);
+        let barrier = Arc::clone(&barrier);
+        let inputs = inputs.clone();
+        threads.push(thread::spawn(move || {
+            barrier.wait();
+            for round in 0..12 {
+                let (document, identity, graph_path, cache_root) = &inputs[(worker + round) % 3];
+                cache.open_verified_document(document, identity, graph_path, cache_root)?;
+            }
+            Ok::<(), compass_query::QueryError>(())
+        }));
+    }
+    for handle in threads {
+        handle.join().map_err(|_| "cache thread panicked")??;
+    }
+    assert_eq!(cache.len(), 2);
+    let (document, identity, graph_path, cache_root) = &inputs[2];
+    let first = cache.open_verified_document(document, identity, graph_path, cache_root)?;
+    let repeated = cache.open_verified_document(document, identity, graph_path, cache_root)?;
+    assert!(Arc::ptr_eq(&first, &repeated));
+    assert_eq!(cache.len(), 2);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn query_engine_cache_canonicalizes_verified_document_aliases()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    let alias_path = directory.path().join("graph-alias.json");
+    support::write_graph(&graph_path)?;
+    symlink(&graph_path, &alias_path)?;
+    let (document, identity) = GraphDocument::load_with_artifact_digest(&graph_path)?;
+    let cache = QueryEngineCache::new(2)?;
+    let cache_root = directory.path().join("cache");
+
+    let direct = cache.open_verified_document(&document, &identity, &graph_path, &cache_root)?;
+    let alias = cache.open_verified_document(&document, &identity, &alias_path, &cache_root)?;
+    assert!(Arc::ptr_eq(&direct, &alias));
+    assert_eq!(cache.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn query_engine_cache_rejects_a_missing_verified_document_path()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let (document, identity) = GraphDocument::load_with_artifact_digest(&graph_path)?;
+    let cache = QueryEngineCache::new(2)?;
+    let error = cache
+        .open_verified_document(
+            &document,
+            &identity,
+            &directory.path().join("missing.json"),
+            &directory.path().join("cache"),
+        )
+        .err()
+        .ok_or("missing graph path unexpectedly opened")?;
+    assert_eq!(error.code(), "canonicalize_verified_graph_failed");
     Ok(())
 }
 

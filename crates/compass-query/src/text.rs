@@ -180,6 +180,13 @@ pub fn search_tokens(text: &str) -> Vec<String> {
 
 #[must_use]
 pub fn query_terms(question: &str) -> Vec<String> {
+    query_recall_terms(question)
+        .into_iter()
+        .map(canonical_query_token)
+        .collect()
+}
+
+pub(crate) fn query_recall_terms(question: &str) -> Vec<String> {
     let mut terms = Vec::new();
     for raw in question.split_whitespace() {
         if raw.chars().any(is_chinese) {
@@ -208,10 +215,6 @@ pub fn query_terms(question: &str) -> Vec<String> {
             }
         }
     }
-    let terms = terms
-        .into_iter()
-        .map(canonical_query_token)
-        .collect::<Vec<_>>();
     let content = terms
         .iter()
         .filter(|term| !QUERY_STOPWORDS.contains(&term.as_str()))
@@ -388,6 +391,10 @@ pub(crate) fn canonical_query_token(token: String) -> String {
         "dispatched" | "dispatching" => "dispatch".to_owned(),
         "implemented" | "implementing" => "implement".to_owned(),
         "handled" | "handling" => "handle".to_owned(),
+        "added" | "adding" => "add".to_owned(),
+        "invoked" | "invoking" => "invoke".to_owned(),
+        "recognized" | "recognizing" => "recognize".to_owned(),
+        "scheduled" | "scheduling" => "schedule".to_owned(),
         _ => canonical_query_suffix(token),
     }
 }

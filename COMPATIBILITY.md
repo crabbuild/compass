@@ -107,6 +107,13 @@ CompassQL and explicit typed query commands remain unchanged. Discovery text
 pagination uses the versioned `compass.query.discovery-text-page/1` cursor;
 JSON rejects those presentation-only controls.
 
+Default discovery JSON remains the strict `compass.query.discovery/1` shape.
+The additive `--result-envelope` option requires `--format json` and returns a
+typed `compass.query.discovery-result/1` envelope containing the unchanged v1
+result plus its query-owned `semanticResultDigest`. The digest is computed from
+canonical v1 semantic response bytes; the digest field is outside that result,
+so the v1 payload and its byte/shape contract remain unchanged.
+
 Clustered updates publish `orientation.json` (`compass.orientation/1`) from the
 same fitted model as `GRAPH_REPORT.md` and include it in the coherent snapshot
 and build state. `compass export orientation-json` and
@@ -120,6 +127,9 @@ MCP structured tool results use the `compass.mcp.tool-result/1` envelope. Its
 `transportTruncation` separately reports the MCP byte bound. A response that
 would exceed that bound fails with typed required/limit/omitted byte metadata
 instead of publishing a partial semantic result.
+Natural discovery results additionally expose the same query-owned
+`semanticResultDigest` in this transport envelope, enabling direct/persistent
+result parity checks without requiring an agent client to invent a digest.
 
 Structural operands use the same bounded exact, alias, term, and typo recall
 channels as search. A unique relationship-role seed may disambiguate a

@@ -24,6 +24,19 @@ Compare a proposed change with a previously approved Compass result captured on
 the same runner and corpus. A median regression above 10% requires explicit
 review and evidence explaining the tradeoff.
 
+Real-repository natural-query qualification materializes one SQLite-backed
+query artifact per repository. Fresh latency/RSS is one direct `compass query`
+process per observation; warm latency is measured inside one persistent MCP
+session after an unmeasured iteration. The harness requires exact artifact
+identity across compared runs, checks all seven discovery work counters, and
+requires the complete eight-corpus run to include at least one query on a graph
+of 50,000 or more nodes that inspects no
+more than 25% of the graph's nodes during candidate recall. Current results
+must carry the Rust-owned semantic digest. An explicitly enabled legacy
+baseline may retain a labeled full-payload harness digest for timing reference,
+but its quality failures remain visible and it cannot be promoted or used as a
+current candidate.
+
 ## Query-relevance qualification
 
 The native query-relevance gate keeps three intentionally separate evidence

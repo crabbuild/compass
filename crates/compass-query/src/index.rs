@@ -1,7 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -18,6 +20,7 @@ use crate::code_query::CodeGraphBackend;
 use crate::cql::{QueryError, QueryErrorKind};
 use crate::graph_engine::{
     DirectGraphEngine, StoreGraphEngine, open_graph_engine, open_local_store_snapshot,
+    read_store_ref,
 };
 
 const INDEX_FORMAT_VERSION: &str = "compass-code-index/4";
@@ -39,6 +42,200 @@ pub enum QueryEngineKind {
     Json,
     Store,
     Memory,
+}
+
+pub const DEFAULT_QUERY_ENGINE_CACHE_CAPACITY: usize = 8;
+pub const MAX_QUERY_ENGINE_CACHE_CAPACITY: usize = 32;
+pub type CachedQueryEngine = Arc<Mutex<CodeQueryEngine>>;
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum QueryEngineIdentity {
+    PublishedStore {
+        store_id: String,
+        snapshot_id: String,
+        manifest_digest: String,
+        graph_digest: String,
+    },
+    VerifiedDocument {
+        graph_identity: String,
+    },
+}
+
+struct QueryEngineCacheEntry {
+    identity: QueryEngineIdentity,
+    engine: CachedQueryEngine,
+}
+
+/// Bounded LRU of long-lived query engines keyed by exact graph identity.
+pub struct QueryEngineCache {
+    capacity: usize,
+    state: Mutex<QueryEngineCacheState>,
+}
+
+#[derive(Default)]
+struct QueryEngineCacheState {
+    entries: BTreeMap<PathBuf, QueryEngineCacheEntry>,
+    order: VecDeque<PathBuf>,
+}
+
+impl Default for QueryEngineCache {
+    fn default() -> Self {
+        Self {
+            capacity: DEFAULT_QUERY_ENGINE_CACHE_CAPACITY,
+            state: Mutex::new(QueryEngineCacheState::default()),
+        }
+    }
+}
+
+impl QueryEngineCache {
+    pub fn new(capacity: usize) -> Result<Self, QueryError> {
+        if capacity == 0 || capacity > MAX_QUERY_ENGINE_CACHE_CAPACITY {
+            return Err(QueryError::new(
+                QueryErrorKind::InvalidParameter,
+                "invalid_query_engine_cache_capacity",
+                format!(
+                    "query engine cache capacity must be between 1 and {MAX_QUERY_ENGINE_CACHE_CAPACITY}"
+                ),
+            ));
+        }
+        Ok(Self {
+            capacity,
+            state: Mutex::new(QueryEngineCacheState::default()),
+        })
+    }
+
+    pub fn open_published_store(&self, graph_path: &Path) -> Result<CachedQueryEngine, QueryError> {
+        let path = fs::canonicalize(graph_path).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "canonicalize_store_graph_failed",
+                error.to_string(),
+            )
+        })?;
+        let reference = read_store_ref(&path)?;
+        let identity = QueryEngineIdentity::PublishedStore {
+            store_id: reference.store_id,
+            snapshot_id: reference.snapshot_id,
+            manifest_digest: reference.manifest_digest,
+            graph_digest: reference.graph_digest,
+        };
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(engine) = state.get(&path, &identity) {
+            return Ok(engine);
+        }
+
+        let cache_root = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("cache");
+        let engine = Arc::new(Mutex::new(open_with_engine(
+            &path,
+            None,
+            &cache_root,
+            EngineSelection::Store,
+        )?));
+        Ok(state.insert(self.capacity, path, identity, engine))
+    }
+
+    pub fn open_verified_document(
+        &self,
+        document: &GraphDocument,
+        graph_identity: &str,
+        graph_path: &Path,
+        cache_root: &Path,
+    ) -> Result<CachedQueryEngine, QueryError> {
+        let path = fs::canonicalize(graph_path).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "canonicalize_verified_graph_failed",
+                error.to_string(),
+            )
+        })?;
+        let identity = QueryEngineIdentity::VerifiedDocument {
+            graph_identity: graph_identity.to_owned(),
+        };
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(engine) = state.get(&path, &identity) {
+            return Ok(engine);
+        }
+        let engine = Arc::new(Mutex::new(open_with_verified_document(
+            document.clone(),
+            graph_identity.to_owned(),
+            &path,
+            None,
+            cache_root,
+        )?));
+        Ok(state.insert(self.capacity, path, identity, engine))
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entries
+            .len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl QueryEngineCacheState {
+    fn get(&mut self, path: &Path, identity: &QueryEngineIdentity) -> Option<CachedQueryEngine> {
+        let engine = self
+            .entries
+            .get(path)
+            .filter(|entry| &entry.identity == identity)
+            .map(|entry| Arc::clone(&entry.engine));
+        if engine.is_some() {
+            self.order.retain(|cached| cached != path);
+            self.order.push_back(path.to_path_buf());
+        }
+        engine
+    }
+
+    fn insert(
+        &mut self,
+        capacity: usize,
+        path: PathBuf,
+        identity: QueryEngineIdentity,
+        engine: CachedQueryEngine,
+    ) -> CachedQueryEngine {
+        self.order.retain(|cached| cached != &path);
+        while self.entries.len() >= capacity && !self.entries.contains_key(&path) {
+            let Some(expired) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&expired);
+        }
+        self.order.push_back(path.clone());
+        self.entries.insert(
+            path,
+            QueryEngineCacheEntry {
+                identity,
+                engine: Arc::clone(&engine),
+            },
+        );
+        engine
+    }
+}
+
+#[must_use]
+pub fn has_published_store(graph_path: &Path) -> bool {
+    graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(compass_store::STORE_REF_FILE_NAME)
+        .is_file()
 }
 
 pub fn open(
@@ -64,13 +261,7 @@ pub fn open_with_engine(
     // fallback to JSON for older/output-only builds, but never fall back after
     // a store reference is present: a corrupt or mismatched sidecar must fail
     // closed instead of silently querying a different realization.
-    if selection == EngineSelection::Default
-        && graph_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(compass_store::STORE_REF_FILE_NAME)
-            .is_file()
-    {
+    if selection == EngineSelection::Default && has_published_store(graph_path) {
         return open_from_local_store(graph_path, program_path);
     }
     if selection == EngineSelection::Store {

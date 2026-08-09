@@ -280,6 +280,7 @@ const PAGES: &[Page] = &[
             "compass query --cql --file <PATH> [OPTIONS]",
             "compass query --cql --stdin",
             "compass query --cql --repl",
+            "compass query <QUESTION> --format json --result-envelope",
             "compass query <QUESTION> --text-budget <N>",
             "compass query <QUESTION> --cursor <TOKEN>"
         ],

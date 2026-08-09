@@ -373,6 +373,49 @@ pub struct DiscoveryQueryResponse {
     pub truncated: bool,
 }
 
+pub const DISCOVERY_RESULT_ENVELOPE_SCHEMA_V1: &str = "compass.query.discovery-result/1";
+
+/// Opt-in transport envelope for a discovery result and its query-owned digest.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DiscoveryResultEnvelope {
+    pub schema: String,
+    pub result: DiscoveryQueryResponse,
+    pub semantic_result_digest: String,
+}
+
+impl DiscoveryResultEnvelope {
+    pub fn new(
+        result: DiscoveryQueryResponse,
+        semantic_result_digest: String,
+    ) -> Result<Self, &'static str> {
+        let envelope = Self {
+            schema: DISCOVERY_RESULT_ENVELOPE_SCHEMA_V1.to_owned(),
+            result,
+            semantic_result_digest,
+        };
+        envelope.validate()?;
+        Ok(envelope)
+    }
+
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.schema != DISCOVERY_RESULT_ENVELOPE_SCHEMA_V1 {
+            return Err("unsupported discovery result envelope schema");
+        }
+        let Some(digest) = self.semantic_result_digest.strip_prefix("sha256:") else {
+            return Err("invalid discovery semantic result digest");
+        };
+        if digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err("invalid discovery semantic result digest");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DiscoveryEdge {

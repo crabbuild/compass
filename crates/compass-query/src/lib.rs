@@ -28,14 +28,17 @@ pub use cql::{
 };
 pub use discovery_text::{
     DISCOVERY_TEXT_PAGE_VERSION, DiscoveryTextPage, DiscoveryTextPageError,
-    DiscoveryTextPageOptions, discovery_request_digest, render_discovery_text_page,
+    DiscoveryTextPageOptions, discovery_request_digest, discovery_response_digest,
+    discovery_result_envelope, render_discovery_text_page,
 };
 pub use graph_engine::{
     DirectGraphEngine, GraphEngine, JsonGraphEngine, StoreGraphEngine, open_graph_engine,
 };
 pub use index::{
-    EngineSelection, QueryEngineKind, open, open_with_document, open_with_engine, open_with_store,
-    open_with_store_selector, open_with_verified_document,
+    CachedQueryEngine, DEFAULT_QUERY_ENGINE_CACHE_CAPACITY, EngineSelection,
+    MAX_QUERY_ENGINE_CACHE_CAPACITY, QueryEngineCache, QueryEngineKind, has_published_store, open,
+    open_with_document, open_with_engine, open_with_store, open_with_store_selector,
+    open_with_verified_document,
 };
 pub use intent::{
     NaturalQueryIntent, NaturalQueryPlan, NaturalQueryRequest, QUERY_PLANNER_PROFILE_V1,
@@ -85,6 +88,14 @@ mod tests {
         assert_eq!(
             query_terms("Wie funktioniert die Authentifizierung?"),
             vec!["authentifizierung"]
+        );
+        assert_eq!(
+            query_terms("how does a model save data"),
+            vec!["model", "save", "data"]
+        );
+        assert_eq!(
+            query_terms("how are plugins added and tasks scheduled"),
+            vec!["plugin", "add", "task", "schedule"]
         );
     }
 

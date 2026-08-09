@@ -41,12 +41,21 @@ python3 benchmarks/performance/harness.py run \
 ```
 
 Use `--repository NAME` repeatedly to select repositories and `--workload`
-to select `build`, `query`, or `compassql`. Query selections still perform the
-build prerequisite. Raw graphs and process logs remain under the owned
+to select `build`, `query`, or `compassql`. Query-only runs materialize one
+SQLite query artifact per repository instead of repeating the build matrix.
+Fresh query samples use one direct CLI process; warm samples share one MCP
+server, with one unmeasured iteration in each mode. Raw graphs and process logs remain under the owned
 workspace; `run.json` and `summary.md` are written under the output directory.
-Every process is fresh, expensive build workloads have three samples, query
-workloads have one untimed warmup and ten measured samples, and reports retain
-excluded observations.
+Expensive build workloads have three samples, query workloads have ten measured
+samples, and reports retain excluded observations.
+
+Use `--reuse-corpora-root PATH` only with detached, clean checkouts whose
+origin, commit, and tree exactly match the suite. Use
+`--reuse-query-artifacts PATH` to validate and query an existing artifact tree
+without pruning it. Pre-digest Compass revisions may be measured only with the
+explicit `--allow-legacy-query-digest` baseline mode; those results retain
+strict quality failures, are labeled as legacy, and cannot be promoted as a
+current passing baseline.
 
 Promotion is allowed only for a complete, clean, passing eight-repository run:
 
@@ -70,10 +79,12 @@ python3 benchmarks/performance/harness.py compare \
 Both tools use the same corpus commits. Build comparisons use the same
 structural profile: Compass `--code-only --no-cluster --no-viz --store json`
 and Graphify's native `--code-only` profile. Every cold, warm, incremental, and
-natural-language query row must independently reach
+fresh natural-language query row must independently reach
 `graphify p50 / compass p50 >= 5.00`; averages cannot hide a failed row.
 Compass build peak RSS must not exceed Graphify, and Graphify's shared graph
-facts must remain present and compatible in Compass. CompassQL is excluded from
+facts must remain present and compatible in Compass. Only fresh natural-query
+rows participate in the cross-tool ratio; persistent warm queries are a
+Compass baseline comparison. CompassQL is excluded from
 the cross-tool ratio because Graphify has no equivalent workload.
 
 The comparison environment is isolated under `target/performance/` and is not a

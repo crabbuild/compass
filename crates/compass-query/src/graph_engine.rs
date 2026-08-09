@@ -398,7 +398,7 @@ fn validate_graph_schema(graph: &GraphDocument) -> Result<(), QueryError> {
     Ok(())
 }
 
-fn read_store_ref(graph_path: &Path) -> Result<StoreRef, QueryError> {
+pub(crate) fn read_store_ref(graph_path: &Path) -> Result<StoreRef, QueryError> {
     let reference_path = graph_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
