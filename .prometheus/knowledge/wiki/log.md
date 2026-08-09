@@ -1,6 +1,9 @@
 # Update Log
 
 ## 2026-08-09
+* **Creation**: [Compass scoping and bounds completion capture](/compass-scoping-and-bounds-completion-capture.md)
+* **Ingest**: [Karpathy session 495b53196088](/karpathy-session-495b53196088c2c2.md)
+* **Ingest**: [Karpathy session 87bd3daa965e](/karpathy-session-87bd3daa965ea4d0.md)
 * **Ingest**: [Karpathy session 8cd321cc802f](/karpathy-session-8cd321cc802fed9d.md)
 * **Ingest**: [Karpathy session b1a297899421](/karpathy-session-b1a29789942105c1.md)
 * **Ingest**: [Karpathy session 7da9adb3b7b1](/karpathy-session-7da9adb3b7b11504.md)

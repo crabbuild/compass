@@ -2,6 +2,7 @@
 
 ## Reference
 
+* [Compass scoping and bounds completion capture](/compass-scoping-and-bounds-completion-capture.md)
 * [Compass scoping and bounds executor session](/compass-scoping-and-bounds-executor-session.md)
 
 ## SessionRecord
@@ -25,6 +26,7 @@
 * [Karpathy session 7c287ce9b219](/karpathy-session-7c287ce9b2192bd7.md)
 * [Karpathy session 7da9adb3b7b1](/karpathy-session-7da9adb3b7b11504.md)
 * [Karpathy session 85be47bbe3d4](/karpathy-session-85be47bbe3d4faec.md)
+* [Karpathy session 87bd3daa965e](/karpathy-session-87bd3daa965ea4d0.md)
 * [Karpathy session 8b2e071dd73e](/karpathy-session-8b2e071dd73e1374.md)
 * [Karpathy session 8cd321cc802f](/karpathy-session-8cd321cc802fed9d.md)
 * [Karpathy session 8f202396ae56](/karpathy-session-8f202396ae5617a5.md)
