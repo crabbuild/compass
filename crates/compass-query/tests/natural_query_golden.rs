@@ -82,6 +82,52 @@ fn compound_identifier_graph() -> Result<Graph, Box<dyn std::error::Error>> {
     }))?)?)
 }
 
+fn reviewed_language_baseline_graph() -> Result<Graph, Box<dyn std::error::Error>> {
+    Ok(Graph::from_document(serde_json::from_value(json!({
+        "directed": true,
+        "multigraph": false,
+        "graph": {},
+        "nodes": [
+            {
+                "id": "py:solve-dependencies",
+                "label": "solve_dependencies",
+                "kind": "function",
+                "source_file": "fastapi/dependencies/utils.py",
+                "source_location": "L540"
+            },
+            {
+                "id": "rs:log-record",
+                "label": "log_record_represent",
+                "kind": "struct",
+                "source_file": "src/record.rs",
+                "source_location": "L18"
+            },
+            {
+                "id": "ts:map-values",
+                "label": "mapValues",
+                "kind": "function",
+                "source_file": "src/object/mapValues.ts",
+                "source_location": "L11"
+            },
+            {
+                "id": "ts:map-values-test",
+                "label": "mapValuesFixture",
+                "kind": "variable",
+                "source_file": "tests/generated/mapValues.test.ts",
+                "source_location": "L8"
+            },
+            {
+                "id": "unicode:cafe-parser",
+                "label": "CaféParser",
+                "kind": "class",
+                "source_file": "src/parsers/cafe.rs",
+                "source_location": "L25"
+            }
+        ],
+        "links": []
+    }))?)?)
+}
+
 #[test]
 fn natural_query_golden_cases_retrieve_reviewed_symbols() -> Result<(), Box<dyn std::error::Error>>
 {
@@ -160,5 +206,48 @@ fn natural_query_golden_prefers_a_matching_compound_identifier()
         rendered.contains("mapValues"),
         "unexpected output: {rendered}"
     );
+    Ok(())
+}
+
+#[test]
+fn reviewed_language_baseline_preserves_ids_anchors_and_no_answer()
+-> Result<(), Box<dyn std::error::Error>> {
+    let graph = reviewed_language_baseline_graph()?;
+    let cases = [
+        ("how are dependencies solved", "py:solve-dependencies"),
+        ("how are log records represented", "rs:log-record"),
+        ("how are object values mapped", "ts:map-values"),
+        ("where is cafe parsed", "unicode:cafe-parser"),
+    ];
+
+    for (question, expected_id) in cases {
+        let expected = graph
+            .node_index(expected_id)
+            .ok_or("reviewed baseline node is missing")?;
+        for _ in 0..3 {
+            let scores = score_nodes(&graph, &query_terms(question), true);
+            assert_eq!(
+                scores.ranked.first().map(|candidate| candidate.node),
+                Some(expected),
+                "question: {question:?}"
+            );
+        }
+    }
+
+    let rendered = query_graph_text(
+        &graph,
+        "how are dependencies solved",
+        TraversalMode::Bfs,
+        0,
+        2_000,
+        &[],
+        &HashMap::new(),
+    );
+    assert!(rendered.contains("src=fastapi/dependencies/utils.py"));
+    assert!(!rendered.contains("mapValuesFixture"));
+
+    let no_answer = score_nodes(&graph, &query_terms("quantum banana synchronization"), true);
+    assert!(no_answer.ranked.is_empty());
+    assert!(no_answer.best_seed_by_term.is_empty());
     Ok(())
 }
