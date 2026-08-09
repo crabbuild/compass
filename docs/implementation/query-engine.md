@@ -37,7 +37,9 @@ family may still request a bounded materialized export.
 - preserves parallel edges for multigraph documents;
 - builds ID lookup;
 - builds incoming/outgoing adjacency;
-- builds `QueryIndex` and a schema fingerprint.
+- builds `QueryIndex` and a schema fingerprint;
+- registers a lazy graph-derived lexical index that is constructed only when
+  an opted-in text ranker requests it.
 
 Read commands can force stored direction when compatibility documents require
 it.
@@ -139,7 +141,7 @@ question
         -> compass.query/1
      -> generic, historical, contradictory, or traversal-controlled
         -> query_terms()
-        -> score_nodes()
+        -> score_nodes() [default legacy profile]
         -> choose anchors
         -> query_graph_text() with BFS/DFS and budget
         -> focused text subgraph
@@ -165,7 +167,8 @@ golden judgment.
 
 ### Scoring
 
-`score_nodes` uses indexed label/attribute evidence to rank candidates.
+`score_nodes` retains the established `text-ranker/legacy-v1` behavior: it
+prepares label evidence and scans the loaded graph to rank candidates.
 `find_node` and `pick_scored_endpoint` support commands that need one entity.
 When at least two query terms are exact components of one compound identifier,
 that co-occurrence receives a bounded ranking boost. Per-query label
@@ -174,6 +177,29 @@ second full normalization pass while preserving deterministic tie-breaking.
 
 Ranking changes can alter which subgraph users see even when graph data is
 unchanged. Protect them with realistic query fixtures and stable tie behavior.
+
+#### Shadow BM25 profile
+
+`score_nodes_with_profile` and `query_graph_text_page_with_profile` expose the
+opt-in `text-ranker/bm25-v1` library profile. The CLI and MCP defaults do not
+select it. The profile lazily derives an in-memory index from the validated
+graph's stable ID, display label, qualified name, kind, and source path fields.
+`graph.json` remains authoritative; the index is disposable, local, and reused
+only for the lifetime of the loaded graph.
+
+The index records deterministic postings, per-field term frequencies, document
+lengths, corpus size, and average document length. Candidate retrieval uses
+field weights 4.0 for labels, 3.0 for identifiers, 1.0 for kinds, and 0.5 for
+source paths with BM25 `k1=1.2` and `b=0.75`. Retrieval is capped at 512 nodes,
+retains the best candidate for each query term, and reports truncation. The
+existing exact-name tiers, source-backed/callable preference, generated/test
+penalty, stable ID tie-break, seed selection, traversal, provenance rendering,
+and pagination then operate over those candidates.
+
+This is qualification code, not a default cutover. Typed JSON FTS5 and store
+postings are unchanged, and FTS5's backend-specific `bm25()` score is not used.
+Promotion requires a separately reviewed relevance, cold-start, warm-latency,
+and memory decision.
 
 ### Traversal
 
