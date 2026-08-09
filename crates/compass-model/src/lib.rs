@@ -9,6 +9,7 @@ mod error;
 mod graph;
 pub mod identity;
 mod lexical;
+mod lexical_index;
 pub mod provenance;
 pub mod query_contract;
 mod query_index;
@@ -18,6 +19,7 @@ pub use document::{EdgeRecord, GraphDocument, NodeRecord};
 pub use error::GraphError;
 pub use graph::{EdgeIndex, Graph, NodeIndex};
 pub use lexical::{canonical_code_token, identifier_tokens, strip_diacritics};
+pub use lexical_index::{LexicalIndex, LexicalPosting, LexicalTermFrequency};
 pub use query_index::{QueryIndex, SchemaFingerprint, cypher_node_label, cypher_relationship_type};
 pub use validation::{
     CodeGraphValidationError, CodeGraphValidationReport, ExtractionValidationError,
