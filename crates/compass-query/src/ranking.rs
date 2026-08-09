@@ -14,6 +14,7 @@ pub(crate) struct RankedSearchResult {
     pub(crate) score: f64,
     pub(crate) node_id: String,
     pub(crate) matched_fields: Vec<String>,
+    pub(crate) matched_terms: Vec<String>,
     pub(crate) node: NodeRecord,
     pub(crate) candidate_source: CandidateSource,
 }
@@ -69,6 +70,7 @@ fn rank_legacy(
                 + matched_fields.len() as f64,
             node_id: node.id.clone(),
             matched_fields,
+            matched_terms: Vec::new(),
             node,
             candidate_source,
         });
@@ -113,6 +115,28 @@ fn rank_v2(
         if normalized_id == normalized_query && !candidate.node.id.is_empty() {
             matched_fields.push("id".to_owned());
         }
+        let matched_terms = candidate
+            .indexed_matches
+            .iter()
+            .chain(
+                candidate
+                    .relationship_matches
+                    .iter()
+                    .map(|matched| &matched.term),
+            )
+            .filter(|term| query_terms.binary_search(term).is_ok())
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let relationship_terms = candidate
+            .relationship_terms()
+            .into_iter()
+            .filter(|term| query_terms.binary_search(term).is_ok())
+            .collect::<BTreeSet<_>>();
+        if !relationship_terms.is_empty() {
+            matched_fields.push("relationship".to_owned());
+        }
 
         let lexical_score = lexical_score_v2(
             &normalized_query,
@@ -131,6 +155,11 @@ fn rank_v2(
         let semantic_score = semantic_signal_score(&candidate.node);
         let field_score = semantic_field_score(&candidate.node, &query_terms);
         let ambiguity_score = ambiguity_signal_score(&candidate);
+        let relationship_score = if query_terms.is_empty() {
+            0.0
+        } else {
+            96_000.0 * relationship_terms.len() as f64 / query_terms.len() as f64
+        };
         let node = candidate.node;
 
         let tie = SearchCandidateTiebreak::new(source_rank, &node);
@@ -139,7 +168,8 @@ fn rank_v2(
             + trust_score
             + semantic_score
             + field_score
-            + ambiguity_score;
+            + ambiguity_score
+            + relationship_score;
 
         ranked.push(RankedSearchCandidate {
             score,
@@ -148,6 +178,7 @@ fn rank_v2(
                 score,
                 node_id: node.id.clone(),
                 matched_fields,
+                matched_terms,
                 node,
                 candidate_source,
             },
@@ -479,10 +510,14 @@ mod tests {
             SearchCandidate {
                 node: node("n:z", "query", NodeKind::Function, "src/lib.rs", false),
                 sources: BTreeSet::from([CandidateSource::ExactName]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: BTreeSet::new(),
             },
             SearchCandidate {
                 node: node("n:a", "query", NodeKind::Function, "src/lib.rs", false),
                 sources: BTreeSet::from([CandidateSource::ExactName]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: BTreeSet::new(),
             },
         ];
         let ranked = rank_legacy("query", candidates, usize::MAX);
@@ -502,6 +537,8 @@ mod tests {
                     false,
                 ),
                 sources: BTreeSet::from([CandidateSource::ExactName]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: BTreeSet::new(),
             },
             SearchCandidate {
                 node: node(
@@ -512,6 +549,8 @@ mod tests {
                     true,
                 ),
                 sources: BTreeSet::from([CandidateSource::ExactName, CandidateSource::Fuzzy]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: BTreeSet::new(),
             },
         ];
         let ranked = rank_search_candidates(
@@ -535,6 +574,8 @@ mod tests {
                     false,
                 ),
                 sources: BTreeSet::from([CandidateSource::ExactName]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: BTreeSet::new(),
             },
             SearchCandidate {
                 node: node(
@@ -545,6 +586,8 @@ mod tests {
                     false,
                 ),
                 sources: BTreeSet::from([CandidateSource::ExactName]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: BTreeSet::new(),
             },
         ];
         let legacy = rank_legacy("charge", candidates.clone(), 1);
@@ -565,10 +608,14 @@ mod tests {
             SearchCandidate {
                 node: node("n:aa", "same", NodeKind::Function, "src/lib.rs", false),
                 sources: BTreeSet::from([CandidateSource::Alias]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: BTreeSet::new(),
             },
             SearchCandidate {
                 node: node("n:ab", "same", NodeKind::Function, "src/lib.rs", false),
                 sources: BTreeSet::from([CandidateSource::Alias]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: BTreeSet::new(),
             },
         ];
         let ranked = rank_search_candidates(
@@ -588,6 +635,8 @@ mod tests {
             .map(|id| SearchCandidate {
                 node: node(id, "same", NodeKind::Function, "src/lib.rs", false),
                 sources: BTreeSet::from([CandidateSource::Alias]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: BTreeSet::new(),
             })
             .collect::<Vec<_>>();
         let full = rank_search_candidates(
@@ -668,6 +717,8 @@ mod tests {
                 .map(|node| SearchCandidate {
                     node,
                     sources: BTreeSet::from([CandidateSource::Alias]),
+                    indexed_matches: BTreeSet::new(),
+                    relationship_matches: BTreeSet::new(),
                 })
                 .collect();
             let terms = crate::text::query_terms(question);

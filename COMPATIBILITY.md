@@ -151,6 +151,15 @@ been removed. This does not change the `compass.query/1` schema, but intentional
 score and ordering improvements can change which equally lexical candidate is
 ranked first; ordering remains deterministic and backend-neutral.
 
+Discovery term indexes preserve their existing full tokens and add bounded
+camel-case, acronym, and underscore subwords derived from raw symbol names,
+qualified names, and aliases. The immutable store records this additive
+capability as an empty reserved term posting, which older same-major readers
+ignore. Current readers still open snapshots without the capability but report
+incomplete discovery coverage; rebuild the graph to make identifier-subword
+recall equivalent across the JSON and store engines. The disposable SQLite FTS
+cache is rebuilt automatically under its new internal format version.
+
 Optional MCP query feedback remains local and disabled by default.
 `COMPASS_QUERY_LOG=<path>` writes the versioned `compass.query-log/1` JSONL
 contract up to a 16 MiB file bound. The review importer accepts only its

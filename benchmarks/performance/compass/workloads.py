@@ -572,6 +572,11 @@ def _validate_compass_discovery(
     no_match = any(
         isinstance(item, dict) and item.get("code") == "no_match" for item in diagnostics
     )
+    bounded_truncation = any(
+        isinstance(item, dict) and item.get("code") == "bounded_truncation"
+        for item in diagnostics
+    )
+    truncated = payload.get("truncated") is True
     no_match_false_positive = no_match and not oracle.allow_no_match
     if no_match_false_positive:
         failures.append("unexpected no_match diagnostic")
@@ -581,8 +586,10 @@ def _validate_compass_discovery(
         failures.append("expected no_match response returned seeds")
     elif no_match and seed_records:
         failures.append("no_match response returned seeds")
-    if not no_match and not seed_records:
+    if not no_match and not seed_records and not truncated:
         failures.append("empty result omitted the no_match diagnostic")
+    if not seed_records and truncated and not bounded_truncation:
+        failures.append("truncated empty result omitted the bounded_truncation diagnostic")
     for expected_edge in oracle.expected_edges:
         matching = [
             edge

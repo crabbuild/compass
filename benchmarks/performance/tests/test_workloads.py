@@ -520,6 +520,70 @@ class WorkloadTests(unittest.TestCase):
         self.assertTrue(any("missing expected seeds" in failure for failure in result.failures))
         self.assertTrue(any("direction mismatch" in failure for failure in result.failures))
 
+    def test_complete_empty_discovery_requires_no_match(self) -> None:
+        oracle = QueryOracle("missing", allow_no_match=True)
+        complete = discovery_json(
+            {
+                "schema": "compass.query.discovery/1",
+                "selectedDirection": "both",
+                "seeds": [],
+                "nodes": [],
+                "edges": [],
+                "diagnostics": [],
+                "truncated": False,
+            }
+        )
+
+        result = validate_query_output(complete, oracle, tool="compass")
+
+        self.assertFalse(result.passed)
+        self.assertIn("expected no_match diagnostic", result.failures)
+        self.assertIn("empty result omitted the no_match diagnostic", result.failures)
+
+    def test_truncated_empty_discovery_requires_bounded_truncation_not_no_match(self) -> None:
+        expected = node_oracle("pkg.expected", "src/expected.rs")
+        oracle = QueryOracle("missing", expected_seeds=(expected,))
+        truncated = discovery_json(
+            {
+                "schema": "compass.query.discovery/1",
+                "selectedDirection": "both",
+                "seeds": [],
+                "nodes": [],
+                "edges": [],
+                "diagnostics": [{"code": "bounded_truncation"}],
+                "truncated": True,
+            }
+        )
+
+        result = validate_query_output(truncated, oracle, tool="compass")
+
+        self.assertFalse(result.passed)
+        self.assertTrue(any("missing expected seeds" in failure for failure in result.failures))
+        self.assertNotIn("empty result omitted the no_match diagnostic", result.failures)
+
+    def test_truncated_empty_discovery_rejects_missing_bounded_truncation(self) -> None:
+        oracle = QueryOracle("missing", allow_no_match=True)
+        truncated = discovery_json(
+            {
+                "schema": "compass.query.discovery/1",
+                "selectedDirection": "both",
+                "seeds": [],
+                "nodes": [],
+                "edges": [],
+                "diagnostics": [],
+                "truncated": True,
+            }
+        )
+
+        result = validate_query_output(truncated, oracle, tool="compass")
+
+        self.assertFalse(result.passed)
+        self.assertIn(
+            "truncated empty result omitted the bounded_truncation diagnostic",
+            result.failures,
+        )
+        self.assertNotIn("empty result omitted the no_match diagnostic", result.failures)
+
     def test_compass_seed_identity_is_resolved_through_returned_nodes(self) -> None:
         oracle = QueryOracle(
             "find target",

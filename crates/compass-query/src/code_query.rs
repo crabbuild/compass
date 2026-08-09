@@ -1,9 +1,12 @@
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
 
-use compass_graph::{GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS, SnapshotReadLimits};
+use compass_graph::{
+    GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS, GRAPH_TERM_POSTING_CHUNK_ITEMS,
+    GraphSnapshotReader, SnapshotReadLimits,
+};
 use compass_ir::ProgramBundle;
 use compass_model::code_graph::{EdgeKind, EdgeRecord, FileRecord, GraphDocument, NodeRecord};
 use compass_model::provenance::{EvidenceConfidence, ResolutionState};
@@ -13,6 +16,7 @@ use compass_model::query_contract::{
     QueryEvidence, QueryEvidenceLayer, QueryFile, QueryNode, QueryPath, SearchHit, SearchRequest,
     discovery_scope_postings,
 };
+use compass_store::SqliteStore;
 use rusqlite::{Connection, params};
 
 use crate::cql::{QueryError, QueryErrorKind};
@@ -91,16 +95,16 @@ pub(crate) struct CandidateAssembly {
     pub(crate) pool: SearchCandidatePool,
     pub(crate) truncated: bool,
     pub(crate) candidate_nodes_read: u64,
-    pub(crate) candidate_probes: u64,
     pub(crate) postings_decoded: u64,
     pub(crate) relation_edges_examined: u64,
 }
 
-struct TermCandidateRead {
-    nodes: Vec<NodeRecord>,
-    truncated: bool,
-    node_ids_decoded: u64,
-    chunks_decoded: u64,
+pub(crate) struct TermCandidateRead {
+    pub(crate) nodes: Vec<NodeRecord>,
+    pub(crate) matched_concepts: BTreeMap<String, BTreeSet<String>>,
+    pub(crate) truncated: bool,
+    pub(crate) node_ids_decoded: u64,
+    pub(crate) chunks_decoded: u64,
 }
 
 pub(crate) struct CandidateAssemblyPolicy<'a> {
@@ -356,6 +360,17 @@ pub(crate) enum CodeGraphBackend {
     Store(Box<LocalStoreSnapshot>),
 }
 
+/// Request-scoped graph view. Store discovery pins one immutable reader so
+/// selector verification and database setup happen once for the whole query.
+pub(crate) enum PinnedDiscoveryBackend<'a> {
+    Materialized {
+        graph: &'a GraphDocument,
+        adjacency: &'a CodeAdjacencyIndex,
+        lookup: &'a CodeLookupIndex,
+    },
+    Store(Box<GraphSnapshotReader<'a, SqliteStore>>),
+}
+
 pub(crate) struct CodeLookupIndex {
     node_by_id: HashMap<String, usize>,
     nodes_by_normalized_name: HashMap<String, Vec<usize>>,
@@ -590,6 +605,23 @@ impl CodeAdjacencyIndex {
 }
 
 impl CodeGraphBackend {
+    pub(crate) fn pin_discovery(&self) -> Result<PinnedDiscoveryBackend<'_>, QueryError> {
+        match self {
+            Self::Materialized {
+                graph,
+                adjacency,
+                lookup,
+            } => Ok(PinnedDiscoveryBackend::Materialized {
+                graph,
+                adjacency,
+                lookup,
+            }),
+            Self::Store(snapshot) => {
+                Ok(PinnedDiscoveryBackend::Store(Box::new(snapshot.reader()?)))
+            }
+        }
+    }
+
     pub(crate) fn node_by_id(&self, id: &str) -> Result<Option<NodeRecord>, QueryError> {
         match self {
             Self::Materialized { graph, lookup, .. } => Ok(lookup
@@ -613,11 +645,12 @@ impl CodeGraphBackend {
         name: &str,
         limit: usize,
     ) -> Result<(Vec<NodeRecord>, bool), QueryError> {
+        let name = normalize_symbol(name);
         match self {
             Self::Materialized { graph, lookup, .. } => {
                 let retained = limit.saturating_add(1);
                 let mut nodes = lookup
-                    .nodes_by_normalized_name(name)
+                    .nodes_by_normalized_name(&name)
                     .iter()
                     .take(retained)
                     .map(|index| graph.nodes[*index].clone())
@@ -631,58 +664,13 @@ impl CodeGraphBackend {
             Self::Store(snapshot) => {
                 let (mut nodes, truncated) = snapshot
                     .reader()?
-                    .nodes_by_normalized_name(name, snapshot_limits(limit.saturating_add(1))?)
+                    .nodes_by_normalized_name(&name, snapshot_limits(limit.saturating_add(1))?)
                     .map_err(snapshot_error)?;
                 let truncated = truncated || nodes.len() > limit;
                 if nodes.len() > limit {
                     nodes.truncate(limit);
                 }
                 Ok((nodes, truncated))
-            }
-        }
-    }
-
-    pub(crate) fn resolve_scope_values(
-        &self,
-        kind: DiscoveryScopeKind,
-        value: &str,
-        limit: usize,
-    ) -> Result<(Vec<String>, bool), QueryError> {
-        match self {
-            Self::Materialized { lookup, .. } => {
-                let retained = limit.saturating_add(1);
-                let mut values = lookup
-                    .scope_values(kind, value)
-                    .iter()
-                    .take(retained)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let truncated = values.len() > limit;
-                values.truncate(limit);
-                Ok((values, truncated))
-            }
-            Self::Store(snapshot) => {
-                let mut values = BTreeSet::new();
-                let mut truncated = false;
-                for posting_kind in snapshot_scope_kinds(kind) {
-                    let (found, found_truncated) = snapshot
-                        .reader()?
-                        .resolve_scope_values(
-                            posting_kind,
-                            value,
-                            snapshot_limits(limit.saturating_add(1))?,
-                        )
-                        .map_err(scope_snapshot_error)?;
-                    truncated |= found_truncated;
-                    for value in found {
-                        values.insert(value);
-                        if values.len() > limit {
-                            truncated = true;
-                            values.pop_last();
-                        }
-                    }
-                }
-                Ok((values.into_iter().collect(), truncated))
             }
         }
     }
@@ -699,21 +687,19 @@ impl CodeGraphBackend {
             Self::Materialized {
                 graph, adjacency, ..
             } => {
-                let (indices, truncated, _) = adjacency.matching_bounded(
-                    graph,
-                    node,
-                    inbound,
-                    kinds,
-                    include_heuristic,
-                    limit,
-                );
-                Ok((
-                    indices
-                        .into_iter()
-                        .map(|index| graph.links[index].clone())
-                        .collect(),
-                    truncated,
-                ))
+                // Both backends bound the same canonical raw edge prefix and
+                // apply the heuristic filter afterward. Otherwise a dense
+                // heuristic prefix changes both results and truncation.
+                let (indices, truncated, _) =
+                    adjacency.matching_bounded(graph, node, inbound, kinds, true, limit);
+                let mut edges = indices
+                    .into_iter()
+                    .map(|index| graph.links[index].clone())
+                    .collect::<Vec<_>>();
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                Ok((edges, truncated))
             }
             Self::Store(snapshot) => {
                 let (mut edges, truncated) = snapshot
@@ -819,11 +805,237 @@ impl CodeGraphBackend {
         if nodes.len() > limit {
             nodes.truncate(limit);
         }
+        let concepts = terms.iter().cloned().collect::<BTreeSet<_>>();
+        let matched_concepts = nodes
+            .iter()
+            .map(|node| (node.id.clone(), concepts.clone()))
+            .collect();
         Ok(Some(TermCandidateRead {
             nodes,
+            matched_concepts,
             truncated,
             node_ids_decoded,
             chunks_decoded,
+        }))
+    }
+}
+
+impl PinnedDiscoveryBackend<'_> {
+    pub(crate) fn node_by_id(&self, id: &str) -> Result<Option<NodeRecord>, QueryError> {
+        match self {
+            Self::Materialized { graph, lookup, .. } => Ok(lookup
+                .node_by_id(id)
+                .map(|index| graph.nodes[index].clone())),
+            Self::Store(reader) => reader.get_node(id).map_err(snapshot_error),
+        }
+    }
+
+    pub(crate) fn nodes_by_normalized_name(
+        &self,
+        name: &str,
+        limit: usize,
+    ) -> Result<(Vec<NodeRecord>, bool), QueryError> {
+        let name = normalize_symbol(name);
+        match self {
+            Self::Materialized { graph, lookup, .. } => {
+                let retained = limit.saturating_add(1);
+                let mut nodes = lookup
+                    .nodes_by_normalized_name(&name)
+                    .iter()
+                    .take(retained)
+                    .map(|index| graph.nodes[*index].clone())
+                    .collect::<Vec<_>>();
+                let truncated = nodes.len() > limit;
+                nodes.truncate(limit);
+                Ok((nodes, truncated))
+            }
+            Self::Store(reader) => {
+                let (mut nodes, truncated) = reader
+                    .nodes_by_normalized_name(&name, snapshot_limits(limit.saturating_add(1))?)
+                    .map_err(snapshot_error)?;
+                let truncated = truncated || nodes.len() > limit;
+                nodes.truncate(limit);
+                Ok((nodes, truncated))
+            }
+        }
+    }
+
+    pub(crate) fn resolve_scope_values(
+        &self,
+        kind: DiscoveryScopeKind,
+        value: &str,
+        limit: usize,
+    ) -> Result<(Vec<String>, bool), QueryError> {
+        match self {
+            Self::Materialized { lookup, .. } => {
+                let retained = limit.saturating_add(1);
+                let mut values = lookup
+                    .scope_values(kind, value)
+                    .iter()
+                    .take(retained)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let truncated = values.len() > limit;
+                values.truncate(limit);
+                Ok((values, truncated))
+            }
+            Self::Store(reader) => {
+                let mut values = BTreeSet::new();
+                let mut truncated = false;
+                for posting_kind in snapshot_scope_kinds(kind) {
+                    let (found, found_truncated) = reader
+                        .resolve_scope_values(
+                            posting_kind,
+                            value,
+                            snapshot_limits(limit.saturating_add(1))?,
+                        )
+                        .map_err(scope_snapshot_error)?;
+                    truncated |= found_truncated;
+                    for value in found {
+                        values.insert(value);
+                        if values.len() > limit {
+                            truncated = true;
+                            values.pop_last();
+                        }
+                    }
+                }
+                Ok((values.into_iter().collect(), truncated))
+            }
+        }
+    }
+
+    pub(crate) fn matching_bounded(
+        &self,
+        node: &str,
+        inbound: bool,
+        kinds: &[EdgeKind],
+        include_heuristic: bool,
+        limit: usize,
+    ) -> Result<(Vec<EdgeRecord>, bool), QueryError> {
+        let (edges, truncated, _) =
+            self.matching_bounded_counted(node, inbound, kinds, include_heuristic, limit)?;
+        Ok((edges, truncated))
+    }
+
+    pub(crate) fn matching_bounded_counted(
+        &self,
+        node: &str,
+        inbound: bool,
+        kinds: &[EdgeKind],
+        include_heuristic: bool,
+        limit: usize,
+    ) -> Result<(Vec<EdgeRecord>, bool, usize), QueryError> {
+        match self {
+            Self::Materialized {
+                graph, adjacency, ..
+            } => {
+                let (indices, truncated, _) =
+                    adjacency.matching_bounded(graph, node, inbound, kinds, true, limit);
+                let mut edges = indices
+                    .into_iter()
+                    .map(|index| graph.links[index].clone())
+                    .collect::<Vec<_>>();
+                let examined = edges.len().saturating_add(usize::from(truncated));
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                Ok((edges, truncated, examined))
+            }
+            Self::Store(reader) => {
+                let (mut edges, truncated) = reader
+                    .directional_adjacency(node, inbound, snapshot_limits(limit.saturating_add(1))?)
+                    .map_err(snapshot_error)?;
+                edges.sort_by(|left, right| left.id.cmp(&right.id));
+                let truncated = truncated || edges.len() > limit;
+                edges.truncate(limit);
+                let examined = edges.len().saturating_add(usize::from(truncated));
+                edges.retain(|edge| kinds.contains(&edge.kind));
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                Ok((edges, truncated, examined))
+            }
+        }
+    }
+
+    pub(crate) fn incident_bounded(
+        &self,
+        node: &str,
+        include_heuristic: bool,
+        limit: usize,
+    ) -> Result<(Vec<EdgeRecord>, bool), QueryError> {
+        match self {
+            Self::Materialized {
+                graph, adjacency, ..
+            } => {
+                let retained = limit.saturating_add(1);
+                let mut edges = adjacency
+                    .incident(node, true)
+                    .iter()
+                    .take(retained)
+                    .map(|index| graph.links[*index].clone())
+                    .collect::<Vec<_>>();
+                let truncated = edges.len() > limit;
+                edges.truncate(limit);
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                Ok((edges, truncated))
+            }
+            Self::Store(reader) => {
+                let (mut edges, truncated) = reader
+                    .incident(node, snapshot_limits(limit.saturating_add(1))?)
+                    .map_err(snapshot_error)?;
+                edges.sort_by(|left, right| left.id.cmp(&right.id));
+                let truncated = truncated || edges.len() > limit;
+                edges.truncate(limit);
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                Ok((edges, truncated))
+            }
+        }
+    }
+
+    pub(crate) fn supports_identifier_subwords(&self) -> Result<bool, QueryError> {
+        match self {
+            Self::Materialized { .. } => Ok(true),
+            Self::Store(reader) => reader
+                .supports_identifier_subwords()
+                .map_err(snapshot_error),
+        }
+    }
+
+    fn store_term_candidates(
+        &self,
+        concept: &str,
+        limit: usize,
+    ) -> Result<Option<TermCandidateRead>, QueryError> {
+        let Self::Store(reader) = self else {
+            return Ok(None);
+        };
+        let terms = [concept.to_owned()];
+        let read_limits = snapshot_limits(limit.max(GRAPH_TERM_POSTING_CHUNK_ITEMS))?;
+        let (mut nodes, mut truncated, mut work) = reader
+            .nodes_for_exact_term_bounded_work(concept, read_limits)
+            .map_err(snapshot_error)?;
+        if nodes.is_empty() && !truncated {
+            (nodes, truncated, work) = reader
+                .nodes_for_terms_bounded_work(&terms, read_limits)
+                .map_err(snapshot_error)?;
+        }
+        let truncated = truncated || nodes.len() > limit;
+        nodes.truncate(limit);
+        let matched_concepts = nodes
+            .iter()
+            .map(|node| (node.id.clone(), BTreeSet::from([concept.to_owned()])))
+            .collect();
+        Ok(Some(TermCandidateRead {
+            nodes,
+            matched_concepts,
+            truncated,
+            node_ids_decoded: work.node_ids_decoded,
+            chunks_decoded: work.chunks_decoded,
         }))
     }
 }
@@ -1108,6 +1320,15 @@ impl CodeQueryEngine {
                     self.materialized_term_candidates(fts_query, term_limit)?;
                 let decoded = u64::try_from(nodes.len()).unwrap_or(u64::MAX);
                 TermCandidateRead {
+                    matched_concepts: nodes
+                        .iter()
+                        .map(|node| {
+                            (
+                                node.id.clone(),
+                                terms.iter().cloned().collect::<BTreeSet<_>>(),
+                            )
+                        })
+                        .collect(),
                     nodes,
                     truncated,
                     node_ids_decoded: decoded,
@@ -1186,7 +1407,6 @@ impl CodeQueryEngine {
             pool,
             truncated,
             candidate_nodes_read: candidate_work.read,
-            candidate_probes: candidate_work.probes,
             postings_decoded,
             relation_edges_examined,
         })
@@ -1346,6 +1566,69 @@ impl CodeQueryEngine {
             nodes.truncate(candidate_limit);
         }
         Ok((nodes, truncated))
+    }
+
+    pub(crate) fn discovery_term_candidates(
+        &self,
+        backend: &PinnedDiscoveryBackend<'_>,
+        concept: &str,
+        candidate_limit: usize,
+    ) -> Result<TermCandidateRead, QueryError> {
+        if let Some(read) = backend.store_term_candidates(concept, candidate_limit)? {
+            return Ok(read);
+        }
+        let connection = self.connection.as_ref().ok_or_else(|| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "query_index_missing",
+                "materialized query engine has no search index",
+            )
+        })?;
+        let sql_limit = i64::try_from(candidate_limit.saturating_add(1)).unwrap_or(i64::MAX);
+        let mut nodes = Vec::new();
+        let exact_query = format!("\"{}\"", concept.replace('"', "\"\""));
+        let prefix_query = fts_query_from_terms(&[concept.to_owned()]);
+        for query in [exact_query, prefix_query] {
+            let mut statement = connection
+                .prepare(
+                    "SELECT n.id
+                       FROM node_fts JOIN nodes n ON n.id = node_fts.node_id
+                      WHERE node_fts MATCH ?1
+                      ORDER BY n.id
+                      LIMIT ?2",
+                )
+                .map_err(sql_error)?;
+            let mut rows = statement
+                .query(params![query, sql_limit])
+                .map_err(sql_error)?;
+            while let Some(row) = rows.next().map_err(sql_error)? {
+                let id: String = row.get(0).map_err(sql_error)?;
+                let node = backend.node_by_id(&id)?.ok_or_else(|| {
+                    QueryError::new(
+                        QueryErrorKind::GraphInvariant,
+                        "query_graph_invariant",
+                        format!("index references absent graph node {id}"),
+                    )
+                })?;
+                nodes.push(node);
+            }
+            if !nodes.is_empty() {
+                break;
+            }
+        }
+        let truncated = nodes.len() > candidate_limit;
+        nodes.truncate(candidate_limit);
+        let matched_concepts = nodes
+            .iter()
+            .map(|node| (node.id.clone(), BTreeSet::from([concept.to_owned()])))
+            .collect();
+        Ok(TermCandidateRead {
+            node_ids_decoded: u64::try_from(nodes.len()).unwrap_or(u64::MAX),
+            nodes,
+            matched_concepts,
+            truncated,
+            chunks_decoded: 0,
+        })
     }
 
     pub fn callers(&self, request: CallRequest) -> Result<CodeQueryResponse, QueryError> {

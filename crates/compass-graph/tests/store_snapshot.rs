@@ -230,10 +230,15 @@ fn nodes_for_terms_matches_diacritic_normalized_queries() -> Result<(), Box<dyn 
     cafe.name = "café".to_owned();
     cafe.qualified_name = "crate::café".to_owned();
     document.nodes.push(cafe);
+    let mut identifier = node("identifier");
+    identifier.name = "HTTPCheckpoint_session_state".to_owned();
+    identifier.qualified_name = "crate::HTTPCheckpoint_session_state".to_owned();
+    document.nodes.push(identifier);
 
     let prepared = builder.prepare(&store, &document)?;
     builder.activate(&store, &prepared)?;
     let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    assert!(reader.supports_identifier_subwords()?);
 
     let (nodes, truncated) = reader.nodes_for_terms(&["cafe".to_owned()], limits(128))?;
     assert!(!truncated);
@@ -242,6 +247,16 @@ fn nodes_for_terms_matches_diacritic_normalized_queries() -> Result<(), Box<dyn 
         nodes.into_iter().map(|node| node.id).collect::<Vec<_>>(),
         ["cafe"]
     );
+
+    for term in ["http", "checkpoint", "session", "state"] {
+        let (nodes, truncated) = reader.nodes_for_terms(&[term.to_owned()], limits(128))?;
+        assert!(!truncated, "{term}");
+        assert_eq!(
+            nodes.into_iter().map(|node| node.id).collect::<Vec<_>>(),
+            ["identifier"],
+            "{term}"
+        );
+    }
 
     let (nodes_with_punctuation, truncated) =
         reader.nodes_for_terms(&["café".to_owned()], limits(128))?;

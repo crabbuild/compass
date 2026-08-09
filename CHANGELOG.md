@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Improve agent discovery accuracy and latency with deterministic identifier-
+  subword postings, bounded one-hop trusted-call recall, fair candidate
+  allocation, and one pinned immutable store reader per request. Legacy store
+  snapshots remain readable and report incomplete subword coverage until they
+  are rebuilt.
+
 - Add a digest-pinned 500-question, AI-reviewed synthetic relevance matrix
   covering all query classes, execute it in CI with strict ranking, recall,
   intent, structural, no-answer, and work bounds, and keep its generated JSON

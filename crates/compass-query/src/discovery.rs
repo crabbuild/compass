@@ -14,9 +14,11 @@ use compass_model::query_contract::{
     canonical_discovery_scope_value, discovery_scope_matches,
 };
 
-use crate::code_query::{CandidateAssemblyPolicy, query_edge, query_node, search_query_terms};
+use crate::code_query::{
+    PinnedDiscoveryBackend, query_edge, query_node, recall_fuzzy_term_variants, search_query_terms,
+};
 use crate::ranking::rank_search_candidates;
-use crate::recall::CandidateSource;
+use crate::recall::{CandidateSource, RecallBudget, RelationshipTermMatch, SearchCandidatePool};
 use crate::text::{normalize_context_filters, search_tokens};
 use crate::{CodeQueryEngine, QueryError, QueryErrorKind};
 
@@ -67,6 +69,7 @@ struct DiscoveryCandidateSelection {
     candidates: Vec<RankedDiscoveryCandidate>,
     nodes_read: u64,
     probes: u64,
+    expanded_relationships: u64,
     truncated: bool,
 }
 
@@ -124,9 +127,10 @@ impl CodeQueryEngine {
         validate_request(&request)?;
         let guard = DiscoveryGuard::new(request.limits.timeout_ms, cancelled);
         guard.check()?;
+        let backend = self.backend.pin_discovery()?;
 
         let relation_contexts = validate_and_normalize_contexts(&request.relation_contexts)?;
-        let resolved_scope = self.resolve_scopes(&request.scope, &guard)?;
+        let resolved_scope = self.resolve_scopes(&backend, &request.scope, &guard)?;
         let (selected_direction, direction_source) = match request.direction {
             DiscoveryDirection::Auto => infer_discovery_direction(&request.question),
             direction => (direction, DiscoveryDirectionSource::Explicit),
@@ -149,10 +153,17 @@ impl CodeQueryEngine {
             truncated: false,
         };
 
-        let selection =
-            self.indexed_candidates(&request.question, &response.scope, &request.limits, &guard)?;
+        let selection = self.indexed_candidates(
+            &backend,
+            &request.question,
+            &response.scope,
+            selected_direction,
+            &request.limits,
+            &guard,
+        )?;
         response.stats.candidate_nodes = selection.nodes_read;
         response.stats.candidate_probes = selection.probes;
+        response.stats.expanded_relationships = selection.expanded_relationships;
         response.stats.candidates_admitted =
             u64::try_from(selection.candidates.len()).unwrap_or(u64::MAX);
         if selection.truncated {
@@ -166,6 +177,11 @@ impl CodeQueryEngine {
             .min(usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX));
         let (seeds, omitted_alternatives) = discovery_seeds(&selection.candidates, max_seeds);
         response.seeds = seeds;
+        if selection.truncated {
+            for seed in &mut response.seeds {
+                seed.ambiguous = true;
+            }
+        }
         response.omissions.alternatives = (!selection.truncated).then_some(omitted_alternatives);
         if omitted_alternatives > 0 {
             response.truncated = true;
@@ -212,7 +228,15 @@ impl CodeQueryEngine {
             return Ok(response);
         }
 
-        self.expand_reference_neighborhood(&request, &guard, &mut response)?;
+        self.expand_reference_neighborhood(&backend, &request, &guard, &mut response)?;
+        if !backend.supports_identifier_subwords()? {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::IncompleteCoverage,
+                message: "The selected legacy graph snapshot lacks identifier-subword postings; rebuild the graph for complete agent discovery recall".to_owned(),
+                node_id: None,
+                path: None,
+            });
+        }
         if let Some(message) = &self.partial_graph_message {
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::IncompleteCoverage,
@@ -227,6 +251,7 @@ impl CodeQueryEngine {
 
     fn resolve_scopes(
         &self,
+        backend: &PinnedDiscoveryBackend<'_>,
         requested: &[DiscoveryScope],
         guard: &DiscoveryGuard<'_>,
     ) -> Result<Vec<DiscoveryScope>, QueryError> {
@@ -244,7 +269,7 @@ impl CodeQueryEngine {
                 kind: scope.kind,
                 value,
             };
-            let (values, truncated) = self.backend.resolve_scope_values(
+            let (values, truncated) = backend.resolve_scope_values(
                 requested_scope.kind,
                 &requested_scope.value,
                 MAX_SCOPE_AMBIGUITY_CANDIDATES + 1,
@@ -265,8 +290,10 @@ impl CodeQueryEngine {
 
     fn indexed_candidates(
         &self,
+        backend: &PinnedDiscoveryBackend<'_>,
         question: &str,
         scope: &[DiscoveryScope],
+        direction: DiscoveryDirection,
         limits: &DiscoveryLimits,
         guard: &DiscoveryGuard<'_>,
     ) -> Result<DiscoveryCandidateSelection, QueryError> {
@@ -277,66 +304,322 @@ impl CodeQueryEngine {
                 candidates: Vec::new(),
                 nodes_read: 0,
                 probes: 0,
+                expanded_relationships: 0,
                 truncated: false,
             });
         }
         let candidate_limit = usize::try_from(limits.max_candidates).unwrap_or(usize::MAX);
-        let source_limit =
+        let promotion_limit = (candidate_limit / 2).min(128);
+        let direct_limit = candidate_limit.saturating_sub(promotion_limit).min(128);
+        let candidate_read_limit =
             usize::try_from(MAX_DISCOVERY_CANDIDATE_NODES_READ).unwrap_or(usize::MAX);
-        let admit = |node: &NodeRecord| discovery_scope_matches(node, scope);
-        let mut check = || guard.check();
-        let assembly = self.assemble_search_candidates(
-            question,
-            &prepared.terms,
-            &prepared.fts_query,
-            CandidateAssemblyPolicy {
-                max_candidates: candidate_limit,
-                source_lookup_limit: source_limit,
-                max_candidate_reads: usize::try_from(MAX_DISCOVERY_CANDIDATE_NODES_READ)
-                    .unwrap_or(usize::MAX),
-                max_candidate_probes: usize::try_from(
-                    compass_model::query_contract::MAX_DISCOVERY_CANDIDATE_PROBES,
-                )
-                .unwrap_or(usize::MAX),
-                bounded_posting_work: true,
-                admit: &admit,
-                check: &mut check,
-            },
-            None,
-            false,
-        )?;
-        let truncated = assembly.truncated;
-        let candidate_nodes_read = assembly.candidate_nodes_read;
-        let candidate_probes = assembly.candidate_probes;
+        let candidate_probe_limit =
+            usize::try_from(compass_model::query_contract::MAX_DISCOVERY_CANDIDATE_PROBES)
+                .unwrap_or(usize::MAX);
+        let concepts = prepared
+            .ranking_terms
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut pool = SearchCandidatePool::new(RecallBudget {
+            max_total_candidates: direct_limit,
+            max_per_source: direct_limit,
+            max_fuzzy_candidates: direct_limit.min(16),
+        });
+        let mut nodes_read = 0_usize;
+        let mut probes = 0_usize;
+        let mut truncated = false;
+
+        guard.check()?;
+        if probes < candidate_probe_limit && nodes_read < candidate_read_limit {
+            probes += 1;
+            if let Some(node) = backend.node_by_id(question)? {
+                nodes_read += 1;
+                if discovery_scope_matches(&node, scope) {
+                    let id = node.id.clone();
+                    let _ = pool.add(CandidateSource::ExactId, node);
+                    let _ = pool.add_indexed_matches(&id, concepts.clone());
+                }
+            }
+        }
+
+        guard.check()?;
+        if probes < candidate_probe_limit && nodes_read < candidate_read_limit {
+            probes += 1;
+            let remaining = candidate_read_limit.saturating_sub(nodes_read).min(64);
+            let (nodes, read_truncated) =
+                backend.nodes_by_normalized_name(question, remaining.max(1))?;
+            nodes_read = nodes_read.saturating_add(nodes.len());
+            truncated |= read_truncated;
+            for node in nodes {
+                if discovery_scope_matches(&node, scope) {
+                    let id = node.id.clone();
+                    let _ = pool.add(CandidateSource::ExactName, node);
+                    let _ = pool.add_indexed_matches(&id, concepts.clone());
+                }
+            }
+        }
+
+        for concept in &concepts {
+            guard.check()?;
+            if probes >= candidate_probe_limit || nodes_read >= candidate_read_limit {
+                truncated = true;
+                break;
+            }
+            probes += 1;
+            let alias_limit = candidate_read_limit.saturating_sub(nodes_read).min(128);
+            let (nodes, alias_truncated) =
+                backend.nodes_by_normalized_name(concept, alias_limit.max(1))?;
+            nodes_read = nodes_read.saturating_add(nodes.len());
+            truncated |= alias_truncated;
+            for node in nodes {
+                if discovery_scope_matches(&node, scope) {
+                    let id = node.id.clone();
+                    let _ = pool.add(CandidateSource::Alias, node);
+                    let _ = pool.add_indexed_matches(&id, [concept.clone()]);
+                }
+            }
+        }
+
+        let mut concept_queues = Vec::<(String, VecDeque<NodeRecord>)>::new();
+        for (concept_index, concept) in concepts.iter().enumerate() {
+            guard.check()?;
+            let remaining = candidate_read_limit.saturating_sub(nodes_read);
+            let concepts_remaining = concepts.len().saturating_sub(concept_index).max(1);
+            let fair_limit = remaining / concepts_remaining;
+            if probes >= candidate_probe_limit
+                || fair_limit < compass_graph::GRAPH_TERM_POSTING_CHUNK_ITEMS
+            {
+                truncated = true;
+                break;
+            }
+            probes += 1;
+            let read = self.discovery_term_candidates(backend, concept, fair_limit)?;
+            nodes_read = nodes_read
+                .saturating_add(usize::try_from(read.node_ids_decoded).unwrap_or(usize::MAX));
+            probes =
+                probes.saturating_add(usize::try_from(read.chunks_decoded).unwrap_or(usize::MAX));
+            truncated |= read.truncated
+                || nodes_read > candidate_read_limit
+                || probes > candidate_probe_limit;
+            let matched_concepts = read.matched_concepts;
+            let nodes = read
+                .nodes
+                .into_iter()
+                .filter(|node| {
+                    discovery_scope_matches(node, scope)
+                        && matched_concepts
+                            .get(&node.id)
+                            .is_some_and(|matched| matched.contains(concept))
+                })
+                .collect::<VecDeque<_>>();
+            concept_queues.push((concept.clone(), nodes));
+        }
+        let mut anchor_queues = concept_queues.clone();
+
+        // Fair per-concept union: no common term can consume the whole direct
+        // pool before another canonical concept receives a chance.
+        while pool.len() < direct_limit {
+            let mut progressed = false;
+            for (concept, queue) in &mut concept_queues {
+                let Some(node) = queue.pop_front() else {
+                    continue;
+                };
+                progressed = true;
+                let id = node.id.clone();
+                let _ = pool.add(CandidateSource::TermIndex, node);
+                let _ = pool.add_indexed_matches(&id, [concept.clone()]);
+                if pool.len() >= direct_limit {
+                    break;
+                }
+            }
+            if !progressed {
+                break;
+            }
+        }
+        if concept_queues.iter().any(|(_, queue)| !queue.is_empty()) {
+            truncated = true;
+        }
+
+        let mut expanded_relationships = 0_u64;
+        if concepts.len() >= 2 && promotion_limit > 0 && direction != DiscoveryDirection::Incoming {
+            let recall_edge_limit = limits.max_expanded_relationships.min(1_024);
+            let mut anchors = BTreeMap::<String, (NodeRecord, BTreeSet<String>)>::new();
+            while anchors.len() < 64 {
+                let mut progressed = false;
+                for (concept, queue) in &mut anchor_queues {
+                    let Some(node) = queue.pop_front() else {
+                        continue;
+                    };
+                    progressed = true;
+                    anchors
+                        .entry(node.id.clone())
+                        .or_insert_with(|| (node, BTreeSet::new()))
+                        .1
+                        .insert(concept.clone());
+                    if anchors.len() >= 64 {
+                        break;
+                    }
+                }
+                if !progressed {
+                    break;
+                }
+            }
+
+            let mut promotions =
+                BTreeMap::<String, (NodeRecord, BTreeSet<RelationshipTermMatch>)>::new();
+            for (_, (anchor, anchor_concepts)) in anchors {
+                guard.check()?;
+                if expanded_relationships >= recall_edge_limit || probes >= candidate_probe_limit {
+                    truncated = true;
+                    break;
+                }
+                probes += 1;
+                let edge_budget =
+                    usize::try_from(recall_edge_limit.saturating_sub(expanded_relationships))
+                        .unwrap_or(usize::MAX)
+                        .min(16);
+                if edge_budget <= 1 {
+                    truncated = true;
+                    break;
+                }
+                let (edges, edge_truncated, examined) = backend.matching_bounded_counted(
+                    &anchor.id,
+                    true,
+                    &[EdgeKind::Calls],
+                    false,
+                    edge_budget - 1,
+                )?;
+                expanded_relationships = expanded_relationships
+                    .saturating_add(u64::try_from(examined).unwrap_or(u64::MAX));
+                truncated |= edge_truncated;
+                for edge in edges {
+                    guard.check()?;
+                    if probes >= candidate_probe_limit || nodes_read >= candidate_read_limit {
+                        truncated = true;
+                        break;
+                    }
+                    probes += 1;
+                    let Some(source) = backend.node_by_id(&edge.source)? else {
+                        continue;
+                    };
+                    nodes_read += 1;
+                    if !source.kind.is_callable()
+                        || source.source_file().is_none()
+                        || !discovery_scope_matches(&source, scope)
+                    {
+                        continue;
+                    }
+                    let matches = &mut promotions
+                        .entry(source.id.clone())
+                        .or_insert_with(|| (source, BTreeSet::new()))
+                        .1;
+                    matches.extend(anchor_concepts.iter().map(|concept| RelationshipTermMatch {
+                        term: concept.clone(),
+                        kind: EdgeKind::Calls,
+                    }));
+                }
+            }
+            pool.extend_total_budget(candidate_limit);
+            let mut promotions = promotions.into_values().collect::<Vec<_>>();
+            promotions.sort_by(|left, right| {
+                let left_terms = left
+                    .1
+                    .iter()
+                    .map(|matched| &matched.term)
+                    .collect::<BTreeSet<_>>()
+                    .len();
+                let right_terms = right
+                    .1
+                    .iter()
+                    .map(|matched| &matched.term)
+                    .collect::<BTreeSet<_>>()
+                    .len();
+                right_terms
+                    .cmp(&left_terms)
+                    .then_with(|| left.0.id.cmp(&right.0.id))
+            });
+            let mut promoted = 0_usize;
+            for (node, matches) in promotions {
+                let distinct = matches
+                    .iter()
+                    .map(|matched| &matched.term)
+                    .collect::<BTreeSet<_>>()
+                    .len();
+                if distinct < 2 {
+                    continue;
+                }
+                let id = node.id.clone();
+                let inserted = pool.add(CandidateSource::RelationSeed, node);
+                let _ = pool.add_relationship_matches(&id, matches);
+                if inserted {
+                    promoted += 1;
+                    if promoted >= promotion_limit {
+                        break;
+                    }
+                }
+            }
+        } else {
+            pool.extend_total_budget(candidate_limit);
+        }
+
+        if pool.len() < candidate_limit.min(4) {
+            let mut fuzzy_remaining = 16_usize.min(candidate_limit.saturating_sub(pool.len()));
+            for variant in recall_fuzzy_term_variants(&prepared.terms) {
+                if fuzzy_remaining == 0 {
+                    break;
+                }
+                if probes >= candidate_probe_limit || nodes_read >= candidate_read_limit {
+                    truncated = true;
+                    break;
+                }
+                probes += 1;
+                let (nodes, fuzzy_truncated) =
+                    backend.nodes_by_normalized_name(&variant, fuzzy_remaining)?;
+                nodes_read = nodes_read.saturating_add(nodes.len());
+                truncated |= fuzzy_truncated;
+                for node in nodes {
+                    if discovery_scope_matches(&node, scope)
+                        && pool.add(CandidateSource::Fuzzy, node)
+                    {
+                        fuzzy_remaining = fuzzy_remaining.saturating_sub(1);
+                    }
+                }
+            }
+        }
+        truncated |= pool.is_truncated();
         let ranked = rank_search_candidates(
             question,
             &prepared.ranking_terms,
-            assembly.pool.into_vec(),
+            pool.into_vec(),
             candidate_limit,
         );
         guard.check()?;
         let mut candidates = Vec::with_capacity(ranked.len());
         for result in ranked {
             guard.check()?;
-            let node = result.node;
             candidates.push(RankedDiscoveryCandidate {
-                matched_terms: matched_terms(&prepared.ranking_terms, &node),
+                matched_terms: result.matched_terms,
                 matched_fields: result.matched_fields,
                 source: discovery_candidate_source(result.candidate_source),
-                node,
+                node: result.node,
                 score: result.score,
             });
         }
         Ok(DiscoveryCandidateSelection {
             candidates,
-            nodes_read: candidate_nodes_read,
-            probes: candidate_probes,
+            nodes_read: u64::try_from(nodes_read).unwrap_or(u64::MAX),
+            probes: u64::try_from(probes).unwrap_or(u64::MAX),
+            expanded_relationships,
             truncated,
         })
     }
 
     fn expand_reference_neighborhood(
         &self,
+        backend: &PinnedDiscoveryBackend<'_>,
         request: &DiscoveryQueryRequest,
         guard: &DiscoveryGuard<'_>,
         response: &mut DiscoveryQueryResponse,
@@ -352,7 +635,7 @@ impl CodeQueryEngine {
 
         for seed in &response.seeds {
             guard.check()?;
-            let Some(node) = self.backend.node_by_id(&seed.node_id)? else {
+            let Some(node) = backend.node_by_id(&seed.node_id)? else {
                 return Err(QueryError::new(
                     QueryErrorKind::GraphInvariant,
                     "discovery_seed_missing",
@@ -380,7 +663,7 @@ impl CodeQueryEngine {
                 usize::try_from(max_expanded.saturating_sub(response.stats.expanded_relationships))
                     .unwrap_or(usize::MAX);
             let (edges, truncated) = edges_for_direction(
-                &self.backend,
+                backend,
                 &node_id,
                 response.selected_direction,
                 request.include_heuristic,
@@ -409,7 +692,7 @@ impl CodeQueryEngine {
                 } else {
                     edge.source.clone()
                 };
-                let Some(other) = self.backend.node_by_id(&other_id)? else {
+                let Some(other) = backend.node_by_id(&other_id)? else {
                     return Err(QueryError::new(
                         QueryErrorKind::GraphInvariant,
                         "discovery_edge_endpoint_missing",
@@ -436,7 +719,7 @@ impl CodeQueryEngine {
         response.omissions.nodes =
             membership_complete.then(|| u64::try_from(omitted_node_ids.len()).unwrap_or(u64::MAX));
         let edge_assembly_complete =
-            self.assemble_selected_edges(request, guard, &selected_nodes, response)?;
+            self.assemble_selected_edges(backend, request, guard, &selected_nodes, response)?;
         response.omissions.expanded_relationships =
             (membership_complete && edge_assembly_complete).then_some(0);
         response.stats.visited_nodes = u64::try_from(visited.len()).unwrap_or(u64::MAX);
@@ -445,6 +728,7 @@ impl CodeQueryEngine {
 
     fn assemble_selected_edges(
         &self,
+        backend: &PinnedDiscoveryBackend<'_>,
         request: &DiscoveryQueryRequest,
         guard: &DiscoveryGuard<'_>,
         selected_nodes: &BTreeMap<String, NodeRecord>,
@@ -464,7 +748,7 @@ impl CodeQueryEngine {
                 mark_expansion_truncated(response);
                 break;
             }
-            let (edges, truncated) = self.backend.matching_bounded(
+            let (edges, truncated) = backend.matching_bounded(
                 node_id,
                 false,
                 ALL_EDGE_KINDS,
@@ -793,24 +1077,6 @@ fn discovery_candidate_source(source: CandidateSource) -> DiscoverySeedSource {
     }
 }
 
-fn matched_terms(terms: &[String], node: &NodeRecord) -> Vec<String> {
-    let mut text = search_tokens(&node.name);
-    text.extend(search_tokens(&node.qualified_name));
-    if let Some(source) = &node.source {
-        text.extend(search_tokens(&source.file));
-    }
-    terms
-        .iter()
-        .filter(|term| {
-            text.iter()
-                .any(|token| token == *term || token.contains(*term))
-        })
-        .cloned()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
-}
-
 fn discovery_seeds(
     candidates: &[RankedDiscoveryCandidate],
     max_seeds: usize,
@@ -891,7 +1157,7 @@ fn format_discovery_score(score: f64) -> String {
 }
 
 fn edges_for_direction(
-    backend: &crate::code_query::CodeGraphBackend,
+    backend: &PinnedDiscoveryBackend<'_>,
     node: &str,
     direction: DiscoveryDirection,
     include_heuristic: bool,
@@ -1107,7 +1373,9 @@ mod tests {
     use compass_model::code_graph::{
         BuildMetadata, CommunityMetadata, EdgeKind, EdgeRecord, GraphDocument, NodeKind, NodeRecord,
     };
-    use compass_model::provenance::{OccurrenceRule, SourceAnchor};
+    use compass_model::provenance::{
+        EvidenceConfidence, EvidenceOrigin, OccurrenceRule, Provenance, SourceAnchor,
+    };
     use compass_model::query_contract::{
         DiscoveryDirection, DiscoveryDirectionSource, DiscoveryLimits, DiscoveryQueryRequest,
         DiscoveryScope, DiscoveryScopeKind, DiscoverySeedSource, DiscoveryTraversal,
@@ -1188,6 +1456,21 @@ mod tests {
         edge
     }
 
+    fn heuristic_edge(id: &str, source: &str, target: &str) -> EdgeRecord {
+        let mut edge = edge(id, source, target);
+        edge.evidence.push(Provenance {
+            origin: EvidenceOrigin::Heuristic,
+            extractor: "test".to_owned(),
+            confidence: EvidenceConfidence::Inferred,
+            rule: None,
+            anchors: Vec::new(),
+            wiring_site: None,
+            score: None,
+            candidates: Vec::new(),
+        });
+        edge
+    }
+
     fn engine(nodes: Vec<NodeRecord>, edges: Vec<EdgeRecord>) -> CodeQueryEngine {
         let mut graph = GraphDocument::empty_v1(BuildMetadata {
             builder_version: "test".to_owned(),
@@ -1211,18 +1494,25 @@ mod tests {
                    CREATE VIRTUAL TABLE node_fts USING fts5(
                      node_id UNINDEXED, name, qualified_name, aliases, kind, roles,
                      language, framework, normalized_path, source_file, community_id,
-                     community_label,
+                     community_label, identifier_terms,
                      tokenize="unicode61 remove_diacritics 2 tokenchars '_'"
                    );"#,
             )
             .unwrap_or_else(|_| std::process::abort());
         for node in &graph.nodes {
+            let identifier_terms = [node.name.as_str(), node.qualified_name.as_str()]
+                .into_iter()
+                .flat_map(compass_model::search::identifier_search_terms)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join(" ");
             connection
                 .execute("INSERT INTO nodes VALUES(?1)", rusqlite::params![node.id])
                 .unwrap_or_else(|_| std::process::abort());
             connection
                 .execute(
-                    "INSERT INTO node_fts VALUES(?1,?2,?3,'',?4,'',?5,?6,'',?7,?8,?9)",
+                    "INSERT INTO node_fts VALUES(?1,?2,?3,'',?4,'',?5,?6,'',?7,?8,?9,?10)",
                     rusqlite::params![
                         node.id,
                         node.name,
@@ -1240,6 +1530,7 @@ mod tests {
                             .as_ref()
                             .and_then(|community| community.label.as_deref())
                             .unwrap_or_default(),
+                        identifier_terms,
                     ],
                 )
                 .unwrap_or_else(|_| std::process::abort());
@@ -1402,6 +1693,186 @@ mod tests {
                 "{question:?}"
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn relationship_recall_promotes_a_source_with_distinct_neighbor_terms()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![
+                anchored_node("n:behavior", "CondenseSession", "src/session.rs", 20),
+                anchored_node("n:checkpoint", "CheckpointID", "src/id.rs", 4),
+                anchored_node(
+                    "n:create",
+                    "extractOrCreateSessionData",
+                    "src/session.rs",
+                    80,
+                ),
+                anchored_node("n:noise", "checkpointFixture", "tests/session.rs", 10),
+            ],
+            vec![
+                edge("e:checkpoint", "n:behavior", "n:checkpoint"),
+                edge("e:create", "n:behavior", "n:create"),
+                edge("e:noise", "n:noise", "n:checkpoint"),
+            ],
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "how is a checkpoint created".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "n:behavior");
+        assert_eq!(
+            response.seeds[0].candidate_source,
+            DiscoverySeedSource::RelationSeed
+        );
+        assert_eq!(response.seeds[0].matched_terms, ["checkpoint", "create"]);
+        assert!(
+            response.seeds[0]
+                .matched_fields
+                .contains(&"relationship".to_owned())
+        );
+        assert!(!response.seeds[0].ambiguous);
+        Ok(())
+    }
+
+    #[test]
+    fn relationship_recall_does_not_let_one_common_neighbor_beat_a_direct_symbol()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![
+                anchored_node("n:direct", "checkpoint", "src/checkpoint.rs", 2),
+                anchored_node("n:caller", "unrelated", "src/caller.rs", 3),
+            ],
+            vec![edge("e:call", "n:caller", "n:direct")],
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "checkpoint".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "n:direct");
+        assert_eq!(
+            response.seeds[0].candidate_source,
+            DiscoverySeedSource::ExactName
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn relationship_recall_is_calls_only_nonrecursive_and_direction_gated()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let nodes = vec![
+            anchored_node("n:behavior", "CondenseSession", "src/session.rs", 20),
+            anchored_node("n:outer", "OuterWorkflow", "src/workflow.rs", 2),
+            anchored_node("n:checkpoint", "CheckpointID", "src/id.rs", 4),
+            anchored_node(
+                "n:create",
+                "extractOrCreateSessionData",
+                "src/session.rs",
+                80,
+            ),
+        ];
+        let edges = vec![
+            edge("e:checkpoint", "n:behavior", "n:checkpoint"),
+            edge("e:create", "n:behavior", "n:create"),
+            edge("e:outer", "n:outer", "n:behavior"),
+        ];
+        let engine = engine(nodes, edges);
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "checkpoint create".to_owned();
+        query.limits.max_candidates = 2;
+        let response = engine.discover(query)?;
+        assert_eq!(response.seeds[0].node_id, "n:behavior");
+        assert!(response.seeds.iter().all(|seed| seed.node_id != "n:outer"));
+
+        let mut incoming = request(DiscoveryDirection::Incoming);
+        incoming.question = "checkpoint create".to_owned();
+        assert!(
+            engine
+                .discover(incoming)?
+                .seeds
+                .iter()
+                .all(|seed| seed.candidate_source != DiscoverySeedSource::RelationSeed)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn relationship_recall_excludes_heuristic_calls_and_respects_edge_budget()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let nodes = vec![
+            anchored_node("n:behavior", "CondenseSession", "src/session.rs", 20),
+            anchored_node("n:checkpoint", "CheckpointID", "src/id.rs", 4),
+            anchored_node(
+                "n:create",
+                "extractOrCreateSessionData",
+                "src/session.rs",
+                80,
+            ),
+        ];
+        let heuristic = engine(
+            nodes.clone(),
+            vec![
+                heuristic_edge("e:checkpoint", "n:behavior", "n:checkpoint"),
+                heuristic_edge("e:create", "n:behavior", "n:create"),
+            ],
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "checkpoint create".to_owned();
+        assert!(
+            heuristic
+                .discover(query.clone())?
+                .seeds
+                .iter()
+                .all(|seed| seed.candidate_source != DiscoverySeedSource::RelationSeed)
+        );
+
+        let bounded = engine(
+            nodes,
+            vec![
+                edge("e:checkpoint", "n:behavior", "n:checkpoint"),
+                edge("e:create", "n:behavior", "n:create"),
+            ],
+        );
+        query.limits.max_expanded_relationships = 1;
+        let response = bounded.discover(query)?;
+        assert!(response.truncated);
+        assert!(response.stats.expanded_relationships <= 1);
+        assert!(
+            response
+                .seeds
+                .iter()
+                .all(|seed| seed.candidate_source != DiscoverySeedSource::RelationSeed)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn relationship_recall_uses_distinct_terms_to_break_same_name_noise()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![
+                anchored_node("n:expected", "run", "src/expected.rs", 10),
+                anchored_node("n:noise", "run", "src/noise.rs", 10),
+                anchored_node("n:checkpoint:a", "CheckpointID", "src/a.rs", 1),
+                anchored_node("n:checkpoint:b", "CheckpointID", "src/b.rs", 1),
+                anchored_node("n:create", "createSession", "src/create.rs", 1),
+            ],
+            vec![
+                edge("e:expected-checkpoint", "n:expected", "n:checkpoint:a"),
+                edge("e:expected-create", "n:expected", "n:create"),
+                edge("e:noise-checkpoint", "n:noise", "n:checkpoint:b"),
+            ],
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "checkpoint created".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "n:expected");
+        assert!(!response.seeds[0].ambiguous);
         Ok(())
     }
 
@@ -1764,8 +2235,19 @@ mod tests {
                 .unwrap_or_else(std::time::Instant::now),
             cancelled: None,
         };
+        let backend = engine
+            .backend
+            .pin_discovery()
+            .unwrap_or_else(|_| std::process::abort());
         let error = engine
-            .indexed_candidates("alpha", &[], &DiscoveryLimits::default(), &guard)
+            .indexed_candidates(
+                &backend,
+                "alpha",
+                &[],
+                DiscoveryDirection::Both,
+                &DiscoveryLimits::default(),
+                &guard,
+            )
             .err()
             .unwrap_or_else(|| std::process::abort());
         assert_eq!(error.kind(), crate::QueryErrorKind::Timeout);

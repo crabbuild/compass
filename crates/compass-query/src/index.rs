@@ -11,6 +11,7 @@ use compass_graph::SnapshotSelector;
 use compass_ir::{PROGRAM_SCHEMA, ProgramBundle};
 use compass_model::code_graph::GraphDocument;
 use compass_model::query_contract::CODE_QUERY_SCHEMA_V1;
+use compass_model::search::identifier_search_terms;
 use compass_store::Store;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use sha2::{Digest, Sha256};
@@ -23,7 +24,7 @@ use crate::graph_engine::{
     read_store_ref,
 };
 
-const INDEX_FORMAT_VERSION: &str = "compass-code-index/4";
+const INDEX_FORMAT_VERSION: &str = "compass-code-index/5";
 
 /// Selects the source used to hydrate the typed query engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -554,7 +555,7 @@ fn build_index(
              CREATE VIRTUAL TABLE node_fts USING fts5(
                node_id UNINDEXED, name, qualified_name, aliases, kind, roles,
                language, framework, normalized_path, source_file, community_id,
-               community_label,
+               community_label, identifier_terms,
                tokenize="unicode61 remove_diacritics 2 tokenchars '_'"
              );"#,
         )
@@ -614,6 +615,20 @@ fn build_index(
                 .filter(|value| !value.is_empty())
                 .collect::<Vec<_>>()
                 .join(" ");
+            let identifier_terms = [node.name.as_str(), node.qualified_name.as_str()]
+                .into_iter()
+                .chain(
+                    aliases_by_target
+                        .get(node.id.as_str())
+                        .into_iter()
+                        .flatten()
+                        .copied(),
+                )
+                .flat_map(identifier_search_terms)
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join(" ");
             for alias in aliases_by_target
                 .get(node.id.as_str())
                 .into_iter()
@@ -651,7 +666,7 @@ fn build_index(
                 .map_err(sql_error)?;
             transaction
                 .execute(
-                    "INSERT INTO node_fts VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                    "INSERT INTO node_fts VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
                     params![
                         node.id,
                         node.name,
@@ -672,6 +687,7 @@ fn build_index(
                             .as_ref()
                             .and_then(|community| community.label.as_deref())
                             .unwrap_or_default(),
+                        identifier_terms,
                     ],
                 )
                 .map_err(sql_error)?;

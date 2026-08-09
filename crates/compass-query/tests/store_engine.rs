@@ -200,6 +200,20 @@ fn discovery_is_identical_for_json_store_direct_document_and_immutable_selectors
     assert_discovery_semantically_equal(&direct_reopened.discover(request.clone())?, &expected)?;
     assert_discovery_semantically_equal(&direct.discover(request.clone())?, &expected)?;
 
+    for subword_query in ["user record", "cache key"] {
+        let request = discovery_request(subword_query);
+        let expected = json.discover(request.clone())?;
+        assert!(!expected.seeds.is_empty(), "{subword_query}");
+        for actual in [
+            active.discover(request.clone())?,
+            local_direct.discover(request.clone())?,
+            selected.discover(request.clone())?,
+            direct.discover(request.clone())?,
+        ] {
+            assert_discovery_semantically_equal(&actual, &expected)?;
+        }
+    }
+
     let boolean_only = discovery_request("AND OR NOT NEAR");
     let empty_expected = json.discover(boolean_only.clone())?;
     for actual in [
@@ -277,6 +291,59 @@ fn discovery_is_identical_for_json_store_direct_document_and_immutable_selectors
     .err()
     .ok_or("mismatched selector unexpectedly opened")?;
     assert_eq!(error.code(), "store_graph_snapshot_failed");
+    Ok(())
+}
+
+#[test]
+fn discovery_common_prefix_maximum_terms_is_bounded_and_backend_equal()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let template = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == "n:list")
+        .cloned()
+        .ok_or("fixture node missing")?;
+    let mut terms = Vec::new();
+    for index in 0..compass_model::query_contract::MAX_INDEXED_QUERY_TERMS {
+        let term = format!("pre{index:02}");
+        let mut node = template.clone();
+        node.id = format!("n:{term}");
+        node.name = term.clone();
+        node.qualified_name = format!("Prefix.{term}");
+        graph.nodes.push(node);
+        terms.push(term);
+    }
+    graph.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    let store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let stored = open_with_store(
+        &store,
+        &graph_path,
+        None,
+        &directory.path().join("store-cache"),
+    )?;
+    let request = discovery_request(&terms.join(" "));
+    let expected = json.discover(request.clone())?;
+    let actual = stored.discover(request.clone())?;
+    assert_discovery_semantically_equal(&actual, &expected)?;
+    for response in [&actual, &expected] {
+        assert!(response.stats.candidate_nodes <= MAX_DISCOVERY_CANDIDATE_NODES_READ);
+        assert!(response.stats.candidate_probes <= MAX_DISCOVERY_CANDIDATE_PROBES);
+        assert!(response.stats.candidates_admitted <= u64::from(request.limits.max_candidates));
+        if response.truncated {
+            assert!(response.seeds.iter().all(|seed| seed.ambiguous));
+        }
+    }
     Ok(())
 }
 
@@ -885,7 +952,7 @@ fn explicit_json_selection_survives_a_corrupt_store_sidecar()
 }
 
 #[test]
-fn json_index_v3_is_rebuilt_to_v4() -> Result<(), Box<dyn std::error::Error>> {
+fn json_index_v3_is_rebuilt_to_v5() -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
     support::write_graph(&graph_path)?;
@@ -908,7 +975,7 @@ fn json_index_v3_is_rebuilt_to_v4() -> Result<(), Box<dyn std::error::Error>> {
         connection.query_row("SELECT value FROM metadata WHERE key='format'", [], |row| {
             row.get(0)
         })?;
-    assert_eq!(format, "compass-code-index/4");
+    assert_eq!(format, "compass-code-index/5");
     Ok(())
 }
 

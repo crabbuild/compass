@@ -11,6 +11,7 @@ pub mod identity;
 pub mod provenance;
 pub mod query_contract;
 mod query_index;
+pub mod search;
 mod validation;
 
 pub use document::{EdgeRecord, GraphDocument, NodeRecord};
