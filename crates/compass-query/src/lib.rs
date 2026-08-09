@@ -5,6 +5,7 @@ mod benchmark;
 mod code_query;
 mod cql;
 mod discovery;
+mod discovery_text;
 mod graph_engine;
 mod index;
 mod intent;
@@ -25,12 +26,16 @@ pub use cql::{
     CacheStats, ExplainPlan, OperatorProfile, PlanCache, PlanCacheConfig, QueryError,
     QueryErrorKind, QueryLimits, QueryProfile, QueryRequest, QueryResult, execute,
 };
+pub use discovery_text::{
+    DISCOVERY_TEXT_PAGE_VERSION, DiscoveryTextPage, DiscoveryTextPageError,
+    DiscoveryTextPageOptions, discovery_request_digest, render_discovery_text_page,
+};
 pub use graph_engine::{
     DirectGraphEngine, GraphEngine, JsonGraphEngine, StoreGraphEngine, open_graph_engine,
 };
 pub use index::{
     EngineSelection, QueryEngineKind, open, open_with_document, open_with_engine, open_with_store,
-    open_with_store_selector,
+    open_with_store_selector, open_with_verified_document,
 };
 pub use intent::{
     NaturalQueryIntent, NaturalQueryPlan, NaturalQueryRequest, QUERY_PLANNER_PROFILE_V1,

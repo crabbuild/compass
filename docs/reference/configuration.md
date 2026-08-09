@@ -269,20 +269,22 @@ Natural-language discovery:
 ```text
 --dfs
 --context VALUE
---budget N
---page N
+--direction auto|incoming|outgoing|both
+--scope KIND:VALUE
+--text-budget N
+--cursor TOKEN
 --graph PATH | --at REV
 ```
 
 `--context VALUE` filters stored relationship evidence contexts such as `call`,
 `import`, or `route`; it does not scope retrieval to a node, file, package,
-community, or subsystem. The current natural-query interface has no `--scope`
-option.
+community, or subsystem. Use repeatable `--scope KIND:VALUE` for an explicit OR
+scope over `community`, `source`, `package`, or `node`.
 
-`--budget` controls approximate tokens per page (default 2,000). `--page` is
-one-based. Repeat all other query inputs unchanged when following the
-`previous` or `next` page reported in output. `compass explain` accepts the
-same two output controls for connection and ambiguity pages.
+`--text-budget` controls approximate rendered tokens per discovery page
+(default 2,000). Follow the opaque `next` cursor with the same semantic query;
+the presentation-only text budget may change. `--traverse`, `--budget`, and
+`--page` explicitly select the bounded legacy compatibility renderer.
 
 CompassQL:
 

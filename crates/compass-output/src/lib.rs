@@ -18,7 +18,7 @@ mod tree;
 mod viewer_model;
 mod wiki;
 
-pub use backup::{BackupResult, backup_if_protected};
+pub use backup::{BackupResult, backup_if_protected, backup_if_protected_to};
 pub use callflow::{
     CallflowExport, CallflowOptions, CallflowSection, callflow_html_document,
     derive_callflow_sections, write_callflow_html,
@@ -52,7 +52,8 @@ pub use report::{
     OrientationOmissions, OrientationPublicationDiagnostic, OrientationQuery, OrientationRisk,
     OrientationSourceAnchor, OrientationWorkMemory, PublicationStatus, REPORT_MARKDOWN_MAX_CHARS,
     ReportOptions, SectionOmission, TokenCost, WorkingTreeState, agent_orientation,
-    generate_report, render_orientation_json, render_orientation_markdown,
+    generate_report, graph_artifact_identity, render_agent_report_markdown,
+    render_orientation_json, render_orientation_markdown, validate_orientation_graph_identity,
 };
 pub use svg::{SvgOptions, spring_layout, svg_document, write_svg};
 pub use tree::{TreeNode, TreeOptions, build_tree, tree_html_document, write_tree_html};
@@ -69,6 +70,8 @@ pub enum OutputError {
     Serialization(#[from] serde_json::Error),
     #[error("orientation Markdown is {rendered_chars} characters; limit is {limit}")]
     OrientationBudgetExceeded { rendered_chars: usize, limit: usize },
+    #[error("graph report Markdown is {rendered_chars} characters; limit is {limit}")]
+    ReportBudgetExceeded { rendered_chars: usize, limit: usize },
     #[error("invalid orientation model: {reason}")]
     InvalidOrientationModel { reason: &'static str },
     #[error(transparent)]

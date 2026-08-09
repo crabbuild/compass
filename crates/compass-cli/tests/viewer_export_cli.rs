@@ -5,6 +5,182 @@ use std::error::Error;
 use serde_json::{Value, json};
 
 #[test]
+fn cluster_only_preserves_the_typed_graph_used_by_orientation_export() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    std::fs::create_dir_all(directory.path().join("src"))?;
+    std::fs::write(
+        directory.path().join("src/lib.rs"),
+        "pub fn caller() {\n    target();\n    target();\n}\nfn target() {}\n",
+    )?;
+    let build = support::compass_command()
+        .args(["update", ".", "--no-viz"])
+        .current_dir(directory.path())
+        .output()?;
+    assert_eq!(
+        build.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let clustered = support::compass_command()
+        .args([
+            "cluster-only",
+            ".",
+            "--no-viz",
+            "--no-label",
+            "--min-community-size=1",
+        ])
+        .current_dir(directory.path())
+        .output()?;
+    assert_eq!(
+        clustered.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&clustered.stderr)
+    );
+    let active = compass_files::BuildGuard::resolve_current_snapshot_directory(
+        &directory.path().join("compass-out"),
+    )?;
+    let typed = compass_model::code_graph::GraphDocument::load(&active.join("graph.json"))?;
+    assert_eq!(typed.graph.schema, "compass.graph/1");
+    assert_eq!(
+        typed
+            .links
+            .iter()
+            .filter(|edge| edge.kind == compass_model::code_graph::EdgeKind::Calls)
+            .count(),
+        2
+    );
+
+    let exported = support::compass_command()
+        .args(["export", "orientation-json"])
+        .current_dir(directory.path())
+        .output()?;
+    assert_eq!(
+        exported.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    let orientation: Value = serde_json::from_slice(&exported.stdout)?;
+    assert_eq!(orientation["schema"], "compass.orientation/1");
+    assert_eq!(orientation["graphSummary"]["edges"], typed.links.len());
+    Ok(())
+}
+
+#[test]
+fn orientation_json_export_is_bound_to_the_selected_graph_generation() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    std::fs::create_dir_all(directory.path().join("src"))?;
+    std::fs::write(
+        directory.path().join("src/lib.rs"),
+        "pub fn caller() { target(); }\nfn target() {}\n",
+    )?;
+    let build = support::compass_command()
+        .args(["update", ".", "--no-viz"])
+        .current_dir(directory.path())
+        .output()?;
+    assert_eq!(
+        build.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let exported = support::compass_command()
+        .args(["export", "orientation-json"])
+        .current_dir(directory.path())
+        .output()?;
+    assert_eq!(
+        exported.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    let orientation: Value = serde_json::from_slice(&exported.stdout)?;
+    assert_eq!(orientation["schema"], "compass.orientation/1");
+    assert!(orientation["evidenceStatus"]["generationId"].is_string());
+
+    let active = compass_files::BuildGuard::resolve_current_snapshot_directory(
+        &directory.path().join("compass-out"),
+    )?;
+    let orientation_path = active.join("orientation.json");
+    let detached = directory.path().join("detached");
+    std::fs::create_dir(&detached)?;
+    std::fs::copy(active.join("graph.json"), detached.join("graph.json"))?;
+    std::fs::copy(&orientation_path, detached.join("orientation.json"))?;
+    let detached_export = support::compass_command()
+        .args([
+            "export",
+            "orientation-json",
+            "--graph",
+            detached.join("graph.json").to_string_lossy().as_ref(),
+        ])
+        .current_dir(directory.path())
+        .output()?;
+    assert_eq!(
+        detached_export.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&detached_export.stderr)
+    );
+    let detached_graph_path = detached.join("graph.json");
+    let mut changed_topology: Value =
+        serde_json::from_slice(&std::fs::read(&detached_graph_path)?)?;
+    let nodes = changed_topology["nodes"]
+        .as_array_mut()
+        .ok_or("fixture graph did not contain nodes")?;
+    let mut changed_communities = 0_usize;
+    for node in nodes {
+        if let Some(community) = node
+            .as_object_mut()
+            .and_then(|node| node.get_mut("community"))
+            .and_then(Value::as_object_mut)
+        {
+            community.insert("label".to_owned(), json!("Changed without changing counts"));
+            changed_communities += 1;
+        }
+    }
+    assert!(changed_communities > 0);
+    std::fs::write(
+        &detached_graph_path,
+        serde_json::to_vec_pretty(&changed_topology)?,
+    )?;
+    let topology_rejected = support::compass_command()
+        .args([
+            "export",
+            "orientation-json",
+            "--graph",
+            detached_graph_path.to_string_lossy().as_ref(),
+        ])
+        .current_dir(directory.path())
+        .output()?;
+    assert_ne!(topology_rejected.status.code(), Some(0));
+    let topology_error = String::from_utf8_lossy(&topology_rejected.stderr);
+    assert!(
+        topology_error.contains("artifact-set identity does not match"),
+        "{topology_error}"
+    );
+
+    let mut mismatched: Value = serde_json::from_slice(&std::fs::read(&orientation_path)?)?;
+    mismatched["evidenceStatus"]["generationId"] = json!("sha256:not-this-graph");
+    std::fs::write(&orientation_path, serde_json::to_vec_pretty(&mismatched)?)?;
+    let rejected = support::compass_command()
+        .args(["export", "orientation-json"])
+        .current_dir(directory.path())
+        .output()?;
+    assert_ne!(rejected.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr)
+            .contains("does not match the selected graph generation")
+    );
+    Ok(())
+}
+
+#[test]
 fn viewer_json_exposes_the_same_versioned_graph_model() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph = directory.path().join("graph.json");

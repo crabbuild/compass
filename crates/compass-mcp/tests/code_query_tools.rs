@@ -2,6 +2,9 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use compass_core::{ClusterExistingOptions, cluster_existing_graph};
+use compass_files::BuildGuard;
+use compass_graph::{GodNode, SurpriseConnection};
 use compass_mcp::CompassMcp;
 use compass_model::code_graph::{
     BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord, GraphDocument, NodeKind,
@@ -9,6 +12,10 @@ use compass_model::code_graph::{
 };
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
+use compass_output::{
+    DetectionSummary, ReportOptions, TokenCost, agent_orientation, graph_artifact_identity,
+    render_orientation_json,
+};
 use rmcp::ServiceExt;
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Map, Value, json};
@@ -92,7 +99,61 @@ fn write_typed_graph(root: &Path) -> Result<PathBuf, Box<dyn Error>> {
         diagnostics: Vec::new(),
     });
     fs::write(&graph_path, serde_json::to_vec_pretty(&graph)?)?;
+    let legacy = graph.to_legacy_document()?;
+    let communities = std::collections::BTreeMap::new();
+    let cohesion = std::collections::BTreeMap::new();
+    let labels = std::collections::BTreeMap::new();
+    let gods = Vec::<GodNode>::new();
+    let surprises = Vec::<SurpriseConnection>::new();
+    let mut orientation = agent_orientation(
+        &legacy,
+        &communities,
+        &cohesion,
+        &labels,
+        &gods,
+        &surprises,
+        &DetectionSummary::default(),
+        TokenCost::default(),
+        None,
+        None,
+        &ReportOptions::new("fixture"),
+    );
+    orientation.evidence_status.artifact_set_identity = Some(graph_artifact_identity(&graph_path)?);
+    fs::write(
+        root.join("orientation.json"),
+        render_orientation_json(&orientation)?,
+    )?;
     Ok(graph_path)
+}
+
+fn add_parallel_call_edge(graph_path: &Path) -> Result<(), Box<dyn Error>> {
+    let mut graph = GraphDocument::load(graph_path)?;
+    let mut parallel = graph.links.first().cloned().ok_or("missing call edge")?;
+    let anchor = SourceAnchor {
+        file: "src/lib.rs".to_owned(),
+        start_byte: 1,
+        end_byte: 3,
+        start_line: 1,
+        start_column: 1,
+        end_line: 1,
+        end_column: 3,
+    };
+    let id = edge_id(
+        &parallel.source,
+        parallel.kind,
+        &parallel.target,
+        Some(&anchor),
+        None,
+    );
+    parallel.id.clone_from(&id);
+    parallel.key = id;
+    parallel.relationship_site = Some(anchor.clone());
+    for evidence in &mut parallel.evidence {
+        evidence.anchors = vec![anchor.clone()];
+    }
+    graph.links.push(parallel);
+    fs::write(graph_path, serde_json::to_vec_pretty(&graph)?)?;
+    Ok(())
 }
 
 fn invoke(server: &CompassMcp, name: &str, arguments: Value) -> Result<Value, Box<dyn Error>> {
@@ -100,7 +161,10 @@ fn invoke(server: &CompassMcp, name: &str, arguments: Value) -> Result<Value, Bo
         name,
         arguments.as_object().cloned().unwrap_or_else(Map::new),
     );
-    Ok(serde_json::from_str(&output)?)
+    let envelope = serde_json::from_str::<Value>(&output)?;
+    assert_eq!(envelope["schema"], "compass.mcp.tool-result/1");
+    assert_eq!(envelope["transportTruncation"]["truncated"], false);
+    Ok(envelope["result"].clone())
 }
 
 #[test]
@@ -108,12 +172,9 @@ fn code_query_tools_share_the_bounded_versioned_contract() -> Result<(), Box<dyn
     let directory = tempfile::tempdir()?;
     let graph = write_typed_graph(directory.path())?;
     let server = CompassMcp::new(graph);
+    let orientation: Value = serde_json::from_str(&server.read("compass://orientation")?)?;
+    assert_eq!(orientation["schema"], "compass.orientation/1");
     for (tool, arguments, operation) in [
-        (
-            "query_graph",
-            json!({"question":"who calls Target?"}),
-            "callers",
-        ),
         ("search_symbols", json!({"query":"Target"}), "search"),
         ("get_callers", json!({"symbol":"Target"}), "callers"),
         ("get_callees", json!({"symbol":"Caller"}), "callees"),
@@ -142,6 +203,13 @@ fn code_query_tools_share_the_bounded_versioned_contract() -> Result<(), Box<dyn
     )?;
     assert_eq!(reverse["paths"], json!([]));
     assert_eq!(reverse["diagnostics"][0]["code"], "direction_mismatch");
+
+    let default_discovery = invoke(
+        &server,
+        "query_graph",
+        json!({"question":"who calls Target?"}),
+    )?;
+    assert_eq!(default_discovery["schema"], "compass.query.discovery/1");
 
     let discovery = invoke(
         &server,
@@ -241,16 +309,99 @@ fn code_query_tools_share_the_bounded_versioned_contract() -> Result<(), Box<dyn
             .contains("unknown query_graph argument")
     );
 
-    for arguments in [
+    let default = invoke(
+        &server,
+        "query_graph",
         json!({"question":"authentication flow"}),
-        json!({"question":"who calls Target?","mode":"bfs"}),
-    ] {
-        let output = server.invoke(
-            "query_graph",
-            arguments.as_object().cloned().unwrap_or_else(Map::new),
-        );
-        assert!(serde_json::from_str::<Value>(&output).is_err(), "{output}");
-    }
+    )?;
+    assert_eq!(default["schema"], "compass.query.discovery/1");
+    let legacy = server.invoke(
+        "query_graph",
+        Map::from_iter([
+            ("question".to_owned(), json!("who calls Target?")),
+            ("mode".to_owned(), json!("bfs")),
+        ]),
+    );
+    assert!(serde_json::from_str::<Value>(&legacy).is_err(), "{legacy}");
+    Ok(())
+}
+
+#[test]
+fn cluster_only_output_remains_typed_and_serves_orientation_resources() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let output = directory.path().join("compass-out");
+    fs::create_dir(&output)?;
+    let graph = write_typed_graph(&output)?;
+    add_parallel_call_edge(&graph)?;
+    cluster_existing_graph(&ClusterExistingOptions {
+        graph_path: graph,
+        output_dir: output.clone(),
+        root: directory.path().to_path_buf(),
+        no_viz: true,
+        no_label: true,
+        resolution: 1.0,
+        exclude_hubs: None,
+        min_community_size: 1,
+    })?;
+
+    let active = BuildGuard::resolve_current_snapshot_directory(&output)?;
+    let typed = GraphDocument::load(&active.join("graph.json"))?;
+    assert_eq!(typed.graph.schema, "compass.graph/1");
+    assert_eq!(typed.links.len(), 2);
+    let server = CompassMcp::new(output.join("graph.json"));
+    let orientation: Value = serde_json::from_str(&server.read("compass://orientation")?)?;
+    assert_eq!(orientation["schema"], "compass.orientation/1");
+    assert!(orientation["evidenceStatus"]["buildCommit"].is_null());
+    assert_eq!(orientation["graphSummary"]["edges"], 2);
+    let report = server.read("compass://report")?;
+    assert!(report.contains("# Agent Orientation"));
+    assert!(report.contains("· 2 edges ·"));
+    Ok(())
+}
+
+#[test]
+fn report_resource_is_rendered_from_validated_orientation_and_rejects_missing_or_stale_evidence()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = write_typed_graph(directory.path())?;
+    let orientation_path = directory.path().join("orientation.json");
+    let orientation_bytes = fs::read(&orientation_path)?;
+    fs::write(
+        directory.path().join("GRAPH_REPORT.md"),
+        "# stale sibling report\nUNTRUSTED-SIBLING-CONTENT\n",
+    )?;
+    let server = CompassMcp::new(&graph);
+    let report = server.read("compass://report")?;
+    assert!(report.contains("# Agent Orientation"));
+    assert!(report.contains("# Bounded Graph Detail"));
+    assert!(!report.contains("UNTRUSTED-SIBLING-CONTENT"));
+
+    fs::remove_file(&orientation_path)?;
+    let missing = server
+        .read("compass://report")
+        .err()
+        .ok_or("missing orientation unexpectedly succeeded")?;
+    assert!(
+        missing
+            .to_string()
+            .contains("coherent orientation artifact is unavailable")
+    );
+    fs::write(&orientation_path, orientation_bytes)?;
+
+    let mut changed: Value = serde_json::from_slice(&fs::read(&graph)?)?;
+    changed["nodes"][0]["community"] = json!({"id":7,"label":"Changed"});
+    fs::write(&graph, serde_json::to_vec_pretty(&changed)?)?;
+    let changed_server = CompassMcp::new(graph);
+    let stale = changed_server
+        .read("compass://orientation")
+        .err()
+        .ok_or("same-size graph summary with changed community unexpectedly succeeded")?;
+    assert!(
+        stale
+            .to_string()
+            .contains("orientation artifact-set identity does not match")
+    );
     Ok(())
 }
 
@@ -320,6 +471,59 @@ fn query_graph_schema_exposes_typed_discovery_controls() -> Result<(), Box<dyn E
     ] {
         assert_eq!(properties[name]["maximum"], maximum, "{name}");
     }
+    for name in [
+        "mode",
+        "depth",
+        "token_budget",
+        "direction",
+        "traversal",
+        "include_heuristic",
+        "max_depth",
+        "max_seeds",
+        "max_candidates",
+        "max_nodes",
+        "max_edges",
+        "max_expanded_relationships",
+        "max_response_bytes",
+        "timeout_ms",
+    ] {
+        assert!(properties[name].get("default").is_none(), "{name}");
+    }
+    Ok(())
+}
+
+#[test]
+fn explicit_discovery_controls_fail_on_legacy_graphs_instead_of_falling_through()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let legacy_path = directory.path().join("legacy.json");
+    fs::write(
+        &legacy_path,
+        serde_json::to_vec_pretty(&json!({
+            "directed":true, "multigraph":false, "graph":{},
+            "nodes":[{"id":"target","label":"Target"}], "links":[]
+        }))?,
+    )?;
+    let server = CompassMcp::new(legacy_path);
+
+    let plain = server.invoke(
+        "query_graph",
+        Map::from_iter([("question".to_owned(), json!("Target"))]),
+    );
+    assert!(plain.contains("Traversal: BFS"), "{plain}");
+    assert!(plain.contains("NODE Target"), "{plain}");
+
+    let explicit = server.invoke(
+        "query_graph",
+        Map::from_iter([
+            ("question".to_owned(), json!("Target")),
+            ("direction".to_owned(), json!("incoming")),
+        ]),
+    );
+    assert!(
+        explicit.contains("discovery controls require a typed compass.graph/1 artifact"),
+        "{explicit}"
+    );
     Ok(())
 }
 
@@ -347,6 +551,15 @@ async fn mcp_code_queries_publish_structured_content_and_protocol_errors()
         response
             .structured_content
             .as_ref()
+            .and_then(|value| value.get("schema"))
+            .and_then(Value::as_str),
+        Some("compass.mcp.tool-result/1")
+    );
+    assert_eq!(
+        response
+            .structured_content
+            .as_ref()
+            .and_then(|value| value.get("result"))
             .and_then(|value| value.get("schema"))
             .and_then(Value::as_str),
         Some("compass.query/1")

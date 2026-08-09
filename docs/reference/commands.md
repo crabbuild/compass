@@ -197,32 +197,34 @@ compass query "<question>"
   [--traverse]
   [--dfs]
   [--context VALUE]
+  [--direction auto|incoming|outgoing|both]
+  [--scope KIND:VALUE]
+  [--text-budget N]
+  [--cursor TOKEN]
   [--budget N]
   [--page N]
   [--graph PATH | --at REV]
 ```
 
-Clear symbol-search, callers, callees, impact, and directed source-to-target path
-questions against the current typed graph use the bounded `compass.query/1`
-framework automatically. Generic or contradictory questions and historical
-`--at` queries retain relevance traversal. Pass `--traverse`, or any explicit
-`--dfs`, `--context`, `--budget`, or `--page` control, to select traversal
-explicitly.
+Plain questions against a typed graph use bounded
+`compass.query.discovery/1` discovery. Direction, repeatable OR scope,
+relationship context, and DFS compose within that contract. `--traverse`,
+`--budget`, or `--page` explicitly select legacy relevance traversal and cannot
+be mixed with discovery controls. CompassQL routing is unchanged.
 
 `--context VALUE` is a relationship filter for traversal evidence contexts such
 as `call`, `import`, or `route`. It is not a node, file, package, community, or
-subsystem selector. The current natural-query command has no `--scope` option;
-use an exact symbol/file/module term in the question or a focused typed command
-when subsystem identity matters.
+subsystem selector. Use repeatable `--scope KIND:VALUE` for explicit OR scope
+over `community`, `source`, `package`, or `node`.
 
-`--budget` is the approximate token budget for one result page. It defaults to
-2,000 and may be raised when the caller has a larger context window.
-Every matched result includes a deterministic `Pagination:` line with the
-current page, total pages, fact range, and previous/next page numbers. Fetch the
-next page by repeating the unchanged query, graph selector, contexts, traversal
-mode, and budget with `--page N`. Pagination is stable for an unchanged graph;
-use `--at REV` when multiple page requests must be pinned to one immutable
-snapshot.
+`--text-budget` bounds the discovery text projection. Its opaque cursor binds
+the contract version, normalized request/options, selected graph generation and
+digest, semantic-response digest, and next stable section/item. Fetch the next
+page with `--cursor TOKEN` and otherwise unchanged semantic inputs. The
+presentation-only `--text-budget` may change between pages. Pages contain whole
+deterministic entries; changed inputs fail instead of silently continuing a
+different result. JSON rejects text pagination controls. Legacy `--budget` and
+numeric `--page` retain their existing meaning only with legacy traversal.
 
 Query seeds prefer source-backed declarations over unresolved external-symbol
 placeholders with the same callable label. Source-less placeholder nodes retain

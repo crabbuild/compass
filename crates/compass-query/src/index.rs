@@ -119,6 +119,22 @@ pub fn open_with_document(
     open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
 }
 
+/// Hydrate a typed engine from a graph whose immutable source has already
+/// verified its content identity.
+pub fn open_with_verified_document(
+    graph: GraphDocument,
+    graph_identity: String,
+    graph_path: &Path,
+    program_path: Option<&Path>,
+    cache_root: &Path,
+) -> Result<CodeQueryEngine, QueryError> {
+    let graph_engine = Box::new(DirectGraphEngine::from_verified_document(
+        graph,
+        graph_identity,
+    )?);
+    open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
+}
+
 fn open_from_graph_engine(
     graph_path: &Path,
     program_path: Option<&Path>,
@@ -127,6 +143,7 @@ fn open_from_graph_engine(
 ) -> Result<CodeQueryEngine, QueryError> {
     let graph = graph_engine.graph().clone();
     let graph_identity = graph_engine.graph_identity().to_owned();
+    let build_generation_identity = graph.graph.build.generation_id.clone();
     let engine_kind = graph_engine.kind();
     let (program, program_digest) = load_program(program_path)?;
     let key = index_key(
@@ -180,6 +197,8 @@ fn open_from_graph_engine(
         index_path,
         partial_graph_message,
         engine_kind,
+        graph_identity,
+        build_generation_identity,
         search_query_cache: std::sync::Mutex::new(Default::default()),
         fuzzy_lookup_cache: std::sync::Mutex::new(Default::default()),
     })
@@ -190,15 +209,16 @@ fn open_from_local_store(
     program_path: Option<&Path>,
 ) -> Result<CodeQueryEngine, QueryError> {
     let snapshot = open_local_store_snapshot(graph_path)?;
-    let _metadata = snapshot.reader()?.metadata_summary().map_err(|error| {
+    let reader = snapshot.reader()?;
+    let metadata = reader.metadata_summary().map_err(|error| {
         QueryError::new(
             QueryErrorKind::CorruptArtifact,
             "store_graph_snapshot_failed",
             error.to_string(),
         )
     })?;
-    let publication_summary = snapshot
-        .reader()?
+    let graph_identity = reader.manifest().graph_digest.clone();
+    let publication_summary = reader
         .graph_diagnostic_by_code("publication_omission_summary")
         .map_err(|error| {
             QueryError::new(
@@ -223,6 +243,8 @@ fn open_from_local_store(
         index_path,
         partial_graph_message,
         engine_kind: QueryEngineKind::Store,
+        graph_identity,
+        build_generation_identity: metadata.graph.build.generation_id,
         search_query_cache: std::sync::Mutex::new(Default::default()),
         fuzzy_lookup_cache: std::sync::Mutex::new(Default::default()),
     })

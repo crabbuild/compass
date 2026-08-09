@@ -34,6 +34,7 @@ compass-out/
 ├── graph.json
 ├── graph.html        # unless --no-viz or the render limit omits it
 ├── GRAPH_REPORT.md
+├── orientation.json  # versioned agent context bound to this exact graph.json
 ├── manifest.json
 └── cache/
 ```
@@ -43,6 +44,26 @@ only need the executable and output-directory rename. The JSON schema and
 cache payloads remain Compass contracts: do not copy `graphify-out/cache/` or
 `graphify-out/manifest.json` into `compass-out/`. Compass rebuilds them from
 source while retaining its own internal snapshot and store protocols.
+
+## Update natural-query automation
+
+Plain `compass query "<question>"` now returns structured discovery text by
+default on a typed graph. Replace discovery text paging based on `--budget` and
+numeric `--page` with `--text-budget` and the opaque `next=<cursor>` token.
+Keep the question, discovery options, and graph unchanged while following a
+cursor. Use explicit `--traverse` when an existing workflow intentionally needs
+the former relevance traversal; its `--budget`/`--page` behavior remains.
+CompassQL and explicit `ask`, `search`, `callers`, `callees`, and other typed
+commands are unchanged.
+
+MCP clients must read structured results from the `result` field of the
+`compass.mcp.tool-result/1` envelope and inspect `transportTruncation`
+separately from the domain result's own `truncated` field.
+
+Run `compass update .` once after upgrading to publish `orientation.json` with
+the exact `graph.json` digest. Agent-facing orientation/report exports fail
+explicitly for older, missing, detached, or stale sidecars instead of pairing
+evidence by filename alone.
 
 ## Opt into Program IR generation
 

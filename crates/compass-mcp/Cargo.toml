@@ -23,6 +23,7 @@ compass-core = { path = "../compass-core", version = "0.3.6" }
 compass-files = { path = "../compass-files", version = "0.3.6" }
 compass-graph = { path = "../compass-graph", version = "0.3.6" }
 compass-model = { path = "../compass-model", version = "0.3.6" }
+compass-output = { path = "../compass-output", version = "0.3.6" }
 compass-prs = { path = "../compass-prs", version = "0.3.6" }
 compass-query = { path = "../compass-query", version = "0.3.6" }
 

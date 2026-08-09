@@ -98,15 +98,28 @@ and reference are internal realizations of the backend-neutral `compass-store`
 contract, not a stable SQL schema or pointer format that consumers may query
 directly.
 
-The additive `compass ask` command routes bounded natural-language questions
-to the existing typed search, callers, callees, impact, or node-trail operation
-and returns the same `compass.query/1` response contract. `compass query`
-automatically uses that path for high-confidence questions against a current
-typed graph. Generic or contradictory questions, historical `--at` queries,
-and requests with `--traverse`, `--dfs`, `--context`, `--budget`, or `--page`
-retain the established text-traversal behavior. Explicit typed query commands
-remain available and unchanged; ambiguous questions never invent a direction
-or select an arbitrary symbol.
+The additive `compass ask` command continues to route bounded questions to the
+typed `compass.query/1` operations. Plain `compass query` against a typed graph
+now defaults to `compass.query.discovery/1`; `--dfs` and `--context` compose
+with discovery. Explicit `--traverse` or legacy-only `--budget`/`--page`
+preserve the established text traversal and reject discovery controls.
+CompassQL and explicit typed query commands remain unchanged. Discovery text
+pagination uses the versioned `compass.query.discovery-text-page/1` cursor;
+JSON rejects those presentation-only controls.
+
+Clustered updates publish `orientation.json` (`compass.orientation/1`) from the
+same fitted model as `GRAPH_REPORT.md` and include it in the coherent snapshot
+and build state. `compass export orientation-json` and
+`compass://orientation` validate that its generation, source/configuration
+identity, commit, graph summary, and exact streamed `graph.json` artifact
+digest match the selected guarded graph. A direct or historical graph without
+that coherent artifact fails explicitly.
+
+MCP structured tool results use the `compass.mcp.tool-result/1` envelope. Its
+`result` retains the domain schema and domain truncation fields unchanged;
+`transportTruncation` separately reports the MCP byte bound. A response that
+would exceed that bound fails with typed required/limit/omitted byte metadata
+instead of publishing a partial semantic result.
 
 Structural operands use the same bounded exact, alias, term, and typo recall
 channels as search. A unique relationship-role seed may disambiguate a

@@ -47,8 +47,8 @@ use compass_model::provenance::{
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
     DetectionSummary, FreshnessBasis, FreshnessStatus, GraphViewModel, HtmlOptions,
-    OrientationHealth, OutputError, PublicationStatus, ReportOptions, TokenCost, generate_report,
-    graph_view_model_document, write_html,
+    OrientationHealth, OutputError, PublicationStatus, ReportOptions, TokenCost, agent_orientation,
+    graph_view_model_document, render_agent_report_markdown, render_orientation_json, write_html,
 };
 use compass_resolve::{
     apply_program_projection, collect_program_projection_sites, merge_decl_def_classes_if_needed,
@@ -84,8 +84,9 @@ const PIPELINE_RAYON_WORKER_CAP: usize = 12;
 const PARALLEL_AST_FACT_DIGEST_MIN_FILES: usize = 32;
 const STORE_SNAPSHOT_EXCLUSIONS: [&str; 3] =
     [STORE_FILE_NAME, "store.sqlite3-wal", "store.sqlite3-shm"];
-const ROOT_ARTIFACTS: [&str; 6] = [
+const ROOT_ARTIFACTS: [&str; 7] = [
     "GRAPH_REPORT.md",
+    "orientation.json",
     "graph-overview.json",
     "graph.html",
     "manifest.json",
@@ -3766,7 +3767,16 @@ fn build_graph_inner_unscoped(
     let labels = label_communities_by_hub(&document, &communities);
     profile_internal("community labeling", &mut internal_started);
 
-    let graph_analyses = || -> Result<(bool, Duration, Option<Value>), CoreError> {
+    let graph_analyses = ||
+     -> Result<
+        (
+            bool,
+            Duration,
+            Option<Value>,
+            Option<compass_output::AgentOrientation>,
+        ),
+        CoreError,
+    > {
         let started = Instant::now();
         let analysis_compute_started = Instant::now();
         let (cohesion, (gods, surprises, questions)) = rayon::join(
@@ -3812,12 +3822,12 @@ fn build_graph_inner_unscoped(
             detection.total_words,
             detection.warning.clone(),
         );
-        let html_written = if options.purpose == BuildPurpose::Update {
+        let orientation = if options.purpose == BuildPurpose::Update {
             let report_root = report_root_label(&options.root);
             let mut report_options = ReportOptions::new(&report_root);
             report_options.built_at_commit = commit.as_deref();
             report_options.health = report_health.clone();
-            let report = generate_report(
+            Some(agent_orientation(
                 &document,
                 &communities,
                 &cohesion,
@@ -3829,8 +3839,11 @@ fn build_graph_inner_unscoped(
                 Some(&questions),
                 None,
                 &report_options,
-            );
-            write_text_atomic(output_dir.join("GRAPH_REPORT.md"), &report)?;
+            ))
+        } else {
+            None
+        };
+        let html_written = if options.purpose == BuildPurpose::Update {
             let html_path = output_dir.join("graph.html");
             if options.no_viz {
                 remove_if_exists(&html_path)?;
@@ -3867,6 +3880,7 @@ fn build_graph_inner_unscoped(
             html_written,
             started.elapsed(),
             retain_artifacts.then_some(analysis),
+            orientation,
         ))
     };
     let overview_output = || -> Result<(Duration, Option<GraphViewModel>), CoreError> {
@@ -3883,7 +3897,7 @@ fn build_graph_inner_unscoped(
         Ok((started.elapsed(), model))
     };
     let (analysis_result, overview_result) = rayon::join(graph_analyses, overview_output);
-    let (html_written, analysis_elapsed, retained_analysis) = analysis_result?;
+    let (html_written, analysis_elapsed, retained_analysis, orientation) = analysis_result?;
     let (overview_elapsed, overview_model) = overview_result?;
     profile_internal_duration(
         "parallel graph analyses and report publication",
@@ -3959,6 +3973,21 @@ fn build_graph_inner_unscoped(
     }
     if options.purpose == BuildPurpose::Update {
         write_prepared_graph_overview(overview_model, &output_dir)?;
+    }
+    if let Some(mut orientation) = orientation {
+        let seal = graph_seal.as_ref().ok_or_else(|| {
+            CoreError::InvalidBuildState(
+                "graph artifact seal is unavailable for Agent Orientation".to_owned(),
+            )
+        })?;
+        orientation.evidence_status.artifact_set_identity = Some(format!("sha256:{}", seal.sha256));
+        let report = render_agent_report_markdown(&orientation, false)?;
+        let orientation_json = render_orientation_json(&orientation)?;
+        write_text_atomic(output_dir.join("GRAPH_REPORT.md"), &report)?;
+        write_text_atomic(
+            output_dir.join("orientation.json"),
+            &format!("{orientation_json}\n"),
+        )?;
     }
     let serialization_elapsed = serialization_started.elapsed();
     profile_internal_duration("graph.json v1 serialization", serialization_elapsed);
@@ -4282,6 +4311,7 @@ fn publish_build_state(
                     output_dir.join(GRAPH_OVERVIEW_FILE),
                     output_dir.join("labels.json"),
                     output_dir.join("GRAPH_REPORT.md"),
+                    output_dir.join("orientation.json"),
                 ]);
             }
         }
@@ -6650,6 +6680,7 @@ fn update_artifacts_complete(options: &BuildOptions, output_dir: &Path) -> bool 
     let mut required = vec![
         "graph.json",
         "GRAPH_REPORT.md",
+        "orientation.json",
         "labels.json",
         "source-root.txt",
         GRAPH_OVERVIEW_FILE,

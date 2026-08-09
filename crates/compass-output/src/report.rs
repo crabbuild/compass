@@ -1,4 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 
 use compass_graph::{
@@ -7,6 +9,7 @@ use compass_graph::{
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::OutputError;
 
@@ -143,6 +146,8 @@ pub struct OrientationEvidenceStatus {
     pub source_tree_digest: Option<String>,
     pub configuration_digest: Option<String>,
     pub generation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_set_identity: Option<String>,
     pub snapshot_digest: Option<String>,
     pub working_tree: WorkingTreeState,
     pub freshness: FreshnessStatus,
@@ -478,6 +483,7 @@ pub fn agent_orientation(
             source_tree_digest: build_value("sourceTreeDigest"),
             configuration_digest: build_value("configurationDigest"),
             generation_id: build_value("generationId"),
+            artifact_set_identity: None,
             snapshot_digest: options.health.snapshot_digest.clone(),
             working_tree: options.health.working_tree,
             freshness: options.health.freshness,
@@ -551,6 +557,75 @@ pub fn render_orientation_json(model: &AgentOrientation) -> Result<String, Outpu
     Ok(serde_json::to_string_pretty(model)?)
 }
 
+/// Verify that a persisted orientation belongs to the exact graph generation
+/// selected by the caller. A nearby filename is not sufficient evidence.
+pub fn validate_orientation_graph_identity(
+    model: &AgentOrientation,
+    graph: &compass_model::code_graph::GraphDocument,
+    graph_artifact_identity: &str,
+) -> Result<(), OutputError> {
+    validate_orientation_model(model)?;
+    let evidence = &model.evidence_status;
+    let build = &graph.graph.build;
+    let identities_match = evidence.generation_id.as_deref() == Some(&build.generation_id)
+        && evidence.source_tree_digest.as_deref() == Some(&build.source_tree_digest)
+        && evidence.configuration_digest.as_deref() == Some(&build.configuration_digest)
+        && evidence.build_commit.as_deref() == build.source_commit.as_deref();
+    if !identities_match {
+        return Err(OutputError::InvalidOrientationModel {
+            reason: "orientation evidence does not match the selected graph generation",
+        });
+    }
+    if evidence.artifact_set_identity.as_deref() != Some(graph_artifact_identity) {
+        return Err(OutputError::InvalidOrientationModel {
+            reason: "orientation artifact-set identity does not match the selected graph",
+        });
+    }
+    if model.graph_summary.directed != graph.directed
+        || model.graph_summary.nodes != graph.nodes.len()
+        || model.graph_summary.edges != graph.links.len()
+    {
+        return Err(OutputError::InvalidOrientationModel {
+            reason: "orientation graph summary does not match the selected graph",
+        });
+    }
+    Ok(())
+}
+
+/// Hash the exact graph artifact with bounded memory so persisted orientation
+/// is tied to topology, metadata, communities, labels, and byte encoding.
+pub fn graph_artifact_identity(path: &Path) -> Result<String, OutputError> {
+    const BUFFER_BYTES: usize = 1024 * 1024;
+    let metadata = path
+        .metadata()
+        .map_err(|source| compass_files::FileError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if !metadata.is_file() {
+        return Err(compass_files::FileError::NotAFile(path.to_path_buf()).into());
+    }
+    let mut file = File::open(path).map_err(|source| compass_files::FileError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut digest = Sha256::new();
+    let mut buffer = vec![0_u8; BUFFER_BYTES];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|source| compass_files::FileError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(format!("sha256:{:x}", digest.finalize()))
+}
+
 pub fn render_orientation_markdown(model: &AgentOrientation) -> Result<String, OutputError> {
     validate_orientation_model(model)?;
     let rendered = render_orientation_markdown_unchecked(model);
@@ -559,6 +634,27 @@ pub fn render_orientation_markdown(model: &AgentOrientation) -> Result<String, O
         return Err(OutputError::OrientationBudgetExceeded {
             rendered_chars,
             limit: ORIENTATION_MARKDOWN_MAX_CHARS,
+        });
+    }
+    Ok(rendered)
+}
+
+/// Render the complete bounded report from an already fitted orientation model.
+///
+/// This is the coherent publication boundary for callers that need both the
+/// machine-readable orientation and the human-readable report. Building the
+/// model once prevents either artifact from observing different graph inputs.
+pub fn render_agent_report_markdown(
+    model: &AgentOrientation,
+    obsidian: bool,
+) -> Result<String, OutputError> {
+    validate_orientation_model(model)?;
+    let rendered = render_report_markdown(model, obsidian);
+    let rendered_chars = char_count(&rendered);
+    if rendered_chars > REPORT_MARKDOWN_MAX_CHARS {
+        return Err(OutputError::ReportBudgetExceeded {
+            rendered_chars,
+            limit: REPORT_MARKDOWN_MAX_CHARS,
         });
     }
     Ok(rendered)
@@ -1646,6 +1742,7 @@ fn orientation_strings_are_bounded(model: &AgentOrientation) -> bool {
         && optional_raw_string_fits(model.evidence_status.source_tree_digest.as_deref())
         && optional_raw_string_fits(model.evidence_status.configuration_digest.as_deref())
         && optional_raw_string_fits(model.evidence_status.generation_id.as_deref())
+        && optional_raw_string_fits(model.evidence_status.artifact_set_identity.as_deref())
         && optional_raw_string_fits(model.evidence_status.snapshot_digest.as_deref())
         && optional_raw_string_fits(model.evidence_status.build_profile.as_deref())
         && model
@@ -1773,11 +1870,12 @@ fn render_orientation_markdown_unchecked(model: &AgentOrientation) -> String {
         )
         .to_lowercase(),
         format!(
-            "- Build identity: commit={} · source tree={} · configuration={} · generation={} · snapshot={}",
+            "- Build identity: commit={} · source tree={} · configuration={} · generation={} · artifact set={} · snapshot={}",
             optional_value(evidence.build_commit.as_deref()),
             optional_value(evidence.source_tree_digest.as_deref()),
             optional_value(evidence.configuration_digest.as_deref()),
             optional_value(evidence.generation_id.as_deref()),
+            optional_value(evidence.artifact_set_identity.as_deref()),
             optional_value(evidence.snapshot_digest.as_deref()),
         ),
         format!(
@@ -2827,6 +2925,9 @@ fn char_count(value: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+    use std::io::Write;
+
     use super::*;
     use serde_json::json;
 
@@ -2854,6 +2955,30 @@ mod tests {
         assert_eq!(graph.ambiguous_edge_count, 1);
         assert_eq!(graph.ambiguous_edges.len(), 1);
         assert_eq!(graph.ambiguous_edges[0].endpoint_a_id, "a");
+        Ok(())
+    }
+
+    #[test]
+    fn graph_artifact_identity_streams_large_files_and_matches_exact_bytes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        const CHUNK_BYTES: usize = 1024 * 1024;
+        const CHUNKS: usize = 16;
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("graph.json");
+        let chunk = vec![b'g'; CHUNK_BYTES];
+        let mut expected = Sha256::new();
+        let mut file = File::create(&path)?;
+        for _ in 0..CHUNKS {
+            file.write_all(&chunk)?;
+            expected.update(&chunk);
+        }
+        file.sync_all()?;
+        drop(file);
+
+        assert_eq!(
+            graph_artifact_identity(&path)?,
+            format!("sha256:{:x}", expected.finalize())
+        );
         Ok(())
     }
 }

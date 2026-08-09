@@ -1256,6 +1256,8 @@ mod tests {
             index_path: PathBuf::from("index.sqlite3"),
             partial_graph_message: None,
             engine_kind: QueryEngineKind::Json,
+            graph_identity: "test-graph-identity".to_owned(),
+            build_generation_identity: "generation".to_owned(),
             search_query_cache: std::sync::Mutex::new(SearchQueryCache::default()),
             fuzzy_lookup_cache: std::sync::Mutex::new(FuzzyLookupCache::default()),
         }

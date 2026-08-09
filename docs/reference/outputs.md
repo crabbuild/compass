@@ -72,6 +72,7 @@ paths.
 | current snapshot `store.ref` | typed selector for the co-published store identity and snapshot | store-engine validation before query execution |
 | `program.json` (optional) | provenance-aware Program IR | program inspection, semantic analysis |
 | `GRAPH_REPORT.md` | derived human orientation | architecture survey |
+| `orientation.json` | versioned Agent Orientation bound to the same graph generation | coding assistants and MCP |
 | `graph.html` | derived optional visualization | interactive exploration |
 | `manifest.json` | incremental build state | next compatible update |
 | binary query caches | disposable acceleration | internal query loading |
@@ -199,6 +200,14 @@ The report can include:
 
 It is intended for people and can evolve in prose/format. Do not parse it when
 structured data or command JSON exists.
+
+The report begins with a bounded Agent Orientation for first-session or broad
+repository context. `orientation.json` is the versioned machine form of that
+same fitted model. Compass publishes both from one coherent build input and
+validates the graph generation and exact streamed `graph.json` digest before
+`compass export orientation-json` or
+`compass://orientation` returns it. `compass://report` renders the human report
+from that validated model; it never trusts an adjacent Markdown file by name.
 
 ## `graph.html`
 

@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1065,6 +1065,28 @@ impl GraphDocument {
         Self::load_strict(path)
     }
 
+    /// Load, validate, and identify the exact bytes read from one opened graph
+    /// artifact. The document and digest can therefore never describe two
+    /// different path realizations when an atomic publisher replaces the path.
+    pub fn load_with_artifact_digest(path: &Path) -> Result<(Self, String), GraphError> {
+        if path.extension().and_then(|part| part.to_str()) != Some("json") {
+            return Err(GraphError::InvalidExtension(path.to_path_buf()));
+        }
+        Self::load_for_recluster_with_artifact_digest(path)
+    }
+
+    /// Load, validate, and identify an exact graph artifact for re-clustering
+    /// without requiring a filename extension.
+    pub fn load_for_recluster_with_artifact_digest(
+        path: &Path,
+    ) -> Result<(Self, String), GraphError> {
+        let file = File::open(path).map_err(|source| GraphError::Read {
+            path: crate::graph::absolute_path(path),
+            source,
+        })?;
+        load_opened_with_artifact_digest(path, file, crate::graph::graph_size_cap())
+    }
+
     /// Load the complete graph for impact traversal.
     ///
     /// V1 records are already typed and compact projections are derived from
@@ -1174,6 +1196,145 @@ impl GraphDocument {
         validate_code_graph(&document)?;
         let _ = write_content_cache(path, &digest, &document);
         Ok(document)
+    }
+}
+
+fn load_opened_with_artifact_digest(
+    path: &Path,
+    file: File,
+    cap: u64,
+) -> Result<(GraphDocument, String), GraphError> {
+    load_opened_with_artifact_digest_after_metadata(path, file, cap, || Ok(()))
+}
+
+fn load_opened_with_artifact_digest_after_metadata<F>(
+    path: &Path,
+    mut file: File,
+    cap: u64,
+    after_metadata: F,
+) -> Result<(GraphDocument, String), GraphError>
+where
+    F: FnOnce() -> std::io::Result<()>,
+{
+    let size = file
+        .metadata()
+        .map_err(|source| GraphError::Read {
+            path: crate::graph::absolute_path(path),
+            source,
+        })?
+        .len();
+    if size > cap {
+        return Err(GraphError::TooLarge {
+            path: crate::graph::absolute_path(path),
+            size,
+            cap,
+        });
+    }
+    after_metadata().map_err(|source| GraphError::Read {
+        path: crate::graph::absolute_path(path),
+        source,
+    })?;
+    let actual_size = file
+        .metadata()
+        .map_err(|source| GraphError::Read {
+            path: crate::graph::absolute_path(path),
+            source,
+        })?
+        .len();
+    if actual_size > cap {
+        return Err(GraphError::TooLarge {
+            path: crate::graph::absolute_path(path),
+            size: actual_size,
+            cap,
+        });
+    }
+
+    #[derive(Deserialize)]
+    struct SchemaEnvelope {
+        #[serde(default)]
+        graph: Option<SchemaHeader>,
+    }
+
+    #[derive(Deserialize)]
+    struct SchemaHeader {
+        #[serde(default)]
+        schema: Option<String>,
+    }
+
+    let found = serde_json::from_reader::<_, SchemaEnvelope>(BufReader::new(
+        (&mut file).take(cap.saturating_add(1)),
+    ))
+    .map_err(GraphError::Corrupt)?
+    .graph
+    .and_then(|graph| graph.schema);
+    if found.as_deref() != Some(CODE_GRAPH_SCHEMA_V1) {
+        return Err(GraphError::UnsupportedGraphSchema { found });
+    }
+    file.seek(SeekFrom::Start(0))
+        .map_err(|source| GraphError::Read {
+            path: crate::graph::absolute_path(path),
+            source,
+        })?;
+    let mut reader = BufReader::new(BoundedHashReader::new(file, cap));
+    let decoded = serde_json::from_reader(&mut reader);
+    let hashed = reader.into_inner();
+    if hashed.exceeded {
+        return Err(GraphError::TooLarge {
+            path: crate::graph::absolute_path(path),
+            size: cap.saturating_add(1),
+            cap,
+        });
+    }
+    let document = decoded.map_err(GraphError::Corrupt)?;
+    validate_code_graph(&document)?;
+    let digest = format!("{:x}", hashed.digest.finalize());
+    Ok((document, digest))
+}
+
+struct BoundedHashReader<R> {
+    inner: R,
+    cap: u64,
+    bytes: u64,
+    exceeded: bool,
+    digest: Sha256,
+}
+
+impl<R> BoundedHashReader<R> {
+    fn new(inner: R, cap: u64) -> Self {
+        Self {
+            inner,
+            cap,
+            bytes: 0,
+            exceeded: false,
+            digest: Sha256::new(),
+        }
+    }
+}
+
+impl<R: Read> Read for BoundedHashReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.exceeded {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "graph grew beyond its configured byte limit",
+            ));
+        }
+        let remaining = self.cap.saturating_sub(self.bytes);
+        let maximum = usize::try_from(remaining)
+            .unwrap_or(usize::MAX)
+            .saturating_add(1)
+            .min(buffer.len());
+        let read = self.inner.read(&mut buffer[..maximum])?;
+        self.bytes = self.bytes.saturating_add(read as u64);
+        if self.bytes > self.cap {
+            self.exceeded = true;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "graph grew beyond its configured byte limit",
+            ));
+        }
+        self.digest.update(&buffer[..read]);
+        Ok(read)
     }
 }
 
@@ -1332,9 +1493,27 @@ fn write_content_cache(
 
 #[cfg(test)]
 mod tests {
+    use std::fs::{self, File, OpenOptions};
+    use std::io::Write;
     use std::path::Path;
 
-    use super::content_cache_path;
+    use sha2::{Digest, Sha256};
+
+    use super::{
+        BuildMetadata, GraphDocument, content_cache_path, load_opened_with_artifact_digest,
+        load_opened_with_artifact_digest_after_metadata,
+    };
+
+    fn document() -> GraphDocument {
+        GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "tree".to_owned(),
+            configuration_digest: "config".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        })
+    }
 
     #[test]
     fn content_cache_path_is_visible_and_scoped() {
@@ -1342,5 +1521,52 @@ mod tests {
             content_cache_path(Path::new("compass-out/graph.json"), "abc123"),
             Path::new("compass-out/cache/graph.json.abc123.content-v1.cache")
         );
+    }
+
+    #[test]
+    fn opened_artifact_keeps_document_and_digest_bound_across_path_replacement()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("graph.json");
+        let original_document = document();
+        let original = serde_json::to_vec(&original_document)?;
+        fs::write(&path, &original)?;
+        let opened = File::open(&path)?;
+        fs::rename(&path, directory.path().join("original.json"))?;
+        fs::write(&path, b"not the opened graph")?;
+
+        let (document, digest) = load_opened_with_artifact_digest(&path, opened, 1024 * 1024)?;
+        assert_eq!(document, original_document);
+        assert_eq!(digest, format!("{:x}", Sha256::digest(&original)));
+        Ok(())
+    }
+
+    #[test]
+    fn opened_artifact_rejects_growth_past_the_limit_after_metadata_check()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("graph.json");
+        fs::write(&path, b"1234")?;
+        let growth_path = path.clone();
+        let mut growth_file = OpenOptions::new().append(true).open(&growth_path)?;
+        let result = load_opened_with_artifact_digest_after_metadata(
+            &path,
+            File::open(&path)?,
+            8,
+            move || growth_file.write_all(b"56789"),
+        );
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => return Err("oversized opened artifact should fail".into()),
+        };
+        assert!(matches!(
+            error,
+            crate::GraphError::TooLarge {
+                size: 9,
+                cap: 8,
+                ..
+            }
+        ));
+        Ok(())
     }
 }

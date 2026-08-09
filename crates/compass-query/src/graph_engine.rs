@@ -4,8 +4,7 @@
 //! indexes directly. Generic store adapters can still use the materializing
 //! engine for compatibility and differential validation.
 
-use std::fs::{self, File};
-use std::io::{BufReader, Read};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use compass_graph::{
@@ -67,6 +66,35 @@ impl DirectGraphEngine {
             graph_identity,
         })
     }
+
+    /// Use an identity already verified by an immutable source such as a
+    /// history realization, avoiding another graph-sized canonical buffer.
+    pub fn from_verified_document(
+        graph: GraphDocument,
+        graph_identity: String,
+    ) -> Result<Self, QueryError> {
+        validate_graph_schema(&graph)?;
+        compass_model::validate_code_graph(&graph).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "direct_graph_validation_failed",
+                error.to_string(),
+            )
+        })?;
+        if graph_identity.len() != 64
+            || !graph_identity.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "direct_graph_identity_invalid",
+                "verified graph identity must be a 64-character hexadecimal digest",
+            ));
+        }
+        Ok(Self {
+            graph,
+            graph_identity: graph_identity.to_ascii_lowercase(),
+        })
+    }
 }
 
 impl GraphEngine for DirectGraphEngine {
@@ -85,15 +113,15 @@ impl GraphEngine for DirectGraphEngine {
 
 impl JsonGraphEngine {
     pub fn open(path: &Path) -> Result<Self, QueryError> {
-        let graph = GraphDocument::load(path).map_err(|error| {
-            QueryError::new(
-                QueryErrorKind::CorruptArtifact,
-                "graph_load_failed",
-                error.to_string(),
-            )
-        })?;
+        let (graph, graph_identity) =
+            GraphDocument::load_with_artifact_digest(path).map_err(|error| {
+                QueryError::new(
+                    QueryErrorKind::CorruptArtifact,
+                    "graph_load_failed",
+                    error.to_string(),
+                )
+            })?;
         validate_graph_schema(&graph)?;
-        let graph_identity = hash_graph_artifact(path)?;
         Ok(Self {
             graph,
             graph_identity,
@@ -339,33 +367,6 @@ impl GraphEngine for StoreGraphEngine {
     fn graph_identity(&self) -> &str {
         &self.graph_identity
     }
-}
-
-fn hash_graph_artifact(path: &Path) -> Result<String, QueryError> {
-    let file = File::open(path).map_err(|error| {
-        QueryError::new(
-            QueryErrorKind::CorruptArtifact,
-            "graph_hash_failed",
-            error.to_string(),
-        )
-    })?;
-    let mut reader = BufReader::new(file);
-    let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
-    loop {
-        let read = reader.read(&mut buffer).map_err(|error| {
-            QueryError::new(
-                QueryErrorKind::CorruptArtifact,
-                "graph_hash_failed",
-                error.to_string(),
-            )
-        })?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-    Ok(format!("{:x}", digest.finalize()))
 }
 
 /// Open the selected materialized graph engine. The bounded local-store path

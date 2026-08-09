@@ -254,6 +254,8 @@ pub struct CodeQueryEngine {
     pub(crate) index_path: PathBuf,
     pub(crate) partial_graph_message: Option<String>,
     pub(crate) engine_kind: QueryEngineKind,
+    pub(crate) graph_identity: String,
+    pub(crate) build_generation_identity: String,
     pub(crate) search_query_cache: Mutex<SearchQueryCache>,
     pub(crate) fuzzy_lookup_cache: Mutex<FuzzyLookupCache>,
 }
@@ -1651,6 +1653,18 @@ impl CodeQueryEngine {
     #[must_use]
     pub const fn engine_kind(&self) -> QueryEngineKind {
         self.engine_kind
+    }
+
+    /// Immutable identity supplied by the selected graph engine.
+    #[must_use]
+    pub fn graph_identity(&self) -> &str {
+        &self.graph_identity
+    }
+
+    /// Build generation recorded by the selected graph snapshot.
+    #[must_use]
+    pub fn build_generation_identity(&self) -> &str {
+        &self.build_generation_identity
     }
 
     fn resolve_symbol(

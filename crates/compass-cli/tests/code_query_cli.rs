@@ -70,17 +70,17 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
 }
 
 #[test]
-fn natural_query_routes_clear_intents_and_preserves_traversal_fallback()
+fn natural_query_defaults_to_discovery_and_preserves_explicit_legacy_traversal()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph = support::write_typed_graph(directory.path())?;
 
-    for (question, operation, expected_node) in [
-        ("who calls Target?", "Callers:", "Fixture.Caller"),
-        ("what does Caller call?", "Callees:", "Fixture.Target"),
-        ("what depends on Target?", "Impact:", "Fixture.Caller"),
-        ("path from Caller to Target", "NodeTrail:", "Fixture.Target"),
-        ("where is Target defined?", "Search:", "Fixture.Target"),
+    for (question, expected_node) in [
+        ("who calls Target?", "Fixture.Caller"),
+        ("what does Caller call?", "Fixture.Target"),
+        ("what depends on Target?", "Fixture.Caller"),
+        ("path from Caller to Target", "Fixture.Target"),
+        ("where is Target defined?", "Fixture.Target"),
     ] {
         let outcome = run(
             Frontend::Compass,
@@ -92,9 +92,10 @@ fn natural_query_routes_clear_intents_and_preserves_traversal_fallback()
             ],
         );
         assert_eq!(outcome.code, 0, "{question}: {}", outcome.stderr);
-        assert!(outcome.stdout.starts_with(operation), "{question}");
+        assert!(outcome.stdout.starts_with("Discovery:"), "{question}");
         assert!(outcome.stdout.contains(expected_node), "{question}");
-        assert!(!outcome.stdout.contains("Pagination:"), "{question}");
+        assert!(outcome.stdout.contains("Direction:"), "{question}");
+        assert!(outcome.stdout.contains("Pagination:"), "{question}");
     }
 
     for question in ["authentication flow", "where is authentication enforced?"] {
@@ -108,7 +109,8 @@ fn natural_query_routes_clear_intents_and_preserves_traversal_fallback()
             ],
         );
         assert_eq!(generic.code, 0, "{}", generic.stderr);
-        assert_eq!(generic.stdout, "No matching nodes found.", "{question}");
+        assert!(generic.stdout.starts_with("Discovery:"), "{question}");
+        assert!(generic.stdout.contains("Completeness:"), "{question}");
     }
 
     for arguments in [
@@ -130,6 +132,107 @@ fn natural_query_routes_clear_intents_and_preserves_traversal_fallback()
         );
     }
 
+    Ok(())
+}
+
+#[test]
+fn discovery_cursor_survives_budget_alias_and_scope_order_but_rejects_graph_change()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    let mut document = GraphDocument::load(&graph)?;
+    document.links[0].context = Some("call".to_owned());
+    let template = document.nodes[1].clone();
+    for index in 0..40 {
+        let mut alternative = template.clone();
+        alternative.id = format!("n:target-alternative-{index}");
+        document.nodes.push(alternative);
+    }
+    document.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    std::fs::write(&graph, serde_json::to_vec_pretty(&document)?)?;
+
+    let first = run(
+        Frontend::Compass,
+        [
+            OsString::from("query"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph.clone().into_os_string(),
+            OsString::from("--text-budget"),
+            OsString::from("500"),
+            OsString::from("--context"),
+            OsString::from("calls"),
+            OsString::from("--context"),
+            OsString::from("import"),
+            OsString::from("--scope"),
+            OsString::from("node:n:target"),
+            OsString::from("--scope"),
+            OsString::from("source:src"),
+        ],
+    );
+    assert_eq!(first.code, 0, "{}", first.stderr);
+    let cursor = first
+        .stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("Pagination: "))
+        .and_then(|line| line.split(" next=").nth(1))
+        .filter(|cursor| *cursor != "none")
+        .ok_or("expected discovery continuation cursor")?
+        .to_owned();
+
+    let continued = run(
+        Frontend::Compass,
+        [
+            OsString::from("query"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph.clone().into_os_string(),
+            OsString::from("--text-budget"),
+            OsString::from("1000"),
+            OsString::from("--cursor"),
+            OsString::from(&cursor),
+            OsString::from("--context"),
+            OsString::from("import"),
+            OsString::from("--context"),
+            OsString::from("call"),
+            OsString::from("--scope"),
+            OsString::from("source:src"),
+            OsString::from("--scope"),
+            OsString::from("node:n:target"),
+        ],
+    );
+    assert_eq!(continued.code, 0, "{}", continued.stderr);
+    assert!(
+        continued
+            .stdout
+            .contains("Relationship contexts: import,call")
+    );
+
+    document.nodes[0].qualified_name.push_str(".changed");
+    std::fs::write(&graph, serde_json::to_vec_pretty(&document)?)?;
+    let changed = run(
+        Frontend::Compass,
+        [
+            OsString::from("query"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph.into_os_string(),
+            OsString::from("--text-budget"),
+            OsString::from("1000"),
+            OsString::from("--cursor"),
+            OsString::from(cursor),
+            OsString::from("--context"),
+            OsString::from("call"),
+            OsString::from("--context"),
+            OsString::from("import"),
+            OsString::from("--scope"),
+            OsString::from("node:n:target"),
+            OsString::from("--scope"),
+            OsString::from("source:src"),
+        ],
+    );
+    assert_ne!(changed.code, 0);
+    assert!(changed.stderr.contains("selected graph generation"));
     Ok(())
 }
 
@@ -224,6 +327,14 @@ fn natural_discovery_rejects_invalid_duplicate_and_mixed_public_controls()
             vec!["--format", "json", "--page", "2"],
             "legacy traversal controls cannot be combined with discovery controls",
         ),
+        (
+            vec!["--format", "json", "--text-budget", "1000"],
+            "text-only and cannot be used with --format json",
+        ),
+        (
+            vec!["--format", "json", "--cursor", "not-a-cursor"],
+            "text-only and cannot be used with --format json",
+        ),
     ] {
         let mut args = vec![OsString::from("query"), OsString::from("Target")];
         args.extend(arguments.iter().map(OsString::from));
@@ -253,6 +364,8 @@ fn natural_discovery_help_documents_only_the_public_contract() {
         "Repeatable OR scope",
         "--context <VALUE>",
         "--format <text|json>",
+        "--text-budget <N>",
+        "--cursor <TOKEN>",
         "Natural discovery:",
         "--include-heuristic",
         "--max-depth <N>",
@@ -475,7 +588,7 @@ fn natural_query_renders_typed_source_locations() -> Result<(), Box<dyn Error>> 
     assert!(
         outcome
             .stdout
-            .contains("NODE Target [src=src/lib.rs loc=L1:0-L1:4")
+            .contains("Node: n:target [function] Fixture.Target @ src/lib.rs:1")
     );
     Ok(())
 }
