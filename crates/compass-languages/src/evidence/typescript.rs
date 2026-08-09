@@ -4347,21 +4347,30 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 }),
                 range_for_node(self.source_file, anchor),
             )?;
-            self.builder.relate(
-                CandidateRelation::Reexports,
-                &owner,
-                Some(&occurrence_id),
-                Some(&binding_id),
-                export_name,
-                ResolutionConstraint {
-                    exact_language: Some(self.language.to_owned()),
-                    module_or_package: Some(module),
-                    qualified_name: Some(target),
-                    allowed_target_kinds: vec!["module".to_owned()],
-                    allow_external: true,
-                    ..ResolutionConstraint::default()
-                },
-            )?;
+            // A plain wildcard binding is bounded lookup scope for resolving
+            // named exports through the barrel. The module-literal candidate
+            // above already publishes the direct barrel-to-module edge, so a
+            // second relationship candidate here would manufacture duplicate
+            // parallel evidence with the same semantic endpoints. A namespace
+            // alias is different: its explicit exported name is source-level
+            // relationship evidence and keeps its own candidate.
+            if alias.is_some() {
+                self.builder.relate(
+                    CandidateRelation::Reexports,
+                    &owner,
+                    Some(&occurrence_id),
+                    Some(&binding_id),
+                    export_name,
+                    ResolutionConstraint {
+                        exact_language: Some(self.language.to_owned()),
+                        module_or_package: Some(module),
+                        qualified_name: Some(target),
+                        allowed_target_kinds: vec!["module".to_owned()],
+                        allow_external: true,
+                        ..ResolutionConstraint::default()
+                    },
+                )?;
+            }
             return Ok(());
         }
         if bindings.is_empty() {

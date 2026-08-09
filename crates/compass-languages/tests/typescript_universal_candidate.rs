@@ -652,6 +652,34 @@ export type * from "./types";
         })
         .expect("type-only wildcard reexport binding");
     assert!(type_only.type_only);
+    let plain_wildcard_candidate_count = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == compass_languages::CandidateRelation::Reexports
+                && candidate.binding_id.as_deref().is_some_and(|binding_id| {
+                    batch
+                        .bindings
+                        .iter()
+                        .any(|binding| binding.id == binding_id && binding.spelling == "*")
+                })
+        })
+        .count();
+    assert_eq!(plain_wildcard_candidate_count, 0);
+    let direct_module_candidates = batch
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == compass_languages::CandidateRelation::Reexports
+                && candidate.binding_id.is_none()
+                && candidate.constraints.allowed_target_kinds == ["module"]
+        })
+        .count();
+    assert_eq!(direct_module_candidates, 3);
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::Reexports
+            && candidate.binding_id.as_deref() == Some(alias.id.as_str())
+    }));
 }
 
 #[test]
