@@ -2,6 +2,8 @@
 
 mod affected;
 mod benchmark;
+#[allow(dead_code)]
+mod bm25;
 mod code_query;
 mod cql;
 mod graph_engine;
