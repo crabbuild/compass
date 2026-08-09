@@ -201,12 +201,23 @@ question
 - produces search tokens;
 - normalizes context filters.
 
-This is deterministic token matching, not embedding inference.
+Natural-language terms use a bounded, deterministic morphology pass for common
+code-query forms (`routes` -> `route`, `registered` -> `register`, and
+`routing` -> `route`). Labels and questions use the same canonical form, so
+camel-case identifiers can contribute their component tokens without adding a
+model or a synonym database. This is still lexical retrieval, not embedding or
+semantic inference; a conceptual question can remain under-specified and must
+not be treated as an authoritative answer without an independently reviewed
+golden judgment.
 
 ### Scoring
 
 `score_nodes` uses indexed label/attribute evidence to rank candidates.
 `find_node` and `pick_scored_endpoint` support commands that need one entity.
+When at least two query terms are exact components of one compound identifier,
+that co-occurrence receives a bounded ranking boost. Per-query label
+normalization and tokenization are prepared once before scoring, avoiding a
+second full normalization pass while preserving deterministic tie-breaking.
 
 Ranking changes can alter which subgraph users see even when graph data is
 unchanged. Protect them with realistic query fixtures and stable tie behavior.

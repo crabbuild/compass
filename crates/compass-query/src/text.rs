@@ -208,6 +208,10 @@ pub fn query_terms(question: &str) -> Vec<String> {
             }
         }
     }
+    let terms = terms
+        .into_iter()
+        .map(canonical_query_token)
+        .collect::<Vec<_>>();
     let content = terms
         .iter()
         .filter(|term| !QUERY_STOPWORDS.contains(&term.as_str()))
@@ -345,6 +349,103 @@ fn canonical_search_token(token: String) -> String {
         "resolution" | "resolved" | "resolver" | "resolving" => "resolve".to_owned(),
         _ => token,
     }
+}
+
+pub(crate) fn canonical_query_token(token: String) -> String {
+    if QUERY_STOPWORDS.contains(&token.as_str()) || !token.is_ascii() {
+        return token;
+    }
+
+    match token.as_str() {
+        // Keep a small explicit table for common irregular or spelling-changing
+        // forms. The generic suffix rules below intentionally stay conservative
+        // so a natural-language query cannot rewrite an arbitrary identifier.
+        "resolution" | "resolved" | "resolver" | "resolving" => "resolve".to_owned(),
+        "solved" | "solving" => "solve".to_owned(),
+        "compiled" | "compiling" => "compile".to_owned(),
+        "registered" | "registering" => "register".to_owned(),
+        "routing" => "route".to_owned(),
+        "aliases" => "alias".to_owned(),
+        "using" => "use".to_owned(),
+        "searched" | "searching" => "search".to_owned(),
+        "represented" | "representing" => "represent".to_owned(),
+        "created" | "creating" => "create".to_owned(),
+        "mapped" | "mapping" => "map".to_owned(),
+        "tracked" | "tracking" => "track".to_owned(),
+        "enabled" | "enabling" => "enable".to_owned(),
+        "sent" | "sending" => "send".to_owned(),
+        "opened" | "opening" => "open".to_owned(),
+        "loaded" | "loading" => "load".to_owned(),
+        "formatted" | "formatting" => "format".to_owned(),
+        "parsed" | "parsing" => "parse".to_owned(),
+        "dispatched" | "dispatching" => "dispatch".to_owned(),
+        "implemented" | "implementing" => "implement".to_owned(),
+        "handled" | "handling" => "handle".to_owned(),
+        _ => canonical_query_suffix(token),
+    }
+}
+
+fn canonical_query_suffix(token: String) -> String {
+    if let Some(stem) = token.strip_suffix("ies")
+        && stem.len() >= 2
+    {
+        return format!("{stem}y");
+    }
+
+    if token.ends_with("sses")
+        || token.ends_with("xes")
+        || token.ends_with("zes")
+        || token.ends_with("ches")
+        || token.ends_with("shes")
+        || token.ends_with("uses")
+    {
+        return token[..token.len().saturating_sub(2)].to_owned();
+    }
+
+    if let Some(stem) = token.strip_suffix('s')
+        && !stem.ends_with(['s', 'u', 'i'])
+        && !stem.ends_with('a')
+        && stem.len() >= 3
+    {
+        return stem.to_owned();
+    }
+
+    if let Some(stem) = token.strip_suffix("ing")
+        && stem.len() >= 3
+    {
+        return add_silent_e_or_remove_double(stem);
+    }
+
+    if let Some(stem) = token.strip_suffix("ied")
+        && stem.len() >= 2
+    {
+        return format!("{stem}y");
+    }
+
+    if let Some(stem) = token.strip_suffix("ed")
+        && stem.len() >= 3
+    {
+        return add_silent_e_or_remove_double(stem);
+    }
+
+    token
+}
+
+fn add_silent_e_or_remove_double(stem: &str) -> String {
+    let mut characters = stem.chars().collect::<Vec<_>>();
+    if characters.len() >= 2 && characters[characters.len() - 1] == characters[characters.len() - 2]
+    {
+        characters.pop();
+    }
+    let mut value = characters.into_iter().collect::<String>();
+    if value.ends_with("at")
+        || value.ends_with("abl")
+        || value.ends_with("il")
+        || value.ends_with('v')
+    {
+        value.push('e');
+    }
+    value
 }
 
 fn is_chinese(character: char) -> bool {
