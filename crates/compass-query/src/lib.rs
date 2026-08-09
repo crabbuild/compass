@@ -2,6 +2,7 @@
 
 mod affected;
 mod benchmark;
+mod bm25;
 mod code_query;
 mod cql;
 mod graph_engine;
@@ -39,16 +40,19 @@ pub use relevance::{
     QUERY_QUALIFICATION_SCHEMA_V1, QualificationReport, QueryClass, QueryObservation,
     RelevanceError, RelevanceMetrics, qualification_report, score,
 };
-pub use score::{QueryScores, ScoredNode, find_node, pick_scored_endpoint, score_nodes};
+pub use score::{
+    ProfiledQueryScores, QueryScores, ScoredNode, TEXT_RANKER_BM25_V1, TEXT_RANKER_FULL_SCAN_V1,
+    TextRankProfile, find_node, pick_scored_endpoint, score_nodes, score_nodes_with_profile,
+};
 pub use telemetry::{
     ProfiledCodeQueryResponse, QUERY_EXECUTION_PROFILE_V1, QueryExecutionProfile,
     QueryStageTimings, WorkCounts,
 };
 pub use text::{normalize_context_filters, query_terms, sanitize_label, search_tokens};
 pub use traversal::{
-    DEFAULT_TEXT_TOKEN_BUDGET, TextPageOptions, TextPaginationError, TraversalMode,
-    query_graph_text, query_graph_text_page, render_explanation, render_explanation_page,
-    render_shortest_path,
+    DEFAULT_TEXT_TOKEN_BUDGET, ProfiledTextPageOptions, TextPageOptions, TextPaginationError,
+    TraversalMode, query_graph_text, query_graph_text_page, query_graph_text_page_with_profile,
+    render_explanation, render_explanation_page, render_shortest_path,
 };
 
 #[cfg(test)]

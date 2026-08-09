@@ -27,7 +27,7 @@ pub(crate) fn rank_search_candidates(
 }
 
 #[cfg(test)]
-fn rank_legacy(
+fn rank_query_v1_reference(
     query: &str,
     candidates: Vec<SearchCandidate>,
     limit: usize,
@@ -370,7 +370,7 @@ mod tests {
 
     use crate::recall::{CandidateSource, SearchCandidate};
 
-    use super::{rank_legacy, rank_search_candidates};
+    use super::{rank_query_v1_reference, rank_search_candidates};
 
     fn anchor(path: &str) -> SourceAnchor {
         SourceAnchor {
@@ -417,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_ranking_remains_deterministic_on_ties() {
+    fn query_ranker_v1_reference_remains_deterministic_on_ties() {
         let candidates = vec![
             SearchCandidate {
                 node: node("n:z", "query", NodeKind::Function, "src/lib.rs", false),
@@ -428,7 +428,7 @@ mod tests {
                 sources: BTreeSet::from([CandidateSource::ExactName]),
             },
         ];
-        let ranked = rank_legacy("query", candidates, usize::MAX);
+        let ranked = rank_query_v1_reference("query", candidates, usize::MAX);
         assert_eq!(ranked[0].node_id, "n:a");
         assert_eq!(ranked[1].node_id, "n:z");
     }
@@ -490,7 +490,7 @@ mod tests {
                 sources: BTreeSet::from([CandidateSource::ExactName]),
             },
         ];
-        let legacy = rank_legacy("charge", candidates.clone(), 1);
+        let reference_v1 = rank_query_v1_reference("charge", candidates.clone(), 1);
         let current = rank_search_candidates(
             "charge",
             std::slice::from_ref(&"charge".to_owned()),
@@ -498,7 +498,7 @@ mod tests {
             1,
         );
 
-        assert_eq!(legacy[0].node_id, "n:a-generated-charge");
+        assert_eq!(reference_v1[0].node_id, "n:a-generated-charge");
         assert_eq!(current[0].node_id, "n:z-payment-charge");
     }
 
