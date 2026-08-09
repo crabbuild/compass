@@ -59,6 +59,38 @@ const GLOBAL_PLATFORMS: &[&str] = &[
 ];
 
 #[test]
+fn agent_assets_reject_subsystem_context_examples() -> Result<(), Box<dyn Error>> {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let subsystem_example = regex::Regex::new(
+        r"--context(?:=|\s+)[A-Z][A-Za-z0-9_:.-]*(?:Service|Controller|Module|Package)\b",
+    )?;
+    for root in [
+        manifest.join("assets/compass-integrations"),
+        manifest.join("assets/compass-skill"),
+    ] {
+        for (path, bytes) in directory_tree(&root)? {
+            let text = String::from_utf8(bytes).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("agent asset {} is not UTF-8: {error}", path.display()),
+                )
+            })?;
+            assert!(
+                !subsystem_example.is_match(&text),
+                "{} uses a subsystem identity as --context: {text}",
+                path.display()
+            );
+            assert!(
+                !text.contains("anchor a common term inside a subsystem"),
+                "{} contains the retired subsystem-context guidance",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Error>> {
     let fixture = InstallFixture::new()?;
     let output = fixture.run(&["install", "--platform", "codex", "--project"])?;
@@ -94,6 +126,10 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     let query = fs::read_to_string(skill.with_file_name("references").join("query.md"))?;
     assert!(query.contains("4,000–16,000 tokens"));
     assert!(query.contains("additional pages remain"));
+    assert!(query.contains("filters relationships by their stored evidence context"));
+    assert!(query.contains("current natural-query command has\nno `--scope` option"));
+    assert!(!query.contains("--context CheckoutService"));
+    assert!(!query.contains("anchor a common term inside a subsystem"));
     let references = skill.with_file_name("references");
     assert_eq!(
         fs::read_dir(&references)?

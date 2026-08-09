@@ -13,7 +13,7 @@ compass query "payment retries" --dfs
 compass query "payment retries" --budget 1500
 compass query "payment retries" --budget 8000
 compass query "payment retries" --budget 8000 --page 2
-compass query "payment retries" --context CheckoutService
+compass query "payment retries" --context call
 ```
 
 Clear search, callers, callees, impact, and path questions against a current
@@ -34,6 +34,13 @@ exhaustive claim. If enough evidence arrives earlier, stop and say that
 additional pages remain rather than treating the first page as complete. Prefer
 `--at REV` when paging through a historical investigation so every page is tied
 to one immutable graph.
+
+`--context VALUE` filters relationships by their stored evidence context, such
+as `call`, `import`, or `route`, before traversal. It does not select a node,
+file, package, community, or subsystem. The current natural-query command has
+no `--scope` option. To narrow by subsystem today, put one exact symbol, file,
+module, or domain term in the question, or use a focused operation such as
+`search`, `callers`, or `callees` with the exact identity returned by Compass.
 
 Before retrying a weak result, derive a small vocabulary set from the request:
 exact symbol spellings, file or crate names, domain nouns, and likely community
@@ -90,10 +97,9 @@ compass tree
 If a label is ambiguous, retry with the exact node ID, symbol spelling, or source
 file returned by `query`.
 
-Use `--context VALUE` to anchor a common term inside a subsystem. Prefer a
-shorter query plus an exact context over a long prose prompt containing several
-unrelated questions. Split multi-part investigations so the evidence for each
-claim stays attributable.
+Prefer a shorter query with one concrete identity over a long prose prompt
+containing several unrelated questions. Split multi-part investigations so the
+evidence for each claim stays attributable.
 
 ## Exact CompassQL
 

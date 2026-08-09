@@ -274,6 +274,11 @@ Natural-language discovery:
 --graph PATH | --at REV
 ```
 
+`--context VALUE` filters stored relationship evidence contexts such as `call`,
+`import`, or `route`; it does not scope retrieval to a node, file, package,
+community, or subsystem. The current natural-query interface has no `--scope`
+option.
+
 `--budget` controls approximate tokens per page (default 2,000). `--page` is
 one-based. Repeat all other query inputs unchanged when following the
 `previous` or `next` page reported in output. `compass explain` accepts the

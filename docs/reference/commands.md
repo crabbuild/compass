@@ -209,6 +209,12 @@ framework automatically. Generic or contradictory questions and historical
 `--dfs`, `--context`, `--budget`, or `--page` control, to select traversal
 explicitly.
 
+`--context VALUE` is a relationship filter for traversal evidence contexts such
+as `call`, `import`, or `route`. It is not a node, file, package, community, or
+subsystem selector. The current natural-query command has no `--scope` option;
+use an exact symbol/file/module term in the question or a focused typed command
+when subsystem identity matters.
+
 `--budget` is the approximate token budget for one result page. It defaults to
 2,000 and may be raised when the caller has a larger context window.
 Every matched result includes a deterministic `Pagination:` line with the
