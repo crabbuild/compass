@@ -3,7 +3,8 @@ use std::error::Error;
 
 use compass_model::GraphDocument;
 use compass_output::{
-    CALLFLOW_VIEWER_SCHEMA, CallflowOptions, CallflowSection, callflow_view_model,
+    CALLFLOW_VIEWER_SCHEMA, CallflowOptions, CallflowSection, CallflowSourceScope,
+    callflow_view_model,
 };
 use serde_json::json;
 
@@ -116,25 +117,16 @@ fn source_scopes_are_classified_without_discarding_nodes() -> Result<(), Box<dyn
     let scopes = model.sections[1]
         .nodes
         .iter()
-        .map(|node| {
-            (
-                node.id.as_str(),
-                serde_json::to_value(&node.scope)
-                    .expect("scope serializes")
-                    .as_str()
-                    .expect("scope is text")
-                    .to_owned(),
-            )
-        })
+        .map(|node| (node.id.as_str(), node.scope.clone()))
         .collect::<BTreeMap<_, _>>();
 
-    assert_eq!(scopes.get("prod").map(String::as_str), Some("production"));
-    assert_eq!(scopes.get("test").map(String::as_str), Some("test"));
+    assert_eq!(scopes.get("prod"), Some(&CallflowSourceScope::Production));
+    assert_eq!(scopes.get("test"), Some(&CallflowSourceScope::Test));
     assert_eq!(
-        scopes.get("generated").map(String::as_str),
-        Some("generated")
+        scopes.get("generated"),
+        Some(&CallflowSourceScope::Generated)
     );
-    assert_eq!(scopes.get("vendor").map(String::as_str), Some("vendor"));
-    assert_eq!(scopes.get("unknown").map(String::as_str), Some("unknown"));
+    assert_eq!(scopes.get("vendor"), Some(&CallflowSourceScope::Vendor));
+    assert_eq!(scopes.get("unknown"), Some(&CallflowSourceScope::Unknown));
     Ok(())
 }
