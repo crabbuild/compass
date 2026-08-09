@@ -7,10 +7,39 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class QuerySourceAnchorOracle:
+    file: str
+    start_line: int | None = None
+
+
+@dataclass(frozen=True)
+class QueryNodeOracle:
+    qualified_name: str
+    source: QuerySourceAnchorOracle | None
+
+
+@dataclass(frozen=True)
+class QueryEdgeOracle:
+    source: str
+    relation: str
+    target: str
+    direction: str
+    site: str | None = None
+
+
+@dataclass(frozen=True)
 class QueryOracle:
     question: str
-    required: tuple[str, ...]
+    required: tuple[str, ...] = ()
     forbidden: tuple[str, ...] = ()
+    expected_seeds: tuple[QueryNodeOracle, ...] = ()
+    acceptable_seeds: tuple[QueryNodeOracle, ...] = ()
+    forbidden_seeds: tuple[QueryNodeOracle, ...] = ()
+    relevant_nodes: tuple[QueryNodeOracle, ...] = ()
+    expected_edges: tuple[QueryEdgeOracle, ...] = ()
+    expected_direction: str = "both"
+    expected_ambiguous: bool = False
+    allow_no_match: bool = False
 
 
 @dataclass(frozen=True)
@@ -19,6 +48,7 @@ class RepositorySpec:
     url: str
     mutation_suffix: str
     queries: tuple[QueryOracle, ...]
+    commit: str = ""
 
 
 @dataclass(frozen=True)
@@ -113,7 +143,7 @@ class CorrectnessResult:
     digest: str
     failures: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
-    metrics: dict[str, int | str | bool] = field(default_factory=dict)
+    metrics: dict[str, float | int | str | bool] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

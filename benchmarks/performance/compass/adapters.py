@@ -155,7 +155,15 @@ class CompassAdapter(ToolAdapter):
         return tuple(command)
 
     def query_command(self, graph: Path, question: str) -> tuple[str, ...]:
-        return (str(self.executable), "query", question, "--graph", str(graph))
+        return (
+            str(self.executable),
+            "query",
+            question,
+            "--graph",
+            str(graph),
+            "--format",
+            "json",
+        )
 
     def compassql_command(self, graph: Path, query: str) -> tuple[str, ...]:
         return (
@@ -215,7 +223,7 @@ class GraphifyAdapter(ToolAdapter):
     ) -> "GraphifyAdapter":
         branch, remote_commit = resolve_remote_head(url)
         effective_commit = commit or remote_commit
-        spec = RepositorySpec("graphify", url, ".py", ())
+        spec = RepositorySpec("graphify", url, ".py", (), effective_commit)
         checkout = workspace.root / "tools" / "graphify-source"
         identity = prepare_checkout(
             spec,

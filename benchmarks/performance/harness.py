@@ -266,12 +266,13 @@ def prepare(args: argparse.Namespace) -> int:
     identities = []
     with workspace.acquire():
         for repository in repositories:
-            _, commit = resolve_remote_head(repository.url)
+            commit = repository.commit
             identities.append(
                 prepare_checkout(
                     repository,
                     commit,
                     workspace.root / "corpora" / repository.name,
+                    pinned=True,
                 )
             )
     payload = {
@@ -409,16 +410,13 @@ def qualify(args: argparse.Namespace, *, comparison: bool) -> int:
             else None
         )
         for repository in repositories:
-            pinned_commit = repository_commits.get(repository.name)
-            if pinned_commit is None:
-                _, commit = resolve_remote_head(repository.url)
-            else:
-                commit = pinned_commit
+            pinned_commit = repository_commits.get(repository.name, repository.commit)
+            commit = pinned_commit
             identity = prepare_checkout(
                 repository,
                 commit,
                 workspace.root / "corpora" / repository.name,
-                pinned=pinned_commit is not None,
+                pinned=True,
             )
             corpora.append(identity)
             checkout = Path(identity.path)

@@ -3,88 +3,145 @@ schema = "compass.performance-suite/1"
 [[repository]]
 name = "django"
 url = "https://github.com/django/django.git"
+commit = "c9eb16a87e60c305fb3651459639f647cce498db"
 mutation_suffix = ".py"
 [[repository.query]]
 question = "where is URL resolution implemented"
 required = ["URLResolver"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "django.urls.resolvers.URLResolver", source = { file = "django/urls/resolvers.py", startLine = 503 } }]
+expectedSeeds = [{ qualifiedName = "django.urls.resolvers.URLResolver", source = { file = "django/urls/resolvers.py", startLine = 503 } }]
 [[repository.query]]
 question = "how does a model save data"
 required = ["Model", "save"]
+expectedDirection = "outgoing"
+relevantNodes = [{ qualifiedName = "django.db.models.base.Model::save", source = { file = "django/db/models/base.py", startLine = 848 } }]
+expectedSeeds = [{ qualifiedName = "django.db.models.base.Model::save", source = { file = "django/db/models/base.py", startLine = 848 } }]
 
 [[repository]]
 name = "spring"
 url = "https://github.com/spring-projects/spring-framework.git"
+commit = "da4b31c82b567a0531c6980b5172cba1fc7e6ed5"
 mutation_suffix = ".java"
 [[repository.query]]
 question = "how is the application context refreshed"
 required = ["ApplicationContext"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "org.springframework.context.support.AbstractApplicationContext::refresh", source = { file = "spring-context/src/main/java/org/springframework/context/support/AbstractApplicationContext.java", startLine = 581 } }]
+expectedSeeds = [{ qualifiedName = "org.springframework.context.support.AbstractApplicationContext::refresh", source = { file = "spring-context/src/main/java/org/springframework/context/support/AbstractApplicationContext.java", startLine = 581 } }]
 [[repository.query]]
 question = "how are HTTP requests dispatched"
 required = ["DispatcherServlet"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "org.springframework.web.servlet.DispatcherServlet::doDispatch", source = { file = "spring-webmvc/src/main/java/org/springframework/web/servlet/DispatcherServlet.java", startLine = 935 } }]
+expectedSeeds = [{ qualifiedName = "org.springframework.web.servlet.DispatcherServlet::doDispatch", source = { file = "spring-webmvc/src/main/java/org/springframework/web/servlet/DispatcherServlet.java", startLine = 935 } }]
 
 [[repository]]
 name = "rails"
 url = "https://github.com/rails/rails.git"
+commit = "cc7d47f4419ba983fc9d06bffece57778fa671c5"
 mutation_suffix = ".rb"
 [[repository.query]]
 question = "how does Active Record save a model"
 required = ["ActiveRecord"]
+expectedDirection = "outgoing"
+relevantNodes = [{ qualifiedName = "ActiveRecord::Persistence::save", source = { file = "activerecord/lib/active_record/persistence.rb", startLine = 410 } }]
+expectedSeeds = [{ qualifiedName = "ActiveRecord::Persistence::save", source = { file = "activerecord/lib/active_record/persistence.rb", startLine = 410 } }]
 [[repository.query]]
 question = "how are routes recognized"
 required = ["RouteSet"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "RouteSet", source = { file = "actionpack/lib/action_dispatch/routing/route_set.rb", startLine = 17 } }]
+expectedSeeds = [{ qualifiedName = "RouteSet", source = { file = "actionpack/lib/action_dispatch/routing/route_set.rb", startLine = 17 } }]
 
 [[repository]]
 name = "laravel"
 url = "https://github.com/laravel/framework.git"
+commit = "8df67f9d176d1d0375a866d8c6780be95ce0336e"
 mutation_suffix = ".php"
 [[repository.query]]
 question = "how does the service container resolve bindings"
 required = ["Container"]
+expectedDirection = "outgoing"
+relevantNodes = [{ qualifiedName = "Container::resolve", source = { file = "src/Illuminate/Container/Container.php", startLine = 905 } }]
+expectedSeeds = [{ qualifiedName = "Container::resolve", source = { file = "src/Illuminate/Container/Container.php", startLine = 905 } }]
 [[repository.query]]
 question = "how are HTTP routes dispatched"
 required = ["Router"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "Router::dispatch", source = { file = "src/Illuminate/Routing/Router.php", startLine = 749 } }]
+expectedSeeds = [{ qualifiedName = "Router::dispatch", source = { file = "src/Illuminate/Routing/Router.php", startLine = 749 } }]
 
 [[repository]]
 name = "bevy"
 url = "https://github.com/bevyengine/bevy.git"
+commit = "e8b3598ff5e5ec40e8ba84edd5750a1c0e4d4e59"
 mutation_suffix = ".rs"
 [[repository.query]]
 question = "how are systems scheduled"
 required = ["Schedule"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "bevy_ecs::schedule::schedule::Schedule::run", source = { file = "crates/bevy_ecs/src/schedule/schedule.rs", startLine = 569 } }]
+expectedSeeds = [{ qualifiedName = "bevy_ecs::schedule::schedule::Schedule::run", source = { file = "crates/bevy_ecs/src/schedule/schedule.rs", startLine = 569 } }]
 [[repository.query]]
 question = "how are plugins added to an application"
 required = ["Plugin"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "bevy_app::app::App::add_plugins", source = { file = "crates/bevy_app/src/app.rs", startLine = 655 } }]
+expectedSeeds = [{ qualifiedName = "bevy_app::app::App::add_plugins", source = { file = "crates/bevy_app/src/app.rs", startLine = 655 } }]
 
 [[repository]]
 name = "aspnetcore"
 url = "https://github.com/dotnet/aspnetcore.git"
+commit = "a5ee747919141424f649e308cb91ec40a0649fb9"
 mutation_suffix = ".cs"
 [[repository.query]]
 question = "how are HTTP requests processed"
 required = ["HttpContext"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "DefaultHttpContext@726", source = { file = "src/Http/Http/src/DefaultHttpContext.cs", startLine = 20 } }]
+expectedSeeds = [{ qualifiedName = "DefaultHttpContext@726", source = { file = "src/Http/Http/src/DefaultHttpContext.cs", startLine = 20 } }]
+forbiddenSeeds = [{ qualifiedName = "DefaultHttpContext" }]
 [[repository.query]]
 question = "how is middleware invoked"
 required = ["RequestDelegate"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "RequestDelegate.cs", source = { file = "src/Http/Http.Abstractions/src/RequestDelegate.cs", startLine = 1 } }]
+expectedSeeds = [{ qualifiedName = "RequestDelegate.cs", source = { file = "src/Http/Http.Abstractions/src/RequestDelegate.cs", startLine = 1 } }]
+forbiddenSeeds = [{ qualifiedName = "RequestDelegate" }]
 
 [[repository]]
 name = "angular"
 url = "https://github.com/angular/angular.git"
+commit = "565dbb2fe5406f2a86d43a5b3c6993434b7124a7"
 mutation_suffix = ".ts"
 [[repository.query]]
 question = "how does dependency injection resolve providers"
 required = ["Injector"]
+expectedDirection = "outgoing"
+relevantNodes = [{ qualifiedName = "r3_injector.R3Injector.get", source = { file = "packages/core/src/di/r3_injector.ts", startLine = 323 } }]
+expectedSeeds = [{ qualifiedName = "r3_injector.R3Injector.get", source = { file = "packages/core/src/di/r3_injector.ts", startLine = 323 } }]
 [[repository.query]]
 question = "how are components created"
 required = ["ComponentFactory"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "component_ref.ComponentFactory.create", source = { file = "packages/core/src/render3/component_ref.ts", startLine = 258 } }]
+expectedSeeds = [{ qualifiedName = "component_ref.ComponentFactory.create", source = { file = "packages/core/src/render3/component_ref.ts", startLine = 258 } }]
 
 [[repository]]
 name = "entire"
 url = "https://github.com/entireio/cli.git"
+commit = "caa0c9be90261fb2b64bf6cfc7147ee3981494db"
 mutation_suffix = ".go"
 [[repository.query]]
 question = "how is a checkpoint created"
 required = ["checkpoint"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "cmd/entire/cli/strategy.ManualCommitStrategy::CondenseSession", source = { file = "cmd/entire/cli/strategy/manual_commit_condensation.go", startLine = 256 } }]
+expectedSeeds = [{ qualifiedName = "cmd/entire/cli/strategy.ManualCommitStrategy::CondenseSession", source = { file = "cmd/entire/cli/strategy/manual_commit_condensation.go", startLine = 256 } }]
 [[repository.query]]
 question = "how is repository state recorded"
 required = ["repository"]
-
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "cmd/entire/cli/strategy.ManualCommitStrategy::SaveStep", source = { file = "cmd/entire/cli/strategy/manual_commit_git.go", startLine = 25 } }]
+expectedSeeds = [{ qualifiedName = "cmd/entire/cli/strategy.ManualCommitStrategy::SaveStep", source = { file = "cmd/entire/cli/strategy/manual_commit_git.go", startLine = 25 } }]

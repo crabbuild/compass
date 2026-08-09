@@ -78,7 +78,15 @@ class AdapterTests(unittest.TestCase):
         )
         self.assertEqual(
             adapter.query_command(Path("/graph.json"), "authentication"),
-            ("/opt/compass", "query", "authentication", "--graph", "/graph.json"),
+            (
+                "/opt/compass",
+                "query",
+                "authentication",
+                "--graph",
+                "/graph.json",
+                "--format",
+                "json",
+            ),
         )
 
     def test_graphify_is_explicit_and_isolated(self) -> None:

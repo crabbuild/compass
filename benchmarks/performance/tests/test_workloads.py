@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import subprocess
 import sys
 import tempfile
 import unittest
 
 from benchmarks.performance.compass.adapters import GraphifyAdapter, ToolAdapter
-from benchmarks.performance.compass.model import QueryOracle, RepositorySpec, ToolRevision
+from benchmarks.performance.compass.model import (
+    QueryEdgeOracle,
+    QueryNodeOracle,
+    QueryOracle,
+    QuerySourceAnchorOracle,
+    RepositorySpec,
+    ToolRevision,
+)
 from benchmarks.performance.compass.workloads import (
     graph_neutral_mutation,
     run_build_matrix,
@@ -23,6 +31,10 @@ FIXTURE = Path(__file__).parent / "fixtures" / "compass_graph.json"
 FAKE_TOOL = Path(__file__).parent / "helpers" / "fake_tool.py"
 
 
+def node_oracle(qualified_name: str, source: str) -> QueryNodeOracle:
+    return QueryNodeOracle(qualified_name, QuerySourceAnchorOracle(source))
+
+
 class FakeAdapter(ToolAdapter):
     def build_command(self, checkout: Path, output: Path, *, force: bool = False):
         return (
@@ -36,7 +48,32 @@ class FakeAdapter(ToolAdapter):
         )
 
     def query_command(self, graph: Path, question: str):
-        return (sys.executable, str(FAKE_TOOL), "query", "--text", "URLResolver safe result")
+        qualified_name = "URLResolver" if question == "where" else "safe"
+        payload = {
+            "schema": "compass.query.discovery/1",
+            "selectedDirection": "both",
+            "seeds": [
+                {
+                    "nodeId": "n:seed",
+                    "source": {"file": "src/main.py"},
+                    "ambiguous": False,
+                }
+            ],
+            "nodes": [
+                {"id": "n:seed", "qualifiedName": qualified_name, "source": {"file": "src/main.py"}}
+            ],
+            "edges": [],
+            "diagnostics": [],
+            "stats": {"candidateNodes": 1, "expandedRelationships": 0},
+            "truncated": False,
+        }
+        return (
+            sys.executable,
+            str(FAKE_TOOL),
+            "query",
+            "--text",
+            json.dumps(payload, sort_keys=True),
+        )
 
     def compassql_command(self, graph: Path, query: str):
         return (
@@ -140,7 +177,18 @@ class WorkloadTests(unittest.TestCase):
                 "fixture",
                 "https://example.invalid/fixture.git",
                 ".py",
-                (QueryOracle("where", ("URLResolver",)), QueryOracle("how", ("safe",))),
+                (
+                    QueryOracle(
+                        "where",
+                        expected_seeds=(node_oracle("URLResolver", "src/main.py"),),
+                        relevant_nodes=(node_oracle("URLResolver", "src/main.py"),),
+                    ),
+                    QueryOracle(
+                        "how",
+                        expected_seeds=(node_oracle("safe", "src/main.py"),),
+                        relevant_nodes=(node_oracle("safe", "src/main.py"),),
+                    ),
+                ),
             )
             results = run_build_matrix(
                 self.adapter(),
@@ -209,8 +257,17 @@ class WorkloadTests(unittest.TestCase):
                 "https://example.invalid/fixture.git",
                 ".py",
                 (
-                    QueryOracle("where", ("URLResolver",), ("forbidden",)),
-                    QueryOracle("how", ("safe",)),
+                    QueryOracle(
+                        "where",
+                        forbidden=("forbidden",),
+                        expected_seeds=(node_oracle("URLResolver", "src/main.py"),),
+                        relevant_nodes=(node_oracle("URLResolver", "src/main.py"),),
+                    ),
+                    QueryOracle(
+                        "how",
+                        expected_seeds=(node_oracle("safe", "src/main.py"),),
+                        relevant_nodes=(node_oracle("safe", "src/main.py"),),
+                    ),
                 ),
             )
             results = run_query_matrix(
@@ -230,6 +287,271 @@ class WorkloadTests(unittest.TestCase):
             QueryOracle("where", ("URLResolver",), ("WrongRoute",)),
         )
         self.assertFalse(result.passed)
+
+    def test_compass_query_validation_uses_typed_discovery_evidence(self) -> None:
+        oracle = QueryOracle(
+            question="where is URL resolution implemented",
+            expected_seeds=(
+                node_oracle("django.urls.resolvers.URLResolver", "django/urls/resolvers.py"),
+            ),
+            relevant_nodes=(
+                node_oracle("django.urls.resolvers.URLResolver", "django/urls/resolvers.py"),
+            ),
+            expected_direction="both",
+        )
+        result = validate_query_output(
+            """{
+              "schema":"compass.query.discovery/1",
+              "selectedDirection":"both",
+              "seeds":[{"nodeId":"n:url","source":{"file":"django/urls/resolvers.py"},"ambiguous":false}],
+              "nodes":[{"id":"n:url","qualifiedName":"django.urls.resolvers.URLResolver","source":{"file":"django/urls/resolvers.py"}}],
+              "edges":[],"diagnostics":[],"stats":{"candidateNodes":4,"expandedRelationships":2},"truncated":false
+            }""",
+            oracle,
+            tool="compass",
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertTrue(result.metrics["top1"])
+        self.assertEqual(result.metrics["candidate_nodes"], 4)
+
+    def test_compass_query_validation_rejects_wrong_seed_direction_and_missing_anchor(self) -> None:
+        oracle = QueryOracle(
+            question="what calls target",
+            expected_seeds=(node_oracle("pkg.target", "src/target.rs"),),
+            expected_direction="incoming",
+        )
+        result = validate_query_output(
+            '{"schema":"compass.query.discovery/1","selectedDirection":"outgoing",'
+            '"seeds":[{"nodeId":"n:other","source":null,"ambiguous":false}],'
+            '"nodes":[{"id":"n:other","qualifiedName":"pkg.other","source":null}],"edges":[],"diagnostics":[],"stats":{},"truncated":false}',
+            oracle,
+            tool="compass",
+        )
+        self.assertFalse(result.passed)
+        self.assertTrue(any("missing expected seeds" in failure for failure in result.failures))
+        self.assertTrue(any("direction mismatch" in failure for failure in result.failures))
+
+    def test_compass_seed_identity_is_resolved_through_returned_nodes(self) -> None:
+        oracle = QueryOracle(
+            "find target",
+            expected_seeds=(node_oracle("pkg.Target", "src/target.rs"),),
+        )
+        result = validate_query_output(
+            '{"schema":"compass.query.discovery/1","selectedDirection":"both",'
+            '"seeds":[{"nodeId":"n:target","qualifiedName":"spoofed","ambiguous":false}],'
+            '"nodes":[{"id":"n:target","qualifiedName":"pkg.Target","source":{"file":"src/target.rs"}}],'
+            '"edges":[],"diagnostics":[],"stats":{},"truncated":false}',
+            oracle,
+            tool="compass",
+        )
+        self.assertTrue(result.passed, result.failures)
+
+    def test_compass_top_one_accepts_declared_alternative_but_rejects_other_seed(self) -> None:
+        oracle = QueryOracle(
+            "find target",
+            expected_seeds=(node_oracle("pkg.Target", "src/target.rs"),),
+            acceptable_seeds=(node_oracle("pkg.TargetAlias", "src/alias.rs"),),
+        )
+        base = {
+            "schema": "compass.query.discovery/1",
+            "selectedDirection": "both",
+            "nodes": [
+                {"id": "target", "qualifiedName": "pkg.Target", "source": {"file": "src/target.rs"}},
+                {"id": "alias", "qualifiedName": "pkg.TargetAlias", "source": {"file": "src/alias.rs"}},
+                {"id": "other", "qualifiedName": "pkg.Other", "source": {"file": "src/other.rs"}},
+            ],
+            "edges": [], "diagnostics": [], "stats": {}, "truncated": False,
+        }
+        accepted = dict(base, seeds=[{"nodeId": "alias", "ambiguous": False}, {"nodeId": "target", "ambiguous": False}])
+        rejected = dict(base, seeds=[{"nodeId": "other", "ambiguous": False}, {"nodeId": "target", "ambiguous": False}])
+        self.assertTrue(validate_query_output(json.dumps(accepted), oracle, tool="compass").passed)
+        failure = validate_query_output(json.dumps(rejected), oracle, tool="compass")
+        self.assertFalse(failure.passed)
+        self.assertTrue(any("top-ranked" in item for item in failure.failures))
+
+    def test_compass_relevant_node_requires_matching_source_anchor(self) -> None:
+        oracle = QueryOracle(
+            "find target",
+            expected_seeds=(node_oracle("pkg.Target", "src/target.rs"),),
+            relevant_nodes=(node_oracle("pkg.Helper", "src/helper.rs"),),
+        )
+        payload = {
+            "schema": "compass.query.discovery/1", "selectedDirection": "both",
+            "seeds": [{"nodeId": "target", "ambiguous": False}],
+            "nodes": [
+                {"id": "target", "qualifiedName": "pkg.Target", "source": {"file": "src/target.rs"}},
+                {"id": "helper", "qualifiedName": "pkg.Helper", "source": {"file": "tests/helper.rs"}},
+            ],
+            "edges": [], "diagnostics": [], "stats": {}, "truncated": False,
+        }
+        result = validate_query_output(json.dumps(payload), oracle, tool="compass")
+        self.assertFalse(result.passed)
+        self.assertTrue(any("missing relevant nodes" in item for item in result.failures))
+
+    def test_compass_expected_edge_direction_is_enforced_relative_to_seed(self) -> None:
+        oracle = QueryOracle(
+            "what calls target",
+            expected_seeds=(node_oracle("pkg.Target", "src/target.rs"),),
+            expected_direction="incoming",
+            expected_edges=(QueryEdgeOracle("pkg.Target", "calls", "pkg.Caller", "incoming"),),
+        )
+        payload = {
+            "schema": "compass.query.discovery/1", "selectedDirection": "incoming",
+            "seeds": [{"nodeId": "target", "ambiguous": False}],
+            "nodes": [
+                {"id": "target", "qualifiedName": "pkg.Target", "source": {"file": "src/target.rs"}},
+                {"id": "caller", "qualifiedName": "pkg.Caller", "source": {"file": "src/caller.rs"}},
+            ],
+            "edges": [{"source": "target", "target": "caller", "kind": "calls"}],
+            "diagnostics": [], "stats": {}, "truncated": False,
+        }
+        result = validate_query_output(json.dumps(payload), oracle, tool="compass")
+        self.assertFalse(result.passed)
+        self.assertTrue(any("edge direction mismatch" in item for item in result.failures))
+
+    def test_compass_no_match_false_positive_is_explicit(self) -> None:
+        oracle = QueryOracle(
+            "find target",
+            expected_seeds=(node_oracle("pkg.Target", "src/target.rs"),),
+        )
+        payload = {
+            "schema": "compass.query.discovery/1", "selectedDirection": "both",
+            "seeds": [], "nodes": [], "edges": [],
+            "diagnostics": [{"code": "no_match"}], "stats": {}, "truncated": False,
+        }
+        result = validate_query_output(json.dumps(payload), oracle, tool="compass")
+        self.assertFalse(result.passed)
+        self.assertTrue(result.metrics["no_match_false_positive"])
+
+    def test_compass_expected_no_match_requires_diagnostic_and_zero_seeds(self) -> None:
+        oracle = QueryOracle("find absent target", allow_no_match=True)
+        valid = {
+            "schema": "compass.query.discovery/1",
+            "selectedDirection": "both",
+            "seeds": [],
+            "nodes": [],
+            "edges": [],
+            "diagnostics": [{"code": "no_match"}],
+            "stats": {},
+            "truncated": False,
+        }
+        self.assertTrue(
+            validate_query_output(json.dumps(valid), oracle, tool="compass").passed
+        )
+
+        missing_diagnostic = dict(valid, diagnostics=[])
+        result = validate_query_output(
+            json.dumps(missing_diagnostic), oracle, tool="compass"
+        )
+        self.assertFalse(result.passed)
+        self.assertTrue(any("expected no_match" in item for item in result.failures))
+
+        returned_seed = dict(
+            valid,
+            seeds=[{"nodeId": "target", "ambiguous": False}],
+            nodes=[
+                {
+                    "id": "target",
+                    "qualifiedName": "pkg.Target",
+                    "source": {"file": "src/target.rs"},
+                }
+            ],
+        )
+        result = validate_query_output(json.dumps(returned_seed), oracle, tool="compass")
+        self.assertFalse(result.passed)
+        self.assertTrue(any("returned seeds" in item for item in result.failures))
+
+    def test_compass_relevance_metrics_are_normalized_and_bounded_to_top_ten(self) -> None:
+        target_one = node_oracle("pkg.TargetOne", "src/one.rs")
+        target_two = node_oracle("pkg.TargetTwo", "src/two.rs")
+        oracle = QueryOracle(
+            "find targets",
+            expected_seeds=(target_one,),
+            relevant_nodes=(target_one, target_two),
+        )
+        nodes = [
+            {
+                "id": "one",
+                "qualifiedName": "pkg.TargetOne",
+                "source": {"file": "src/one.rs"},
+            },
+            {
+                "id": "two",
+                "qualifiedName": "pkg.TargetTwo",
+                "source": {"file": "src/two.rs"},
+            },
+        ]
+        nodes.extend(
+            {
+                "id": f"other-{index}",
+                "qualifiedName": f"pkg.Other{index}",
+                "source": {"file": f"src/other-{index}.rs"},
+            }
+            for index in range(9)
+        )
+        seeds = [{"nodeId": "one", "ambiguous": False}]
+        seeds.extend(
+            {"nodeId": f"other-{index}", "ambiguous": False}
+            for index in range(9)
+        )
+        seeds.append({"nodeId": "two", "ambiguous": False})
+        payload = {
+            "schema": "compass.query.discovery/1",
+            "selectedDirection": "both",
+            "seeds": seeds,
+            "nodes": nodes,
+            "edges": [],
+            "diagnostics": [],
+            "stats": {},
+            "truncated": False,
+        }
+        result = validate_query_output(json.dumps(payload), oracle, tool="compass")
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["mrr_at_10"], 1.0)
+        self.assertEqual(result.metrics["recall_at_10"], 0.5)
+        self.assertNotIn("mrr_millionths", result.metrics)
+
+        cutoff_oracle = QueryOracle(
+            "find second target",
+            expected_seeds=(target_one,),
+            relevant_nodes=(target_two,),
+        )
+        cutoff = validate_query_output(
+            json.dumps(payload), cutoff_oracle, tool="compass"
+        )
+        self.assertTrue(cutoff.passed, cutoff.failures)
+        self.assertEqual(cutoff.metrics["mrr_at_10"], 0.0)
+        self.assertEqual(cutoff.metrics["recall_at_10"], 0.0)
+
+    def test_compass_source_less_forbidden_seed_rejects_unresolved_distractor(self) -> None:
+        oracle = QueryOracle(
+            "find target",
+            expected_seeds=(node_oracle("pkg.Target", "src/target.rs"),),
+            forbidden_seeds=(QueryNodeOracle("Target", None),),
+        )
+        payload = {
+            "schema": "compass.query.discovery/1",
+            "selectedDirection": "both",
+            "seeds": [
+                {"nodeId": "target", "ambiguous": False},
+                {"nodeId": "placeholder", "ambiguous": False},
+            ],
+            "nodes": [
+                {
+                    "id": "target",
+                    "qualifiedName": "pkg.Target",
+                    "source": {"file": "src/target.rs"},
+                },
+                {"id": "placeholder", "qualifiedName": "Target", "source": None},
+            ],
+            "edges": [],
+            "diagnostics": [],
+            "stats": {},
+            "truncated": False,
+        }
+        result = validate_query_output(json.dumps(payload), oracle, tool="compass")
+        self.assertFalse(result.passed)
+        self.assertTrue(any("forbidden seed" in item for item in result.failures))
 
     def test_compassql_matrix_canonicalizes_results(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

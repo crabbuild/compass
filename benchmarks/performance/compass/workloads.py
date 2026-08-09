@@ -380,7 +380,184 @@ def run_build_matrix(
     )
 
 
-def validate_query_output(text: str, oracle: QueryOracle) -> CorrectnessResult:
+def _source_file(record: dict[str, object]) -> str:
+    source = record.get("source")
+    return str(source.get("file", "")) if isinstance(source, dict) else ""
+
+
+def _source_line(record: dict[str, object]) -> int | None:
+    source = record.get("source")
+    value = source.get("startLine") if isinstance(source, dict) else None
+    return value if isinstance(value, int) else None
+
+
+def _oracle_pair(oracle) -> tuple[str, str, int | None]:
+    if oracle.source is None:
+        return (oracle.qualified_name, "", None)
+    return (oracle.qualified_name, oracle.source.file, oracle.source.start_line)
+
+
+def _node_pair(node: dict[str, object]) -> tuple[str, str, int | None]:
+    return (str(node.get("qualifiedName", "")), _source_file(node), _source_line(node))
+
+
+def _pair_matches(
+    observed: tuple[str, str, int | None], expected: tuple[str, str, int | None]
+) -> bool:
+    return (
+        observed[0] == expected[0]
+        and (not expected[1] or observed[1] == expected[1])
+        and (expected[2] is None or observed[2] == expected[2])
+    )
+
+
+def _validate_compass_discovery(text: str, oracle: QueryOracle) -> CorrectnessResult:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as error:
+        message = f"invalid Compass discovery JSON: {error}"
+        return CorrectnessResult(False, hashlib.sha256(message.encode()).hexdigest(), (message,))
+    if not isinstance(payload, dict) or payload.get("schema") != "compass.query.discovery/1":
+        message = "Compass query did not emit compass.query.discovery/1"
+        return CorrectnessResult(False, hashlib.sha256(message.encode()).hexdigest(), (message,))
+    seeds = payload.get("seeds", [])
+    nodes = payload.get("nodes", [])
+    edges = payload.get("edges", [])
+    diagnostics = payload.get("diagnostics", [])
+    if not all(isinstance(value, list) for value in (seeds, nodes, edges, diagnostics)):
+        message = "Compass discovery arrays are malformed"
+        return CorrectnessResult(False, hashlib.sha256(message.encode()).hexdigest(), (message,))
+    seed_records = [item for item in seeds if isinstance(item, dict)]
+    node_records = [item for item in nodes if isinstance(item, dict)]
+    edge_records = [item for item in edges if isinstance(item, dict)]
+    nodes_by_id = {str(node.get("id", "")): node for node in node_records}
+    seed_pairs = [
+        _node_pair(nodes_by_id[str(seed.get("nodeId", ""))])
+        for seed in seed_records
+        if str(seed.get("nodeId", "")) in nodes_by_id
+    ]
+    expected = [_oracle_pair(item) for item in oracle.expected_seeds]
+    acceptable = [_oracle_pair(item) for item in oracle.acceptable_seeds]
+    forbidden = [_oracle_pair(item) for item in oracle.forbidden_seeds]
+    failures: list[str] = []
+    missing_expected = [
+        item for item in expected if not any(_pair_matches(seed, item) for seed in seed_pairs)
+    ]
+    if missing_expected:
+        failures.append(f"missing expected seeds: {missing_expected!r}")
+    if not expected and acceptable and not any(
+        _pair_matches(seed, item) for seed in seed_pairs for item in acceptable
+    ):
+        failures.append("no acceptable seed was returned")
+    returned_forbidden = [
+        item for item in forbidden if any(_pair_matches(seed, item) for seed in seed_pairs)
+    ]
+    if returned_forbidden:
+        failures.append(f"forbidden seed returned: {returned_forbidden!r}")
+    node_pairs = [_node_pair(node) for node in node_records]
+    relevant = [_oracle_pair(item) for item in oracle.relevant_nodes]
+    missing_nodes = [
+        item for item in relevant if not any(_pair_matches(node, item) for node in node_pairs)
+    ]
+    if missing_nodes:
+        failures.append(f"missing relevant nodes: {missing_nodes!r}")
+    selected_direction = payload.get("selectedDirection")
+    if selected_direction != oracle.expected_direction:
+        failures.append(
+            f"direction mismatch: expected {oracle.expected_direction}, got {selected_direction}"
+        )
+    ambiguous = any(bool(seed.get("ambiguous")) for seed in seed_records)
+    if ambiguous != oracle.expected_ambiguous:
+        failures.append(
+            f"ambiguity mismatch: expected {oracle.expected_ambiguous}, got {ambiguous}"
+        )
+    no_match = any(
+        isinstance(item, dict) and item.get("code") == "no_match" for item in diagnostics
+    )
+    no_match_false_positive = no_match and not oracle.allow_no_match
+    if no_match_false_positive:
+        failures.append("unexpected no_match diagnostic")
+    if oracle.allow_no_match and not no_match:
+        failures.append("expected no_match diagnostic")
+    if oracle.allow_no_match and seed_records:
+        failures.append("expected no_match response returned seeds")
+    elif no_match and seed_records:
+        failures.append("no_match response returned seeds")
+    if not no_match and not seed_records:
+        failures.append("empty result omitted the no_match diagnostic")
+    for expected_edge in oracle.expected_edges:
+        matching = [
+            edge
+            for edge in edge_records
+            if nodes_by_id.get(str(edge.get("source")), {}).get("qualifiedName")
+            == expected_edge.source
+            and nodes_by_id.get(str(edge.get("target")), {}).get("qualifiedName")
+            == expected_edge.target
+            and edge.get("kind") == expected_edge.relation
+        ]
+        if expected_edge.site is not None:
+            matching = [edge for edge in matching if _source_file({"source": edge.get("relationshipSite")}) == expected_edge.site]
+        if not matching:
+            failures.append(
+                "missing expected edge: "
+                f"{expected_edge.source} {expected_edge.relation} {expected_edge.target}"
+            )
+            continue
+        seed_ids = {str(seed.get("nodeId", "")) for seed in seed_records}
+        direction_matches = any(
+            (expected_edge.direction == "outgoing" and str(edge.get("source")) in seed_ids)
+            or (expected_edge.direction == "incoming" and str(edge.get("target")) in seed_ids)
+            for edge in matching
+        )
+        if not direction_matches:
+            failures.append(
+                "expected edge direction mismatch: "
+                f"{expected_edge.source} {expected_edge.relation} {expected_edge.target} "
+                f"must be {expected_edge.direction} relative to a seed"
+            )
+    source_anchor_count = sum(bool(_source_file(node)) for node in node_records)
+    top_one = bool(seed_pairs) and any(
+        _pair_matches(seed_pairs[0], item) for item in expected + acceptable
+    )
+    if seed_records and (expected or acceptable) and not top_one:
+        failures.append("top-ranked seed is neither expected nor acceptable")
+    top_ten = seed_pairs[:10]
+    relevant_hits_at_ten = sum(
+        any(_pair_matches(seed, item) for seed in top_ten) for item in relevant
+    )
+    recall_at_ten = relevant_hits_at_ten / len(relevant) if relevant else 0.0
+    reciprocal_rank_at_ten = 0.0
+    for rank, seed in enumerate(seed_records[:10], 1):
+        node = nodes_by_id.get(str(seed.get("nodeId", "")))
+        if node is not None and any(_pair_matches(_node_pair(node), item) for item in relevant):
+            reciprocal_rank_at_ten = 1.0 / rank
+            break
+    stats = payload.get("stats") if isinstance(payload.get("stats"), dict) else {}
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return CorrectnessResult(
+        passed=not failures,
+        digest=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        failures=tuple(failures),
+        metrics={
+            "top1": top_one,
+            "mrr_at_10": reciprocal_rank_at_ten,
+            "recall_at_10": recall_at_ten,
+            "direction_correct": selected_direction == oracle.expected_direction,
+            "ambiguity_correct": ambiguous == oracle.expected_ambiguous,
+            "source_anchor_count": source_anchor_count,
+            "no_match_false_positive": no_match_false_positive,
+            "candidate_nodes": int(stats.get("candidateNodes", 0)),
+            "expanded_relationships": int(stats.get("expandedRelationships", 0)),
+            "complete": not bool(payload.get("truncated")),
+        },
+    )
+
+
+def validate_query_output(
+    text: str, oracle: QueryOracle, *, tool: str = "cross-tool"
+) -> CorrectnessResult:
+    if tool == "compass":
+        return _validate_compass_discovery(text, oracle)
     folded = text.casefold()
     failures = [
         f"missing required query evidence: {required}"
@@ -429,7 +606,7 @@ def run_query_matrix(
                 )
             )
             output = Path(metrics.stdout_path).read_text(encoding="utf-8", errors="replace")
-            correctness = validate_query_output(output, oracle)
+            correctness = validate_query_output(output, oracle, tool=adapter.name)
             error = None
             if metrics.return_code != 0 or metrics.timed_out:
                 error = f"query failed with return code {metrics.return_code}"
@@ -452,6 +629,7 @@ def run_query_matrix(
                     metrics=metrics,
                     correctness_digest=correctness.digest,
                     error=error,
+                    evidence=correctness.metrics,
                 )
             )
         results.append(_result(adapter.name, spec.name, workload, samples, failures))
