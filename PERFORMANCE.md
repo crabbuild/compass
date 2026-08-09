@@ -26,13 +26,15 @@ review and evidence explaining the tradeoff.
 
 ## Query-relevance qualification
 
-The native query-relevance gate keeps two intentionally separate evidence
+The native query-relevance gate keeps three intentionally separate evidence
 sets: the checked-in 80-question reviewed synthetic corpus validates fixture,
-schema, scoring, and metric behavior; a 23-question, production-shaped
-executable subset runs actual
+schema, scoring, and metric behavior; a 500-question AI-reviewed synthetic
+matrix executes all eight query classes on a digest-pinned graph; and a
+23-question, production-shaped subset runs actual
 `CodeQueryEngine::query_natural_profiled` requests for search, callers,
 callees, impact, directed-path, and no-answer cases against the support graph.
-The executable subset
+The 500 records are approved synthetic equivalence cases, not production
+telemetry or independent human judgments. The smaller executable subset
 therefore qualifies the planner and typed operation together. It derives its
 canonical graph digest, records measured latency and serialized response bytes,
 and requires matching ordered observations from JSON, store, and a repeated
@@ -46,10 +48,11 @@ CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
   python3 scripts/qualify_query_relevance.py
 ```
 
-The gate fails on corpus/schema/digest drift, non-deterministic backend output,
-or a reviewed minimum metric miss. Its thresholds currently require perfect
-Success@1, edge-direction precision, path acceptance, and no-answer precision
-for the deliberately small executable graph. It reports MRR, Recall@k, nDCG,
+The gate fails on generated-artifact, corpus/schema/digest drift,
+non-deterministic backend output, or a reviewed minimum metric miss. The
+500-query thresholds require perfect Success@1, Recall@5, intent macro-F1,
+slot exact match, edge/direction recall, path acceptance, and no-answer
+behavior for the deliberately small executable graph. It reports MRR, Recall@k, nDCG,
 intent macro-F1, edge-kind/direction precision and recall, backend parity,
 latency percentiles, and versioned query work. The profile records intent,
 recall, ranking, execution, and total microseconds. Its logical work counters
@@ -57,6 +60,13 @@ measure candidate records observed before deduplication, term candidates
 materialized by bounded posting lookup, nodes and edges examined by traversal
 or relationship probes, and exact serialized response bytes. These counters
 come from the query engine rather than being inferred from result size.
+
+Single-edit fuzzy recall is capped at 192 variants per eligible term and 256
+variants per query. An immutable per-engine LRU retains at most 512 fuzzy
+name-lookup results, keyed by variant and requested result limit. This prevents
+large paraphrase matrices from repeating empty SQLite probes while preserving
+the same candidate and truncation contract. Qualification also checks every
+observation against candidate, node, edge, and response-byte work limits.
 
 Refresh a judged corpus, executable request, digest expectation, or threshold
 only with a reviewed intent/identity change and updated deterministic evidence;

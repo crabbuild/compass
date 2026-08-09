@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add a digest-pinned 500-question, AI-reviewed synthetic relevance matrix
+  covering all query classes, execute it in CI with strict ranking, recall,
+  intent, structural, no-answer, and work bounds, and keep its generated JSON
+  reproducible from reviewed equivalence classes. Complete bounded single-edit
+  fuzzy recovery for insertion and substitution typos, avoid mistaking
+  `caller`/`callee` symbol names for contradictory intent, and cache at most
+  512 immutable fuzzy name lookups per engine.
+
 - Add deterministic, bounded natural-language routing for symbol search,
   callers, callees, impact, and node trails through `compass ask`, clear
   `compass query` intents, and MCP `query_graph`. Generic, contradictory,

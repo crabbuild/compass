@@ -194,21 +194,6 @@ fn plan_validated_natural_query(question: &str) -> NaturalQueryPlan {
         return plan(NaturalQueryIntent::NodeTrail, 100, [source, target]);
     }
 
-    // Contradictory direction words are deliberately not resolved by choosing
-    // the first cue. Search is the safe fallback and can surface candidates.
-    // Explicit path syntax is parsed first because symbol names can themselves
-    // contain words such as `caller` and `callee`.
-    if (["caller", "callers"]
-        .iter()
-        .any(|word| contains_word(&lower, word))
-        && ["callee", "callees"]
-            .iter()
-            .any(|word| contains_word(&lower, word)))
-        || (contains_word(&lower, "incoming") && contains_word(&lower, "outgoing"))
-    {
-        return fallback_plan(original);
-    }
-
     for prefix in [
         "find callers of ",
         "show callers of ",
@@ -244,6 +229,21 @@ fn plan_validated_natural_query(question: &str) -> NaturalQueryPlan {
                 return plan(NaturalQueryIntent::Callees, 100, [symbol]);
             }
         }
+    }
+
+    // Contradictory direction words are deliberately not resolved by choosing
+    // the first cue. Search is the safe fallback and can surface candidates.
+    // Explicit structural syntax is parsed first because symbol operands can
+    // themselves contain words such as `caller` and `callee`.
+    if (["caller", "callers"]
+        .iter()
+        .any(|word| contains_word(&lower, word))
+        && ["callee", "callees"]
+            .iter()
+            .any(|word| contains_word(&lower, word)))
+        || (contains_word(&lower, "incoming") && contains_word(&lower, "outgoing"))
+    {
+        return fallback_plan(original);
     }
 
     for prefix in [
@@ -403,6 +403,10 @@ mod tests {
         );
         assert_eq!(
             planned("What does Api.caller call?")?,
+            (NaturalQueryIntent::Callees, vec!["Api.caller".to_owned()])
+        );
+        assert_eq!(
+            planned("Find callees of Api.caller")?,
             (NaturalQueryIntent::Callees, vec!["Api.caller".to_owned()])
         );
         assert_eq!(

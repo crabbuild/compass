@@ -136,13 +136,15 @@ path, preventing consumers from treating an inverted relationship as valid.
 
 ## Relevance qualification
 
-`crates/compass-query/tests/relevance_qualification.rs` separates the reviewed
-80-question synthetic corpus from a 23-question, production-shaped executable
-baseline. The larger
-corpus exercises the versioned judgment and metric contract without pretending
-that its synthetic identities can execute on a production graph. The executable
-subset sends natural-language questions through `query_natural_profiled` on the
-checked-in support graph, derives its canonical graph digest, and maps actual
+`crates/compass-query/tests/relevance_qualification.rs` keeps three evidence
+layers separate: an 80-question metric-contract fixture, a 500-question
+AI-reviewed synthetic executable matrix, and a 23-question production-shaped
+cross-backend subset. The 500 records cover every query class and send each
+natural-language question through `query_natural_profiled` on the digest-pinned
+support graph. They require exact rank-one and recall, intent/slot, directed
+edge/path, no-answer, and bounded-work thresholds. Their review notes explicitly
+state that they are synthetic and not production telemetry. The 23-question
+subset maps actual
 `CodeQueryResponse` values into ordered node IDs, directed edges, paths,
 truncation/no-answer state, measured latency, and serialized response bytes.
 JSON/store parity and repeated store execution must agree once timing is
@@ -159,6 +161,13 @@ responses contain no timing fields and remain byte-deterministic.
 The reviewed executable threshold block lives beside the test so a failure is
 local and deterministic. Updating its expected identities, graph digest, or
 minimums requires an intentional review rather than copying a new result.
+The generated 500-record artifact is checked against
+`scripts/generate_query_relevance_corpus.py --check` before execution. Fuzzy
+recall covers bounded adjacent transposition, deletion, insertion, and
+substitution variants (192 per eligible term and 256 per query), and a
+512-entry per-engine LRU caches immutable name-lookup results. The cache is
+keyed by normalized variant and result limit, so it cannot reuse an unbounded
+or differently truncated result.
 `scripts/prepare_query_relevance_review.py` turns approved local JSONL query
 logs into bounded, redacted, deterministic review candidates. It never sends
 data, invents expected results, or writes directly to the judgment corpus; a

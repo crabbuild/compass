@@ -27,9 +27,11 @@ use crate::text::strip_diacritics;
 type GraphPath = (Vec<String>, Vec<String>);
 type BoundedPathResult = (Option<GraphPath>, bool);
 const MAX_CODE_QUERY_CANDIDATES: u32 = 256;
-const MAX_RECALL_FUZZY_VARIANTS_PER_TERM: usize = 3;
+const MAX_RECALL_FUZZY_VARIANTS_PER_TERM: usize = 192;
+const MAX_RECALL_FUZZY_VARIANTS_TOTAL: usize = 256;
 const MIN_RECALL_CANDIDATES_BEFORE_FUZZY: usize = 4;
 const SEARCH_QUERY_CACHE_CAPACITY: usize = 64;
+const FUZZY_LOOKUP_CACHE_CAPACITY: usize = 512;
 
 const ALL_EDGE_KINDS: &[EdgeKind] = &[
     EdgeKind::Contains,
@@ -171,6 +173,7 @@ pub struct CodeQueryEngine {
     pub(crate) partial_graph_message: Option<String>,
     pub(crate) engine_kind: QueryEngineKind,
     pub(crate) search_query_cache: Mutex<SearchQueryCache>,
+    pub(crate) fuzzy_lookup_cache: Mutex<FuzzyLookupCache>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -214,6 +217,48 @@ impl SearchQueryCache {
         }
         self.order.push_back(query.clone());
         self.entries.insert(query, prepared);
+    }
+}
+
+type FuzzyLookupValue = (Vec<NodeRecord>, bool);
+
+#[derive(Debug)]
+pub(crate) struct FuzzyLookupCache {
+    entries: HashMap<(String, usize), FuzzyLookupValue>,
+    order: VecDeque<(String, usize)>,
+    capacity: usize,
+}
+
+impl Default for FuzzyLookupCache {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::with_capacity(FUZZY_LOOKUP_CACHE_CAPACITY),
+            order: VecDeque::with_capacity(FUZZY_LOOKUP_CACHE_CAPACITY),
+            capacity: FUZZY_LOOKUP_CACHE_CAPACITY,
+        }
+    }
+}
+
+impl FuzzyLookupCache {
+    fn get(&mut self, name: &str, limit: usize) -> Option<FuzzyLookupValue> {
+        let key = (name.to_owned(), limit);
+        let value = self.entries.get(&key)?.clone();
+        self.order.retain(|cached| cached != &key);
+        self.order.push_back(key);
+        Some(value)
+    }
+
+    fn insert(&mut self, name: String, limit: usize, value: FuzzyLookupValue) {
+        let key = (name, limit);
+        self.order.retain(|cached| cached != &key);
+        while self.entries.len() >= self.capacity {
+            let Some(expired) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&expired);
+        }
+        self.order.push_back(key.clone());
+        self.entries.insert(key, value);
     }
 }
 
@@ -814,9 +859,8 @@ impl CodeQueryEngine {
                 if pool.len() >= candidate_limit {
                     break;
                 }
-                let (fuzzy_nodes, fuzzy_truncated) = self
-                    .backend
-                    .nodes_by_normalized_name(&variant, budget.max_fuzzy_candidates)?;
+                let (fuzzy_nodes, fuzzy_truncated) =
+                    self.cached_fuzzy_nodes(&variant, budget.max_fuzzy_candidates)?;
                 pool.add_many(CandidateSource::Fuzzy, fuzzy_nodes);
                 truncated |= fuzzy_truncated;
                 if pool.truncated_by_fuzzy_capacity() {
@@ -852,6 +896,25 @@ impl CodeQueryEngine {
             postings_decoded,
             relation_edges_examined,
         })
+    }
+
+    fn cached_fuzzy_nodes(&self, name: &str, limit: usize) -> Result<FuzzyLookupValue, QueryError> {
+        {
+            let mut cache = match self.fuzzy_lookup_cache.lock() {
+                Ok(cache) => cache,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if let Some(value) = cache.get(name, limit) {
+                return Ok(value);
+            }
+        }
+        let value = self.backend.nodes_by_normalized_name(name, limit)?;
+        let mut cache = match self.fuzzy_lookup_cache.lock() {
+            Ok(cache) => cache,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        cache.insert(name.to_owned(), limit, value.clone());
+        Ok(value)
     }
 
     fn prepare_search_query(&self, query: &str) -> Result<PreparedSearchQuery, QueryError> {
@@ -1872,12 +1935,19 @@ fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
 }
 
 fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
-    let mut seen = BTreeSet::new();
+    let mut seen = terms.iter().cloned().collect::<BTreeSet<_>>();
     let mut variants = Vec::new();
-    let max_total_variants = terms
-        .len()
-        .saturating_mul(MAX_RECALL_FUZZY_VARIANTS_PER_TERM)
-        .max(1);
+    let eligible_terms = terms
+        .iter()
+        .filter(|term| term.chars().count() >= 4)
+        .count();
+    let per_term_limit = MAX_RECALL_FUZZY_VARIANTS_PER_TERM.min(
+        MAX_RECALL_FUZZY_VARIANTS_TOTAL
+            .checked_div(eligible_terms.max(1))
+            .unwrap_or(1)
+            .max(1),
+    );
+    let max_total_variants = eligible_terms.saturating_mul(per_term_limit).max(1);
 
     for term in terms {
         let chars = term.chars().collect::<Vec<_>>();
@@ -1888,7 +1958,7 @@ fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
         if remaining_capacity == 0 {
             break;
         }
-        let per_term_target = remaining_capacity.min(MAX_RECALL_FUZZY_VARIANTS_PER_TERM);
+        let per_term_target = remaining_capacity.min(per_term_limit);
         let mut emitted = 0_usize;
         let stripped = strip_diacritics(term);
         if stripped != *term && stripped.len() >= 3 && seen.insert(stripped.clone()) {
@@ -1930,6 +2000,58 @@ fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
             if seen.insert(variant.clone()) {
                 variants.push(variant);
                 emitted = emitted.saturating_add(1);
+            }
+        }
+
+        // Missing a repeated character is common (`calee` -> `callee`) and
+        // can be recovered before the broader ASCII edit matrix.
+        for index in 0..chars.len() {
+            if emitted >= per_term_target {
+                break;
+            }
+            let mut variant = chars.clone();
+            variant.insert(index, chars[index]);
+            let variant = variant.iter().collect::<String>();
+            if seen.insert(variant.clone()) {
+                variants.push(variant);
+                emitted = emitted.saturating_add(1);
+            }
+        }
+
+        if emitted >= per_term_target || !term.is_ascii() {
+            continue;
+        }
+        // Bounded ASCII insertion and substitution recover the other common
+        // single-edit typo classes while retaining exact index probes. The
+        // replacement character is the outer loop so likely alphabetic edits
+        // are reached before the fixed per-term ceiling.
+        for replacement in "abcdefghijklmnopqrstuvwxyz0123456789_".chars() {
+            for index in 0..=chars.len() {
+                if emitted >= per_term_target {
+                    break;
+                }
+                if index < chars.len() && chars[index] != replacement {
+                    let mut variant = chars.clone();
+                    variant[index] = replacement;
+                    let variant = variant.iter().collect::<String>();
+                    if seen.insert(variant.clone()) {
+                        variants.push(variant);
+                        emitted = emitted.saturating_add(1);
+                    }
+                }
+                if emitted >= per_term_target {
+                    break;
+                }
+                let mut variant = chars.clone();
+                variant.insert(index, replacement);
+                let variant = variant.iter().collect::<String>();
+                if seen.insert(variant.clone()) {
+                    variants.push(variant);
+                    emitted = emitted.saturating_add(1);
+                }
+            }
+            if emitted >= per_term_target {
+                break;
             }
         }
     }
@@ -2214,8 +2336,8 @@ mod adjacency_tests {
 #[cfg(test)]
 mod fuzzy_term_variant_tests {
     use super::{
-        MAX_RECALL_FUZZY_VARIANTS_PER_TERM, PreparedSearchQuery, SearchQueryCache,
-        recall_fuzzy_term_variants,
+        FuzzyLookupCache, MAX_RECALL_FUZZY_VARIANTS_PER_TERM, MAX_RECALL_FUZZY_VARIANTS_TOTAL,
+        PreparedSearchQuery, SearchQueryCache, recall_fuzzy_term_variants,
     };
 
     #[test]
@@ -2230,6 +2352,7 @@ mod fuzzy_term_variant_tests {
         assert_eq!(first, second, "variant generation must be deterministic");
         assert!(!first.is_empty());
         assert!(first.len() <= terms.len() * MAX_RECALL_FUZZY_VARIANTS_PER_TERM);
+        assert!(first.len() <= MAX_RECALL_FUZZY_VARIANTS_TOTAL);
         assert!(first.iter().all(|variant| variant.len() >= 3));
         let unique = first.iter().collect::<std::collections::BTreeSet<_>>();
         assert_eq!(unique.len(), first.len());
@@ -2259,6 +2382,19 @@ mod fuzzy_term_variant_tests {
         assert!(variants.iter().any(|variant| variant == "list"));
     }
 
+    #[test]
+    fn recall_fuzzy_term_variants_cover_single_edit_typo_classes() {
+        for (typo, expected) in [
+            ("cace_key", "cache_key"),
+            ("callar", "caller"),
+            ("calee", "callee"),
+        ] {
+            let variants = recall_fuzzy_term_variants(&[typo.to_owned()]);
+            assert!(variants.iter().any(|variant| variant == expected));
+            assert!(variants.len() <= MAX_RECALL_FUZZY_VARIANTS_TOTAL);
+        }
+    }
+
     fn prepared(term: &str) -> PreparedSearchQuery {
         PreparedSearchQuery {
             terms: vec![term.to_owned()],
@@ -2282,5 +2418,21 @@ mod fuzzy_term_variant_tests {
         assert!(cache.get("two").is_none());
         assert!(cache.get("three").is_some());
         assert_eq!(cache.entries.len(), 2);
+    }
+
+    #[test]
+    fn fuzzy_lookup_cache_is_bounded_and_keys_limits() {
+        let mut cache = FuzzyLookupCache {
+            entries: Default::default(),
+            order: Default::default(),
+            capacity: 2,
+        };
+        cache.insert("one".to_owned(), 1, (Vec::new(), false));
+        cache.insert("one".to_owned(), 2, (Vec::new(), true));
+        assert_eq!(cache.get("one", 1), Some((Vec::new(), false)));
+        cache.insert("three".to_owned(), 1, (Vec::new(), false));
+        assert_eq!(cache.get("one", 2), None);
+        assert!(cache.get("one", 1).is_some());
+        assert!(cache.get("three", 1).is_some());
     }
 }

@@ -27,6 +27,12 @@ fn corpus() -> Result<JudgmentCorpus, Box<dyn std::error::Error>> {
     Ok(corpus)
 }
 
+fn executable_reviewed_corpus() -> Result<JudgmentCorpus, Box<dyn std::error::Error>> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/relevance/executable-reviewed-v2.json");
+    Ok(serde_json::from_slice::<JudgmentCorpus>(&fs::read(path)?)?)
+}
+
 fn observation(query: &compass_query::JudgedQuery, ordinal: u64) -> QueryObservation {
     let mut node_ids = query
         .node_judgments
@@ -663,6 +669,151 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
             ]),
         )?)?
     );
+    Ok(())
+}
+
+#[test]
+fn five_hundred_reviewed_queries_execute_with_qualified_relevance_and_bounded_work()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let graph = GraphDocument::load(&graph_path)?;
+    let graph_digest = format!("sha256:{:x}", Sha256::digest(canonical_graph_json(&graph)?));
+    let corpus = executable_reviewed_corpus()?;
+    corpus.validate_graph_digest(&graph_digest)?;
+    assert_eq!(corpus.queries.len(), 500);
+
+    let class_counts =
+        corpus
+            .queries
+            .iter()
+            .fold(BTreeMap::<String, usize>::new(), |mut counts, query| {
+                *counts.entry(format!("{:?}", query.class)).or_default() += 1;
+                counts
+            });
+    assert_eq!(
+        class_counts,
+        BTreeMap::from([
+            ("Architecture".to_owned(), 30),
+            ("Edge".to_owned(), 120),
+            ("Exact".to_owned(), 80),
+            ("Fuzzy".to_owned(), 32),
+            ("Intent".to_owned(), 76),
+            ("Lexical".to_owned(), 72),
+            ("Negative".to_owned(), 40),
+            ("Path".to_owned(), 50),
+        ])
+    );
+    assert!(corpus.queries.iter().all(|query| {
+        query.locale.as_deref() == Some("en-US")
+            && query.notes.as_deref().is_some_and(|notes| {
+                notes.contains("AI-reviewed synthetic equivalence case")
+                    && notes.contains("not production telemetry")
+            })
+    }));
+    assert_eq!(
+        corpus
+            .queries
+            .iter()
+            .map(|query| query.text.as_str())
+            .collect::<BTreeSet<_>>()
+            .len(),
+        corpus.queries.len(),
+        "reviewed questions must be textually unique"
+    );
+
+    publish_snapshot(directory.path(), &graph_path)?;
+    let engine = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("store-cache"),
+        EngineSelection::Store,
+    )?;
+    let observations = execute_subset(&engine, &corpus)?;
+    let report = qualification_report(
+        &corpus,
+        &observations,
+        QUERY_RANKER_PROFILE_V2,
+        QUERY_PLANNER_PROFILE_V1,
+        "store",
+        BTreeMap::from([
+            (
+                "maxCandidates".to_owned(),
+                u64::from(CodeQueryLimits::default().max_candidates),
+            ),
+            (
+                "maxNodes".to_owned(),
+                u64::from(CodeQueryLimits::default().max_nodes),
+            ),
+        ]),
+    )?;
+    let misses = corpus
+        .queries
+        .iter()
+        .zip(&observations)
+        .filter_map(|(query, observation)| {
+            let exact = query
+                .node_judgments
+                .iter()
+                .filter(|judgment| judgment.grade == 3)
+                .map(|judgment| judgment.id.as_str())
+                .collect::<BTreeSet<_>>();
+            (!exact.is_empty()
+                && !observation
+                    .node_ids
+                    .first()
+                    .is_some_and(|id| exact.contains(id.as_str())))
+            .then(|| {
+                (
+                    query.id.as_str(),
+                    query.text.as_str(),
+                    observation.node_ids.first(),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    assert!(misses.is_empty(), "reviewed rank-1 misses: {misses:?}");
+    let recall_misses = corpus
+        .queries
+        .iter()
+        .zip(&observations)
+        .filter_map(|(query, observation)| {
+            let missing = query
+                .node_judgments
+                .iter()
+                .filter(|judgment| judgment.grade >= 2)
+                .filter(|judgment| {
+                    !observation
+                        .node_ids
+                        .iter()
+                        .take(5)
+                        .any(|id| id == &judgment.id)
+                })
+                .map(|judgment| judgment.id.as_str())
+                .collect::<Vec<_>>();
+            (!missing.is_empty()).then_some((query.id.as_str(), missing, &observation.node_ids))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        recall_misses.is_empty(),
+        "reviewed recall@5 misses: {recall_misses:?}"
+    );
+    assert_eq!(report.metrics.success_at_1.value, Some(1.0));
+    assert_eq!(report.metrics.recall_at_5.value, Some(1.0));
+    assert_eq!(report.metrics.intent_macro_f1.value, Some(1.0));
+    assert_eq!(report.metrics.entity_slot_exact_match.value, Some(1.0));
+    assert_eq!(report.metrics.edge_recall.value, Some(1.0));
+    assert_eq!(report.metrics.edge_direction_recall.value, Some(1.0));
+    assert_eq!(report.metrics.path_acceptance_rate.value, Some(1.0));
+    assert_eq!(report.metrics.no_answer_precision.value, Some(1.0));
+    assert_eq!(report.metrics.false_positive_rate.value, Some(0.0));
+    assert!(observations.iter().all(|observation| {
+        observation.work.candidates_read <= 128
+            && observation.work.nodes_expanded <= u64::from(CodeQueryLimits::default().max_nodes)
+            && observation.work.edges_expanded <= u64::from(CodeQueryLimits::default().max_edges)
+            && observation.work.response_bytes <= CodeQueryLimits::default().max_response_bytes
+    }));
     Ok(())
 }
 
