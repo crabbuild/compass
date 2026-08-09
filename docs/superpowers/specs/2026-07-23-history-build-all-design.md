@@ -371,7 +371,7 @@ compass history build main --all --code-only
 ### Real-repository qualification
 
 Create a shallow disposable clone of
-`/Volumes/Workspace/Github/cocoindex` containing a small number of commits.
+`<qualification-corpus-root>/cocoindex` containing a small number of commits.
 Run:
 
 ```bash

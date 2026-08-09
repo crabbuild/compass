@@ -111,14 +111,14 @@ Set the external target on every Cargo invocation:
 
 | Purpose | Command | Expected on success |
 |---|---|---|
-| Media | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-media --locked` | exit 0 |
-| Semantic | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-semantic --locked` | exit 0 |
-| Files | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-files --locked` | exit 0 |
-| Lint | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo clippy -p compass-media -p compass-semantic -p compass-files --all-targets --all-features --locked -- -D warnings` | exit 0 |
+| Media | `cargo test -p compass-media --locked` | exit 0 |
+| Semantic | `cargo test -p compass-semantic --locked` | exit 0 |
+| Files | `cargo test -p compass-files --locked` | exit 0 |
+| Lint | `cargo clippy -p compass-media -p compass-semantic -p compass-files --all-targets --all-features --locked -- -D warnings` | exit 0 |
 | Format | `cargo fmt --all -- --check` | exit 0 |
 | Boundary | `sh scripts/check_product_boundary.sh` | exit 0 |
 
-If `/Volumes/Workspace` is unavailable or unwritable, stop rather than using a
+If the chosen Cargo target directory is unwritable, stop rather than using a
 local `target/` directory.
 
 ## Scope

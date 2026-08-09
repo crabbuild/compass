@@ -41,11 +41,11 @@ and requires matching ordered observations from JSON, store, and a repeated
 store execution. Timing is measured but removed before the deterministic
 response-baseline comparison.
 
-Run the gate with this checkout's external Cargo target:
+Run the gate. If you redirect Cargo output, use a target directory dedicated to
+this checkout:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
-  python3 scripts/qualify_query_relevance.py
+python3 scripts/qualify_query_relevance.py
 ```
 
 The gate fails on generated-artifact, corpus/schema/digest drift,
@@ -95,11 +95,11 @@ amplification, immutable-object reuse, GC state, and JSON/typed-query/
 CompassQL differential results. It also measures a small real CLI workflow:
 clean build, unchanged update, one-file update, and cold JSON/store search.
 The store workflow passes `--store sqlite`; ordinary builds remain JSON-only.
-Run it from a checkout with the required external target directory:
+Run it from a checkout. If you redirect Cargo output, use a target directory
+dedicated to this checkout:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-store-<checkout> \
-  scripts/qualify_compass_store_release.sh
+scripts/qualify_compass_store_release.sh
 ```
 
 The default graph sizes are 32, 128, and 512 generated nodes. Raw JSON and

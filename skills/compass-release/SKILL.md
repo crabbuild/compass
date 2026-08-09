@@ -1,7 +1,7 @@
 ---
 name: compass-release
 description: Release Compass from the latest origin/main. Use this skill whenever a user asks to sync Compass, bump a Compass version, create or merge a release PR, build or publish macOS/Linux/Windows artifacts, write release notes, verify release downloads, or build the matching VS Code VSIX. Follow the complete gated workflow rather than treating a release as a local version edit.
-compatibility: Requires git, GitHub CLI (gh) with push/release permission, jq, Rust 1.97.1, Cargo, Node/npm, tar, shasum (or sha256sum), and a writable /Volumes/Workspace/crabbuild-target volume for Cargo builds.
+compatibility: Requires git, GitHub CLI (gh) with push/release permission, jq, Rust 1.97.1, Cargo, Node/npm, tar, and shasum (or sha256sum).
 ---
 
 # Compass release
@@ -23,7 +23,7 @@ Use these shell variables after the version is confirmed:
 version="<requested-version>"
 tag="compass-v${version}"
 branch="codex/release-${version}"
-target_dir="/Volumes/Workspace/crabbuild-target/compass-release-${version}"
+target_dir="${CARGO_TARGET_DIR:-$(git rev-parse --show-toplevel)/target}"
 ```
 
 ## Safety gates
@@ -31,7 +31,7 @@ target_dir="/Volumes/Workspace/crabbuild-target/compass-release-${version}"
 Stop and report the blocker instead of improvising when:
 
 1. The worktree has user changes (`git status --short` is non-empty). Preserve them; never use `git reset --hard`, `git clean`, force-push, or overwrite unrelated files.
-2. `/Volumes/Workspace` is missing or `$target_dir` cannot be created and written. Cargo must not fall back to a local `target/` directory.
+2. `$target_dir` cannot be created and written.
 3. The requested tag already exists, points at a different commit, or the GitHub release already exists. Published realizations are immutable.
 4. `gh auth status` or repository permissions do not allow fetching, pushing, PR operations, or release inspection.
 5. Metadata, validation, PR checks, tag validation, a release job, an archive checksum, or an archive smoke check fails. Do not publish a partial artifact set.
@@ -80,10 +80,9 @@ Build release notes from the meaningful commits between the previous `compass-v*
 
 ## 3. Validate before publishing the PR
 
-Verify the build volume and create only this checkout's target directory:
+Create and verify this checkout's target directory:
 
 ```sh
-test -d /Volumes/Workspace
 mkdir -p "$target_dir"
 test -w "$target_dir"
 ```

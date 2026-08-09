@@ -53,18 +53,16 @@ document IR planned in 007. It is intentionally safe to land first.
 
 ## Commands you will need
 
-Set the external target on every Cargo invocation:
-
 | Purpose | Command | Expected on success |
 |---|---|---|
-| Media tests | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-media --locked` | exit 0 |
-| Semantic tests | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-semantic --locked` | exit 0 |
-| Lint | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo clippy -p compass-media -p compass-semantic --all-targets --all-features --locked -- -D warnings` | exit 0 |
+| Media tests | `cargo test -p compass-media --locked` | exit 0 |
+| Semantic tests | `cargo test -p compass-semantic --locked` | exit 0 |
+| Lint | `cargo clippy -p compass-media -p compass-semantic --all-targets --all-features --locked -- -D warnings` | exit 0 |
 | Format | `cargo fmt --all -- --check` | exit 0 |
 | Boundary | `sh scripts/check_product_boundary.sh` | exit 0 |
 
-If `/Volumes/Workspace` is unavailable or unwritable, stop. Do not fall back to
-a target directory inside the checkout.
+If you redirect Cargo output with `CARGO_TARGET_DIR`, set it on every
+invocation above and use a directory dedicated to this checkout.
 
 ## Scope
 

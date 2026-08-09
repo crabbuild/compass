@@ -131,7 +131,7 @@ Every phase follows these rules independently:
    `compass-files`, query behavior in `compass-query`, and public command
    effects in `compass-cli`.
 8. **Use one target directory per checkout.** Every compiling Cargo command
-   sets `CARGO_TARGET_DIR` under `/Volumes/Workspace/crabbuild-target` as
+   sets `CARGO_TARGET_DIR` under `<qualification-corpus-root>/crabbuild-target` as
    required by `AGENTS.md`.
 
 ## Phase dependency map
@@ -193,15 +193,12 @@ A phase is complete only when:
 The normal final Rust baseline is:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
-  cargo fmt --all -- --check
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
-  cargo clippy --workspace --lib --bins --locked -- -D warnings
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
-  cargo test --workspace --lib --bins --locked
+cargo fmt --all -- --check
+cargo clippy --workspace --lib --bins --locked -- -D warnings
+cargo test --workspace --lib --bins --locked
 ```
 
-Use the actual unique checkout name. Verify `/Volumes/Workspace` is mounted and
+Use the actual unique checkout name. Verify `<qualification-corpus-root>` is mounted and
 writable before running Cargo; do not fall back to a local `target/`.
 
 ## Phase 0: Freeze the contract and build the reference store
@@ -1077,21 +1074,18 @@ release metadata have settled.
 In addition to targeted crate tests, run:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
-  cargo test -p compass-cli --test compass_product --locked
+cargo test -p compass-cli --test compass_product --locked
 sh scripts/check_product_boundary.sh
 
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
-  cargo test -p compass-cypher --test tck --locked
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
-  cargo test -p compass-query --test opencypher_tck --locked
+cargo test -p compass-cypher --test tck --locked
+cargo test -p compass-query --test opencypher_tck --locked
 python3 scripts/check_compassql_support.py
 
 ./scripts/qualify_code_graph_v1.sh --fixtures-only
 ```
 
 Run repository qualification on external repositories only under
-`/Volumes/Workspace/Github` and treat them as read-only, following
+`<qualification-corpus-root>/Github` and treat them as read-only, following
 `AGENTS.md`.
 
 ### Exit and rollback

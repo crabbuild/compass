@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 compass_root=$(cd "$script_dir/.." && pwd)
-target_dir=${CARGO_TARGET_DIR:-/Volumes/Workspace/crabbuild-target/compass-store-phase9}
+target_dir=${CARGO_TARGET_DIR:-$compass_root/target}
 output_dir=${COMPASS_STORE_QUALIFICATION_OUTPUT:-$target_dir/compass-store-release-qualification-$(date -u +%Y%m%dT%H%M%SZ)}
 sizes=${COMPASS_STORE_QUALIFICATION_SIZES:-"32 128 512"}
 measure="$script_dir/measure_process.py"
@@ -31,10 +31,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -d /Volumes/Workspace || ! -w /Volumes/Workspace ]]; then
-  echo "error: /Volumes/Workspace must be mounted and writable" >&2
-  exit 1
-fi
 mkdir -p "$target_dir"
 if [[ ! -w "$target_dir" ]]; then
   echo "error: target directory is not writable: $target_dir" >&2
