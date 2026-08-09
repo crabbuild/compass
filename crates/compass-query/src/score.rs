@@ -24,13 +24,13 @@ pub struct QueryScores {
     pub best_seed_by_term: HashMap<String, NodeIndex>,
 }
 
-pub const TEXT_RANKER_LEGACY_V1: &str = "text-ranker/legacy-v1";
+pub const TEXT_RANKER_FULL_SCAN_V1: &str = "text-ranker/full-scan-v1";
 pub const TEXT_RANKER_BM25_V1: &str = BM25_PROFILE_V1;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum TextRankProfile {
     #[default]
-    LegacyV1,
+    FullScanV1,
     Bm25V1,
 }
 
@@ -38,7 +38,7 @@ impl TextRankProfile {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::LegacyV1 => TEXT_RANKER_LEGACY_V1,
+            Self::FullScanV1 => TEXT_RANKER_FULL_SCAN_V1,
             Self::Bm25V1 => TEXT_RANKER_BM25_V1,
         }
     }
@@ -64,7 +64,7 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
         graph,
         terms,
         collect_per_term_seeds,
-        TextRankProfile::LegacyV1,
+        TextRankProfile::FullScanV1,
     )
     .scores
 }
@@ -77,8 +77,8 @@ pub fn score_nodes_with_profile(
     profile: TextRankProfile,
 ) -> ProfiledQueryScores {
     let (scores, candidates_truncated) = match profile {
-        TextRankProfile::LegacyV1 => (
-            score_nodes_legacy(graph, terms, collect_per_term_seeds),
+        TextRankProfile::FullScanV1 => (
+            score_nodes_full_scan(graph, terms, collect_per_term_seeds),
             false,
         ),
         TextRankProfile::Bm25V1 => score_nodes_bm25(graph, terms, collect_per_term_seeds),
@@ -90,7 +90,7 @@ pub fn score_nodes_with_profile(
     }
 }
 
-fn score_nodes_legacy(
+fn score_nodes_full_scan(
     graph: &Graph,
     terms: &[String],
     collect_per_term_seeds: bool,
@@ -140,7 +140,7 @@ fn score_nodes_bm25(
         && graph.node_index(exact_id).is_some()
     {
         return (
-            score_nodes_legacy(graph, terms, collect_per_term_seeds),
+            score_nodes_full_scan(graph, terms, collect_per_term_seeds),
             false,
         );
     }
@@ -778,7 +778,7 @@ mod tests {
         let document: GraphDocument = serde_json::from_value(json!({
             "nodes": [
                 {"id": id, "name": "Canonical target", "kind": "function"},
-                {"id": "legacy", "label": "sha256"}
+                {"id": "digest-label-decoy", "label": "sha256"}
             ],
             "links": []
         }))?;

@@ -92,7 +92,7 @@ pub fn query_graph_text_page(
         depth,
         ProfiledTextPageOptions {
             page: options,
-            rank_profile: TextRankProfile::LegacyV1,
+            rank_profile: TextRankProfile::FullScanV1,
         },
         explicit_contexts,
         overlay,
@@ -118,7 +118,7 @@ pub fn query_graph_text_page_with_profile(
     let seeds = pick_seeds(graph, &profiled_scores.scores, 3, 0.2);
     if seeds.is_empty() {
         return if page == 1 {
-            if profile == TextRankProfile::LegacyV1 {
+            if profile == TextRankProfile::FullScanV1 {
                 Ok("No matching nodes found.".to_owned())
             } else {
                 Ok(format!(
@@ -156,7 +156,7 @@ pub fn query_graph_text_page_with_profile(
         format!("Traversal: {} depth={depth}", mode.upper()),
         format!("Start: [{labels}]"),
     ];
-    if profile != TextRankProfile::LegacyV1 {
+    if profile != TextRankProfile::FullScanV1 {
         header.push(format!("Ranker: {}", profile.as_str()));
         header.push(format!(
             "Candidate retrieval: {}",

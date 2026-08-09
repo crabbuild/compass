@@ -19,13 +19,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         .nth(1)
         .unwrap_or_else(|| "--compare".to_owned());
     let report = match mode.as_str() {
-        "--legacy" => single_profile_report(&graph, &terms, TextRankProfile::LegacyV1)?,
+        "--full-scan" => single_profile_report(&graph, &terms, TextRankProfile::FullScanV1)?,
         "--bm25" => single_profile_report(&graph, &terms, TextRankProfile::Bm25V1)?,
         "--compare" => comparison_report(&graph, &terms)?,
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "expected --legacy, --bm25, or --compare",
+                "expected --full-scan, --bm25, or --compare",
             )
             .into());
         }
@@ -65,8 +65,8 @@ fn single_profile_report(
 }
 
 fn comparison_report(graph: &Graph, terms: &[String]) -> Result<Value, Box<dyn Error>> {
-    let legacy_first = measure(graph, terms, TextRankProfile::LegacyV1)?;
-    let legacy_warm = warm_samples(graph, terms, TextRankProfile::LegacyV1)?;
+    let full_scan_first = measure(graph, terms, TextRankProfile::FullScanV1)?;
+    let full_scan_warm = warm_samples(graph, terms, TextRankProfile::FullScanV1)?;
     let bm25_first = measure(graph, terms, TextRankProfile::Bm25V1)?;
     let bm25_warm = warm_samples(graph, terms, TextRankProfile::Bm25V1)?;
     let index = graph.lexical_index();
@@ -77,7 +77,7 @@ fn comparison_report(graph: &Graph, terms: &[String]) -> Result<Value, Box<dyn E
         "warmSamples": WARM_SAMPLES,
         "question": QUESTION,
         "expectedId": EXPECTED_ID,
-        "legacy": profile_report(legacy_first, &legacy_warm),
+        "fullScan": profile_report(full_scan_first, &full_scan_warm),
         "bm25": profile_report(bm25_first, &bm25_warm),
         "lexicalIndex": {
             "documents": index.document_count(),
@@ -90,7 +90,7 @@ fn comparison_report(graph: &Graph, terms: &[String]) -> Result<Value, Box<dyn E
 
 fn interpretation() -> Value {
     json!({
-        "legacyFirstIncludes": "full graph scan",
+        "fullScanFirstIncludes": "full graph scan",
         "bm25FirstIncludes": "lazy lexical index construction and query",
         "warmSamplesExclude": "graph loading and first-use index construction",
         "peakMemory": "measure each single-profile run with the repository qualification script"

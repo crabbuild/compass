@@ -79,7 +79,7 @@ One macOS Apple Silicon development run on 2026-08-08 produced:
 
 | Profile | First query | Warm p50 | Warm p95 | Maximum RSS | Top ID |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `text-ranker/legacy-v1` | 158.868 ms | 155.983 ms | 157.671 ms | 281,444,352 B | expected |
+| `text-ranker/full-scan-v1` | 158.868 ms | 155.983 ms | 157.671 ms | 281,444,352 B | expected |
 | `text-ranker/bm25-v1` | 366.502 ms | 0.005 ms | 0.010 ms | 322,453,504 B | expected |
 
 The BM25 first query includes lazy construction of 202,008 terms for 100,000

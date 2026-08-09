@@ -39,7 +39,7 @@ pub use relevance::{
     RelevanceError, RelevanceMetrics, WorkCounts, qualification_report, score,
 };
 pub use score::{
-    ProfiledQueryScores, QueryScores, ScoredNode, TEXT_RANKER_BM25_V1, TEXT_RANKER_LEGACY_V1,
+    ProfiledQueryScores, QueryScores, ScoredNode, TEXT_RANKER_BM25_V1, TEXT_RANKER_FULL_SCAN_V1,
     TextRankProfile, find_node, pick_scored_endpoint, score_nodes, score_nodes_with_profile,
 };
 pub use text::{normalize_context_filters, query_terms, sanitize_label, search_tokens};

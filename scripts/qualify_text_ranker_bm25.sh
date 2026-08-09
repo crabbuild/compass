@@ -39,5 +39,5 @@ run_profile() {
   esac
 }
 
-run_profile legacy
+run_profile full-scan
 run_profile bm25

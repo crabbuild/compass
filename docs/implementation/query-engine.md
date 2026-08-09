@@ -141,7 +141,7 @@ question
         -> compass.query/1
      -> generic, historical, contradictory, or traversal-controlled
         -> query_terms()
-        -> score_nodes() [default legacy profile]
+        -> score_nodes() [default full-scan profile]
         -> choose anchors
         -> query_graph_text() with BFS/DFS and budget
         -> focused text subgraph
@@ -167,7 +167,7 @@ golden judgment.
 
 ### Scoring
 
-`score_nodes` retains the established `text-ranker/legacy-v1` behavior: it
+`score_nodes` retains the established `text-ranker/full-scan-v1` behavior: it
 prepares label evidence and scans the loaded graph to rank candidates.
 `find_node` and `pick_scored_endpoint` support commands that need one entity.
 When at least two query terms are exact components of one compound identifier,

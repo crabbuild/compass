@@ -42,12 +42,12 @@ pub(crate) fn rank_search_candidates(
     limit: usize,
 ) -> Vec<RankedSearchResult> {
     match profile {
-        SearchRankProfile::QueryRankerV1 => rank_legacy(query, candidates, limit),
+        SearchRankProfile::QueryRankerV1 => rank_query_v1(query, candidates, limit),
         SearchRankProfile::QueryRankerV2 => rank_v2(query, terms, candidates, limit),
     }
 }
 
-fn rank_legacy(
+fn rank_query_v1(
     query: &str,
     candidates: Vec<SearchCandidate>,
     limit: usize,
@@ -456,7 +456,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_ranking_remains_deterministic_on_ties() {
+    fn query_ranker_v1_remains_deterministic_on_ties() {
         let candidates = vec![
             SearchCandidate {
                 node: node("n:z", "query", NodeKind::Function, "src/lib.rs", false),

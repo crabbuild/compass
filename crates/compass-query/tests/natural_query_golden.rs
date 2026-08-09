@@ -279,7 +279,7 @@ fn reviewed_language_baseline_preserves_ids_anchors_and_no_answer()
 }
 
 #[test]
-fn bm25_shadow_profile_is_deterministic_and_keeps_legacy_as_default()
+fn bm25_shadow_profile_is_deterministic_and_keeps_full_scan_as_default()
 -> Result<(), Box<dyn std::error::Error>> {
     let graph = reviewed_language_baseline_graph()?;
     let cases = [
@@ -291,15 +291,15 @@ fn bm25_shadow_profile_is_deterministic_and_keeps_legacy_as_default()
 
     for (question, expected_id) in cases {
         let terms = query_terms(question);
-        let legacy = score_nodes(&graph, &terms, true);
-        let explicit_legacy =
-            score_nodes_with_profile(&graph, &terms, true, TextRankProfile::LegacyV1);
-        assert_eq!(legacy.ranked, explicit_legacy.scores.ranked);
+        let full_scan = score_nodes(&graph, &terms, true);
+        let explicit_full_scan =
+            score_nodes_with_profile(&graph, &terms, true, TextRankProfile::FullScanV1);
+        assert_eq!(full_scan.ranked, explicit_full_scan.scores.ranked);
         assert_eq!(
-            legacy.best_seed_by_term,
-            explicit_legacy.scores.best_seed_by_term
+            full_scan.best_seed_by_term,
+            explicit_full_scan.scores.best_seed_by_term
         );
-        assert!(!explicit_legacy.candidates_truncated);
+        assert!(!explicit_full_scan.candidates_truncated);
 
         let first = score_nodes_with_profile(&graph, &terms, true, TextRankProfile::Bm25V1);
         let second = score_nodes_with_profile(&graph, &terms, true, TextRankProfile::Bm25V1);
@@ -329,12 +329,12 @@ fn bm25_shadow_profile_is_deterministic_and_keeps_legacy_as_default()
         &[],
         &HashMap::new(),
     );
-    let explicit_legacy_output = profiled_text_query(
+    let explicit_full_scan_output = profiled_text_query(
         &graph,
         "how are dependencies solved",
-        TextRankProfile::LegacyV1,
+        TextRankProfile::FullScanV1,
     )?;
-    assert_eq!(default_output, explicit_legacy_output);
+    assert_eq!(default_output, explicit_full_scan_output);
 
     let bm25_output = profiled_text_query(
         &graph,
