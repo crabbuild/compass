@@ -1,0 +1,108 @@
+{
+  "name": "Compass",
+  "description": "Native local-first knowledge graph engine for source code and project artifacts",
+  "active_phase": "compass-scoping-and-bounds",
+  "worktreeRoot": "${HOME}/.claude/worktrees",
+  "maxChildDepth": 4,
+  "ux_profile": "advanced",
+  "__ux_profile_note": "advanced \u2192 kbd-status is dense by default; beginner \u2192 kbd-status --explain is on by default (expands decision-log entries + next-and-why narrative). Verbosity only \u2014 never gates information.",
+  "spec_paths": [
+    "openspec/specs/*.md"
+  ],
+  "openspec_available": true,
+  "constraint_file": ".kbd-orchestrator/constraints.md",
+  "__command_note": "AGENTS.md requires CARGO_TARGET_DIR on EVERY invocation that can compile; the main disk is capped at 100 GB and each checkout/worktree needs its own target directory. Never share one across repositories or concurrent worktrees. If /Volumes/Workspace is unmounted, stop and report rather than falling back to a local target/.",
+  "build_health_command": "CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo check --workspace --locked",
+  "test_command": "CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test --workspace --lib --bins --locked",
+  "lint_command": "CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo clippy --workspace --lib --bins --locked -- -D warnings",
+  "dev_command": null,
+  "preferred_planning_agent": "claude",
+  "preferred_execution_agents": [
+    "claude",
+    "codex",
+    "opencode"
+  ],
+  "model_policy": {
+    "registry": {
+      "small": {
+        "local": "Qwen3.5-9B-Q8_0",
+        "t4": "Qwen3.5-9B-Q8_0",
+        "l4": "Qwen3.5-9B-Q8_0"
+      },
+      "medium": {
+        "local": null,
+        "t4": "Qwen3.5-27B-Q4",
+        "l4": "Qwen3.5-35B-A3B-Q4"
+      },
+      "frontier": {
+        "local": "claude-sonnet-4-6",
+        "t4": "claude-sonnet-4-6",
+        "l4": "claude-sonnet-4-6"
+      }
+    },
+    "phases": {
+      "kbd-assess": "frontier",
+      "kbd-plan": "frontier",
+      "kbd-status": "small",
+      "kbd-reflect": "frontier",
+      "opsx-new": "small",
+      "opsx-apply-low": "small",
+      "opsx-apply-medium": "medium",
+      "opsx-apply-high": "frontier",
+      "opsx-verify": "medium",
+      "opsx-archive": "small",
+      "refiner-iterate": "small",
+      "refiner-evaluate": "medium",
+      "evolver-assess": "frontier",
+      "evolver-analyze": "frontier",
+      "evolver-plan": "frontier",
+      "evolver-execute-low": "small",
+      "evolver-execute-medium": "medium",
+      "evolver-execute-high": "frontier",
+      "evolver-reflect": "frontier",
+      "evolver-status": "small"
+    },
+    "active_environment": "local"
+  },
+  "agents_config": {
+    "claude": {
+      "entry": "Claude Code CLI / slash commands",
+      "strengths": [
+        "multi-crate Rust changes",
+        "contract and compatibility review",
+        "planning"
+      ]
+    },
+    "codex": {
+      "entry": "OpenAI Codex CLI / app",
+      "strengths": [
+        "parallel isolated tasks via git worktrees"
+      ]
+    },
+    "opencode": {
+      "entry": "OpenCode CLI",
+      "strengths": [
+        "quick targeted edits",
+        "file patches"
+      ]
+    },
+    "kimi": {
+      "entry": "Kimi CLI (OpenSpec skills only \u2014 no command adapter)",
+      "strengths": [
+        "focused implementation"
+      ]
+    }
+  },
+  "focus_project_path": "/Users/gqadonis/Projects/references/compass",
+  "workspace": {
+    "workspace_file": null,
+    "folders": [
+      {
+        "path": "/Users/gqadonis/Projects/references/compass",
+        "role": "focus",
+        "purpose": "Active project \u2014 all KBD operations target this directory",
+        "write_access": true
+      }
+    ]
+  }
+}

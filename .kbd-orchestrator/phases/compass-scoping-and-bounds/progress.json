@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "5",
+  "generatedBy": "claude",
+  "phase": "compass-scoping-and-bounds",
+  "last_updated": "2026-08-09T12:27:19Z",
+  "last_updated_by": "claude",
+  "assessment_complete": true,
+  "plan_complete": true,
+  "execution_dispatched": false,
+  "reflection_complete": false,
+  "changes_total": 6,
+  "changes_completed": 0,
+  "implementation_total": 6,
+  "implementation_completed": 0,
+  "completion": {
+    "implementation": {
+      "completed": 0,
+      "total": 6
+    }
+  },
+  "changes": [
+    {
+      "id": "C-001",
+      "title": "Stop materializing snapshot payload in read_snapshot",
+      "status": "pending"
+    },
+    {
+      "id": "C-002",
+      "title": "Make snapshot limit error actionable",
+      "status": "pending"
+    },
+    {
+      "id": "C-003",
+      "title": "Pre-flight graph size estimate",
+      "status": "pending"
+    },
+    {
+      "id": "C-004",
+      "title": "Honor COMPASS_MAX_GRAPH_BYTES on publication path",
+      "status": "pending"
+    },
+    {
+      "id": "C-005",
+      "title": "Extract compass-partition shared crate",
+      "status": "pending"
+    },
+    {
+      "id": "C-006",
+      "title": "Decide vendor/ default-skip policy",
+      "status": "pending"
+    }
+  ],
+  "children": []
+}

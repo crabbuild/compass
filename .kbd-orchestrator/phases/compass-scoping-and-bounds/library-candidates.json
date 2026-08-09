@@ -1,0 +1,59 @@
+{
+  "phase": "compass-scoping-and-bounds",
+  "generated_at": "2026-08-09T11:30:19Z",
+  "research_budget": {
+    "max_queries_per_tier": 8,
+    "max_minutes": 20,
+    "queries_used": { "tier1": 2, "tier2": 0, "tier3": 0, "tier4": 2 }
+  },
+  "gaps_addressed": ["G1", "G2", "G3", "G4", "ARCH-partitioning"],
+  "candidates": [
+    {
+      "id": "cand-001",
+      "name": "compass-history::PartitionedGraph",
+      "kind": "framework",
+      "verdict": "adopt",
+      "fit_for_gap": "ARCH-partitioning",
+      "notes": "Record-class partitioning already implemented and tested in-repo for historical realizations; unused by the current-graph publication path. Partitions by record class, not graph topology, so no edge-cut problem. Adoption blocked on an ownership decision (compass-history vs compass-graph).",
+      "evidence": [
+        { "tier": 1, "source_url": "crates/compass-history/src/artifacts.rs:76-84", "claim": "PartitionedGraph splits nodes/edges/hyperedges/analysis/metadata/program_facts/program_summaries into individually keyed records" },
+        { "tier": 1, "source_url": "crates/compass-history/src/artifacts.rs:168-181", "claim": "partition(), into_partition(), and reconstruct() exist and round-trip" },
+        { "tier": 1, "source_url": "grep PartitionedGraph across crates/", "claim": "No usage outside compass-history; current-graph path does not use it" }
+      ]
+    },
+    {
+      "id": "cand-002",
+      "name": "Distributed graph sharding (multi-store)",
+      "kind": "pattern",
+      "verdict": "reject",
+      "fit_for_gap": "ARCH-partitioning",
+      "notes": "Solves multi-machine scaling. Compass is local-first single-process; sharding would add distributed-query cost and eventual consistency, violating the determinism invariant.",
+      "evidence": [
+        { "tier": 4, "source_url": "https://www.puppygraph.com/learn/sharding-vs-partitioning", "claim": "Sharding targets scaling past the limits of any one machine; partitioning lowers cost under a fixed ceiling and is nearly free operationally" },
+        { "tier": 4, "source_url": "https://learn.microsoft.com/en-us/azure/architecture/patterns/sharding", "claim": "Apply only when total data volume exceeds single-instance capacity and vertical scaling cannot address it" },
+        { "tier": 4, "source_url": "https://www.citusdata.com/blog/2017/08/28/five-data-models-for-sharding/", "claim": "Graph sharding yields multiple differently-sharded copies and typically eventual consistency" },
+        { "tier": 4, "source_url": "https://www.puppygraph.com/blog/when-to-use-graph-database", "claim": "Graph interconnectivity makes topological partitioning hard, especially for high-degree nodes" }
+      ]
+    },
+    {
+      "id": "cand-003",
+      "name": "Streaming chunk reader for load_active_snapshot",
+      "kind": "build",
+      "verdict": "adopt",
+      "fit_for_gap": "ARCH-partitioning",
+      "notes": "No external library needed. The write path already streams via DigestWriter; the read path does not. Making the read path stream removes the real memory constraint and makes the crate's own doc comment true. Prerequisite for G1.",
+      "evidence": [
+        { "tier": 1, "source_url": "crates/compass-store/src/lib.rs:838-853", "claim": "load_active_snapshot pre-allocates payload_bytes and concatenates all chunks into one contiguous Vec<u8>" },
+        { "tier": 1, "source_url": "crates/compass-store/src/lib.rs:44-51", "claim": "Doc comment claims records are served through indexed scans instead of materializing the whole document" },
+        { "tier": 1, "source_url": "crates/compass-graph/src/snapshot.rs:3100-3126", "claim": "DigestWriter implements io::Write and hashes incrementally; the write path never materializes the payload" }
+      ]
+    }
+  ],
+  "build_required": [
+    { "gap": "A", "description": "Stream load_active_snapshot so reconstruction never materializes the full document" },
+    { "gap": "G2", "description": "Make the snapshot limit error actionable (name override, --exclude, .compassignore, dominant content class)" },
+    { "gap": "G3", "description": "Pre-flight graph size estimate so oversized builds fail before full extraction" },
+    { "gap": "G1", "description": "Honor COMPASS_MAX_GRAPH_BYTES on the publication path — ONLY after A" },
+    { "gap": "G4", "description": "Decide vendor/ default-skip policy deliberately" }
+  ]
+}

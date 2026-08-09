@@ -70,6 +70,15 @@ normal verification. Before using packaging, install, or release targets,
 inspect the target and ensure its artifact lookup also points at the selected
 external directory; never allow it to trigger a second local build silently.
 
+## Prometheus state ownership
+
+`.prometheus/knowledge/wiki/**` is repository-owned project knowledge and must
+remain tracked, including generated session transcripts and their embedded
+machine-specific project paths. Treat every other `.prometheus/**` path as local
+runtime or tooling state unless a repository rule or explicit user instruction
+classifies that path as tracked content. Never discard or exclude the wiki merely
+because it lives beneath a hidden tooling directory.
+
 ## Product invariants
 
 - Compass is a native, local-first Rust product. Structural extraction and

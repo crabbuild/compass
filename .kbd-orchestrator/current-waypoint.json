@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "5",
+  "path": [
+    "compass-scoping-and-bounds"
+  ],
+  "phase": "compass-scoping-and-bounds",
+  "previousPhase": null,
+  "change": null,
+  "status": "plan_ready",
+  "currentTask": "Apply C-001 \u2014 read_snapshot API split",
+  "nextPendingChange": "C-001",
+  "sourceTool": "claude",
+  "exactNextCommand": "/opsx:new stream-snapshot-read",
+  "parentPhase": null,
+  "childPhases": [],
+  "childPointer": null,
+  "backend": "openspec",
+  "wave": 1,
+  "lastCompletedChange": null,
+  "completionMetric": "implementation",
+  "implementationCompleted": 0,
+  "implementationTotal": 6,
+  "certificationStatus": "NOT_TRACKED",
+  "publicationStatus": "NOT_TRACKED",
+  "updatedAt": "2026-08-09T12:27:19Z"
+}
