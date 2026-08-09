@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl UniversalResolutionIndex {
+impl ResolutionDb<'_> {
     pub(in crate::evidence) fn resolve_typescript_import_candidate(
         &self,
         language: &str,
@@ -227,7 +227,8 @@ impl UniversalResolutionIndex {
                     };
                     if self
                         .indexes
-                        .typescript_member_aliases
+                        .typescript
+                        .member_aliases
                         .contains_key(&(owner.language.clone(), owner.qualified_name.clone()))
                     {
                         structural_alias_seen = true;
@@ -249,7 +250,7 @@ impl UniversalResolutionIndex {
                         continue;
                     };
                     if member_owner_export.is_some()
-                        && let Some(members) = self.indexes.members_by_owner.get(&(
+                        && let Some(members) = self.indexes.members.members_by_owner.get(&(
                             owner.language.clone(),
                             owner.qualified_name.clone(),
                             candidate.target_spelling.clone(),
@@ -273,7 +274,8 @@ impl UniversalResolutionIndex {
                     }
                     if self
                         .indexes
-                        .typescript_member_aliases
+                        .typescript
+                        .member_aliases
                         .contains_key(&(owner.language.clone(), owner.qualified_name.clone()))
                     {
                         structural_alias_seen = true;
@@ -307,7 +309,7 @@ impl UniversalResolutionIndex {
                             let Some(typed_owner) = self.declaration(typed_owner) else {
                                 continue;
                             };
-                            if let Some(members) = self.indexes.members_by_owner.get(&(
+                            if let Some(members) = self.indexes.members.members_by_owner.get(&(
                                 language.to_owned(),
                                 typed_owner.qualified_name.clone(),
                                 candidate.target_spelling.clone(),
@@ -398,7 +400,7 @@ impl UniversalResolutionIndex {
     ) -> BTreeSet<DeclarationSlot> {
         let mut slots = BTreeSet::new();
         for target_language in typescript_language_family(language) {
-            if let Some(values) = self.indexes.typescript_export_aliases.get(&(
+            if let Some(values) = self.indexes.typescript.export_aliases.get(&(
                 (*target_language).to_owned(),
                 module.to_owned(),
                 exported.to_owned(),
@@ -446,8 +448,8 @@ impl UniversalResolutionIndex {
             // traversal still requests the concrete exported name below.
             let direct_export = if exported == "*" { "module" } else { exported };
             for (direct_module_index, index) in [
-                (true, &self.indexes.typescript_modules),
-                (false, &self.indexes.typescript_export_aliases),
+                (true, &self.indexes.typescript.modules),
+                (false, &self.indexes.typescript.export_aliases),
             ] {
                 if let Some(values) = index.get(&(
                     target_language.to_owned(),
@@ -465,7 +467,8 @@ impl UniversalResolutionIndex {
                                         && !walk.allow_type_owner
                                         && !self
                                             .indexes
-                                            .typescript_exported_declarations
+                                            .typescript
+                                            .exported_declarations
                                             .contains(slot)
                                         && self
                                             .declaration(**slot)
@@ -496,7 +499,7 @@ impl UniversalResolutionIndex {
                 }
             }
             if exported != "default"
-                && let Some(values) = self.indexes.typescript_reexport_targets.get(&(
+                && let Some(values) = self.indexes.typescript.reexport_targets.get(&(
                     target_language.to_owned(),
                     module.to_owned(),
                     "*".to_owned(),
@@ -513,7 +516,7 @@ impl UniversalResolutionIndex {
                     );
                 }
             }
-            if let Some(values) = self.indexes.typescript_reexport_targets.get(&(
+            if let Some(values) = self.indexes.typescript.reexport_targets.get(&(
                 target_language.to_owned(),
                 module.to_owned(),
                 exported.to_owned(),

@@ -2,7 +2,7 @@
 
 use super::super::*;
 
-impl UniversalResolutionIndex {
+impl ResolutionDb<'_> {
     pub(in crate::evidence) fn unique_java_applicable_overload<'a>(
         &self,
         overloads: &[&'a DeclarationFact],
@@ -152,6 +152,7 @@ impl UniversalResolutionIndex {
                 }
                 if let Some(bases) = self
                     .indexes
+                    .hierarchy
                     .direct_bases
                     .get(&("java".to_owned(), current.clone()))
                 {
@@ -198,6 +199,7 @@ impl UniversalResolutionIndex {
     ) -> Option<&DeclarationFact> {
         let declarations = self
             .indexes
+            .names
             .by_qualified
             .get(&("java".to_owned(), qualified_name.to_owned()))?;
         let mut eligible = declarations.iter().filter_map(|id| {
