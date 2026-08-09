@@ -4,6 +4,7 @@ use std::path::Path;
 
 use compass_model::{Graph, NodeIndex, NodeRecord};
 
+use crate::bm25::{self, BM25_PROFILE_V1, DEFAULT_BM25_CANDIDATE_LIMIT};
 use crate::text::{canonical_query_token, search_tokens, strip_diacritics};
 
 const EXACT_MATCH_BONUS: f64 = 1000.0;
@@ -23,6 +24,33 @@ pub struct QueryScores {
     pub best_seed_by_term: HashMap<String, NodeIndex>,
 }
 
+pub const TEXT_RANKER_LEGACY_V1: &str = "text-ranker/legacy-v1";
+pub const TEXT_RANKER_BM25_V1: &str = BM25_PROFILE_V1;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TextRankProfile {
+    #[default]
+    LegacyV1,
+    Bm25V1,
+}
+
+impl TextRankProfile {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LegacyV1 => TEXT_RANKER_LEGACY_V1,
+            Self::Bm25V1 => TEXT_RANKER_BM25_V1,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ProfiledQueryScores {
+    pub profile: TextRankProfile,
+    pub candidates_truncated: bool,
+    pub scores: QueryScores,
+}
+
 struct NodeText {
     node: NodeIndex,
     normalized_label: String,
@@ -32,6 +60,41 @@ struct NodeText {
 
 #[must_use]
 pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool) -> QueryScores {
+    score_nodes_with_profile(
+        graph,
+        terms,
+        collect_per_term_seeds,
+        TextRankProfile::LegacyV1,
+    )
+    .scores
+}
+
+#[must_use]
+pub fn score_nodes_with_profile(
+    graph: &Graph,
+    terms: &[String],
+    collect_per_term_seeds: bool,
+    profile: TextRankProfile,
+) -> ProfiledQueryScores {
+    let (scores, candidates_truncated) = match profile {
+        TextRankProfile::LegacyV1 => (
+            score_nodes_legacy(graph, terms, collect_per_term_seeds),
+            false,
+        ),
+        TextRankProfile::Bm25V1 => score_nodes_bm25(graph, terms, collect_per_term_seeds),
+    };
+    ProfiledQueryScores {
+        profile,
+        candidates_truncated,
+        scores,
+    }
+}
+
+fn score_nodes_legacy(
+    graph: &Graph,
+    terms: &[String],
+    collect_per_term_seeds: bool,
+) -> QueryScores {
     if let [exact_id] = terms
         && exact_id.starts_with("sha256:")
         && let Some(node) = graph.node_index(exact_id)
@@ -48,6 +111,75 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
             },
         };
     }
+    let normalized_terms = normalized_query_terms(terms);
+    if normalized_terms.is_empty() {
+        return QueryScores::default();
+    }
+    let node_text = graph
+        .nodes()
+        .map(|(node, record)| node_text(node, record))
+        .collect::<Vec<_>>();
+    let idf = compute_idf(&node_text, &normalized_terms);
+    score_prepared_nodes(
+        graph,
+        &normalized_terms,
+        &node_text,
+        &idf,
+        collect_per_term_seeds,
+        &HashMap::new(),
+    )
+}
+
+fn score_nodes_bm25(
+    graph: &Graph,
+    terms: &[String],
+    collect_per_term_seeds: bool,
+) -> (QueryScores, bool) {
+    if let [exact_id] = terms
+        && exact_id.starts_with("sha256:")
+        && graph.node_index(exact_id).is_some()
+    {
+        return (
+            score_nodes_legacy(graph, terms, collect_per_term_seeds),
+            false,
+        );
+    }
+    let normalized_terms = normalized_query_terms(terms);
+    if normalized_terms.is_empty() {
+        return (QueryScores::default(), false);
+    }
+    let retrieved = bm25::retrieve(graph, &normalized_terms, DEFAULT_BM25_CANDIDATE_LIMIT);
+    let node_text = retrieved
+        .ranked
+        .iter()
+        .map(|candidate| node_text(candidate.node, graph.node(candidate.node)))
+        .collect::<Vec<_>>();
+    let idf = normalized_terms
+        .iter()
+        .map(|term| (term.clone(), 1.0))
+        .collect::<HashMap<_, _>>();
+    let fallback_scores = retrieved
+        .ranked
+        .iter()
+        .map(|candidate| (candidate.node, candidate.score))
+        .collect::<HashMap<_, _>>();
+    let mut scores = score_prepared_nodes(
+        graph,
+        &normalized_terms,
+        &node_text,
+        &idf,
+        collect_per_term_seeds,
+        &fallback_scores,
+    );
+    if collect_per_term_seeds {
+        for (term, node) in retrieved.best_by_term {
+            scores.best_seed_by_term.entry(term).or_insert(node);
+        }
+    }
+    (scores, retrieved.truncated)
+}
+
+fn normalized_query_terms(terms: &[String]) -> Vec<String> {
     let mut normalized_terms = Vec::new();
     let mut seen = HashSet::new();
     for term in terms {
@@ -58,26 +190,31 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
             }
         }
     }
-    let term_count = normalized_terms.len();
-    if term_count == 0 {
-        return QueryScores::default();
+    normalized_terms
+}
+
+fn node_text(node: NodeIndex, record: &NodeRecord) -> NodeText {
+    let label = record.string("label");
+    let normalized_label = normalized_label_with_text(record, &label);
+    let bare_label = normalized_label.trim_end_matches(['(', ')']).to_owned();
+    let label_tokens = canonical_label_tokens(&label);
+    NodeText {
+        node,
+        normalized_label,
+        bare_label,
+        label_tokens,
     }
-    let node_text = graph
-        .nodes()
-        .map(|(node, record)| {
-            let label = record.string("label");
-            let normalized_label = normalized_label_with_text(record, &label);
-            let bare_label = normalized_label.trim_end_matches(['(', ')']).to_owned();
-            let label_tokens = canonical_label_tokens(&label);
-            NodeText {
-                node,
-                normalized_label,
-                bare_label,
-                label_tokens,
-            }
-        })
-        .collect::<Vec<_>>();
-    let idf = compute_idf(&node_text, &normalized_terms);
+}
+
+fn score_prepared_nodes(
+    graph: &Graph,
+    normalized_terms: &[String],
+    node_text: &[NodeText],
+    idf: &HashMap<String, f64>,
+    collect_per_term_seeds: bool,
+    fallback_scores: &HashMap<NodeIndex, f64>,
+) -> QueryScores {
+    let term_count = normalized_terms.len();
     let joined = normalized_terms.join(" ");
     let joined_weight = normalized_terms
         .iter()
@@ -88,7 +225,7 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
     let mut ranked = Vec::new();
     let mut best: HashMap<String, BestSeed> = HashMap::new();
     let mut tie_breakers = HashMap::new();
-    for text in &node_text {
+    for text in node_text {
         let node_index = text.node;
         let node = graph.node(node_index);
         let norm_label = text.normalized_label.as_str();
@@ -113,7 +250,7 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
 
         let mut matched = 0_usize;
         let mut tiered = 0.0;
-        for term in &normalized_terms {
+        for term in normalized_terms {
             let weight = idf.get(term).copied().unwrap_or(1.0);
             let mut tier_value = 0.0;
             let mut substring_value = 0.0;
@@ -164,6 +301,9 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
         }
         let coverage = matched as f64 / term_count as f64;
         score += tiered * coverage.powi(2);
+        if score <= 0.0 {
+            score = fallback_scores.get(&node_index).copied().unwrap_or(0.0);
+        }
         if score > 0.0 {
             let tie =
                 *tie_breaker.get_or_insert_with(|| SeedTieBreaker::new(graph, node_index, node));
@@ -549,8 +689,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        BestSeed, QueryScores, ScoredNode, pick_seeds, query_match_tier, score_nodes,
-        singleton_score,
+        BestSeed, QueryScores, ScoredNode, TextRankProfile, pick_seeds, query_match_tier,
+        score_nodes, score_nodes_with_profile, singleton_score,
     };
 
     fn seed(score: f64, degree: usize, label_len: usize, id: &str) -> BestSeed {
@@ -651,6 +791,15 @@ mod tests {
             scores.best_seed_by_term.get(&id),
             Some(&scores.ranked[0].node)
         );
+        let bm25 = score_nodes_with_profile(
+            &graph,
+            std::slice::from_ref(&id),
+            true,
+            TextRankProfile::Bm25V1,
+        );
+        assert_eq!(bm25.scores.ranked, scores.ranked);
+        assert_eq!(bm25.scores.best_seed_by_term, scores.best_seed_by_term);
+        assert!(!bm25.candidates_truncated);
         Ok(())
     }
 
@@ -857,6 +1006,15 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(seeds[..2], ["save-method", "model-production"]);
+
+        let bm25 = score_nodes_with_profile(&graph, &terms, true, TextRankProfile::Bm25V1);
+        let bm25_seeds = pick_seeds(&graph, &bm25.scores, 3, 0.2)
+            .into_iter()
+            .map(|index| graph.node(index).id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(bm25_seeds[..2], ["save-method", "model-production"]);
+        assert!(!bm25_seeds.contains(&"save-variable"));
+        assert!(!bm25_seeds.contains(&"model-test"));
         Ok(())
     }
 }

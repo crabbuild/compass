@@ -4,7 +4,10 @@ use compass_model::{Graph, NodeIndex};
 use serde_json::{Map, Value};
 use thiserror::Error;
 
-use crate::score::{find_exact_nodes, find_node, pick_scored_endpoint, pick_seeds, score_nodes};
+use crate::score::{
+    TextRankProfile, find_exact_nodes, find_node, pick_scored_endpoint, pick_seeds, score_nodes,
+    score_nodes_with_profile,
+};
 use crate::text::{infer_context_filters, normalize_context_filters, query_terms, sanitize_label};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -19,6 +22,12 @@ pub const DEFAULT_TEXT_TOKEN_BUDGET: usize = 2_000;
 pub struct TextPageOptions {
     pub token_budget: usize,
     pub page: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProfiledTextPageOptions {
+    pub page: TextPageOptions,
+    pub rank_profile: TextRankProfile,
 }
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
@@ -76,14 +85,48 @@ pub fn query_graph_text_page(
     explicit_contexts: &[String],
     overlay: &HashMap<String, Map<String, Value>>,
 ) -> Result<String, TextPaginationError> {
-    let TextPageOptions { token_budget, page } = options;
+    query_graph_text_page_with_profile(
+        graph,
+        question,
+        mode,
+        depth,
+        ProfiledTextPageOptions {
+            page: options,
+            rank_profile: TextRankProfile::LegacyV1,
+        },
+        explicit_contexts,
+        overlay,
+    )
+}
+
+pub fn query_graph_text_page_with_profile(
+    graph: &Graph,
+    question: &str,
+    mode: TraversalMode,
+    depth: usize,
+    options: ProfiledTextPageOptions,
+    explicit_contexts: &[String],
+    overlay: &HashMap<String, Map<String, Value>>,
+) -> Result<String, TextPaginationError> {
+    let ProfiledTextPageOptions {
+        page: TextPageOptions { token_budget, page },
+        rank_profile: profile,
+    } = options;
     validate_pagination(token_budget, page)?;
     let terms = query_terms(question);
-    let scores = score_nodes(graph, &terms, true);
-    let seeds = pick_seeds(graph, &scores, 3, 0.2);
+    let profiled_scores = score_nodes_with_profile(graph, &terms, true, profile);
+    let seeds = pick_seeds(graph, &profiled_scores.scores, 3, 0.2);
     if seeds.is_empty() {
         return if page == 1 {
-            Ok("No matching nodes found.".to_owned())
+            if profile == TextRankProfile::LegacyV1 {
+                Ok("No matching nodes found.".to_owned())
+            } else {
+                Ok(format!(
+                    "No matching nodes found. Ranker: {}. Candidate retrieval: {}.",
+                    profile.as_str(),
+                    retrieval_state(profiled_scores.candidates_truncated)
+                ))
+            }
         } else {
             Err(TextPaginationError::PageOutOfRange {
                 requested: page,
@@ -113,6 +156,13 @@ pub fn query_graph_text_page(
         format!("Traversal: {} depth={depth}", mode.upper()),
         format!("Start: [{labels}]"),
     ];
+    if profile != TextRankProfile::LegacyV1 {
+        header.push(format!("Ranker: {}", profile.as_str()));
+        header.push(format!(
+            "Candidate retrieval: {}",
+            retrieval_state(profiled_scores.candidates_truncated)
+        ));
+    }
     if !contexts.is_empty() {
         header.push(format!(
             "Context: {} ({})",
@@ -131,6 +181,10 @@ pub fn query_graph_text_page(
         "facts",
     )?;
     Ok(format!("{header}\n\n{page}"))
+}
+
+fn retrieval_state(truncated: bool) -> &'static str {
+    if truncated { "truncated" } else { "complete" }
 }
 
 pub fn render_shortest_path(

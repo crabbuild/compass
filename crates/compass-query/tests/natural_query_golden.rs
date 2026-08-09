@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 
 use compass_model::Graph;
-use compass_query::{TraversalMode, query_graph_text, query_terms, score_nodes};
+use compass_query::{
+    ProfiledTextPageOptions, TextPageOptions, TextPaginationError, TextRankProfile, TraversalMode,
+    query_graph_text, query_graph_text_page_with_profile, query_terms, score_nodes,
+    score_nodes_with_profile,
+};
 use serde_json::json;
 
 fn golden_graph() -> Result<Graph, Box<dyn std::error::Error>> {
@@ -128,6 +132,28 @@ fn reviewed_language_baseline_graph() -> Result<Graph, Box<dyn std::error::Error
     }))?)?)
 }
 
+fn profiled_text_query(
+    graph: &Graph,
+    question: &str,
+    rank_profile: TextRankProfile,
+) -> Result<String, TextPaginationError> {
+    query_graph_text_page_with_profile(
+        graph,
+        question,
+        TraversalMode::Bfs,
+        0,
+        ProfiledTextPageOptions {
+            page: TextPageOptions {
+                token_budget: 2_000,
+                page: 1,
+            },
+            rank_profile,
+        },
+        &[],
+        &HashMap::new(),
+    )
+}
+
 #[test]
 fn natural_query_golden_cases_retrieve_reviewed_symbols() -> Result<(), Box<dyn std::error::Error>>
 {
@@ -249,5 +275,114 @@ fn reviewed_language_baseline_preserves_ids_anchors_and_no_answer()
     let no_answer = score_nodes(&graph, &query_terms("quantum banana synchronization"), true);
     assert!(no_answer.ranked.is_empty());
     assert!(no_answer.best_seed_by_term.is_empty());
+    Ok(())
+}
+
+#[test]
+fn bm25_shadow_profile_is_deterministic_and_keeps_legacy_as_default()
+-> Result<(), Box<dyn std::error::Error>> {
+    let graph = reviewed_language_baseline_graph()?;
+    let cases = [
+        ("how are dependencies solved", "py:solve-dependencies"),
+        ("how are log records represented", "rs:log-record"),
+        ("how are object values mapped", "ts:map-values"),
+        ("where is cafe parsed", "unicode:cafe-parser"),
+    ];
+
+    for (question, expected_id) in cases {
+        let terms = query_terms(question);
+        let legacy = score_nodes(&graph, &terms, true);
+        let explicit_legacy =
+            score_nodes_with_profile(&graph, &terms, true, TextRankProfile::LegacyV1);
+        assert_eq!(legacy.ranked, explicit_legacy.scores.ranked);
+        assert_eq!(
+            legacy.best_seed_by_term,
+            explicit_legacy.scores.best_seed_by_term
+        );
+        assert!(!explicit_legacy.candidates_truncated);
+
+        let first = score_nodes_with_profile(&graph, &terms, true, TextRankProfile::Bm25V1);
+        let second = score_nodes_with_profile(&graph, &terms, true, TextRankProfile::Bm25V1);
+        assert_eq!(first.scores.ranked, second.scores.ranked);
+        assert_eq!(
+            first.scores.best_seed_by_term,
+            second.scores.best_seed_by_term
+        );
+        assert_eq!(
+            first
+                .scores
+                .ranked
+                .first()
+                .map(|candidate| graph.node(candidate.node).id.as_str()),
+            Some(expected_id),
+            "question: {question:?}"
+        );
+        assert!(!first.candidates_truncated);
+    }
+
+    let default_output = query_graph_text(
+        &graph,
+        "how are dependencies solved",
+        TraversalMode::Bfs,
+        0,
+        2_000,
+        &[],
+        &HashMap::new(),
+    );
+    let explicit_legacy_output = profiled_text_query(
+        &graph,
+        "how are dependencies solved",
+        TextRankProfile::LegacyV1,
+    )?;
+    assert_eq!(default_output, explicit_legacy_output);
+
+    let bm25_output = profiled_text_query(
+        &graph,
+        "how are dependencies solved",
+        TextRankProfile::Bm25V1,
+    )?;
+    assert!(bm25_output.contains("Ranker: text-ranker/bm25-v1"));
+    assert!(bm25_output.contains("Candidate retrieval: complete"));
+    assert!(bm25_output.contains("src=fastapi/dependencies/utils.py"));
+    assert!(!bm25_output.contains("mapValuesFixture"));
+
+    let no_answer = score_nodes_with_profile(
+        &graph,
+        &query_terms("quantum banana synchronization"),
+        true,
+        TextRankProfile::Bm25V1,
+    );
+    assert!(no_answer.scores.ranked.is_empty());
+    assert!(no_answer.scores.best_seed_by_term.is_empty());
+    assert!(!no_answer.candidates_truncated);
+    Ok(())
+}
+
+#[test]
+fn bm25_shadow_profile_surfaces_candidate_truncation() -> Result<(), Box<dyn std::error::Error>> {
+    let nodes = (0..520)
+        .map(|index| {
+            json!({
+                "id": format!("route:{index:03}"),
+                "label": format!("route_{index:03}"),
+                "kind": "function",
+                "source_file": format!("src/routes/{index:03}.rs")
+            })
+        })
+        .collect::<Vec<_>>();
+    let graph = Graph::from_document(serde_json::from_value(json!({
+        "directed": true,
+        "multigraph": false,
+        "graph": {},
+        "nodes": nodes,
+        "links": []
+    }))?)?;
+    let profiled =
+        score_nodes_with_profile(&graph, &query_terms("route"), true, TextRankProfile::Bm25V1);
+    assert_eq!(profiled.scores.ranked.len(), 512);
+    assert!(profiled.candidates_truncated);
+
+    let rendered = profiled_text_query(&graph, "route", TextRankProfile::Bm25V1)?;
+    assert!(rendered.contains("Candidate retrieval: truncated"));
     Ok(())
 }
