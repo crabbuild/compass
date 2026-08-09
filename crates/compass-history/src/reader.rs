@@ -75,6 +75,22 @@ impl RealizationReader<'_> {
         &self.published
     }
 
+    /// Load the exact trusted typed graph retained by this immutable realization.
+    ///
+    /// Compatibility-only historical projections are deliberately rejected:
+    /// callers requiring `compass.graph/1` must rebuild older realizations.
+    pub fn graph_document(&self) -> Result<compass_model::code_graph::GraphDocument, HistoryError> {
+        let artifacts = self
+            .store
+            .artifacts_with_activity(&self.published.id, &self._activity)?;
+        artifacts
+            .artifacts
+            .trusted_graph_document()?
+            .ok_or_else(|| HistoryError::TrustedGraphUnavailable {
+                realization: self.published.id.to_string(),
+            })
+    }
+
     pub fn read(&self, key: HistoryRecordKey<'_>) -> Result<Option<HistoryRecord>, HistoryError> {
         let owned = OwnedHistoryRecordKey::from(key);
         if let Some(value) = self.records.borrow().get(&owned) {

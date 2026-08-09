@@ -6,8 +6,8 @@ use compass_graph::{
     garbage_collect_graph_snapshots, graph_snapshot_needs_gc,
 };
 use compass_model::code_graph::{
-    BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails, FileRecord,
-    GraphDocument, NodeDetails, NodeKind, NodeRecord,
+    BuildMetadata, CommunityMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails,
+    FileRecord, GraphDocument, NodeDetails, NodeKind, NodeRecord,
 };
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{
@@ -183,9 +183,10 @@ fn snapshot_is_deterministic_and_reuses_immutable_objects() -> Result<(), Box<dy
         named.into_iter().map(|node| node.id).collect::<Vec<_>>(),
         ["a"]
     );
-    let (term_nodes, term_truncated) = reader.nodes_for_terms(&["crat".to_owned()], limits(4))?;
+    let (term_nodes, term_truncated) =
+        reader.nodes_for_terms(&["rust".to_owned()], limits(12_800))?;
     assert!(!term_truncated);
-    assert_eq!(term_nodes.len(), 2);
+    assert_eq!(term_nodes.len(), 3);
     assert_eq!(
         reader.file_by_path("src/lib.rs")?.map(|file| file.path),
         Some("src/lib.rs".to_owned())
@@ -234,7 +235,7 @@ fn nodes_for_terms_matches_diacritic_normalized_queries() -> Result<(), Box<dyn 
     builder.activate(&store, &prepared)?;
     let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
 
-    let (nodes, truncated) = reader.nodes_for_terms(&["cafe".to_owned()], limits(8))?;
+    let (nodes, truncated) = reader.nodes_for_terms(&["cafe".to_owned()], limits(128))?;
     assert!(!truncated);
     assert_eq!(nodes.len(), 1);
     assert_eq!(
@@ -243,7 +244,7 @@ fn nodes_for_terms_matches_diacritic_normalized_queries() -> Result<(), Box<dyn 
     );
 
     let (nodes_with_punctuation, truncated) =
-        reader.nodes_for_terms(&["café".to_owned()], limits(8))?;
+        reader.nodes_for_terms(&["café".to_owned()], limits(128))?;
     assert!(!truncated);
     assert_eq!(
         nodes_with_punctuation
@@ -253,6 +254,44 @@ fn nodes_for_terms_matches_diacritic_normalized_queries() -> Result<(), Box<dyn 
         ["cafe"]
     );
 
+    Ok(())
+}
+
+#[test]
+fn term_posting_work_is_bounded_before_multi_term_intersection() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut document = graph();
+    document.nodes.clear();
+    document.links.clear();
+    for index in 0..128 {
+        let mut candidate = node(&format!("n:{index:03}"));
+        candidate.name = if index == 0 { "alpha" } else { "beta" }.to_owned();
+        document.nodes.push(candidate);
+    }
+    let prepared = builder.prepare(&store, &document)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    assert_eq!(reader.nodes(limits(300))?.len(), 128);
+
+    let (alpha, alpha_truncated, alpha_work) =
+        reader.nodes_for_terms_bounded_work(&["crat".to_owned()], limits(128))?;
+    assert_eq!(alpha.len(), 128);
+    assert!(!alpha_truncated);
+    assert_eq!(alpha_work.node_ids_decoded, 128);
+
+    let (nodes, truncated, work) = reader
+        .nodes_for_terms_bounded_work(&["crat".to_owned(), "alpha".to_owned()], limits(256))?;
+    assert_eq!(nodes.len(), 1);
+    assert!(!truncated);
+    assert_eq!(work.chunks_decoded, 2);
+    assert_eq!(work.node_ids_decoded, 129);
+
+    let (nodes, truncated, work) =
+        reader.nodes_for_terms_bounded_work(&["crat".to_owned()], limits(127))?;
+    assert!(nodes.is_empty());
+    assert!(truncated);
+    assert_eq!(work.node_ids_decoded, 0);
     Ok(())
 }
 
@@ -427,6 +466,97 @@ fn graph_delta_rebuilds_relationship_indexes_without_rewriting_nodes() -> Result
     assert_eq!(reader.get_edge(&replacement.id)?, Some(replacement));
     assert_eq!(reader.outgoing("b", limits(4))?.len(), 1);
     assert_eq!(reader.export_graph()?, graph_sorted_with(&current));
+    Ok(())
+}
+
+#[test]
+fn graph_delta_rebuilds_discovery_scope_postings() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut previous = graph();
+    for path in ["src/old_a.rs", "src/new.rs"] {
+        let mut file = previous.graph.files[0].clone();
+        file.id = file_id(path);
+        file.path = path.to_owned();
+        previous.graph.files.push(file);
+    }
+    previous
+        .graph
+        .files
+        .sort_by(|left, right| left.id.cmp(&right.id));
+    let previous_node = previous
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "a")
+        .ok_or("node a missing")?;
+    previous_node.source = Some(SourceAnchor {
+        file: "src/old_a.rs".to_owned(),
+        ..anchor()
+    });
+    previous_node.community = Some(CommunityMetadata {
+        id: 7,
+        label: Some("old-community".to_owned()),
+        score: None,
+        color: None,
+    });
+    let first = builder.prepare(&store, &previous)?;
+    builder.activate(&store, &first)?;
+
+    let mut current = previous.clone();
+    let current_node = current
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "a")
+        .ok_or("node a missing")?;
+    current_node.qualified_name = "new_package::a".to_owned();
+    current_node.source = Some(SourceAnchor {
+        file: "src/new.rs".to_owned(),
+        ..anchor()
+    });
+    current_node.community = Some(CommunityMetadata {
+        id: 8,
+        label: Some("new-community".to_owned()),
+        score: None,
+        color: None,
+    });
+
+    let content = builder.prepare_graph_delta(&store, &previous, &current)?;
+    let graph_bytes = canonical_graph_json(&current)?;
+    let graph_digest = format!("{:x}", sha2::Sha256::digest(&graph_bytes));
+    let delta = builder.finish_content(&store, content, graph_digest, graph_bytes.len() as u64)?;
+    builder.activate(&store, &delta)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+
+    for (kind, value) in [
+        ("node-qname", "crate::a"),
+        ("source", "src/old_a.rs"),
+        ("community-label", "old-community"),
+    ] {
+        assert!(
+            reader
+                .resolve_scope_values(kind, value, limits(16))?
+                .0
+                .is_empty()
+        );
+    }
+    assert_eq!(
+        reader
+            .resolve_scope_values("node-qname", "new_package::a", limits(16))?
+            .0,
+        ["a"]
+    );
+    assert_eq!(
+        reader
+            .resolve_scope_values("source", "src/new.rs", limits(16))?
+            .0,
+        ["src/new.rs"]
+    );
+    assert_eq!(
+        reader
+            .resolve_scope_values("community-label", "new-community", limits(16))?
+            .0,
+        ["8"]
+    );
     Ok(())
 }
 

@@ -143,6 +143,104 @@ fn code_query_tools_share_the_bounded_versioned_contract() -> Result<(), Box<dyn
     assert_eq!(reverse["paths"], json!([]));
     assert_eq!(reverse["diagnostics"][0]["code"], "direction_mismatch");
 
+    let discovery = invoke(
+        &server,
+        "query_graph",
+        json!({
+            "question":"Target",
+            "direction":"incoming",
+            "scope":[{"kind":"node","value":"Fixture.Target"}],
+            "relation_contexts":["call"],
+            "traversal":"bfs"
+        }),
+    )?;
+    assert_eq!(discovery["schema"], "compass.query.discovery/1");
+    assert_eq!(discovery["selectedDirection"], "incoming");
+    assert_eq!(discovery["directionSource"], "explicit");
+    assert_eq!(discovery["scope"][0]["kind"], "node");
+    assert_eq!(discovery["scope"][0]["value"], "n:target");
+    assert_eq!(discovery["seeds"][0]["nodeId"], "n:target");
+
+    let invalid_scope = server.invoke(
+        "query_graph",
+        json!({
+            "question":"Target",
+            "scope":[{"kind":"guessed","value":"Fixture.Target"}]
+        })
+        .as_object()
+        .cloned()
+        .unwrap_or_else(Map::new),
+    );
+    assert!(invalid_scope.contains("unsupported 'kind' value"));
+
+    for (field, value) in [
+        ("direction", json!("auto")),
+        ("relation_contexts", json!([])),
+        ("scope", json!([])),
+        ("traversal", json!("bfs")),
+        ("include_heuristic", json!(false)),
+        ("max_depth", json!(2)),
+        ("max_seeds", json!(3)),
+        ("max_candidates", json!(256)),
+        ("max_nodes", json!(500)),
+        ("max_edges", json!(1000)),
+        ("max_expanded_relationships", json!(10_000)),
+        ("max_response_bytes", json!(8_388_608)),
+        ("timeout_ms", json!(30_000)),
+    ] {
+        let mut arguments = Map::from_iter([("question".to_owned(), json!("Target"))]);
+        arguments.insert(field.to_owned(), value);
+        let response = invoke(&server, "query_graph", Value::Object(arguments))?;
+        assert_eq!(response["schema"], "compass.query.discovery/1", "{field}");
+    }
+
+    for (field, value) in [
+        ("direction", json!(7)),
+        ("relation_contexts", json!("call")),
+        ("scope", json!("node:Target")),
+        ("traversal", json!(7)),
+        ("include_heuristic", json!("false")),
+        ("max_depth", json!("2")),
+        ("max_seeds", json!(-1)),
+        ("max_candidates", json!(false)),
+        ("max_nodes", json!(1.5)),
+        ("max_edges", Value::Null),
+        ("max_expanded_relationships", json!("100")),
+        ("max_response_bytes", json!(false)),
+        ("timeout_ms", json!(-1)),
+    ] {
+        let mut arguments = Map::from_iter([("question".to_owned(), json!("Target"))]);
+        arguments.insert(field.to_owned(), value);
+        let output = server.invoke("query_graph", arguments);
+        assert!(
+            output.contains("must be") || output.contains("unsupported"),
+            "{field}: {output}"
+        );
+    }
+    assert!(
+        server
+            .invoke(
+                "query_graph",
+                Map::from_iter([
+                    ("question".to_owned(), json!("Target")),
+                    ("mode".to_owned(), json!("bfs")),
+                    ("direction".to_owned(), json!("incoming")),
+                ]),
+            )
+            .contains("cannot be combined")
+    );
+    assert!(
+        server
+            .invoke(
+                "query_graph",
+                Map::from_iter([
+                    ("question".to_owned(), json!("Target")),
+                    ("unknown".to_owned(), json!(true)),
+                ]),
+            )
+            .contains("unknown query_graph argument")
+    );
+
     for arguments in [
         json!({"question":"authentication flow"}),
         json!({"question":"who calls Target?","mode":"bfs"}),
@@ -184,6 +282,45 @@ fn code_query_tool_schemas_are_closed_and_bounded() {
                 .is_some()
         );
     }
+}
+
+#[test]
+fn query_graph_schema_exposes_typed_discovery_controls() -> Result<(), Box<dyn Error>> {
+    let query = CompassMcp::tools()
+        .into_iter()
+        .find(|tool| tool.name.as_ref() == "query_graph")
+        .ok_or("query_graph tool missing")?;
+    let properties = query
+        .input_schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .ok_or("query_graph properties missing")?;
+    assert_eq!(
+        properties["direction"]["enum"],
+        json!(["auto", "incoming", "outgoing", "both"])
+    );
+    assert_eq!(query.input_schema["additionalProperties"], false);
+    assert_eq!(properties["question"]["maxLength"], 4096);
+    assert_eq!(properties["relation_contexts"]["maxItems"], 32);
+    assert_eq!(properties["scope"]["maxItems"], 32);
+    assert_eq!(properties["scope"]["items"]["additionalProperties"], false);
+    assert_eq!(
+        properties["scope"]["items"]["properties"]["kind"]["enum"],
+        json!(["community", "source", "package", "node"])
+    );
+    for (name, maximum) in [
+        ("max_depth", 8_u64),
+        ("max_seeds", 3),
+        ("max_candidates", 256),
+        ("max_nodes", 500),
+        ("max_edges", 1000),
+        ("max_expanded_relationships", 10_000),
+        ("max_response_bytes", 8_388_608),
+        ("timeout_ms", 30_000),
+    ] {
+        assert_eq!(properties[name]["maximum"], maximum, "{name}");
+    }
+    Ok(())
 }
 
 #[tokio::test]

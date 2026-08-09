@@ -8,9 +8,10 @@ use compass_ir::ProgramBundle;
 use compass_model::code_graph::{EdgeKind, EdgeRecord, FileRecord, GraphDocument, NodeRecord};
 use compass_model::provenance::{EvidenceConfidence, ResolutionState};
 use compass_model::query_contract::{
-    CallRequest, CodeQueryOperation, CodeQueryResponse, ExploreRequest, ImpactRequest,
-    NodeTrailRequest, QueryDiagnostic, QueryDiagnosticCode, QueryEdge, QueryEvidence,
-    QueryEvidenceLayer, QueryFile, QueryNode, QueryPath, SearchHit, SearchRequest,
+    CallRequest, CodeQueryOperation, CodeQueryResponse, DiscoveryScopeKind, ExploreRequest,
+    ImpactRequest, NodeTrailRequest, QueryDiagnostic, QueryDiagnosticCode, QueryEdge,
+    QueryEvidence, QueryEvidenceLayer, QueryFile, QueryNode, QueryPath, SearchHit, SearchRequest,
+    discovery_scope_postings,
 };
 use rusqlite::{Connection, params};
 
@@ -95,11 +96,19 @@ pub(crate) struct CandidateAssembly {
     pub(crate) relation_edges_examined: u64,
 }
 
+struct TermCandidateRead {
+    nodes: Vec<NodeRecord>,
+    truncated: bool,
+    node_ids_decoded: u64,
+    chunks_decoded: u64,
+}
+
 pub(crate) struct CandidateAssemblyPolicy<'a> {
     pub(crate) max_candidates: usize,
     pub(crate) source_lookup_limit: usize,
     pub(crate) max_candidate_reads: usize,
     pub(crate) max_candidate_probes: usize,
+    pub(crate) bounded_posting_work: bool,
     pub(crate) admit: &'a dyn Fn(&NodeRecord) -> bool,
     pub(crate) check: &'a mut dyn FnMut() -> Result<(), QueryError>,
 }
@@ -144,6 +153,25 @@ impl CandidateReadBudget {
             .read
             .saturating_add(u64::try_from(examined).unwrap_or(u64::MAX));
         self.truncated |= source_truncated || self.remaining == 0;
+    }
+
+    fn record_additional_probes(&mut self, probes: u64) {
+        let requested = usize::try_from(probes).unwrap_or(usize::MAX);
+        let admitted = requested.min(self.probes_remaining);
+        self.probes_remaining = self.probes_remaining.saturating_sub(admitted);
+        self.probes = self
+            .probes
+            .saturating_add(u64::try_from(admitted).unwrap_or(u64::MAX));
+        self.truncated |= admitted < requested;
+    }
+
+    fn record_exact_work(&mut self, examined: usize, source_truncated: bool) {
+        let admitted = examined.min(self.remaining);
+        self.remaining = self.remaining.saturating_sub(admitted);
+        self.read = self
+            .read
+            .saturating_add(u64::try_from(admitted).unwrap_or(u64::MAX));
+        self.truncated |= source_truncated || admitted < examined || self.remaining == 0;
     }
 }
 
@@ -329,6 +357,7 @@ pub(crate) struct CodeLookupIndex {
     node_by_id: HashMap<String, usize>,
     nodes_by_normalized_name: HashMap<String, Vec<usize>>,
     file_by_path: HashMap<String, usize>,
+    scope_values: HashMap<(u8, String), Vec<String>>,
 }
 
 impl CodeLookupIndex {
@@ -337,6 +366,7 @@ impl CodeLookupIndex {
             node_by_id: HashMap::with_capacity(graph.nodes.len()),
             nodes_by_normalized_name: HashMap::new(),
             file_by_path: HashMap::with_capacity(graph.graph.files.len()),
+            scope_values: HashMap::new(),
         };
         for (index, node) in graph.nodes.iter().enumerate() {
             lookup.node_by_id.insert(node.id.clone(), index);
@@ -347,10 +377,24 @@ impl CodeLookupIndex {
                     .or_default()
                     .push(index);
             }
+            for (posting_kind, value, canonical) in discovery_scope_postings(node) {
+                let Some(kind) = scope_kind_from_posting(&posting_kind) else {
+                    continue;
+                };
+                lookup
+                    .scope_values
+                    .entry((scope_kind_rank(kind), value))
+                    .or_default()
+                    .push(canonical);
+            }
         }
         for nodes in lookup.nodes_by_normalized_name.values_mut() {
             nodes.sort_by(|left, right| graph.nodes[*left].id.cmp(&graph.nodes[*right].id));
             nodes.dedup();
+        }
+        for values in lookup.scope_values.values_mut() {
+            values.sort();
+            values.dedup();
         }
         for (index, file) in graph.graph.files.iter().enumerate() {
             lookup.file_by_path.insert(file.path.clone(), index);
@@ -370,6 +414,31 @@ impl CodeLookupIndex {
 
     fn file_by_path(&self, path: &str) -> Option<usize> {
         self.file_by_path.get(path).copied()
+    }
+
+    fn scope_values(&self, kind: DiscoveryScopeKind, value: &str) -> &[String] {
+        self.scope_values
+            .get(&(scope_kind_rank(kind), value.to_owned()))
+            .map_or(&[], Vec::as_slice)
+    }
+}
+
+pub(crate) const fn scope_kind_rank(kind: DiscoveryScopeKind) -> u8 {
+    match kind {
+        DiscoveryScopeKind::Community => 0,
+        DiscoveryScopeKind::Source => 1,
+        DiscoveryScopeKind::Package => 2,
+        DiscoveryScopeKind::Node => 3,
+    }
+}
+
+fn scope_kind_from_posting(posting: &str) -> Option<DiscoveryScopeKind> {
+    match posting {
+        "community-id" | "community-label" => Some(DiscoveryScopeKind::Community),
+        "source" => Some(DiscoveryScopeKind::Source),
+        "package" => Some(DiscoveryScopeKind::Package),
+        "node-id" | "node-qname" => Some(DiscoveryScopeKind::Node),
+        _ => None,
     }
 }
 
@@ -570,6 +639,51 @@ impl CodeGraphBackend {
         }
     }
 
+    pub(crate) fn resolve_scope_values(
+        &self,
+        kind: DiscoveryScopeKind,
+        value: &str,
+        limit: usize,
+    ) -> Result<(Vec<String>, bool), QueryError> {
+        match self {
+            Self::Materialized { lookup, .. } => {
+                let retained = limit.saturating_add(1);
+                let mut values = lookup
+                    .scope_values(kind, value)
+                    .iter()
+                    .take(retained)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let truncated = values.len() > limit;
+                values.truncate(limit);
+                Ok((values, truncated))
+            }
+            Self::Store(snapshot) => {
+                let mut values = BTreeSet::new();
+                let mut truncated = false;
+                for posting_kind in snapshot_scope_kinds(kind) {
+                    let (found, found_truncated) = snapshot
+                        .reader()?
+                        .resolve_scope_values(
+                            posting_kind,
+                            value,
+                            snapshot_limits(limit.saturating_add(1))?,
+                        )
+                        .map_err(scope_snapshot_error)?;
+                    truncated |= found_truncated;
+                    for value in found {
+                        values.insert(value);
+                        if values.len() > limit {
+                            truncated = true;
+                            values.pop_last();
+                        }
+                    }
+                }
+                Ok((values.into_iter().collect(), truncated))
+            }
+        }
+    }
+
     pub(crate) fn matching_bounded(
         &self,
         node: &str,
@@ -673,23 +787,50 @@ impl CodeGraphBackend {
         }
     }
 
-    pub(crate) fn store_term_candidates(
+    fn store_term_candidates(
         &self,
         terms: &[String],
         limit: usize,
-    ) -> Result<Option<(Vec<NodeRecord>, bool)>, QueryError> {
+        bounded_posting_work: bool,
+    ) -> Result<Option<TermCandidateRead>, QueryError> {
         let Self::Store(snapshot) = self else {
             return Ok(None);
         };
-        let (mut nodes, truncated) = snapshot
-            .reader()?
-            .nodes_for_terms(terms, snapshot_limits(limit.saturating_add(1))?)
-            .map_err(snapshot_error)?;
+        let reader = snapshot.reader()?;
+        let (mut nodes, truncated, node_ids_decoded, chunks_decoded) = if bounded_posting_work {
+            let (nodes, truncated, work) = reader
+                .nodes_for_terms_bounded_work(terms, snapshot_limits(limit)?)
+                .map_err(snapshot_error)?;
+            (nodes, truncated, work.node_ids_decoded, work.chunks_decoded)
+        } else {
+            let recall_ceiling =
+                usize::try_from(compass_model::query_contract::MAX_INDEXED_CANDIDATE_NODES_READ)
+                    .unwrap_or(usize::MAX);
+            let (nodes, truncated) = reader
+                .nodes_for_terms(terms, snapshot_limits(recall_ceiling)?)
+                .map_err(snapshot_error)?;
+            let decoded = u64::try_from(nodes.len()).unwrap_or(u64::MAX);
+            (nodes, truncated, decoded, 0)
+        };
         let truncated = truncated || nodes.len() > limit;
         if nodes.len() > limit {
             nodes.truncate(limit);
         }
-        Ok(Some((nodes, truncated)))
+        Ok(Some(TermCandidateRead {
+            nodes,
+            truncated,
+            node_ids_decoded,
+            chunks_decoded,
+        }))
+    }
+}
+
+fn snapshot_scope_kinds(kind: DiscoveryScopeKind) -> &'static [&'static str] {
+    match kind {
+        DiscoveryScopeKind::Community => &["community-id", "community-label"],
+        DiscoveryScopeKind::Source => &["source"],
+        DiscoveryScopeKind::Package => &["package"],
+        DiscoveryScopeKind::Node => &["node-id", "node-qname"],
     }
 }
 
@@ -715,6 +856,21 @@ fn snapshot_error(error: compass_graph::SnapshotError) -> QueryError {
         "store_graph_snapshot_failed",
         error.to_string(),
     )
+}
+
+fn scope_snapshot_error(error: compass_graph::SnapshotError) -> QueryError {
+    if matches!(
+        error,
+        compass_graph::SnapshotError::CapabilityUnavailable(_)
+    ) {
+        QueryError::new(
+            QueryErrorKind::UnsupportedSchema,
+            "scope_index_unavailable",
+            error.to_string(),
+        )
+    } else {
+        snapshot_error(error)
+    }
 }
 
 fn index_directional_edge(
@@ -787,6 +943,7 @@ impl CodeQueryEngine {
                     compass_model::query_contract::MAX_INDEXED_CANDIDATE_PROBES,
                 )
                 .unwrap_or(usize::MAX),
+                bounded_posting_work: false,
                 admit: &admit,
                 check: &mut check,
             },
@@ -937,22 +1094,33 @@ impl CodeQueryEngine {
         (policy.check)()?;
         let term_limit = candidate_work.lookup_limit(policy.source_lookup_limit);
         if term_limit > 0 && candidate_work.begin_probe() {
-            let (term_nodes, term_truncated) =
-                if let Some(candidates) = self.backend.store_term_candidates(terms, term_limit)? {
-                    candidates
-                } else {
-                    self.materialized_term_candidates(fts_query, term_limit)?
-                };
-            postings_decoded = postings_decoded
-                .saturating_add(u64::try_from(term_nodes.len()).unwrap_or(u64::MAX));
-            if term_truncated {
-                postings_decoded = postings_decoded.saturating_add(1);
-            }
-            candidate_work.record(term_nodes.len(), term_truncated);
+            let term_read = if let Some(candidates) = self.backend.store_term_candidates(
+                terms,
+                term_limit,
+                policy.bounded_posting_work,
+            )? {
+                candidates
+            } else {
+                let (nodes, truncated) =
+                    self.materialized_term_candidates(fts_query, term_limit)?;
+                let decoded = u64::try_from(nodes.len()).unwrap_or(u64::MAX);
+                TermCandidateRead {
+                    nodes,
+                    truncated,
+                    node_ids_decoded: decoded,
+                    chunks_decoded: 0,
+                }
+            };
+            postings_decoded = postings_decoded.saturating_add(term_read.node_ids_decoded);
+            candidate_work.record_additional_probes(term_read.chunks_decoded);
+            candidate_work.record_exact_work(
+                usize::try_from(term_read.node_ids_decoded).unwrap_or(usize::MAX),
+                term_read.truncated,
+            );
             add_admitted_candidates(
                 &mut pool,
                 CandidateSource::TermIndex,
-                term_nodes,
+                term_read.nodes,
                 policy.admit,
             );
         } else if !fts_query.is_empty() && policy.source_lookup_limit > 0 {
@@ -1560,6 +1728,7 @@ impl CodeQueryEngine {
                     compass_model::query_contract::MAX_INDEXED_CANDIDATE_PROBES,
                 )
                 .unwrap_or(usize::MAX),
+                bounded_posting_work: false,
                 admit: &admit,
                 check: &mut check,
             },
@@ -2263,7 +2432,24 @@ mod adjacency_tests {
     use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
     use compass_model::validate_code_graph;
 
-    use super::{CodeAdjacencyIndex, EdgeKind};
+    use compass_model::query_contract::DiscoveryScopeKind;
+
+    use super::{CodeAdjacencyIndex, EdgeKind, scope_kind_from_posting};
+
+    #[test]
+    fn discovery_scope_posting_mapping_is_closed() {
+        for (posting, expected) in [
+            ("community-id", DiscoveryScopeKind::Community),
+            ("community-label", DiscoveryScopeKind::Community),
+            ("source", DiscoveryScopeKind::Source),
+            ("package", DiscoveryScopeKind::Package),
+            ("node-id", DiscoveryScopeKind::Node),
+            ("node-qname", DiscoveryScopeKind::Node),
+        ] {
+            assert_eq!(scope_kind_from_posting(posting), Some(expected));
+        }
+        assert_eq!(scope_kind_from_posting("future-extension"), None);
+    }
 
     fn edge(id: &str, source: &str, kind: EdgeKind, target: &str) -> EdgeRecord {
         EdgeRecord {

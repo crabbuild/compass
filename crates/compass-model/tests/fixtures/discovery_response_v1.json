@@ -33,6 +33,7 @@
   },
   "omissions": {
     "candidates": 0,
+    "alternatives": null,
     "nodes": 0,
     "edges": 0,
     "expandedRelationships": 0

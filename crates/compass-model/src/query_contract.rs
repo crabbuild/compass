@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::code_graph::{EdgeDetails, EdgeKind, NodeDetails, NodeKind, NodeRole};
@@ -34,6 +36,7 @@ pub const MAX_DISCOVERY_QUESTION_BYTES: usize = MAX_INDEXED_QUERY_BYTES;
 pub const MAX_DISCOVERY_QUERY_TERMS: usize = MAX_INDEXED_QUERY_TERMS;
 pub const MAX_DISCOVERY_FILTERS: usize = 32;
 pub const MAX_DISCOVERY_FILTER_BYTES: usize = 1_024;
+pub const MAX_DISCOVERY_ALTERNATIVES_PER_SEED: usize = 8;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -54,7 +57,7 @@ pub enum DiscoveryDirectionSource {
     Neutral,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiscoveryScopeKind {
     Community,
@@ -68,6 +71,140 @@ pub enum DiscoveryScopeKind {
 pub struct DiscoveryScope {
     pub kind: DiscoveryScopeKind,
     pub value: String,
+}
+
+/// Canonicalize a discovery scope without consulting the host filesystem.
+/// Source paths use `/`; package names retain language namespace separators.
+#[must_use]
+pub fn canonical_discovery_scope_value(kind: DiscoveryScopeKind, value: &str) -> Option<String> {
+    let value = match kind {
+        DiscoveryScopeKind::Source => canonical_source_scope(value),
+        DiscoveryScopeKind::Package => {
+            let value = value.trim().trim_matches('/');
+            if value.contains('/') || value.contains('\\') {
+                canonical_source_scope(value)
+            } else {
+                value.trim_matches('.').trim_matches(':').to_owned()
+            }
+        }
+        DiscoveryScopeKind::Community | DiscoveryScopeKind::Node => value.trim().to_owned(),
+    };
+    (!value.is_empty() && !value.split('/').any(|part| part == "..")).then_some(value)
+}
+
+/// Stable scope postings as `(posting kind, requested value, canonical value)`.
+/// Canonical values are community/node IDs or the normalized prefix itself.
+#[must_use]
+pub fn discovery_scope_postings(
+    node: &crate::code_graph::NodeRecord,
+) -> BTreeSet<(String, String, String)> {
+    let mut postings = BTreeSet::from([
+        ("node-id".to_owned(), node.id.clone(), node.id.clone()),
+        (
+            "node-qname".to_owned(),
+            node.qualified_name.clone(),
+            node.id.clone(),
+        ),
+    ]);
+    if let Some(community) = &node.community {
+        let id = community.id.to_string();
+        postings.insert(("community-id".to_owned(), id.clone(), id.clone()));
+        if let Some(label) = &community.label {
+            postings.insert(("community-label".to_owned(), label.clone(), id));
+        }
+    }
+    if let Some(source) = &node.source
+        && let Some(source) =
+            canonical_discovery_scope_value(DiscoveryScopeKind::Source, &source.file)
+    {
+        for prefix in slash_prefixes(&source) {
+            postings.insert(("source".to_owned(), prefix.clone(), prefix.clone()));
+            postings.insert(("package".to_owned(), prefix.clone(), prefix));
+        }
+    }
+    for prefix in qname_prefixes(&node.qualified_name) {
+        postings.insert(("package".to_owned(), prefix.clone(), prefix));
+    }
+    postings.retain(|(_, value, canonical)| {
+        value.len() <= MAX_DISCOVERY_FILTER_BYTES && canonical.len() <= MAX_DISCOVERY_FILTER_BYTES
+    });
+    postings
+}
+
+/// Match a node against the deterministic OR-union of canonical scopes.
+#[must_use]
+pub fn discovery_scope_matches(
+    node: &crate::code_graph::NodeRecord,
+    scopes: &[DiscoveryScope],
+) -> bool {
+    scopes.is_empty()
+        || scopes.iter().any(|scope| match scope.kind {
+            DiscoveryScopeKind::Community => node
+                .community
+                .as_ref()
+                .is_some_and(|community| community.id.to_string() == scope.value),
+            DiscoveryScopeKind::Source => node.source.as_ref().is_some_and(|source| {
+                canonical_source_scope(&source.file) == scope.value
+                    || canonical_source_scope(&source.file)
+                        .strip_prefix(&scope.value)
+                        .is_some_and(|suffix| suffix.starts_with('/'))
+            }),
+            DiscoveryScopeKind::Package => {
+                node.qualified_name == scope.value
+                    || node
+                        .qualified_name
+                        .strip_prefix(&scope.value)
+                        .is_some_and(|suffix| {
+                            suffix.starts_with("::")
+                                || suffix.starts_with('.')
+                                || suffix.starts_with('/')
+                        })
+                    || node.source.as_ref().is_some_and(|source| {
+                        let source = canonical_source_scope(&source.file);
+                        source == scope.value
+                            || source
+                                .strip_prefix(&scope.value)
+                                .is_some_and(|suffix| suffix.starts_with('/'))
+                    })
+            }
+            DiscoveryScopeKind::Node => node.id == scope.value,
+        })
+}
+
+fn canonical_source_scope(value: &str) -> String {
+    value
+        .trim()
+        .replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn slash_prefixes(value: &str) -> Vec<String> {
+    let mut prefixes = Vec::new();
+    let mut current = String::new();
+    for part in value.split('/').filter(|part| !part.is_empty()) {
+        if !current.is_empty() {
+            current.push('/');
+        }
+        current.push_str(part);
+        prefixes.push(current.clone());
+    }
+    prefixes
+}
+
+fn qname_prefixes(value: &str) -> Vec<String> {
+    let mut cuts = BTreeSet::from([value.len()]);
+    for (index, character) in value.char_indices() {
+        if matches!(character, '.' | '/' | ':') && index > 0 {
+            cuts.insert(index);
+        }
+    }
+    cuts.into_iter()
+        .filter_map(|cut| value.get(..cut))
+        .filter_map(|value| canonical_discovery_scope_value(DiscoveryScopeKind::Package, value))
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -194,6 +331,7 @@ pub struct DiscoverySeed {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DiscoveryOmissions {
     pub candidates: Option<u64>,
+    pub alternatives: Option<u64>,
     pub nodes: Option<u64>,
     pub edges: Option<u64>,
     pub expanded_relationships: Option<u64>,

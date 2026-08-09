@@ -6,7 +6,9 @@ use compass_graph::{GraphSnapshotBuilder, GraphSnapshotReader};
 use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
 use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, DiscoveryDirection, DiscoveryLimits, DiscoveryQueryRequest,
-    DiscoveryTraversal, ExploreRequest, ImpactRequest, NodeTrailRequest, SearchRequest,
+    DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind, DiscoveryTraversal, ExploreRequest,
+    ImpactRequest, MAX_DISCOVERY_CANDIDATE_NODES_READ, MAX_DISCOVERY_CANDIDATE_PROBES,
+    NodeTrailRequest, SearchRequest,
 };
 use compass_query::{
     EngineSelection, QueryEngineKind, open, open_with_document, open_with_engine, open_with_store,
@@ -44,6 +46,28 @@ fn discovery_request(question: &str) -> DiscoveryQueryRequest {
     }
 }
 
+fn assert_discovery_semantically_equal(
+    actual: &DiscoveryQueryResponse,
+    expected: &DiscoveryQueryResponse,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut actual_value = serde_json::to_value(actual)?;
+    let mut expected_value = serde_json::to_value(expected)?;
+    actual_value
+        .as_object_mut()
+        .ok_or("discovery response must serialize as an object")?
+        .remove("stats");
+    expected_value
+        .as_object_mut()
+        .ok_or("discovery response must serialize as an object")?
+        .remove("stats");
+    assert_eq!(actual_value, expected_value);
+    for response in [actual, expected] {
+        assert!(response.stats.candidate_nodes <= MAX_DISCOVERY_CANDIDATE_NODES_READ);
+        assert!(response.stats.candidate_probes <= MAX_DISCOVERY_CANDIDATE_PROBES);
+    }
+    Ok(())
+}
+
 #[test]
 fn discovery_is_identical_for_json_store_direct_document_and_immutable_selectors()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -63,6 +87,13 @@ fn discovery_is_identical_for_json_store_direct_document_and_immutable_selectors
         &directory.path().join("json-cache"),
         EngineSelection::Json,
     )?;
+    let json_reopened = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    assert_eq!(json.index_path(), json_reopened.index_path());
     let active = open_with_store(
         &store,
         &graph_path,
@@ -97,46 +128,85 @@ fn discovery_is_identical_for_json_store_direct_document_and_immutable_selectors
     assert_eq!(direct.engine_kind(), QueryEngineKind::Memory);
     assert_eq!(direct.index_path(), direct_reopened.index_path());
     let request = discovery_request("UserService.list");
-    let expected = serde_json::to_vec(&json.discover(request.clone())?)?;
+    let expected = json.discover(request.clone())?;
+    for actual in [
+        active.discover(request.clone())?,
+        local_direct.discover(request.clone())?,
+        selected.discover(request.clone())?,
+        direct.discover(request.clone())?,
+    ] {
+        assert_discovery_semantically_equal(&actual, &expected)?;
+    }
+    assert_eq!(json.discover(request.clone())?.stats, expected.stats);
     assert_eq!(
-        serde_json::to_vec(&active.discover(request.clone())?)?,
-        expected
+        active.discover(request.clone())?.stats,
+        active.discover(request.clone())?.stats
     );
     assert_eq!(
-        serde_json::to_vec(&local_direct.discover(request.clone())?)?,
-        expected
-    );
-    assert_eq!(
-        serde_json::to_vec(&selected.discover(request.clone())?)?,
-        expected
-    );
-    assert_eq!(
-        serde_json::to_vec(&direct.discover(request.clone())?)?,
-        expected
-    );
-    assert_eq!(
-        serde_json::to_vec(&direct_reopened.discover(request.clone())?)?,
-        expected
-    );
-    assert_eq!(
-        serde_json::to_vec(&direct.discover(request.clone())?)?,
-        expected
+        local_direct.discover(request.clone())?.stats,
+        local_direct.discover(request.clone())?.stats
     );
 
+    let mut scoped = discovery_request("UserService.list");
+    scoped.scope = vec![DiscoveryScope {
+        kind: DiscoveryScopeKind::Node,
+        value: "UserService.list".to_owned(),
+    }];
+    let scoped_expected = json.discover(scoped.clone())?;
+    for actual in [
+        active.discover(scoped.clone())?,
+        local_direct.discover(scoped.clone())?,
+        selected.discover(scoped.clone())?,
+        direct.discover(scoped)?,
+    ] {
+        assert_discovery_semantically_equal(&actual, &scoped_expected)?;
+    }
+
+    for scope in [
+        DiscoveryScope {
+            kind: DiscoveryScopeKind::Source,
+            value: "src".to_owned(),
+        },
+        DiscoveryScope {
+            kind: DiscoveryScopeKind::Community,
+            value: "services".to_owned(),
+        },
+    ] {
+        let mut scoped = discovery_request("UserService.list");
+        scoped.scope = vec![scope];
+        let expected = json.discover(scoped.clone())?;
+        for actual in [
+            json_reopened.discover(scoped.clone())?,
+            active.discover(scoped.clone())?,
+            local_direct.discover(scoped.clone())?,
+            selected.discover(scoped.clone())?,
+            direct.discover(scoped)?,
+        ] {
+            assert_discovery_semantically_equal(&actual, &expected)?;
+        }
+    }
+
+    let ambiguous = discovery_request("list");
+    let ambiguous_expected = json.discover(ambiguous.clone())?;
+    for actual in [
+        active.discover(ambiguous.clone())?,
+        selected.discover(ambiguous.clone())?,
+        direct.discover(ambiguous)?,
+    ] {
+        assert_discovery_semantically_equal(&actual, &ambiguous_expected)?;
+    }
+    assert_discovery_semantically_equal(&direct_reopened.discover(request.clone())?, &expected)?;
+    assert_discovery_semantically_equal(&direct.discover(request.clone())?, &expected)?;
+
     let boolean_only = discovery_request("AND OR NOT NEAR");
-    let empty_expected = serde_json::to_vec(&json.discover(boolean_only.clone())?)?;
-    assert_eq!(
-        serde_json::to_vec(&local_direct.discover(boolean_only.clone())?)?,
-        empty_expected
-    );
-    assert_eq!(
-        serde_json::to_vec(&selected.discover(boolean_only.clone())?)?,
-        empty_expected
-    );
-    assert_eq!(
-        serde_json::to_vec(&direct.discover(boolean_only)?)?,
-        empty_expected
-    );
+    let empty_expected = json.discover(boolean_only.clone())?;
+    for actual in [
+        local_direct.discover(boolean_only.clone())?,
+        selected.discover(boolean_only.clone())?,
+        direct.discover(boolean_only)?,
+    ] {
+        assert_discovery_semantically_equal(&actual, &empty_expected)?;
+    }
 
     let mut second_graph = first_graph;
     let mut added = second_graph.nodes[0].clone();
@@ -163,10 +233,7 @@ fn discovery_is_identical_for_json_store_direct_document_and_immutable_selectors
         None,
         &directory.path().join("historical-cache"),
     )?;
-    assert_eq!(
-        serde_json::to_vec(&historical.discover(request.clone())?)?,
-        expected
-    );
+    assert_discovery_semantically_equal(&historical.discover(request.clone())?, &expected)?;
     let current = open_with_store_selector(
         &store,
         second_selector,
@@ -608,6 +675,34 @@ fn explicit_json_selection_survives_a_corrupt_store_sidecar()
         Err(error) => error,
     };
     assert_eq!(error.code(), "store_open_failed");
+    Ok(())
+}
+
+#[test]
+fn json_index_v3_is_rebuilt_to_v4() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let cache = directory.path().join("cache");
+    let engine = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
+    let index_path = engine.index_path().to_path_buf();
+    drop(engine);
+
+    let connection = rusqlite::Connection::open(&index_path)?;
+    connection.execute(
+        "UPDATE metadata SET value='compass-code-index/3' WHERE key='format'",
+        [],
+    )?;
+    drop(connection);
+
+    let reopened = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
+    assert_eq!(reopened.index_path(), index_path);
+    let connection = rusqlite::Connection::open(index_path)?;
+    let format: String =
+        connection.query_row("SELECT value FROM metadata WHERE key='format'", [], |row| {
+            row.get(0)
+        })?;
+    assert_eq!(format, "compass-code-index/4");
     Ok(())
 }
 

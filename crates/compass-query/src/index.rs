@@ -20,7 +20,7 @@ use crate::graph_engine::{
     DirectGraphEngine, StoreGraphEngine, open_graph_engine, open_local_store_snapshot,
 };
 
-const INDEX_FORMAT_VERSION: &str = "compass-code-index/3";
+const INDEX_FORMAT_VERSION: &str = "compass-code-index/4";
 
 /// Selects the source used to hydrate the typed query engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -329,7 +329,9 @@ fn build_index(
              CREATE TABLE nodes(
                id TEXT PRIMARY KEY, name TEXT NOT NULL, qualified_name TEXT NOT NULL,
                kind TEXT NOT NULL, roles TEXT NOT NULL, language TEXT NOT NULL,
-               framework TEXT NOT NULL, normalized_path TEXT NOT NULL, json TEXT NOT NULL
+               framework TEXT NOT NULL, normalized_path TEXT NOT NULL,
+               source_file TEXT NOT NULL, community_id TEXT NOT NULL,
+               community_label TEXT NOT NULL, json TEXT NOT NULL
              );
              CREATE TABLE edges(id TEXT PRIMARY KEY, source TEXT NOT NULL, target TEXT NOT NULL, kind TEXT NOT NULL, json TEXT NOT NULL);
              CREATE TABLE files(path TEXT PRIMARY KEY, digest TEXT NOT NULL, json TEXT NOT NULL);
@@ -338,7 +340,8 @@ fn build_index(
              CREATE TABLE program_joins(graph_node_id TEXT NOT NULL, symbol_id TEXT NOT NULL, json TEXT NOT NULL);
              CREATE VIRTUAL TABLE node_fts USING fts5(
                node_id UNINDEXED, name, qualified_name, aliases, kind, roles,
-               language, framework, normalized_path,
+               language, framework, normalized_path, source_file, community_id,
+               community_label,
                tokenize="unicode61 remove_diacritics 2 tokenchars '_'"
              );"#,
         )
@@ -409,7 +412,7 @@ fn build_index(
             }
             transaction
                 .execute(
-                    "INSERT INTO nodes VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                    "INSERT INTO nodes VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
                     params![
                         node.id,
                         node.name,
@@ -419,13 +422,23 @@ fn build_index(
                         node.language.as_deref().unwrap_or_default(),
                         node.framework.as_deref().unwrap_or_default(),
                         normalized_path,
+                        node.source
+                            .as_ref()
+                            .map_or("", |source| source.file.as_str()),
+                        node.community
+                            .as_ref()
+                            .map_or_else(String::new, |community| community.id.to_string()),
+                        node.community
+                            .as_ref()
+                            .and_then(|community| community.label.as_deref())
+                            .unwrap_or_default(),
                         serde_json::to_string(node).map_err(json_error)?,
                     ],
                 )
                 .map_err(sql_error)?;
             transaction
                 .execute(
-                    "INSERT INTO node_fts VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                    "INSERT INTO node_fts VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
                     params![
                         node.id,
                         node.name,
@@ -436,6 +449,16 @@ fn build_index(
                         node.language.as_deref().unwrap_or_default(),
                         node.framework.as_deref().unwrap_or_default(),
                         normalized_path,
+                        node.source
+                            .as_ref()
+                            .map_or("", |source| source.file.as_str()),
+                        node.community
+                            .as_ref()
+                            .map_or_else(String::new, |community| community.id.to_string()),
+                        node.community
+                            .as_ref()
+                            .and_then(|community| community.label.as_deref())
+                            .unwrap_or_default(),
                     ],
                 )
                 .map_err(sql_error)?;

@@ -14,7 +14,7 @@ use compass_output::{render_cql_json, render_cql_jsonl, render_cql_table};
 use compass_query::{PlanCache, QueryLimits, QueryRequest, execute};
 use serde_json::Value;
 
-use super::{Frontend, GraphSelection, Outcome, load_selection, parse_graph_selection};
+use super::{Frontend, GraphSelection, Outcome, load_indexed_selection, parse_graph_selection};
 
 static CQL_PLAN_CACHE: OnceLock<PlanCache> = OnceLock::new();
 
@@ -329,7 +329,7 @@ fn run_source(
     source_name: &str,
     source: &str,
 ) -> Result<String, CliError> {
-    let loaded = load_selection(Frontend::Compass, &request.graph_selection, true)
+    let loaded = load_indexed_selection(Frontend::Compass, &request.graph_selection)
         .map_err(|outcome| CliError::graph(outcome.stderr))?;
     run_source_with_graph(request, source_name, source, &loaded.graph)
 }
@@ -411,7 +411,7 @@ fn run_repl(request: CqlCliRequest) -> Result<String, CliError> {
     if !std::io::stdin().is_terminal() {
         return Err(CliError::usage("--repl requires an interactive terminal"));
     }
-    let loaded = load_selection(Frontend::Compass, &request.graph_selection, true)
+    let loaded = load_indexed_selection(Frontend::Compass, &request.graph_selection)
         .map_err(|outcome| CliError::graph(outcome.stderr))?;
     let mut transcript = Vec::new();
     let mut buffer = String::new();

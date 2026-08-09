@@ -8,9 +8,10 @@ use compass_model::query_contract::{
     DISCOVERY_QUERY_SCHEMA_V1, DiscoveryAlternative, DiscoveryDirection, DiscoveryDirectionSource,
     DiscoveryEdge, DiscoveryLimits, DiscoveryOmissions, DiscoveryQueryRequest,
     DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind, DiscoveryScoreTier, DiscoverySeed,
-    DiscoverySeedSource, DiscoveryStats, MAX_DISCOVERY_CANDIDATE_NODES_READ,
-    MAX_DISCOVERY_FILTER_BYTES, MAX_DISCOVERY_FILTERS, MAX_DISCOVERY_QUESTION_BYTES,
-    QueryDiagnostic, QueryDiagnosticCode,
+    DiscoverySeedSource, DiscoveryStats, MAX_DISCOVERY_ALTERNATIVES_PER_SEED,
+    MAX_DISCOVERY_CANDIDATE_NODES_READ, MAX_DISCOVERY_FILTER_BYTES, MAX_DISCOVERY_FILTERS,
+    MAX_DISCOVERY_QUESTION_BYTES, QueryDiagnostic, QueryDiagnosticCode,
+    canonical_discovery_scope_value, discovery_scope_matches,
 };
 
 use crate::code_query::{CandidateAssemblyPolicy, query_edge, query_node, search_query_terms};
@@ -51,7 +52,7 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
     EdgeKind::MapsTo,
 ];
 
-const DISCOVERY_SCOPE_OVERSAMPLE: usize = 8;
+const MAX_SCOPE_AMBIGUITY_CANDIDATES: usize = 8;
 
 #[derive(Clone, Debug)]
 struct RankedDiscoveryCandidate {
@@ -124,22 +125,19 @@ impl CodeQueryEngine {
         let guard = DiscoveryGuard::new(request.limits.timeout_ms, cancelled);
         guard.check()?;
 
-        let relation_contexts = normalize_context_filters(&request.relation_contexts);
-        let selected_direction = match request.direction {
-            DiscoveryDirection::Auto => DiscoveryDirection::Both,
-            direction => direction,
+        let relation_contexts = validate_and_normalize_contexts(&request.relation_contexts)?;
+        let resolved_scope = self.resolve_scopes(&request.scope, &guard)?;
+        let (selected_direction, direction_source) = match request.direction {
+            DiscoveryDirection::Auto => infer_discovery_direction(&request.question),
+            direction => (direction, DiscoveryDirectionSource::Explicit),
         };
         let mut response = DiscoveryQueryResponse {
             schema: DISCOVERY_QUERY_SCHEMA_V1.to_owned(),
             question: request.question.clone(),
             selected_direction,
-            direction_source: if request.direction == DiscoveryDirection::Auto {
-                DiscoveryDirectionSource::Neutral
-            } else {
-                DiscoveryDirectionSource::Explicit
-            },
+            direction_source,
             relation_contexts,
-            scope: canonical_scope(&request.scope),
+            scope: resolved_scope,
             traversal: request.traversal,
             seeds: Vec::new(),
             nodes: Vec::new(),
@@ -151,7 +149,7 @@ impl CodeQueryEngine {
             truncated: false,
         };
 
-        let mut selection =
+        let selection =
             self.indexed_candidates(&request.question, &response.scope, &request.limits, &guard)?;
         response.stats.candidate_nodes = selection.nodes_read;
         response.stats.candidate_probes = selection.probes;
@@ -166,18 +164,50 @@ impl CodeQueryEngine {
         let max_seeds = usize::try_from(request.limits.max_seeds)
             .unwrap_or(usize::MAX)
             .min(usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX));
-        selection.candidates.truncate(max_seeds);
-        response.seeds = discovery_seeds(&selection.candidates);
+        let (seeds, omitted_alternatives) = discovery_seeds(&selection.candidates, max_seeds);
+        response.seeds = seeds;
+        response.omissions.alternatives = (!selection.truncated).then_some(omitted_alternatives);
+        if omitted_alternatives > 0 {
+            response.truncated = true;
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::BoundedTruncation,
+                message: format!(
+                    "Ambiguity alternatives were limited; {omitted_alternatives} ranked alternative(s) were omitted"
+                ),
+                node_id: None,
+                path: None,
+            });
+        }
+        for seed in response.seeds.iter().filter(|seed| seed.ambiguous) {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::AmbiguousMatch,
+                message: format!(
+                    "Seed {} is ambiguous; retry with an exact node ID or run `compass explain {}`",
+                    seed.node_id, seed.node_id
+                ),
+                node_id: Some(seed.node_id.clone()),
+                path: None,
+            });
+        }
         if response.seeds.is_empty() {
             response.omissions.nodes = Some(0);
             response.omissions.edges = Some(0);
             response.omissions.expanded_relationships = Some(0);
-            response.diagnostics.push(QueryDiagnostic {
-                code: QueryDiagnosticCode::NoMatch,
-                message: format!("No node matched {:?}", request.question),
-                node_id: None,
-                path: None,
-            });
+            if response.truncated {
+                response.diagnostics.push(QueryDiagnostic {
+                    code: QueryDiagnosticCode::BoundedTruncation,
+                    message: "Candidate recall was truncated before a scoped match could be proven; retry with an exact node ID or a narrower query".to_owned(),
+                    node_id: None,
+                    path: None,
+                });
+            } else {
+                response.diagnostics.push(QueryDiagnostic {
+                    code: QueryDiagnosticCode::NoMatch,
+                    message: format!("No node matched {:?}", request.question),
+                    node_id: None,
+                    path: None,
+                });
+            };
             finish_response(&guard, &mut response)?;
             return Ok(response);
         }
@@ -193,6 +223,44 @@ impl CodeQueryEngine {
         }
         finish_response(&guard, &mut response)?;
         Ok(response)
+    }
+
+    fn resolve_scopes(
+        &self,
+        requested: &[DiscoveryScope],
+        guard: &DiscoveryGuard<'_>,
+    ) -> Result<Vec<DiscoveryScope>, QueryError> {
+        let mut resolved = Vec::with_capacity(requested.len());
+        for scope in requested {
+            guard.check()?;
+            let Some(value) = canonical_discovery_scope_value(scope.kind, &scope.value) else {
+                return Err(QueryError::new(
+                    QueryErrorKind::InvalidParameter,
+                    "invalid_discovery_scope",
+                    format!("discovery scope {:?} has an invalid value", scope.kind),
+                ));
+            };
+            let requested_scope = DiscoveryScope {
+                kind: scope.kind,
+                value,
+            };
+            let (values, truncated) = self.backend.resolve_scope_values(
+                requested_scope.kind,
+                &requested_scope.value,
+                MAX_SCOPE_AMBIGUITY_CANDIDATES + 1,
+            )?;
+            if truncated {
+                return Err(scope_resolution_error(
+                    "ambiguous_discovery_scope",
+                    &requested_scope,
+                    &values,
+                    true,
+                ));
+            }
+            let canonical = canonical_resolved_scope(&requested_scope, &values)?;
+            resolved.push(canonical);
+        }
+        Ok(canonical_scope(&resolved))
     }
 
     fn indexed_candidates(
@@ -213,13 +281,9 @@ impl CodeQueryEngine {
             });
         }
         let candidate_limit = usize::try_from(limits.max_candidates).unwrap_or(usize::MAX);
-        let source_limit = candidate_limit
-            .saturating_mul(DISCOVERY_SCOPE_OVERSAMPLE)
-            .min(
-                usize::try_from(compass_model::query_contract::MAX_DISCOVERY_CANDIDATES)
-                    .unwrap_or(usize::MAX),
-            );
-        let admit = |node: &NodeRecord| scope_matches(node, scope);
+        let source_limit =
+            usize::try_from(MAX_DISCOVERY_CANDIDATE_NODES_READ).unwrap_or(usize::MAX);
+        let admit = |node: &NodeRecord| discovery_scope_matches(node, scope);
         let mut check = || guard.check();
         let assembly = self.assemble_search_candidates(
             question,
@@ -234,6 +298,7 @@ impl CodeQueryEngine {
                     compass_model::query_contract::MAX_DISCOVERY_CANDIDATE_PROBES,
                 )
                 .unwrap_or(usize::MAX),
+                bounded_posting_work: true,
                 admit: &admit,
                 check: &mut check,
             },
@@ -351,11 +416,12 @@ impl CodeQueryEngine {
                         format!("edge {} references absent node {other_id}", edge.id),
                     ));
                 };
-                if !scope_matches(&other, &response.scope) {
+                if !discovery_scope_matches(&other, &response.scope) {
                     continue;
                 }
                 if selected_nodes.len() >= max_nodes && !selected_nodes.contains_key(&other_id) {
                     response.truncated = true;
+                    membership_complete = false;
                     omitted_node_ids.insert(other_id);
                     continue;
                 }
@@ -444,6 +510,207 @@ impl CodeQueryEngine {
     }
 }
 
+fn infer_discovery_direction(question: &str) -> (DiscoveryDirection, DiscoveryDirectionSource) {
+    let normalized = question
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>();
+    let normalized = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+    let incoming = [
+        "caller",
+        "called by",
+        "used by",
+        "registered by",
+        "enforced at",
+        "affected by",
+        "referenced by",
+        "depends on this",
+    ]
+    .iter()
+    .any(|signal| normalized.contains(signal));
+    let outgoing = [
+        " calls ",
+        " invokes ",
+        " uses ",
+        "implementation flow",
+        "writes to",
+        "calls from",
+    ]
+    .iter()
+    .any(|signal| format!(" {normalized} ").contains(signal))
+        || (normalized.contains("depends on") && !normalized.contains("depends on this"));
+    if incoming && outgoing {
+        return (DiscoveryDirection::Both, DiscoveryDirectionSource::Neutral);
+    }
+    if let Ok(plan) = crate::intent::plan_natural_query(question)
+        && plan.routes_to_typed_query()
+    {
+        match plan.intent() {
+            crate::intent::NaturalQueryIntent::Callers
+            | crate::intent::NaturalQueryIntent::Impact => {
+                return (
+                    DiscoveryDirection::Incoming,
+                    DiscoveryDirectionSource::Heuristic,
+                );
+            }
+            crate::intent::NaturalQueryIntent::Callees => {
+                return (
+                    DiscoveryDirection::Outgoing,
+                    DiscoveryDirectionSource::Heuristic,
+                );
+            }
+            crate::intent::NaturalQueryIntent::NodeTrail => {
+                return (
+                    DiscoveryDirection::Outgoing,
+                    DiscoveryDirectionSource::Heuristic,
+                );
+            }
+            crate::intent::NaturalQueryIntent::Search
+            | crate::intent::NaturalQueryIntent::Fallback => {}
+        }
+    }
+    let neutral = ["architecture", "related", "connected", "coupling"]
+        .iter()
+        .any(|signal| normalized.contains(signal))
+        || (normalized.contains("flow") && !normalized.contains("implementation flow"));
+    if neutral {
+        return (DiscoveryDirection::Both, DiscoveryDirectionSource::Neutral);
+    }
+    let outgoing = outgoing || normalized.starts_with("how does ");
+    match (incoming, outgoing) {
+        (true, false) => (
+            DiscoveryDirection::Incoming,
+            DiscoveryDirectionSource::Heuristic,
+        ),
+        (false, true) => (
+            DiscoveryDirection::Outgoing,
+            DiscoveryDirectionSource::Heuristic,
+        ),
+        _ => (DiscoveryDirection::Both, DiscoveryDirectionSource::Neutral),
+    }
+}
+
+fn validate_and_normalize_contexts(filters: &[String]) -> Result<Vec<String>, QueryError> {
+    const SUPPORTED: &[&str] = &[
+        "attribute",
+        "call",
+        "declaration",
+        "dependency",
+        "export",
+        "field",
+        "generic_arg",
+        "import",
+        "parameter_type",
+        "read",
+        "registration",
+        "return_type",
+        "route",
+        "test",
+        "type",
+        "write",
+    ];
+    let normalized = normalize_context_filters(filters);
+    if let Some(value) = normalized
+        .iter()
+        .find(|value| !SUPPORTED.contains(&value.as_str()))
+    {
+        return Err(QueryError::new(
+            QueryErrorKind::InvalidParameter,
+            "unsupported_discovery_context",
+            format!(
+                "unsupported relationship context {value:?}; supported canonical contexts are {}",
+                SUPPORTED.join(", ")
+            ),
+        ));
+    }
+    Ok(normalized)
+}
+
+fn canonical_resolved_scope(
+    requested: &DiscoveryScope,
+    values: &[String],
+) -> Result<DiscoveryScope, QueryError> {
+    if values.is_empty() {
+        return Err(scope_resolution_error(
+            "unknown_discovery_scope",
+            requested,
+            values,
+            false,
+        ));
+    }
+    match requested.kind {
+        DiscoveryScopeKind::Source | DiscoveryScopeKind::Package => Ok(requested.clone()),
+        DiscoveryScopeKind::Node | DiscoveryScopeKind::Community => {
+            let canonical = if values.iter().any(|value| value == &requested.value) {
+                requested.value.clone()
+            } else if values.len() == 1 {
+                values[0].clone()
+            } else {
+                return Err(scope_resolution_error(
+                    "ambiguous_discovery_scope",
+                    requested,
+                    values,
+                    false,
+                ));
+            };
+            Ok(DiscoveryScope {
+                kind: requested.kind,
+                value: canonical,
+            })
+        }
+    }
+}
+
+fn scope_resolution_error(
+    code: &'static str,
+    scope: &DiscoveryScope,
+    values: &[String],
+    truncated: bool,
+) -> QueryError {
+    let identity_scope = matches!(
+        scope.kind,
+        DiscoveryScopeKind::Community | DiscoveryScopeKind::Node
+    );
+    let candidates = values
+        .iter()
+        .take(MAX_SCOPE_AMBIGUITY_CANDIDATES)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let candidate_label = if identity_scope {
+        "candidate IDs"
+    } else {
+        "matching values"
+    };
+    let detail = if candidates.is_empty() {
+        String::new()
+    } else if truncated {
+        format!("; {candidate_label} include {candidates}, with more omitted")
+    } else {
+        format!("; {candidate_label}: {candidates}")
+    };
+    let guidance = match scope.kind {
+        DiscoveryScopeKind::Source => "use an existing normalized source path or path prefix",
+        DiscoveryScopeKind::Package => "use an existing normalized package name or package prefix",
+        DiscoveryScopeKind::Community => "use an exact community ID",
+        DiscoveryScopeKind::Node => "use an exact node ID",
+    };
+    QueryError::new(
+        QueryErrorKind::InvalidParameter,
+        code,
+        format!(
+            "scope {:?}={:?} is not uniquely resolvable{detail}; {guidance}",
+            scope.kind, scope.value,
+        ),
+    )
+}
+
 fn validate_request(request: &DiscoveryQueryRequest) -> Result<(), QueryError> {
     if !request.limits.is_valid() {
         return Err(QueryError::new(
@@ -462,10 +729,9 @@ fn validate_request(request: &DiscoveryQueryRequest) -> Result<(), QueryError> {
     let _ = search_query_terms(&request.question)?;
     validate_filters("relationContexts", &request.relation_contexts)?;
     if request.scope.len() > MAX_DISCOVERY_FILTERS
-        || request
-            .scope
-            .iter()
-            .any(|scope| scope.value.is_empty() || scope.value.len() > MAX_DISCOVERY_FILTER_BYTES)
+        || request.scope.iter().any(|scope| {
+            scope.value.trim().is_empty() || scope.value.len() > MAX_DISCOVERY_FILTER_BYTES
+        })
     {
         return Err(QueryError::new(
             QueryErrorKind::InvalidParameter,
@@ -482,7 +748,7 @@ fn validate_filters(label: &str, filters: &[String]) -> Result<(), QueryError> {
     if filters.len() > MAX_DISCOVERY_FILTERS
         || filters
             .iter()
-            .any(|value| value.is_empty() || value.len() > MAX_DISCOVERY_FILTER_BYTES)
+            .any(|value| value.trim().is_empty() || value.len() > MAX_DISCOVERY_FILTER_BYTES)
     {
         return Err(QueryError::new(
             QueryErrorKind::InvalidParameter,
@@ -515,43 +781,6 @@ const fn scope_kind_rank(kind: DiscoveryScopeKind) -> u8 {
     }
 }
 
-fn scope_matches(node: &NodeRecord, scope: &[DiscoveryScope]) -> bool {
-    scope.is_empty()
-        || scope.iter().any(|entry| match entry.kind {
-            DiscoveryScopeKind::Community => node.community.as_ref().is_some_and(|community| {
-                community.id.to_string() == entry.value
-                    || community.label.as_deref() == Some(entry.value.as_str())
-            }),
-            DiscoveryScopeKind::Source => node.source.as_ref().is_some_and(|source| {
-                source.file == entry.value
-                    || source
-                        .file
-                        .strip_prefix(&entry.value)
-                        .is_some_and(|suffix| suffix.starts_with('/'))
-            }),
-            DiscoveryScopeKind::Package => {
-                node.qualified_name == entry.value
-                    || node
-                        .qualified_name
-                        .strip_prefix(&entry.value)
-                        .is_some_and(|suffix| {
-                            suffix.starts_with("::")
-                                || suffix.starts_with('.')
-                                || suffix.starts_with('/')
-                        })
-                    || node.source.as_ref().is_some_and(|source| {
-                        source
-                            .file
-                            .strip_prefix(&entry.value)
-                            .is_some_and(|suffix| suffix.starts_with('/'))
-                    })
-            }
-            DiscoveryScopeKind::Node => {
-                node.id == entry.value || node.qualified_name == entry.value
-            }
-        })
-}
-
 fn discovery_candidate_source(source: CandidateSource) -> DiscoverySeedSource {
     match source {
         CandidateSource::ExactId => DiscoverySeedSource::ExactId,
@@ -582,16 +811,23 @@ fn matched_terms(terms: &[String], node: &NodeRecord) -> Vec<String> {
         .collect()
 }
 
-fn discovery_seeds(candidates: &[RankedDiscoveryCandidate]) -> Vec<DiscoverySeed> {
-    candidates
+fn discovery_seeds(
+    candidates: &[RankedDiscoveryCandidate],
+    max_seeds: usize,
+) -> (Vec<DiscoverySeed>, u64) {
+    let mut omitted_alternatives = 0_u64;
+    let seeds = candidates
         .iter()
+        .take(max_seeds)
         .enumerate()
         .map(|(index, candidate)| {
-            let alternatives = candidates
+            let mut alternatives = candidates
                 .iter()
                 .filter(|other| {
-                    other.score.total_cmp(&candidate.score).is_eq()
-                        && other.node.id != candidate.node.id
+                    other.node.id != candidate.node.id
+                        && (other.score.total_cmp(&candidate.score).is_eq()
+                            || source_backed_name_collision(candidate, other)
+                            || calibrated_low_margin(candidate.score, other.score))
                 })
                 .map(|other| DiscoveryAlternative {
                     node_id: other.node.id.clone(),
@@ -600,6 +836,12 @@ fn discovery_seeds(candidates: &[RankedDiscoveryCandidate]) -> Vec<DiscoverySeed
                     score: format_discovery_score(other.score),
                 })
                 .collect::<Vec<_>>();
+            let omitted = alternatives
+                .len()
+                .saturating_sub(MAX_DISCOVERY_ALTERNATIVES_PER_SEED);
+            omitted_alternatives =
+                omitted_alternatives.saturating_add(u64::try_from(omitted).unwrap_or(u64::MAX));
+            alternatives.truncate(MAX_DISCOVERY_ALTERNATIVES_PER_SEED);
             DiscoverySeed {
                 node_id: candidate.node.id.clone(),
                 score: format_discovery_score(candidate.score),
@@ -621,7 +863,27 @@ fn discovery_seeds(candidates: &[RankedDiscoveryCandidate]) -> Vec<DiscoverySeed
                 alternatives,
             }
         })
-        .collect()
+        .collect();
+    (seeds, omitted_alternatives)
+}
+
+fn source_backed_name_collision(
+    candidate: &RankedDiscoveryCandidate,
+    other: &RankedDiscoveryCandidate,
+) -> bool {
+    candidate.node.source.is_some()
+        && other.node.source.is_some()
+        && canonical_declaration_name(&candidate.node.name)
+            == canonical_declaration_name(&other.node.name)
+}
+
+fn canonical_declaration_name(value: &str) -> String {
+    search_tokens(value).join(" ")
+}
+
+fn calibrated_low_margin(left: f64, right: f64) -> bool {
+    let scale = left.abs().max(right.abs()).max(1.0);
+    (left - right).abs() <= scale * 0.01
 }
 
 fn format_discovery_score(score: f64) -> String {
@@ -796,6 +1058,16 @@ fn enforce_response_bytes(response: &mut DiscoveryQueryResponse) -> Result<(), Q
             add_known_omission(&mut response.omissions.nodes, 1);
             continue;
         }
+        if let Some(seed) = response
+            .seeds
+            .iter_mut()
+            .rev()
+            .find(|seed| !seed.alternatives.is_empty())
+        {
+            seed.alternatives.pop();
+            add_known_omission(&mut response.omissions.alternatives, 1);
+            continue;
+        }
         return Err(QueryError::new(
             QueryErrorKind::MemoryLimit,
             "discovery_response_limit",
@@ -821,24 +1093,27 @@ fn ensure_truncation_diagnostic(response: &mut DiscoveryQueryResponse) {
 }
 
 fn add_known_omission(slot: &mut Option<u64>, count: u64) {
-    *slot = Some(slot.unwrap_or(0).saturating_add(count));
+    if let Some(existing) = slot {
+        *existing = existing.saturating_add(count);
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
 
     use compass_model::code_graph::{
-        BuildMetadata, EdgeKind, EdgeRecord, GraphDocument, NodeKind, NodeRecord,
+        BuildMetadata, CommunityMetadata, EdgeKind, EdgeRecord, GraphDocument, NodeKind, NodeRecord,
     };
     use compass_model::provenance::{OccurrenceRule, SourceAnchor};
     use compass_model::query_contract::{
         DiscoveryDirection, DiscoveryDirectionSource, DiscoveryLimits, DiscoveryQueryRequest,
         DiscoveryScope, DiscoveryScopeKind, DiscoverySeedSource, DiscoveryTraversal,
-        MAX_DISCOVERY_CANDIDATE_NODES_READ, MAX_DISCOVERY_CANDIDATE_PROBES,
-        MAX_DISCOVERY_FILTER_BYTES, MAX_DISCOVERY_FILTERS, MAX_DISCOVERY_QUESTION_BYTES,
-        QueryDiagnosticCode,
+        MAX_DISCOVERY_ALTERNATIVES_PER_SEED, MAX_DISCOVERY_CANDIDATE_NODES_READ,
+        MAX_DISCOVERY_CANDIDATE_PROBES, MAX_DISCOVERY_FILTER_BYTES, MAX_DISCOVERY_FILTERS,
+        MAX_DISCOVERY_QUESTION_BYTES, QueryDiagnosticCode,
     };
 
     use crate::code_query::{
@@ -864,6 +1139,20 @@ mod tests {
             diagnostics: Vec::new(),
             community: None,
         }
+    }
+
+    fn anchored_node(id: &str, name: &str, file: &str, line: u32) -> NodeRecord {
+        let mut node = node(id, name);
+        node.source = Some(SourceAnchor {
+            file: file.to_owned(),
+            start_byte: u64::from(line),
+            end_byte: u64::from(line).saturating_add(1),
+            start_line: line,
+            start_column: 0,
+            end_line: line,
+            end_column: 1,
+        });
+        node
     }
 
     fn edge(id: &str, source: &str, target: &str) -> EdgeRecord {
@@ -921,7 +1210,8 @@ mod tests {
                 r#"CREATE TABLE nodes(id TEXT PRIMARY KEY);
                    CREATE VIRTUAL TABLE node_fts USING fts5(
                      node_id UNINDEXED, name, qualified_name, aliases, kind, roles,
-                     language, framework, normalized_path,
+                     language, framework, normalized_path, source_file, community_id,
+                     community_label,
                      tokenize="unicode61 remove_diacritics 2 tokenchars '_'"
                    );"#,
             )
@@ -932,7 +1222,7 @@ mod tests {
                 .unwrap_or_else(|_| std::process::abort());
             connection
                 .execute(
-                    "INSERT INTO node_fts VALUES(?1,?2,?3,'',?4,'',?5,?6,?7)",
+                    "INSERT INTO node_fts VALUES(?1,?2,?3,'',?4,'',?5,?6,'',?7,?8,?9)",
                     rusqlite::params![
                         node.id,
                         node.name,
@@ -943,6 +1233,13 @@ mod tests {
                         node.source
                             .as_ref()
                             .map_or("", |source| source.file.as_str()),
+                        node.community
+                            .as_ref()
+                            .map_or_else(String::new, |community| community.id.to_string()),
+                        node.community
+                            .as_ref()
+                            .and_then(|community| community.label.as_deref())
+                            .unwrap_or_default(),
                     ],
                 )
                 .unwrap_or_else(|_| std::process::abort());
@@ -994,6 +1291,75 @@ mod tests {
         let response = engine.discover(request(DiscoveryDirection::Auto))?;
         assert_eq!(response.selected_direction, DiscoveryDirection::Both);
         assert_eq!(response.direction_source, DiscoveryDirectionSource::Neutral);
+        Ok(())
+    }
+
+    #[test]
+    fn automatic_direction_uses_conservative_intent_signals()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(vec![node("n:alpha", "alpha")], Vec::new());
+        let cases = [
+            (
+                "how does alpha resolve providers",
+                DiscoveryDirection::Outgoing,
+                DiscoveryDirectionSource::Heuristic,
+            ),
+            (
+                "who calls alpha",
+                DiscoveryDirection::Incoming,
+                DiscoveryDirectionSource::Heuristic,
+            ),
+            (
+                "where is alpha registered by the router",
+                DiscoveryDirection::Incoming,
+                DiscoveryDirectionSource::Heuristic,
+            ),
+            (
+                "where is alpha enforced at runtime",
+                DiscoveryDirection::Incoming,
+                DiscoveryDirectionSource::Heuristic,
+            ),
+            (
+                "what is affected by alpha",
+                DiscoveryDirection::Incoming,
+                DiscoveryDirectionSource::Heuristic,
+            ),
+            (
+                "alpha implementation flow writes to storage",
+                DiscoveryDirection::Outgoing,
+                DiscoveryDirectionSource::Heuristic,
+            ),
+            (
+                "how is alpha created",
+                DiscoveryDirection::Both,
+                DiscoveryDirectionSource::Neutral,
+            ),
+            (
+                "alpha architecture and coupling",
+                DiscoveryDirection::Both,
+                DiscoveryDirectionSource::Neutral,
+            ),
+            (
+                "how does alpha get used by callers",
+                DiscoveryDirection::Both,
+                DiscoveryDirectionSource::Neutral,
+            ),
+        ];
+        for (question, direction, source) in cases {
+            let mut request = request(DiscoveryDirection::Auto);
+            request.question = question.to_owned();
+            let response = engine.discover(request)?;
+            assert_eq!(response.selected_direction, direction, "{question}");
+            assert_eq!(response.direction_source, source, "{question}");
+        }
+        let mut explicit = request(DiscoveryDirection::Incoming);
+        explicit.question = "alpha calls beta".to_owned();
+        let response = engine.discover(explicit)?;
+        assert_eq!(response.selected_direction, DiscoveryDirection::Incoming);
+        assert_eq!(
+            response.direction_source,
+            DiscoveryDirectionSource::Explicit
+        );
         Ok(())
     }
 
@@ -1119,8 +1485,9 @@ mod tests {
     }
 
     #[test]
-    fn scoped_recall_oversamples_before_admission() -> Result<(), Box<dyn std::error::Error>> {
-        let nodes = (0..6)
+    fn scoped_recall_uses_the_shared_read_ceiling_before_admission()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let nodes = (0..400)
             .map(|index| node(&format!("n:{index:02}"), "alpha"))
             .collect::<Vec<_>>();
         let engine = engine(nodes, Vec::new());
@@ -1128,13 +1495,244 @@ mod tests {
         query.limits.max_candidates = 1;
         query.scope = vec![DiscoveryScope {
             kind: DiscoveryScopeKind::Node,
-            value: "n:04".to_owned(),
+            value: "n:300".to_owned(),
         }];
         let response = engine.discover(query)?;
         assert_eq!(response.seeds.len(), 1);
-        assert_eq!(response.seeds[0].node_id, "n:04");
+        assert_eq!(response.seeds[0].node_id, "n:300");
         assert_eq!(response.stats.candidates_admitted, 1);
         assert!(response.stats.candidate_nodes > response.stats.candidates_admitted);
+        Ok(())
+    }
+
+    #[test]
+    fn repeated_scopes_are_canonical_deduplicated_and_or_combined()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![
+                anchored_node("n:prod", "alpha", "src/認証/mod.rs", 1),
+                anchored_node("n:test", "alpha", "tests/auth.rs", 2),
+                anchored_node("n:other", "alpha", "vendor/auth.rs", 3),
+            ],
+            Vec::new(),
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.scope = vec![
+            DiscoveryScope {
+                kind: DiscoveryScopeKind::Source,
+                value: "tests/".to_owned(),
+            },
+            DiscoveryScope {
+                kind: DiscoveryScopeKind::Source,
+                value: "src\\認証".to_owned(),
+            },
+            DiscoveryScope {
+                kind: DiscoveryScopeKind::Source,
+                value: "tests".to_owned(),
+            },
+        ];
+        let response = engine.discover(query)?;
+        assert_eq!(
+            response.scope,
+            [
+                DiscoveryScope {
+                    kind: DiscoveryScopeKind::Source,
+                    value: "src/認証".to_owned(),
+                },
+                DiscoveryScope {
+                    kind: DiscoveryScopeKind::Source,
+                    value: "tests".to_owned(),
+                },
+            ]
+        );
+        assert_eq!(
+            response
+                .seeds
+                .iter()
+                .map(|seed| seed.node_id.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["n:prod", "n:test"])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_and_ambiguous_scopes_are_typed_rejections() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut first = anchored_node("n:a", "run", "src/a.rs", 1);
+        first.qualified_name = "pkg::run".to_owned();
+        let mut second = anchored_node("n:b", "run", "src/b.rs", 2);
+        second.qualified_name = "pkg::run".to_owned();
+        let engine = engine(vec![first, second], Vec::new());
+
+        let mut unknown = request(DiscoveryDirection::Both);
+        unknown.scope = vec![DiscoveryScope {
+            kind: DiscoveryScopeKind::Source,
+            value: "missing".to_owned(),
+        }];
+        let error = engine
+            .discover(unknown)
+            .err()
+            .unwrap_or_else(|| std::process::abort());
+        assert_eq!(error.code(), "unknown_discovery_scope");
+        assert!(
+            error
+                .message()
+                .contains("existing normalized source path or path prefix")
+        );
+
+        let mut ambiguous = request(DiscoveryDirection::Both);
+        ambiguous.scope = vec![DiscoveryScope {
+            kind: DiscoveryScopeKind::Node,
+            value: "pkg::run".to_owned(),
+        }];
+        let error = engine
+            .discover(ambiguous)
+            .err()
+            .unwrap_or_else(|| std::process::abort());
+        assert_eq!(error.code(), "ambiguous_discovery_scope");
+        assert!(error.message().contains("n:a"));
+        assert!(error.message().contains("n:b"));
+        assert!(error.message().contains("candidate IDs"));
+        assert!(error.message().contains("use an exact node ID"));
+        Ok(())
+    }
+
+    #[test]
+    fn community_label_ambiguity_and_package_prefixes_are_resolved_explicitly()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut first = anchored_node("n:a", "login", "src/auth/login.rs", 1);
+        first.qualified_name = "crate::auth::login".to_owned();
+        first.community = Some(CommunityMetadata {
+            id: 1,
+            label: Some("core".to_owned()),
+            score: None,
+            color: None,
+        });
+        let mut second = anchored_node("n:b", "logout", "src/auth/logout.rs", 2);
+        second.qualified_name = "crate::auth::logout".to_owned();
+        second.community = Some(CommunityMetadata {
+            id: 2,
+            label: Some("core".to_owned()),
+            score: None,
+            color: None,
+        });
+        let engine = engine(vec![first, second], Vec::new());
+
+        let mut ambiguous = request(DiscoveryDirection::Both);
+        ambiguous.scope = vec![DiscoveryScope {
+            kind: DiscoveryScopeKind::Community,
+            value: "core".to_owned(),
+        }];
+        let error = engine
+            .discover(ambiguous)
+            .err()
+            .unwrap_or_else(|| std::process::abort());
+        assert_eq!(error.code(), "ambiguous_discovery_scope");
+        assert!(error.message().contains('1'));
+        assert!(error.message().contains('2'));
+
+        let mut package = request(DiscoveryDirection::Both);
+        package.question = "login".to_owned();
+        package.scope = vec![DiscoveryScope {
+            kind: DiscoveryScopeKind::Package,
+            value: "::crate::auth::".to_owned(),
+        }];
+        let response = engine.discover(package)?;
+        assert_eq!(response.scope[0].value, "crate::auth");
+        assert_eq!(response.seeds[0].node_id, "n:a");
+        Ok(())
+    }
+
+    #[test]
+    fn context_aliases_are_validated_before_graph_filtering()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![node("n:alpha", "alpha"), node("n:callee", "callee")],
+            vec![edge("e:call", "n:alpha", "n:callee")],
+        );
+        let mut valid_empty = request(DiscoveryDirection::Outgoing);
+        valid_empty.relation_contexts = vec!["imports".to_owned()];
+        let response = engine.discover(valid_empty)?;
+        assert_eq!(response.relation_contexts, ["import"]);
+        assert!(response.edges.is_empty());
+
+        for invalid in ["cal", "   "] {
+            let mut query = request(DiscoveryDirection::Both);
+            query.relation_contexts = vec![invalid.to_owned()];
+            let error = engine
+                .discover(query)
+                .err()
+                .unwrap_or_else(|| std::process::abort());
+            assert_eq!(error.kind(), crate::QueryErrorKind::InvalidParameter);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn ambiguity_uses_full_ranking_and_bounds_alternatives()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let nodes = (0..12)
+            .map(|index| {
+                anchored_node(
+                    &format!("n:{index:02}"),
+                    "alpha",
+                    if index == 0 {
+                        "src/alpha.rs"
+                    } else {
+                        "tests/alpha.rs"
+                    },
+                    index + 1,
+                )
+            })
+            .collect::<Vec<_>>();
+        let engine = engine(nodes, Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.limits.max_seeds = 1;
+        let first = engine.discover(query.clone())?;
+        let second = engine.discover(query)?;
+        assert_eq!(first.seeds.len(), 1);
+        assert!(first.seeds[0].ambiguous);
+        assert_eq!(
+            first.seeds[0].alternatives.len(),
+            MAX_DISCOVERY_ALTERNATIVES_PER_SEED
+        );
+        assert_eq!(first.omissions.alternatives, Some(3));
+        assert!(first.truncated);
+        assert_eq!(serde_json::to_vec(&first)?, serde_json::to_vec(&second)?);
+        Ok(())
+    }
+
+    #[test]
+    fn broad_scope_does_not_hide_a_late_unique_lexical_match()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut nodes = (0..12_900)
+            .map(|index| {
+                anchored_node(
+                    &format!("n:{index:05}"),
+                    &format!("unrelated_{index:05}"),
+                    &format!("src/module_{index:05}.rs"),
+                    u32::try_from(index).unwrap_or(u32::MAX).saturating_add(1),
+                )
+            })
+            .collect::<Vec<_>>();
+        nodes.push(anchored_node(
+            "z:target",
+            "unique_needle",
+            "src/最後.rs",
+            13_001,
+        ));
+        let engine = engine(nodes, Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "unique_needle".to_owned();
+        query.scope = vec![DiscoveryScope {
+            kind: DiscoveryScopeKind::Source,
+            value: "src".to_owned(),
+        }];
+        let response = engine.discover(query)?;
+        assert_eq!(response.seeds[0].node_id, "z:target");
+        assert!(response.stats.candidate_nodes <= MAX_DISCOVERY_CANDIDATE_NODES_READ);
+        assert!(response.stats.candidate_probes <= MAX_DISCOVERY_CANDIDATE_PROBES);
         Ok(())
     }
 
@@ -1228,7 +1826,7 @@ mod tests {
     }
 
     #[test]
-    fn node_omissions_count_unique_identities() -> Result<(), Box<dyn std::error::Error>> {
+    fn node_cap_makes_omission_counts_unknown() -> Result<(), Box<dyn std::error::Error>> {
         let engine = engine(
             vec![node("n:alpha", "alpha"), node("n:other", "other")],
             vec![
@@ -1239,7 +1837,91 @@ mod tests {
         let mut bounded_request = request(DiscoveryDirection::Both);
         bounded_request.limits.max_nodes = 1;
         let response = engine.discover(bounded_request)?;
-        assert_eq!(response.omissions.nodes, Some(1));
+        assert_eq!(response.omissions.nodes, None);
+        assert_eq!(response.omissions.expanded_relationships, None);
+        assert!(response.truncated);
+        assert!(
+            response
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == QueryDiagnosticCode::BoundedTruncation)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn node_cap_does_not_claim_exact_omissions_beyond_an_unvisited_node()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![
+                node("n:alpha", "alpha"),
+                node("n:middle", "middle"),
+                node("n:leaf", "leaf"),
+            ],
+            vec![
+                edge("e:first", "n:alpha", "n:middle"),
+                edge("e:second", "n:middle", "n:leaf"),
+            ],
+        );
+        let mut bounded_request = request(DiscoveryDirection::Outgoing);
+        bounded_request.limits.max_nodes = 1;
+        bounded_request.limits.max_depth = 2;
+        let response = engine.discover(bounded_request)?;
+        assert_eq!(
+            response
+                .nodes
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["n:alpha"]
+        );
+        assert_eq!(response.omissions.nodes, None);
+        assert_eq!(response.omissions.expanded_relationships, None);
+        assert!(response.truncated);
+        assert!(
+            response
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == QueryDiagnosticCode::BoundedTruncation)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn response_byte_trimming_preserves_unknown_node_and_expansion_omissions()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![
+                node("n:alpha", "alpha"),
+                node("n:first", "first"),
+                node("n:second", "second"),
+                node("n:hidden", "hidden"),
+            ],
+            vec![
+                edge("e:first", "n:alpha", "n:first"),
+                edge("e:second", "n:alpha", "n:second"),
+                edge("e:hidden", "n:second", "n:hidden"),
+            ],
+        );
+        let mut node_bounded = request(DiscoveryDirection::Outgoing);
+        node_bounded.limits.max_nodes = 2;
+        node_bounded.limits.max_depth = 2;
+        let before_byte_trim = engine.discover(node_bounded.clone())?;
+        assert_eq!(before_byte_trim.omissions.nodes, None);
+        assert_eq!(before_byte_trim.omissions.expanded_relationships, None);
+        assert!(!before_byte_trim.edges.is_empty());
+
+        node_bounded.limits.max_response_bytes = u64::try_from(
+            serde_json::to_vec(&before_byte_trim)?
+                .len()
+                .saturating_sub(1),
+        )
+        .unwrap_or(u64::MAX);
+        let response = engine.discover(node_bounded)?;
+        assert!(response.truncated);
+        assert_eq!(response.omissions.nodes, None);
+        assert_eq!(response.omissions.expanded_relationships, None);
+        assert!(serde_json::to_vec(&response)?.len() as u64 <= response.limits.max_response_bytes);
         Ok(())
     }
 

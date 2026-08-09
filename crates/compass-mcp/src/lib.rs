@@ -16,6 +16,12 @@ use std::time::{Duration, Instant};
 
 use compass_core::LoadedGraph;
 use compass_graph::{Communities, god_nodes, suggest_questions, surprising_connections};
+use compass_model::query_contract::{
+    MAX_DISCOVERY_CANDIDATES, MAX_DISCOVERY_DEPTH, MAX_DISCOVERY_EDGES,
+    MAX_DISCOVERY_EXPANDED_RELATIONSHIPS, MAX_DISCOVERY_FILTER_BYTES, MAX_DISCOVERY_FILTERS,
+    MAX_DISCOVERY_NODES, MAX_DISCOVERY_QUESTION_BYTES, MAX_DISCOVERY_RESPONSE_BYTES,
+    MAX_DISCOVERY_SEEDS, MAX_DISCOVERY_TIMEOUT_MS,
+};
 use compass_model::{Graph, GraphDocument, NodeIndex};
 use compass_prs::{
     ProcessRunner, SystemRunner, compute_pr_impact, detect_default_branch, fetch_pr_files,
@@ -338,6 +344,9 @@ impl CompassMcp {
                 "unknown tool: {name}"
             )));
         }
+        if name == "query_graph" {
+            code_query::validate_query_graph_arguments(arguments)?;
+        }
         let project_path = arguments
             .remove("project_path")
             .and_then(|value| value.as_str().map(str::to_owned));
@@ -345,6 +354,36 @@ impl CompassMcp {
             .store
             .load(project_path.as_deref())
             .map_err(InvocationError::Internal)?;
+        if name == "query_graph" && code_query::has_discovery_arguments(arguments) {
+            if !context.typed_query_supported {
+                return Err(InvocationError::InvalidParams(
+                    "discovery controls require a typed compass.graph/1 artifact".to_owned(),
+                ));
+            }
+            let started = Instant::now();
+            let response = code_query::invoke_discovery(arguments, &context.path)?;
+            let text = format!(
+                "Discovery: {} seeds, {} nodes, {} edges{}",
+                response.seeds.len(),
+                response.nodes.len(),
+                response.edges.len(),
+                if response.truncated {
+                    " (truncated)"
+                } else {
+                    ""
+                }
+            );
+            if let Some(question) = arguments.get("question").and_then(Value::as_str) {
+                log_discovery_mcp_query(question, &context.path, &response, started.elapsed());
+            }
+            return Ok(ToolInvocation {
+                text,
+                structured_content: Some(
+                    serde_json::to_value(response)
+                        .map_err(|error| InvocationError::Internal(error.to_string()))?,
+                ),
+            });
+        }
         let typed_query = matches!(
             name,
             "search_symbols"
@@ -394,6 +433,9 @@ fn should_route_natural_query(
     arguments: &Map<String, Value>,
     context: &GraphContext,
 ) -> Result<bool, InvocationError> {
+    if code_query::has_discovery_arguments(arguments) {
+        return Ok(context.typed_query_supported);
+    }
     if ["mode", "depth", "token_budget", "context_filter"]
         .iter()
         .any(|name| arguments.contains_key(*name))
@@ -454,12 +496,25 @@ fn tool_specs() -> Vec<Tool> {
         tool(
             "query_graph",
             "Route clear natural-language intents through bounded typed code queries; use explicit traversal controls for BFS/DFS text context.",
-            json!({"type":"object","properties":{
-                "question":{"type":"string","description":"Natural language question or keyword search"},
+            json!({"type":"object","additionalProperties":false,"properties":{
+                "question":{"type":"string","minLength":1,"maxLength":MAX_DISCOVERY_QUESTION_BYTES,"description":"Natural language question or keyword search"},
                 "mode":{"type":"string","enum":["bfs","dfs"],"default":"bfs","description":"bfs=broad context, dfs=trace a specific path"},
-                "depth":{"type":"integer","default":3,"description":"Traversal depth (1-6)"},
-                "token_budget":{"type":"integer","default":2000,"description":"Max output tokens"},
-                "context_filter":{"type":"array","items":{"type":"string"},"description":"Optional explicit edge-context filter, e.g. ['call', 'field']"}
+                "depth":{"type":"integer","minimum":0,"maximum":6,"default":3,"description":"Traversal depth (1-6)"},
+                "token_budget":{"type":"integer","minimum":0,"default":2000,"description":"Max output tokens"},
+                "context_filter":{"type":"array","maxItems":MAX_DISCOVERY_FILTERS,"items":{"type":"string","maxLength":MAX_DISCOVERY_FILTER_BYTES},"description":"Optional explicit edge-context filter, e.g. ['call', 'field']"},
+                "direction":{"type":"string","enum":["auto","incoming","outgoing","both"],"default":"auto","description":"Discovery edge direction; explicit values override inference"},
+                "relation_contexts":{"type":"array","maxItems":MAX_DISCOVERY_FILTERS,"items":{"type":"string","minLength":1,"maxLength":MAX_DISCOVERY_FILTER_BYTES},"description":"Canonical discovery relationship contexts"},
+                "scope":{"type":"array","maxItems":MAX_DISCOVERY_FILTERS,"items":{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string","enum":["community","source","package","node"]},"value":{"type":"string","minLength":1,"maxLength":MAX_DISCOVERY_FILTER_BYTES}},"required":["kind","value"]},"description":"Repeatable OR discovery scopes"},
+                "traversal":{"type":"string","enum":["bfs","dfs"],"default":"bfs","description":"Bounded discovery traversal order"},
+                "include_heuristic":{"type":"boolean","default":false},
+                "max_depth":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_DEPTH,"default":2},
+                "max_seeds":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_SEEDS,"default":3},
+                "max_candidates":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_CANDIDATES,"default":MAX_DISCOVERY_CANDIDATES},
+                "max_nodes":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_NODES,"default":MAX_DISCOVERY_NODES},
+                "max_edges":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_EDGES,"default":MAX_DISCOVERY_EDGES},
+                "max_expanded_relationships":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_EXPANDED_RELATIONSHIPS,"default":MAX_DISCOVERY_EXPANDED_RELATIONSHIPS},
+                "max_response_bytes":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_RESPONSE_BYTES,"default":MAX_DISCOVERY_RESPONSE_BYTES},
+                "timeout_ms":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_TIMEOUT_MS,"default":MAX_DISCOVERY_TIMEOUT_MS}
             },"required":["question"]}),
         ),
         tool(
@@ -723,6 +778,29 @@ fn log_typed_mcp_query(
         "result_chars": 0,
         "duration_ms": (duration.as_secs_f64() * 1000.0 * 1000.0).round() / 1000.0,
         "operation": response.operation,
+        "truncated": response.truncated,
+    }));
+}
+
+fn log_discovery_mcp_query(
+    question: &str,
+    corpus: &Path,
+    response: &compass_model::query_contract::DiscoveryQueryResponse,
+    duration: Duration,
+) {
+    if question.len() > MAX_LOGGED_QUESTION_BYTES {
+        return;
+    }
+    append_query_log(json!({
+        "schema": "compass.query-log/1",
+        "ts": OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_default(),
+        "kind": "mcp_query",
+        "question": question,
+        "corpus": corpus.to_string_lossy(),
+        "nodes_returned": response.nodes.len(),
+        "result_chars": 0,
+        "duration_ms": (duration.as_secs_f64() * 1000.0 * 1000.0).round() / 1000.0,
+        "operation": "discovery",
         "truncated": response.truncated,
     }));
 }

@@ -14,13 +14,18 @@ compass query "payment retries" --budget 1500
 compass query "payment retries" --budget 8000
 compass query "payment retries" --budget 8000 --page 2
 compass query "payment retries" --context call
+compass query "authentication flow" --direction both --scope package:auth
+compass query "what uses charge?" --direction incoming --context call --format json
 ```
 
 Clear search, callers, callees, impact, and path questions against a current
-typed graph use the bounded typed query framework automatically. Generic or
-contradictory questions retain broad relevance traversal. Use `--traverse` to
-select traversal explicitly; `--dfs`, `--context`, `--budget`, and `--page` do
-so as well. Historical `--at` queries always use traversal.
+typed graph use focused typed operations automatically. Generic or
+contradictory questions retain broad relevance traversal. Add `--direction`,
+`--scope`, `--format`, or a discovery bound to use the bounded discovery
+contract. `--context` and `--dfs` compose with those discovery controls; alone,
+they retain legacy traversal behavior. Historical discovery resolves `--at REV`
+once and reads the selected immutable realization's trusted `compass.graph/1`
+artifact.
 
 The default traversal favors broad relevant context. Use `--dfs` when tracing a
 specific chain. A token budget bounds rendered output; it does not change graph
@@ -37,10 +42,14 @@ to one immutable graph.
 
 `--context VALUE` filters relationships by their stored evidence context, such
 as `call`, `import`, or `route`, before traversal. It does not select a node,
-file, package, community, or subsystem. The current natural-query command has
-no `--scope` option. To narrow by subsystem today, put one exact symbol, file,
-module, or domain term in the question, or use a focused operation such as
-`search`, `callers`, or `callees` with the exact identity returned by Compass.
+file, package, community, or subsystem. Use repeatable `--scope KIND:VALUE` for
+an explicit OR scope. Supported kinds are `community`, `source`, `package`, and
+`node`; every scope must resolve canonically, and Compass never guesses a kind.
+Use `--direction auto|incoming|outgoing|both` to override or expose direction
+selection. Discovery text is one bounded response with `Pagination: none`;
+inspect `Completeness` and truncation diagnostics before making an exhaustive
+claim. `--traverse`, `--budget`, and `--page` cannot be mixed with discovery
+controls.
 
 Before retrying a weak result, derive a small vocabulary set from the request:
 exact symbol spellings, file or crate names, domain nouns, and likely community

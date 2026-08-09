@@ -134,6 +134,151 @@ fn natural_query_routes_clear_intents_and_preserves_traversal_fallback()
 }
 
 #[test]
+fn natural_discovery_exposes_the_public_json_contract_and_repeatable_or_scopes()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    let mut document = GraphDocument::load(&graph)?;
+    document.links[0].context = Some("call".to_owned());
+    std::fs::write(&graph, serde_json::to_vec_pretty(&document)?)?;
+    let outcome = run(
+        Frontend::Compass,
+        [
+            OsString::from("query"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph.into_os_string(),
+            OsString::from("--direction"),
+            OsString::from("incoming"),
+            OsString::from("--scope"),
+            OsString::from("node:n:caller"),
+            OsString::from("--scope=node:n:target"),
+            OsString::from("--context"),
+            OsString::from("call"),
+            OsString::from("--dfs"),
+            OsString::from("--format=json"),
+        ],
+    );
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+    let response: Value = serde_json::from_str(&outcome.stdout)?;
+    assert_eq!(response["schema"], "compass.query.discovery/1");
+    assert_eq!(response["selectedDirection"], "incoming");
+    assert_eq!(response["directionSource"], "explicit");
+    assert_eq!(response["relationContexts"], serde_json::json!(["call"]));
+    assert_eq!(response["traversal"], "dfs");
+    assert_eq!(
+        response["scope"],
+        serde_json::json!([
+            {"kind": "node", "value": "n:caller"},
+            {"kind": "node", "value": "n:target"}
+        ])
+    );
+    assert_eq!(response["seeds"][0]["nodeId"], "n:target");
+    assert_eq!(response["nodes"].as_array().map(Vec::len), Some(2));
+    assert_eq!(response["edges"].as_array().map(Vec::len), Some(1));
+    Ok(())
+}
+
+#[test]
+fn natural_discovery_rejects_invalid_duplicate_and_mixed_public_controls()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    let graph = graph.to_string_lossy().into_owned();
+    for (arguments, expected) in [
+        (
+            vec!["--direction", "sideways"],
+            "--direction must be auto, incoming, outgoing, or both",
+        ),
+        (vec!["--scope", "Target"], "--scope must use kind:value"),
+        (
+            vec!["--scope", "guessed:Target"],
+            "--scope kind must be community, source, package, or node",
+        ),
+        (vec!["--scope", "node:"], "--scope value must not be empty"),
+        (
+            vec!["--direction", "both", "--context", "subsystem"],
+            "unsupported relationship context",
+        ),
+        (
+            vec!["--direction", "both", "--direction", "incoming"],
+            "--direction must not be repeated",
+        ),
+        (
+            vec!["--max-nodes", "2", "--max-nodes=3"],
+            "--max-nodes must not be repeated",
+        ),
+        (
+            vec!["--include-heuristic", "--include-heuristic"],
+            "--include-heuristic must not be repeated",
+        ),
+        (
+            vec!["--direction", "both", "--traverse"],
+            "legacy traversal controls cannot be combined with discovery controls",
+        ),
+        (
+            vec!["--scope", "node:n:target", "--budget", "1000"],
+            "legacy traversal controls cannot be combined with discovery controls",
+        ),
+        (
+            vec!["--format", "json", "--page", "2"],
+            "legacy traversal controls cannot be combined with discovery controls",
+        ),
+    ] {
+        let mut args = vec![OsString::from("query"), OsString::from("Target")];
+        args.extend(arguments.iter().map(OsString::from));
+        args.extend([OsString::from("--graph"), OsString::from(&graph)]);
+        let outcome = run(Frontend::Compass, args);
+        assert_ne!(outcome.code, 0, "arguments={arguments:?}");
+        assert!(
+            outcome.stderr.contains(expected),
+            "arguments={arguments:?} stderr={}",
+            outcome.stderr
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn natural_discovery_help_documents_only_the_public_contract() {
+    let outcome = run(
+        Frontend::Compass,
+        [OsString::from("query"), OsString::from("--help")],
+    );
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+    for expected in [
+        "--direction <VALUE>",
+        "auto, incoming, outgoing, or both",
+        "--scope <KIND:VALUE>",
+        "Repeatable OR scope",
+        "--context <VALUE>",
+        "--format <text|json>",
+        "Natural discovery:",
+        "--include-heuristic",
+        "--max-depth <N>",
+        "default: 2; hard maximum: 8",
+        "--max-seeds <N>",
+        "--max-candidates <N>",
+        "--max-nodes <N>",
+        "--max-edges <N>",
+        "--max-expanded-relationships <N>",
+        "--max-response-bytes <N>",
+        "--timeout-ms <N>",
+        "Discovery deadline in milliseconds",
+        "CompassQL execution timeout",
+        "Legacy traversal:",
+        "hard maximum",
+        "clamped",
+        "--at <REV>",
+        "Resolve REV once to an immutable typed realization",
+    ] {
+        assert!(outcome.stdout.contains(expected), "missing {expected}");
+    }
+    assert!(!outcome.stdout.contains("--relation-context"));
+    assert!(!outcome.stdout.contains("--realization"));
+}
+
+#[test]
 fn typed_query_defaults_to_store_and_json_remains_explicit() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = support::write_typed_graph(directory.path())?;

@@ -31,6 +31,7 @@ use unicode_normalization::char::is_combining_mark;
 pub const GRAPH_SNAPSHOT_LAYOUT_V2: &str = "compass.store.graph-index/2";
 pub const GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1: &str = "compass.store.graph-selector/1";
 pub const GRAPH_SNAPSHOT_CANONICAL_ENCODING_V1: &str = "canonical-json-v1";
+pub const DISCOVERY_SCOPE_INDEX_CAPABILITY_V1: &str = "compass.discovery-scope-index/1";
 pub const GRAPH_SNAPSHOT_OBJECT_PARTITION: &str = "graph-snapshot/objects";
 pub const GRAPH_SNAPSHOT_CATALOG_PARTITION: &str = "graph-snapshot/catalog";
 pub const GRAPH_SNAPSHOT_ACTIVE_KEY: &str = "active";
@@ -60,6 +61,8 @@ pub enum SnapshotError {
     Unsupported(String),
     #[error("snapshot limit exceeded: {0}")]
     Limit(String),
+    #[error("snapshot capability unavailable: {0}")]
+    CapabilityUnavailable(String),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -241,6 +244,12 @@ pub struct SnapshotReadLimits {
     pub max_bytes: usize,
     pub max_objects: usize,
     pub max_depth: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TermPostingWork {
+    pub chunks_decoded: u64,
+    pub node_ids_decoded: u64,
 }
 
 impl Default for SnapshotReadLimits {
@@ -1611,7 +1620,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 b"diagnostic" => graph
                     .diagnostics
                     .push(decode_json::<GraphDiagnostic>(&entry.value)?),
-                b"diagnostic-code" => {}
+                b"diagnostic-code" | b"scope-capability" => {}
                 _ => {
                     return Err(SnapshotError::Corrupt(
                         "metadata index contains an unknown supplement".to_owned(),
@@ -1744,6 +1753,43 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         Ok((nodes, truncated))
     }
 
+    /// Resolve one exact canonical discovery scope through immutable postings.
+    pub fn resolve_scope_values(
+        &self,
+        kind: &str,
+        value: &str,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<String>, bool), SnapshotError> {
+        let capability_key = encode_graph_index_key(IndexKind::Metadata, &[b"scope-capability"])?;
+        let capability = self
+            .lookup(IndexKind::Metadata, &capability_key)?
+            .map(|value| decode_json::<String>(&value))
+            .transpose()?;
+        if capability.as_deref() != Some(DISCOVERY_SCOPE_INDEX_CAPABILITY_V1) {
+            return Err(SnapshotError::CapabilityUnavailable(
+                "scope_index_unavailable; rebuild the graph store with this Compass version"
+                    .to_owned(),
+            ));
+        }
+        let value_digest = hex_digest(value.as_bytes());
+        let prefix = encode_graph_index_key(
+            IndexKind::Terms,
+            &[b"scope", kind.as_bytes(), value_digest.as_bytes()],
+        )?;
+        let (values, truncated) =
+            self.scan_values_bounded(IndexKind::Terms, Some(&prefix), limits)?;
+        let mut canonical = Vec::with_capacity(values.len());
+        for encoded in values {
+            let (stored_requested, stored_canonical) = decode_json::<(String, String)>(&encoded)?;
+            if stored_requested == value {
+                canonical.push(stored_canonical);
+            }
+        }
+        canonical.sort();
+        canonical.dedup();
+        Ok((canonical, truncated))
+    }
+
     /// Return node candidates present in every exact normalized term posting.
     pub fn nodes_for_terms(
         &self,
@@ -1765,11 +1811,6 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 IndexKind::Terms,
                 &[posting_prefix.as_bytes(), b"node_prefix"],
             )?;
-            // `max_items` on the public request bounds candidate node IDs, not
-            // posting chunks. Scan the complete bounded prefix range and keep
-            // only the smallest canonical IDs; otherwise a vocabulary-heavy
-            // prefix can consume the bound before later matching terms are
-            // visited and diverge from the JSON accelerator.
             let posting_limits = SnapshotReadLimits {
                 max_items: GRAPH_SNAPSHOT_MAX_ITEMS,
                 ..limits
@@ -1806,6 +1847,86 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             }
         }
         Ok((nodes, truncated))
+    }
+
+    /// Return bounded discovery candidates and report the posting work decoded.
+    pub fn nodes_for_terms_bounded_work(
+        &self,
+        terms: &[String],
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<NodeRecord>, bool, TermPostingWork), SnapshotError> {
+        let searchable_terms = terms
+            .iter()
+            .filter(|term| !normalize_search_term(term).is_empty())
+            .count()
+            .max(1);
+        let total_chunk_budget = limits.max_items / TERM_POSTING_CHUNK_ITEMS;
+        if total_chunk_budget < searchable_terms {
+            return Ok((Vec::new(), true, TermPostingWork::default()));
+        }
+        let per_term_chunk_limit = total_chunk_budget / searchable_terms;
+        let per_term_item_limit = per_term_chunk_limit * TERM_POSTING_CHUNK_ITEMS;
+        let mut intersection: Option<BTreeSet<String>> = None;
+        let mut truncated = false;
+        let mut work = TermPostingWork::default();
+        for term in terms {
+            let normalized = normalize_search_term(term);
+            if normalized.is_empty() {
+                continue;
+            }
+            let prefix_length = normalized.len().min(3);
+            let posting_prefix = normalized
+                .get(..prefix_length)
+                .unwrap_or(normalized.as_str());
+            let prefix = encode_graph_index_key(
+                IndexKind::Terms,
+                &[posting_prefix.as_bytes(), b"node_prefix"],
+            )?;
+            let posting_limits = SnapshotReadLimits {
+                // Term values are fixed-size posting chunks. Divide the
+                // caller's candidate ceiling across query terms so decoded
+                // posting work remains independent of graph size. A prefix
+                // collision can truncate recall, which is propagated rather
+                // than hidden behind an unbounded scan.
+                max_items: per_term_chunk_limit,
+                ..limits
+            };
+            let (values, mut posting_truncated) =
+                self.scan_values_bounded(IndexKind::Terms, Some(&prefix), posting_limits)?;
+            let mut ids = BTreeSet::new();
+            for value in values {
+                let posting = decode_json::<TermPostingChunk>(&value)?;
+                work.chunks_decoded = work.chunks_decoded.saturating_add(1);
+                work.node_ids_decoded = work
+                    .node_ids_decoded
+                    .saturating_add(u64::try_from(posting.node_ids.len()).unwrap_or(u64::MAX));
+                if !normalize_search_term(&posting.term).starts_with(&normalized) {
+                    continue;
+                }
+                for node_id in posting.node_ids {
+                    ids.insert(node_id);
+                    if ids.len() > per_term_item_limit {
+                        ids.pop_last();
+                        posting_truncated = true;
+                    }
+                }
+            }
+            truncated |= posting_truncated;
+            intersection = Some(match intersection {
+                Some(previous) => previous.intersection(&ids).cloned().collect(),
+                None => ids,
+            });
+            if intersection.as_ref().is_some_and(BTreeSet::is_empty) {
+                break;
+            }
+        }
+        let mut nodes = Vec::new();
+        for node_id in intersection.unwrap_or_default() {
+            if let Some(node) = self.get_node(&node_id)? {
+                nodes.push(node);
+            }
+        }
+        Ok((nodes, truncated, work))
     }
 
     pub fn file_by_path(&self, path: &str) -> Result<Option<FileRecord>, SnapshotError> {
@@ -2193,6 +2314,15 @@ fn build_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
         if let Some(framework) = &node.framework {
             terms.extend(search_terms(framework));
         }
+        if let Some(source) = &node.source {
+            terms.extend(search_terms(&source.file));
+        }
+        if let Some(community) = &node.community {
+            terms.extend(search_terms(&community.id.to_string()));
+            if let Some(label) = &community.label {
+                terms.extend(search_terms(label));
+            }
+        }
         if let Some(path) = node
             .details
             .as_ref()
@@ -2288,6 +2418,11 @@ fn build_index(
                     entries.entry(key).or_insert(value);
                 }
             }
+            insert_json(
+                &mut entries,
+                encode_graph_index_key(IndexKind::Metadata, &[b"scope-capability"])?,
+                &DISCOVERY_SCOPE_INDEX_CAPABILITY_V1,
+            )?;
         }
         IndexKind::Nodes => {
             for node in &graph.nodes {
@@ -2338,6 +2473,26 @@ fn build_index(
                             node_ids: chunk.to_vec(),
                         },
                     )?;
+                }
+            }
+            for node in &graph.nodes {
+                for (kind, value, canonical) in
+                    compass_model::query_contract::discovery_scope_postings(node)
+                {
+                    let value_digest = hex_digest(value.as_bytes());
+                    let canonical_digest = hex_digest(canonical.as_bytes());
+                    let key = encode_graph_index_key(
+                        IndexKind::Terms,
+                        &[
+                            b"scope",
+                            kind.as_bytes(),
+                            value_digest.as_bytes(),
+                            canonical_digest.as_bytes(),
+                        ],
+                    )?;
+                    entries
+                        .entry(key)
+                        .or_insert(encode_json(&(value, canonical))?);
                 }
             }
         }
@@ -2552,6 +2707,7 @@ fn file_node_index_projection_equal(previous: &NodeRecord, current: &NodeRecord)
         || previous.qualified_name != current.qualified_name
         || previous.language != current.language
         || previous.framework != current.framework
+        || previous.source != current.source
         || previous.community != current.community
     {
         return false;
@@ -3299,6 +3455,7 @@ mod tests {
         BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails, FileRecord,
         NodeDetails, NodeKind,
     };
+    use compass_model::provenance::SourceAnchor;
 
     #[test]
     fn streamed_canonical_graph_json_matches_serde_encoding() -> Result<(), SnapshotError> {
@@ -3451,6 +3608,20 @@ mod tests {
             nodes: vec![file_node, symbol_node],
             links: Vec::new(),
         };
+        let mut source_changed = previous.clone();
+        source_changed.nodes[0].source = Some(SourceAnchor {
+            file: "src/main.rs".to_owned(),
+            start_byte: 0,
+            end_byte: 1,
+            start_line: 1,
+            start_column: 0,
+            end_line: 1,
+            end_column: 1,
+        });
+        assert!(matches!(
+            validate_file_node_delta(&previous, &source_changed),
+            Err(SnapshotError::Unsupported(_))
+        ));
         let mut previous_bytes = Vec::new();
         write_canonical_graph_json(&previous, &mut previous_bytes)
             .map_err(|error| SnapshotError::Encode(error.to_string()))?;
@@ -3499,6 +3670,52 @@ mod tests {
             .map_err(|error| SnapshotError::Encode(error.to_string()))?
         );
         assert!(no_output.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_v2_snapshot_without_scope_capability_remains_readable_but_rejects_scopes()
+    -> Result<(), SnapshotError> {
+        let graph = GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "legacy-test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "tree".to_owned(),
+            configuration_digest: "config".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        });
+        let store = compass_store::MemoryStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let mut content = builder.prepare_content(&store, &graph)?;
+        let mut metadata_entries = build_index(&graph, IndexKind::Metadata, None)?;
+        metadata_entries.remove(&encode_graph_index_key(
+            IndexKind::Metadata,
+            &[b"scope-capability"],
+        )?);
+        let metadata_entry_count = metadata_entries.len() as u64;
+        let mut writer = ObjectWriter::new(&store)?;
+        let metadata_digest = build_index_tree(&mut writer, IndexKind::Metadata, metadata_entries)?;
+        let _ = writer.finish()?;
+        let metadata_root = content
+            .roots
+            .iter_mut()
+            .find(|root| root.index == IndexKind::Metadata)
+            .ok_or_else(|| SnapshotError::Corrupt("metadata root is missing".to_owned()))?;
+        metadata_root.digest = metadata_digest;
+        metadata_root.entry_count = metadata_entry_count;
+        let (graph_digest, graph_bytes) = digest_canonical_graph(&graph, false)?;
+        let prepared = builder.finish_content(&store, content, graph_digest, graph_bytes)?;
+        builder.activate(&store, &prepared)?;
+
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("active snapshot is missing".to_owned()))?;
+        assert!(reader.nodes(SnapshotReadLimits::default())?.is_empty());
+        assert_eq!(reader.metadata()?.graph.build, graph.graph.build);
+        assert!(matches!(
+            reader.resolve_scope_values("node-id", "missing", SnapshotReadLimits::default()),
+            Err(SnapshotError::CapabilityUnavailable(message))
+                if message.contains("scope_index_unavailable")
+        ));
         Ok(())
     }
 

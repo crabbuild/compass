@@ -127,7 +127,8 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     assert!(query.contains("4,000–16,000 tokens"));
     assert!(query.contains("additional pages remain"));
     assert!(query.contains("filters relationships by their stored evidence context"));
-    assert!(query.contains("current natural-query command has\nno `--scope` option"));
+    assert!(query.contains("Use repeatable `--scope KIND:VALUE`"));
+    assert!(query.contains("every scope must resolve canonically"));
     assert!(!query.contains("--context CheckoutService"));
     assert!(!query.contains("anchor a common term inside a subsystem"));
     let references = skill.with_file_name("references");

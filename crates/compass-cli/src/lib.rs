@@ -26,7 +26,7 @@ mod semantic_diff_render;
 mod store_commands;
 mod upgrade_commands;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{BufRead, Write};
@@ -52,6 +52,11 @@ use compass_global::{GlobalPaths, global_add};
 use compass_graph::god_nodes;
 use compass_graphdb::{push_to_falkordb, push_to_neo4j};
 use compass_model::GraphError;
+use compass_model::query_contract::{
+    DiscoveryDirection, DiscoveryDirectionSource, DiscoveryLimits, DiscoveryQueryRequest,
+    DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind, DiscoveryScoreTier,
+    DiscoverySeedSource, DiscoveryTraversal,
+};
 use compass_output::{
     CallflowOptions, CallflowSection, CanvasOptions, HtmlOptions, ObsidianOptions, SvgOptions,
     TreeOptions, WikiOptions, callflow_view_model, export_obsidian, export_wiki,
@@ -61,8 +66,9 @@ use compass_output::{
 };
 use compass_query::{
     DEFAULT_AFFECTED_RELATIONS, DEFAULT_TEXT_TOKEN_BUDGET, TextPageOptions, TraversalMode,
-    format_affected, format_benchmark, plan_natural_query, query_graph_text_page,
-    render_explanation_page, render_shortest_path, run_benchmark,
+    format_affected, format_benchmark, open as open_code_query, open_with_document,
+    plan_natural_query, query_graph_text_page, render_explanation_page, render_shortest_path,
+    run_benchmark,
 };
 use compass_semantic::{
     CachedCorpusExtractionOptions, CorpusExtractionOptions, detect_backend_with_custom,
@@ -3606,15 +3612,26 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
     let mut page = 1_usize;
     let mut mode = TraversalMode::Bfs;
     let mut force_traversal = false;
+    let mut incompatible_with_discovery = false;
+    let mut discovery_requested = false;
+    let mut discovery_direction = DiscoveryDirection::Auto;
+    let mut discovery_scope = Vec::new();
+    let mut discovery_traversal = DiscoveryTraversal::Bfs;
+    let mut discovery_include_heuristic = false;
+    let mut discovery_limits = DiscoveryLimits::default();
+    let mut discovery_format = "text".to_owned();
+    let mut seen_discovery_options = HashSet::new();
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
             "--traverse" => {
                 force_traversal = true;
+                incompatible_with_discovery = true;
                 index += 1;
             }
             "--dfs" => {
                 mode = TraversalMode::Dfs;
+                discovery_traversal = DiscoveryTraversal::Dfs;
                 force_traversal = true;
                 index += 1;
             }
@@ -3627,6 +3644,7 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                 };
                 budget = value;
                 force_traversal = true;
+                incompatible_with_discovery = true;
                 index += 2;
             }
             "--context" => {
@@ -3646,6 +3664,50 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                 };
                 page = value;
                 force_traversal = true;
+                incompatible_with_discovery = true;
+                index += 2;
+            }
+            "--direction" | "--scope" | "--format" => {
+                let name = args[index].as_str();
+                let Some(value) = args.get(index + 1) else {
+                    return Outcome::failure(format!("error: {name} requires a value"));
+                };
+                if name != "--scope" && !seen_discovery_options.insert(name.to_owned()) {
+                    return Outcome::failure(format!("error: {name} must not be repeated"));
+                }
+                if let Err(error) = apply_discovery_option(
+                    name,
+                    value,
+                    &mut discovery_direction,
+                    &mut discovery_scope,
+                    &mut discovery_format,
+                ) {
+                    return Outcome::failure(format!("error: {error}"));
+                }
+                discovery_requested = true;
+                index += 2;
+            }
+            "--include-heuristic" => {
+                if !seen_discovery_options.insert("--include-heuristic".to_owned()) {
+                    return Outcome::failure(
+                        "error: --include-heuristic must not be repeated".to_owned(),
+                    );
+                }
+                discovery_include_heuristic = true;
+                discovery_requested = true;
+                index += 1;
+            }
+            value if is_discovery_limit(value) => {
+                if !seen_discovery_options.insert(value.to_owned()) {
+                    return Outcome::failure(format!("error: {value} must not be repeated"));
+                }
+                let Some(raw) = args.get(index + 1) else {
+                    return Outcome::failure(format!("error: {value} requires an integer"));
+                };
+                if let Err(error) = apply_discovery_limit(&mut discovery_limits, value, raw) {
+                    return Outcome::failure(format!("error: {error}"));
+                }
+                discovery_requested = true;
                 index += 2;
             }
             value if value.starts_with("--budget=") => {
@@ -3654,6 +3716,7 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                 };
                 budget = value;
                 force_traversal = true;
+                incompatible_with_discovery = true;
                 index += 1;
             }
             value if value.starts_with("--context=") => {
@@ -3667,12 +3730,75 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                 };
                 page = value;
                 force_traversal = true;
+                incompatible_with_discovery = true;
+                index += 1;
+            }
+            value
+                if ["--direction=", "--scope=", "--format="]
+                    .iter()
+                    .any(|prefix| value.starts_with(prefix)) =>
+            {
+                let Some((name, option_value)) = value.split_once('=') else {
+                    return Outcome::failure("error: invalid discovery option".to_owned());
+                };
+                if name != "--scope" && !seen_discovery_options.insert(name.to_owned()) {
+                    return Outcome::failure(format!("error: {name} must not be repeated"));
+                }
+                if let Err(error) = apply_discovery_option(
+                    name,
+                    option_value,
+                    &mut discovery_direction,
+                    &mut discovery_scope,
+                    &mut discovery_format,
+                ) {
+                    return Outcome::failure(format!("error: {error}"));
+                }
+                discovery_requested = true;
+                index += 1;
+            }
+            value
+                if value
+                    .split_once('=')
+                    .is_some_and(|(name, _)| is_discovery_limit(name)) =>
+            {
+                let Some((name, raw)) = value.split_once('=') else {
+                    return Outcome::failure("error: invalid discovery limit".to_owned());
+                };
+                if !seen_discovery_options.insert(name.to_owned()) {
+                    return Outcome::failure(format!("error: {name} must not be repeated"));
+                }
+                if let Err(error) = apply_discovery_limit(&mut discovery_limits, name, raw) {
+                    return Outcome::failure(format!("error: {error}"));
+                }
+                discovery_requested = true;
                 index += 1;
             }
             value => {
                 return Outcome::failure(format!("error: unexpected query argument {value}"));
             }
         }
+    }
+    if discovery_requested && incompatible_with_discovery {
+        return Outcome::failure(
+            "error: legacy traversal controls cannot be combined with discovery controls"
+                .to_owned(),
+        );
+    }
+    if discovery_requested {
+        let request = DiscoveryQueryRequest {
+            question: question.clone(),
+            direction: discovery_direction,
+            relation_contexts: contexts,
+            scope: discovery_scope,
+            traversal: discovery_traversal,
+            include_heuristic: discovery_include_heuristic,
+            limits: discovery_limits,
+        };
+        let outcome = command_discovery_query(&selection, request, &discovery_format);
+        if outcome.code == 0 {
+            touch_selected_query_stamp(&selection);
+        }
+        return outcome;
     }
     if let Err(error) = validate_text_pagination(budget, page) {
         return Outcome::failure(format!("error: {error}"));
@@ -3716,6 +3842,318 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
     };
     touch_selected_query_stamp(&selection);
     Outcome::success(output)
+}
+
+fn apply_discovery_option(
+    name: &str,
+    value: &str,
+    direction: &mut DiscoveryDirection,
+    scope: &mut Vec<DiscoveryScope>,
+    format: &mut String,
+) -> Result<(), String> {
+    match name {
+        "--direction" => {
+            *direction = match value {
+                "auto" => DiscoveryDirection::Auto,
+                "incoming" => DiscoveryDirection::Incoming,
+                "outgoing" => DiscoveryDirection::Outgoing,
+                "both" => DiscoveryDirection::Both,
+                _ => {
+                    return Err("--direction must be auto, incoming, outgoing, or both".to_owned());
+                }
+            };
+        }
+        "--scope" => scope.push(parse_discovery_scope(value)?),
+        "--format" => {
+            if !matches!(value, "text" | "json") {
+                return Err("--format must be text or json for discovery queries".to_owned());
+            }
+            *format = value.to_owned();
+        }
+        _ => return Err(format!("unsupported discovery option {name}")),
+    }
+    Ok(())
+}
+
+fn parse_discovery_scope(value: &str) -> Result<DiscoveryScope, String> {
+    let Some((kind, value)) = value.split_once(':') else {
+        return Err(
+            "--scope must use kind:value with kind community, source, package, or node".to_owned(),
+        );
+    };
+    if value.is_empty() {
+        return Err("--scope value must not be empty".to_owned());
+    }
+    let kind = match kind {
+        "community" => DiscoveryScopeKind::Community,
+        "source" => DiscoveryScopeKind::Source,
+        "package" => DiscoveryScopeKind::Package,
+        "node" => DiscoveryScopeKind::Node,
+        _ => {
+            return Err("--scope kind must be community, source, package, or node".to_owned());
+        }
+    };
+    Ok(DiscoveryScope {
+        kind,
+        value: value.to_owned(),
+    })
+}
+
+fn is_discovery_limit(name: &str) -> bool {
+    matches!(
+        name,
+        "--max-depth"
+            | "--max-seeds"
+            | "--max-candidates"
+            | "--max-nodes"
+            | "--max-edges"
+            | "--max-expanded-relationships"
+            | "--max-response-bytes"
+            | "--timeout-ms"
+    )
+}
+
+fn apply_discovery_limit(
+    limits: &mut DiscoveryLimits,
+    name: &str,
+    raw: &str,
+) -> Result<(), String> {
+    let value = raw
+        .parse::<u64>()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| format!("{name} requires a positive integer"))?;
+    let as_u32 =
+        || u32::try_from(value).map_err(|_| format!("{name} requires a positive 32-bit integer"));
+    match name {
+        "--max-depth" => limits.max_depth = as_u32()?,
+        "--max-seeds" => limits.max_seeds = as_u32()?,
+        "--max-candidates" => limits.max_candidates = as_u32()?,
+        "--max-nodes" => limits.max_nodes = as_u32()?,
+        "--max-edges" => limits.max_edges = as_u32()?,
+        "--max-expanded-relationships" => limits.max_expanded_relationships = value,
+        "--max-response-bytes" => limits.max_response_bytes = value,
+        "--timeout-ms" => limits.timeout_ms = value,
+        _ => return Err(format!("unsupported discovery limit {name}")),
+    }
+    Ok(())
+}
+
+fn command_discovery_query(
+    selection: &GraphSelection,
+    request: DiscoveryQueryRequest,
+    format: &str,
+) -> Outcome {
+    let response = match discovery_query(selection, request) {
+        Ok(response) => response,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
+    };
+    if format == "json" {
+        match serde_json::to_string_pretty(&response) {
+            Ok(output) => Outcome::success(output),
+            Err(error) => Outcome::failure(format!("error: {error}")),
+        }
+    } else {
+        Outcome::success(render_discovery_text(&response))
+    }
+}
+
+fn discovery_query(
+    selection: &GraphSelection,
+    request: DiscoveryQueryRequest,
+) -> Result<DiscoveryQueryResponse, String> {
+    match selection {
+        GraphSelection::File(path) => {
+            let graph = compass_files::BuildGuard::resolve_requested_artifact(path)
+                .map_err(|error| error.to_string())?;
+            let cache = graph
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join("cache");
+            open_code_query(&graph, None, &cache)
+                .map_err(|error| error.to_string())?
+                .discover(request)
+                .map_err(|error| error.to_string())
+        }
+        GraphSelection::Commit(revision) => {
+            let (realization, document) = history_commands::load_typed_graph_at(revision)?;
+            let current = std::env::current_dir().map_err(|error| error.to_string())?;
+            let cache = current
+                .join(".compass")
+                .join("cache")
+                .join("history-query")
+                .join(realization.to_string());
+            let graph_path = current
+                .join(".compass")
+                .join("history-query")
+                .join(realization.to_string())
+                .join("graph.json");
+            open_with_document(document, &graph_path, None, &cache)
+                .map_err(|error| error.to_string())?
+                .discover(request)
+                .map_err(|error| error.to_string())
+        }
+    }
+}
+
+fn render_discovery_text(response: &DiscoveryQueryResponse) -> String {
+    let mut lines = vec![format!(
+        "Discovery: {} seed(s), {} node(s), {} edge(s)",
+        response.seeds.len(),
+        response.nodes.len(),
+        response.edges.len()
+    )];
+    lines.push(format!(
+        "Direction: {} ({})",
+        discovery_direction_name(response.selected_direction),
+        discovery_direction_source_name(response.direction_source)
+    ));
+    lines.push(format!("Traversal: {:?}", response.traversal).to_ascii_lowercase());
+    if !response.relation_contexts.is_empty() {
+        lines.push(format!(
+            "Relationship contexts: {}",
+            response.relation_contexts.join(", ")
+        ));
+    }
+    if !response.scope.is_empty() {
+        lines.push(format!(
+            "Scope (OR): {}",
+            response
+                .scope
+                .iter()
+                .map(|scope| format!("{}:{}", discovery_scope_kind_name(scope.kind), scope.value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    for seed in &response.seeds {
+        lines.push(format!(
+            "Seed: {} [{}; source={}; score={}; matchedFields={}; matchedTerms={}]{}",
+            seed.node_id,
+            discovery_score_tier_name(seed.score_tier),
+            discovery_seed_source_name(seed.candidate_source),
+            seed.score,
+            display_values(&seed.matched_fields),
+            display_values(&seed.matched_terms),
+            seed.source
+                .as_ref()
+                .map(|source| format!(" @ {}:{}", source.file, source.start_line))
+                .unwrap_or_default()
+        ));
+        for alternative in &seed.alternatives {
+            lines.push(format!(
+                "  Alternative: {} {} score={}{}",
+                alternative.node_id,
+                alternative.qualified_name,
+                alternative.score,
+                alternative
+                    .source
+                    .as_ref()
+                    .map(|source| format!(" @ {}:{}", source.file, source.start_line))
+                    .unwrap_or_default()
+            ));
+        }
+    }
+    lines.extend(response.nodes.iter().map(|node| {
+        format!(
+            "Node: {} [{}] {}{}",
+            node.id,
+            node.kind.as_str(),
+            node.qualified_name,
+            node.source
+                .as_ref()
+                .map(|source| format!(" @ {}:{}", source.file, source.start_line))
+                .unwrap_or_default()
+        )
+    }));
+    lines.extend(response.edges.iter().map(|edge| {
+        format!(
+            "Edge: {} -{}-> {} [id={}; evidence={}]",
+            edge.source,
+            edge.kind.as_str(),
+            edge.target,
+            edge.id.as_deref().unwrap_or("unavailable"),
+            edge.evidence.len()
+        )
+    }));
+    lines.extend(
+        response
+            .diagnostics
+            .iter()
+            .map(|diagnostic| format!("! {:?}: {}", diagnostic.code, diagnostic.message)),
+    );
+    if response.truncated {
+        lines.push("! response truncated by explicit bounds".to_owned());
+    }
+    lines.push(format!(
+        "Completeness: {} (candidates={}, alternatives={}, nodes={}, edges={}, expandedRelationships={})",
+        if response.truncated { "partial" } else { "complete" },
+        display_omission(response.omissions.candidates),
+        display_omission(response.omissions.alternatives),
+        display_omission(response.omissions.nodes),
+        display_omission(response.omissions.edges),
+        display_omission(response.omissions.expanded_relationships)
+    ));
+    lines.push("Pagination: none (one bounded response)".to_owned());
+    lines.join("\n")
+}
+
+fn display_values(values: &[String]) -> String {
+    if values.is_empty() {
+        "none".to_owned()
+    } else {
+        values.join(",")
+    }
+}
+
+fn display_omission(value: Option<u64>) -> String {
+    value.map_or_else(|| "unknown".to_owned(), |value| value.to_string())
+}
+
+fn discovery_direction_name(direction: DiscoveryDirection) -> &'static str {
+    match direction {
+        DiscoveryDirection::Auto => "auto",
+        DiscoveryDirection::Incoming => "incoming",
+        DiscoveryDirection::Outgoing => "outgoing",
+        DiscoveryDirection::Both => "both",
+    }
+}
+
+fn discovery_direction_source_name(source: DiscoveryDirectionSource) -> &'static str {
+    match source {
+        DiscoveryDirectionSource::Explicit => "explicit",
+        DiscoveryDirectionSource::Heuristic => "heuristic",
+        DiscoveryDirectionSource::Neutral => "neutral",
+    }
+}
+
+fn discovery_scope_kind_name(kind: DiscoveryScopeKind) -> &'static str {
+    match kind {
+        DiscoveryScopeKind::Community => "community",
+        DiscoveryScopeKind::Source => "source",
+        DiscoveryScopeKind::Package => "package",
+        DiscoveryScopeKind::Node => "node",
+    }
+}
+
+fn discovery_score_tier_name(tier: DiscoveryScoreTier) -> &'static str {
+    match tier {
+        DiscoveryScoreTier::ExactId => "exact_id",
+        DiscoveryScoreTier::ExactName => "exact_name",
+        DiscoveryScoreTier::Lexical => "lexical",
+    }
+}
+
+fn discovery_seed_source_name(source: DiscoverySeedSource) -> &'static str {
+    match source {
+        DiscoverySeedSource::ExactId => "exact_id",
+        DiscoverySeedSource::ExactName => "exact_name",
+        DiscoverySeedSource::Alias => "alias",
+        DiscoverySeedSource::TermIndex => "term_index",
+        DiscoverySeedSource::RelationSeed => "relation_seed",
+        DiscoverySeedSource::Fuzzy => "fuzzy",
+        DiscoverySeedSource::HeuristicFallback => "heuristic_fallback",
+    }
 }
 
 fn command_path(frontend: Frontend, args: &[String]) -> Outcome {
@@ -3977,6 +4415,29 @@ pub(crate) fn load_selection(
     }
 }
 
+pub(crate) fn load_indexed_selection(
+    frontend: Frontend,
+    selection: &GraphSelection,
+) -> Result<LoadedGraph, Outcome> {
+    match selection {
+        GraphSelection::File(path) => {
+            let path =
+                compass_files::BuildGuard::resolve_requested_artifact(path).map_err(|error| {
+                    Outcome::failure(format!("error: could not resolve graph: {error}"))
+                })?;
+            let graph = compass_model::Graph::load_directed(&path).map_err(graph_load_outcome)?;
+            Ok(LoadedGraph {
+                graph,
+                overlay: HashMap::new(),
+            })
+        }
+        GraphSelection::Commit(revision) => {
+            history_commands::load_graph_at(frontend, revision, true)
+                .map_err(|error| Outcome::failure(format!("error: {error}")))
+        }
+    }
+}
+
 fn touch_selected_query_stamp(selection: &GraphSelection) {
     if let GraphSelection::File(path) = selection {
         integration_commands::touch_query_stamp(path);
@@ -3986,7 +4447,7 @@ fn touch_selected_query_stamp(selection: &GraphSelection) {
 fn query_help(frontend: Frontend) -> String {
     let prefix = frontend_name(frontend);
     format!(
-        "Usage: {prefix} query \"<question>\" [--traverse] [--dfs] [--context VALUE] [--budget N] [--page N] [--graph PATH|--at REV]"
+        "Usage: {prefix} query \"<question>\" [--direction auto|incoming|outgoing|both] [--scope KIND:VALUE] [--context VALUE] [--dfs] [--format text|json] [--graph PATH|--at REV]\n\nNatural discovery options:\n  --direction <VALUE>               Direction: auto, incoming, outgoing, or both [default: auto]\n  --scope <KIND:VALUE>              Repeatable OR scope; KIND is community, source, package, or node\n  --context <VALUE>                 Repeatable strict relationship-context filter\n  --dfs                             Use depth-first expansion [default: breadth-first]\n  --include-heuristic               Include heuristic evidence [default: excluded]\n  --format <text|json>              Discovery output [default: text]\n  --max-depth <N>                   Traversal depth [default: 2; hard maximum: 8]\n  --max-seeds <N>                   Ranked seed count [default: 3; hard maximum: 3]\n  --max-candidates <N>              Ranked candidate count [default/hard maximum: 256]\n  --max-nodes <N>                   Returned node count [default/hard maximum: 500]\n  --max-edges <N>                   Returned edge count [default/hard maximum: 1000]\n  --max-expanded-relationships <N>  Examined relationships [default/hard maximum: 10000]\n  --max-response-bytes <N>          Serialized response bytes [default/hard maximum: 8388608]\n  --timeout-ms <N>                  Discovery deadline in milliseconds [default/hard maximum: 30000]\n\nLegacy traversal options:\n  --traverse                        Force legacy relevance traversal\n  --budget <N>                      Approximate tokens per page [default: 2000]\n  --page <N>                        Result page, starting at 1 [default: 1]\n\nGraph selection:\n  --graph <PATH>                    Read a graph JSON file\n  --at <REV>                        Resolve REV once to an immutable typed realization; conflicts with --graph\n\nCompassQL options:\n  --cql                             Use CompassQL mode\n  --timeout-ms <N>                  CompassQL execution timeout\n  --max-expanded-relationships <N>  CompassQL relationship expansion limit\n  Run `{prefix} help query` for all CompassQL controls and examples.\n\nDiscovery limits must be positive; values above a hard maximum are rejected rather than clamped. Legacy --traverse, --budget, and --page cannot be mixed with discovery controls."
     )
 }
 

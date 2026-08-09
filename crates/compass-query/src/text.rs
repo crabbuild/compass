@@ -243,10 +243,17 @@ pub fn normalize_context_filters(filters: &[String]) -> Vec<String> {
             "return" | "returns" | "returned" => "return_type",
             "generic" | "generics" | "template" | "templates" => "generic_arg",
             "annotation" | "annotations" | "decorator" | "decorators" => "attribute",
-            "calls" | "called" | "invoke" | "invocation" => "call",
+            "calls" | "called" | "invoke" | "invokes" | "invoked" | "invocation" => "call",
             "fields" | "property" | "properties" | "member" | "members" => "field",
             "imports" | "imported" | "module" | "modules" => "import",
             "exports" | "exported" => "export",
+            "routes" | "routed" | "routing" => "route",
+            "register" | "registered" | "registers" => "registration",
+            "reads" | "reading" => "read",
+            "writes" | "writing" => "write",
+            "tests" | "tested" | "testing" => "test",
+            "types" | "typing" => "type",
+            "dependencies" | "depends" => "dependency",
             _ => &key,
         }
         .to_owned();
