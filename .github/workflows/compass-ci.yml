@@ -94,6 +94,11 @@ jobs:
           cargo test --workspace --lib --bins --locked
           cargo test -p compass-cli --test compass_product --locked
 
+      - name: Qualify natural-language query relevance
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: python3 scripts/qualify_query_relevance.py
+
       - name: Verify pinned CompassQL support evidence
         run: |
           cargo test -p compass-cypher --test tck --locked
