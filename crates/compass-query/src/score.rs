@@ -65,9 +65,10 @@ pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool
     let node_text = graph
         .nodes()
         .map(|(node, record)| {
-            let normalized_label = normalized_label(record);
+            let label = record.string("label");
+            let normalized_label = normalized_label_with_text(record, &label);
             let bare_label = normalized_label.trim_end_matches(['(', ')']).to_owned();
-            let label_tokens = canonical_label_tokens(record.label());
+            let label_tokens = canonical_label_tokens(&label);
             NodeText {
                 node,
                 normalized_label,
@@ -405,9 +406,14 @@ fn compute_idf(nodes: &[NodeText], terms: &[String]) -> HashMap<String, f64> {
 }
 
 pub(crate) fn normalized_label(node: &NodeRecord) -> String {
+    let label = node.string("label");
+    normalized_label_with_text(node, &label)
+}
+
+fn normalized_label_with_text(node: &NodeRecord, label: &str) -> String {
     let stored = node.string("norm_label");
     let normalized = if stored.is_empty() {
-        strip_diacritics(node.label()).to_lowercase()
+        strip_diacritics(label).to_lowercase()
     } else {
         stored.to_lowercase()
     };
