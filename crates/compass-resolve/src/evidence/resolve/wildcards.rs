@@ -2,7 +2,7 @@
 
 use super::super::*;
 
-impl UniversalResolutionIndex {
+impl ResolutionDb<'_> {
     pub(in crate::evidence) fn resolve_wildcard_binding(
         &self,
         language: &str,
@@ -98,7 +98,8 @@ impl UniversalResolutionIndex {
             }
             if let Some(bindings) = self
                 .indexes
-                .wildcard_bindings_by_scope
+                .wildcards
+                .by_scope
                 .get(&(language.to_owned(), current.to_owned()))
             {
                 if !bindings.complete {
@@ -162,7 +163,7 @@ impl UniversalResolutionIndex {
                 return Err(visited.len());
             }
             if qualifier.is_none()
-                && let Some(ids) = self.indexes.by_module_name.get(&(
+                && let Some(ids) = self.indexes.names.by_module_name.get(&(
                     language.to_owned(),
                     module.clone(),
                     candidate.target_spelling.clone(),
@@ -181,6 +182,7 @@ impl UniversalResolutionIndex {
                 let mut qualified_declarations = BTreeSet::new();
                 if let Some(ids) = self
                     .indexes
+                    .names
                     .by_qualified
                     .get(&(language.to_owned(), qualified.clone()))
                 {
@@ -204,6 +206,7 @@ impl UniversalResolutionIndex {
                     if expanded != qualified {
                         if let Some(ids) = self
                             .indexes
+                            .names
                             .by_qualified
                             .get(&(language.to_owned(), expanded.clone()))
                         {
@@ -226,7 +229,8 @@ impl UniversalResolutionIndex {
             }
             if let Some(reexports) = self
                 .indexes
-                .wildcard_reexports_by_module
+                .wildcards
+                .reexports_by_module
                 .get(&(language.to_owned(), module.clone()))
             {
                 if !reexports.complete {
@@ -242,7 +246,8 @@ impl UniversalResolutionIndex {
                     .is_some_and(|source_module| rust_module_is_descendant(source_module, &module))
                 && let Some(bindings) = self
                     .indexes
-                    .wildcard_bindings_by_module
+                    .wildcards
+                    .by_module
                     .get(&(language.to_owned(), module))
             {
                 if !bindings.complete {

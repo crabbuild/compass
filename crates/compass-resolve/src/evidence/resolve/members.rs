@@ -2,7 +2,7 @@
 
 use super::super::*;
 
-impl UniversalResolutionIndex {
+impl ResolutionDb<'_> {
     pub(in crate::evidence) fn inventory_decision(
         &self,
         language: &str,
@@ -23,6 +23,7 @@ impl UniversalResolutionIndex {
         }
         let candidates = self
             .indexes
+            .names
             .inventory_by_qualified
             .get(&(language.to_owned(), qualified_name.to_owned()))?;
         match candidates.as_slice() {
@@ -56,7 +57,7 @@ impl UniversalResolutionIndex {
         for start in 0..components.len().min(64) {
             let directory = components[start..].join("/");
             let key = (language.to_owned(), directory, spelling.to_owned());
-            if let Some(candidates) = self.indexes.by_source_directory_name.get(&key) {
+            if let Some(candidates) = self.indexes.names.by_source_directory_name.get(&key) {
                 let imported = candidates
                     .iter()
                     .filter_map(|slot| {
@@ -78,6 +79,7 @@ impl UniversalResolutionIndex {
             return Vec::new();
         };
         self.indexes
+            .names
             .by_module_name
             .get(&(
                 language.to_owned(),
@@ -117,6 +119,7 @@ impl UniversalResolutionIndex {
             let owner = &self.declaration(owner_id)?.qualified_name;
             if let Some(ids) = self
                 .indexes
+                .names
                 .by_qualified
                 .get(&(language.to_owned(), format!("{owner}::{member}")))
             {
@@ -173,11 +176,11 @@ impl UniversalResolutionIndex {
         }
         let mut target = binding.qualified_target.clone();
         for member in parts {
-            let Some(targets) =
-                self.indexes
-                    .members
-                    .get(&(language.to_owned(), target.clone(), member.to_owned()))
-            else {
+            let Some(targets) = self.indexes.members.members.get(&(
+                language.to_owned(),
+                target.clone(),
+                member.to_owned(),
+            )) else {
                 return Ok(None);
             };
             let [next] = targets.as_slice() else {
@@ -281,9 +284,12 @@ impl UniversalResolutionIndex {
         };
         let key = (language.to_owned(), callable.qualified_name.clone());
         let return_candidates = if language == "rust" {
-            self.indexes.outer_return_candidates_by_callable.get(&key)
+            self.indexes
+                .members
+                .outer_return_candidates_by_callable
+                .get(&key)
         } else {
-            self.indexes.return_candidates_by_callable.get(&key)
+            self.indexes.members.return_candidates_by_callable.get(&key)
         };
         let Some(return_candidates) = return_candidates else {
             return Ok(None);
@@ -351,7 +357,8 @@ impl UniversalResolutionIndex {
             }
             if let Some(bindings) = self
                 .indexes
-                .wildcard_bindings_by_scope
+                .wildcards
+                .by_scope
                 .get(&(language.to_owned(), current.to_owned()))
             {
                 if !bindings.complete {
@@ -430,6 +437,7 @@ impl UniversalResolutionIndex {
         };
         if let Some(declarations) = self
             .indexes
+            .names
             .by_qualified
             .get(&(language.to_owned(), qualified.clone()))
         {
@@ -450,7 +458,7 @@ impl UniversalResolutionIndex {
                 let Some(owner) = self.declaration(owner_id) else {
                     continue;
                 };
-                if let Some(ids) = self.indexes.by_qualified.get(&(
+                if let Some(ids) = self.indexes.names.by_qualified.get(&(
                     language.to_owned(),
                     format!("{}::{member}", owner.qualified_name),
                 )) {
@@ -494,6 +502,7 @@ impl UniversalResolutionIndex {
         };
         let receiver_slots = self
             .indexes
+            .names
             .by_qualified
             .get(&(language.to_owned(), receiver.to_owned()))
             .into_iter()
@@ -520,7 +529,8 @@ impl UniversalResolutionIndex {
         };
         let mut matching_trait_sets = self
             .indexes
-            .rust_impl_traits
+            .rust
+            .impl_traits
             .iter()
             .filter(|((implementer_id, _), _)| implementer_id == receiver_id)
             .collect::<Vec<_>>();
@@ -556,6 +566,7 @@ impl UniversalResolutionIndex {
                 };
                 if let Some(slots) = self
                     .indexes
+                    .names
                     .by_qualified
                     .get(&(language.to_owned(), format!("{trait_name}::{member}")))
                 {
@@ -583,7 +594,8 @@ impl UniversalResolutionIndex {
         let (facade, spelling) = qualified.rsplit_once('.')?;
         if !self
             .indexes
-            .wildcard_reexports_by_module
+            .wildcards
+            .reexports_by_module
             .contains_key(&(language.to_owned(), facade.to_owned()))
         {
             return None;
@@ -602,7 +614,8 @@ impl UniversalResolutionIndex {
             }
             let Some(reexports) = self
                 .indexes
-                .wildcard_reexports_by_module
+                .wildcards
+                .reexports_by_module
                 .get(&(language.to_owned(), module))
             else {
                 continue;
@@ -622,6 +635,7 @@ impl UniversalResolutionIndex {
                 };
                 if let Some(ids) = self
                     .indexes
+                    .names
                     .by_qualified
                     .get(&(language.to_owned(), canonical.clone()))
                 {
@@ -656,7 +670,7 @@ impl UniversalResolutionIndex {
         candidate: &RelationshipCandidate,
     ) -> Option<Vec<DeclarationSlot>> {
         let (owner, spelling) = split_qualified_member(qualified)?;
-        let targets = self.indexes.members.get(&(
+        let targets = self.indexes.members.members.get(&(
             language.to_owned(),
             owner.to_owned(),
             spelling.to_owned(),
@@ -665,6 +679,7 @@ impl UniversalResolutionIndex {
         for target in targets {
             if let Some(ids) = self
                 .indexes
+                .names
                 .by_qualified
                 .get(&(language.to_owned(), target.clone()))
             {
@@ -698,6 +713,7 @@ impl UniversalResolutionIndex {
         }
         let Some(overloads) = self
             .indexes
+            .names
             .by_qualified
             .get(&(target.language.clone(), target.qualified_name.clone()))
         else {
@@ -723,8 +739,8 @@ impl UniversalResolutionIndex {
             .collect::<Vec<_>>();
         match exact.as_slice() {
             [only] => only.id == target.id,
-            [] => self
-                .unique_java_applicable_overload(&eligible, argument_types)
+            [] => LanguagePolicyKind::for_language(&target.language)
+                .unique_applicable_overload(self, &eligible, argument_types)
                 .is_none_or(|only| only == target.id),
             _ => true,
         }
@@ -743,6 +759,7 @@ impl UniversalResolutionIndex {
             }
             let Some(targets) = self
                 .indexes
+                .names
                 .aliases
                 .get(&(language.to_owned(), current.clone()))
             else {
@@ -777,6 +794,7 @@ impl UniversalResolutionIndex {
             }
             if let Some(targets) = self
                 .indexes
+                .names
                 .aliases
                 .get(&(language.to_owned(), current.clone()))
             {
@@ -803,6 +821,7 @@ impl UniversalResolutionIndex {
                 let prefix = &current[..separator];
                 let Some(targets) = self
                     .indexes
+                    .names
                     .aliases
                     .get(&(language.to_owned(), prefix.to_owned()))
                 else {

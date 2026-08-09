@@ -2,7 +2,7 @@
 
 use super::super::*;
 
-impl UniversalResolutionIndex {
+impl ResolutionDb<'_> {
     pub(in crate::evidence) fn resolve_rust_associated_type(
         &self,
         language: &str,
@@ -37,7 +37,7 @@ impl UniversalResolutionIndex {
             }
         };
         let mut targets = BTreeSet::new();
-        let associated_trait_names = self.indexes.rust_impl_associated_trait_names.get(&(
+        let associated_trait_names = self.indexes.rust.impl_associated_trait_names.get(&(
             receiver_declaration_id.to_owned(),
             candidate.target_spelling.clone(),
         ));
@@ -61,7 +61,7 @@ impl UniversalResolutionIndex {
             if !lineage.contains(&trait_name) {
                 continue;
             }
-            let Some(associated) = self.indexes.rust_impl_associated_types.get(&(
+            let Some(associated) = self.indexes.rust.impl_associated_types.get(&(
                 receiver_declaration_id.to_owned(),
                 raw_trait_name.clone(),
                 candidate.target_spelling.clone(),
@@ -114,7 +114,7 @@ impl UniversalResolutionIndex {
         if let Ok(declaration) = self.exact_rust_declaration(raw_trait_name, &["trait"]) {
             return Ok(declaration.qualified_name.clone());
         }
-        let Some(candidates) = self.indexes.rust_impl_traits.get(&(
+        let Some(candidates) = self.indexes.rust.impl_traits.get(&(
             receiver_declaration_id.to_owned(),
             raw_trait_name.to_owned(),
         )) else {
@@ -178,7 +178,7 @@ impl UniversalResolutionIndex {
                 lookup.target_spelling.clone(),
             );
             if let Some(decision) = self.unique_decision(
-                self.indexes.by_module_name.get(&key),
+                self.indexes.names.by_module_name.get(&key),
                 &lookup,
                 ResolutionRule::UniqueModuleOrPackage,
             ) {
@@ -212,7 +212,7 @@ impl UniversalResolutionIndex {
                 return Err(lineage.len().saturating_add(1));
             }
             let key = ("rust".to_owned(), trait_declaration.qualified_name.clone());
-            let Some(bases) = self.indexes.direct_bases.get(&key) else {
+            let Some(bases) = self.indexes.hierarchy.direct_bases.get(&key) else {
                 continue;
             };
             if !bases.complete || bases.links.len() > self.budget.candidates_per_lookup() {
@@ -265,6 +265,7 @@ impl UniversalResolutionIndex {
     ) -> Result<&'a DeclarationFact, usize> {
         let exact = self
             .indexes
+            .names
             .by_qualified
             .get(&("rust".to_owned(), qualified_name.to_owned()))
             .into_iter()
@@ -284,6 +285,7 @@ impl UniversalResolutionIndex {
         }
         let declarations = self
             .indexes
+            .names
             .by_qualified
             .get(&("rust".to_owned(), aliased))
             .into_iter()

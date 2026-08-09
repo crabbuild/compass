@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl UniversalResolutionIndex {
+impl ResolutionDb<'_> {
     pub(in crate::evidence) fn typescript_structural_member_slots(
         &self,
         owner_slot: DeclarationSlot,
@@ -56,7 +56,7 @@ impl UniversalResolutionIndex {
             property.to_owned(),
         );
         if owner.kind != "module"
-            && let Some(members) = self.indexes.members_by_owner.get(&direct_key)
+            && let Some(members) = self.indexes.members.members_by_owner.get(&direct_key)
         {
             let direct = members
                 .iter()
@@ -69,7 +69,7 @@ impl UniversalResolutionIndex {
             }
         }
         let alias_key = (owner_language.to_owned(), owner.qualified_name.clone());
-        let Some(aliases) = self.indexes.typescript_member_aliases.get(&alias_key) else {
+        let Some(aliases) = self.indexes.typescript.member_aliases.get(&alias_key) else {
             visiting.remove(&owner_slot);
             return Ok(None);
         };
@@ -139,6 +139,7 @@ impl UniversalResolutionIndex {
             return true;
         }
         self.indexes
+            .members
             .members_by_owner
             .keys()
             .any(|(language, qualified, _)| {
@@ -182,6 +183,7 @@ impl UniversalResolutionIndex {
         }
         if let Some(slots) = self
             .indexes
+            .names
             .by_qualified
             .get(&(language.to_owned(), alias.source.clone()))
         {
@@ -347,7 +349,7 @@ impl UniversalResolutionIndex {
                         let Some(owner) = self.declaration(owner_slot) else {
                             continue;
                         };
-                        let Some(members) = self.indexes.members_by_owner.get(&(
+                        let Some(members) = self.indexes.members.members_by_owner.get(&(
                             owner.language.clone(),
                             owner.qualified_name.clone(),
                             member_name.clone(),
@@ -882,7 +884,7 @@ impl UniversalResolutionIndex {
                 let Some(owner) = self.declaration(owner_slot) else {
                     continue;
                 };
-                let Some(members) = self.indexes.members_by_owner.get(&(
+                let Some(members) = self.indexes.members.members_by_owner.get(&(
                     owner.language.clone(),
                     owner.qualified_name.clone(),
                     property.clone(),

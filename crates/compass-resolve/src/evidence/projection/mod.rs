@@ -22,6 +22,7 @@ struct PreparedTarget<'a> {
 
 impl UniversalResolutionIndex {
     pub fn materialize(&self, nodes: &mut Vec<NodeRecord>, edges: &mut Vec<EdgeRecord>) {
+        let db = ResolutionDb::new(self);
         let mut profile_started = Instant::now();
         let overloads = declaration_overloads(self.facts.declarations.values());
         let graph_ids = materialized_declaration_ids(self.facts.declarations.values());
@@ -97,7 +98,7 @@ impl UniversalResolutionIndex {
                 let mut decisions = vec![(candidate_id, decision)];
                 if allow_possible {
                     decisions.extend(
-                        self.possible_receiver_dispatches(
+                        db.possible_receiver_dispatches(
                             candidate_id,
                             exact_declaration_id.as_deref(),
                         )
@@ -256,7 +257,7 @@ impl UniversalResolutionIndex {
                         .map(|declaration| graph_ids[&declaration.id].clone())?;
                     let annotation_source = (candidate.relation == CandidateRelation::Decorates)
                         .then(|| {
-                            let occurrence = self.occurrence(candidate)?;
+                            let occurrence = db.occurrence(candidate)?;
                             self.facts
                                 .declarations
                                 .values()
@@ -280,7 +281,7 @@ impl UniversalResolutionIndex {
                         .unwrap_or_else(|| owner_source.clone());
                     let (source, target) = if candidate.relation == CandidateRelation::Contains {
                         (source, target)
-                    } else if self.occurrence(candidate).is_some_and(|occurrence| {
+                    } else if db.occurrence(candidate).is_some_and(|occurrence| {
                         occurrence.role == compass_languages::SemanticRole::Receiver
                     }) {
                         (target, source)
@@ -296,7 +297,7 @@ impl UniversalResolutionIndex {
                         && annotation_source.is_some()
                     {
                         "decorates"
-                    } else if self.occurrence(candidate).is_some_and(|occurrence| {
+                    } else if db.occurrence(candidate).is_some_and(|occurrence| {
                         occurrence.role == compass_languages::SemanticRole::Receiver
                     }) {
                         "method"
@@ -310,7 +311,7 @@ impl UniversalResolutionIndex {
                     } else {
                         relation_name(candidate.relation)
                     };
-                    let site = self
+                    let site = db
                         .occurrence(candidate)
                         .map(|occurrence| &occurrence.range)
                         .or_else(|| exact_target.map(|target| &target.range))
@@ -337,12 +338,12 @@ impl UniversalResolutionIndex {
                     }
                     let target_source_file = target_site.map(|range| range.source_file.as_str());
                     let project_metadata =
-                        self.typescript_project_metadata(candidate, target_source_file);
+                        db.typescript_project_metadata(candidate, target_source_file);
                     let binding = candidate
                         .binding_id
                         .as_deref()
                         .and_then(|binding_id| self.facts.bindings.get(binding_id));
-                    let occurrence = self.occurrence(candidate);
+                    let occurrence = db.occurrence(candidate);
                     let edge = materialized_edge(
                         source,
                         target,

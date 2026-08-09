@@ -798,50 +798,69 @@ Execution on 2026-08-08 produced the following implementation:
 
 | Phase | Result | Evidence |
 | --- | --- | --- |
-| 0 | Complete | Direct parser-free decision, precedence, limit, determinism, and projection contracts; existing integration characterization retained |
+| 0 | Partial | Public decision/rule matrix, parser-free precedence contracts, bounded ambiguity regressions, and focused integration targets are present; direct resolver fixtures do not yet exercise every rule and projection shape |
 | 1 | Complete | Directory facade, public API, lookup budget, project utilities, and pure language helpers extracted |
 | 2 | Complete | Prepared targets, node projection, and edge projection isolated behind materialization |
-| 3 | Complete | `FactStore`, `ResolutionIndexes`, bounded construction, and dedicated index builder module |
-| 4 | Complete | `ResolutionDb`, `CandidateContext`, `StageOutcome`, generic stage modules, and explicit pipeline |
-| 5 | Complete | Closed static policy selection plus TypeScript, Rust, and Java policy modules |
-| 6 | Complete | Existing compact slots, preallocation, bounded vectors, and deterministic parallelism retained; no unproven memoization added |
-| 7 | Complete | Architecture and extension documentation updated; crate and qualification gates recorded below |
+| 3 | Partial | Facts and indexes are ownership-grouped, public constructors delegate to `IndexBuilder`, phase profiling is explicit, and Rust/TypeScript construction is skipped for unrelated corpora; per-index constructors and a shared bounded-candidate abstraction remain |
+| 4 | Complete | `ResolutionDb` exposes explicit read-only queries without `Deref`; all precedence steps use named `ResolutionStage` entries and `StageOutcome` |
+| 5 | Complete | Closed static policy selection dispatches TypeScript import policy, Rust associated-type policy, Java overload policy, and generic no-op behavior |
+| 6 | Partial | Lazy language construction landed and existing compact slots, preallocation, bounded vectors, and deterministic parallelism remain; no current peak-RSS comparison justifies further optimization |
+| 7 | Partial | This execution record and focused verification are current; a fresh workspace-wide baseline remains outstanding |
 
-The large historical `universal_resolution.rs` characterization source remains
-intact. Splitting it while moving production code would create review noise and
-weaken history without changing its test ownership. New parser-free contracts
-live in `evidence_resolution_contract.rs`; future language-specific cases
-should be added to focused integration targets rather than extending the
-historical source.
+The historical integration binary remains
+`tests/universal_resolution.rs`, but its 181 tests are now grouped under
+`tests/universal_resolution/{core,rust,python,go,typescript,javascript}.rs`
+with shared helpers retained in `core.rs`. Focused public contracts live in
+`evidence_resolution_api.rs`, `evidence_resolution_bounds.rs`, and
+`evidence_resolution_contract.rs`.
+
+### Remaining acceptance criteria
+
+- Phase 0: add direct resolver-emission fixtures for every `ResolutionRule`,
+  every bounded traversal family, and every projection record shape. The
+  current API matrix guarantees exhaustive public-enum coverage but does not
+  claim that every rule has a parser-free producer fixture.
+- Phase 3: move construction of each grouped index behind its owning module
+  constructor and introduce a shared bounded-candidate type only after all
+  sentinel semantics have direct coverage.
+- Phase 6: record peak RSS and five warm runs for the documented corpora before
+  claiming a measured benefit from lazy bundles or landing another
+  optimization.
+- Phase 7: run the workspace-wide lib/bin baseline after unrelated workspace
+  changes permit a clean comparison.
 
 ### Performance record
 
 - Before refactor: `universal_resolution` reported 0.29 seconds.
-- After refactor: `universal_resolution` reported 0.28 seconds.
-- Warm command wall time after refactor: 0.62 seconds and 0.65 seconds.
-- Enterprise framework scale test: passed its existing 30-second ceiling in
-  26.42 seconds.
+- Current `universal_resolution`: 181 tests passed in 0.29 seconds.
+- Current full-suite enterprise framework scale test: passed in 44.09 seconds;
+  the qualification invocation passed the same gate in 24.93 seconds.
+- Lazy TypeScript, Rust, and Go construction is implemented, but no new
+  peak-RSS corpus comparison was captured. No memory-improvement claim is made.
 - Decision: retain current bounded indexes and parallel projection; do not add
   a cache without a measured repeated-lookup bottleneck.
 
 ### Verification record
 
+- `cargo fmt --all -- --check`: passed after formatting the changed Rust files.
 - `cargo test -p compass-resolve --locked`: passed all unit, integration,
-  scale, and documentation tests.
+  scale, and documentation tests, including the 181 decomposed universal tests
+  and the Rust outer-return overflow regression.
 - `cargo clippy -p compass-resolve --lib --all-features --locked -- -D warnings`:
-  passed for the changed production surface.
+  passed.
+- Focused Clippy for `evidence_resolution_api`,
+  `evidence_resolution_bounds`, `evidence_resolution_contract`, and
+  `universal_resolution`: passed with all features and warnings denied.
 - `cargo clippy -p compass-resolve --all-targets --all-features --locked -- -D warnings`:
-  production code passed; the command is blocked by pre-existing lint failures
-  in untouched integration tests.
+  production and changed targets passed; the aggregate command remains blocked
+  by pre-existing `expect_used`, `panic`, and style lints in untouched
+  `framework_qualification.rs` and `python_import_provenance.rs`.
 - `./scripts/qualify_code_graph_v1.sh --fixtures-only`: passed all manifest,
   scale, deterministic byte-comparison, and semantic assertion gates. The run
   validated 1,773 invariants and 27 exact resolution assertions.
-- `cargo clippy --workspace --lib --bins --locked -- -D warnings`: passed.
-- `sh scripts/check_product_boundary.sh`: passed.
-- `cargo test --workspace --lib --bins --locked`: attempted after all focused
-  gates; linking the unrelated `compass-cli` test binary stopped when the
-  external workspace volume reported `No space left on device`. No target
-  directory was cleaned or reused.
+- Workspace-wide Clippy, tests, and product-boundary checks were not rerun for
+  this follow-up; the resolver crate and code-graph publication gates are the
+  verified scope recorded here.
 
 ## Verification matrix
 
@@ -960,5 +979,6 @@ the implementation, and no required migration remains undocumented.
 - [Extending Compass](extending-compass.md)
 - [Workspace tour](workspace-tour.md)
 
-**Next step:** complete and review Phase 0 before moving any production
-resolver code.
+**Next step:** finish the remaining acceptance criteria above as independently
+measured follow-ups; do not relabel partial phases as complete without their
+recorded evidence.

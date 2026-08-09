@@ -1,35 +1,31 @@
 //! Read-only views used while resolving one candidate.
 
-use std::ops::Deref;
-
-use compass_languages::RelationshipCandidate;
-
-use super::super::UniversalResolutionIndex;
+use super::super::*;
 
 /// Read-only resolver database passed through the ordered pipeline.
-pub(super) struct ResolutionDb<'a> {
-    index: &'a UniversalResolutionIndex,
+pub(in crate::evidence) struct ResolutionDb<'a> {
+    pub(in crate::evidence) facts: &'a FactStore,
+    pub(in crate::evidence) indexes: &'a ResolutionIndexes,
+    pub(in crate::evidence) project: &'a ProjectContext,
+    pub(in crate::evidence) budget: LookupBudget,
 }
 
 impl<'a> ResolutionDb<'a> {
-    pub(super) const fn new(index: &'a UniversalResolutionIndex) -> Self {
-        Self { index }
-    }
-}
-
-impl Deref for ResolutionDb<'_> {
-    type Target = UniversalResolutionIndex;
-
-    fn deref(&self) -> &Self::Target {
-        self.index
+    pub(in crate::evidence) const fn new(index: &'a UniversalResolutionIndex) -> Self {
+        Self {
+            facts: &index.facts,
+            indexes: &index.indexes,
+            project: &index.project,
+            budget: index.budget,
+        }
     }
 }
 
 /// Normalized, borrowed context shared by the generic resolution stages.
 pub(super) struct CandidateContext<'a> {
-    pub(super) candidate: &'a RelationshipCandidate,
+    original: &'a RelationshipCandidate,
+    fallback: Option<RelationshipCandidate>,
     pub(super) language: &'a str,
-    pub(super) qualifier: Option<&'a str>,
 }
 
 impl<'a> CandidateContext<'a> {
@@ -39,27 +35,47 @@ impl<'a> CandidateContext<'a> {
             .exact_language
             .as_deref()
             .unwrap_or(&candidate.language);
-        let qualifier = db
-            .occurrence(candidate)
-            .and_then(|occurrence| occurrence.qualifier.as_deref());
+        let fallback = candidate
+            .binding_id
+            .as_deref()
+            .and_then(|binding_id| db.facts.bindings.get(binding_id))
+            .filter(|binding| binding.kind == compass_languages::BindingKind::CallResult)
+            .map(|binding| {
+                let mut fallback = candidate.clone();
+                fallback.binding_id.clone_from(&binding.fallback_binding_id);
+                fallback
+            });
         Self {
-            candidate,
+            original: candidate,
+            fallback,
             language,
-            qualifier,
         }
     }
 
-    pub(super) fn has_unbound_qualified_receiver(&self) -> bool {
-        self.qualifier.is_some_and(|qualifier| {
-            self.candidate.binding_id.is_none()
+    pub(super) const fn original(&self) -> &RelationshipCandidate {
+        self.original
+    }
+
+    pub(super) fn candidate(&self) -> &RelationshipCandidate {
+        self.fallback.as_ref().unwrap_or(self.original)
+    }
+
+    pub(super) fn qualifier<'b>(&'b self, db: &'b ResolutionDb<'_>) -> Option<&'b str> {
+        db.occurrence(self.candidate())
+            .and_then(|occurrence| occurrence.qualifier.as_deref())
+    }
+
+    pub(super) fn has_unbound_qualified_receiver(&self, db: &ResolutionDb<'_>) -> bool {
+        self.qualifier(db).is_some_and(|qualifier| {
+            self.candidate().binding_id.is_none()
                 && !matches!((self.language, qualifier), ("python", "self" | "cls"))
         })
     }
 
-    pub(super) fn allows_lexical_lookup(&self) -> bool {
-        self.qualifier.is_none()
-            || self.qualifier.is_some_and(|qualifier| {
-                self.candidate.binding_id.is_none()
+    pub(super) fn allows_lexical_lookup(&self, db: &ResolutionDb<'_>) -> bool {
+        self.qualifier(db).is_none()
+            || self.qualifier(db).is_some_and(|qualifier| {
+                self.candidate().binding_id.is_none()
                     && matches!((self.language, qualifier), ("python", "self" | "cls"))
             })
     }

@@ -2,7 +2,7 @@
 
 use super::super::*;
 
-impl UniversalResolutionIndex {
+impl ResolutionDb<'_> {
     pub(in crate::evidence) fn binding_target_is_internal(&self, binding: &BindingFact) -> bool {
         let Some(owner) = binding
             .scope_id
@@ -17,7 +17,8 @@ impl UniversalResolutionIndex {
             || (binding.language == "rust"
                 && self
                     .indexes
-                    .rust_source_wildcard_targets
+                    .rust
+                    .source_wildcard_targets
                     .contains(&binding.qualified_target))
     }
 
@@ -54,7 +55,7 @@ impl UniversalResolutionIndex {
             Ok(Some(qualified)) => {
                 let key = (language.to_owned(), qualified.clone());
                 if let Some(decision) = self.unique_decision(
-                    self.indexes.by_qualified.get(&key),
+                    self.indexes.names.by_qualified.get(&key),
                     candidate,
                     ResolutionRule::MemberBinding,
                 ) {
@@ -150,7 +151,7 @@ impl UniversalResolutionIndex {
             ResolutionRule::ExplicitBinding
         };
         if let Some(decision) = self.unique_decision(
-            self.indexes.by_qualified.get(&key),
+            self.indexes.names.by_qualified.get(&key),
             candidate,
             qualified_rule,
         ) {

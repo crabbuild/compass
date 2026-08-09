@@ -2,7 +2,7 @@
 
 use super::super::*;
 
-impl UniversalResolutionIndex {
+impl ResolutionDb<'_> {
     pub(in crate::evidence) fn resolve_c3_receiver_dispatch(
         &self,
         language: &str,
@@ -74,7 +74,7 @@ impl UniversalResolutionIndex {
                 owner.clone(),
                 candidate.target_spelling.clone(),
             );
-            let Some(members) = self.indexes.members_by_owner.get(&key) else {
+            let Some(members) = self.indexes.members.members_by_owner.get(&key) else {
                 continue;
             };
             let eligible = members
@@ -239,7 +239,7 @@ impl UniversalResolutionIndex {
             return Err(());
         }
         let result = (|| {
-            let Some(bases) = self.indexes.direct_bases.get(&key) else {
+            let Some(bases) = self.indexes.hierarchy.direct_bases.get(&key) else {
                 return Ok(false);
             };
             if bases.links.len() > self.budget.candidates_per_lookup() {
@@ -280,6 +280,7 @@ impl UniversalResolutionIndex {
             cursor = cursor.saturating_add(1);
             let Some(direct) = self
                 .indexes
+                .hierarchy
                 .direct_subtypes
                 .get(&(language.to_owned(), current))
             else {
@@ -308,6 +309,7 @@ impl UniversalResolutionIndex {
     ) -> Option<String> {
         let bases = self
             .indexes
+            .hierarchy
             .direct_bases
             .get(&(language.to_owned(), receiver.to_owned()))?;
         if !bases.complete
@@ -372,6 +374,7 @@ impl UniversalResolutionIndex {
             }
             let base_set = self
                 .indexes
+                .hierarchy
                 .direct_bases
                 .get(&(language.to_owned(), receiver.clone()))?;
             if !base_set.complete
@@ -410,7 +413,7 @@ impl UniversalResolutionIndex {
             candidate.target_spelling.clone(),
         );
         let mut eligible = BTreeSet::new();
-        if let Some(members) = self.indexes.members_by_owner.get(&key) {
+        if let Some(members) = self.indexes.members.members_by_owner.get(&key) {
             eligible.extend(
                 members
                     .iter()
@@ -418,10 +421,11 @@ impl UniversalResolutionIndex {
                     .copied(),
             );
         }
-        if let Some(targets) = self.indexes.members.get(&key) {
+        if let Some(targets) = self.indexes.members.members.get(&key) {
             for target in targets {
                 let Some(declarations) = self
                     .indexes
+                    .names
                     .by_qualified
                     .get(&(language.to_owned(), target.clone()))
                 else {
@@ -463,6 +467,7 @@ impl UniversalResolutionIndex {
         let receiver = self.exact_hierarchy_type(language, receiver_qualified_name)?;
         let base_set = self
             .indexes
+            .hierarchy
             .direct_bases
             .get(&(language.to_owned(), receiver))?;
         if !base_set.complete
@@ -510,7 +515,7 @@ impl UniversalResolutionIndex {
         };
         let key = (language.to_owned(), qualified_name.clone());
         if let Some(decision) = self.unique_decision(
-            self.indexes.by_qualified.get(&key),
+            self.indexes.names.by_qualified.get(&key),
             candidate,
             ResolutionRule::ExactHierarchyBase,
         ) {
@@ -537,6 +542,7 @@ impl UniversalResolutionIndex {
         let receiver = self.exact_hierarchy_type(language, receiver_qualified_name)?;
         let base_set = self
             .indexes
+            .hierarchy
             .direct_bases
             .get(&(language.to_owned(), receiver))?;
         if !base_set.complete
@@ -549,7 +555,7 @@ impl UniversalResolutionIndex {
             .qualified_name
             .as_deref()
             .and_then(|name| self.exact_hierarchy_type(language, name))?;
-        let members = self.indexes.members_by_owner.get(&(
+        let members = self.indexes.members.members_by_owner.get(&(
             language.to_owned(),
             direct_successor,
             candidate.target_spelling.clone(),
@@ -597,7 +603,7 @@ impl UniversalResolutionIndex {
             return Err(());
         }
         let result = (|| {
-            let Some(base_set) = self.indexes.direct_bases.get(&key) else {
+            let Some(base_set) = self.indexes.hierarchy.direct_bases.get(&key) else {
                 return Ok(vec![canonical.clone()]);
             };
             if !base_set.complete
@@ -641,6 +647,7 @@ impl UniversalResolutionIndex {
         let qualified_name = self.follow_alias(language, qualified_name).ok()?;
         let declarations = self
             .indexes
+            .names
             .by_qualified
             .get(&(language.to_owned(), qualified_name))?;
         let eligible = declarations

@@ -32,6 +32,7 @@ pub use api::{ResolutionDecision, ResolutionEvidence, ResolutionRule, UniversalR
 use budget::LookupBudget;
 use facts::FactStore;
 use index::ResolutionIndexes;
+use languages::policy::LanguagePolicyKind;
 use languages::rust::{
     rust_external_wildcard_target_is_explicit, rust_impl_associated_trait_name_index,
     rust_impl_associated_type_index, rust_impl_trait_index, rust_module_is_descendant,
@@ -40,6 +41,7 @@ use languages::typescript::{
     typescript_declaration_basic_allowed, typescript_declaration_basic_allowed_with_type_owner,
 };
 use project::*;
+use resolve::context::ResolutionDb;
 
 #[derive(Clone, Debug)]
 struct DirectBaseLink {
@@ -145,12 +147,13 @@ pub struct UniversalResolutionIndex {
 impl UniversalResolutionIndex {
     #[must_use]
     pub fn candidate_ids(&self) -> Vec<&str> {
+        let db = ResolutionDb::new(self);
         let mut ordered = self
             .facts
             .candidates
             .iter()
             .map(|(id, candidate)| {
-                let range = self
+                let range = db
                     .occurrence(candidate)
                     .map(|occurrence| &occurrence.range)
                     .or_else(|| {
@@ -185,20 +188,25 @@ impl UniversalResolutionIndex {
         });
         ordered.into_iter().map(|(id, _)| id).collect()
     }
+}
 
-    fn declaration_id(&self, slot: DeclarationSlot) -> Option<&str> {
+impl ResolutionDb<'_> {
+    pub(in crate::evidence) fn declaration_id(&self, slot: DeclarationSlot) -> Option<&str> {
         self.facts
             .declaration_ids
             .get(usize::try_from(slot).ok()?)
             .map(String::as_str)
     }
 
-    fn declaration(&self, slot: DeclarationSlot) -> Option<&DeclarationFact> {
+    pub(in crate::evidence) fn declaration(
+        &self,
+        slot: DeclarationSlot,
+    ) -> Option<&DeclarationFact> {
         self.declaration_id(slot)
             .and_then(|id| self.facts.declarations.get(id))
     }
 
-    fn declaration_allowed_slot(
+    pub(in crate::evidence) fn declaration_allowed_slot(
         &self,
         slot: DeclarationSlot,
         candidate: &RelationshipCandidate,
@@ -208,14 +216,17 @@ impl UniversalResolutionIndex {
     }
 
     #[must_use]
-    fn occurrence(&self, candidate: &RelationshipCandidate) -> Option<&OccurrenceFact> {
+    pub(in crate::evidence) fn occurrence(
+        &self,
+        candidate: &RelationshipCandidate,
+    ) -> Option<&OccurrenceFact> {
         candidate
             .occurrence_id
             .as_deref()
             .and_then(|id| self.facts.occurrences.get(id))
     }
 
-    fn unique_decision(
+    pub(in crate::evidence) fn unique_decision(
         &self,
         ids: Option<&Vec<DeclarationSlot>>,
         candidate: &RelationshipCandidate,
@@ -274,7 +285,7 @@ impl UniversalResolutionIndex {
         }
     }
 
-    fn typescript_declaration_allowed_slot(
+    pub(in crate::evidence) fn typescript_declaration_allowed_slot(
         &self,
         slot: DeclarationSlot,
         candidate: &RelationshipCandidate,
@@ -285,7 +296,7 @@ impl UniversalResolutionIndex {
         typescript_declaration_basic_allowed(target, candidate)
     }
 
-    fn typescript_declaration_allowed_owner_slot(
+    pub(in crate::evidence) fn typescript_declaration_allowed_owner_slot(
         &self,
         slot: DeclarationSlot,
         candidate: &RelationshipCandidate,
@@ -296,7 +307,7 @@ impl UniversalResolutionIndex {
         typescript_declaration_basic_allowed_with_type_owner(target, candidate)
     }
 
-    fn unique_typescript_decision(
+    pub(in crate::evidence) fn unique_typescript_decision(
         &self,
         ids: Option<&Vec<DeclarationSlot>>,
         candidate: &RelationshipCandidate,

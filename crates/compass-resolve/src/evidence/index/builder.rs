@@ -1,6 +1,69 @@
 //! Validated, phased construction of immutable resolution indexes.
 
 use super::super::*;
+use super::{
+    HierarchyIndexes, MemberIndexes, NameIndexes, RustIndexes, TypeScriptIndexes, WildcardIndexes,
+};
+
+#[derive(Clone, Copy, Debug, Default)]
+struct LanguagePresence {
+    typescript: bool,
+    rust: bool,
+    go: bool,
+}
+
+impl LanguagePresence {
+    fn detect(batches: &[SemanticEvidenceBatch], inventory_nodes: &[NodeRecord]) -> Self {
+        let mut presence = Self::default();
+        for language in batches.iter().map(|batch| batch.adapter.language.as_str()) {
+            presence.observe(language);
+        }
+        for node in inventory_nodes {
+            presence.observe(&node.string("language"));
+        }
+        presence
+    }
+
+    fn observe(&mut self, language: &str) {
+        match language {
+            "javascript" | "javascriptreact" | "typescript" | "typescriptreact" => {
+                self.typescript = true;
+            }
+            "rust" => self.rust = true,
+            "go" => self.go = true,
+            _ => {}
+        }
+    }
+}
+
+struct IndexBuilder<'a> {
+    batches: Vec<SemanticEvidenceBatch>,
+    inventory_nodes: &'a [NodeRecord],
+    project_edges: &'a [EdgeRecord],
+    root: &'a Path,
+    limits: UniversalResolutionLimits,
+    validate_batches: bool,
+}
+
+impl<'a> IndexBuilder<'a> {
+    fn new(
+        batches: Vec<SemanticEvidenceBatch>,
+        inventory_nodes: &'a [NodeRecord],
+        project_edges: &'a [EdgeRecord],
+        root: &'a Path,
+        limits: UniversalResolutionLimits,
+        validate_batches: bool,
+    ) -> Self {
+        Self {
+            batches,
+            inventory_nodes,
+            project_edges,
+            root,
+            limits,
+            validate_batches,
+        }
+    }
+}
 
 impl UniversalResolutionIndex {
     pub fn new(
@@ -25,7 +88,7 @@ impl UniversalResolutionIndex {
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
-        Self::new_with_inventory_owned_impl(batches, inventory_nodes, &[], root, limits, true)
+        IndexBuilder::new(batches, inventory_nodes, &[], root, limits, true).build()
     }
 
     pub(crate) fn new_with_project_inventory_owned(
@@ -35,14 +98,7 @@ impl UniversalResolutionIndex {
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
-        Self::new_with_inventory_owned_impl(
-            batches,
-            inventory_nodes,
-            project_edges,
-            root,
-            limits,
-            true,
-        )
+        IndexBuilder::new(batches, inventory_nodes, project_edges, root, limits, true).build()
     }
 
     pub(crate) fn new_with_prevalidated_project_inventory_owned(
@@ -52,24 +108,21 @@ impl UniversalResolutionIndex {
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
-        Self::new_with_inventory_owned_impl(
+        IndexBuilder::new(batches, inventory_nodes, project_edges, root, limits, false).build()
+    }
+}
+
+impl IndexBuilder<'_> {
+    fn build(self) -> Result<UniversalResolutionIndex, String> {
+        let Self {
             batches,
             inventory_nodes,
             project_edges,
             root,
             limits,
-            false,
-        )
-    }
-
-    fn new_with_inventory_owned_impl(
-        batches: Vec<SemanticEvidenceBatch>,
-        inventory_nodes: &[NodeRecord],
-        project_edges: &[EdgeRecord],
-        root: &Path,
-        limits: UniversalResolutionLimits,
-        validate_batches: bool,
-    ) -> Result<Self, String> {
+            validate_batches,
+        } = self;
+        let languages = LanguagePresence::detect(&batches, inventory_nodes);
         let mut profile_started = Instant::now();
         if validate_batches {
             batches.par_iter().try_for_each(|batch| {
@@ -119,7 +172,7 @@ impl UniversalResolutionIndex {
             }
         }
 
-        let go_module_path = read_go_module_path(root);
+        let go_module_path = languages.go.then(|| read_go_module_path(root)).flatten();
         // Reserve the checked aggregate fact counts before consuming the
         // batches. A corpus-scale evidence index otherwise grows each primary
         // map by repeated rehashes while the old and new tables overlap in
@@ -148,43 +201,59 @@ impl UniversalResolutionIndex {
             }
         }
         profile_internal("universal fact collection", &mut profile_started);
-        let rust_source_wildcard_targets = declarations
-            .values()
-            .filter(|declaration| {
-                declaration.language == "rust"
-                    && matches!(declaration.kind.as_str(), "file" | "module" | "enum")
-            })
-            .map(|declaration| declaration.qualified_name.clone())
-            .collect::<AHashSet<_>>();
+        let rust_source_wildcard_targets = if languages.rust {
+            declarations
+                .values()
+                .filter(|declaration| {
+                    declaration.language == "rust"
+                        && matches!(declaration.kind.as_str(), "file" | "module" | "enum")
+                })
+                .map(|declaration| declaration.qualified_name.clone())
+                .collect::<AHashSet<_>>()
+        } else {
+            AHashSet::new()
+        };
         let mut declaration_ids = declarations.keys().cloned().collect::<Vec<_>>();
         declaration_ids.sort_unstable();
         if u32::try_from(declaration_ids.len()).is_err() {
             return Err("universal declaration slot count exceeds u32".to_owned());
         }
         let definition_ranges = unique_definition_ranges(&declarations, &scopes);
-        let (typescript_project_modules, typescript_project_metadata) =
+        let (typescript_project_modules, typescript_project_metadata) = if languages.typescript {
             typescript_project_module_index(
                 project_edges,
                 inventory_nodes,
                 root,
                 limits.candidates,
                 limits.candidates_per_lookup,
-            )?;
+            )?
+        } else {
+            (AHashMap::new(), AHashMap::new())
+        };
         let (typescript_modules, typescript_export_aliases, typescript_reexport_targets) =
-            typescript_module_indices(
-                &declarations,
-                &declaration_ids,
-                &bindings,
-                &scopes,
-                root,
-                &typescript_project_modules,
-            );
-        let typescript_exported_declarations = bindings
-            .values()
-            .filter(|binding| binding.kind == compass_languages::BindingKind::Reexport)
-            .filter_map(|binding| binding.target_declaration_id.as_deref())
-            .filter_map(|id| declaration_slot(&declaration_ids, id))
-            .collect::<AHashSet<_>>();
+            if languages.typescript {
+                typescript_module_indices(
+                    &declarations,
+                    &declaration_ids,
+                    &bindings,
+                    &scopes,
+                    root,
+                    &typescript_project_modules,
+                )
+            } else {
+                (AHashMap::new(), AHashMap::new(), AHashMap::new())
+            };
+        let typescript_exported_declarations = if languages.typescript {
+            bindings
+                .values()
+                .filter(|binding| binding.kind == compass_languages::BindingKind::Reexport)
+                .filter_map(|binding| binding.target_declaration_id.as_deref())
+                .filter_map(|id| declaration_slot(&declaration_ids, id))
+                .collect::<AHashSet<_>>()
+        } else {
+            AHashSet::new()
+        };
+        profile_internal("universal language module indices", &mut profile_started);
         for (name, count, limit) in [
             ("declarations", declarations.len(), limits.declarations),
             ("bindings", bindings.len(), limits.bindings),
@@ -582,19 +651,25 @@ impl UniversalResolutionIndex {
                 members.truncate(candidate_storage_limit(limits.candidates_per_lookup));
             }
         }
-        let rust_impl_associated_types = rust_impl_associated_type_index(
-            &declarations,
-            &declaration_ids,
-            &scopes,
-            &candidates,
-            &occurrences,
-            limits.candidates_per_lookup,
-        );
-        let rust_impl_associated_trait_names = rust_impl_associated_trait_name_index(
-            &rust_impl_associated_types,
-            limits.candidates_per_lookup,
-        );
-        let rust_impl_traits = rust_impl_trait_index(&candidates, limits.candidates_per_lookup);
+        let (rust_impl_associated_types, rust_impl_associated_trait_names, rust_impl_traits) =
+            if languages.rust {
+                let associated_types = rust_impl_associated_type_index(
+                    &declarations,
+                    &declaration_ids,
+                    &scopes,
+                    &candidates,
+                    &occurrences,
+                    limits.candidates_per_lookup,
+                );
+                let associated_trait_names = rust_impl_associated_trait_name_index(
+                    &associated_types,
+                    limits.candidates_per_lookup,
+                );
+                let impl_traits = rust_impl_trait_index(&candidates, limits.candidates_per_lookup);
+                (associated_types, associated_trait_names, impl_traits)
+            } else {
+                (AHashMap::new(), AHashMap::new(), AHashMap::new())
+            };
         profile_internal("universal hierarchy indices", &mut profile_started);
         let mut wildcard_bindings_by_scope = AHashMap::<(String, String), WildcardModuleSet>::new();
         let mut wildcard_bindings_by_module =
@@ -707,31 +782,33 @@ impl UniversalResolutionIndex {
         }
         let mut typescript_member_aliases =
             AHashMap::<(String, String), Vec<TypeScriptMemberAlias>>::new();
-        for binding in bindings.values().filter(|binding| {
-            binding.kind == compass_languages::BindingKind::Member
-                && binding.spelling == "*"
-                && matches!(binding.language.as_str(), "typescript" | "javascript")
-        }) {
-            let Some(owner) = binding
-                .scope_id
-                .as_deref()
-                .and_then(|id| scopes.get(id))
-                .and_then(|scope| scope.owner_declaration_id.as_deref())
-                .and_then(|id| declarations.get(id))
-            else {
-                continue;
-            };
-            typescript_member_aliases
-                .entry((binding.language.clone(), owner.qualified_name.clone()))
-                .or_default()
-                .push(TypeScriptMemberAlias {
-                    source: binding.qualified_target.clone(),
-                    source_slot: binding
-                        .target_declaration_id
-                        .as_deref()
-                        .and_then(|id| declaration_slot(&declaration_ids, id)),
-                    start_byte: binding.range.start_byte,
-                });
+        if languages.typescript {
+            for binding in bindings.values().filter(|binding| {
+                binding.kind == compass_languages::BindingKind::Member
+                    && binding.spelling == "*"
+                    && matches!(binding.language.as_str(), "typescript" | "javascript")
+            }) {
+                let Some(owner) = binding
+                    .scope_id
+                    .as_deref()
+                    .and_then(|id| scopes.get(id))
+                    .and_then(|scope| scope.owner_declaration_id.as_deref())
+                    .and_then(|id| declarations.get(id))
+                else {
+                    continue;
+                };
+                typescript_member_aliases
+                    .entry((binding.language.clone(), owner.qualified_name.clone()))
+                    .or_default()
+                    .push(TypeScriptMemberAlias {
+                        source: binding.qualified_target.clone(),
+                        source_slot: binding
+                            .target_declaration_id
+                            .as_deref()
+                            .and_then(|id| declaration_slot(&declaration_ids, id)),
+                        start_byte: binding.range.start_byte,
+                    });
+            }
         }
         for aliases in typescript_member_aliases.values_mut() {
             aliases.sort_unstable_by(|left, right| {
@@ -801,7 +878,7 @@ impl UniversalResolutionIndex {
             .into_iter()
             .map(|(key, mut entries)| {
                 entries.sort_unstable();
-                entries.truncate(limits.candidates_per_lookup);
+                entries.truncate(candidate_storage_limit(limits.candidates_per_lookup));
                 (
                     key,
                     entries
@@ -812,7 +889,7 @@ impl UniversalResolutionIndex {
             })
             .collect();
         profile_internal("universal member index", &mut profile_started);
-        Ok(Self {
+        Ok(UniversalResolutionIndex {
             facts: FactStore {
                 declarations,
                 declaration_ids,
@@ -823,30 +900,42 @@ impl UniversalResolutionIndex {
                 definition_ranges,
             },
             indexes: ResolutionIndexes {
-                by_qualified,
-                by_module_name,
-                by_scope_name,
-                by_source_directory_name,
-                typescript_modules,
-                typescript_exported_declarations,
-                typescript_export_aliases,
-                typescript_reexport_targets,
-                direct_bases,
-                direct_subtypes,
-                members_by_owner,
-                rust_impl_associated_types,
-                rust_impl_associated_trait_names,
-                rust_impl_traits,
-                inventory_by_qualified,
-                aliases,
-                rust_source_wildcard_targets,
-                wildcard_bindings_by_scope,
-                wildcard_bindings_by_module,
-                wildcard_reexports_by_module,
-                members,
-                typescript_member_aliases,
-                return_candidates_by_callable,
-                outer_return_candidates_by_callable,
+                names: NameIndexes {
+                    by_qualified,
+                    by_module_name,
+                    by_scope_name,
+                    by_source_directory_name,
+                    inventory_by_qualified,
+                    aliases,
+                },
+                hierarchy: HierarchyIndexes {
+                    direct_bases,
+                    direct_subtypes,
+                },
+                members: MemberIndexes {
+                    members_by_owner,
+                    members,
+                    return_candidates_by_callable,
+                    outer_return_candidates_by_callable,
+                },
+                wildcards: WildcardIndexes {
+                    by_scope: wildcard_bindings_by_scope,
+                    by_module: wildcard_bindings_by_module,
+                    reexports_by_module: wildcard_reexports_by_module,
+                },
+                typescript: TypeScriptIndexes {
+                    modules: typescript_modules,
+                    exported_declarations: typescript_exported_declarations,
+                    export_aliases: typescript_export_aliases,
+                    reexport_targets: typescript_reexport_targets,
+                    member_aliases: typescript_member_aliases,
+                },
+                rust: RustIndexes {
+                    impl_associated_types: rust_impl_associated_types,
+                    impl_associated_trait_names: rust_impl_associated_trait_names,
+                    impl_traits: rust_impl_traits,
+                    source_wildcard_targets: rust_source_wildcard_targets,
+                },
             },
             project: ProjectContext {
                 root: root.to_path_buf(),
