@@ -901,8 +901,9 @@ mod tests {
         )?;
         fs::write(root.join("paper.pdf"), b"%PDF-1.4\n")?;
 
+        let rebuild_deadline = Instant::now() + Duration::from_secs(15);
         let mut complete = false;
-        while Instant::now() < deadline {
+        while Instant::now() < rebuild_deadline {
             complete = statuses.lock().is_ok_and(|values| {
                 values
                     .iter()

@@ -6,7 +6,8 @@ use std::path::Path;
 use compass_graph::GraphSnapshotBuilder;
 use compass_model::query_contract::{CodeQueryLimits, CodeQueryOperation, QueryDiagnosticCode};
 use compass_query::{
-    EngineSelection, NaturalQueryIntent, NaturalQueryRequest, QUERY_PLANNER_PROFILE_V1,
+    EngineSelection, NaturalQueryIntent, NaturalQueryRequest, ProfiledCodeQueryResponse,
+    QUERY_EXECUTION_PROFILE_V1, QUERY_PLANNER_PROFILE_V1, QUERY_RANKER_PROFILE_V2,
     open_with_engine, plan_natural_query,
 };
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
@@ -124,6 +125,85 @@ fn contradictory_and_ambiguous_questions_never_invent_direction()
             .iter()
             .any(|diagnostic| { diagnostic.code == QueryDiagnosticCode::AmbiguousMatch })
     );
+    Ok(())
+}
+
+#[test]
+fn structural_intents_use_bounded_fuzzy_recall_and_relation_evidence()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = compass_model::code_graph::GraphDocument::load(&graph_path)?;
+    let mut distractor = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == "n:list")
+        .cloned()
+        .ok_or("missing list fixture node")?;
+    distractor.id = "n:ilts".to_owned();
+    distractor.name = "ilts".to_owned();
+    distractor.qualified_name = "Noise.ilts".to_owned();
+    graph.nodes.push(distractor);
+    fs::write(&graph_path, serde_json::to_vec_pretty(&graph)?)?;
+    publish_snapshot(directory.path(), &graph_path)?;
+
+    for selection in [EngineSelection::Json, EngineSelection::Store] {
+        let engine = open_with_engine(
+            &graph_path,
+            None,
+            &directory.path().join(format!("{selection:?}-cache")),
+            selection,
+        )?;
+        let response = engine.query_natural(request("who calls UserService.lits?"))?;
+        assert_eq!(response.operation, CodeQueryOperation::Callers);
+        assert!(response.nodes.iter().any(|node| node.id == "n:list"));
+        assert!(!response.nodes.iter().any(|node| node.id == "n:ilts"));
+        assert!(response.edges.iter().any(|edge| edge.target == "n:list"));
+    }
+    Ok(())
+}
+
+#[test]
+fn profiled_natural_queries_report_real_stage_work_without_changing_the_response()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let engine = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("cache"),
+        EngineSelection::Json,
+    )?;
+    let profiled = engine.query_natural_profiled(request("who calls UserService.list?"))?;
+    let ordinary = engine.query_natural(request("who calls UserService.list?"))?;
+
+    assert_eq!(profiled.response, ordinary);
+    assert_eq!(profiled.profile.schema, QUERY_EXECUTION_PROFILE_V1);
+    assert_eq!(profiled.profile.planner_profile, QUERY_PLANNER_PROFILE_V1);
+    assert_eq!(profiled.profile.ranker_profile, QUERY_RANKER_PROFILE_V2);
+    assert!(profiled.profile.work.candidates_read > 0);
+    assert!(profiled.profile.work.nodes_expanded > 0);
+    assert!(profiled.profile.work.edges_expanded > 0);
+    assert_eq!(
+        profiled.profile.work.response_bytes,
+        u64::try_from(serde_json::to_vec(&ordinary)?.len())?
+    );
+    assert!(profiled.profile.timings.total_micros >= profiled.profile.timings.intent_micros);
+    assert!(profiled.profile.timings.total_micros >= profiled.profile.timings.recall_micros);
+    assert!(profiled.profile.timings.total_micros >= profiled.profile.timings.execution_micros);
+    let encoded = serde_json::to_value(&profiled)?;
+    assert_eq!(
+        serde_json::from_value::<ProfiledCodeQueryResponse>(encoded.clone())?,
+        profiled
+    );
+    let mut unknown = encoded;
+    unknown
+        .as_object_mut()
+        .ok_or("profile envelope must be an object")?
+        .insert("unexpected".to_owned(), serde_json::Value::Bool(true));
+    assert!(serde_json::from_value::<ProfiledCodeQueryResponse>(unknown).is_err());
     Ok(())
 }
 

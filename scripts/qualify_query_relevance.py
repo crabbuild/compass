@@ -13,6 +13,18 @@ def main() -> int:
     if not target:
         print("CARGO_TARGET_DIR must name this checkout's external target directory", file=sys.stderr)
         return 2
+    corpus_check = subprocess.run(
+        [sys.executable, "scripts/generate_query_relevance_corpus.py", "--check"],
+        check=False,
+    )
+    if corpus_check.returncode != 0:
+        return corpus_check.returncode
+    review_self_test = subprocess.run(
+        [sys.executable, "scripts/prepare_query_relevance_review.py", "--self-test"],
+        check=False,
+    )
+    if review_self_test.returncode != 0:
+        return review_self_test.returncode
     command = [
         "cargo",
         "test",

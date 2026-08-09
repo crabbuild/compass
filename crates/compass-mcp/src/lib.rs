@@ -37,6 +37,9 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 const SERVER_NAME: &str = "compass";
+const MAX_QUERY_LOG_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_QUERY_LOG_RECORD_BYTES: usize = 128 * 1024;
+const MAX_LOGGED_QUESTION_BYTES: usize = 4_096;
 
 #[derive(Debug)]
 enum InvocationError {
@@ -353,6 +356,7 @@ impl CompassMcp {
         ) || (name == "query_graph"
             && should_route_natural_query(arguments, &context)?);
         if typed_query {
+            let started = Instant::now();
             let response = code_query::invoke(name, arguments, &context.path)?;
             let text = format!(
                 "{:?}: {} nodes, {} edges, {} paths{}",
@@ -366,6 +370,11 @@ impl CompassMcp {
                     ""
                 }
             );
+            if name == "query_graph"
+                && let Some(question) = arguments.get("question").and_then(Value::as_str)
+            {
+                log_typed_mcp_query(question, &context.path, &response, started.elapsed());
+            }
             return Ok(ToolInvocation {
                 text,
                 structured_content: Some(
@@ -659,25 +668,9 @@ fn log_mcp_query(
     token_budget: usize,
     duration: Duration,
 ) {
-    let disabled = std::env::var("COMPASS_QUERY_LOG_DISABLE")
-        .ok()
-        .is_some_and(|value| truthy(&value));
-    if disabled {
+    if question.len() > MAX_LOGGED_QUESTION_BYTES {
         return;
     }
-    let path = std::env::var_os("COMPASS_QUERY_LOG")
-        .filter(|value| !value.is_empty())
-        .map(|value| expand_home(&PathBuf::from(value)))
-        .or_else(|| {
-            std::env::var("COMPASS_QUERY_LOG_ENABLE")
-                .ok()
-                .filter(|value| truthy(value))?;
-            let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-            Some(PathBuf::from(home).join(".cache/compass-queries.log"))
-        });
-    let Some(path) = path else {
-        return;
-    };
     let words = result.split_whitespace().collect::<Vec<_>>();
     let nodes = words.windows(3).find_map(|window| {
         (matches!(window[1], "node" | "nodes") && window[2] == "found")
@@ -689,6 +682,7 @@ fn log_mcp_query(
         TraversalMode::Dfs => "dfs",
     };
     let mut record = json!({
+        "schema": "compass.query-log/1",
         "ts": OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_default(),
         "kind": "mcp_query",
         "question": question,
@@ -707,13 +701,94 @@ fn log_mcp_query(
     {
         object.insert("response".to_owned(), Value::String(result.to_owned()));
     }
+    append_query_log(record);
+}
+
+fn log_typed_mcp_query(
+    question: &str,
+    corpus: &Path,
+    response: &compass_model::query_contract::CodeQueryResponse,
+    duration: Duration,
+) {
+    if question.len() > MAX_LOGGED_QUESTION_BYTES {
+        return;
+    }
+    append_query_log(json!({
+        "schema": "compass.query-log/1",
+        "ts": OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_default(),
+        "kind": "mcp_query",
+        "question": question,
+        "corpus": corpus.to_string_lossy(),
+        "nodes_returned": response.nodes.len(),
+        "result_chars": 0,
+        "duration_ms": (duration.as_secs_f64() * 1000.0 * 1000.0).round() / 1000.0,
+        "operation": response.operation,
+        "truncated": response.truncated,
+    }));
+}
+
+fn query_log_path() -> Option<PathBuf> {
+    let disabled = std::env::var("COMPASS_QUERY_LOG_DISABLE")
+        .ok()
+        .is_some_and(|value| truthy(&value));
+    if disabled {
+        return None;
+    }
+    std::env::var_os("COMPASS_QUERY_LOG")
+        .filter(|value| !value.is_empty())
+        .map(|value| expand_home(&PathBuf::from(value)))
+        .or_else(|| {
+            std::env::var("COMPASS_QUERY_LOG_ENABLE")
+                .ok()
+                .filter(|value| truthy(value))?;
+            let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+            Some(PathBuf::from(home).join(".cache/compass-queries.log"))
+        })
+}
+
+fn encode_query_log_record(mut record: Value) -> Option<Vec<u8>> {
+    if let Some(object) = record.as_object_mut()
+        && object
+            .get("response")
+            .and_then(Value::as_str)
+            .is_some_and(|response| response.len() > MAX_QUERY_LOG_RECORD_BYTES / 2)
+    {
+        object.remove("response");
+        object.insert("response_truncated".to_owned(), Value::Bool(true));
+    }
+    let mut encoded = serde_json::to_vec(&record).ok()?;
+    if encoded.len() > MAX_QUERY_LOG_RECORD_BYTES
+        && let Some(object) = record.as_object_mut()
+        && object.remove("response").is_some()
+    {
+        object.insert("response_truncated".to_owned(), Value::Bool(true));
+        encoded = serde_json::to_vec(&record).ok()?;
+    }
+    if encoded.len() >= MAX_QUERY_LOG_RECORD_BYTES {
+        return None;
+    }
+    encoded.push(b'\n');
+    Some(encoded)
+}
+
+fn append_query_log(record: Value) {
+    let Some(path) = query_log_path() else {
+        return;
+    };
+    let Some(encoded) = encode_query_log_record(record) else {
+        return;
+    };
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path)
-        && serde_json::to_writer(&mut file, &record).is_ok()
+        && file.metadata().ok().is_some_and(|metadata| {
+            metadata.len()
+                <= MAX_QUERY_LOG_BYTES
+                    .saturating_sub(u64::try_from(encoded.len()).unwrap_or(u64::MAX))
+        })
     {
-        let _ = file.write_all(b"\n");
+        let _ = file.write_all(&encoded);
     }
 }
 
@@ -1311,6 +1386,24 @@ mod tests {
                 .code,
             rmcp::model::ErrorCode::INTERNAL_ERROR
         );
+    }
+
+    #[test]
+    fn query_log_records_are_bounded_and_drop_oversized_responses()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let encoded = encode_query_log_record(json!({
+            "schema": "compass.query-log/1",
+            "question": "who calls charge",
+            "response": "x".repeat(MAX_QUERY_LOG_RECORD_BYTES),
+        }))
+        .ok_or("the response-free record must remain bounded")?;
+        let record = serde_json::from_slice::<Value>(&encoded)?;
+
+        assert_eq!(record["question"], "who calls charge");
+        assert_eq!(record["response_truncated"], true);
+        assert!(record.get("response").is_none());
+        assert!(encoded.len() <= MAX_QUERY_LOG_RECORD_BYTES);
+        Ok(())
     }
 
     fn sample(path: &Path) -> Result<(), Box<dyn std::error::Error>> {

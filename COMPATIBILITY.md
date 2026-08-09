@@ -62,6 +62,14 @@ A user-visible incompatible change requires:
 Versioned formats use Compass-owned identifiers. Consumers should reject
 unknown major versions instead of attempting legacy fallback behavior.
 
+The release workflow publishes `compass-release.json` with schema
+`compass.release/1`. `compass upgrade` retrieves that bounded static manifest
+through the GitHub release-download path, requires one exact artifact for each
+running binary's target, and rejects unknown schemas, unstable or mismatched
+versions/tags, duplicate or invalid targets, invalid sizes, and invalid SHA-256
+digests. Additional bounded target entries remain forward-compatible. Archive
+downloads use the immutable validated tag rather than a mutable latest URL.
+
 Current output uses visible Compass-owned paths: `snapshots/`,
 `current-snapshot`, `root-artifacts-complete`, and
 `store/`. Snapshot-local state likewise uses concise names such as
@@ -99,6 +107,32 @@ and requests with `--traverse`, `--dfs`, `--context`, `--budget`, or `--page`
 retain the established text-traversal behavior. Explicit typed query commands
 remain available and unchanged; ambiguous questions never invent a direction
 or select an arbitrary symbol.
+
+Structural operands use the same bounded exact, alias, term, and typo recall
+channels as search. A unique relationship-role seed may disambiguate a
+non-exact operand, while duplicate exact names remain an explicit
+`ambiguous_match`. Node-trail operations are directed from the supplied source
+to target. A route that exists only when ignoring edge direction returns `direction_mismatch`
+instead of publishing a misleading path; callers that need the reverse route
+must swap the operands. This adds one typed diagnostic variant to
+`compass.query/1`.
+
+The Rust library's `query_natural_profiled` API returns a separate
+`compass.query-execution-profile/1` envelope. It does not add timing or work
+fields to `compass.query/1`, so ordinary responses remain deterministic and
+backend-neutral.
+
+Typed symbol search now unconditionally uses `query-ranker/2`. The internal
+`COMPASS_QUERY_RANKER_PROFILE` experiment switch and v1 runtime fallback have
+been removed. This does not change the `compass.query/1` schema, but intentional
+score and ordering improvements can change which equally lexical candidate is
+ranked first; ordering remains deterministic and backend-neutral.
+
+Optional MCP query feedback remains local and disabled by default.
+`COMPASS_QUERY_LOG=<path>` writes the versioned `compass.query-log/1` JSONL
+contract up to a 16 MiB file bound. The review importer accepts only its
+bounded `question` field and emits a separate
+`compass.query-review-candidates/1` queue; neither format is a judgment corpus.
 
 Structural `init`, `update`, `extract`, and `watch` builds publish
 `program.json` only when `--program` or `--program-artifact` is selected. The

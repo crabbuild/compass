@@ -1,4 +1,6 @@
 use std::fs::{self, File, OpenOptions};
+#[cfg(target_vendor = "apple")]
+use std::io::Read;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -35,6 +37,23 @@ fn temporary_path(destination: &Path) -> PathBuf {
         .and_then(|value| value.to_str())
         .unwrap_or("compass");
     destination.with_file_name(format!(".{name}.{pid}.{sequence}.tmp"))
+}
+
+#[cfg(target_vendor = "apple")]
+fn unpredictable_temporary_path(destination: &Path) -> Result<PathBuf, FileError> {
+    let mut nonce = [0_u8; 16];
+    File::open("/dev/urandom")
+        .and_then(|mut random| random.read_exact(&mut nonce))
+        .map_err(|error| io_error(destination, error))?;
+    let pid = std::process::id();
+    let name = destination
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("compass");
+    Ok(destination.with_file_name(format!(
+        ".{name}.{pid}.{:032x}.tmp",
+        u128::from_ne_bytes(nonce)
+    )))
 }
 
 fn atomic_replace<F>(path: &Path, write: F) -> Result<(), FileError>
@@ -80,6 +99,79 @@ where
 
         #[cfg(not(windows))]
         fs::rename(&temporary, &destination).map_err(|source| io_error(&destination, source))?;
+
+        sync_directory(parent)
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+/// Atomically copy an existing file using the platform's native copy path.
+///
+/// Native copies can use copy-on-write clones or in-kernel copying while the
+/// temporary-file, sync, and rename sequence preserves the same publication
+/// guarantees as the streaming atomic writers.
+pub(crate) fn copy_file_atomic(source: &Path, path: &Path) -> Result<(), FileError> {
+    let destination = resolved_destination(path);
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|error| io_error(parent, error))?;
+    #[cfg(target_vendor = "apple")]
+    let temporary = {
+        // Keep the destination absent so `fs::copy` can use clonefile on
+        // APFS. An OS-random name prevents another process from predicting
+        // and replacing the path before clonefile creates it.
+        unpredictable_temporary_path(&destination)?
+    };
+    #[cfg(not(target_vendor = "apple"))]
+    let temporary = {
+        let temporary = temporary_path(&destination);
+        OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)
+            .map_err(|error| io_error(&temporary, error))?;
+        temporary
+    };
+
+    let result = (|| {
+        let expected_bytes = fs::metadata(source)
+            .map_err(|error| io_error(source, error))?
+            .len();
+        let copied_bytes =
+            fs::copy(source, &temporary).map_err(|error| io_error(&temporary, error))?;
+        if copied_bytes != expected_bytes {
+            return Err(io_error(
+                &temporary,
+                std::io::Error::other(format!(
+                    "native copy wrote {copied_bytes} bytes; expected {expected_bytes}"
+                )),
+            ));
+        }
+        if let Ok(metadata) = fs::metadata(&destination) {
+            fs::set_permissions(&temporary, metadata.permissions())
+                .map_err(|error| io_error(&temporary, error))?;
+        }
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&temporary)
+            .and_then(|file| file.sync_all())
+            .map_err(|error| io_error(&temporary, error))?;
+
+        #[cfg(windows)]
+        {
+            replace_atomic_windows(&temporary, &destination)
+                .map_err(|error| io_error(&destination, error))?;
+        }
+
+        #[cfg(not(windows))]
+        fs::rename(&temporary, &destination).map_err(|error| io_error(&destination, error))?;
 
         sync_directory(parent)
     })();

@@ -80,7 +80,10 @@ compass tree
 - `node` exposes the evidence trail and provenance between two symbols.
 - `explain` reports a matched node and connected context; follow its pagination
   metadata when connections or ambiguous candidates span multiple pages.
-- `path` reports the shortest known graph route; preserve relation direction.
+- `path` reports the shortest known directed graph route from source to target.
+  A `direction_mismatch` diagnostic means a route exists only by ignoring one
+  or more edge directions; swap the operands only when the reverse route is
+  the intended question.
 - `affected` follows impact relations and returns a review candidate set.
 - `tree` combines repository structure with graph metadata.
 

@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 use compass_model::code_graph::{EdgeKind, GraphDocument};
 use compass_model::identity::edge_id;
 use compass_model::query_contract::{
-    CallRequest, CodeQueryLimits, ImpactRequest, NodeTrailRequest,
+    CallRequest, CodeQueryLimits, ImpactRequest, NodeTrailRequest, SearchRequest,
 };
-use compass_query::open;
+use compass_query::{NaturalQueryRequest, open};
 
 const SCALE_NODES: usize = 100_000;
 const QUERY_CEILING: Duration = Duration::from_secs(5);
@@ -68,7 +68,34 @@ fn enterprise_queries_stay_within_in_process_ceiling() -> Result<(), Box<dyn std
         max_edges: 1_024,
         ..CodeQueryLimits::default()
     };
+    let last_scale_id = scale_id(SCALE_NODES - 1);
     let started = Instant::now();
+
+    let search_started = Instant::now();
+    let search = engine.search(SearchRequest {
+        query: format!("scale::f{:05}", SCALE_NODES - 1),
+        limits: limits.clone(),
+    })?;
+    assert_eq!(
+        search.results.first().map(|result| result.node_id.as_str()),
+        Some(last_scale_id.as_str())
+    );
+    let search_elapsed = search_started.elapsed();
+
+    let natural_started = Instant::now();
+    let natural = engine.query_natural(NaturalQueryRequest {
+        question: format!("find definition of scale::f{:05}", SCALE_NODES - 1),
+        include_heuristic: false,
+        limits: limits.clone(),
+    })?;
+    assert_eq!(
+        natural
+            .results
+            .first()
+            .map(|result| result.node_id.as_str()),
+        Some(last_scale_id.as_str())
+    );
+    let natural_elapsed = natural_started.elapsed();
 
     let callers_started = Instant::now();
     let callers = engine.callers(CallRequest {
@@ -112,7 +139,8 @@ fn enterprise_queries_stay_within_in_process_ceiling() -> Result<(), Box<dyn std
     assert!(
         elapsed < QUERY_CEILING,
         "indexed in-process queries took {elapsed:?}, exceeding {QUERY_CEILING:?}; \
-         callers={callers_elapsed:?}, impact={impact_elapsed:?}, trail={trail_elapsed:?}"
+         search={search_elapsed:?}, natural={natural_elapsed:?}, callers={callers_elapsed:?}, \
+         impact={impact_elapsed:?}, trail={trail_elapsed:?}"
     );
     Ok(())
 }

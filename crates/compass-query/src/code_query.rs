@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use compass_graph::{GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS, SnapshotReadLimits};
 use compass_ir::ProgramBundle;
@@ -17,21 +18,86 @@ use crate::cql::{QueryError, QueryErrorKind};
 use crate::graph_engine::LocalStoreSnapshot;
 use crate::index::QueryEngineKind;
 use crate::join_program_evidence;
-use crate::ranking::{SearchRankProfile, rank_search_candidates};
+use crate::ranking::rank_search_candidates;
 use crate::recall::{CandidateSource, RecallBudget, SearchCandidatePool};
 use crate::source::{VerifiedSource, verified_source};
+use crate::telemetry::QueryInstrumentation;
 use crate::text::strip_diacritics;
 
 type GraphPath = (Vec<String>, Vec<String>);
 type BoundedPathResult = (Option<GraphPath>, bool);
 const MAX_CODE_QUERY_CANDIDATES: u32 = 256;
-const MAX_RECALL_FUZZY_VARIANTS_PER_TERM: usize = 3;
+const MAX_RECALL_FUZZY_VARIANTS_PER_TERM: usize = 192;
+const MAX_RECALL_FUZZY_VARIANTS_TOTAL: usize = 256;
 const MIN_RECALL_CANDIDATES_BEFORE_FUZZY: usize = 4;
 const SEARCH_QUERY_CACHE_CAPACITY: usize = 64;
+const FUZZY_LOOKUP_CACHE_CAPACITY: usize = 512;
+
+const ALL_EDGE_KINDS: &[EdgeKind] = &[
+    EdgeKind::Contains,
+    EdgeKind::Embeds,
+    EdgeKind::Calls,
+    EdgeKind::Imports,
+    EdgeKind::Exports,
+    EdgeKind::Extends,
+    EdgeKind::Implements,
+    EdgeKind::References,
+    EdgeKind::TypeOf,
+    EdgeKind::Returns,
+    EdgeKind::Instantiates,
+    EdgeKind::Overrides,
+    EdgeKind::Decorates,
+    EdgeKind::RoutesTo,
+    EdgeKind::Reads,
+    EdgeKind::Writes,
+    EdgeKind::Aliases,
+    EdgeKind::Registers,
+    EdgeKind::Handles,
+    EdgeKind::Publishes,
+    EdgeKind::Subscribes,
+    EdgeKind::Produces,
+    EdgeKind::Consumes,
+    EdgeKind::Schedules,
+    EdgeKind::Triggers,
+    EdgeKind::Tests,
+    EdgeKind::DependsOn,
+    EdgeKind::Documents,
+    EdgeKind::MapsTo,
+];
+
+#[derive(Clone, Copy, Debug)]
+enum StructuralOperandRole {
+    CallersTarget,
+    CalleesSource,
+    ImpactTarget,
+    TrailSource,
+    TrailTarget,
+}
+
+impl StructuralOperandRole {
+    const fn relation_probe(self) -> (bool, &'static [EdgeKind]) {
+        match self {
+            Self::CallersTarget => (true, &[EdgeKind::Calls, EdgeKind::RoutesTo]),
+            Self::CalleesSource => (false, &[EdgeKind::Calls]),
+            Self::ImpactTarget => (true, IMPACT_KINDS),
+            Self::TrailSource => (false, ALL_EDGE_KINDS),
+            Self::TrailTarget => (true, ALL_EDGE_KINDS),
+        }
+    }
+}
+
+struct CandidateAssembly {
+    pool: SearchCandidatePool,
+    truncated: bool,
+    postings_decoded: u64,
+    relation_edges_examined: u64,
+}
 
 struct TraversalBudget {
     remaining_nodes: usize,
     remaining_edges: usize,
+    nodes_expanded: u64,
+    edges_expanded: u64,
 }
 
 impl TraversalBudget {
@@ -39,6 +105,8 @@ impl TraversalBudget {
         Self {
             remaining_nodes: usize::try_from(limits.max_nodes).unwrap_or(usize::MAX),
             remaining_edges: usize::try_from(limits.max_edges).unwrap_or(usize::MAX),
+            nodes_expanded: 0,
+            edges_expanded: 0,
         }
     }
 
@@ -51,6 +119,7 @@ impl TraversalBudget {
             false
         } else {
             self.remaining_nodes -= 1;
+            self.nodes_expanded = self.nodes_expanded.saturating_add(1);
             true
         }
     }
@@ -60,8 +129,20 @@ impl TraversalBudget {
             false
         } else {
             self.remaining_edges -= 1;
+            self.edges_expanded = self.edges_expanded.saturating_add(1);
             true
         }
+    }
+
+    fn record_work(&self, instrumentation: &mut QueryInstrumentation) {
+        instrumentation.work.nodes_expanded = instrumentation
+            .work
+            .nodes_expanded
+            .saturating_add(self.nodes_expanded);
+        instrumentation.work.edges_expanded = instrumentation
+            .work
+            .edges_expanded
+            .saturating_add(self.edges_expanded);
     }
 }
 
@@ -92,6 +173,7 @@ pub struct CodeQueryEngine {
     pub(crate) partial_graph_message: Option<String>,
     pub(crate) engine_kind: QueryEngineKind,
     pub(crate) search_query_cache: Mutex<SearchQueryCache>,
+    pub(crate) fuzzy_lookup_cache: Mutex<FuzzyLookupCache>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -135,6 +217,48 @@ impl SearchQueryCache {
         }
         self.order.push_back(query.clone());
         self.entries.insert(query, prepared);
+    }
+}
+
+type FuzzyLookupValue = (Vec<NodeRecord>, bool);
+
+#[derive(Debug)]
+pub(crate) struct FuzzyLookupCache {
+    entries: HashMap<(String, usize), FuzzyLookupValue>,
+    order: VecDeque<(String, usize)>,
+    capacity: usize,
+}
+
+impl Default for FuzzyLookupCache {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::with_capacity(FUZZY_LOOKUP_CACHE_CAPACITY),
+            order: VecDeque::with_capacity(FUZZY_LOOKUP_CACHE_CAPACITY),
+            capacity: FUZZY_LOOKUP_CACHE_CAPACITY,
+        }
+    }
+}
+
+impl FuzzyLookupCache {
+    fn get(&mut self, name: &str, limit: usize) -> Option<FuzzyLookupValue> {
+        let key = (name.to_owned(), limit);
+        let value = self.entries.get(&key)?.clone();
+        self.order.retain(|cached| cached != &key);
+        self.order.push_back(key);
+        Some(value)
+    }
+
+    fn insert(&mut self, name: String, limit: usize, value: FuzzyLookupValue) {
+        let key = (name, limit);
+        self.order.retain(|cached| cached != &key);
+        while self.entries.len() >= self.capacity {
+            let Some(expired) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&expired);
+        }
+        self.order.push_back(key.clone());
+        self.entries.insert(key, value);
     }
 }
 
@@ -563,7 +687,16 @@ fn sort_edge_indices(edges: &mut [usize], graph: &GraphDocument) {
 
 impl CodeQueryEngine {
     pub fn search(&self, request: SearchRequest) -> Result<CodeQueryResponse, QueryError> {
+        self.search_instrumented(request, &mut QueryInstrumentation::default())
+    }
+
+    pub(crate) fn search_instrumented(
+        &self,
+        request: SearchRequest,
+        instrumentation: &mut QueryInstrumentation,
+    ) -> Result<CodeQueryResponse, QueryError> {
         validate_limits(&request.limits)?;
+        let recall_started = Instant::now();
         let prepared = self.prepare_search_query(&request.query)?;
         let terms = prepared.terms;
         let query = prepared.fts_query;
@@ -576,81 +709,59 @@ impl CodeQueryEngine {
                 node_id: None,
                 path: None,
             });
-            return self.finish_response(&mut response);
+            instrumentation.recall += recall_started.elapsed();
+            let execution_started = Instant::now();
+            let response = self.finish_response(&mut response);
+            instrumentation.execution += execution_started.elapsed();
+            return response;
         }
-        let candidate_limit =
-            usize::try_from(request.limits.max_candidates.max(request.limits.max_nodes))
-                .unwrap_or(usize::MAX);
-        let budget = RecallBudget {
-            max_total_candidates: candidate_limit,
-            max_per_source: candidate_limit,
-            max_fuzzy_candidates: candidate_limit.min(16),
-        };
-        let mut pool = SearchCandidatePool::new(budget);
-
-        if let Some(node) = self.backend.node_by_id(&request.query)? {
-            let _ = pool.add(CandidateSource::ExactId, node);
-        }
-
-        let normalized_name_query = normalize_symbol(&request.query);
-        let (exact_name_nodes, exact_name_truncated) = self
-            .backend
-            .nodes_by_normalized_name(&normalized_name_query, candidate_limit)?;
-        pool.add_many(CandidateSource::ExactName, exact_name_nodes);
-        response.truncated |= exact_name_truncated;
-
-        for term in &terms {
-            if term.chars().count() < 3 {
-                continue;
-            }
-            let (alias_nodes, alias_truncated) = self
-                .backend
-                .nodes_by_normalized_name(term, candidate_limit)?;
-            pool.add_many(CandidateSource::Alias, alias_nodes);
-            response.truncated |= alias_truncated;
-        }
-
-        let (term_nodes, term_truncated) = if let Some(candidates) = self
-            .backend
-            .store_term_candidates(&terms, candidate_limit)?
-        {
-            candidates
-        } else {
-            self.materialized_term_candidates(&query, candidate_limit)?
-        };
-        pool.add_many(CandidateSource::TermIndex, term_nodes);
-        response.truncated |= term_truncated;
-
-        if pool.len() < candidate_limit.min(MIN_RECALL_CANDIDATES_BEFORE_FUZZY) {
-            for variant in recall_fuzzy_term_variants(&terms) {
-                if variant.len() < 3 {
-                    continue;
-                }
-                if pool.len() >= candidate_limit {
-                    break;
-                }
-                let (fuzzy_nodes, fuzzy_truncated) = self
-                    .backend
-                    .nodes_by_normalized_name(&variant, budget.max_fuzzy_candidates)?;
-                pool.add_many(CandidateSource::Fuzzy, fuzzy_nodes);
-                response.truncated |= fuzzy_truncated;
-                if pool.truncated_by_fuzzy_capacity() {
-                    break;
-                }
-            }
-        }
-
-        response.truncated |= pool.is_truncated();
-        let candidates = pool.into_vec();
-        let candidate_count = candidates.len();
-        let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);
-        let ranked = rank_search_candidates(
-            SearchRankProfile::from_env(),
+        let candidate_limit = usize::try_from(request.limits.max_candidates).unwrap_or(usize::MAX);
+        let assembly = self.assemble_search_candidates(
             &request.query,
             &terms,
-            candidates,
-            max_nodes,
-        );
+            &query,
+            candidate_limit,
+            None,
+            false,
+        )?;
+        instrumentation.work.candidates_read = instrumentation
+            .work
+            .candidates_read
+            .saturating_add(assembly.pool.candidates_read());
+        instrumentation.work.postings_decoded = instrumentation
+            .work
+            .postings_decoded
+            .saturating_add(assembly.postings_decoded);
+        instrumentation.work.edges_expanded = instrumentation
+            .work
+            .edges_expanded
+            .saturating_add(assembly.relation_edges_examined);
+        response.truncated |= assembly.truncated;
+        instrumentation.recall += recall_started.elapsed();
+
+        if response.truncated {
+            let candidate_label = if candidate_limit == 1 {
+                "candidate"
+            } else {
+                "candidates"
+            };
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::BoundedTruncation,
+                message: format!(
+                    "Search candidate recall was limited to {candidate_limit} {candidate_label}"
+                ),
+                node_id: None,
+                path: None,
+            });
+        }
+        let candidates = assembly.pool.into_vec();
+        let candidate_count = candidates.len();
+        let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);
+        let ranking_started = Instant::now();
+        let ranked = rank_search_candidates(&request.query, &terms, candidates, max_nodes);
+        instrumentation.ranking += ranking_started.elapsed();
+
+        let execution_started = Instant::now();
         if candidate_count > max_nodes {
             response.truncated = true;
             response.diagnostics.push(QueryDiagnostic {
@@ -680,7 +791,130 @@ impl CodeQueryEngine {
                 path: None,
             });
         }
-        self.finish_response(&mut response)
+        let response = self.finish_response(&mut response);
+        instrumentation.execution += execution_started.elapsed();
+        response
+    }
+
+    fn assemble_search_candidates(
+        &self,
+        raw_query: &str,
+        terms: &[String],
+        fts_query: &str,
+        candidate_limit: usize,
+        role: Option<StructuralOperandRole>,
+        include_heuristic: bool,
+    ) -> Result<CandidateAssembly, QueryError> {
+        let budget = RecallBudget {
+            max_total_candidates: candidate_limit,
+            max_per_source: candidate_limit,
+            max_fuzzy_candidates: candidate_limit.min(16),
+        };
+        let mut pool = SearchCandidatePool::new(budget);
+        let mut truncated = false;
+        let mut postings_decoded = 0_u64;
+        let mut relation_edges_examined = 0_u64;
+
+        if let Some(node) = self.backend.node_by_id(raw_query)? {
+            let _ = pool.add(CandidateSource::ExactId, node);
+        }
+
+        let normalized_name_query = normalize_symbol(raw_query);
+        let (exact_name_nodes, exact_name_truncated) = self
+            .backend
+            .nodes_by_normalized_name(&normalized_name_query, candidate_limit)?;
+        pool.add_many(CandidateSource::ExactName, exact_name_nodes);
+        truncated |= exact_name_truncated;
+
+        for term in terms {
+            if term.chars().count() < 3 {
+                continue;
+            }
+            let (alias_nodes, alias_truncated) = self
+                .backend
+                .nodes_by_normalized_name(term, candidate_limit)?;
+            pool.add_many(CandidateSource::Alias, alias_nodes);
+            truncated |= alias_truncated;
+        }
+
+        let (term_nodes, term_truncated) =
+            if let Some(candidates) = self.backend.store_term_candidates(terms, candidate_limit)? {
+                candidates
+            } else {
+                self.materialized_term_candidates(fts_query, candidate_limit)?
+            };
+        postings_decoded =
+            postings_decoded.saturating_add(u64::try_from(term_nodes.len()).unwrap_or(u64::MAX));
+        if term_truncated {
+            postings_decoded = postings_decoded.saturating_add(1);
+        }
+        pool.add_many(CandidateSource::TermIndex, term_nodes);
+        truncated |= term_truncated;
+
+        if pool.len() < candidate_limit.min(MIN_RECALL_CANDIDATES_BEFORE_FUZZY) {
+            for variant in recall_fuzzy_term_variants(terms) {
+                if variant.len() < 3 {
+                    continue;
+                }
+                if pool.len() >= candidate_limit {
+                    break;
+                }
+                let (fuzzy_nodes, fuzzy_truncated) =
+                    self.cached_fuzzy_nodes(&variant, budget.max_fuzzy_candidates)?;
+                pool.add_many(CandidateSource::Fuzzy, fuzzy_nodes);
+                truncated |= fuzzy_truncated;
+                if pool.truncated_by_fuzzy_capacity() {
+                    break;
+                }
+            }
+        }
+
+        if let Some(role) = role {
+            let (inbound, kinds) = role.relation_probe();
+            for node_id in pool.candidate_ids() {
+                let (edges, probe_truncated) = self.backend.matching_bounded(
+                    &node_id,
+                    inbound,
+                    kinds,
+                    include_heuristic,
+                    1,
+                )?;
+                if !edges.is_empty() {
+                    let _ = pool.tag(&node_id, CandidateSource::RelationSeed);
+                }
+                relation_edges_examined = relation_edges_examined
+                    .saturating_add(u64::try_from(edges.len()).unwrap_or(u64::MAX));
+                if probe_truncated {
+                    relation_edges_examined = relation_edges_examined.saturating_add(1);
+                }
+            }
+        }
+        truncated |= pool.is_truncated();
+        Ok(CandidateAssembly {
+            pool,
+            truncated,
+            postings_decoded,
+            relation_edges_examined,
+        })
+    }
+
+    fn cached_fuzzy_nodes(&self, name: &str, limit: usize) -> Result<FuzzyLookupValue, QueryError> {
+        {
+            let mut cache = match self.fuzzy_lookup_cache.lock() {
+                Ok(cache) => cache,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if let Some(value) = cache.get(name, limit) {
+                return Ok(value);
+            }
+        }
+        let value = self.backend.nodes_by_normalized_name(name, limit)?;
+        let mut cache = match self.fuzzy_lookup_cache.lock() {
+            Ok(cache) => cache,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        cache.insert(name.to_owned(), limit, value.clone());
+        Ok(value)
     }
 
     fn prepare_search_query(&self, query: &str) -> Result<PreparedSearchQuery, QueryError> {
@@ -757,17 +991,18 @@ impl CodeQueryEngine {
     }
 
     pub fn callers(&self, request: CallRequest) -> Result<CodeQueryResponse, QueryError> {
-        self.call_neighbors(request, true)
+        self.call_neighbors_instrumented(request, true, &mut QueryInstrumentation::default())
     }
 
     pub fn callees(&self, request: CallRequest) -> Result<CodeQueryResponse, QueryError> {
-        self.call_neighbors(request, false)
+        self.call_neighbors_instrumented(request, false, &mut QueryInstrumentation::default())
     }
 
-    fn call_neighbors(
+    pub(crate) fn call_neighbors_instrumented(
         &self,
         request: CallRequest,
         inbound: bool,
+        instrumentation: &mut QueryInstrumentation,
     ) -> Result<CodeQueryResponse, QueryError> {
         validate_limits(&request.limits)?;
         let operation = if inbound {
@@ -776,9 +1011,27 @@ impl CodeQueryEngine {
             CodeQueryOperation::Callees
         };
         let mut response = CodeQueryResponse::empty(operation, request.limits.clone());
-        let Some(seed) = self.resolve_symbol(&request.symbol, &mut response)? else {
-            return self.finish_response(&mut response);
+        let recall_started = Instant::now();
+        let role = if inbound {
+            StructuralOperandRole::CallersTarget
+        } else {
+            StructuralOperandRole::CalleesSource
         };
+        let seed = self.resolve_symbol(
+            &request.symbol,
+            &mut response,
+            Some(role),
+            request.include_heuristic,
+            instrumentation,
+        )?;
+        instrumentation.recall += recall_started.elapsed();
+        let Some(seed) = seed else {
+            let execution_started = Instant::now();
+            let response = self.finish_response(&mut response);
+            instrumentation.execution += execution_started.elapsed();
+            return response;
+        };
+        let execution_started = Instant::now();
         let kinds: &[EdgeKind] = if inbound {
             &[EdgeKind::Calls, EdgeKind::RoutesTo]
         } else {
@@ -792,6 +1045,15 @@ impl CodeQueryEngine {
             request.include_heuristic,
             max_edges,
         )?;
+        instrumentation.work.nodes_expanded = instrumentation.work.nodes_expanded.saturating_add(1);
+        instrumentation.work.edges_expanded = instrumentation
+            .work
+            .edges_expanded
+            .saturating_add(u64::try_from(selected_edges.len()).unwrap_or(u64::MAX));
+        if truncated {
+            instrumentation.work.edges_expanded =
+                instrumentation.work.edges_expanded.saturating_add(1);
+        }
         response.truncated |= truncated;
         let mut ids = HashSet::from([seed.clone()]);
         for edge in &selected_edges {
@@ -800,16 +1062,39 @@ impl CodeQueryEngine {
             response.edges.push(query_edge(edge));
         }
         self.add_nodes(&ids, &mut response)?;
-        self.finish_response(&mut response)
+        let response = self.finish_response(&mut response);
+        instrumentation.execution += execution_started.elapsed();
+        response
     }
 
     pub fn impact(&self, request: ImpactRequest) -> Result<CodeQueryResponse, QueryError> {
+        self.impact_instrumented(request, &mut QueryInstrumentation::default())
+    }
+
+    pub(crate) fn impact_instrumented(
+        &self,
+        request: ImpactRequest,
+        instrumentation: &mut QueryInstrumentation,
+    ) -> Result<CodeQueryResponse, QueryError> {
         validate_limits(&request.limits)?;
         let mut response =
             CodeQueryResponse::empty(CodeQueryOperation::Impact, request.limits.clone());
-        let Some(seed) = self.resolve_symbol(&request.symbol, &mut response)? else {
-            return self.finish_response(&mut response);
+        let recall_started = Instant::now();
+        let seed = self.resolve_symbol(
+            &request.symbol,
+            &mut response,
+            Some(StructuralOperandRole::ImpactTarget),
+            request.include_heuristic,
+            instrumentation,
+        )?;
+        instrumentation.recall += recall_started.elapsed();
+        let Some(seed) = seed else {
+            let execution_started = Instant::now();
+            let response = self.finish_response(&mut response);
+            instrumentation.execution += execution_started.elapsed();
+            return response;
         };
+        let execution_started = Instant::now();
         let max_depth = usize::try_from(request.limits.max_depth).unwrap_or(usize::MAX);
         let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);
         let mut queue =
@@ -818,6 +1103,8 @@ impl CodeQueryEngine {
         let max_edges = usize::try_from(request.limits.max_edges).unwrap_or(usize::MAX);
         let mut selected_edges = HashSet::new();
         while let Some((node, path_nodes, path_edges)) = queue.pop_front() {
+            instrumentation.work.nodes_expanded =
+                instrumentation.work.nodes_expanded.saturating_add(1);
             if path_edges.len() >= max_depth {
                 continue;
             }
@@ -829,6 +1116,14 @@ impl CodeQueryEngine {
                 request.include_heuristic,
                 remaining_edges,
             )?;
+            instrumentation.work.edges_expanded = instrumentation
+                .work
+                .edges_expanded
+                .saturating_add(u64::try_from(incoming.len()).unwrap_or(u64::MAX));
+            if incoming_truncated {
+                instrumentation.work.edges_expanded =
+                    instrumentation.work.edges_expanded.saturating_add(1);
+            }
             response.truncated |= incoming_truncated;
             for edge in incoming {
                 if selected_edges.len() >= max_edges {
@@ -863,10 +1158,20 @@ impl CodeQueryEngine {
         self.add_nodes(&ids, &mut response)?;
         self.add_edges(&selected_edges, &mut response)?;
         self.apply_path_bound(&mut response);
-        self.finish_response(&mut response)
+        let response = self.finish_response(&mut response);
+        instrumentation.execution += execution_started.elapsed();
+        response
     }
 
     pub fn explore(&self, request: ExploreRequest) -> Result<CodeQueryResponse, QueryError> {
+        self.explore_instrumented(request, &mut QueryInstrumentation::default())
+    }
+
+    fn explore_instrumented(
+        &self,
+        request: ExploreRequest,
+        instrumentation: &mut QueryInstrumentation,
+    ) -> Result<CodeQueryResponse, QueryError> {
         validate_limits(&request.limits)?;
         if request.symbols.len()
             > usize::try_from(request.limits.max_candidates).unwrap_or(usize::MAX)
@@ -884,11 +1189,20 @@ impl CodeQueryEngine {
         let mut response =
             CodeQueryResponse::empty(CodeQueryOperation::Explore, request.limits.clone());
         let mut seeds = Vec::new();
+        let recall_started = Instant::now();
         for symbol in &request.symbols {
-            if let Some(seed) = self.resolve_symbol(symbol, &mut response)? {
+            if let Some(seed) = self.resolve_symbol(
+                symbol,
+                &mut response,
+                None,
+                request.include_heuristic,
+                instrumentation,
+            )? {
                 seeds.push(seed);
             }
         }
+        instrumentation.recall += recall_started.elapsed();
+        let execution_started = Instant::now();
         seeds.sort();
         seeds.dedup();
         let mut ids = seeds.iter().cloned().collect::<HashSet<_>>();
@@ -906,6 +1220,7 @@ impl CodeQueryEngine {
                     request.include_heuristic,
                     &request.limits,
                     &mut budget,
+                    false,
                 )?
             {
                 response.truncated |= truncated;
@@ -918,19 +1233,54 @@ impl CodeQueryEngine {
         self.add_edges(&edge_ids, &mut response)?;
         self.add_verified_files(&request.root, &mut response)?;
         self.apply_path_bound(&mut response);
-        self.finish_response(&mut response)
+        budget.record_work(instrumentation);
+        let response = self.finish_response(&mut response);
+        instrumentation.execution += execution_started.elapsed();
+        response
     }
 
     pub fn node_trail(&self, request: NodeTrailRequest) -> Result<CodeQueryResponse, QueryError> {
+        self.node_trail_instrumented(request, &mut QueryInstrumentation::default())
+    }
+
+    pub(crate) fn node_trail_instrumented(
+        &self,
+        request: NodeTrailRequest,
+        instrumentation: &mut QueryInstrumentation,
+    ) -> Result<CodeQueryResponse, QueryError> {
         validate_limits(&request.limits)?;
         let mut response =
             CodeQueryResponse::empty(CodeQueryOperation::NodeTrail, request.limits.clone());
-        let Some(source) = self.resolve_symbol(&request.source, &mut response)? else {
-            return self.finish_response(&mut response);
+        let recall_started = Instant::now();
+        let source = self.resolve_symbol(
+            &request.source,
+            &mut response,
+            Some(StructuralOperandRole::TrailSource),
+            request.include_heuristic,
+            instrumentation,
+        )?;
+        let Some(source) = source else {
+            instrumentation.recall += recall_started.elapsed();
+            let execution_started = Instant::now();
+            let response = self.finish_response(&mut response);
+            instrumentation.execution += execution_started.elapsed();
+            return response;
         };
-        let Some(target) = self.resolve_symbol(&request.target, &mut response)? else {
-            return self.finish_response(&mut response);
+        let target = self.resolve_symbol(
+            &request.target,
+            &mut response,
+            Some(StructuralOperandRole::TrailTarget),
+            request.include_heuristic,
+            instrumentation,
+        )?;
+        instrumentation.recall += recall_started.elapsed();
+        let Some(target) = target else {
+            let execution_started = Instant::now();
+            let response = self.finish_response(&mut response);
+            instrumentation.execution += execution_started.elapsed();
+            return response;
         };
+        let execution_started = Instant::now();
         let mut budget = TraversalBudget::new(&request.limits);
         let (path, truncated) = self.shortest_path(
             &source,
@@ -938,26 +1288,56 @@ impl CodeQueryEngine {
             request.include_heuristic,
             &request.limits,
             &mut budget,
+            true,
         )?;
         response.truncated |= truncated;
         let Some((nodes, edges)) = path else {
             if truncated {
-                return self.finish_response(&mut response);
+                budget.record_work(instrumentation);
+                let response = self.finish_response(&mut response);
+                instrumentation.execution += execution_started.elapsed();
+                return response;
             }
-            response.diagnostics.push(QueryDiagnostic {
-                code: QueryDiagnosticCode::NoMatch,
-                message: format!("No bounded trail connects {source} and {target}"),
-                node_id: Some(source),
-                path: None,
-            });
-            return self.finish_response(&mut response);
+            let (undirected_path, mismatch_truncated) = self.shortest_path(
+                &source,
+                &target,
+                request.include_heuristic,
+                &request.limits,
+                &mut budget,
+                false,
+            )?;
+            budget.record_work(instrumentation);
+            response.truncated |= mismatch_truncated;
+            if undirected_path.is_some() {
+                response.diagnostics.push(QueryDiagnostic {
+                    code: QueryDiagnosticCode::DirectionMismatch,
+                    message: format!(
+                        "A trail connects {source} and {target}, but not in the requested source-to-target direction"
+                    ),
+                    node_id: Some(source),
+                    path: None,
+                });
+            } else if !mismatch_truncated {
+                response.diagnostics.push(QueryDiagnostic {
+                    code: QueryDiagnosticCode::NoMatch,
+                    message: format!("No bounded directed trail connects {source} to {target}"),
+                    node_id: Some(source),
+                    path: None,
+                });
+            }
+            let response = self.finish_response(&mut response);
+            instrumentation.execution += execution_started.elapsed();
+            return response;
         };
         let ids = nodes.iter().cloned().collect::<HashSet<_>>();
         self.add_nodes(&ids, &mut response)?;
         let edge_ids = edges.iter().cloned().collect::<HashSet<_>>();
         self.add_edges(&edge_ids, &mut response)?;
         response.paths.push(self.path_record(&nodes, &edges)?);
-        self.finish_response(&mut response)
+        budget.record_work(instrumentation);
+        let response = self.finish_response(&mut response);
+        instrumentation.execution += execution_started.elapsed();
+        response
     }
 
     #[must_use]
@@ -979,41 +1359,123 @@ impl CodeQueryEngine {
         &self,
         query: &str,
         response: &mut CodeQueryResponse,
+        role: Option<StructuralOperandRole>,
+        include_heuristic: bool,
+        instrumentation: &mut QueryInstrumentation,
     ) -> Result<Option<String>, QueryError> {
         if let Some(node) = self.backend.node_by_id(query)? {
+            instrumentation.work.candidates_read =
+                instrumentation.work.candidates_read.saturating_add(1);
             return Ok(Some(node.id));
         }
         let normalized = normalize_symbol(query);
         let candidate_limit = usize::try_from(response.limits.max_candidates).unwrap_or(usize::MAX);
-        let (exact_nodes, truncated) = self
+        let (exact_nodes, exact_truncated) = self
             .backend
             .nodes_by_normalized_name(&normalized, candidate_limit)?;
+        instrumentation.work.candidates_read = instrumentation
+            .work
+            .candidates_read
+            .saturating_add(u64::try_from(exact_nodes.len()).unwrap_or(u64::MAX));
         let exact = exact_nodes
             .into_iter()
             .map(|node| node.id)
             .collect::<Vec<_>>();
-        response.truncated |= truncated;
+        response.truncated |= exact_truncated;
         match exact.as_slice() {
-            [node] => Ok(Some(node.clone())),
-            [] => {
-                response.diagnostics.push(QueryDiagnostic {
-                    code: QueryDiagnosticCode::NoMatch,
-                    message: format!("No symbol matched {query:?}"),
-                    node_id: None,
-                    path: None,
-                });
-                Ok(None)
-            }
+            [node] if !exact_truncated => return Ok(Some(node.clone())),
+            [] => {}
             _ => {
                 response.diagnostics.push(QueryDiagnostic {
                     code: QueryDiagnosticCode::AmbiguousMatch,
-                    message: format!("Symbol {query:?} matched {} nodes", exact.len()),
+                    message: if exact_truncated {
+                        format!(
+                            "Symbol {query:?} exceeded the {}-candidate resolution bound",
+                            response.limits.max_candidates
+                        )
+                    } else {
+                        format!("Symbol {query:?} matched {} nodes", exact.len())
+                    },
                     node_id: None,
                     path: None,
                 });
-                Ok(None)
+                return Ok(None);
             }
         }
+
+        let prepared = self.prepare_search_query(query)?;
+        if prepared.fts_query.is_empty() {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::NoMatch,
+                message: format!("No symbol matched {query:?}"),
+                node_id: None,
+                path: None,
+            });
+            return Ok(None);
+        }
+        let assembly = self.assemble_search_candidates(
+            query,
+            &prepared.terms,
+            &prepared.fts_query,
+            candidate_limit,
+            role,
+            include_heuristic,
+        )?;
+        instrumentation.work.candidates_read = instrumentation
+            .work
+            .candidates_read
+            .saturating_add(assembly.pool.candidates_read());
+        instrumentation.work.postings_decoded = instrumentation
+            .work
+            .postings_decoded
+            .saturating_add(assembly.postings_decoded);
+        instrumentation.work.edges_expanded = instrumentation
+            .work
+            .edges_expanded
+            .saturating_add(assembly.relation_edges_examined);
+        response.truncated |= assembly.truncated;
+        let candidates = assembly.pool.into_vec();
+        if candidates.is_empty() {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::NoMatch,
+                message: format!("No symbol matched {query:?}"),
+                node_id: None,
+                path: None,
+            });
+            return Ok(None);
+        }
+        if response.truncated {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::AmbiguousMatch,
+                message: format!(
+                    "Symbol {query:?} could not be resolved uniquely within {} candidates",
+                    response.limits.max_candidates
+                ),
+                node_id: None,
+                path: None,
+            });
+            return Ok(None);
+        }
+        let relation_seeded = candidates
+            .iter()
+            .filter(|candidate| candidate.sources.contains(&CandidateSource::RelationSeed))
+            .collect::<Vec<_>>();
+        if let [candidate] = relation_seeded.as_slice() {
+            return Ok(Some(candidate.node.id.clone()));
+        }
+        if let [candidate] = candidates.as_slice() {
+            return Ok(Some(candidate.node.id.clone()));
+        }
+        response.diagnostics.push(QueryDiagnostic {
+            code: QueryDiagnosticCode::AmbiguousMatch,
+            message: format!(
+                "Symbol {query:?} recalled {} candidates; provide a qualified name or exact ID",
+                candidates.len()
+            ),
+            node_id: None,
+            path: None,
+        });
+        Ok(None)
     }
 
     fn add_nodes(
@@ -1070,6 +1532,7 @@ impl CodeQueryEngine {
         include_heuristic: bool,
         limits: &compass_model::query_contract::CodeQueryLimits,
         budget: &mut TraversalBudget,
+        directed: bool,
     ) -> Result<BoundedPathResult, QueryError> {
         let max_depth = usize::try_from(limits.max_depth).unwrap_or(usize::MAX);
         if !budget.consume_node() {
@@ -1100,9 +1563,18 @@ impl CodeQueryEngine {
                 continue;
             }
             let mut adjacent = Vec::new();
-            let (incident, incident_truncated) =
+            let (incident, incident_truncated) = if directed {
+                self.backend.matching_bounded(
+                    &node,
+                    false,
+                    ALL_EDGE_KINDS,
+                    include_heuristic,
+                    budget.remaining_edges,
+                )?
+            } else {
                 self.backend
-                    .incident_bounded(&node, include_heuristic, budget.remaining_edges)?;
+                    .incident_bounded(&node, include_heuristic, budget.remaining_edges)?
+            };
             truncated |= incident_truncated;
             for edge in incident {
                 if !budget.consume_edge() {
@@ -1111,7 +1583,7 @@ impl CodeQueryEngine {
                 }
                 if edge.source == node {
                     adjacent.push((edge.target.clone(), edge));
-                } else if edge.target == node {
+                } else if !directed && edge.target == node {
                     adjacent.push((edge.source.clone(), edge));
                 }
             }
@@ -1463,12 +1935,19 @@ fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
 }
 
 fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
-    let mut seen = BTreeSet::new();
+    let mut seen = terms.iter().cloned().collect::<BTreeSet<_>>();
     let mut variants = Vec::new();
-    let max_total_variants = terms
-        .len()
-        .saturating_mul(MAX_RECALL_FUZZY_VARIANTS_PER_TERM)
-        .max(1);
+    let eligible_terms = terms
+        .iter()
+        .filter(|term| term.chars().count() >= 4)
+        .count();
+    let per_term_limit = MAX_RECALL_FUZZY_VARIANTS_PER_TERM.min(
+        MAX_RECALL_FUZZY_VARIANTS_TOTAL
+            .checked_div(eligible_terms.max(1))
+            .unwrap_or(1)
+            .max(1),
+    );
+    let max_total_variants = eligible_terms.saturating_mul(per_term_limit).max(1);
 
     for term in terms {
         let chars = term.chars().collect::<Vec<_>>();
@@ -1479,7 +1958,7 @@ fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
         if remaining_capacity == 0 {
             break;
         }
-        let per_term_target = remaining_capacity.min(MAX_RECALL_FUZZY_VARIANTS_PER_TERM);
+        let per_term_target = remaining_capacity.min(per_term_limit);
         let mut emitted = 0_usize;
         let stripped = strip_diacritics(term);
         if stripped != *term && stripped.len() >= 3 && seen.insert(stripped.clone()) {
@@ -1521,6 +2000,58 @@ fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
             if seen.insert(variant.clone()) {
                 variants.push(variant);
                 emitted = emitted.saturating_add(1);
+            }
+        }
+
+        // Missing a repeated character is common (`calee` -> `callee`) and
+        // can be recovered before the broader ASCII edit matrix.
+        for index in 0..chars.len() {
+            if emitted >= per_term_target {
+                break;
+            }
+            let mut variant = chars.clone();
+            variant.insert(index, chars[index]);
+            let variant = variant.iter().collect::<String>();
+            if seen.insert(variant.clone()) {
+                variants.push(variant);
+                emitted = emitted.saturating_add(1);
+            }
+        }
+
+        if emitted >= per_term_target || !term.is_ascii() {
+            continue;
+        }
+        // Bounded ASCII insertion and substitution recover the other common
+        // single-edit typo classes while retaining exact index probes. The
+        // replacement character is the outer loop so likely alphabetic edits
+        // are reached before the fixed per-term ceiling.
+        for replacement in "abcdefghijklmnopqrstuvwxyz0123456789_".chars() {
+            for index in 0..=chars.len() {
+                if emitted >= per_term_target {
+                    break;
+                }
+                if index < chars.len() && chars[index] != replacement {
+                    let mut variant = chars.clone();
+                    variant[index] = replacement;
+                    let variant = variant.iter().collect::<String>();
+                    if seen.insert(variant.clone()) {
+                        variants.push(variant);
+                        emitted = emitted.saturating_add(1);
+                    }
+                }
+                if emitted >= per_term_target {
+                    break;
+                }
+                let mut variant = chars.clone();
+                variant.insert(index, replacement);
+                let variant = variant.iter().collect::<String>();
+                if seen.insert(variant.clone()) {
+                    variants.push(variant);
+                    emitted = emitted.saturating_add(1);
+                }
+            }
+            if emitted >= per_term_target {
+                break;
             }
         }
     }
@@ -1805,8 +2336,8 @@ mod adjacency_tests {
 #[cfg(test)]
 mod fuzzy_term_variant_tests {
     use super::{
-        MAX_RECALL_FUZZY_VARIANTS_PER_TERM, PreparedSearchQuery, SearchQueryCache,
-        recall_fuzzy_term_variants,
+        FuzzyLookupCache, MAX_RECALL_FUZZY_VARIANTS_PER_TERM, MAX_RECALL_FUZZY_VARIANTS_TOTAL,
+        PreparedSearchQuery, SearchQueryCache, recall_fuzzy_term_variants,
     };
 
     #[test]
@@ -1821,6 +2352,7 @@ mod fuzzy_term_variant_tests {
         assert_eq!(first, second, "variant generation must be deterministic");
         assert!(!first.is_empty());
         assert!(first.len() <= terms.len() * MAX_RECALL_FUZZY_VARIANTS_PER_TERM);
+        assert!(first.len() <= MAX_RECALL_FUZZY_VARIANTS_TOTAL);
         assert!(first.iter().all(|variant| variant.len() >= 3));
         let unique = first.iter().collect::<std::collections::BTreeSet<_>>();
         assert_eq!(unique.len(), first.len());
@@ -1850,6 +2382,19 @@ mod fuzzy_term_variant_tests {
         assert!(variants.iter().any(|variant| variant == "list"));
     }
 
+    #[test]
+    fn recall_fuzzy_term_variants_cover_single_edit_typo_classes() {
+        for (typo, expected) in [
+            ("cace_key", "cache_key"),
+            ("callar", "caller"),
+            ("calee", "callee"),
+        ] {
+            let variants = recall_fuzzy_term_variants(&[typo.to_owned()]);
+            assert!(variants.iter().any(|variant| variant == expected));
+            assert!(variants.len() <= MAX_RECALL_FUZZY_VARIANTS_TOTAL);
+        }
+    }
+
     fn prepared(term: &str) -> PreparedSearchQuery {
         PreparedSearchQuery {
             terms: vec![term.to_owned()],
@@ -1873,5 +2418,21 @@ mod fuzzy_term_variant_tests {
         assert!(cache.get("two").is_none());
         assert!(cache.get("three").is_some());
         assert_eq!(cache.entries.len(), 2);
+    }
+
+    #[test]
+    fn fuzzy_lookup_cache_is_bounded_and_keys_limits() {
+        let mut cache = FuzzyLookupCache {
+            entries: Default::default(),
+            order: Default::default(),
+            capacity: 2,
+        };
+        cache.insert("one".to_owned(), 1, (Vec::new(), false));
+        cache.insert("one".to_owned(), 2, (Vec::new(), true));
+        assert_eq!(cache.get("one", 1), Some((Vec::new(), false)));
+        cache.insert("three".to_owned(), 1, (Vec::new(), false));
+        assert_eq!(cache.get("one", 2), None);
+        assert!(cache.get("one", 1).is_some());
+        assert!(cache.get("three", 1).is_some());
     }
 }

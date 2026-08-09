@@ -70,12 +70,54 @@ pub(crate) fn resolve_framework_facts(
     if extraction.framework_facts.is_empty() {
         return (Ok(Vec::new()), Ok(Vec::new()));
     }
+    if universal_framework_targets_are_materialized(extraction) {
+        let targets = target_index::FrameworkTargetIndex::new_with_root(extraction, Some(root));
+        return join(
+            || routes::resolve_routes_with_targets(extraction, limits, &targets, Some(root)),
+            || domain::resolve_domains_with_targets(extraction, limits, &targets),
+        );
+    }
     let target_extraction = materialize_universal_framework_targets(extraction);
     let targets = target_index::FrameworkTargetIndex::new_with_root(&target_extraction, Some(root));
     join(
         || routes::resolve_routes_with_targets(&target_extraction, limits, &targets, Some(root)),
         || domain::resolve_domains_with_targets(&target_extraction, limits, &targets),
     )
+}
+
+fn universal_framework_targets_are_materialized(
+    extraction: &compass_languages::Extraction,
+) -> bool {
+    let Some(batch) = extraction
+        .semantic_evidence
+        .as_ref()
+        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
+    else {
+        return true;
+    };
+    let existing = extraction
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let mut graph_id_counts = std::collections::BTreeMap::<&str, usize>::new();
+    for declaration in &batch.declarations {
+        *graph_id_counts
+            .entry(declaration.graph_node_id.as_str())
+            .or_default() += 1;
+    }
+    batch.declarations.iter().all(|declaration| {
+        if graph_id_counts
+            .get(declaration.graph_node_id.as_str())
+            .copied()
+            == Some(1)
+        {
+            existing.contains(declaration.graph_node_id.as_str())
+        } else {
+            let id = make_id(&[&declaration.graph_node_id, &declaration.id]);
+            existing.contains(id.as_str())
+        }
+    })
 }
 
 /// Universal TypeScript/JavaScript extraction publishes declaration evidence

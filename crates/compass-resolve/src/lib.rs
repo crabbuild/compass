@@ -474,8 +474,9 @@ fn augment_universal_project_inventory(
                 source_languages
                     .entry(declaration.range.source_file.clone())
                     .or_insert_with(|| batch.adapter.language.clone());
+                let normalized_source = source_key(&declaration.range.source_file, root);
                 let length = source_evidence_lengths
-                    .entry(declaration.range.source_file.clone())
+                    .entry(normalized_source)
                     .or_insert(0);
                 *length = (*length).max(declaration.range.end_byte as usize);
             }
@@ -484,14 +485,15 @@ fn augment_universal_project_inventory(
     if source_languages.is_empty() {
         return;
     }
+    let source_inventory = source_inventory_index(sources, root);
 
-    let mut source_ids = BTreeMap::<String, String>::new();
+    let mut source_files = BTreeMap::<String, (String, String)>::new();
     for node in &merged.nodes {
         let source = node.string("source_file");
         if !source.is_empty() && is_file_node(node, &source) {
-            source_ids
+            source_files
                 .entry(source_key(&source, root))
-                .or_insert_with(|| node.id.clone());
+                .or_insert_with(|| (node.id.clone(), source));
         }
     }
     for (source, language) in &source_languages {
@@ -499,23 +501,19 @@ fn augment_universal_project_inventory(
         if !is_safe_relative_source(&key) {
             continue;
         }
-        let display_source =
-            source_inventory_display(source, &key, sources, root).unwrap_or_else(|| source.clone());
-        let file_id = source_ids.entry(key.clone()).or_insert_with(|| {
+        let (display_source, inventory_byte_len) = source_inventory
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| (source.clone(), 0));
+        source_files.entry(key.clone()).or_insert_with(|| {
             let id = make_id(&[&display_source]);
             let label = Path::new(&display_source)
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or(&display_source)
                 .to_owned();
-            let byte_len = source_inventory_byte_len(&display_source, sources, root).max(
-                source_evidence_lengths
-                    .iter()
-                    .filter(|(source, _)| source_key(source, root) == key)
-                    .map(|(_, length)| *length)
-                    .max()
-                    .unwrap_or(0),
-            );
+            let byte_len =
+                inventory_byte_len.max(source_evidence_lengths.get(&key).copied().unwrap_or(0));
             let mut attributes = Map::from_iter([
                 ("label".to_owned(), Value::String(label)),
                 ("symbol_kind".to_owned(), Value::String("file".to_owned())),
@@ -554,9 +552,8 @@ fn augment_universal_project_inventory(
                 id: id.clone(),
                 attributes,
             });
-            id
+            (id, display_source)
         });
-        let _ = file_id;
     }
 
     let declaration_ids = evidence_batches
@@ -584,6 +581,16 @@ fn augment_universal_project_inventory(
         .iter()
         .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
     {
+        let occurrences_by_id = batch
+            .occurrences
+            .iter()
+            .map(|occurrence| (occurrence.id.as_str(), occurrence))
+            .collect::<HashMap<_, _>>();
+        let bindings_by_id = batch
+            .bindings
+            .iter()
+            .map(|binding| (binding.id.as_str(), binding))
+            .collect::<HashMap<_, _>>();
         for candidate in batch.candidates.iter().filter(|candidate| {
             matches!(
                 candidate.relation,
@@ -593,12 +600,11 @@ fn augment_universal_project_inventory(
             if !existing.insert(candidate.id.clone()) {
                 continue;
             }
-            let Some(occurrence) = candidate.occurrence_id.as_deref().and_then(|id| {
-                batch
-                    .occurrences
-                    .iter()
-                    .find(|occurrence| occurrence.id == id)
-            }) else {
+            let Some(occurrence) = candidate
+                .occurrence_id
+                .as_deref()
+                .and_then(|id| occurrences_by_id.get(id).copied())
+            else {
                 continue;
             };
             if !matches!(
@@ -614,10 +620,9 @@ fn augment_universal_project_inventory(
                 .binding_id
                 .as_deref()
                 .and_then(|binding_id| {
-                    batch
-                        .bindings
-                        .iter()
-                        .find(|binding| binding.id == binding_id)
+                    bindings_by_id
+                        .get(binding_id)
+                        .copied()
                         .and_then(|binding| binding.qualified_target.rsplit_once("::"))
                         .map(|(module, _)| module.to_owned())
                 })
@@ -648,23 +653,19 @@ fn augment_universal_project_inventory(
                 continue;
             }
             let source_key_value = source_key(&occurrence.range.source_file, root);
-            let Some(source_id) = source_ids.get(&source_key_value) else {
+            let Some((source_id, project_source_file)) = source_files.get(&source_key_value) else {
                 continue;
             };
-            let project_source_file = merged
-                .nodes
-                .iter()
-                .find(|node| node.id == *source_id)
-                .map(|node| node.string("source_file"))
-                .filter(|source| !source.is_empty())
-                .unwrap_or_else(|| occurrence.range.source_file.clone());
             let attributes = Map::from_iter([
                 (
                     "relation".to_owned(),
                     Value::String("imports_from".to_owned()),
                 ),
                 ("module".to_owned(), Value::String(module)),
-                ("source_file".to_owned(), Value::String(project_source_file)),
+                (
+                    "source_file".to_owned(),
+                    Value::String(project_source_file.clone()),
+                ),
                 (
                     "universal_evidence_source_file".to_owned(),
                     Value::String(occurrence.range.source_file.clone()),
@@ -944,6 +945,7 @@ fn finish_resolution(
         ..Extraction::default()
     });
     if has_javascript {
+        let mut javascript_profile_started = Instant::now();
         if let Err(error) =
             resolve_javascript_package_conditions(&mut merged, &canonical_root, sources)
         {
@@ -951,11 +953,19 @@ fn finish_resolution(
                 format!("JavaScript package-condition resolution failed: {error}")
             });
         }
+        profile_internal(
+            "resolver JavaScript package conditions (merged)",
+            &mut javascript_profile_started,
+        );
         if let Err(error) = resolve_javascript_workspace_modules(&mut merged, &canonical_root) {
             merged
                 .error
                 .get_or_insert_with(|| format!("JavaScript workspace resolution failed: {error}"));
         }
+        profile_internal(
+            "resolver JavaScript workspace exports (merged)",
+            &mut javascript_profile_started,
+        );
         if let Err(error) =
             resolve_javascript_typescript_paths(&mut merged, &canonical_root, sources)
         {
@@ -963,6 +973,10 @@ fn finish_resolution(
                 format!("TypeScript/JavaScript path resolution failed: {error}")
             });
         }
+        profile_internal(
+            "resolver TypeScript paths (merged)",
+            &mut javascript_profile_started,
+        );
         resolve_javascript_reexports(&mut merged);
         if let Some(project) = project_resolution.as_mut() {
             if let Err(error) =
@@ -972,11 +986,19 @@ fn finish_resolution(
                     format!("JavaScript project package-condition resolution failed: {error}")
                 });
             }
+            profile_internal(
+                "resolver JavaScript package conditions (project)",
+                &mut javascript_profile_started,
+            );
             if let Err(error) = resolve_javascript_workspace_modules(project, &canonical_root) {
                 merged.error.get_or_insert_with(|| {
                     format!("JavaScript project workspace resolution failed: {error}")
                 });
             }
+            profile_internal(
+                "resolver JavaScript workspace exports (project)",
+                &mut javascript_profile_started,
+            );
             if let Err(error) =
                 resolve_javascript_typescript_paths(project, &canonical_root, sources)
             {
@@ -984,6 +1006,10 @@ fn finish_resolution(
                     format!("JavaScript project path resolution failed: {error}")
                 });
             }
+            profile_internal(
+                "resolver TypeScript paths (project)",
+                &mut javascript_profile_started,
+            );
             resolve_javascript_reexports(project);
         }
     }
@@ -1147,6 +1173,9 @@ fn resolve_javascript_workspace_modules(
     extraction: &mut Extraction,
     root: &Path,
 ) -> Result<(), String> {
+    if !has_javascript_import_edges(extraction) {
+        return Ok(());
+    }
     let mut file_by_source = BTreeMap::<String, (String, String)>::new();
     let mut manifests = BTreeSet::new();
     for node in &extraction.nodes {
@@ -1302,6 +1331,9 @@ fn resolve_javascript_package_conditions(
     root: &Path,
     sources: &HashMap<String, String>,
 ) -> Result<(), String> {
+    if !has_javascript_import_edges(extraction) {
+        return Ok(());
+    }
     let (typescript_configs, referenced_configs) =
         collect_typescript_configs(extraction, root, sources)?;
     let mut file_by_source = BTreeMap::<String, (String, String)>::new();
@@ -2075,6 +2107,9 @@ fn resolve_javascript_typescript_paths(
     root: &Path,
     sources: &HashMap<String, String>,
 ) -> Result<(), String> {
+    if !has_javascript_import_edges(extraction) {
+        return Ok(());
+    }
     let (configs, referenced_configs) = collect_typescript_configs(extraction, root, sources)?;
 
     let mut file_by_source = BTreeMap::<String, (String, String)>::new();
@@ -2167,6 +2202,13 @@ fn resolve_javascript_typescript_paths(
         }
     }
     Ok(())
+}
+
+fn has_javascript_import_edges(extraction: &Extraction) -> bool {
+    extraction
+        .edges
+        .iter()
+        .any(|edge| relation(edge) == "imports_from")
 }
 
 fn collect_typescript_configs(
@@ -4486,64 +4528,42 @@ fn source_key(source: &str, root: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-/// Recover the source-inventory spelling for a portable universal-evidence
-/// path. The language adapter intentionally shortens absolute temporary paths
-/// to a stable `parent/file` spelling; a project resolver must map that
-/// spelling back to the admitted source only when the suffix is unique.
-fn source_inventory_display(
-    _evidence_source: &str,
-    key: &str,
+/// Index exact and suffix spellings for portable universal-evidence paths.
+/// The language adapter can shorten an absolute temporary path to a stable
+/// `parent/file` spelling; that spelling maps back to an admitted source only
+/// when the suffix is unique.
+fn source_inventory_index(
     sources: &HashMap<String, String>,
     root: &Path,
-) -> Option<String> {
-    if key.is_empty() {
-        return None;
-    }
-    let suffix = format!("/{key}");
-    let mut matches = sources
-        .keys()
-        .filter(|candidate| {
-            source_key(candidate, root) == key || {
-                let candidate = candidate.replace('\\', "/");
-                candidate == key || candidate.ends_with(&suffix)
-            }
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    matches.sort();
-    matches.dedup();
-    if matches.len() != 1 {
-        return None;
+) -> BTreeMap<String, (String, usize)> {
+    let mut matches = BTreeMap::<String, BTreeMap<String, (String, usize)>>::new();
+    for (candidate, contents) in sources {
+        let normalized_candidate = candidate.replace('\\', "/");
+        let display = source_key(candidate, root);
+        let mut spellings = BTreeSet::from([display.clone(), normalized_candidate.clone()]);
+        spellings.extend(
+            normalized_candidate
+                .match_indices('/')
+                .map(|(index, _)| normalized_candidate[index + 1..].to_owned())
+                .filter(|suffix| !suffix.is_empty()),
+        );
+        for spelling in spellings {
+            matches
+                .entry(spelling)
+                .or_default()
+                .insert(candidate.clone(), (display.clone(), contents.len()));
+        }
     }
     matches
-        .pop()
-        .map(|candidate| source_key(&candidate, root))
-        .filter(|display| is_safe_relative_source(display))
-}
-
-fn source_inventory_byte_len(
-    display: &str,
-    sources: &HashMap<String, String>,
-    root: &Path,
-) -> usize {
-    let display_key = source_key(display, root);
-    let suffix = format!("/{display_key}");
-    let mut matches = sources
-        .iter()
-        .filter(|(candidate, _)| {
-            source_key(candidate, root) == display_key
-                || candidate.replace('\\', "/") == display_key
-                || candidate.replace('\\', "/").ends_with(&suffix)
+        .into_iter()
+        .filter_map(|(spelling, mut candidates)| {
+            if candidates.len() != 1 {
+                return None;
+            }
+            let (_, (display, byte_len)) = candidates.pop_first()?;
+            is_safe_relative_source(&display).then_some((spelling, (display, byte_len)))
         })
-        .map(|(candidate, contents)| (candidate.to_owned(), contents.len()))
-        .collect::<Vec<_>>();
-    matches.sort_by(|left, right| left.0.cmp(&right.0));
-    matches.dedup_by(|left, right| left.0 == right.0);
-    if matches.len() == 1 {
-        matches.pop().map_or(0, |(_, length)| length)
-    } else {
-        0
-    }
+        .collect()
 }
 
 /// Resolve non-member raw calls using unique definitions and import evidence.
@@ -5240,6 +5260,22 @@ mod tests {
             target: target.to_owned(),
             attributes,
         }
+    }
+
+    #[test]
+    fn javascript_resolution_indices_require_import_edges() {
+        let mut extraction = Extraction::default();
+        assert!(!has_javascript_import_edges(&extraction));
+
+        extraction
+            .edges
+            .push(edge("module", "member", "contains", "module.ts"));
+        assert!(!has_javascript_import_edges(&extraction));
+
+        extraction
+            .edges
+            .push(edge("module", "target", "imports_from", "module.ts"));
+        assert!(has_javascript_import_edges(&extraction));
     }
 
     #[test]

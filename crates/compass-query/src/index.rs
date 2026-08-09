@@ -152,6 +152,7 @@ fn open_from_graph_engine(
         partial_graph_message,
         engine_kind,
         search_query_cache: std::sync::Mutex::new(Default::default()),
+        fuzzy_lookup_cache: std::sync::Mutex::new(Default::default()),
     })
 }
 
@@ -194,6 +195,7 @@ fn open_from_local_store(
         partial_graph_message,
         engine_kind: QueryEngineKind::Store,
         search_query_cache: std::sync::Mutex::new(Default::default()),
+        fuzzy_lookup_cache: std::sync::Mutex::new(Default::default()),
     })
 }
 

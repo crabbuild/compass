@@ -202,7 +202,7 @@ compass query "<question>"
   [--graph PATH | --at REV]
 ```
 
-Clear symbol-search, callers, callees, impact, and source-to-target path
+Clear symbol-search, callers, callees, impact, and directed source-to-target path
 questions against the current typed graph use the bounded `compass.query/1`
 framework automatically. Generic or contradictory questions and historical
 `--at` queries retain relevance traversal. Pass `--traverse`, or any explicit
@@ -263,6 +263,8 @@ compass path "<source>" "<target>" [--graph PATH | --at REV]
 ```
 
 Renders a shortest known graph path while preserving relationship direction.
+If a route exists only by ignoring one or more edge directions, the typed response
+reports `direction_mismatch`; swap the operands to request that route.
 
 ### `explain`
 
@@ -552,10 +554,12 @@ Review targets before `--purge`.
 compass upgrade
 ```
 
-Downloads the latest stable Compass release for the current platform, verifies
-its SHA-256 checksum and reported version, then replaces the running executable.
-If the installed version is current or newer, the command exits successfully
-without changing it.
+Reads the bounded `compass.release/1` static manifest from the latest stable
+Compass release, downloads the exact immutable-tag archive for the current
+platform, verifies its declared size, SHA-256 digest, and reported version,
+then replaces the running executable. Release discovery does not use the
+rate-limited GitHub REST API. If the installed version is current or newer,
+the command exits successfully without changing it.
 
 ### `hook`
 

@@ -3,18 +3,17 @@ mod support;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
-use std::time::Instant;
 
 use compass_graph::{GraphSnapshotBuilder, canonical_graph_json};
 use compass_model::code_graph::GraphDocument;
 use compass_model::query_contract::{
-    CallRequest, CodeQueryLimits, CodeQueryOperation, CodeQueryResponse, NodeTrailRequest,
-    SearchRequest,
+    CallRequest, CodeQueryLimits, CodeQueryOperation, NodeTrailRequest, SearchRequest,
 };
 use compass_query::{
     EdgeIdentity, EdgeJudgment, IdJudgment, JudgedQuery, JudgmentCorpus, NaturalQueryRequest,
-    ObservedEdge, ObservedPath, PathJudgment, PathPattern, QUERY_PLANNER_PROFILE_V1, QueryClass,
-    QueryObservation, RelevanceError, WorkCounts, qualification_report, score,
+    ObservedEdge, ObservedPath, PathJudgment, PathPattern, ProfiledCodeQueryResponse,
+    QUERY_PLANNER_PROFILE_V1, QUERY_RANKER_PROFILE_V2, QueryClass, QueryObservation,
+    RelevanceError, WorkCounts, qualification_report, score,
 };
 use compass_query::{EngineSelection, open_with_engine};
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
@@ -26,6 +25,12 @@ fn corpus() -> Result<JudgmentCorpus, Box<dyn std::error::Error>> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/relevance/judged.json");
     let corpus = serde_json::from_slice::<JudgmentCorpus>(&fs::read(path)?)?;
     Ok(corpus)
+}
+
+fn executable_reviewed_corpus() -> Result<JudgmentCorpus, Box<dyn std::error::Error>> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/relevance/executable-reviewed-v2.json");
+    Ok(serde_json::from_slice::<JudgmentCorpus>(&fs::read(path)?)?)
 }
 
 fn observation(query: &compass_query::JudgedQuery, ordinal: u64) -> QueryObservation {
@@ -97,9 +102,9 @@ fn operation_intent(operation: CodeQueryOperation) -> &'static str {
 
 fn observe_execution(
     query_id: &str,
-    response: &CodeQueryResponse,
-    latency_micros: u64,
+    execution: &ProfiledCodeQueryResponse,
 ) -> Result<QueryObservation, Box<dyn std::error::Error>> {
+    let response = &execution.response;
     let edge_kinds = response
         .edges
         .iter()
@@ -115,6 +120,7 @@ fn observe_execution(
             .collect()
     };
     let response_bytes = u64::try_from(serde_json::to_vec(response)?.len())?;
+    assert_eq!(execution.profile.work.response_bytes, response_bytes);
     let mut slots = BTreeMap::from([(
         "operation".to_owned(),
         operation_intent(response.operation).to_owned(),
@@ -156,14 +162,8 @@ fn observe_execution(
             && response.nodes.is_empty()
             && response.edges.is_empty()
             && response.paths.is_empty(),
-        latency_micros: Some(latency_micros),
-        // The public query response exposes serialized response bytes, but not
-        // candidate/posting/expansion counters. Leave unavailable counters at
-        // zero rather than synthesizing implementation work.
-        work: WorkCounts {
-            response_bytes,
-            ..WorkCounts::default()
-        },
+        latency_micros: Some(execution.profile.timings.total_micros),
+        work: execution.profile.work.clone(),
     })
 }
 
@@ -171,6 +171,10 @@ fn executable_corpus(graph_digest: String) -> JudgmentCorpus {
     let node_judgment = |id: &str| IdJudgment {
         id: id.to_owned(),
         grade: 3,
+    };
+    let weak_node_judgment = |id: &str| IdJudgment {
+        id: id.to_owned(),
+        grade: 1,
     };
     let edge_judgment = |source: &str, target: &str, kind: &str| EdgeJudgment {
         edge: EdgeIdentity {
@@ -196,127 +200,195 @@ fn executable_corpus(graph_digest: String) -> JudgmentCorpus {
         must_not_return: Vec::new(),
         notes: None,
     };
-    let mut search_list = query(
-        "exec-search-list",
-        "find definition of UserService.list",
-        QueryClass::Exact,
-        "search",
-    );
-    search_list.node_judgments = vec![node_judgment("n:list")];
-    let mut search_unicode = query(
-        "exec-search-cafe",
-        "where is cafe defined",
-        QueryClass::Lexical,
-        "search",
-    );
-    search_unicode.node_judgments = vec![node_judgment("n:unicode")];
-    let mut callers = query(
-        "exec-callers",
-        "who calls UserService.list?",
-        QueryClass::Edge,
-        "callers",
-    );
-    callers.node_judgments = vec![
-        node_judgment("n:caller"),
-        node_judgment("n:list"),
-        node_judgment("n:route"),
-    ];
-    callers.edge_judgments = vec![
-        edge_judgment("n:caller", "n:list", "calls"),
-        edge_judgment("n:route", "n:list", "routes_to"),
-    ];
-    let mut callees = query(
-        "exec-callees",
-        "what does Api.caller call?",
-        QueryClass::Edge,
-        "callees",
-    );
-    callees.node_judgments = vec![node_judgment("n:caller"), node_judgment("n:list")];
-    callees.edge_judgments = vec![edge_judgment("n:caller", "n:list", "calls")];
-    let mut impact = query(
-        "exec-impact",
-        "what depends on Api.caller?",
+    let search = |id: &str, text: &str, class: QueryClass, expected: &str| {
+        let mut judged = query(id, text, class, "search");
+        judged.node_judgments = vec![node_judgment(expected)];
+        judged
+    };
+    let callers = |id: &str, text: &str| {
+        let mut judged = query(id, text, QueryClass::Edge, "callers");
+        judged.node_judgments = vec![
+            node_judgment("n:caller"),
+            node_judgment("n:list"),
+            node_judgment("n:route"),
+        ];
+        judged.edge_judgments = vec![
+            edge_judgment("n:caller", "n:list", "calls"),
+            edge_judgment("n:route", "n:list", "routes_to"),
+        ];
+        judged
+    };
+    let callees = |id: &str, text: &str| {
+        let mut judged = query(id, text, QueryClass::Edge, "callees");
+        judged.node_judgments = vec![node_judgment("n:caller"), node_judgment("n:list")];
+        judged.edge_judgments = vec![edge_judgment("n:caller", "n:list", "calls")];
+        judged
+    };
+    let impact = |id: &str, text: &str| {
+        let mut judged = query(id, text, QueryClass::Intent, "impact");
+        judged.node_judgments = vec![node_judgment("n:caller"), node_judgment("n:dependent")];
+        judged.edge_judgments = vec![edge_judgment("n:dependent", "n:caller", "imports")];
+        judged
+    };
+    let trail = |id: &str, text: &str| {
+        let mut judged = query(id, text, QueryClass::Path, "node_trail");
+        judged.node_judgments = vec![
+            node_judgment("n:caller"),
+            node_judgment("n:list"),
+            node_judgment("n:callee"),
+        ];
+        judged.edge_judgments = vec![
+            edge_judgment("n:caller", "n:list", "calls"),
+            edge_judgment("n:list", "n:callee", "calls"),
+        ];
+        judged.path_judgments = vec![PathJudgment {
+            pattern: PathPattern {
+                edge_kinds: vec!["calls".to_owned(), "calls".to_owned()],
+                endpoint_ids: vec!["n:caller".to_owned(), "n:callee".to_owned()],
+            },
+            grade: 3,
+        }];
+        judged
+    };
+    let mut ambiguous_charge = search(
+        "exec-search-charge",
+        "find charge",
         QueryClass::Intent,
-        "impact",
+        "n:z-payment-charge",
     );
-    impact.node_judgments = vec![node_judgment("n:caller"), node_judgment("n:dependent")];
-    impact.edge_judgments = vec![edge_judgment("n:dependent", "n:caller", "imports")];
-    let mut trail = query(
-        "exec-trail",
-        "path from Api.caller to Store.callee",
-        QueryClass::Path,
-        "node_trail",
+    ambiguous_charge
+        .node_judgments
+        .push(weak_node_judgment("n:a-generated-charge"));
+    ambiguous_charge.notes = Some(
+        "Reviewed production-shaped ambiguity: source implementation must rank above generated test code."
+            .to_owned(),
     );
-    trail.node_judgments = vec![
-        node_judgment("n:caller"),
-        node_judgment("n:list"),
-        node_judgment("n:callee"),
-    ];
-    trail.edge_judgments = vec![
-        edge_judgment("n:caller", "n:list", "calls"),
-        edge_judgment("n:list", "n:callee", "calls"),
-    ];
-    trail.path_judgments = vec![PathJudgment {
-        pattern: PathPattern {
-            edge_kinds: vec!["calls".to_owned(), "calls".to_owned()],
-            endpoint_ids: vec!["n:caller".to_owned(), "n:callee".to_owned()],
-        },
-        grade: 3,
-    }];
     let mut missing = query(
         "exec-missing",
         "find definitely_missing",
         QueryClass::Negative,
         "search",
     );
-    missing.notes = Some("Reviewed compact fixture no-answer case.".to_owned());
+    missing.notes = Some("Reviewed no-answer case.".to_owned());
+    let mut domain_missing = query(
+        "exec-domain-missing",
+        "search for kafkaConsumerLagMonitor",
+        QueryClass::Negative,
+        "search",
+    );
+    domain_missing.notes = Some("Reviewed unseen-domain no-answer case.".to_owned());
     JudgmentCorpus {
         schema: compass_query::QUERY_JUDGMENTS_SCHEMA_V1.to_owned(),
         corpus_id: "compass-query-executable-reviewed-v1".to_owned(),
         graph_schema: "compass.graph/1".to_owned(),
         graph_digest,
-        repository_revision: "crates/compass-query/tests/support@v1".to_owned(),
+        repository_revision: "crates/compass-query/tests/support@v2".to_owned(),
         analyzer_version: "compass.search-term/1".to_owned(),
         queries: vec![
-            search_list,
-            search_unicode,
-            callers,
-            callees,
-            impact,
-            trail,
+            search(
+                "exec-search-list",
+                "find definition of UserService.list",
+                QueryClass::Exact,
+                "n:list",
+            ),
+            search(
+                "exec-search-list-paraphrase",
+                "definition of UserService.list",
+                QueryClass::Intent,
+                "n:list",
+            ),
+            search(
+                "exec-search-cafe",
+                "where is cafe defined",
+                QueryClass::Lexical,
+                "n:unicode",
+            ),
+            search(
+                "exec-search-resume",
+                "search for resume",
+                QueryClass::Lexical,
+                "n:resume",
+            ),
+            search(
+                "exec-search-snake",
+                "find cache_key",
+                QueryClass::Exact,
+                "n:snake",
+            ),
+            search(
+                "exec-search-camel",
+                "show fetchUserRecord",
+                QueryClass::Exact,
+                "n:camel",
+            ),
+            search(
+                "exec-search-typo",
+                "find litsing",
+                QueryClass::Fuzzy,
+                "n:listing",
+            ),
+            ambiguous_charge,
+            search(
+                "exec-search-qualified-charge",
+                "find definition of PaymentGateway.charge",
+                QueryClass::Exact,
+                "n:z-payment-charge",
+            ),
+            callers("exec-callers", "who calls UserService.list?"),
+            callers(
+                "exec-callers-find-paraphrase",
+                "find callers of UserService.list",
+            ),
+            callers(
+                "exec-callers-where-paraphrase",
+                "where is UserService.list called?",
+            ),
+            callees("exec-callees", "what does Api.caller call?"),
+            callees(
+                "exec-callees-made-by-paraphrase",
+                "calls made by Api.caller",
+            ),
+            callees(
+                "exec-callees-invoke-paraphrase",
+                "what functions does Api.caller invoke?",
+            ),
+            impact("exec-impact", "what depends on Api.caller?"),
+            impact(
+                "exec-impact-breaks-paraphrase",
+                "what breaks if Api.caller changes?",
+            ),
+            impact("exec-impact-of-paraphrase", "impact of Api.caller"),
+            trail("exec-trail", "path from Api.caller to Store.callee"),
+            trail(
+                "exec-trail-shortest-paraphrase",
+                "shortest path from Api.caller to Store.callee",
+            ),
+            trail(
+                "exec-trail-reach-paraphrase",
+                "how does Api.caller reach Store.callee?",
+            ),
             missing,
+            domain_missing,
         ],
     }
 }
 
 fn execute_subset(
     engine: &compass_query::CodeQueryEngine,
+    corpus: &JudgmentCorpus,
 ) -> Result<Vec<QueryObservation>, Box<dyn std::error::Error>> {
-    let execute =
-        |id: &str, operation: &dyn Fn() -> Result<CodeQueryResponse, compass_query::QueryError>| {
-            let started = Instant::now();
-            let response = operation()?;
-            observe_execution(id, &response, u64::try_from(started.elapsed().as_micros())?)
-        };
     let natural = |question: &str| {
-        engine.query_natural(NaturalQueryRequest {
+        engine.query_natural_profiled(NaturalQueryRequest {
             question: question.to_owned(),
             include_heuristic: false,
             limits: CodeQueryLimits::default(),
         })
     };
-    [
-        ("exec-search-list", "find definition of UserService.list"),
-        ("exec-search-cafe", "where is cafe defined"),
-        ("exec-callers", "who calls UserService.list?"),
-        ("exec-callees", "what does Api.caller call?"),
-        ("exec-impact", "what depends on Api.caller?"),
-        ("exec-trail", "path from Api.caller to Store.callee"),
-        ("exec-missing", "find definitely_missing"),
-    ]
-    .into_iter()
-    .map(|(id, question)| execute(id, &|| natural(question)))
-    .collect()
+    corpus
+        .queries
+        .iter()
+        .map(|query| observe_execution(&query.id, &natural(&query.text)?))
+        .collect()
 }
 
 #[test]
@@ -440,18 +512,48 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
         &directory.path().join("json-cache"),
         EngineSelection::Json,
     )?;
-    let store_observations = execute_subset(&store)?;
-    let json_observations = execute_subset(&json)?;
-    let repeated_observations = execute_subset(&store)?;
+    let store_observations = execute_subset(&store, &corpus)?;
+    let json_observations = execute_subset(&json, &corpus)?;
+    let repeated_observations = execute_subset(&store, &corpus)?;
+    let charge_ranking = store.search(SearchRequest {
+        query: "charge".to_owned(),
+        limits: CodeQueryLimits::default(),
+    })?;
+    assert_eq!(
+        charge_ranking
+            .results
+            .first()
+            .map(|result| result.node_id.as_str()),
+        Some("n:z-payment-charge"),
+        "v2 must prefer source implementation over generated test ambiguity: results={:?}, nodes={:?}",
+        charge_ranking.results,
+        charge_ranking.nodes
+    );
     assert!(store_observations.iter().all(|observation| {
         observation.latency_micros.is_some() && observation.work.response_bytes > 0
     }));
-    assert!(store_observations.iter().all(|observation| {
-        observation.work.candidates_read == 0
-            && observation.work.postings_decoded == 0
-            && observation.work.nodes_expanded == 0
-            && observation.work.edges_expanded == 0
-    }));
+    let observed_work =
+        store_observations
+            .iter()
+            .fold(WorkCounts::default(), |mut total, observation| {
+                total.candidates_read = total
+                    .candidates_read
+                    .saturating_add(observation.work.candidates_read);
+                total.postings_decoded = total
+                    .postings_decoded
+                    .saturating_add(observation.work.postings_decoded);
+                total.nodes_expanded = total
+                    .nodes_expanded
+                    .saturating_add(observation.work.nodes_expanded);
+                total.edges_expanded = total
+                    .edges_expanded
+                    .saturating_add(observation.work.edges_expanded);
+                total
+            });
+    assert!(observed_work.candidates_read > 0);
+    assert!(observed_work.postings_decoded > 0);
+    assert!(observed_work.nodes_expanded > 0);
+    assert!(observed_work.edges_expanded > 0);
 
     let normalize_timing = |mut observations: Vec<QueryObservation>| {
         for observation in &mut observations {
@@ -485,11 +587,38 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
     let report = qualification_report(
         &corpus,
         &store_observations,
-        "code-query/1",
+        QUERY_RANKER_PROFILE_V2,
         QUERY_PLANNER_PROFILE_V1,
         "store",
         limits,
     )?;
+    let missed_top_results = corpus
+        .queries
+        .iter()
+        .zip(&store_observations)
+        .filter_map(|(query, observation)| {
+            let best_grade = query
+                .node_judgments
+                .iter()
+                .map(|judgment| judgment.grade)
+                .max()?;
+            let accepted = query
+                .node_judgments
+                .iter()
+                .filter(|judgment| judgment.grade == best_grade)
+                .map(|judgment| judgment.id.as_str())
+                .collect::<BTreeSet<_>>();
+            (!observation
+                .node_ids
+                .first()
+                .is_some_and(|id| accepted.contains(id.as_str())))
+            .then(|| (query.id.clone(), observation.node_ids.first().cloned()))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        missed_top_results.is_empty(),
+        "reviewed queries missed at rank 1: {missed_top_results:?}"
+    );
     assert_eq!(report.graph_digest, graph_digest);
     assert_eq!(report.metrics.success_at_1.value, Some(1.0));
     assert_eq!(report.metrics.intent_macro_f1.value, Some(1.0));
@@ -511,10 +640,14 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
             .is_some_and(f64::is_finite)
     );
     assert!(report.metrics.work.response_bytes > 0);
+    assert!(report.metrics.work.candidates_read > 0);
+    assert!(report.metrics.work.postings_decoded > 0);
+    assert!(report.metrics.work.nodes_expanded > 0);
+    assert!(report.metrics.work.edges_expanded > 0);
     let deterministic_report = qualification_report(
         &corpus,
         &deterministic_observations,
-        "code-query/1",
+        QUERY_RANKER_PROFILE_V2,
         QUERY_PLANNER_PROFILE_V1,
         "store",
         BTreeMap::from([
@@ -527,7 +660,7 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
         serde_json::to_vec(&qualification_report(
             &corpus,
             &deterministic_observations,
-            "code-query/1",
+            QUERY_RANKER_PROFILE_V2,
             QUERY_PLANNER_PROFILE_V1,
             "store",
             BTreeMap::from([
@@ -536,6 +669,151 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
             ]),
         )?)?
     );
+    Ok(())
+}
+
+#[test]
+fn five_hundred_reviewed_queries_execute_with_qualified_relevance_and_bounded_work()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let graph = GraphDocument::load(&graph_path)?;
+    let graph_digest = format!("sha256:{:x}", Sha256::digest(canonical_graph_json(&graph)?));
+    let corpus = executable_reviewed_corpus()?;
+    corpus.validate_graph_digest(&graph_digest)?;
+    assert_eq!(corpus.queries.len(), 500);
+
+    let class_counts =
+        corpus
+            .queries
+            .iter()
+            .fold(BTreeMap::<String, usize>::new(), |mut counts, query| {
+                *counts.entry(format!("{:?}", query.class)).or_default() += 1;
+                counts
+            });
+    assert_eq!(
+        class_counts,
+        BTreeMap::from([
+            ("Architecture".to_owned(), 30),
+            ("Edge".to_owned(), 120),
+            ("Exact".to_owned(), 80),
+            ("Fuzzy".to_owned(), 32),
+            ("Intent".to_owned(), 76),
+            ("Lexical".to_owned(), 72),
+            ("Negative".to_owned(), 40),
+            ("Path".to_owned(), 50),
+        ])
+    );
+    assert!(corpus.queries.iter().all(|query| {
+        query.locale.as_deref() == Some("en-US")
+            && query.notes.as_deref().is_some_and(|notes| {
+                notes.contains("AI-reviewed synthetic equivalence case")
+                    && notes.contains("not production telemetry")
+            })
+    }));
+    assert_eq!(
+        corpus
+            .queries
+            .iter()
+            .map(|query| query.text.as_str())
+            .collect::<BTreeSet<_>>()
+            .len(),
+        corpus.queries.len(),
+        "reviewed questions must be textually unique"
+    );
+
+    publish_snapshot(directory.path(), &graph_path)?;
+    let engine = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("store-cache"),
+        EngineSelection::Store,
+    )?;
+    let observations = execute_subset(&engine, &corpus)?;
+    let report = qualification_report(
+        &corpus,
+        &observations,
+        QUERY_RANKER_PROFILE_V2,
+        QUERY_PLANNER_PROFILE_V1,
+        "store",
+        BTreeMap::from([
+            (
+                "maxCandidates".to_owned(),
+                u64::from(CodeQueryLimits::default().max_candidates),
+            ),
+            (
+                "maxNodes".to_owned(),
+                u64::from(CodeQueryLimits::default().max_nodes),
+            ),
+        ]),
+    )?;
+    let misses = corpus
+        .queries
+        .iter()
+        .zip(&observations)
+        .filter_map(|(query, observation)| {
+            let exact = query
+                .node_judgments
+                .iter()
+                .filter(|judgment| judgment.grade == 3)
+                .map(|judgment| judgment.id.as_str())
+                .collect::<BTreeSet<_>>();
+            (!exact.is_empty()
+                && !observation
+                    .node_ids
+                    .first()
+                    .is_some_and(|id| exact.contains(id.as_str())))
+            .then(|| {
+                (
+                    query.id.as_str(),
+                    query.text.as_str(),
+                    observation.node_ids.first(),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    assert!(misses.is_empty(), "reviewed rank-1 misses: {misses:?}");
+    let recall_misses = corpus
+        .queries
+        .iter()
+        .zip(&observations)
+        .filter_map(|(query, observation)| {
+            let missing = query
+                .node_judgments
+                .iter()
+                .filter(|judgment| judgment.grade >= 2)
+                .filter(|judgment| {
+                    !observation
+                        .node_ids
+                        .iter()
+                        .take(5)
+                        .any(|id| id == &judgment.id)
+                })
+                .map(|judgment| judgment.id.as_str())
+                .collect::<Vec<_>>();
+            (!missing.is_empty()).then_some((query.id.as_str(), missing, &observation.node_ids))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        recall_misses.is_empty(),
+        "reviewed recall@5 misses: {recall_misses:?}"
+    );
+    assert_eq!(report.metrics.success_at_1.value, Some(1.0));
+    assert_eq!(report.metrics.recall_at_5.value, Some(1.0));
+    assert_eq!(report.metrics.intent_macro_f1.value, Some(1.0));
+    assert_eq!(report.metrics.entity_slot_exact_match.value, Some(1.0));
+    assert_eq!(report.metrics.edge_recall.value, Some(1.0));
+    assert_eq!(report.metrics.edge_direction_recall.value, Some(1.0));
+    assert_eq!(report.metrics.path_acceptance_rate.value, Some(1.0));
+    assert_eq!(report.metrics.no_answer_precision.value, Some(1.0));
+    assert_eq!(report.metrics.false_positive_rate.value, Some(0.0));
+    assert!(observations.iter().all(|observation| {
+        observation.work.candidates_read <= 128
+            && observation.work.nodes_expanded <= u64::from(CodeQueryLimits::default().max_nodes)
+            && observation.work.edges_expanded <= u64::from(CodeQueryLimits::default().max_edges)
+            && observation.work.response_bytes <= CodeQueryLimits::default().max_response_bytes
+    }));
     Ok(())
 }
 

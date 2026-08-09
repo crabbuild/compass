@@ -74,6 +74,19 @@ fn search_limits_are_enforced_before_sqlite_work() -> Result<(), Box<dyn std::er
     })?;
     assert_eq!(response.results.len(), 1);
     assert!(response.truncated);
+    let candidate_bounded = engine.search(SearchRequest {
+        query: "list".to_owned(),
+        limits: CodeQueryLimits {
+            max_candidates: 1,
+            ..CodeQueryLimits::default()
+        },
+    })?;
+    assert_eq!(candidate_bounded.results.len(), 1);
+    assert!(candidate_bounded.truncated);
+    assert!(candidate_bounded.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == QueryDiagnosticCode::BoundedTruncation
+            && diagnostic.message.contains("limited to 1 candidate")
+    }));
     assert!(
         engine
             .search(SearchRequest {

@@ -14,6 +14,7 @@ mod recall;
 mod relevance;
 mod score;
 mod source;
+mod telemetry;
 mod text;
 mod traversal;
 
@@ -31,16 +32,21 @@ pub use intent::{
     plan_natural_query,
 };
 pub use program_join::join_program_evidence;
+pub use ranking::QUERY_RANKER_PROFILE_V2;
 pub use relevance::{
     EdgeIdentity, EdgeJudgment, IdJudgment, IntentMetrics, JudgedQuery, JudgmentCorpus,
     MAX_JUDGMENTS_PER_QUERY, MAX_QUESTIONS, MAX_TEXT_BYTES, MetricValue, ObservedEdge,
     ObservedPath, PathJudgment, PathPattern, QUERY_JUDGMENTS_SCHEMA_V1,
     QUERY_QUALIFICATION_SCHEMA_V1, QualificationReport, QueryClass, QueryObservation,
-    RelevanceError, RelevanceMetrics, WorkCounts, qualification_report, score,
+    RelevanceError, RelevanceMetrics, qualification_report, score,
 };
 pub use score::{
     ProfiledQueryScores, QueryScores, ScoredNode, TEXT_RANKER_BM25_V1, TEXT_RANKER_FULL_SCAN_V1,
     TextRankProfile, find_node, pick_scored_endpoint, score_nodes, score_nodes_with_profile,
+};
+pub use telemetry::{
+    ProfiledCodeQueryResponse, QUERY_EXECUTION_PROFILE_V1, QueryExecutionProfile,
+    QueryStageTimings, WorkCounts,
 };
 pub use text::{normalize_context_filters, query_terms, sanitize_label, search_tokens};
 pub use traversal::{

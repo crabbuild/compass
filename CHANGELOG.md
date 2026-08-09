@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add a digest-pinned 500-question, AI-reviewed synthetic relevance matrix
+  covering all query classes, execute it in CI with strict ranking, recall,
+  intent, structural, no-answer, and work bounds, and keep its generated JSON
+  reproducible from reviewed equivalence classes. Complete bounded single-edit
+  fuzzy recovery for insertion and substitution typos, avoid mistaking
+  `caller`/`callee` symbol names for contradictory intent, and cache at most
+  512 immutable fuzzy name lookups per engine.
+
 - Add deterministic, bounded natural-language routing for symbol search,
   callers, callees, impact, and node trails through `compass ask`, clear
   `compass query` intents, and MCP `query_graph`. Generic, contradictory,
@@ -9,12 +17,38 @@
   while ambiguous symbols remain explicit instead of selecting an arbitrary
   candidate.
 
+- Reuse bounded alias, term, typo, and relation-seeded recall when resolving
+  structural query operands. Node trails now follow edge direction from source
+  to target and report `direction_mismatch` when a route exists only by
+  ignoring one or more edge directions.
+  Add a versioned profiled library response with intent, recall, ranking, and
+  execution timings plus real candidate, posting, expansion, and response-byte
+  work counts without changing the deterministic `compass.query/1` response.
+
+- Hard-cut typed symbol search to the deterministic `query-ranker/2`, add a
+  23-question executable relevance baseline with reviewed paraphrase,
+  production-versus-generated ambiguity, domain, and no-answer cases, and add
+  a bounded local redaction/review workflow for growing the corpus from
+  approved production query samples without network telemetry or automatic
+  judgment generation. Opt-in MCP query logs now cover typed natural queries,
+  use a versioned record, and stop at 16 MiB. Search now enforces
+  `maxCandidates` as the total recall-pool bound instead of silently inflating
+  it to `maxNodes`.
+
+- Make `compass upgrade` discover releases through a bounded, versioned static
+  release manifest instead of the unauthenticated GitHub REST API. Corporate
+  networks that share an outbound IP no longer consume GitHub's per-IP API
+  quota when checking for Compass updates; archive size, digest, target, tag,
+  and staged-binary validation remain fail-closed.
+
 - Route JavaScript and TypeScript production extraction through the registered
   universal semantic candidate, including source-backed declarations, imports,
   re-exports, calls, references, heritage, aliases, and framework route
   targets. The candidate is now the same deterministic path used by
   qualification fixtures, with universal provenance and cross-file resolution
-  preserved through cached and rebuilt graphs.
+  preserved through cached and rebuilt graphs. Preserve the pipeline's exact
+  repository-relative identity for universal framework facts so shallow source
+  paths are published instead of being mistaken for temporary-directory paths.
 
 ## 0.3.6 - 2026-08-06
 

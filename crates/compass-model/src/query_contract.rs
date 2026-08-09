@@ -227,6 +227,7 @@ pub struct QueryDiagnostic {
 pub enum QueryDiagnosticCode {
     NoMatch,
     AmbiguousMatch,
+    DirectionMismatch,
     UnresolvedHandler,
     IncompleteCoverage,
     StaleSourceDigest,

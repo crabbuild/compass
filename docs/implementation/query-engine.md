@@ -69,6 +69,11 @@ then run common Rust ranking and tie-breaking. Store prefix scans traverse the
 complete bounded posting range before retaining the smallest candidate IDs;
 the posting-chunk count cannot consume a node-candidate limit. Differential
 tests include more matching vocabulary entries than the public candidate bound.
+`maxCandidates` is the total multi-source recall-pool bound; it is never
+inflated to `maxNodes`. The default therefore ranks at most 20 recalled
+candidates, while `maxNodes` independently limits how many ranked nodes can be
+returned. The 100,000-node in-process ceiling exercises direct search and the
+natural-query planner in addition to callers, impact, and node trails.
 
 Each opened code-query engine keeps a 64-entry LRU cache of validated search
 preparations. The cache stores only bounded query terms and the derived FTS
@@ -84,6 +89,14 @@ channels produce too few candidates. Diacritic normalization is attempted when
 it changes the term, then adjacent transpositions are tried before deletions so
 the fixed three-variant budget prioritizes common spelling mistakes. Fuzzy
 candidates retain their explicit source penalty in `query-ranker/2`.
+`query-ranker/2` is now the unconditional typed-search ranker. The former
+runtime selection and v1 fallback have been removed, so equivalent inputs do
+not depend on process environment. The ranker combines lexical coverage,
+candidate provenance, evidence confidence, semantic node kind, and bounded
+ambiguity penalties. Production source receives a deterministic advantage over
+otherwise equal generated/test declarations. A frozen v1 implementation exists
+only in unit tests to prove the reviewed production-versus-generated case is a
+strict v2 improvement; it is not a runtime fallback.
 
 ## Natural-language intent routing
 
@@ -108,14 +121,32 @@ on the established relevance traversal. MCP `query_graph` uses the same routing
 rule for typed graphs unless a legacy `mode`, `depth`, `token_budget`, or
 `context_filter` field is present.
 
+Structural operand resolution uses the same bounded exact-ID, normalized-name,
+alias, term-posting, and typo recall assembly as search. Duplicate exact names
+remain ambiguous. For a non-exact operand, a candidate with unique evidence in
+the operation's required relationship role can resolve the operand; otherwise
+the engine returns `ambiguous_match` rather than selecting the top-ranked
+candidate. Relation probes are bounded by the request's candidate limit and a
+one-edge existence check per candidate.
+
+Node trails traverse published edges from source to target. When no directed
+path is found, one undirected probe using the remaining traversal budget
+distinguishes a true no-match from
+a route that requires traversing at least one edge backward. The latter returns
+`direction_mismatch` and publishes no
+path, preventing consumers from treating an inverted relationship as valid.
+
 ## Relevance qualification
 
-`crates/compass-query/tests/relevance_qualification.rs` separates the reviewed
-80-question synthetic corpus from a compact executable baseline. The larger
-corpus exercises the versioned judgment and metric contract without pretending
-that its synthetic identities can execute on a production graph. The executable
-subset sends natural-language questions through `query_natural` on the
-checked-in support graph, derives its canonical graph digest, and maps actual
+`crates/compass-query/tests/relevance_qualification.rs` keeps three evidence
+layers separate: an 80-question metric-contract fixture, a 500-question
+AI-reviewed synthetic executable matrix, and a 23-question production-shaped
+cross-backend subset. The 500 records cover every query class and send each
+natural-language question through `query_natural_profiled` on the digest-pinned
+support graph. They require exact rank-one and recall, intent/slot, directed
+edge/path, no-answer, and bounded-work thresholds. Their review notes explicitly
+state that they are synthetic and not production telemetry. The 23-question
+subset maps actual
 `CodeQueryResponse` values into ordered node IDs, directed edges, paths,
 truncation/no-answer state, measured latency, and serialized response bytes.
 JSON/store parity and repeated store execution must agree once timing is
@@ -124,12 +155,28 @@ normalized away.
 Run `python3 scripts/qualify_query_relevance.py` with an external
 `CARGO_TARGET_DIR`. The native gate evaluates Success@1, MRR, Recall@k, nDCG,
 intent macro-F1, edge direction, path acceptance, no-answer precision,
-backend parity, deterministic ordering, and latency percentiles. Only response
-bytes are directly observable work counts today; the harness records the other
-work fields as uninstrumented instead of fabricating candidate or posting work.
+backend parity, deterministic ordering, and latency percentiles. The separate
+`compass.query-execution-profile/1` envelope records intent, recall, ranking,
+execution, and total timing plus candidates read, postings decoded, nodes and
+edges expanded, and serialized response bytes. Ordinary `compass.query/1`
+responses contain no timing fields and remain byte-deterministic.
 The reviewed executable threshold block lives beside the test so a failure is
 local and deterministic. Updating its expected identities, graph digest, or
 minimums requires an intentional review rather than copying a new result.
+The generated 500-record artifact is checked against
+`scripts/generate_query_relevance_corpus.py --check` before execution. Fuzzy
+recall covers bounded adjacent transposition, deletion, insertion, and
+substitution variants (192 per eligible term and 256 per query), and a
+512-entry per-engine LRU caches immutable name-lookup results. The cache is
+keyed by normalized variant and result limit, so it cannot reuse an unbounded
+or differently truncated result.
+`scripts/prepare_query_relevance_review.py` turns approved local JSONL query
+logs into bounded, redacted, deterministic review candidates. It never sends
+data, invents expected results, or writes directly to the judgment corpus; a
+two-person review must bind every accepted question to an immutable graph
+revision and explicit expected identities. This supplies a safe feedback loop
+for unseen paraphrases and domain vocabulary without adding a runtime model,
+embedding service, or self-modifying ranker.
 
 ## Focused discovery path
 

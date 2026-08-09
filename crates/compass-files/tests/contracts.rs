@@ -777,6 +777,16 @@ fn build_guard_materializes_and_repairs_root_artifacts() -> Result<(), Box<dyn E
         fs::read_to_string(directory.path().join("graph.json"))?,
         "graph-one"
     );
+    fs::write(directory.path().join("graph.json"), "root-only-change")?;
+    assert_eq!(
+        fs::read_to_string(BuildGuard::resolve_artifact(
+            directory.path(),
+            "graph.json"
+        )?)?,
+        "graph-one",
+        "the conventional root copy must not share mutable storage with its immutable snapshot"
+    );
+    BuildGuard::publish_root_artifacts(directory.path(), &["graph.html", "graph.json"], true)?;
     assert_eq!(
         fs::read_to_string(directory.path().join("graph.html"))?,
         "html-one"

@@ -2,9 +2,12 @@ use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, CodeQueryResponse, ImpactRequest, NodeTrailRequest, SearchRequest,
 };
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 use crate::code_query::{CodeQueryEngine, validate_limits};
 use crate::cql::{QueryError, QueryErrorKind};
+use crate::ranking::QUERY_RANKER_PROFILE_V2;
+use crate::telemetry::{ProfiledCodeQueryResponse, QueryInstrumentation};
 
 pub const QUERY_PLANNER_PROFILE_V1: &str = "query-planner/1";
 const MAX_NATURAL_QUERY_BYTES: usize = 4_096;
@@ -69,31 +72,68 @@ impl CodeQueryEngine {
         &self,
         request: NaturalQueryRequest,
     ) -> Result<CodeQueryResponse, QueryError> {
+        self.execute_natural_query(request)
+            .map(|(response, _)| response)
+    }
+
+    pub fn query_natural_profiled(
+        &self,
+        request: NaturalQueryRequest,
+    ) -> Result<ProfiledCodeQueryResponse, QueryError> {
+        let total_started = Instant::now();
+        let (response, instrumentation) = self.execute_natural_query(request)?;
+        Ok(instrumentation.finish(
+            response,
+            total_started.elapsed(),
+            QUERY_PLANNER_PROFILE_V1,
+            QUERY_RANKER_PROFILE_V2,
+        ))
+    }
+
+    fn execute_natural_query(
+        &self,
+        request: NaturalQueryRequest,
+    ) -> Result<(CodeQueryResponse, QueryInstrumentation), QueryError> {
         validate_limits(&request.limits)?;
+        let mut instrumentation = QueryInstrumentation::default();
+        let intent_started = Instant::now();
         let plan = plan_natural_query(&request.question)?;
+        instrumentation.intent += intent_started.elapsed();
         let primary = plan.operands.first().cloned().unwrap_or_default();
-        match plan.intent {
-            NaturalQueryIntent::Search | NaturalQueryIntent::Fallback => {
-                self.search(SearchRequest {
+        let response = match plan.intent {
+            NaturalQueryIntent::Search | NaturalQueryIntent::Fallback => self.search_instrumented(
+                SearchRequest {
                     query: primary,
                     limits: request.limits,
-                })
-            }
-            NaturalQueryIntent::Callers => self.callers(CallRequest {
-                symbol: primary,
-                include_heuristic: request.include_heuristic,
-                limits: request.limits,
-            }),
-            NaturalQueryIntent::Callees => self.callees(CallRequest {
-                symbol: primary,
-                include_heuristic: request.include_heuristic,
-                limits: request.limits,
-            }),
-            NaturalQueryIntent::Impact => self.impact(ImpactRequest {
-                symbol: primary,
-                include_heuristic: request.include_heuristic,
-                limits: request.limits,
-            }),
+                },
+                &mut instrumentation,
+            ),
+            NaturalQueryIntent::Callers => self.call_neighbors_instrumented(
+                CallRequest {
+                    symbol: primary,
+                    include_heuristic: request.include_heuristic,
+                    limits: request.limits,
+                },
+                true,
+                &mut instrumentation,
+            ),
+            NaturalQueryIntent::Callees => self.call_neighbors_instrumented(
+                CallRequest {
+                    symbol: primary,
+                    include_heuristic: request.include_heuristic,
+                    limits: request.limits,
+                },
+                false,
+                &mut instrumentation,
+            ),
+            NaturalQueryIntent::Impact => self.impact_instrumented(
+                ImpactRequest {
+                    symbol: primary,
+                    include_heuristic: request.include_heuristic,
+                    limits: request.limits,
+                },
+                &mut instrumentation,
+            ),
             NaturalQueryIntent::NodeTrail => {
                 let target = plan.operands.get(1).cloned().ok_or_else(|| {
                     QueryError::new(
@@ -102,14 +142,18 @@ impl CodeQueryEngine {
                         "node-trail intent is missing its target operand",
                     )
                 })?;
-                self.node_trail(NodeTrailRequest {
-                    source: primary,
-                    target,
-                    include_heuristic: request.include_heuristic,
-                    limits: request.limits,
-                })
+                self.node_trail_instrumented(
+                    NodeTrailRequest {
+                        source: primary,
+                        target,
+                        include_heuristic: request.include_heuristic,
+                        limits: request.limits,
+                    },
+                    &mut instrumentation,
+                )
             }
-        }
+        }?;
+        Ok((response, instrumentation))
     }
 }
 
@@ -150,21 +194,6 @@ fn plan_validated_natural_query(question: &str) -> NaturalQueryPlan {
         return plan(NaturalQueryIntent::NodeTrail, 100, [source, target]);
     }
 
-    // Contradictory direction words are deliberately not resolved by choosing
-    // the first cue. Search is the safe fallback and can surface candidates.
-    // Explicit path syntax is parsed first because symbol names can themselves
-    // contain words such as `caller` and `callee`.
-    if (["caller", "callers"]
-        .iter()
-        .any(|word| contains_word(&lower, word))
-        && ["callee", "callees"]
-            .iter()
-            .any(|word| contains_word(&lower, word)))
-        || (contains_word(&lower, "incoming") && contains_word(&lower, "outgoing"))
-    {
-        return fallback_plan(original);
-    }
-
     for prefix in [
         "find callers of ",
         "show callers of ",
@@ -200,6 +229,21 @@ fn plan_validated_natural_query(question: &str) -> NaturalQueryPlan {
                 return plan(NaturalQueryIntent::Callees, 100, [symbol]);
             }
         }
+    }
+
+    // Contradictory direction words are deliberately not resolved by choosing
+    // the first cue. Search is the safe fallback and can surface candidates.
+    // Explicit structural syntax is parsed first because symbol operands can
+    // themselves contain words such as `caller` and `callee`.
+    if (["caller", "callers"]
+        .iter()
+        .any(|word| contains_word(&lower, word))
+        && ["callee", "callees"]
+            .iter()
+            .any(|word| contains_word(&lower, word)))
+        || (contains_word(&lower, "incoming") && contains_word(&lower, "outgoing"))
+    {
+        return fallback_plan(original);
     }
 
     for prefix in [
@@ -359,6 +403,10 @@ mod tests {
         );
         assert_eq!(
             planned("What does Api.caller call?")?,
+            (NaturalQueryIntent::Callees, vec!["Api.caller".to_owned()])
+        );
+        assert_eq!(
+            planned("Find callees of Api.caller")?,
             (NaturalQueryIntent::Callees, vec!["Api.caller".to_owned()])
         );
         assert_eq!(
