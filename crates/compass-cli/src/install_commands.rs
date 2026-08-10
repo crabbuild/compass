@@ -25,6 +25,8 @@ use self::request::{parse_install_request, resolve_scope};
 use crate::{Frontend, Outcome};
 
 const SKILL_VERSION: &str = env!("CARGO_PKG_VERSION");
+const OPENCODE_PLUGIN: &str = include_str!("../assets/compass-integrations/opencode-plugin.js");
+const KILO_PLUGIN: &str = include_str!("../assets/compass-integrations/kilo-plugin.js");
 const SKILL_ASSET: &str = "compass-skill/SKILL.md";
 const REFERENCE_BUNDLE: &str = "compass-skill";
 const PLATFORM_NAMES: &[&str] = &[
@@ -2653,50 +2655,72 @@ fn install_codex_hook(root: &Path, lines: &mut Vec<String>) -> Result<(), String
 
 fn install_opencode(root: &Path, lines: &mut Vec<String>) -> Result<(), String> {
     let config = root.join(".opencode/opencode.json");
-    let mut document = load_json_object(&config)?;
-    let entry = ".opencode/plugins/compass.js";
-    let plugins = document
-        .entry("plugin".to_owned())
-        .or_insert_with(|| Value::Array(Vec::new()));
-    let array = plugins.as_array_mut().ok_or_else(|| {
-        format!(
-            "error: {} field 'plugin' must be an array; file was not changed",
-            config.display()
-        )
-    })?;
-    if !array.iter().any(|value| value.as_str() == Some(entry)) {
-        array.push(Value::String(entry.to_owned()));
-    }
     let plugin = root.join(".opencode/plugins/compass.js");
+    preflight_plugin_array(&config)?;
+    preflight_managed_adapter(&plugin, OPENCODE_PLUGIN)?;
     write_managed_adapter(plugin, OPENCODE_PLUGIN)?;
-    lines.push("  .opencode/plugins/compass.js  ->  tool.execute.before hook written".to_owned());
-    write_json_object(config, &document)?;
-    lines.push("  .opencode/opencode.json  ->  plugin registered".to_owned());
+    lines.push(
+        "  .opencode/plugins/compass.js  ->  auto-discovered tool.execute.before hook written"
+            .to_owned(),
+    );
+    if remove_plugin_registrations(
+        &config,
+        &["./plugins/compass.js", ".opencode/plugins/compass.js"],
+    )? {
+        lines.push("  .opencode/opencode.json  ->  duplicate registration removed".to_owned());
+    }
     Ok(())
 }
 
 fn install_kilo_plugin(root: &Path, lines: &mut Vec<String>) -> Result<(), String> {
     let plugin = root.join(".kilo/plugins/compass.js");
     let config = root.join(".kilo/kilo.json");
-    let mut document = load_json_object(&config)?;
-    let plugins = document
-        .entry("plugin".to_owned())
-        .or_insert_with(|| Value::Array(Vec::new()));
+    preflight_plugin_array(&config)?;
+    preflight_managed_adapter(&plugin, KILO_PLUGIN)?;
+    write_managed_adapter(plugin.clone(), KILO_PLUGIN)?;
+    lines.push(
+        "  .kilo/plugins/compass.js  ->  auto-discovered tool.execute.before hook written"
+            .to_owned(),
+    );
+    let legacy_entry = legacy_kilo_plugin_entry(&plugin);
+    if remove_plugin_registrations(
+        &config,
+        &[
+            kilo_plugin_entry(),
+            legacy_entry.as_str(),
+            "file:./.kilo/plugins/compass.js",
+        ],
+    )? {
+        lines.push("  .kilo/kilo.json  ->  duplicate registration removed".to_owned());
+    }
+    Ok(())
+}
+
+fn remove_plugin_registrations(config: &Path, entries: &[&str]) -> Result<bool, String> {
+    if !config.is_file() {
+        return Ok(false);
+    }
+    let mut document = load_json_object(config)?;
+    let Some(plugins) = document.get_mut("plugin") else {
+        return Ok(false);
+    };
     let array = plugins.as_array_mut().ok_or_else(|| {
         format!(
             "error: {} field 'plugin' must be an array; file was not changed",
             config.display()
         )
     })?;
-    let entry = kilo_plugin_entry(&plugin);
-    if !array.iter().any(|value| value.as_str() == Some(&entry)) {
-        array.push(Value::String(entry));
+    let before = array.len();
+    array.retain(|value| value.as_str().is_none_or(|entry| !entries.contains(&entry)));
+    let changed = array.len() != before;
+    if !changed {
+        return Ok(false);
     }
-    write_managed_adapter(plugin.clone(), KILO_PLUGIN)?;
-    lines.push("  .kilo/plugins/compass.js  ->  tool.execute.before hook written".to_owned());
-    write_json_object(config, &document)?;
-    lines.push("  .kilo/kilo.json  ->  plugin registered".to_owned());
-    Ok(())
+    if array.is_empty() {
+        document.remove("plugin");
+    }
+    write_json_object(config.to_path_buf(), &document)?;
+    Ok(true)
 }
 
 fn finalize_antigravity(root: &Path, skill: &Path, lines: &mut Vec<String>) -> Result<(), String> {
@@ -2887,7 +2911,12 @@ fn remove_opencode(root: &Path, lines: &mut Vec<String>) {
     };
     if let Some(plugins) = document.get_mut("plugin").and_then(Value::as_array_mut) {
         let before = plugins.len();
-        plugins.retain(|value| value.as_str() != Some(".opencode/plugins/compass.js"));
+        plugins.retain(|value| {
+            !matches!(
+                value.as_str(),
+                Some("./plugins/compass.js" | ".opencode/plugins/compass.js")
+            )
+        });
         let changed = plugins.len() != before;
         let empty = plugins.is_empty();
         if empty {
@@ -2906,7 +2935,8 @@ fn remove_opencode(root: &Path, lines: &mut Vec<String>) {
 
 fn remove_kilo(root: &Path, lines: &mut Vec<String>) {
     let plugin = root.join(".kilo/plugins/compass.js");
-    let entry = kilo_plugin_entry(&plugin);
+    let entry = kilo_plugin_entry();
+    let legacy_entry = legacy_kilo_plugin_entry(&plugin);
     let existed = plugin.exists();
     let removed = remove_managed_adapter(
         &plugin,
@@ -2927,7 +2957,9 @@ fn remove_kilo(root: &Path, lines: &mut Vec<String>) {
     };
     if let Some(plugins) = document.get_mut("plugin").and_then(Value::as_array_mut) {
         let before = plugins.len();
-        plugins.retain(|value| value.as_str() != Some(&entry));
+        plugins.retain(|value| {
+            !matches!(value.as_str(), Some(candidate) if candidate == entry || candidate == legacy_entry || candidate == "file:./.kilo/plugins/compass.js")
+        });
         let changed = plugins.len() != before;
         let empty = plugins.is_empty();
         if empty {
@@ -2942,7 +2974,11 @@ fn remove_kilo(root: &Path, lines: &mut Vec<String>) {
     }
 }
 
-fn kilo_plugin_entry(plugin: &Path) -> String {
+fn kilo_plugin_entry() -> &'static str {
+    "./plugins/compass.js"
+}
+
+fn legacy_kilo_plugin_entry(plugin: &Path) -> String {
     let absolute = fs::canonicalize(plugin).unwrap_or_else(|_| plugin.to_path_buf());
     if cfg!(windows) {
         format!("file:///{}", absolute.to_string_lossy().replace('\\', "/"))
@@ -3968,29 +4004,7 @@ fn is_managed_compass_command(command: &str) -> bool {
 }
 
 fn compass_executable() -> String {
-    executable_on_path("compass")
-        .or_else(|| env::current_exe().ok())
-        .map(|path| path.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_else(|| "compass".to_owned())
-}
-
-fn executable_on_path(name: &str) -> Option<PathBuf> {
-    let path = env::var_os("PATH")?;
-    let extensions = if cfg!(windows) {
-        env::var("PATHEXT")
-            .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned())
-            .split(';')
-            .map(str::to_owned)
-            .collect::<Vec<_>>()
-    } else {
-        vec![String::new()]
-    };
-    env::split_paths(&path).find_map(|directory| {
-        extensions
-            .iter()
-            .map(|extension| directory.join(format!("{name}{extension}")))
-            .find(|candidate| candidate.is_file())
-    })
+    "compass".to_owned()
 }
 
 fn remove_dir_if_exists(path: &Path) -> Result<(), String> {
@@ -4072,11 +4086,8 @@ fn capitalize(value: &str) -> String {
     })
 }
 
-const DEVIN_RULES: &str = "## compass\n\nWhen `compass-out/graph.json` exists, use Compass as the first codebase navigation layer. If it is absent, ask before building it unless the current task requires a graph.\n\nRules:\n- For codebase or architecture questions, when `compass-out/graph.json` exists, first run `compass query \"<question>\"` (or `compass path \"<A>\" \"<B>\"` / `compass explain \"<concept>\"`). These return a scoped subgraph, usually much smaller than `GRAPH_REPORT.md` or raw grep output.\n- Set `--budget N` to fit available context. When query or explain reports `next=N`, repeat the unchanged command with `--page N`; reach `next=none` before exhaustive claims.\n- If compass-out/wiki/index.md exists, navigate it instead of reading raw files\n- Read compass-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context\n- After modifying code files in this session, run `compass update .` to keep the graph current (AST-only, no API cost)\n";
-const CURSOR_RULE: &str = "---\ndescription: compass knowledge graph context\nalwaysApply: true\n---\n\nWhen `compass-out/graph.json` exists, use Compass as the first codebase navigation layer. If it is absent, ask before building it unless the current task requires a graph.\n\n**When the graph exists, before using Read, Grep, Glob, or Bash to explore the codebase, run Compass first:**\n- `compass query \"<question>\"` — scoped subgraph for any codebase or architecture question\n- `compass path \"<A>\" \"<B>\"` — dependency path between two symbols\n- `compass explain \"<concept>\"` — all nodes related to a concept\n- Set `--budget N` to fit available context. When query or explain reports `next=N`, repeat the unchanged command with `--page N`; reach `next=none` before exhaustive claims.\n\nThis applies to you and to subagents doing code exploration. The graph surfaces cross-file dependencies and inferred edges that text search may miss.\n\nUse Read/Grep/Glob directly when:\n1. Compass has already oriented you and you need to modify or debug specific lines\n2. `compass-out/graph.json` does not exist yet\n\n- If `compass-out/wiki/index.md` exists, navigate it instead of reading raw files\n- Read `compass-out/GRAPH_REPORT.md` only for broad architecture review when query/path/explain do not surface enough context\n- After modifying code files, run `compass update .` to keep the graph current (AST-only, no API cost)\n";
-const OPENCODE_PLUGIN: &str = "// compass OpenCode plugin\n// Injects a knowledge graph reminder before bash tool calls when the graph exists.\n//\n// IMPORTANT: keep the reminder string free of backticks and $(...) constructs.\n// The hook prepends `echo \"<reminder>\" && <cmd>` to the user's bash command;\n// backticks inside the double-quoted echo trigger bash command substitution,\n// which both corrupts tool output and silently executes the very compass\n// command we are only suggesting. Plain words render fine in opencode's TUI.\nimport { existsSync } from \"fs\";\nimport { join } from \"path\";\n\nexport const CompassPlugin = async ({ directory }) => {\n  let reminded = false;\n\n  return {\n    \"tool.execute.before\": async (input, output) => {\n      if (reminded) return;\n      if (!existsSync(join(directory, \"compass-out\", \"graph.json\"))) return;\n\n      if (input.tool === \"bash\") {\n        // ';' not '&&' — Windows PowerShell 5.1 rejects '&&' as a statement\n        // separator, breaking the first bash command of the session (#1646).\n        output.args.command =\n          'echo \"[compass] knowledge graph at compass-out/. For focused questions, run compass query with your question (scoped subgraph, usually much smaller than GRAPH_REPORT.md) instead of grepping raw files. Read GRAPH_REPORT.md only for broad architecture context.\" ; ' +\n          output.args.command;\n        reminded = true;\n      }\n    },\n  };\n};\n";
-const KILO_PLUGIN: &str = "// compass Kilo plugin\n// Injects a knowledge graph reminder before bash tool calls when the graph exists.\nimport { existsSync } from \"fs\";\nimport { join } from \"path\";\n\nexport const CompassPlugin = async ({ directory }) => {\n  let reminded = false;\n\n  return {\n    \"tool.execute.before\": async (input, output) => {\n      if (reminded) return;\n      if (!existsSync(join(directory, \"compass-out\", \"graph.json\"))) return;\n\n      if (input.tool === \"bash\") {\n        // Separate with ';' not '&&' — Windows PowerShell 5.1 rejects '&&' as a\n        // statement separator (\"not a valid statement separator\"), which broke\n        // the first bash command in every OpenCode session on Windows (#1646).\n        // ';' works in PowerShell 5.1, Bash, and POSIX shells alike.\n        output.args.command =\n          'echo \"[compass] Knowledge graph available. Read compass-out/GRAPH_REPORT.md for god nodes and architecture context before searching files.\" ; ' +\n          output.args.command;\n        reminded = true;\n      }\n    },\n  };\n};\n";
-
+const DEVIN_RULES: &str = include_str!("../assets/compass-integrations/agents-md.md");
+const CURSOR_RULE: &str = include_str!("../assets/compass-integrations/agents-md.md");
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4110,14 +4121,14 @@ mod tests {
         );
         assert!(body.contains("references/query.md"));
         assert!(body.contains("compass query"));
-        assert!(body.contains("--budget N"));
+        assert!(body.contains("--text-budget"));
         assert!(body.contains("next=none"));
         let openai_metadata = asset_text("compass-skill/agents/openai.yaml").unwrap_or_default();
         assert!(openai_metadata.contains("display_name: \"Compass\""));
         assert!(openai_metadata.contains("$compass"));
         let query = asset_text("compass-skill/references/query.md").unwrap_or_default();
-        assert!(query.contains("4,000–16,000 tokens"));
-        assert!(query.contains("--page N"));
+        assert!(query.contains("--text-budget"));
+        assert!(query.contains("--cursor <TOKEN>"));
         assert!(query.contains("additional pages remain"));
         for adapter in [
             "compass-integrations/agents-md.md",
@@ -4128,13 +4139,15 @@ mod tests {
             "compass-integrations/vscode-instructions.md",
         ] {
             let adapter = asset_text(adapter).unwrap_or_default();
-            assert!(adapter.contains("--budget N"));
-            assert!(adapter.contains("--page N"));
+            assert!(adapter.contains("compass init"));
+            assert!(adapter.contains("compass watch"));
+            assert!(adapter.contains("--cursor"));
             assert!(adapter.contains("next=none"));
         }
         for adapter in [DEVIN_RULES, CURSOR_RULE] {
-            assert!(adapter.contains("--budget N"));
-            assert!(adapter.contains("--page N"));
+            assert!(adapter.contains("compass init"));
+            assert!(adapter.contains("compass watch"));
+            assert!(adapter.contains("--cursor"));
             assert!(adapter.contains("next=none"));
         }
         assert!(!body.contains("python -m"), "stale token python -m");

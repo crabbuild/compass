@@ -1,6 +1,9 @@
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
-use compass_model::{Graph, NodeIndex};
+use compass_model::query_contract::{
+    DiscoveryLimits, MAX_DISCOVERY_EDGES, MAX_DISCOVERY_EXPANDED_RELATIONSHIPS, MAX_DISCOVERY_NODES,
+};
+use compass_model::{EdgeIndex, Graph, NodeIndex};
 use serde_json::{Map, Value};
 use thiserror::Error;
 
@@ -22,6 +25,40 @@ pub const DEFAULT_TEXT_TOKEN_BUDGET: usize = 2_000;
 pub struct TextPageOptions {
     pub token_budget: usize,
     pub page: usize,
+}
+
+#[derive(Clone, Debug)]
+struct NaturalQueryAssembly {
+    seeds: Vec<NodeIndex>,
+    nodes: HashSet<NodeIndex>,
+    edges: Vec<NaturalQueryEdge>,
+    contexts: Vec<String>,
+    context_source: Option<&'static str>,
+    equally_ranked_seed_candidates: usize,
+    expanded_relationships: u64,
+    omitted_edges: Option<u64>,
+    truncated: bool,
+    candidates_truncated: bool,
+}
+
+#[derive(Clone, Debug)]
+struct TraversalSelection {
+    nodes: HashSet<NodeIndex>,
+    edges: Vec<NaturalQueryEdge>,
+    expanded_relationships: u64,
+    omitted_edges: Option<u64>,
+    truncated: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NaturalQueryEdge {
+    graph_order: EdgeIndex,
+    id: Option<String>,
+    source: NodeIndex,
+    target: NodeIndex,
+    kind: String,
+    occurrence: Option<String>,
+    site: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -113,10 +150,9 @@ pub fn query_graph_text_page_with_profile(
         rank_profile: profile,
     } = options;
     validate_pagination(token_budget, page)?;
-    let terms = query_terms(question);
-    let profiled_scores = score_nodes_with_profile(graph, &terms, true, profile);
-    let seeds = pick_seeds(graph, &profiled_scores.scores, 3, 0.2);
-    if seeds.is_empty() {
+    let (assembly, candidates_truncated) =
+        assemble_natural_query(graph, question, mode, depth, explicit_contexts, profile);
+    let Some(assembly) = assembly else {
         return if page == 1 {
             if profile == TextRankProfile::FullScanV1 {
                 Ok("No matching nodes found.".to_owned())
@@ -124,7 +160,7 @@ pub fn query_graph_text_page_with_profile(
                 Ok(format!(
                     "No matching nodes found. Ranker: {}. Candidate retrieval: {}.",
                     profile.as_str(),
-                    retrieval_state(profiled_scores.candidates_truncated)
+                    retrieval_state(candidates_truncated)
                 ))
             }
         } else {
@@ -133,46 +169,58 @@ pub fn query_graph_text_page_with_profile(
                 last: 1,
             })
         };
-    }
-    let normalized = normalize_context_filters(explicit_contexts);
-    let (contexts, source) = if normalized.is_empty() {
-        let inferred = infer_context_filters(question);
-        let source = (!inferred.is_empty()).then_some("heuristic");
-        (inferred, source)
-    } else {
-        (normalized, Some("explicit"))
     };
-    let filtered = graph.with_edge_contexts(&contexts);
-    let (nodes, edges) = match mode {
-        TraversalMode::Bfs => bfs(&filtered, &seeds, depth),
-        TraversalMode::Dfs => dfs(&filtered, &seeds, depth),
-    };
-    let labels = seeds
+    let filtered = graph.with_edge_contexts(&assembly.contexts);
+    let labels = assembly
+        .seeds
         .iter()
         .map(|&node| format!("'{}'", graph.node(node).label()))
         .collect::<Vec<_>>()
         .join(", ");
     let mut header = vec![
         format!("Traversal: {} depth={depth}", mode.upper()),
+        "Direction: both (neutral)".to_owned(),
+        format!(
+            "Ambiguity: {} equally ranked top candidate(s)",
+            assembly.equally_ranked_seed_candidates
+        ),
         format!("Start: [{labels}]"),
     ];
     if profile != TextRankProfile::FullScanV1 {
         header.push(format!("Ranker: {}", profile.as_str()));
         header.push(format!(
             "Candidate retrieval: {}",
-            retrieval_state(profiled_scores.candidates_truncated)
+            retrieval_state(assembly.candidates_truncated)
         ));
     }
-    if !contexts.is_empty() {
+    if !assembly.contexts.is_empty() {
         header.push(format!(
             "Context: {} ({})",
-            contexts.join(", "),
-            source.unwrap_or("explicit")
+            assembly.contexts.join(", "),
+            assembly.context_source.unwrap_or("explicit")
         ));
     }
-    header.push(format!("{} nodes found", nodes.len()));
+    header.push(if assembly.truncated {
+        format!(
+            "Completion: bounded after {} relationship expansions",
+            assembly.expanded_relationships
+        )
+    } else {
+        "Completion: complete".to_owned()
+    });
+    header.push(match assembly.omitted_edges {
+        Some(omitted) => format!("Omitted edges: {omitted}"),
+        None => "Omitted edges: unknown (work bound reached)".to_owned(),
+    });
+    header.push(format!("{} nodes found", assembly.nodes.len()));
     let header = header.join(" | ");
-    let lines = render_subgraph_lines(&filtered, &nodes, &edges, &seeds, overlay);
+    let lines = render_subgraph_lines(
+        &filtered,
+        &assembly.nodes,
+        &assembly.edges,
+        &assembly.seeds,
+        overlay,
+    );
     let page = render_paginated_lines(
         &lines,
         token_budget,
@@ -181,6 +229,61 @@ pub fn query_graph_text_page_with_profile(
         "facts",
     )?;
     Ok(format!("{header}\n\n{page}"))
+}
+
+fn assemble_natural_query(
+    graph: &Graph,
+    question: &str,
+    mode: TraversalMode,
+    depth: usize,
+    explicit_contexts: &[String],
+    profile: TextRankProfile,
+) -> (Option<NaturalQueryAssembly>, bool) {
+    let terms = query_terms(question);
+    let profiled_scores = score_nodes_with_profile(graph, &terms, true, profile);
+    let candidates_truncated = profiled_scores.candidates_truncated;
+    let scores = profiled_scores.scores;
+    let max_seeds = usize::try_from(DiscoveryLimits::default().max_seeds).unwrap_or(usize::MAX);
+    let equally_ranked_seed_candidates = scores.ranked.first().map_or(0, |first| {
+        scores
+            .ranked
+            .iter()
+            .take_while(|candidate| candidate.score.total_cmp(&first.score).is_eq())
+            .count()
+    });
+    let mut seeds = pick_seeds(graph, &scores, max_seeds, 0.2);
+    seeds.truncate(max_seeds);
+    if seeds.is_empty() {
+        return (None, candidates_truncated);
+    }
+    let normalized = normalize_context_filters(explicit_contexts);
+    let (contexts, context_source) = if normalized.is_empty() {
+        let inferred = infer_context_filters(question);
+        let source = (!inferred.is_empty()).then_some("heuristic");
+        (inferred, source)
+    } else {
+        (normalized, Some("explicit"))
+    };
+    let filtered = graph.with_edge_contexts(&contexts);
+    let selection = match mode {
+        TraversalMode::Bfs => bfs(&filtered, &seeds, depth),
+        TraversalMode::Dfs => dfs(&filtered, &seeds, depth),
+    };
+    (
+        Some(NaturalQueryAssembly {
+            seeds,
+            nodes: selection.nodes,
+            edges: selection.edges,
+            contexts,
+            context_source,
+            equally_ranked_seed_candidates,
+            expanded_relationships: selection.expanded_relationships,
+            omitted_edges: selection.omitted_edges,
+            truncated: selection.truncated,
+            candidates_truncated,
+        }),
+        candidates_truncated,
+    )
 }
 
 fn retrieval_state(truncated: bool) -> &'static str {
@@ -507,44 +610,61 @@ fn render_ambiguity_page(
     Ok(format!("{header}\n{rendered}\n{footer}"))
 }
 
-fn bfs(
-    graph: &Graph,
-    starts: &[NodeIndex],
-    depth: usize,
-) -> (HashSet<NodeIndex>, Vec<(NodeIndex, NodeIndex)>) {
+fn bfs(graph: &Graph, starts: &[NodeIndex], depth: usize) -> TraversalSelection {
     let threshold = hub_threshold(graph);
     let seeds = starts.iter().copied().collect::<HashSet<_>>();
     let mut visited = seeds.clone();
     let mut frontier = starts.iter().copied().collect::<BTreeSet<_>>();
-    let mut edges = Vec::new();
+    let mut expanded_relationships = 0_u64;
+    let mut truncated = false;
+    let max_nodes = usize::try_from(MAX_DISCOVERY_NODES).unwrap_or(usize::MAX);
     for _ in 0..depth {
         let mut next = BTreeSet::new();
         for node in frontier {
             if !seeds.contains(&node) && graph.degree(node) >= threshold {
                 continue;
             }
-            for neighbor in graph.successors(node) {
-                if !visited.contains(&neighbor) {
+            for relationship in incident_relationships(graph, node) {
+                if expanded_relationships >= MAX_DISCOVERY_EXPANDED_RELATIONSHIPS {
+                    truncated = true;
+                    break;
+                }
+                expanded_relationships = expanded_relationships.saturating_add(1);
+                let neighbor = if relationship.source == node {
+                    relationship.target
+                } else {
+                    relationship.source
+                };
+                if !visited.contains(&neighbor) && !next.contains(&neighbor) {
+                    if visited.len().saturating_add(next.len()) >= max_nodes {
+                        truncated = true;
+                        continue;
+                    }
                     next.insert(neighbor);
-                    edges.push((node, neighbor));
                 }
             }
         }
         visited.extend(next.iter().copied());
         frontier = next;
     }
-    (visited, edges)
+    let collection = collect_selected_relationships(graph, &visited, expanded_relationships);
+    TraversalSelection {
+        nodes: visited,
+        edges: collection.edges,
+        expanded_relationships: collection.expanded_relationships,
+        omitted_edges: collection.omitted_edges,
+        truncated: truncated || collection.truncated,
+    }
 }
 
-fn dfs(
-    graph: &Graph,
-    starts: &[NodeIndex],
-    depth: usize,
-) -> (HashSet<NodeIndex>, Vec<(NodeIndex, NodeIndex)>) {
+fn dfs(graph: &Graph, starts: &[NodeIndex], depth: usize) -> TraversalSelection {
     let threshold = hub_threshold(graph);
     let seeds = starts.iter().copied().collect::<HashSet<_>>();
     let mut visited = HashSet::new();
-    let mut edges = Vec::new();
+    let mut discovered = seeds.clone();
+    let mut expanded_relationships = 0_u64;
+    let mut truncated = false;
+    let max_nodes = usize::try_from(MAX_DISCOVERY_NODES).unwrap_or(usize::MAX);
     let mut stack = starts
         .iter()
         .rev()
@@ -554,18 +674,134 @@ fn dfs(
         if visited.contains(&node) || current_depth > depth {
             continue;
         }
-        visited.insert(node);
-        if !seeds.contains(&node) && graph.degree(node) >= threshold {
+        if visited.len() >= max_nodes {
+            truncated = true;
             continue;
         }
-        for neighbor in graph.successors(node) {
-            if !visited.contains(&neighbor) {
+        visited.insert(node);
+        if current_depth >= depth || (!seeds.contains(&node) && graph.degree(node) >= threshold) {
+            continue;
+        }
+        for relationship in incident_relationships(graph, node) {
+            if expanded_relationships >= MAX_DISCOVERY_EXPANDED_RELATIONSHIPS {
+                truncated = true;
+                break;
+            }
+            expanded_relationships = expanded_relationships.saturating_add(1);
+            let neighbor = if relationship.source == node {
+                relationship.target
+            } else {
+                relationship.source
+            };
+            if !visited.contains(&neighbor) && !discovered.contains(&neighbor) {
+                if discovered.len() >= max_nodes {
+                    truncated = true;
+                    continue;
+                }
+                discovered.insert(neighbor);
                 stack.push((neighbor, current_depth + 1));
-                edges.push((node, neighbor));
             }
         }
     }
-    (visited, edges)
+    let collection = collect_selected_relationships(graph, &visited, expanded_relationships);
+    TraversalSelection {
+        nodes: visited,
+        edges: collection.edges,
+        expanded_relationships: collection.expanded_relationships,
+        omitted_edges: collection.omitted_edges,
+        truncated: truncated || collection.truncated,
+    }
+}
+
+struct RelationshipCollection {
+    edges: Vec<NaturalQueryEdge>,
+    expanded_relationships: u64,
+    omitted_edges: Option<u64>,
+    truncated: bool,
+}
+
+fn collect_selected_relationships(
+    graph: &Graph,
+    selected_nodes: &HashSet<NodeIndex>,
+    mut expanded_relationships: u64,
+) -> RelationshipCollection {
+    let max_edges = usize::try_from(MAX_DISCOVERY_EDGES).unwrap_or(usize::MAX);
+    let mut edges = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut omitted = 0_u64;
+    let mut complete = true;
+    let mut nodes = selected_nodes.iter().copied().collect::<Vec<_>>();
+    nodes.sort_unstable();
+    'nodes: for node in nodes {
+        for graph_order in graph.outgoing_edges(node) {
+            if !seen.insert(graph_order) {
+                continue;
+            }
+            if expanded_relationships >= MAX_DISCOVERY_EXPANDED_RELATIONSHIPS {
+                complete = false;
+                break 'nodes;
+            }
+            expanded_relationships = expanded_relationships.saturating_add(1);
+            let Some((source, target)) = graph.edge_endpoints(graph_order) else {
+                continue;
+            };
+            if !selected_nodes.contains(&source) || !selected_nodes.contains(&target) {
+                continue;
+            }
+            if edges.len() >= max_edges {
+                omitted = omitted.saturating_add(1);
+                continue;
+            }
+            if let Some(edge) = natural_query_edge(graph, graph_order) {
+                edges.push(edge);
+            }
+        }
+    }
+    RelationshipCollection {
+        edges,
+        expanded_relationships,
+        omitted_edges: complete.then_some(omitted),
+        truncated: !complete || omitted > 0,
+    }
+}
+
+fn incident_relationships(graph: &Graph, node: NodeIndex) -> Vec<NaturalQueryEdge> {
+    let edge_indexes = graph
+        .outgoing_edges(node)
+        .chain(graph.incoming_edges(node))
+        .collect::<BTreeSet<_>>();
+    edge_indexes
+        .into_iter()
+        .filter_map(|graph_order| natural_query_edge(graph, graph_order))
+        .collect()
+}
+
+fn natural_query_edge(graph: &Graph, graph_order: EdgeIndex) -> Option<NaturalQueryEdge> {
+    let (source, target) = graph.edge_endpoints(graph_order)?;
+    let edge = graph.edge(graph_order);
+    let stored_id = {
+        let id = edge.string("id");
+        if id.is_empty() {
+            edge.string("key")
+        } else {
+            id
+        }
+    };
+    let occurrence = edge
+        .attributes
+        .get("occurrenceRule")
+        .or_else(|| edge.attributes.get("occurrence_rule"))
+        .map(Value::to_string);
+    let site = formatted_site(&edge.string("source_file"), &edge.string("source_location"));
+    Some(NaturalQueryEdge {
+        graph_order,
+        id: (!stored_id.is_empty()).then_some(stored_id),
+        source,
+        target,
+        kind: edge.string("relation"),
+        occurrence,
+        site: (!site.is_empty()).then_some(site),
+    })
 }
 
 fn hub_threshold(graph: &Graph) -> usize {
@@ -584,7 +820,7 @@ fn hub_threshold(graph: &Graph) -> usize {
 fn render_subgraph_lines(
     graph: &Graph,
     nodes: &HashSet<NodeIndex>,
-    edges: &[(NodeIndex, NodeIndex)],
+    edges: &[NaturalQueryEdge],
     seeds: &[NodeIndex],
     overlay: &HashMap<String, Map<String, Value>>,
 ) -> Vec<String> {
@@ -644,34 +880,43 @@ fn render_subgraph_lines(
             learning.unwrap_or_default()
         ));
     }
-    for &(source, target) in edges {
+    for relationship in edges {
+        let source = relationship.source;
+        let target = relationship.target;
         if !nodes.contains(&source) || !nodes.contains(&target) {
             continue;
         }
-        let Some(edge_index) = graph.edge_between(source, target) else {
-            continue;
-        };
-        let edge = graph.edge(edge_index);
+        let edge = graph.edge(relationship.graph_order);
         let context = edge.string("context");
         let context = if context.is_empty() {
             String::new()
         } else {
             format!(" context={}", sanitize_label(&context))
         };
-        let site = formatted_site(&edge.string("source_file"), &edge.string("source_location"));
-        let site = if site.is_empty() {
-            String::new()
-        } else {
-            format!(" at={}", sanitize_label(&site))
-        };
+        let site = relationship
+            .site
+            .as_ref()
+            .map_or_else(String::new, |site| format!(" at={}", sanitize_label(site)));
+        let identity = relationship.id.as_ref().map_or_else(
+            || format!(" order={}", relationship.graph_order),
+            |id| format!(" id={}", sanitize_label(id)),
+        );
+        let occurrence = relationship
+            .occurrence
+            .as_ref()
+            .map_or_else(String::new, |occurrence| {
+                format!(" occurrence={}", sanitize_label(occurrence))
+            });
         lines.push(format!(
-            "EDGE {} --{} [{}{}]--> {}{}",
+            "EDGE {} --{} [{}{}]--> {}{}{}{}",
             sanitize_label(graph.node(source).label()),
-            sanitize_label(&edge.string("relation")),
+            sanitize_label(&relationship.kind),
             sanitize_label(&edge.string("confidence")),
             context,
             sanitize_label(graph.node(target).label()),
-            site
+            site,
+            identity,
+            occurrence,
         ));
     }
     lines
@@ -706,13 +951,12 @@ fn rendered_file_type(node: &compass_model::NodeRecord) -> String {
 fn contextual_wiring_site(
     graph: &Graph,
     node: NodeIndex,
-    edges: &[(NodeIndex, NodeIndex)],
+    edges: &[NaturalQueryEdge],
 ) -> Option<String> {
     edges
         .iter()
-        .filter(|(source, target)| *source == node || *target == node)
-        .filter_map(|(source, target)| graph.edge_between(*source, *target))
-        .map(|edge| graph.edge(edge))
+        .filter(|edge| edge.source == node || edge.target == node)
+        .map(|edge| graph.edge(edge.graph_order))
         .map(|edge| formatted_site(&edge.string("source_file"), &edge.string("source_location")))
         .filter(|site| !site.is_empty())
         .min()
@@ -852,5 +1096,76 @@ fn json_string(value: Option<&Value>) -> String {
         Some(Value::Bool(value)) => if *value { "True" } else { "False" }.to_owned(),
         Some(Value::Number(value)) => value.to_string(),
         Some(value) => value.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use compass_model::{Graph, GraphDocument};
+    use serde_json::json;
+
+    use super::dfs;
+
+    #[test]
+    fn dfs_edges_always_reference_visited_nodes_at_depth_cap()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let document = serde_json::from_value::<GraphDocument>(json!({
+            "directed": true,
+            "multigraph": true,
+            "graph": {},
+            "nodes": [
+                {"id": "seed", "label": "seed"},
+                {"id": "depth-one", "label": "depth one"},
+                {"id": "depth-two", "label": "depth two"}
+            ],
+            "links": [
+                {"source": "seed", "target": "depth-one", "relation": "calls"},
+                {"source": "depth-one", "target": "depth-two", "relation": "calls"}
+            ]
+        }))?;
+        let graph = Graph::from_document(document)?;
+        let seed = graph
+            .node_index("seed")
+            .ok_or_else(|| std::io::Error::other("seed must exist in test graph"))?;
+        let selection = dfs(&graph, &[seed], 1);
+        assert!(selection.edges.iter().all(|edge| {
+            selection.nodes.contains(&edge.source) && selection.nodes.contains(&edge.target)
+        }));
+        assert_eq!(selection.nodes.len(), 2);
+        assert_eq!(selection.edges.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn final_edge_cap_reports_exact_parallel_omissions() -> Result<(), Box<dyn std::error::Error>> {
+        let links = (0..1_002)
+            .map(|index| {
+                json!({
+                    "source": "seed",
+                    "target": "boundary",
+                    "relation": "calls",
+                    "occurrenceRule": format!("parallel-{index:04}")
+                })
+            })
+            .collect::<Vec<_>>();
+        let document = serde_json::from_value::<GraphDocument>(json!({
+            "directed": true,
+            "multigraph": true,
+            "graph": {},
+            "nodes": [
+                {"id": "seed", "label": "seed"},
+                {"id": "boundary", "label": "boundary"}
+            ],
+            "links": links
+        }))?;
+        let graph = Graph::from_document(document)?;
+        let seed = graph
+            .node_index("seed")
+            .ok_or_else(|| std::io::Error::other("seed must exist in test graph"))?;
+        let selection = super::bfs(&graph, &[seed], 1);
+        assert_eq!(selection.edges.len(), 1_000);
+        assert_eq!(selection.omitted_edges, Some(2));
+        assert!(selection.truncated);
+        Ok(())
     }
 }

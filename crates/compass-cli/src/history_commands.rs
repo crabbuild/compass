@@ -89,6 +89,28 @@ pub(crate) fn load_graph_at(
     LoadedGraph::from_document(document, force_directed).map_err(|error| error.to_string())
 }
 
+pub(crate) fn load_typed_graph_at(
+    revision: &str,
+) -> Result<(RealizationId, compass_model::code_graph::GraphDocument), String> {
+    let repository =
+        Repository::discover(&std::env::current_dir().map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?;
+    let commit = repository
+        .resolve(revision)
+        .map_err(|error| error.to_string())?;
+    let options = configured_build_options(&repository)?;
+    let (history, preferred) = resolve_or_materialize(&repository, commit, &options, false, false)?;
+    let realization = preferred.id;
+    let reader = history
+        .reader(&realization)
+        .map_err(|error| error.to_string())?;
+    if reader.version().id != realization {
+        return Err("history reader resolved a different realization".to_owned());
+    }
+    let document = reader.graph_document().map_err(|error| error.to_string())?;
+    Ok((realization, document))
+}
+
 pub(crate) fn resolve_or_materialize(
     repository: &Repository,
     commit: CommitId,
@@ -738,6 +760,7 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                         manifest: artifacts.artifacts.manifest.as_ref(),
                         authoritative_sidecars: &authoritative_sidecars,
                         semantic_marker: &marker,
+                        publication_evidence: None,
                         derived: &derived,
                     },
                 )

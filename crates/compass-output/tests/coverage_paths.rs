@@ -175,6 +175,15 @@ fn reports_cover_navigation_quality_learning_hyperedges_and_questions() -> Resul
         built_at_commit: Some("αβγδεζηθ-extra"),
         obsidian: true,
         today: Some("2026-07-20"),
+        health: compass_output::OrientationHealth {
+            publication: Some(compass_output::PublicationStatus::Complete),
+            omitted_nodes: Some(0),
+            omitted_edges: Some(0),
+            identity_collisions: Some(0),
+            diagnostic_examples_omitted: Some(0),
+            corpus_measurements_available: true,
+            ..compass_output::OrientationHealth::default()
+        },
     };
     let report = generate_report(
         &graph,
@@ -193,24 +202,25 @@ fn reports_cover_navigation_quality_learning_hyperedges_and_questions() -> Resul
         &options,
     );
     for expected in [
-        "12345 files · ~9,876,543 words",
-        "2 shown, 1 thin omitted",
-        "Built from commit: `αβγδεζηθ`",
-        "[[_COMMUNITY_RuntimeFlow|Runtime/Flow.md]]",
-        "[[_COMMUNITY_unnamed|[]:#^]]",
-        "[semantically similar]",
+        "# Agent Orientation",
+        "Publication: complete",
+        "commit=αβγδεζηθ-extra",
+        "files: 12345 · words: 9876543",
+        "Evidence label: Runtime/Flow.md",
+        "Metric: incident edge count with separate incoming and outgoing evidence",
+        "incoming: 0 · outgoing: 1",
+        "relations: calls=1",
+        "Surprising Connections",
+        "semantically＿similar＿to",
         "shared contract",
         "Import Cycles",
-        "2-file cycle",
         "Hyperedges",
         "Pipeline",
-        "(+2 more)",
-        "Ambiguous Edges",
-        "Knowledge Gaps",
-        "Work-memory lessons",
-        "code changed — re-verify",
-        "Known dead ends",
-        "Suggested Questions",
+        "Ambiguous Edge Evidence",
+        "Work-Memory Observations",
+        "code changed; re-verify",
+        "known＿dead＿end",
+        "Suggested Compass Queries",
         "How does runtime flow?",
     ] {
         assert!(report.contains(expected), "missing {expected:?}\n{report}");
@@ -239,8 +249,8 @@ fn reports_cover_navigation_quality_learning_hyperedges_and_questions() -> Resul
         &ReportOptions::new("empty"),
     );
     assert!(minimal.contains("Corpus warning"));
-    assert!(minimal.contains("None detected"));
-    assert!(minimal.contains("_No unique signal_"));
-    assert!(!minimal.contains("Work-memory lessons"));
+    assert!(minimal.contains("Publication: unknown"));
+    assert!(minimal.contains("files: unknown · words: unknown"));
+    assert!(minimal.contains("Work-Memory Observations"));
     Ok(())
 }

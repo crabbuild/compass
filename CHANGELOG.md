@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Improve agent discovery accuracy and latency with deterministic identifier-
+  subword postings, exact trusted-call relationship-term postings, bounded
+  proof-complete caller recall, distinct supporting-callee evidence, fair
+  candidate allocation, persistence-predicate precision within trusted
+  relation candidates, capacity-aware traversal, selected-subgraph edge-ref
+  filtering, bounded batched node and edge hydration, and one pinned immutable
+  store reader with a bounded decoded-object cache per request.
+  Legacy store snapshots remain readable and report incomplete identifier or
+  relationship coverage until they are rebuilt. The immutable relationship
+  capability is v2, and the disposable SQLite query accelerator now uses
+  internal format v7 and rebuilds automatically.
+
 - Add a digest-pinned 500-question, AI-reviewed synthetic relevance matrix
   covering all query classes, execute it in CI with strict ranking, recall,
   intent, structural, no-answer, and work bounds, and keep its generated JSON

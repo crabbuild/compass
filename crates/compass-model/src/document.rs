@@ -689,18 +689,45 @@ impl GraphDocument {
         Ok(compact)
     }
 
-    /// Load a node-link document like Python's re-clustering command.
-    ///
-    /// That command accepts arbitrary filenames and warns on oversized files
-    /// while still refreshing the core graph artifacts.
+    /// Load a node-link document for re-clustering without requiring a `.json`
+    /// extension. The same configured graph-size bound applies to this path.
     pub fn load_for_recluster(path: &Path) -> Result<Self, GraphError> {
         if !path.exists() {
             return Err(GraphError::NotFound(crate::graph::absolute_path(path)));
         }
-        let bytes = fs::read(path).map_err(|source| GraphError::Read {
+        let file = File::open(path).map_err(|source| GraphError::Read {
             path: crate::graph::absolute_path(path),
             source,
         })?;
+        let cap = crate::graph::graph_size_cap();
+        let size = file
+            .metadata()
+            .map_err(|source| GraphError::Read {
+                path: crate::graph::absolute_path(path),
+                source,
+            })?
+            .len();
+        if size > cap {
+            return Err(GraphError::TooLarge {
+                path: crate::graph::absolute_path(path),
+                size,
+                cap,
+            });
+        }
+        let mut bytes = Vec::new();
+        file.take(cap.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(|source| GraphError::Read {
+                path: crate::graph::absolute_path(path),
+                source,
+            })?;
+        if bytes.len() as u64 > cap {
+            return Err(GraphError::TooLarge {
+                path: crate::graph::absolute_path(path),
+                size: bytes.len() as u64,
+                cap,
+            });
+        }
         serde_json::from_slice(&bytes).map_err(GraphError::Corrupt)
     }
 

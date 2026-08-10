@@ -11,8 +11,9 @@ use compass_model::GraphDocument;
 use serde_json::Value;
 
 use crate::{
-    DetectionSummary, HtmlOptions, OutputError, ReportOptions, TokenCost, TreeOptions,
-    generate_report, write_html, write_tree_html,
+    DetectionSummary, FreshnessBasis, FreshnessStatus, HtmlOptions, OrientationHealth, OutputError,
+    PublicationStatus, ReportOptions, TokenCost, TreeOptions, generate_report, write_html,
+    write_tree_html,
 };
 
 pub const SUPPORTED_HISTORY_RENDERER: &str = "compass-output/v1";
@@ -33,7 +34,17 @@ pub struct HistoryBundleInput<'a> {
     pub manifest: Option<&'a Value>,
     pub authoritative_sidecars: &'a BTreeMap<String, Vec<u8>>,
     pub semantic_marker: &'a Value,
+    pub publication_evidence: Option<&'a HistoricalPublicationEvidence>,
     pub derived: &'a [DerivedArtifactRequest],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HistoricalPublicationEvidence {
+    pub publication: PublicationStatus,
+    pub omitted_nodes: usize,
+    pub omitted_edges: usize,
+    pub identity_collisions: usize,
+    pub diagnostic_examples_omitted: usize,
 }
 
 pub fn publish_history_bundle(
@@ -116,6 +127,7 @@ fn render_v1(staging: &Path, input: &HistoryBundleInput<'_>) -> Result<(), Outpu
             .extras
             .get("built_at_commit")
             .and_then(Value::as_str);
+        options.health = historical_orientation_health(input.publication_evidence);
         let detection = DetectionSummary {
             total_files: input
                 .manifest
@@ -176,6 +188,23 @@ fn render_v1(staging: &Path, input: &HistoryBundleInput<'_>) -> Result<(), Outpu
         write_json_atomic(staging.join("labels.json.sig"), &signatures, false)?;
     }
     Ok(())
+}
+
+fn historical_orientation_health(
+    evidence: Option<&HistoricalPublicationEvidence>,
+) -> OrientationHealth {
+    OrientationHealth {
+        freshness: FreshnessStatus::Unknown,
+        freshness_basis: FreshnessBasis::HistoricalSnapshot,
+        publication: evidence.map(|value| value.publication),
+        omitted_nodes: evidence.map(|value| value.omitted_nodes),
+        omitted_edges: evidence.map(|value| value.omitted_edges),
+        identity_collisions: evidence.map(|value| value.identity_collisions),
+        diagnostic_examples_omitted: evidence.map(|value| value.diagnostic_examples_omitted),
+        build_profile: Some("historical".to_owned()),
+        corpus_measurements_available: false,
+        ..OrientationHealth::default()
+    }
 }
 
 fn validate_requests(requests: &[DerivedArtifactRequest]) -> Result<(), OutputError> {

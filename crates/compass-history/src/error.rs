@@ -78,6 +78,11 @@ pub enum HistoryError {
     /// Graph artifacts violated the immutable history schema.
     #[error("invalid graph artifacts: {0}")]
     InvalidArtifacts(String),
+    /// The realization predates the retained trusted Compass graph artifact.
+    #[error(
+        "realization {realization} has no trusted compass.graph/1 artifact; rebuild that realization before running typed graph queries"
+    )]
+    TrustedGraphUnavailable { realization: String },
     /// Durable catalog state conflicts with immutable realization content.
     #[error("corrupt graph history: {0}")]
     CorruptHistory(String),
@@ -128,6 +133,7 @@ impl HistoryError {
             | Self::LockTimeout { .. }
             | Self::IncompatibleStoreFormat
             | Self::FingerprintSecretKey(_) => false,
+            Self::TrustedGraphUnavailable { .. } => false,
             Self::OperationalState(_) => false,
         }
     }

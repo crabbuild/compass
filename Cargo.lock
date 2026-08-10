@@ -1209,8 +1209,10 @@ dependencies = [
  "compass-files",
  "compass-graph",
  "compass-model",
+ "compass-output",
  "compass-prs",
  "compass-query",
+ "compass-store",
  "rmcp",
  "serde_json",
  "tempfile",
@@ -1316,6 +1318,7 @@ dependencies = [
 name = "compass-query"
 version = "0.3.7"
 dependencies = [
+ "base64",
  "compass-analysis",
  "compass-cypher",
  "compass-graph",

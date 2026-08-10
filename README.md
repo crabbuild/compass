@@ -38,7 +38,12 @@ compass install
 compass watch
 ```
 
-Run `compass watch` in a second terminal. Once installed, an assistant runs `compass query "<question>"` before broad source searches. It reads `compass-out/GRAPH_REPORT.md` for repository-wide architecture context and opens only the source needed to verify its answer.
+Run `compass watch` in a second terminal. For a focused task, an installed
+assistant starts with `compass query "<question>"`. On a first session or broad
+repository orientation, it reads only the bounded **Agent Orientation** at the
+start of `compass-out/GRAPH_REPORT.md`, then runs a focused query. It checks
+direction, ambiguity, completeness, truncation, and pagination before opening
+only the cited source needed to verify its answer.
 
 Inside a Git repository, `compass install` detects supported assistants and always includes the portable Agent Skills integration. Confirm that the intended host appears under `Selected`. If it does not, select one or more platforms explicitly:
 
@@ -241,6 +246,7 @@ Compass writes:
 compass-out/
 ├── graph.json        machine-readable graph
 ├── GRAPH_REPORT.md   architecture and community summary
+├── orientation.json  versioned Agent Orientation from the same graph generation
 ├── graph.html        interactive visualization when size permits
 ├── manifest.json     incremental build state
 ├── snapshots/        coherent retained build snapshots
@@ -252,16 +258,21 @@ compass-out/
 
 ```bash
 compass query "where is authentication enforced?"
-compass query "where is authentication enforced?" --budget 8000 --page 2
+compass query "where is authentication enforced?" --text-budget 8000
+compass query "where is authentication enforced?" --cursor '<TOKEN>'
 compass explain TokenVerifier
 compass path ApiHandler TokenVerifier
 compass affected TokenVerifier --depth 3
 ```
 
 These commands read the saved graph and do not call a model.
-Natural `query` and `explain` output is deterministically paged. Callers may set
-an approximate per-page token budget with `--budget N` (2,000 by default) and
-follow the reported `next` page with `--page N`.
+Plain natural `query` uses bounded structured discovery. Its text projection
+pages whole deterministic entries with `--text-budget N` (2,000 by default).
+Follow `next=<cursor>` with the unchanged semantic question and options until
+`next=none`; the presentation-only text budget may change between pages. The
+cursor fails if semantic inputs, the selected graph, or the semantic result
+changed. `--traverse`, `--budget`, and `--page` retain the
+legacy traversal contract; CompassQL is unchanged.
 
 ## Compass-specific workflows
 
@@ -331,24 +342,20 @@ not detect a host-specific adapter. An explicit `--platform` selection bypasses
 detection. Start a new assistant session after installation. In Codex, review
 and trust the hook under `/hooks`; in Gemini CLI, run `/skills reload`.
 
-The skill teaches assistants to refresh an existing graph when it is stale,
-run a focused Compass query before broad source searches, and open only the
-source files needed to verify an answer. It reads `compass-out/GRAPH_REPORT.md`
-when repository-wide architecture context is useful. Installation does not
-build a graph; on the first architecture, dependency, history, or impact
-question, the assistant can run the local deterministic build and continue.
+The skill teaches assistants to keep `compass watch` in a second terminal (or
+use `compass update .` as a reported fallback), run a focused query first, and
+open only cited source. For first-session or broad orientation it reads only
+the bounded Agent Orientation at the start of `GRAPH_REPORT.md`, then queries.
+It inspects direction, ambiguity, graph completeness, domain truncation, and
+pagination; ambiguous seeds are retried by exact node ID. Installation does
+not build a graph.
 
 ```text
-coding question
-        |
-        v
-run a focused Compass query
-        |
-        v
-read GRAPH_REPORT.md for repository-wide context
-        |
-        v
-inspect the smallest useful source set
+focused task ───────────────> focused query
+first/broad orientation ────> bounded Agent Orientation ──> focused query
+                                      |
+                                      v
+                 inspect completion and the smallest cited source set
 ```
 
 See [Assistant setup](docs/guides/assistant-setup.md) for supported platforms,

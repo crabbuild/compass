@@ -826,12 +826,7 @@ fn portable_framework_source(path: &Path) -> String {
     {
         return source[index..].to_owned();
     }
-    let components = source
-        .split('/')
-        .filter(|component| !component.is_empty())
-        .collect::<Vec<_>>();
-    let start = components.len().saturating_sub(3);
-    components[start..].join("/")
+    portable_evidence_source(path)
 }
 
 struct FunctionBody<'tree> {

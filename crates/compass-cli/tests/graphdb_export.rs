@@ -31,8 +31,10 @@ fn seed(root: &Path) -> Result<(), Box<dyn Error>> {
 fn live_push_validation_is_safe_and_namespaced() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     seed(directory.path())?;
+    let graph = directory.path().join("compass-out/graph.json");
     let missing = support::compass_command()
-        .args(["export", "neo4j", "--push", "bolt://127.0.0.1:1"])
+        .args(["export", "neo4j", "--push", "bolt://127.0.0.1:1", "--graph"])
+        .arg(&graph)
         .current_dir(directory.path())
         .env_remove("NEO4J_PASSWORD")
         .output()?;
@@ -50,7 +52,9 @@ fn live_push_validation_is_safe_and_namespaced() -> Result<(), Box<dyn Error>> {
             "bolt://127.0.0.1:1",
             "--password",
             "never-print-this",
+            "--graph",
         ])
+        .arg(&graph)
         .current_dir(directory.path())
         .env("COMPASS_GRAPHDB_TIMEOUT", "1")
         .output()?;

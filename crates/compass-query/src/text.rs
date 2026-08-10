@@ -173,6 +173,13 @@ pub fn search_tokens(text: &str) -> Vec<String> {
 
 #[must_use]
 pub fn query_terms(question: &str) -> Vec<String> {
+    query_recall_terms(question)
+        .into_iter()
+        .map(canonical_query_token)
+        .collect()
+}
+
+pub(crate) fn query_recall_terms(question: &str) -> Vec<String> {
     let mut terms = Vec::new();
     for raw in question.split_whitespace() {
         if raw.chars().any(is_chinese) {
@@ -201,10 +208,6 @@ pub fn query_terms(question: &str) -> Vec<String> {
             }
         }
     }
-    let terms = terms
-        .into_iter()
-        .map(canonical_query_token)
-        .collect::<Vec<_>>();
     let content = terms
         .iter()
         .filter(|term| !QUERY_STOPWORDS.contains(&term.as_str()))
@@ -236,10 +239,17 @@ pub fn normalize_context_filters(filters: &[String]) -> Vec<String> {
             "return" | "returns" | "returned" => "return_type",
             "generic" | "generics" | "template" | "templates" => "generic_arg",
             "annotation" | "annotations" | "decorator" | "decorators" => "attribute",
-            "calls" | "called" | "invoke" | "invocation" => "call",
+            "calls" | "called" | "invoke" | "invokes" | "invoked" | "invocation" => "call",
             "fields" | "property" | "properties" | "member" | "members" => "field",
             "imports" | "imported" | "module" | "modules" => "import",
             "exports" | "exported" => "export",
+            "routes" | "routed" | "routing" => "route",
+            "register" | "registered" | "registers" => "registration",
+            "reads" | "reading" => "read",
+            "writes" | "writing" => "write",
+            "tests" | "tested" | "testing" => "test",
+            "types" | "typing" => "type",
+            "dependencies" | "depends" => "dependency",
             _ => &key,
         }
         .to_owned();

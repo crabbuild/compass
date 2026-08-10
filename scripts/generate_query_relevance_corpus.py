@@ -413,7 +413,7 @@ def build() -> dict[str, object]:
         "schema": SCHEMA,
         "corpusId": "compass-query-executable-ai-reviewed-v2",
         "graphSchema": "compass.graph/1",
-        "graphDigest": "sha256:ac93d0a2a2d25d3d089e1f6eccab2e90246a045bac23c04fd0cfcc3d4125cf2b",
+        "graphDigest": "sha256:1fcf2e655dbef361301736117c3da03ab428de183e3fde20b42494d39eed98ee",
         "repositoryRevision": "crates/compass-query/tests/support@v2",
         "analyzerVersion": "compass.search-term/1",
         "queries": queries,

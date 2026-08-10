@@ -1,0 +1,10 @@
+{
+  "maxDepth": 2,
+  "maxSeeds": 3,
+  "maxCandidates": 256,
+  "maxNodes": 500,
+  "maxEdges": 1000,
+  "maxExpandedRelationships": 10000,
+  "maxResponseBytes": 8388608,
+  "timeoutMs": 30000
+}

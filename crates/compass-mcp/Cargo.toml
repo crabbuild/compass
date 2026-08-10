@@ -23,10 +23,12 @@ compass-core = { path = "../compass-core", version = "0.3.7" }
 compass-files = { path = "../compass-files", version = "0.3.7" }
 compass-graph = { path = "../compass-graph", version = "0.3.7" }
 compass-model = { path = "../compass-model", version = "0.3.7" }
+compass-output = { path = "../compass-output", version = "0.3.7" }
 compass-prs = { path = "../compass-prs", version = "0.3.7" }
 compass-query = { path = "../compass-query", version = "0.3.7" }
 
 [dev-dependencies]
+compass-store = { path = "../compass-store", version = "0.3.7" }
 rmcp = { workspace = true, features = ["client"] }
 tempfile.workspace = true
 

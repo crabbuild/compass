@@ -8,7 +8,7 @@ pub use transport::{HttpOptions, serve_http, serve_stdio};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -16,18 +16,28 @@ use std::time::{Duration, Instant};
 
 use compass_core::LoadedGraph;
 use compass_graph::{Communities, god_nodes, suggest_questions, surprising_connections};
+use compass_model::code_graph::GraphDocument as CodeGraphDocument;
+use compass_model::query_contract::{
+    MAX_DISCOVERY_CANDIDATES, MAX_DISCOVERY_DEPTH, MAX_DISCOVERY_EDGES,
+    MAX_DISCOVERY_EXPANDED_RELATIONSHIPS, MAX_DISCOVERY_FILTER_BYTES, MAX_DISCOVERY_FILTERS,
+    MAX_DISCOVERY_NODES, MAX_DISCOVERY_QUESTION_BYTES, MAX_DISCOVERY_RESPONSE_BYTES,
+    MAX_DISCOVERY_SEEDS, MAX_DISCOVERY_TIMEOUT_MS,
+};
 use compass_model::{Graph, GraphDocument, NodeIndex};
+use compass_output::{
+    AgentOrientation, render_agent_report_markdown, render_orientation_json,
+    validate_orientation_graph_identity,
+};
 use compass_prs::{
     ProcessRunner, SystemRunner, compute_pr_impact, detect_default_branch, fetch_pr_files,
     fetch_prs, fetch_worktrees, format_prs_text, parse_ci,
 };
 use compass_query::{
-    TraversalMode, find_node, pick_scored_endpoint, plan_natural_query, query_graph_text,
-    sanitize_label, score_nodes,
+    TraversalMode, find_node, pick_scored_endpoint, query_graph_text, sanitize_label, score_nodes,
 };
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, ErrorData, Implementation,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
+    ListResourcesResult, ListToolsResult, Meta, PaginatedRequestParams, ReadResourceRequestParams,
     ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
@@ -40,11 +50,20 @@ const SERVER_NAME: &str = "compass";
 const MAX_QUERY_LOG_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_QUERY_LOG_RECORD_BYTES: usize = 128 * 1024;
 const MAX_LOGGED_QUESTION_BYTES: usize = 4_096;
+const MAX_MCP_STRUCTURED_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_MCP_RESOURCE_BYTES: usize = 1024 * 1024;
+const MCP_TOOL_RESULT_SCHEMA: &str = "compass.mcp.tool-result/1";
+const MCP_TRANSPORT_TRUNCATION_SCHEMA: &str = "compass.mcp.transport-truncation/1";
 
 #[derive(Debug)]
 enum InvocationError {
     InvalidParams(String),
     Internal(String),
+    TransportLimit {
+        required_bytes: usize,
+        limit_bytes: usize,
+        omitted_bytes: usize,
+    },
 }
 
 impl InvocationError {
@@ -52,6 +71,20 @@ impl InvocationError {
         match self {
             Self::InvalidParams(message) => ErrorData::invalid_params(message, None),
             Self::Internal(message) => ErrorData::internal_error(message, None),
+            Self::TransportLimit {
+                required_bytes,
+                limit_bytes,
+                omitted_bytes,
+            } => ErrorData::internal_error(
+                "MCP transport bound would truncate a semantic result".to_owned(),
+                Some(json!({
+                    "schema": MCP_TRANSPORT_TRUNCATION_SCHEMA,
+                    "truncated": true,
+                    "requiredBytes": required_bytes,
+                    "limitBytes": limit_bytes,
+                    "omittedBytes": omitted_bytes,
+                })),
+            ),
         }
     }
 }
@@ -60,6 +93,14 @@ impl std::fmt::Display for InvocationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidParams(message) | Self::Internal(message) => formatter.write_str(message),
+            Self::TransportLimit {
+                required_bytes,
+                limit_bytes,
+                omitted_bytes,
+            } => write!(
+                formatter,
+                "MCP response requires {required_bytes} bytes; transport limit is {limit_bytes} bytes ({omitted_bytes} omitted)"
+            ),
         }
     }
 }
@@ -83,12 +124,19 @@ struct GraphContext {
     overlay: HashMap<String, Map<String, Value>>,
     communities: BTreeMap<usize, Vec<NodeIndex>>,
     typed_query_supported: bool,
+    typed_document: Option<CodeGraphDocument>,
+    typed_graph_identity: Option<String>,
 }
 
 impl GraphContext {
     fn load(path: &Path) -> Result<Self, String> {
         let loaded = LoadedGraph::load_directed(path).map_err(|error| error.to_string())?;
-        let typed_query_supported = GraphDocument::load(path).is_ok();
+        let (typed_document, typed_graph_identity) =
+            match CodeGraphDocument::load_with_artifact_digest(path) {
+                Ok((document, identity)) => (Some(document), Some(identity)),
+                Err(_) => (None, None),
+            };
+        let typed_query_supported = typed_document.is_some();
         let mut communities = BTreeMap::<usize, Vec<NodeIndex>>::new();
         for (index, node) in loaded.graph.nodes() {
             if let Some(community) = node
@@ -105,6 +153,8 @@ impl GraphContext {
             overlay: loaded.overlay,
             communities,
             typed_query_supported,
+            typed_document,
+            typed_graph_identity,
         })
     }
 
@@ -134,16 +184,26 @@ struct CacheEntry {
     context: Arc<GraphContext>,
 }
 
-#[derive(Debug)]
 struct StoreInner {
     default_graph: PathBuf,
     cache: Mutex<HashMap<PathBuf, CacheEntry>>,
+    typed_queries: compass_query::QueryEngineCache,
 }
 
 /// Hot-reloading, multi-project graph store shared by every MCP session.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct GraphStore {
     inner: Arc<StoreInner>,
+}
+
+impl std::fmt::Debug for GraphStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GraphStore")
+            .field("default_graph", &self.inner.default_graph)
+            .field("typed_query_engines", &self.inner.typed_queries.len())
+            .finish()
+    }
 }
 
 impl GraphStore {
@@ -153,6 +213,7 @@ impl GraphStore {
             inner: Arc::new(StoreInner {
                 default_graph: default_graph.into(),
                 cache: Mutex::new(HashMap::new()),
+                typed_queries: compass_query::QueryEngineCache::default(),
             }),
         }
     }
@@ -247,8 +308,20 @@ impl CompassMcp {
 
     /// Read a compass resource without a transport.
     pub fn read(&self, uri: &str) -> Result<String, String> {
-        let context = self.store.load(None)?;
-        read_resource_text(uri, &context)
+        self.read_result(uri).map_err(|error| error.to_string())
+    }
+
+    fn read_result(&self, uri: &str) -> Result<String, InvocationError> {
+        let context = self.store.load(None).map_err(InvocationError::Internal)?;
+        let text = read_resource_text(uri, &context)?;
+        if text.len() > MAX_MCP_RESOURCE_BYTES {
+            return Err(InvocationError::TransportLimit {
+                required_bytes: text.len(),
+                limit_bytes: MAX_MCP_RESOURCE_BYTES,
+                omitted_bytes: text.len().saturating_sub(MAX_MCP_RESOURCE_BYTES),
+            });
+        }
+        Ok(text)
     }
 }
 
@@ -309,15 +382,28 @@ impl ServerHandler for CompassMcp {
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
         let text = self
-            .read(&request.uri)
-            .map_err(|error| ErrorData::invalid_params(error, None))?;
-        let mime = if request.uri == "compass://report" {
-            "text/markdown"
-        } else {
-            "text/plain"
+            .read_result(&request.uri)
+            .map_err(InvocationError::protocol_error)?;
+        let mime = match request.uri.as_str() {
+            "compass://report" => "text/markdown",
+            "compass://orientation" => "application/json",
+            _ => "text/plain",
         };
+        let required_bytes = text.len();
+        let transport = Meta(Map::from_iter([(
+            "transportTruncation".to_owned(),
+            json!({
+                "schema": MCP_TRANSPORT_TRUNCATION_SCHEMA,
+                "truncated": false,
+                "requiredBytes": required_bytes,
+                "limitBytes": MAX_MCP_RESOURCE_BYTES,
+                "omittedBytes": 0,
+            }),
+        )]));
         Ok(ReadResourceResult::new(vec![
-            ResourceContents::text(text, request.uri).with_mime_type(mime),
+            ResourceContents::text(text, request.uri)
+                .with_mime_type(mime)
+                .with_meta(transport),
         ]))
     }
 }
@@ -338,13 +424,21 @@ impl CompassMcp {
                 "unknown tool: {name}"
             )));
         }
+        if name == "query_graph" {
+            code_query::validate_query_graph_arguments(arguments)?;
+        }
         let project_path = arguments
             .remove("project_path")
             .and_then(|value| value.as_str().map(str::to_owned));
-        let context = self
-            .store
-            .load(project_path.as_deref())
-            .map_err(InvocationError::Internal)?;
+        if name == "query_graph" && natural_discovery_requested(arguments) {
+            let graph_path = self
+                .store
+                .resolve(project_path.as_deref())
+                .map_err(InvocationError::Internal)?;
+            if compass_query::has_published_store(&graph_path) {
+                return invoke_discovery_tool(&self.store, arguments, &graph_path, None);
+            }
+        }
         let typed_query = matches!(
             name,
             "search_symbols"
@@ -353,35 +447,25 @@ impl CompassMcp {
                 | "get_impact"
                 | "explore_code"
                 | "get_node"
-        ) || (name == "query_graph"
-            && should_route_natural_query(arguments, &context)?);
+        );
         if typed_query {
-            let started = Instant::now();
-            let response = code_query::invoke(name, arguments, &context.path)?;
-            let text = format!(
-                "{:?}: {} nodes, {} edges, {} paths{}",
-                response.operation,
-                response.nodes.len(),
-                response.edges.len(),
-                response.paths.len(),
-                if response.truncated {
-                    " (truncated)"
-                } else {
-                    ""
-                }
-            );
-            if name == "query_graph"
-                && let Some(question) = arguments.get("question").and_then(Value::as_str)
-            {
-                log_typed_mcp_query(question, &context.path, &response, started.elapsed());
+            let graph_path = self
+                .store
+                .resolve(project_path.as_deref())
+                .map_err(InvocationError::Internal)?;
+            if compass_query::has_published_store(&graph_path) {
+                return invoke_typed_tool(&self.store, name, arguments, &graph_path, None);
             }
-            return Ok(ToolInvocation {
-                text,
-                structured_content: Some(
-                    serde_json::to_value(response)
-                        .map_err(|error| InvocationError::Internal(error.to_string()))?,
-                ),
-            });
+        }
+        let context = self
+            .store
+            .load(project_path.as_deref())
+            .map_err(InvocationError::Internal)?;
+        if name == "query_graph" && should_route_natural_query(arguments, &context)? {
+            return invoke_discovery_tool(&self.store, arguments, &context.path, Some(&context));
+        }
+        if typed_query {
+            return invoke_typed_tool(&self.store, name, arguments, &context.path, Some(&context));
         }
         Ok(ToolInvocation {
             text: invoke_tool(name, arguments, &context).map_err(InvocationError::InvalidParams)?,
@@ -390,35 +474,199 @@ impl CompassMcp {
     }
 }
 
+fn invoke_typed_tool(
+    store: &GraphStore,
+    name: &str,
+    arguments: &Map<String, Value>,
+    graph_path: &Path,
+    context: Option<&GraphContext>,
+) -> Result<ToolInvocation, InvocationError> {
+    let engine = cached_typed_engine(store, graph_path, context)?;
+    let engine = engine
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let response = code_query::invoke_with_engine(name, arguments, &engine)?;
+    let text = format!(
+        "{:?}: {} nodes, {} edges, {} paths{}",
+        response.operation,
+        response.nodes.len(),
+        response.edges.len(),
+        response.paths.len(),
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
+    Ok(ToolInvocation {
+        text,
+        structured_content: Some(transport_envelope(
+            serde_json::to_value(response)
+                .map_err(|error| InvocationError::Internal(error.to_string()))?,
+        )?),
+    })
+}
+
+fn natural_discovery_requested(arguments: &Map<String, Value>) -> bool {
+    !["mode", "depth", "token_budget", "context_filter"]
+        .iter()
+        .any(|name| arguments.contains_key(*name))
+        && arguments
+            .get("question")
+            .and_then(Value::as_str)
+            .is_some_and(|question| !question.is_empty())
+}
+
+fn invoke_discovery_tool(
+    store: &GraphStore,
+    arguments: &Map<String, Value>,
+    graph_path: &Path,
+    context: Option<&GraphContext>,
+) -> Result<ToolInvocation, InvocationError> {
+    let started = Instant::now();
+    let engine = cached_typed_engine(store, graph_path, context)?;
+    let engine = engine
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let response = code_query::invoke_discovery_with_engine(arguments, &engine)?;
+    let text = format!(
+        "Discovery: {} seeds, {} nodes, {} edges{}",
+        response.seeds.len(),
+        response.nodes.len(),
+        response.edges.len(),
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
+    if let Some(question) = arguments.get("question").and_then(Value::as_str) {
+        log_discovery_mcp_query(question, graph_path, &response, started.elapsed());
+    }
+    let semantic_result_digest = compass_query::discovery_response_digest(&response)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    Ok(ToolInvocation {
+        text,
+        structured_content: Some(transport_envelope_with_digest(
+            serde_json::to_value(response)
+                .map_err(|error| InvocationError::Internal(error.to_string()))?,
+            Some(&semantic_result_digest),
+        )?),
+    })
+}
+
+fn cached_typed_engine(
+    store: &GraphStore,
+    graph_path: &Path,
+    context: Option<&GraphContext>,
+) -> Result<compass_query::CachedQueryEngine, InvocationError> {
+    if compass_query::has_published_store(graph_path) {
+        return store
+            .inner
+            .typed_queries
+            .open_published_store(graph_path)
+            .map_err(|error| InvocationError::Internal(error.to_string()));
+    }
+    let context = context.ok_or_else(|| {
+        InvocationError::Internal("typed JSON query context is unavailable".to_owned())
+    })?;
+    let document = context.typed_document.as_ref().ok_or_else(|| {
+        InvocationError::InvalidParams(
+            "discovery controls require a typed compass.graph/1 artifact".to_owned(),
+        )
+    })?;
+    let identity = context.typed_graph_identity.as_deref().ok_or_else(|| {
+        InvocationError::Internal("typed graph identity is unavailable".to_owned())
+    })?;
+    let cache_root = graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("cache");
+    store
+        .inner
+        .typed_queries
+        .open_verified_document(document, identity, graph_path, &cache_root)
+        .map_err(|error| InvocationError::Internal(error.to_string()))
+}
+
 fn should_route_natural_query(
     arguments: &Map<String, Value>,
     context: &GraphContext,
 ) -> Result<bool, InvocationError> {
-    if ["mode", "depth", "token_budget", "context_filter"]
+    let legacy = ["mode", "depth", "token_budget", "context_filter"]
         .iter()
-        .any(|name| arguments.contains_key(*name))
-    {
+        .any(|name| arguments.contains_key(*name));
+    if legacy {
         return Ok(false);
     }
-    let Some(question) = arguments
+    let Some(_question) = arguments
         .get("question")
         .and_then(Value::as_str)
         .filter(|question| !question.is_empty())
     else {
         return Ok(false);
     };
+    if !context.typed_query_supported && code_query::has_discovery_arguments(arguments) {
+        return Err(InvocationError::InvalidParams(
+            "discovery controls require a typed compass.graph/1 artifact".to_owned(),
+        ));
+    }
     if !context.typed_query_supported {
         return Ok(false);
     }
-    plan_natural_query(question)
-        .map(|plan| plan.routes_to_typed_query())
-        .map_err(|error| InvocationError::InvalidParams(error.to_string()))
+    Ok(true)
+}
+
+fn transport_envelope(result: Value) -> Result<Value, InvocationError> {
+    transport_envelope_with_digest(result, None)
+}
+
+fn transport_envelope_with_digest(
+    result: Value,
+    semantic_result_digest: Option<&str>,
+) -> Result<Value, InvocationError> {
+    let mut envelope = json!({
+        "schema": MCP_TOOL_RESULT_SCHEMA,
+        "result": result,
+        "transportTruncation": {
+            "schema": MCP_TRANSPORT_TRUNCATION_SCHEMA,
+            "truncated": false,
+            "requiredBytes": 0,
+            "limitBytes": MAX_MCP_STRUCTURED_RESPONSE_BYTES,
+            "omittedBytes": 0,
+        }
+    });
+    if let Some(digest) = semantic_result_digest {
+        envelope["semanticResultDigest"] = json!(format!("sha256:{digest}"));
+    }
+    for _ in 0..8 {
+        let required_bytes = serde_json::to_vec(&envelope)
+            .map_err(|error| InvocationError::Internal(error.to_string()))?
+            .len();
+        if envelope["transportTruncation"]["requiredBytes"].as_u64()
+            == u64::try_from(required_bytes).ok()
+        {
+            break;
+        }
+        envelope["transportTruncation"]["requiredBytes"] = json!(required_bytes);
+    }
+    let required_bytes = serde_json::to_vec(&envelope)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?
+        .len();
+    if required_bytes > MAX_MCP_STRUCTURED_RESPONSE_BYTES {
+        return Err(InvocationError::TransportLimit {
+            required_bytes,
+            limit_bytes: MAX_MCP_STRUCTURED_RESPONSE_BYTES,
+            omitted_bytes: required_bytes.saturating_sub(MAX_MCP_STRUCTURED_RESPONSE_BYTES),
+        });
+    }
+    Ok(envelope)
 }
 
 fn tool_specs() -> Vec<Tool> {
     let project = json!({
         "type": "string",
-        "description": "Absolute path to a project directory containing compass-out/graph.json. Optional — defaults to the graph this server was started with."
+        "description": "Project directory containing compass-out/graph.json. Optional — defaults to the graph this server was started with."
     });
     let mut specs = vec![
         tool(
@@ -453,13 +701,26 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "query_graph",
-            "Route clear natural-language intents through bounded typed code queries; use explicit traversal controls for BFS/DFS text context.",
-            json!({"type":"object","properties":{
-                "question":{"type":"string","description":"Natural language question or keyword search"},
-                "mode":{"type":"string","enum":["bfs","dfs"],"default":"bfs","description":"bfs=broad context, dfs=trace a specific path"},
-                "depth":{"type":"integer","default":3,"description":"Traversal depth (1-6)"},
-                "token_budget":{"type":"integer","default":2000,"description":"Max output tokens"},
-                "context_filter":{"type":"array","items":{"type":"string"},"description":"Optional explicit edge-context filter, e.g. ['call', 'field']"}
+            "Run bounded structured discovery for natural-language questions; explicit legacy traversal fields preserve compatibility text context.",
+            json!({"type":"object","additionalProperties":false,"properties":{
+                "question":{"type":"string","minLength":1,"maxLength":MAX_DISCOVERY_QUESTION_BYTES,"description":"Natural language question or keyword search"},
+                "mode":{"type":"string","enum":["bfs","dfs"],"description":"Explicit legacy mode; selects compatibility traversal"},
+                "depth":{"type":"integer","minimum":0,"maximum":6,"description":"Explicit legacy traversal depth (1-6)"},
+                "token_budget":{"type":"integer","minimum":0,"description":"Explicit legacy text token budget"},
+                "context_filter":{"type":"array","maxItems":MAX_DISCOVERY_FILTERS,"items":{"type":"string","maxLength":MAX_DISCOVERY_FILTER_BYTES},"description":"Optional explicit edge-context filter, e.g. ['call', 'field']"},
+                "direction":{"type":"string","enum":["auto","incoming","outgoing","both"],"description":"Discovery edge direction; omitted uses bounded inference"},
+                "relation_contexts":{"type":"array","maxItems":MAX_DISCOVERY_FILTERS,"items":{"type":"string","minLength":1,"maxLength":MAX_DISCOVERY_FILTER_BYTES},"description":"Canonical discovery relationship contexts"},
+                "scope":{"type":"array","maxItems":MAX_DISCOVERY_FILTERS,"items":{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string","enum":["community","source","package","node"]},"value":{"type":"string","minLength":1,"maxLength":MAX_DISCOVERY_FILTER_BYTES}},"required":["kind","value"]},"description":"Repeatable OR discovery scopes"},
+                "traversal":{"type":"string","enum":["bfs","dfs"],"description":"Bounded discovery traversal order; omitted uses bfs"},
+                "include_heuristic":{"type":"boolean"},
+                "max_depth":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_DEPTH},
+                "max_seeds":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_SEEDS},
+                "max_candidates":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_CANDIDATES},
+                "max_nodes":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_NODES},
+                "max_edges":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_EDGES},
+                "max_expanded_relationships":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_EXPANDED_RELATIONSHIPS},
+                "max_response_bytes":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_RESPONSE_BYTES},
+                "timeout_ms":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_TIMEOUT_MS}
             },"required":["question"]}),
         ),
         tool(
@@ -525,9 +786,15 @@ fn tool(name: &'static str, description: &'static str, schema: Value) -> Tool {
 fn resource_specs() -> Vec<Resource> {
     [
         (
+            "compass://orientation",
+            "Agent Orientation",
+            "Versioned bounded orientation from the selected graph generation",
+            "application/json",
+        ),
+        (
             "compass://report",
             "Graph Report",
-            "Full GRAPH_REPORT.md",
+            "Bounded report rendered from orientation validated against the selected graph",
             "text/markdown",
         ),
         (
@@ -704,10 +971,10 @@ fn log_mcp_query(
     append_query_log(record);
 }
 
-fn log_typed_mcp_query(
+fn log_discovery_mcp_query(
     question: &str,
     corpus: &Path,
-    response: &compass_model::query_contract::CodeQueryResponse,
+    response: &compass_model::query_contract::DiscoveryQueryResponse,
     duration: Duration,
 ) {
     if question.len() > MAX_LOGGED_QUESTION_BYTES {
@@ -722,7 +989,7 @@ fn log_typed_mcp_query(
         "nodes_returned": response.nodes.len(),
         "result_chars": 0,
         "duration_ms": (duration.as_secs_f64() * 1000.0 * 1000.0).round() / 1000.0,
-        "operation": response.operation,
+        "operation": "discovery",
         "truncated": response.truncated,
     }));
 }
@@ -1288,22 +1555,21 @@ fn status_index(status: &str) -> usize {
     .unwrap_or(99)
 }
 
-fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, String> {
+fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, InvocationError> {
     match uri {
-        "compass://report" => {
-            let report = context
-                .path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join("GRAPH_REPORT.md");
-            Ok(fs::read_to_string(report).unwrap_or_else(|_| {
-                "GRAPH_REPORT.md not found. Run compass extract first.".to_owned()
-            }))
+        "compass://orientation" => {
+            let orientation = validated_orientation(context)?;
+            render_orientation_json(&orientation)
+                .map_err(|error| InvocationError::InvalidParams(error.to_string()))
         }
+        "compass://report" => render_agent_report_markdown(&validated_orientation(context)?, false)
+            .map_err(|error| InvocationError::InvalidParams(error.to_string())),
         "compass://stats" => Ok(tool_graph_stats(context)),
-        "compass://god-nodes" => tool_god_nodes(&Map::new(), context),
+        "compass://god-nodes" => {
+            tool_god_nodes(&Map::new(), context).map_err(InvocationError::InvalidParams)
+        }
         "compass://surprises" => {
-            let document = context.document()?;
+            let document = context.document().map_err(InvocationError::InvalidParams)?;
             let surprises = surprising_connections(&document, &context.community_ids(), 10);
             if surprises.is_empty() {
                 return Ok("No surprising connections found.".to_owned());
@@ -1336,7 +1602,7 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Strin
             ))
         }
         "compass://questions" => {
-            let document = context.document()?;
+            let document = context.document().map_err(InvocationError::InvalidParams)?;
             let labels_path = context
                 .path
                 .parent()
@@ -1364,8 +1630,76 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Strin
             );
             Ok(lines.join("\n"))
         }
-        _ => Err(format!("Unknown resource: {uri}")),
+        _ => Err(InvocationError::InvalidParams(format!(
+            "Unknown resource: {uri}"
+        ))),
     }
+}
+
+fn validated_orientation(context: &GraphContext) -> Result<AgentOrientation, InvocationError> {
+    let (typed, graph_digest) =
+        compass_model::code_graph::GraphDocument::load_with_artifact_digest(&context.path)
+            .map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
+    let orientation_path = context
+        .path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("orientation.json");
+    let orientation_json = match read_bounded_resource(&orientation_path) {
+        Ok(orientation_json) => orientation_json,
+        Err(error @ InvocationError::TransportLimit { .. }) => return Err(error),
+        Err(error) => {
+            return Err(InvocationError::InvalidParams(format!(
+                "coherent orientation artifact is unavailable for {}: {error}",
+                context.path.display()
+            )));
+        }
+    };
+    let orientation =
+        serde_json::from_str::<AgentOrientation>(&orientation_json).map_err(|error| {
+            InvocationError::InvalidParams(format!("invalid orientation artifact: {error}"))
+        })?;
+    let graph_identity = format!("sha256:{graph_digest}");
+    validate_orientation_graph_identity(&orientation, &typed, &graph_identity)
+        .map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
+    Ok(orientation)
+}
+
+fn read_bounded_resource(path: &Path) -> Result<String, InvocationError> {
+    let file =
+        fs::File::open(path).map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
+    if !metadata.is_file() {
+        return Err(InvocationError::InvalidParams(format!(
+            "{} is not a regular file",
+            path.display()
+        )));
+    }
+    let required_bytes = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
+    if required_bytes > MAX_MCP_RESOURCE_BYTES {
+        return Err(InvocationError::TransportLimit {
+            required_bytes,
+            limit_bytes: MAX_MCP_RESOURCE_BYTES,
+            omitted_bytes: required_bytes.saturating_sub(MAX_MCP_RESOURCE_BYTES),
+        });
+    }
+    let read_limit = u64::try_from(MAX_MCP_RESOURCE_BYTES)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let mut bytes = Vec::with_capacity(required_bytes);
+    file.take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
+    if bytes.len() > MAX_MCP_RESOURCE_BYTES {
+        return Err(InvocationError::TransportLimit {
+            required_bytes: bytes.len(),
+            limit_bytes: MAX_MCP_RESOURCE_BYTES,
+            omitted_bytes: bytes.len().saturating_sub(MAX_MCP_RESOURCE_BYTES),
+        });
+    }
+    String::from_utf8(bytes).map_err(|error| InvocationError::InvalidParams(error.to_string()))
 }
 
 #[cfg(test)]
@@ -1386,6 +1720,47 @@ mod tests {
                 .code,
             rmcp::model::ErrorCode::INTERNAL_ERROR
         );
+        let oversize =
+            transport_envelope(Value::String("x".repeat(MAX_MCP_STRUCTURED_RESPONSE_BYTES)));
+        assert!(matches!(
+            oversize,
+            Err(InvocationError::TransportLimit { .. })
+        ));
+        if let Err(InvocationError::TransportLimit {
+            required_bytes,
+            limit_bytes,
+            omitted_bytes,
+        }) = oversize
+        {
+            assert!(required_bytes > limit_bytes);
+            assert_eq!(limit_bytes, MAX_MCP_STRUCTURED_RESPONSE_BYTES);
+            assert_eq!(omitted_bytes, required_bytes - limit_bytes);
+        }
+    }
+
+    #[test]
+    fn resource_reader_reports_typed_transport_oversize() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let resource = directory.path().join("orientation.json");
+        fs::write(&resource, vec![b'x'; MAX_MCP_RESOURCE_BYTES + 1])?;
+
+        let error = match read_bounded_resource(&resource) {
+            Ok(_) => return Err("resource unexpectedly fit the transport limit".into()),
+            Err(error) => error,
+        };
+        let InvocationError::TransportLimit {
+            required_bytes,
+            limit_bytes,
+            omitted_bytes,
+        } = error
+        else {
+            return Err("expected typed transport limit".into());
+        };
+        assert_eq!(required_bytes, MAX_MCP_RESOURCE_BYTES + 1);
+        assert_eq!(limit_bytes, MAX_MCP_RESOURCE_BYTES);
+        assert_eq!(omitted_bytes, 1);
+        Ok(())
     }
 
     #[test]
@@ -1421,7 +1796,7 @@ mod tests {
         sample(&graph)?;
         let server = CompassMcp::new(graph);
         assert_eq!(CompassMcp::tools().len(), 15);
-        assert_eq!(CompassMcp::resources().len(), 6);
+        assert_eq!(CompassMcp::resources().len(), 7);
         let text = server.invoke("graph_stats", Map::new());
         assert_eq!(
             text,
@@ -1581,9 +1956,10 @@ mod tests {
         let invoke = |name: &str, value: Value| {
             server.invoke(name, value.as_object().cloned().unwrap_or_default())
         };
+        let get_node = invoke("get_node", json!({"source":"a","target":"b"}));
         assert!(
-            invoke("get_node", json!({"source":"a","target":"b"}))
-                .contains("requires compass.graph/1")
+            get_node.contains("discovery controls require a typed compass.graph/1 artifact"),
+            "{get_node}"
         );
         let neighbors = invoke("get_neighbors", json!({"label":"Beta"}));
         assert!(neighbors.contains("--> Delta"));
@@ -1629,8 +2005,8 @@ mod tests {
         assert!(invoke("query_graph", json!({})).contains("'question'"));
         assert!(invoke("get_pr_impact", json!({"pr_number":-1})).contains("'pr_number'"));
 
+        assert!(server.read("compass://report").is_err());
         for uri in [
-            "compass://report",
             "compass://stats",
             "compass://god-nodes",
             "compass://surprises",

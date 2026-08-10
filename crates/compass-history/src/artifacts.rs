@@ -7,6 +7,7 @@ use compass_analysis::{AnalysisBundle, FunctionSummary};
 use compass_files::{write_bytes_atomic, write_json_atomic};
 use compass_ir::{EvidenceRecord, FunctionIr, ModuleIr, ProgramBundle, ProviderDescriptor};
 use compass_model::code_graph::GraphDocument as TrustedGraphDocument;
+use compass_model::validate_code_graph;
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use prolly::{KeyBuilder, VersionedValue, decode_segments};
 use rayon::prelude::*;
@@ -247,6 +248,30 @@ impl GraphArtifacts {
     /// Return the canonical durable graph artifact retained by this realization.
     pub fn graph_json_bytes(&self) -> Result<Vec<u8>, HistoryError> {
         authoritative_graph_bytes(self)
+    }
+
+    pub(crate) fn trusted_graph_document(
+        &self,
+    ) -> Result<Option<TrustedGraphDocument>, HistoryError> {
+        let Some(bytes) = self.authoritative_sidecars.get(TRUSTED_GRAPH_CONTENT) else {
+            return Ok(None);
+        };
+        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > crate::MAX_AUTHORITATIVE_BYTES {
+            return Err(HistoryError::InvalidArtifacts(
+                "trusted graph exceeds the authoritative byte limit".to_owned(),
+            ));
+        }
+        let value: Value = serde_json::from_slice(bytes)?;
+        if canonical_json_bytes(&value)? != *bytes {
+            return Err(HistoryError::InvalidArtifacts(
+                "trusted graph artifact is not canonical JSON".to_owned(),
+            ));
+        }
+        let document: TrustedGraphDocument = serde_json::from_value(value)?;
+        validate_code_graph(&document).map_err(|error| {
+            HistoryError::InvalidArtifacts(format!("trusted graph validation failed: {error}"))
+        })?;
+        Ok(Some(document))
     }
 
     /// Return authoritative sidecars intended for product output.
@@ -908,20 +933,7 @@ impl GraphArtifacts {
             } else {
                 restore_order(&mut edges, edge_order, "edge")?
             };
-            trusted.sort_by(|left, right| {
-                (
-                    left.source.as_str(),
-                    left.kind.as_str(),
-                    left.target.as_str(),
-                    left.key.as_str(),
-                )
-                    .cmp(&(
-                        right.source.as_str(),
-                        right.kind.as_str(),
-                        right.target.as_str(),
-                        right.key.as_str(),
-                    ))
-            });
+            trusted.sort_by(|left, right| left.id.cmp(&right.id));
             let compatible = trusted
                 .iter()
                 .map(compat_edge)

@@ -9,6 +9,7 @@ use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{
     EvidenceConfidence, EvidenceOrigin, OccurrenceRule, Provenance, SourceAnchor,
 };
+use sha2::{Digest, Sha256};
 
 const CLOSED_ENDPOINT_REWRITE_RULES: [&str; 12] = [
     "csharp-namespace-canonicalization",
@@ -158,6 +159,22 @@ fn strict_loading_rejects_pre_contract_and_unknown_graphs() -> Result<(), Box<dy
         GraphDocument::load(&graph_path),
         Err(GraphError::UnsupportedGraphSchema { found: Some(schema) }) if schema == "compass.graph/2"
     ));
+    Ok(())
+}
+
+#[test]
+fn exact_recluster_loading_does_not_require_a_json_extension()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph-without-extension");
+    let expected = document();
+    let bytes = serde_json::to_vec(&expected)?;
+    fs::write(&graph_path, &bytes)?;
+
+    let (actual, digest) = GraphDocument::load_for_recluster_with_artifact_digest(&graph_path)?;
+
+    assert_eq!(actual, expected);
+    assert_eq!(digest, format!("{:x}", Sha256::digest(bytes)));
     Ok(())
 }
 

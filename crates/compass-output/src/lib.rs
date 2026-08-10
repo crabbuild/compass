@@ -18,7 +18,7 @@ mod tree;
 mod viewer_model;
 mod wiki;
 
-pub use backup::{BackupResult, backup_if_protected};
+pub use backup::{BackupResult, backup_if_protected, backup_if_protected_to};
 pub use callflow::{
     CallflowExport, CallflowOptions, CallflowSection, callflow_html_document,
     derive_callflow_sections, write_callflow_html,
@@ -33,7 +33,8 @@ pub use cql::{render_cql_json, render_cql_jsonl, render_cql_table};
 pub use cypher::{cypher_document, write_cypher};
 pub use graphml::{graphml_document, write_graphml};
 pub use history_bundle::{
-    DerivedArtifactRequest, HistoryBundleInput, SUPPORTED_HISTORY_RENDERER, publish_history_bundle,
+    DerivedArtifactRequest, HistoricalPublicationEvidence, HistoryBundleInput,
+    SUPPORTED_HISTORY_RENDERER, publish_history_bundle,
 };
 pub use history_viewer::{HistoricalViewError, historical_graph_document, historical_view_model};
 pub use html::{
@@ -42,7 +43,18 @@ pub use html::{
 };
 pub use json::{JsonExportOptions, export_json_value, write_json};
 pub use obsidian::{ObsidianExport, ObsidianOptions, export_obsidian, node_filenames};
-pub use report::{DetectionSummary, ReportOptions, TokenCost, generate_report};
+pub use report::{
+    AgentOrientation, BoundedCoverage, DetectionSummary, FreshnessBasis, FreshnessStatus,
+    ORIENTATION_MARKDOWN_MAX_CHARS, ORIENTATION_SCHEMA, OrientationAmbiguousEdge,
+    OrientationCommunity, OrientationCommunityLink, OrientationConnection, OrientationCycle,
+    OrientationDetails, OrientationEvidenceStatus, OrientationGraphSummary, OrientationHealth,
+    OrientationHub, OrientationHyperedge, OrientationLearnedQuestion, OrientationNodeReference,
+    OrientationOmissions, OrientationPublicationDiagnostic, OrientationQuery, OrientationRisk,
+    OrientationSourceAnchor, OrientationWorkMemory, PublicationStatus, REPORT_MARKDOWN_MAX_CHARS,
+    ReportOptions, SectionOmission, TokenCost, WorkingTreeState, agent_orientation,
+    generate_report, graph_artifact_identity, render_agent_report_markdown,
+    render_orientation_json, render_orientation_markdown, validate_orientation_graph_identity,
+};
 pub use svg::{SvgOptions, spring_layout, svg_document, write_svg};
 pub use tree::{TreeNode, TreeOptions, build_tree, tree_html_document, write_tree_html};
 pub use viewer_model::{
@@ -56,6 +68,12 @@ pub use wiki::{WikiExport, WikiOptions, export_wiki};
 pub enum OutputError {
     #[error("could not serialize output: {0}")]
     Serialization(#[from] serde_json::Error),
+    #[error("orientation Markdown is {rendered_chars} characters; limit is {limit}")]
+    OrientationBudgetExceeded { rendered_chars: usize, limit: usize },
+    #[error("graph report Markdown is {rendered_chars} characters; limit is {limit}")]
+    ReportBudgetExceeded { rendered_chars: usize, limit: usize },
+    #[error("invalid orientation model: {reason}")]
+    InvalidOrientationModel { reason: &'static str },
     #[error(transparent)]
     File(#[from] compass_files::FileError),
     #[error("existing graph is non-empty but malformed: {0}")]

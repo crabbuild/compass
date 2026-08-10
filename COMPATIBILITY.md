@@ -98,15 +98,38 @@ and reference are internal realizations of the backend-neutral `compass-store`
 contract, not a stable SQL schema or pointer format that consumers may query
 directly.
 
-The additive `compass ask` command routes bounded natural-language questions
-to the existing typed search, callers, callees, impact, or node-trail operation
-and returns the same `compass.query/1` response contract. `compass query`
-automatically uses that path for high-confidence questions against a current
-typed graph. Generic or contradictory questions, historical `--at` queries,
-and requests with `--traverse`, `--dfs`, `--context`, `--budget`, or `--page`
-retain the established text-traversal behavior. Explicit typed query commands
-remain available and unchanged; ambiguous questions never invent a direction
-or select an arbitrary symbol.
+The additive `compass ask` command continues to route bounded questions to the
+typed `compass.query/1` operations. Plain `compass query` against a typed graph
+now defaults to `compass.query.discovery/1`; `--dfs` and `--context` compose
+with discovery. Explicit `--traverse` or legacy-only `--budget`/`--page`
+preserve the established text traversal and reject discovery controls.
+CompassQL and explicit typed query commands remain unchanged. Discovery text
+pagination uses the versioned `compass.query.discovery-text-page/1` cursor;
+JSON rejects those presentation-only controls.
+
+Default discovery JSON remains the strict `compass.query.discovery/1` shape.
+The additive `--result-envelope` option requires `--format json` and returns a
+typed `compass.query.discovery-result/1` envelope containing the unchanged v1
+result plus its query-owned `semanticResultDigest`. The digest is computed from
+canonical v1 semantic response bytes; the digest field is outside that result,
+so the v1 payload and its byte/shape contract remain unchanged.
+
+Clustered updates publish `orientation.json` (`compass.orientation/1`) from the
+same fitted model as `GRAPH_REPORT.md` and include it in the coherent snapshot
+and build state. `compass export orientation-json` and
+`compass://orientation` validate that its generation, source/configuration
+identity, commit, graph summary, and exact streamed `graph.json` artifact
+digest match the selected guarded graph. A direct or historical graph without
+that coherent artifact fails explicitly.
+
+MCP structured tool results use the `compass.mcp.tool-result/1` envelope. Its
+`result` retains the domain schema and domain truncation fields unchanged;
+`transportTruncation` separately reports the MCP byte bound. A response that
+would exceed that bound fails with typed required/limit/omitted byte metadata
+instead of publishing a partial semantic result.
+Natural discovery results additionally expose the same query-owned
+`semanticResultDigest` in this transport envelope, enabling direct/persistent
+result parity checks without requiring an agent client to invent a digest.
 
 Structural operands use the same bounded exact, alias, term, and typo recall
 channels as search. A unique relationship-role seed may disambiguate a
@@ -127,6 +150,66 @@ Typed symbol search now unconditionally uses `query-ranker/2`. The internal
 been removed. This does not change the `compass.query/1` schema, but intentional
 score and ordering improvements can change which equally lexical candidate is
 ranked first; ordering remains deterministic and backend-neutral.
+
+Discovery term indexes preserve their existing full tokens and add bounded
+camel-case, acronym, and underscore subwords derived from raw symbol names,
+qualified names, and aliases. They also add exact relationship-term postings
+from source-backed callable nodes through direct `calls` edges whose evidence
+is entirely exact and non-heuristic. Relationship postings use only the called
+target's terminal symbol name; namespace and owner terms from its qualified
+name remain available to direct lexical recall but do not become caller
+evidence. Parallel edges are deduplicated for this recall index; inferred,
+ambiguous, mixed-confidence, heuristic, source-less, and non-callable sources
+do not participate.
+
+Direct symbols and candidates with at least two trusted relationship concepts
+share one deterministic behavior-ranking channel. They are ordered by
+production status, bounded operation-predicate alignment, direct
+terminal/owner concept coverage, semantic kind, field and predicate precision,
+relationship concept coverage, distinct supporting targets, and evidence
+confidence. A relationship candidate keeps its lexical or alias source when
+it also has direct indexed evidence; only relationship-only recall is labeled
+as a relation seed. Fixed whole-token operation families (including
+persistence, dispatch, invocation, processing, recognition, refresh,
+resolution, and scheduling) affect ranking only: they cannot add a posting,
+candidate, relationship concept, or relation eligibility. Equal evidence
+vectors remain explicitly ambiguous.
+
+Discovery performs at most eight deterministic multi-concept term-index
+intersections before independent term unions. Intersection reads spend the
+same candidate, posting, object, byte, and probe budgets as all other recall;
+exhaustion remains explicit truncation rather than an empty result. A complete
+exact-name lookup can prove its top channel despite truncation in lower recall
+channels, while duplicate exact names remain ambiguous.
+
+Discovery traversal bounds adjacency reads by remaining node capacity and
+stops endpoint hydration at the node cap. Store-backed final edge assembly
+scans unit-valued outgoing references, rejects targets outside the selected
+subgraph before record hydration, and resolves the remaining edge IDs through
+a bounded shared tree traversal. This preserves canonical parallel-edge order
+and exact edge omissions when the reference scan completes; a shared expansion
+limit still produces explicit incomplete counts. Exact term candidates and
+adjacency records use bounded multi-key tree walks so immutable branch and leaf
+objects are decoded once per batch. A pinned request reader retains only
+digest-verified, decoded, schema-validated tree objects in an 8 MiB envelope
+with a 7 MiB decoded-object budget and a 1,024-object ceiling. Branches are
+retained preferentially and leaves use LRU eviction; cache hits do not bypass
+any logical item, byte, object, depth, or truncation accounting.
+
+The immutable store records identifier and relationship capabilities as
+separate empty reserved postings in its existing additive terms root, which
+older same-major readers ignore. Relationship membership is also stored as a
+bounded unit-valued `(source, term)` key so a complete sparse posting can prove
+membership in one truncated dense posting without scanning adjacency. The v2
+relationship capability also stores bounded unit-valued
+`(source, term, target)` evidence so ranking can count distinct query-supporting
+callees without inflating parallel calls or one callee that matches multiple
+concepts. Current readers still open snapshots without either capability but
+report incomplete discovery coverage; rebuild the graph to make discovery
+recall equivalent across the JSON and store engines. The disposable SQLite
+query cache adds `relationship_terms(term, source_id)` and
+`relationship_term_targets(term, source_id, target_id)` tables, uses internal
+format v7, and is rebuilt automatically.
 
 Optional MCP query feedback remains local and disabled by default.
 `COMPASS_QUERY_LOG=<path>` writes the versioned `compass.query-log/1` JSONL

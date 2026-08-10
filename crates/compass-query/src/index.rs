@@ -1,13 +1,20 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use compass_graph::SnapshotSelector;
 use compass_ir::{PROGRAM_SCHEMA, ProgramBundle};
 use compass_model::code_graph::GraphDocument;
 use compass_model::query_contract::CODE_QUERY_SCHEMA_V1;
+use compass_model::search::{
+    direct_call_source_identifier_postings, direct_call_source_identifier_targets,
+    identifier_search_terms,
+};
 use compass_store::Store;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use sha2::{Digest, Sha256};
@@ -15,9 +22,12 @@ use sha2::{Digest, Sha256};
 use crate::CodeQueryEngine;
 use crate::code_query::CodeGraphBackend;
 use crate::cql::{QueryError, QueryErrorKind};
-use crate::graph_engine::{open_graph_engine, open_local_store_snapshot};
+use crate::graph_engine::{
+    DirectGraphEngine, StoreGraphEngine, open_graph_engine, open_local_store_snapshot,
+    read_store_ref,
+};
 
-const INDEX_FORMAT_VERSION: &str = "compass-code-index/3";
+const INDEX_FORMAT_VERSION: &str = "compass-code-index/7";
 
 /// Selects the source used to hydrate the typed query engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -35,6 +45,201 @@ pub enum EngineSelection {
 pub enum QueryEngineKind {
     Json,
     Store,
+    Memory,
+}
+
+pub const DEFAULT_QUERY_ENGINE_CACHE_CAPACITY: usize = 8;
+pub const MAX_QUERY_ENGINE_CACHE_CAPACITY: usize = 32;
+pub type CachedQueryEngine = Arc<Mutex<CodeQueryEngine>>;
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum QueryEngineIdentity {
+    PublishedStore {
+        store_id: String,
+        snapshot_id: String,
+        manifest_digest: String,
+        graph_digest: String,
+    },
+    VerifiedDocument {
+        graph_identity: String,
+    },
+}
+
+struct QueryEngineCacheEntry {
+    identity: QueryEngineIdentity,
+    engine: CachedQueryEngine,
+}
+
+/// Bounded LRU of long-lived query engines keyed by exact graph identity.
+pub struct QueryEngineCache {
+    capacity: usize,
+    state: Mutex<QueryEngineCacheState>,
+}
+
+#[derive(Default)]
+struct QueryEngineCacheState {
+    entries: BTreeMap<PathBuf, QueryEngineCacheEntry>,
+    order: VecDeque<PathBuf>,
+}
+
+impl Default for QueryEngineCache {
+    fn default() -> Self {
+        Self {
+            capacity: DEFAULT_QUERY_ENGINE_CACHE_CAPACITY,
+            state: Mutex::new(QueryEngineCacheState::default()),
+        }
+    }
+}
+
+impl QueryEngineCache {
+    pub fn new(capacity: usize) -> Result<Self, QueryError> {
+        if capacity == 0 || capacity > MAX_QUERY_ENGINE_CACHE_CAPACITY {
+            return Err(QueryError::new(
+                QueryErrorKind::InvalidParameter,
+                "invalid_query_engine_cache_capacity",
+                format!(
+                    "query engine cache capacity must be between 1 and {MAX_QUERY_ENGINE_CACHE_CAPACITY}"
+                ),
+            ));
+        }
+        Ok(Self {
+            capacity,
+            state: Mutex::new(QueryEngineCacheState::default()),
+        })
+    }
+
+    pub fn open_published_store(&self, graph_path: &Path) -> Result<CachedQueryEngine, QueryError> {
+        let path = fs::canonicalize(graph_path).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "canonicalize_store_graph_failed",
+                error.to_string(),
+            )
+        })?;
+        let reference = read_store_ref(&path)?;
+        let identity = QueryEngineIdentity::PublishedStore {
+            store_id: reference.store_id,
+            snapshot_id: reference.snapshot_id,
+            manifest_digest: reference.manifest_digest,
+            graph_digest: reference.graph_digest,
+        };
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(engine) = state.get(&path, &identity) {
+            return Ok(engine);
+        }
+
+        let cache_root = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("cache");
+        let engine = Arc::new(Mutex::new(open_with_engine(
+            &path,
+            None,
+            &cache_root,
+            EngineSelection::Store,
+        )?));
+        Ok(state.insert(self.capacity, path, identity, engine))
+    }
+
+    pub fn open_verified_document(
+        &self,
+        document: &GraphDocument,
+        graph_identity: &str,
+        graph_path: &Path,
+        cache_root: &Path,
+    ) -> Result<CachedQueryEngine, QueryError> {
+        let path = fs::canonicalize(graph_path).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "canonicalize_verified_graph_failed",
+                error.to_string(),
+            )
+        })?;
+        let identity = QueryEngineIdentity::VerifiedDocument {
+            graph_identity: graph_identity.to_owned(),
+        };
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(engine) = state.get(&path, &identity) {
+            return Ok(engine);
+        }
+        let engine = Arc::new(Mutex::new(open_with_verified_document(
+            document.clone(),
+            graph_identity.to_owned(),
+            &path,
+            None,
+            cache_root,
+        )?));
+        Ok(state.insert(self.capacity, path, identity, engine))
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entries
+            .len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl QueryEngineCacheState {
+    fn get(&mut self, path: &Path, identity: &QueryEngineIdentity) -> Option<CachedQueryEngine> {
+        let engine = self
+            .entries
+            .get(path)
+            .filter(|entry| &entry.identity == identity)
+            .map(|entry| Arc::clone(&entry.engine));
+        if engine.is_some() {
+            self.order.retain(|cached| cached != path);
+            self.order.push_back(path.to_path_buf());
+        }
+        engine
+    }
+
+    fn insert(
+        &mut self,
+        capacity: usize,
+        path: PathBuf,
+        identity: QueryEngineIdentity,
+        engine: CachedQueryEngine,
+    ) -> CachedQueryEngine {
+        self.order.retain(|cached| cached != &path);
+        while self.entries.len() >= capacity && !self.entries.contains_key(&path) {
+            let Some(expired) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&expired);
+        }
+        self.order.push_back(path.clone());
+        self.entries.insert(
+            path,
+            QueryEngineCacheEntry {
+                identity,
+                engine: Arc::clone(&engine),
+            },
+        );
+        engine
+    }
+}
+
+#[must_use]
+pub fn has_published_store(graph_path: &Path) -> bool {
+    graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(compass_store::STORE_REF_FILE_NAME)
+        .is_file()
 }
 
 pub fn open(
@@ -60,13 +265,7 @@ pub fn open_with_engine(
     // fallback to JSON for older/output-only builds, but never fall back after
     // a store reference is present: a corrupt or mismatched sidecar must fail
     // closed instead of silently querying a different realization.
-    if selection == EngineSelection::Default
-        && graph_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(compass_store::STORE_REF_FILE_NAME)
-            .is_file()
-    {
+    if selection == EngineSelection::Default && has_published_store(graph_path) {
         return open_from_local_store(graph_path, program_path);
     }
     if selection == EngineSelection::Store {
@@ -90,6 +289,47 @@ pub fn open_with_store<S: Store + ?Sized>(
     open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
 }
 
+/// Hydrate the typed query engine from one exact immutable store selector.
+/// The active selector and JSON artifacts are never consulted.
+pub fn open_with_store_selector<S: Store + ?Sized>(
+    store: &S,
+    selector: SnapshotSelector,
+    graph_path: &Path,
+    program_path: Option<&Path>,
+    cache_root: &Path,
+) -> Result<CodeQueryEngine, QueryError> {
+    let graph_engine = Box::new(StoreGraphEngine::from_store_selector(store, selector)?);
+    open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
+}
+
+/// Hydrate a long-lived typed query engine from a validated in-memory graph.
+/// Its materialized index and caches are keyed by the canonical graph identity.
+pub fn open_with_document(
+    graph: GraphDocument,
+    graph_path: &Path,
+    program_path: Option<&Path>,
+    cache_root: &Path,
+) -> Result<CodeQueryEngine, QueryError> {
+    let graph_engine = Box::new(DirectGraphEngine::from_document(graph)?);
+    open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
+}
+
+/// Hydrate a typed engine from a graph whose immutable source has already
+/// verified its content identity.
+pub fn open_with_verified_document(
+    graph: GraphDocument,
+    graph_identity: String,
+    graph_path: &Path,
+    program_path: Option<&Path>,
+    cache_root: &Path,
+) -> Result<CodeQueryEngine, QueryError> {
+    let graph_engine = Box::new(DirectGraphEngine::from_verified_document(
+        graph,
+        graph_identity,
+    )?);
+    open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
+}
+
 fn open_from_graph_engine(
     graph_path: &Path,
     program_path: Option<&Path>,
@@ -98,6 +338,7 @@ fn open_from_graph_engine(
 ) -> Result<CodeQueryEngine, QueryError> {
     let graph = graph_engine.graph().clone();
     let graph_identity = graph_engine.graph_identity().to_owned();
+    let build_generation_identity = graph.graph.build.generation_id.clone();
     let engine_kind = graph_engine.kind();
     let (program, program_digest) = load_program(program_path)?;
     let key = index_key(
@@ -151,6 +392,8 @@ fn open_from_graph_engine(
         index_path,
         partial_graph_message,
         engine_kind,
+        graph_identity,
+        build_generation_identity,
         search_query_cache: std::sync::Mutex::new(Default::default()),
         fuzzy_lookup_cache: std::sync::Mutex::new(Default::default()),
     })
@@ -161,15 +404,16 @@ fn open_from_local_store(
     program_path: Option<&Path>,
 ) -> Result<CodeQueryEngine, QueryError> {
     let snapshot = open_local_store_snapshot(graph_path)?;
-    let _metadata = snapshot.reader()?.metadata_summary().map_err(|error| {
+    let reader = snapshot.reader()?;
+    let metadata = reader.metadata_summary().map_err(|error| {
         QueryError::new(
             QueryErrorKind::CorruptArtifact,
             "store_graph_snapshot_failed",
             error.to_string(),
         )
     })?;
-    let publication_summary = snapshot
-        .reader()?
+    let graph_identity = reader.manifest().graph_digest.clone();
+    let publication_summary = reader
         .graph_diagnostic_by_code("publication_omission_summary")
         .map_err(|error| {
             QueryError::new(
@@ -194,6 +438,8 @@ fn open_from_local_store(
         index_path,
         partial_graph_message,
         engine_kind: QueryEngineKind::Store,
+        graph_identity,
+        build_generation_identity: metadata.graph.build.generation_id,
         search_query_cache: std::sync::Mutex::new(Default::default()),
         fuzzy_lookup_cache: std::sync::Mutex::new(Default::default()),
     })
@@ -300,16 +546,27 @@ fn build_index(
              CREATE TABLE nodes(
                id TEXT PRIMARY KEY, name TEXT NOT NULL, qualified_name TEXT NOT NULL,
                kind TEXT NOT NULL, roles TEXT NOT NULL, language TEXT NOT NULL,
-               framework TEXT NOT NULL, normalized_path TEXT NOT NULL, json TEXT NOT NULL
+               framework TEXT NOT NULL, normalized_path TEXT NOT NULL,
+               source_file TEXT NOT NULL, community_id TEXT NOT NULL,
+               community_label TEXT NOT NULL, json TEXT NOT NULL
              );
              CREATE TABLE edges(id TEXT PRIMARY KEY, source TEXT NOT NULL, target TEXT NOT NULL, kind TEXT NOT NULL, json TEXT NOT NULL);
              CREATE TABLE files(path TEXT PRIMARY KEY, digest TEXT NOT NULL, json TEXT NOT NULL);
              CREATE TABLE evidence(owner_type TEXT NOT NULL, owner_id TEXT NOT NULL, position INTEGER NOT NULL, json TEXT NOT NULL);
              CREATE TABLE aliases(node_id TEXT NOT NULL, alias TEXT NOT NULL);
+             CREATE TABLE relationship_terms(
+               term TEXT NOT NULL, source_id TEXT NOT NULL,
+               PRIMARY KEY(term, source_id)
+             ) WITHOUT ROWID;
+             CREATE TABLE relationship_term_targets(
+               term TEXT NOT NULL, source_id TEXT NOT NULL, target_id TEXT NOT NULL,
+               PRIMARY KEY(source_id, term, target_id)
+             ) WITHOUT ROWID;
              CREATE TABLE program_joins(graph_node_id TEXT NOT NULL, symbol_id TEXT NOT NULL, json TEXT NOT NULL);
              CREATE VIRTUAL TABLE node_fts USING fts5(
                node_id UNINDEXED, name, qualified_name, aliases, kind, roles,
-               language, framework, normalized_path,
+               language, framework, normalized_path, source_file, community_id,
+               community_label, identifier_terms,
                tokenize="unicode61 remove_diacritics 2 tokenchars '_'"
              );"#,
         )
@@ -369,6 +626,20 @@ fn build_index(
                 .filter(|value| !value.is_empty())
                 .collect::<Vec<_>>()
                 .join(" ");
+            let identifier_terms = [node.name.as_str(), node.qualified_name.as_str()]
+                .into_iter()
+                .chain(
+                    aliases_by_target
+                        .get(node.id.as_str())
+                        .into_iter()
+                        .flatten()
+                        .copied(),
+                )
+                .flat_map(identifier_search_terms)
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join(" ");
             for alias in aliases_by_target
                 .get(node.id.as_str())
                 .into_iter()
@@ -380,7 +651,7 @@ fn build_index(
             }
             transaction
                 .execute(
-                    "INSERT INTO nodes VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                    "INSERT INTO nodes VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
                     params![
                         node.id,
                         node.name,
@@ -390,13 +661,23 @@ fn build_index(
                         node.language.as_deref().unwrap_or_default(),
                         node.framework.as_deref().unwrap_or_default(),
                         normalized_path,
+                        node.source
+                            .as_ref()
+                            .map_or("", |source| source.file.as_str()),
+                        node.community
+                            .as_ref()
+                            .map_or_else(String::new, |community| community.id.to_string()),
+                        node.community
+                            .as_ref()
+                            .and_then(|community| community.label.as_deref())
+                            .unwrap_or_default(),
                         serde_json::to_string(node).map_err(json_error)?,
                     ],
                 )
                 .map_err(sql_error)?;
             transaction
                 .execute(
-                    "INSERT INTO node_fts VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                    "INSERT INTO node_fts VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
                     params![
                         node.id,
                         node.name,
@@ -407,6 +688,17 @@ fn build_index(
                         node.language.as_deref().unwrap_or_default(),
                         node.framework.as_deref().unwrap_or_default(),
                         normalized_path,
+                        node.source
+                            .as_ref()
+                            .map_or("", |source| source.file.as_str()),
+                        node.community
+                            .as_ref()
+                            .map_or_else(String::new, |community| community.id.to_string()),
+                        node.community
+                            .as_ref()
+                            .and_then(|community| community.label.as_deref())
+                            .unwrap_or_default(),
+                        identifier_terms,
                     ],
                 )
                 .map_err(sql_error)?;
@@ -422,6 +714,24 @@ fn build_index(
                     )
                     .map_err(sql_error)?;
             }
+        }
+        for (term, source_ids) in direct_call_source_identifier_postings(graph) {
+            for source_id in source_ids {
+                transaction
+                    .execute(
+                        "INSERT INTO relationship_terms VALUES(?1,?2)",
+                        params![term, source_id],
+                    )
+                    .map_err(sql_error)?;
+            }
+        }
+        for (term, source_id, target_id) in direct_call_source_identifier_targets(graph) {
+            transaction
+                .execute(
+                    "INSERT INTO relationship_term_targets VALUES(?1,?2,?3)",
+                    params![term, source_id, target_id],
+                )
+                .map_err(sql_error)?;
         }
         for edge in &graph.links {
             transaction

@@ -4,6 +4,7 @@ use std::fs;
 use compass_graph::{build_from_extraction, normalize_document_v1};
 use compass_languages::Engine;
 use compass_model::code_graph::{NodeDetails, NodeKind};
+use compass_model::provenance::EvidenceOrigin;
 
 #[test]
 fn namespace_imports_from_one_module_keep_distinct_local_alias_identities()
@@ -34,6 +35,14 @@ import * as m from "./module_test.js";
             let Some(NodeDetails::ImportExport(details)) = &node.details else {
                 return None;
             };
+            assert!(
+                node.source
+                    .as_ref()
+                    .is_some_and(|source| source.start_byte < source.end_byte)
+            );
+            assert!(node.evidence.iter().any(|evidence| {
+                evidence.origin == EvidenceOrigin::Ast && !evidence.anchors.is_empty()
+            }));
             Some((
                 details.local_name.as_deref().unwrap_or_default(),
                 node.id.as_str(),
