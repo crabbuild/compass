@@ -17,8 +17,10 @@ use compass_model::query_contract::{
 use crate::code_query::{
     PinnedDiscoveryBackend, query_edge, query_node, recall_fuzzy_term_variants, search_query_terms,
 };
-use crate::ranking::rank_search_candidates;
-use crate::recall::{CandidateSource, RecallBudget, RelationshipTermMatch, SearchCandidatePool};
+use crate::ranking::{RelationEvidenceRank, rank_search_candidates};
+use crate::recall::{
+    CandidateSource, RecallBudget, RelationshipTermMatch, SearchCandidate, SearchCandidatePool,
+};
 use crate::text::{normalize_context_filters, search_tokens};
 use crate::{CodeQueryEngine, QueryError, QueryErrorKind};
 
@@ -55,11 +57,14 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
 ];
 
 const MAX_SCOPE_AMBIGUITY_CANDIDATES: usize = 8;
+const MAX_RELATIONSHIP_SUPPORT_TARGETS: usize = 8;
 
 #[derive(Clone, Debug)]
 struct RankedDiscoveryCandidate {
     node: NodeRecord,
     score: f64,
+    channel_rank: u8,
+    relation_evidence: Option<RelationEvidenceRank>,
     matched_terms: Vec<String>,
     matched_fields: Vec<String>,
     source: DiscoverySeedSource,
@@ -70,6 +75,8 @@ struct DiscoveryCandidateSelection {
     nodes_read: u64,
     probes: u64,
     expanded_relationships: u64,
+    relationship_terms_supported: bool,
+    ambiguity_complete: bool,
     truncated: bool,
 }
 
@@ -171,13 +178,21 @@ impl CodeQueryEngine {
         } else {
             response.omissions.candidates = Some(0);
         }
+        if !selection.relationship_terms_supported {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::IncompleteCoverage,
+                message: "The selected legacy graph snapshot lacks exact relationship-term postings; rebuild the graph for complete agent discovery recall".to_owned(),
+                node_id: None,
+                path: None,
+            });
+        }
 
         let max_seeds = usize::try_from(request.limits.max_seeds)
             .unwrap_or(usize::MAX)
             .min(usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX));
         let (seeds, omitted_alternatives) = discovery_seeds(&selection.candidates, max_seeds);
         response.seeds = seeds;
-        if selection.truncated {
+        if !selection.ambiguity_complete {
             for seed in &mut response.seeds {
                 seed.ambiguous = true;
             }
@@ -305,6 +320,8 @@ impl CodeQueryEngine {
                 nodes_read: 0,
                 probes: 0,
                 expanded_relationships: 0,
+                relationship_terms_supported: backend.supports_relationship_terms()?,
+                ambiguity_complete: true,
                 truncated: false,
             });
         }
@@ -331,6 +348,7 @@ impl CodeQueryEngine {
         let mut nodes_read = 0_usize;
         let mut probes = 0_usize;
         let mut truncated = false;
+        let mut term_postings_truncated = false;
 
         guard.check()?;
         if probes < candidate_probe_limit && nodes_read < candidate_read_limit {
@@ -383,16 +401,22 @@ impl CodeQueryEngine {
             }
         }
 
-        let mut concept_queues = Vec::<(String, VecDeque<NodeRecord>)>::new();
+        let mut term_candidates = BTreeMap::<String, SearchCandidate>::new();
+        let lexical_read_limit = if concepts.len() >= 2 && direction != DiscoveryDirection::Incoming
+        {
+            candidate_read_limit / 2
+        } else {
+            candidate_read_limit
+        };
         for (concept_index, concept) in concepts.iter().enumerate() {
             guard.check()?;
-            let remaining = candidate_read_limit.saturating_sub(nodes_read);
+            let remaining = lexical_read_limit.saturating_sub(nodes_read);
             let concepts_remaining = concepts.len().saturating_sub(concept_index).max(1);
             let fair_limit = remaining / concepts_remaining;
             if probes >= candidate_probe_limit
                 || fair_limit < compass_graph::GRAPH_TERM_POSTING_CHUNK_ITEMS
             {
-                truncated = true;
+                term_postings_truncated = true;
                 break;
             }
             probes += 1;
@@ -401,174 +425,268 @@ impl CodeQueryEngine {
                 .saturating_add(usize::try_from(read.node_ids_decoded).unwrap_or(usize::MAX));
             probes =
                 probes.saturating_add(usize::try_from(read.chunks_decoded).unwrap_or(usize::MAX));
-            truncated |= read.truncated
-                || nodes_read > candidate_read_limit
-                || probes > candidate_probe_limit;
-            let matched_concepts = read.matched_concepts;
-            let nodes = read
-                .nodes
-                .into_iter()
-                .filter(|node| {
-                    discovery_scope_matches(node, scope)
-                        && matched_concepts
-                            .get(&node.id)
-                            .is_some_and(|matched| matched.contains(concept))
-                })
-                .collect::<VecDeque<_>>();
-            concept_queues.push((concept.clone(), nodes));
-        }
-        let mut anchor_queues = concept_queues.clone();
-
-        // Fair per-concept union: no common term can consume the whole direct
-        // pool before another canonical concept receives a chance.
-        while pool.len() < direct_limit {
-            let mut progressed = false;
-            for (concept, queue) in &mut concept_queues {
-                let Some(node) = queue.pop_front() else {
+            term_postings_truncated |=
+                read.truncated || nodes_read > lexical_read_limit || probes > candidate_probe_limit;
+            for node in read.nodes {
+                if !discovery_scope_matches(&node, scope)
+                    || !read
+                        .matched_concepts
+                        .get(&node.id)
+                        .is_some_and(|matched| matched.contains(concept))
+                {
                     continue;
-                };
-                progressed = true;
-                let id = node.id.clone();
-                let _ = pool.add(CandidateSource::TermIndex, node);
-                let _ = pool.add_indexed_matches(&id, [concept.clone()]);
-                if pool.len() >= direct_limit {
-                    break;
                 }
-            }
-            if !progressed {
-                break;
+                let candidate =
+                    term_candidates
+                        .entry(node.id.clone())
+                        .or_insert_with(|| SearchCandidate {
+                            node,
+                            sources: BTreeSet::from([CandidateSource::TermIndex]),
+                            indexed_matches: BTreeSet::new(),
+                            relationship_matches: BTreeSet::new(),
+                        });
+                candidate.indexed_matches.insert(concept.clone());
             }
         }
-        if concept_queues.iter().any(|(_, queue)| !queue.is_empty()) {
-            truncated = true;
+
+        let direct_available = direct_limit.saturating_sub(pool.len());
+        let ranked_direct = rank_search_candidates(
+            question,
+            &prepared.ranking_terms,
+            term_candidates.into_values().collect(),
+            direct_available,
+        );
+        for candidate in ranked_direct {
+            let id = candidate.node.id.clone();
+            let _ = pool.add(CandidateSource::TermIndex, candidate.node);
+            let _ = pool.add_indexed_matches(&id, candidate.matched_terms);
         }
 
         let mut expanded_relationships = 0_u64;
-        if concepts.len() >= 2 && promotion_limit > 0 && direction != DiscoveryDirection::Incoming {
-            let recall_edge_limit = limits.max_expanded_relationships.min(1_024);
-            let mut anchors = BTreeMap::<String, (NodeRecord, BTreeSet<String>)>::new();
-            while anchors.len() < 64 {
-                let mut progressed = false;
-                for (concept, queue) in &mut anchor_queues {
-                    let Some(node) = queue.pop_front() else {
-                        continue;
-                    };
-                    progressed = true;
-                    anchors
-                        .entry(node.id.clone())
-                        .or_insert_with(|| (node, BTreeSet::new()))
-                        .1
-                        .insert(concept.clone());
-                    if anchors.len() >= 64 {
-                        break;
-                    }
-                }
-                if !progressed {
-                    break;
-                }
-            }
-
-            let mut promotions =
-                BTreeMap::<String, (NodeRecord, BTreeSet<RelationshipTermMatch>)>::new();
-            for (_, (anchor, anchor_concepts)) in anchors {
+        let mut complete_relationship_candidate = false;
+        let relationship_terms_supported = backend.supports_relationship_terms()?;
+        truncated |= !relationship_terms_supported;
+        if relationship_terms_supported
+            && concepts.len() >= 2
+            && promotion_limit > 0
+            && direction != DiscoveryDirection::Incoming
+        {
+            let recall_edge_limit = limits.max_expanded_relationships.min(4_096);
+            let posting_budget = recall_edge_limit / 2;
+            let mut complete_masks = BTreeMap::<String, BTreeSet<String>>::new();
+            let mut observed_truncated_postings =
+                BTreeMap::<String, (BTreeSet<String>, Option<String>)>::new();
+            let mut exhaustive_postings = 0_usize;
+            let mut truncated_concepts = Vec::<String>::new();
+            let mut concepts_examined = 0_usize;
+            for (concept_index, concept) in concepts.iter().enumerate() {
                 guard.check()?;
-                if expanded_relationships >= recall_edge_limit || probes >= candidate_probe_limit {
+                let concepts_remaining = concepts.len().saturating_sub(concept_index).max(1);
+                let remaining_nodes = candidate_read_limit.saturating_sub(nodes_read);
+                let remaining_relationships =
+                    usize::try_from(posting_budget.saturating_sub(expanded_relationships))
+                        .unwrap_or(usize::MAX);
+                let fair_limit = (remaining_nodes / concepts_remaining)
+                    .min(remaining_relationships / concepts_remaining);
+                if probes >= candidate_probe_limit
+                    || fair_limit < compass_graph::GRAPH_TERM_POSTING_CHUNK_ITEMS
+                {
                     truncated = true;
                     break;
                 }
                 probes += 1;
-                let edge_budget =
-                    usize::try_from(recall_edge_limit.saturating_sub(expanded_relationships))
-                        .unwrap_or(usize::MAX)
-                        .min(16);
-                if edge_budget <= 1 {
-                    truncated = true;
-                    break;
+                let read = self.discovery_relationship_sources(backend, concept, fair_limit)?;
+                concepts_examined = concepts_examined.saturating_add(1);
+                nodes_read = nodes_read
+                    .saturating_add(usize::try_from(read.node_ids_decoded).unwrap_or(usize::MAX));
+                probes = probes
+                    .saturating_add(usize::try_from(read.chunks_decoded).unwrap_or(usize::MAX));
+                expanded_relationships =
+                    expanded_relationships.saturating_add(read.node_ids_decoded);
+                if read.truncated {
+                    truncated_concepts.push(concept.clone());
+                    let complete_through_source_id = read.source_ids.last().cloned();
+                    observed_truncated_postings.insert(
+                        concept.clone(),
+                        (
+                            read.source_ids.into_iter().collect(),
+                            complete_through_source_id,
+                        ),
+                    );
+                } else {
+                    exhaustive_postings += 1;
+                    for source_id in read.source_ids {
+                        complete_masks
+                            .entry(source_id)
+                            .or_default()
+                            .insert(concept.clone());
+                    }
                 }
-                let (edges, edge_truncated, examined) = backend.matching_bounded_counted(
-                    &anchor.id,
-                    true,
-                    &[EdgeKind::Calls],
-                    false,
-                    edge_budget - 1,
-                )?;
-                expanded_relationships = expanded_relationships
-                    .saturating_add(u64::try_from(examined).unwrap_or(u64::MAX));
-                truncated |= edge_truncated;
-                for edge in edges {
-                    guard.check()?;
-                    if probes >= candidate_probe_limit || nodes_read >= candidate_read_limit {
+            }
+            let all_concepts_examined = concepts_examined == concepts.len();
+            if !all_concepts_examined || exhaustive_postings == 0 || truncated_concepts.len() > 1 {
+                truncated = true;
+            }
+            let mut relationship_proof_complete =
+                all_concepts_examined && exhaustive_postings > 0 && truncated_concepts.len() <= 1;
+            let mut relationship_masks = BTreeMap::<String, BTreeSet<String>>::new();
+            for (source_id, mut matches) in complete_masks {
+                guard.check()?;
+                let mut verified = true;
+                for concept in &truncated_concepts {
+                    if let Some((source_ids, complete_through_source_id)) =
+                        observed_truncated_postings.get(concept)
+                    {
+                        if source_ids.contains(&source_id) {
+                            matches.insert(concept.clone());
+                            continue;
+                        }
+                        if complete_through_source_id
+                            .as_ref()
+                            .is_some_and(|last| source_id.as_str() <= last.as_str())
+                        {
+                            continue;
+                        }
+                    }
+                    if probes >= candidate_probe_limit
+                        || expanded_relationships >= recall_edge_limit
+                    {
                         truncated = true;
+                        relationship_proof_complete = false;
+                        verified = false;
                         break;
                     }
                     probes += 1;
-                    let Some(source) = backend.node_by_id(&edge.source)? else {
-                        continue;
-                    };
-                    nodes_read += 1;
-                    if !source.kind.is_callable()
-                        || source.source_file().is_none()
-                        || !discovery_scope_matches(&source, scope)
+                    expanded_relationships = expanded_relationships.saturating_add(1);
+                    if self
+                        .discovery_relationship_source_matches_term(backend, &source_id, concept)?
                     {
-                        continue;
+                        matches.insert(concept.clone());
                     }
-                    let matches = &mut promotions
-                        .entry(source.id.clone())
-                        .or_insert_with(|| (source, BTreeSet::new()))
-                        .1;
-                    matches.extend(anchor_concepts.iter().map(|concept| RelationshipTermMatch {
-                        term: concept.clone(),
-                        kind: EdgeKind::Calls,
-                    }));
+                }
+                if !verified {
+                    break;
+                }
+                if matches.len() >= 2 {
+                    relationship_masks.insert(source_id, matches);
+                }
+            }
+            let mut hydrated_promotions = Vec::new();
+            for (source_id, matches) in relationship_masks {
+                guard.check()?;
+                if probes >= candidate_probe_limit || nodes_read >= candidate_read_limit {
+                    truncated = true;
+                    relationship_proof_complete = false;
+                    break;
+                }
+                probes += 1;
+                let Some(node) = backend.node_by_id(&source_id)? else {
+                    return Err(QueryError::new(
+                        QueryErrorKind::GraphInvariant,
+                        "discovery_relationship_source_missing",
+                        format!("relationship-term index references absent node {source_id}"),
+                    ));
+                };
+                nodes_read += 1;
+                if node.kind.is_callable()
+                    && node.source_file().is_some_and(|file| !file.is_empty())
+                    && discovery_scope_matches(&node, scope)
+                {
+                    if probes >= candidate_probe_limit
+                        || expanded_relationships >= recall_edge_limit
+                    {
+                        truncated = true;
+                        relationship_proof_complete = false;
+                        break;
+                    }
+                    let remaining =
+                        usize::try_from(recall_edge_limit.saturating_sub(expanded_relationships))
+                            .unwrap_or(usize::MAX);
+                    let target_limit = MAX_RELATIONSHIP_SUPPORT_TARGETS
+                        .saturating_mul(matches.len())
+                        .saturating_add(1)
+                        .min(remaining);
+                    if target_limit == 0 {
+                        truncated = true;
+                        relationship_proof_complete = false;
+                        break;
+                    }
+                    probes += 1;
+                    let read = self.discovery_relationship_targets(
+                        backend,
+                        &source_id,
+                        &matches,
+                        target_limit,
+                    )?;
+                    expanded_relationships =
+                        expanded_relationships.saturating_add(read.ids_decoded);
+                    let retained_targets = read
+                        .target_ids
+                        .into_iter()
+                        .take(MAX_RELATIONSHIP_SUPPORT_TARGETS)
+                        .collect::<BTreeSet<_>>();
+                    if read.truncated && retained_targets.len() < MAX_RELATIONSHIP_SUPPORT_TARGETS {
+                        truncated = true;
+                        relationship_proof_complete = false;
+                    }
+                    let relationship_matches = matches
+                        .into_iter()
+                        .map(|term| RelationshipTermMatch {
+                            target_ids: retained_targets.clone(),
+                            term,
+                            kind: EdgeKind::Calls,
+                        })
+                        .collect::<BTreeSet<_>>();
+                    hydrated_promotions.push((node, relationship_matches));
                 }
             }
             pool.extend_total_budget(candidate_limit);
-            let mut promotions = promotions.into_values().collect::<Vec<_>>();
-            promotions.sort_by(|left, right| {
-                let left_terms = left
-                    .1
-                    .iter()
-                    .map(|matched| &matched.term)
-                    .collect::<BTreeSet<_>>()
-                    .len();
-                let right_terms = right
-                    .1
-                    .iter()
-                    .map(|matched| &matched.term)
-                    .collect::<BTreeSet<_>>()
-                    .len();
-                right_terms
-                    .cmp(&left_terms)
-                    .then_with(|| left.0.id.cmp(&right.0.id))
-            });
-            let mut promoted = 0_usize;
-            for (node, matches) in promotions {
-                let distinct = matches
-                    .iter()
-                    .map(|matched| &matched.term)
-                    .collect::<BTreeSet<_>>()
-                    .len();
-                if distinct < 2 {
-                    continue;
-                }
+            let promotion_count = hydrated_promotions.len();
+            let mut promotion_matches = BTreeMap::new();
+            let promotion_candidates = hydrated_promotions
+                .into_iter()
+                .map(|(node, relationship_matches)| {
+                    promotion_matches.insert(node.id.clone(), relationship_matches.clone());
+                    SearchCandidate {
+                        node,
+                        sources: BTreeSet::from([CandidateSource::RelationSeed]),
+                        indexed_matches: BTreeSet::new(),
+                        relationship_matches,
+                    }
+                })
+                .collect::<Vec<_>>();
+            if promotion_count > promotion_limit {
+                truncated = true;
+                relationship_proof_complete = false;
+            }
+            let promotions = rank_search_candidates(
+                question,
+                &prepared.ranking_terms,
+                promotion_candidates,
+                promotion_limit,
+            );
+            let mut promoted_any = false;
+            for promotion in promotions {
+                let node = promotion.node;
                 let id = node.id.clone();
                 let inserted = pool.add(CandidateSource::RelationSeed, node);
-                let _ = pool.add_relationship_matches(&id, matches);
-                if inserted {
-                    promoted += 1;
-                    if promoted >= promotion_limit {
-                        break;
-                    }
-                }
+                let matches = promotion_matches.remove(&id).unwrap_or_default();
+                // A pre-existing direct candidate still counts after the
+                // exact relationship evidence is attached. A capacity-
+                // rejected node does not.
+                let relationship_attached = pool.add_relationship_matches(&id, matches);
+                promoted_any |= inserted || relationship_attached;
             }
+            complete_relationship_candidate = relationship_proof_complete && promoted_any;
         } else {
             pool.extend_total_budget(candidate_limit);
         }
 
-        if pool.len() < candidate_limit.min(4) {
+        if !complete_relationship_candidate && pool.len() < candidate_limit.min(4) {
             let mut fuzzy_remaining = 16_usize.min(candidate_limit.saturating_sub(pool.len()));
+            let mut fuzzy_probes_remaining = 16_usize;
             for variant in recall_fuzzy_term_variants(&prepared.terms) {
-                if fuzzy_remaining == 0 {
+                if fuzzy_remaining == 0 || fuzzy_probes_remaining == 0 {
                     break;
                 }
                 if probes >= candidate_probe_limit || nodes_read >= candidate_read_limit {
@@ -576,6 +694,7 @@ impl CodeQueryEngine {
                     break;
                 }
                 probes += 1;
+                fuzzy_probes_remaining = fuzzy_probes_remaining.saturating_sub(1);
                 let (nodes, fuzzy_truncated) =
                     backend.nodes_by_normalized_name(&variant, fuzzy_remaining)?;
                 nodes_read = nodes_read.saturating_add(nodes.len());
@@ -589,6 +708,7 @@ impl CodeQueryEngine {
                 }
             }
         }
+        truncated |= term_postings_truncated && !complete_relationship_candidate;
         truncated |= pool.is_truncated();
         let ranked = rank_search_candidates(
             question,
@@ -596,6 +716,11 @@ impl CodeQueryEngine {
             pool.into_vec(),
             candidate_limit,
         );
+        let ambiguity_complete = !truncated
+            || (complete_relationship_candidate
+                && ranked
+                    .first()
+                    .is_some_and(|candidate| candidate.channel_rank == 4));
         guard.check()?;
         let mut candidates = Vec::with_capacity(ranked.len());
         for result in ranked {
@@ -606,6 +731,8 @@ impl CodeQueryEngine {
                 source: discovery_candidate_source(result.candidate_source),
                 node: result.node,
                 score: result.score,
+                channel_rank: result.channel_rank,
+                relation_evidence: result.relation_evidence,
             });
         }
         Ok(DiscoveryCandidateSelection {
@@ -613,6 +740,8 @@ impl CodeQueryEngine {
             nodes_read: u64::try_from(nodes_read).unwrap_or(u64::MAX),
             probes: u64::try_from(probes).unwrap_or(u64::MAX),
             expanded_relationships,
+            relationship_terms_supported,
+            ambiguity_complete,
             truncated,
         })
     }
@@ -632,6 +761,7 @@ impl CodeQueryEngine {
         let mut visited = BTreeSet::new();
         let mut frontier = VecDeque::new();
         let mut membership_complete = true;
+        let mut edge_cache = BTreeMap::new();
 
         for seed in &response.seeds {
             guard.check()?;
@@ -647,7 +777,7 @@ impl CodeQueryEngine {
             selected_nodes.insert(node.id.clone(), node);
         }
 
-        while let Some((node_id, depth)) = match request.traversal {
+        'traversal: while let Some((node_id, depth)) = match request.traversal {
             compass_model::query_contract::DiscoveryTraversal::Bfs => frontier.pop_front(),
             compass_model::query_contract::DiscoveryTraversal::Dfs => frontier.pop_back(),
         } {
@@ -659,15 +789,24 @@ impl CodeQueryEngine {
                 }
                 continue;
             }
-            let remaining =
+            let remaining_expansion =
                 usize::try_from(max_expanded.saturating_sub(response.stats.expanded_relationships))
                     .unwrap_or(usize::MAX);
+            // Once every remaining node slot plus one witness has been
+            // examined, more adjacency cannot change the bounded node set.
+            // Reading a larger Store prefix only hydrates edges that the
+            // response cannot admit. A truncated prefix keeps completeness
+            // and omission counts honest.
+            let remaining_node_slots = max_nodes.saturating_sub(selected_nodes.len());
+            let adjacency_limit = remaining_expansion
+                .min(remaining_node_slots.saturating_add(1))
+                .max(1);
             let (edges, truncated) = edges_for_direction(
                 backend,
                 &node_id,
                 response.selected_direction,
                 request.include_heuristic,
-                remaining,
+                adjacency_limit,
             )?;
             if truncated {
                 mark_expansion_truncated(response);
@@ -675,6 +814,11 @@ impl CodeQueryEngine {
             }
             for edge in edges {
                 guard.check()?;
+                if !edge.id.is_empty() {
+                    edge_cache
+                        .entry(edge.id.clone())
+                        .or_insert_with(|| edge.clone());
+                }
                 response.stats.expanded_relationships =
                     response.stats.expanded_relationships.saturating_add(1);
                 if response.stats.expanded_relationships > max_expanded {
@@ -692,6 +836,18 @@ impl CodeQueryEngine {
                 } else {
                     edge.source.clone()
                 };
+                if selected_nodes.contains_key(&other_id) {
+                    if visited.insert(other_id.clone()) {
+                        frontier.push_back((other_id, depth.saturating_add(1)));
+                    }
+                    continue;
+                }
+                if selected_nodes.len() >= max_nodes {
+                    response.truncated = true;
+                    membership_complete = false;
+                    omitted_node_ids.insert(other_id);
+                    break 'traversal;
+                }
                 let Some(other) = backend.node_by_id(&other_id)? else {
                     return Err(QueryError::new(
                         QueryErrorKind::GraphInvariant,
@@ -700,12 +856,6 @@ impl CodeQueryEngine {
                     ));
                 };
                 if !discovery_scope_matches(&other, &response.scope) {
-                    continue;
-                }
-                if selected_nodes.len() >= max_nodes && !selected_nodes.contains_key(&other_id) {
-                    response.truncated = true;
-                    membership_complete = false;
-                    omitted_node_ids.insert(other_id);
                     continue;
                 }
                 selected_nodes.entry(other.id.clone()).or_insert(other);
@@ -718,8 +868,14 @@ impl CodeQueryEngine {
         response.nodes = selected_nodes.values().map(query_node).collect();
         response.omissions.nodes =
             membership_complete.then(|| u64::try_from(omitted_node_ids.len()).unwrap_or(u64::MAX));
-        let edge_assembly_complete =
-            self.assemble_selected_edges(backend, request, guard, &selected_nodes, response)?;
+        let edge_assembly_complete = self.assemble_selected_edges(
+            backend,
+            request,
+            guard,
+            &selected_nodes,
+            &edge_cache,
+            response,
+        )?;
         response.omissions.expanded_relationships =
             (membership_complete && edge_assembly_complete).then_some(0);
         response.stats.visited_nodes = u64::try_from(visited.len()).unwrap_or(u64::MAX);
@@ -732,12 +888,15 @@ impl CodeQueryEngine {
         request: &DiscoveryQueryRequest,
         guard: &DiscoveryGuard<'_>,
         selected_nodes: &BTreeMap<String, NodeRecord>,
+        cached_edges: &BTreeMap<String, EdgeRecord>,
         response: &mut DiscoveryQueryResponse,
     ) -> Result<bool, QueryError> {
         let max_edges = usize::try_from(request.limits.max_edges).unwrap_or(usize::MAX);
         let max_expanded = request.limits.max_expanded_relationships;
         let mut selected_edges = Vec::<(usize, EdgeRecord)>::new();
+        let mut selected_store_edge_ids = BTreeSet::new();
         let mut complete = true;
+        let selected_node_ids = selected_nodes.keys().cloned().collect::<BTreeSet<_>>();
         for node_id in selected_nodes.keys() {
             guard.check()?;
             let remaining =
@@ -748,24 +907,23 @@ impl CodeQueryEngine {
                 mark_expansion_truncated(response);
                 break;
             }
-            let (edges, truncated) = backend.matching_bounded(
+            let read = backend.outgoing_within_nodes_bounded_work(
                 node_id,
-                false,
-                ALL_EDGE_KINDS,
+                &selected_node_ids,
                 request.include_heuristic,
                 remaining,
             )?;
-            if truncated {
+            response.stats.expanded_relationships = response
+                .stats
+                .expanded_relationships
+                .saturating_add(u64::try_from(read.examined).unwrap_or(u64::MAX));
+            if read.truncated {
                 complete = false;
                 mark_expansion_truncated(response);
             }
-            for edge in edges {
+            for edge in read.records {
                 guard.check()?;
-                response.stats.expanded_relationships =
-                    response.stats.expanded_relationships.saturating_add(1);
-                if !edge_matches_context(&edge, &response.relation_contexts)
-                    || !selected_nodes.contains_key(&edge.target)
-                {
+                if !edge_matches_context(&edge, &response.relation_contexts) {
                     continue;
                 }
                 // Each stored outgoing occurrence is visited exactly once for
@@ -774,9 +932,40 @@ impl CodeQueryEngine {
                 // multigraph deduplication keys.
                 selected_edges.push((selected_edges.len(), edge));
             }
-            if truncated {
+            selected_store_edge_ids.extend(read.edge_ids);
+            if read.truncated {
                 break;
             }
+        }
+        let uncached_edge_ids = selected_store_edge_ids
+            .iter()
+            .filter(|edge_id| !cached_edges.contains_key(*edge_id))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut loaded_edges = backend
+            .edges_by_ids(&uncached_edge_ids)?
+            .into_iter()
+            .map(|edge| (edge.id.clone(), edge))
+            .collect::<BTreeMap<_, _>>();
+        for edge_id in selected_store_edge_ids {
+            guard.check()?;
+            let edge = if let Some(edge) = cached_edges.get(&edge_id) {
+                edge.clone()
+            } else {
+                loaded_edges.remove(&edge_id).ok_or_else(|| {
+                    QueryError::new(
+                        QueryErrorKind::GraphInvariant,
+                        "discovery_edge_missing",
+                        format!("outgoing index references missing edge {edge_id}"),
+                    )
+                })?
+            };
+            if !edge_matches_context(&edge, &response.relation_contexts)
+                || (!request.include_heuristic && is_heuristic(&edge))
+            {
+                continue;
+            }
+            selected_edges.push((selected_edges.len(), edge));
         }
         selected_edges.sort_by(compare_discovery_edge_occurrences);
         let omitted_edges = selected_edges.len().saturating_sub(max_edges);
@@ -1091,9 +1280,14 @@ fn discovery_seeds(
                 .iter()
                 .filter(|other| {
                     other.node.id != candidate.node.id
-                        && (other.score.total_cmp(&candidate.score).is_eq()
-                            || source_backed_name_collision(candidate, other)
-                            || calibrated_low_margin(candidate.score, other.score))
+                        && other.channel_rank == candidate.channel_rank
+                        && if candidate.channel_rank == 4 {
+                            other.relation_evidence == candidate.relation_evidence
+                        } else {
+                            other.score.total_cmp(&candidate.score).is_eq()
+                                || source_backed_name_collision(candidate, other)
+                                || calibrated_low_margin(candidate.score, other.score)
+                        }
                 })
                 .map(|other| DiscoveryAlternative {
                     node_id: other.node.id.clone(),
@@ -1496,7 +1690,15 @@ mod tests {
                      language, framework, normalized_path, source_file, community_id,
                      community_label, identifier_terms,
                      tokenize="unicode61 remove_diacritics 2 tokenchars '_'"
-                   );"#,
+                   );
+                   CREATE TABLE relationship_terms(
+                     term TEXT NOT NULL, source_id TEXT NOT NULL,
+                     PRIMARY KEY(term, source_id)
+                   ) WITHOUT ROWID;
+                   CREATE TABLE relationship_term_targets(
+                     term TEXT NOT NULL, source_id TEXT NOT NULL, target_id TEXT NOT NULL,
+                     PRIMARY KEY(source_id, term, target_id)
+                   ) WITHOUT ROWID;"#,
             )
             .unwrap_or_else(|_| std::process::abort());
         for node in &graph.nodes {
@@ -1532,6 +1734,28 @@ mod tests {
                             .unwrap_or_default(),
                         identifier_terms,
                     ],
+                )
+                .unwrap_or_else(|_| std::process::abort());
+        }
+        for (term, source_ids) in
+            compass_model::search::direct_call_source_identifier_postings(&graph)
+        {
+            for source_id in source_ids {
+                connection
+                    .execute(
+                        "INSERT INTO relationship_terms VALUES(?1,?2)",
+                        rusqlite::params![term, source_id],
+                    )
+                    .unwrap_or_else(|_| std::process::abort());
+            }
+        }
+        for (term, source_id, target_id) in
+            compass_model::search::direct_call_source_identifier_targets(&graph)
+        {
+            connection
+                .execute(
+                    "INSERT INTO relationship_term_targets VALUES(?1,?2,?3)",
+                    rusqlite::params![term, source_id, target_id],
                 )
                 .unwrap_or_else(|_| std::process::abort());
         }
@@ -1738,6 +1962,169 @@ mod tests {
     }
 
     #[test]
+    fn relationship_recall_finds_repository_state_workflow()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![
+                anchored_node("n:save", "SaveStep", "src/strategy.rs", 40),
+                anchored_node("n:open", "RepositoryHandle", "src/repository.rs", 8),
+                anchored_node("n:state", "StateHandle", "src/state.rs", 12),
+                anchored_node("n:record", "RecordedMarker", "src/record.rs", 13),
+                anchored_node("n:noise", "repositoryFixture", "tests/repository.rs", 5),
+            ],
+            vec![
+                edge("e:open", "n:save", "n:open"),
+                edge("e:state", "n:save", "n:state"),
+                edge("e:record", "n:save", "n:record"),
+                edge("e:noise", "n:noise", "n:open"),
+            ],
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "how is repository state recorded".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "n:save");
+        assert_eq!(
+            response.seeds[0].candidate_source,
+            DiscoverySeedSource::RelationSeed
+        );
+        assert_eq!(response.seeds[0].matched_terms, ["repository", "state"]);
+        assert!(!response.seeds[0].ambiguous);
+        Ok(())
+    }
+
+    #[test]
+    fn relationship_postings_recover_a_late_dense_source_from_an_exhaustive_sparse_driver()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut nodes = vec![
+            anchored_node(
+                "z:behavior",
+                "CondenseSession",
+                "src/session/condense.rs",
+                20,
+            ),
+            anchored_node("c:checkpoint", "CheckpointID", "src/id.rs", 4),
+            anchored_node(
+                "z:create",
+                "extractOrCreateSessionData",
+                "src/session.rs",
+                80,
+            ),
+        ];
+        let mut edges = vec![
+            edge("e:checkpoint", "z:behavior", "c:checkpoint"),
+            edge("e:create", "z:behavior", "z:create"),
+        ];
+        for index in 0..1_100 {
+            let caller_id = format!("a:caller:{index:04}");
+            nodes.push(anchored_node(
+                &caller_id,
+                &format!("fixtureCaller{index:04}"),
+                if index % 2 == 0 {
+                    "tests/generated/create_fixture.rs"
+                } else {
+                    "generated/tests/create_fixture.rs"
+                },
+                index + 100,
+            ));
+            edges.push(edge(&format!("e:dense:{index:04}"), &caller_id, "z:create"));
+        }
+        let ordered = engine(nodes.clone(), edges.clone());
+        nodes.reverse();
+        let mut shuffled_edges = edges;
+        shuffled_edges.reverse();
+        let shuffled = engine(nodes, shuffled_edges);
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "how is a checkpoint created".to_owned();
+
+        let response = ordered.discover(query.clone())?;
+        let shuffled_response = shuffled.discover(query)?;
+
+        assert_eq!(response, shuffled_response);
+        assert_eq!(response.seeds[0].node_id, "z:behavior");
+        assert_eq!(response.seeds[0].matched_terms, ["checkpoint", "create"]);
+        assert!(
+            response.seeds[0]
+                .matched_fields
+                .contains(&"relationship".to_owned())
+        );
+        assert!(!response.seeds[0].ambiguous);
+        Ok(())
+    }
+
+    #[test]
+    fn observed_truncated_posting_ids_do_not_spend_membership_probes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut nodes = vec![
+            anchored_node("n:checkpoint", "CheckpointID", "src/id.rs", 1),
+            anchored_node("n:create", "CreateSession", "src/create.rs", 2),
+        ];
+        let mut edges = Vec::new();
+        for index in 0..60 {
+            let id = format!("a:shared:{index:04}");
+            nodes.push(anchored_node(
+                &id,
+                "run",
+                &format!("tests/shared/{index:04}.rs"),
+                index + 10,
+            ));
+            edges.push(edge(
+                &format!("e:shared:{index:04}:checkpoint"),
+                &id,
+                "n:checkpoint",
+            ));
+            edges.push(edge(
+                &format!("e:shared:{index:04}:create"),
+                &id,
+                "n:create",
+            ));
+        }
+        for index in 0..199 {
+            let id = format!("b:create-only:{index:04}");
+            nodes.push(anchored_node(
+                &id,
+                "run",
+                &format!("tests/create-only/{index:04}.rs"),
+                index + 100,
+            ));
+            edges.push(edge(&format!("e:create-only:{index:04}"), &id, "n:create"));
+        }
+        nodes.push(anchored_node(
+            "zz:create-tail",
+            "run",
+            "tests/create-only/tail.rs",
+            299,
+        ));
+        edges.push(edge("e:create-only:tail", "zz:create-tail", "n:create"));
+        for index in 0..1_100 {
+            let id = format!("m:dense:{index:04}");
+            nodes.push(anchored_node(
+                &id,
+                "run",
+                &format!("tests/dense/{index:04}.rs"),
+                index + 300,
+            ));
+            edges.push(edge(
+                &format!("e:dense:{index:04}:checkpoint"),
+                &id,
+                "n:checkpoint",
+            ));
+        }
+        let engine = engine(nodes, edges);
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "checkpoint create".to_owned();
+        query.limits.max_candidates = 256;
+
+        let response = engine.discover(query)?;
+
+        assert!(response.truncated);
+        assert_eq!(response.stats.candidates_admitted, 188);
+        assert_eq!(response.stats.candidate_probes, 129);
+        Ok(())
+    }
+
+    #[test]
     fn relationship_recall_does_not_let_one_common_neighbor_beat_a_direct_symbol()
     -> Result<(), Box<dyn std::error::Error>> {
         let engine = engine(
@@ -1757,6 +2144,229 @@ mod tests {
             response.seeds[0].candidate_source,
             DiscoverySeedSource::ExactName
         );
+        Ok(())
+    }
+
+    #[test]
+    fn exact_name_beats_a_maximal_relationship_match() -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![
+                anchored_node("n:direct", "checkpoint create session", "src/direct.rs", 2),
+                anchored_node("n:caller", "indirect", "src/caller.rs", 3),
+                anchored_node("n:checkpoint", "CheckpointID", "src/id.rs", 4),
+                anchored_node("n:create", "CreateSession", "src/create.rs", 5),
+                anchored_node("n:session", "SessionData", "src/session.rs", 6),
+            ],
+            vec![
+                edge("e:checkpoint", "n:caller", "n:checkpoint"),
+                edge("e:create", "n:caller", "n:create"),
+                edge("e:session", "n:caller", "n:session"),
+            ],
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "checkpoint create session".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "n:direct");
+        assert_eq!(
+            response.seeds[0].candidate_source,
+            DiscoverySeedSource::ExactName
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn equal_relationship_callers_are_reported_as_ambiguous()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut nodes = vec![
+            anchored_node("n:caller:a", "run", "src/a.rs", 2),
+            anchored_node("n:caller:b", "run", "src/b.rs", 3),
+            anchored_node("n:checkpoint", "CheckpointID", "src/id.rs", 4),
+            anchored_node("n:create", "CreateSession", "src/create.rs", 5),
+        ];
+        let mut edges = vec![
+            edge("e:a:checkpoint", "n:caller:a", "n:checkpoint"),
+            edge("e:a:create", "n:caller:a", "n:create"),
+            edge("e:b:checkpoint", "n:caller:b", "n:checkpoint"),
+            edge("e:b:create", "n:caller:b", "n:create"),
+        ];
+        let ordered = engine(nodes.clone(), edges.clone());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "checkpoint create".to_owned();
+
+        let response = ordered.discover(query.clone())?;
+        nodes.reverse();
+        edges.reverse();
+        let reversed = engine(nodes, edges).discover(query)?;
+
+        assert_eq!(response, reversed);
+        assert!(response.seeds[0].ambiguous);
+        assert_eq!(response.seeds[0].alternatives.len(), 1);
+        assert_eq!(response.seeds[0].alternatives[0].node_id, "n:caller:b");
+        Ok(())
+    }
+
+    #[test]
+    fn relation_evidence_prefers_production_support_four_and_dedupes_cross_concept_targets()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut nodes = vec![
+            anchored_node("z:production-four", "run", "src/workflow/four.rs", 1),
+            anchored_node("a:production-three", "run", "src/workflow/three.rs", 2),
+            anchored_node("0:test-five", "run", "tests/workflow_test.rs", 3),
+            anchored_node("t:both", "CheckpointCreate", "src/targets.rs", 10),
+            anchored_node("t:checkpoint:1", "CheckpointID", "src/targets.rs", 11),
+            anchored_node("t:checkpoint:2", "CheckpointStore", "src/targets.rs", 12),
+            anchored_node("t:create:1", "CreateSession", "src/targets.rs", 13),
+            anchored_node("t:create:2", "CreateData", "src/targets.rs", 14),
+            anchored_node("t:create:3", "CreateCommit", "src/targets.rs", 15),
+        ];
+        let mut edges = vec![
+            edge("e:p4:cp1", "z:production-four", "t:checkpoint:1"),
+            edge("e:p4:cp2", "z:production-four", "t:checkpoint:2"),
+            edge("e:p4:c1", "z:production-four", "t:create:1"),
+            edge("e:p4:c2", "z:production-four", "t:create:2"),
+            edge("e:p3:both", "a:production-three", "t:both"),
+            edge("e:p3:cp", "a:production-three", "t:checkpoint:1"),
+            edge("e:p3:create", "a:production-three", "t:create:1"),
+            edge("e:t5:both", "0:test-five", "t:both"),
+            edge("e:t5:cp1", "0:test-five", "t:checkpoint:1"),
+            edge("e:t5:create1", "0:test-five", "t:create:1"),
+            edge("e:t5:create2", "0:test-five", "t:create:2"),
+            edge("e:t5:create3", "0:test-five", "t:create:3"),
+        ];
+        let ordered = engine(nodes.clone(), edges.clone());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "checkpoint create".to_owned();
+        let response = ordered.discover(query.clone())?;
+        nodes.reverse();
+        edges.reverse();
+        let reversed = engine(nodes, edges).discover(query)?;
+
+        assert_eq!(response, reversed);
+        assert_eq!(response.seeds[0].node_id, "z:production-four");
+        assert!(!response.seeds[0].ambiguous);
+        assert_eq!(response.seeds[1].node_id, "a:production-three");
+        assert_eq!(response.seeds[2].node_id, "0:test-five");
+        Ok(())
+    }
+
+    #[test]
+    fn scope_filtering_precedes_relationship_promotion_cap()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut nodes = vec![
+            anchored_node("n:checkpoint", "CheckpointID", "src/shared/id.rs", 4),
+            anchored_node("n:create", "CreateSession", "src/shared/create.rs", 5),
+            anchored_node("z:in-scope", "run", "src/workflow/run.rs", 8),
+        ];
+        let mut edges = vec![
+            edge("e:z:checkpoint", "z:in-scope", "n:checkpoint"),
+            edge("e:z:create", "z:in-scope", "n:create"),
+        ];
+        for index in 0..128 {
+            let id = format!("a:out-of-scope:{index:03}");
+            nodes.push(anchored_node(
+                &id,
+                "run",
+                &format!("tests/generated/{index:03}.rs"),
+                index + 10,
+            ));
+            edges.push(edge(
+                &format!("e:a:{index:03}:checkpoint"),
+                &id,
+                "n:checkpoint",
+            ));
+            edges.push(edge(&format!("e:a:{index:03}:create"), &id, "n:create"));
+        }
+        let engine = engine(nodes, edges);
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "checkpoint create".to_owned();
+        query.limits.max_candidates = 256;
+        query.scope = vec![DiscoveryScope {
+            kind: DiscoveryScopeKind::Source,
+            value: "src/workflow".to_owned(),
+        }];
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "z:in-scope");
+        assert!(!response.seeds[0].ambiguous);
+        Ok(())
+    }
+
+    #[test]
+    fn relationship_promotion_cap_uses_canonical_ranking_before_admission()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut nodes = vec![
+            anchored_node("n:checkpoint", "CheckpointID", "src/shared/id.rs", 4),
+            anchored_node("n:create", "CreateSession", "src/shared/create.rs", 5),
+            anchored_node("z:production", "run", "src/workflow/run.rs", 8),
+        ];
+        let mut edges = vec![
+            edge("e:z:checkpoint", "z:production", "n:checkpoint"),
+            edge("e:z:create", "z:production", "n:create"),
+        ];
+        for index in 0..128 {
+            let id = format!("a:test-helper:{index:03}");
+            nodes.push(anchored_node(
+                &id,
+                "run",
+                &format!("tests/generated/{index:03}.rs"),
+                index + 10,
+            ));
+            edges.push(edge(
+                &format!("e:a:{index:03}:checkpoint"),
+                &id,
+                "n:checkpoint",
+            ));
+            edges.push(edge(&format!("e:a:{index:03}:create"), &id, "n:create"));
+        }
+        let engine = engine(nodes, edges);
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "checkpoint create".to_owned();
+        query.limits.max_candidates = 256;
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "z:production");
+        assert_eq!(
+            response.seeds[0].candidate_source,
+            DiscoverySeedSource::RelationSeed
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn lower_channel_alias_truncation_does_not_make_a_proven_relationship_seed_ambiguous()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut nodes = vec![
+            anchored_node("n:behavior", "run", "src/workflow/run.rs", 1),
+            anchored_node("n:checkpoint", "CheckpointID", "src/id.rs", 2),
+            anchored_node("n:create", "CreateSession", "src/create.rs", 3),
+        ];
+        for index in 0..200 {
+            nodes.push(anchored_node(
+                &format!("n:alias:{index:03}"),
+                "checkpoint",
+                &format!("tests/aliases/{index:03}.rs"),
+                index + 10,
+            ));
+        }
+        let engine = engine(
+            nodes,
+            vec![
+                edge("e:checkpoint", "n:behavior", "n:checkpoint"),
+                edge("e:create", "n:behavior", "n:create"),
+            ],
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "checkpoint create".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert!(response.truncated);
+        assert_eq!(response.seeds[0].node_id, "n:behavior");
+        assert!(!response.seeds[0].ambiguous);
         Ok(())
     }
 
@@ -1846,6 +2456,40 @@ mod tests {
                 .iter()
                 .all(|seed| seed.candidate_source != DiscoverySeedSource::RelationSeed)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn relationship_recall_never_claims_completeness_before_all_concepts_are_examined()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![
+                anchored_node("n:behavior", "run", "src/run.rs", 1),
+                anchored_node("n:checkpoint", "CheckpointID", "src/id.rs", 2),
+                anchored_node("n:create", "CreateSession", "src/create.rs", 3),
+                anchored_node("n:state", "SessionState", "src/state.rs", 4),
+            ],
+            vec![
+                edge("e:checkpoint", "n:behavior", "n:checkpoint"),
+                edge("e:create", "n:behavior", "n:create"),
+                edge("e:state", "n:behavior", "n:state"),
+            ],
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "checkpoint create state".to_owned();
+        query.limits.max_expanded_relationships = 255;
+
+        let response = engine.discover(query)?;
+
+        assert!(response.truncated);
+        assert!(response.seeds.iter().all(|seed| seed.ambiguous));
+        assert!(
+            response
+                .seeds
+                .iter()
+                .all(|seed| seed.candidate_source != DiscoverySeedSource::RelationSeed)
+        );
+        assert!(response.stats.expanded_relationships <= 255);
         Ok(())
     }
 
@@ -2222,6 +2866,7 @@ mod tests {
         assert!(response.stats.candidate_nodes <= MAX_DISCOVERY_CANDIDATE_NODES_READ);
         assert!(response.stats.candidate_probes <= MAX_DISCOVERY_CANDIDATE_PROBES);
         assert!(response.stats.candidate_probes >= 34);
+        assert!(response.stats.candidate_probes <= 114);
         assert_eq!(response.stats.candidates_admitted, 0);
         Ok(())
     }
@@ -2368,6 +3013,34 @@ mod tests {
                 .iter()
                 .any(|diagnostic| diagnostic.code == QueryDiagnosticCode::BoundedTruncation)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn node_cap_stops_endpoint_expansion_but_preserves_selected_subgraph_edges()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut nodes = vec![node("n:alpha", "alpha")];
+        let mut edges = Vec::new();
+        for index in 0..1_024 {
+            let id = format!("n:leaf:{index:04}");
+            nodes.push(node(&id, &format!("leaf_{index:04}")));
+            edges.push(edge(&format!("e:{index:04}"), "n:alpha", &id));
+        }
+        let engine = engine(nodes, edges);
+        let mut bounded_request = request(DiscoveryDirection::Both);
+        bounded_request.limits.max_nodes = 2;
+        bounded_request.limits.max_edges = 1_000;
+        bounded_request.limits.max_expanded_relationships = 4_096;
+
+        let response = engine.discover(bounded_request)?;
+
+        assert_eq!(response.nodes.len(), 2);
+        assert_eq!(response.stats.visited_nodes, 2);
+        assert!(response.stats.expanded_relationships <= 1_027);
+        assert_eq!(response.edges.len(), 1);
+        assert_eq!(response.omissions.edges, Some(0));
+        assert_eq!(response.omissions.expanded_relationships, None);
+        assert!(response.truncated);
         Ok(())
     }
 

@@ -49,6 +49,7 @@ pub(crate) struct SearchCandidate {
 pub(crate) struct RelationshipTermMatch {
     pub(crate) term: String,
     pub(crate) kind: EdgeKind,
+    pub(crate) target_ids: BTreeSet<String>,
 }
 
 impl Ord for RelationshipTermMatch {
@@ -56,6 +57,7 @@ impl Ord for RelationshipTermMatch {
         self.term
             .cmp(&other.term)
             .then_with(|| self.kind.as_str().cmp(other.kind.as_str()))
+            .then_with(|| self.target_ids.cmp(&other.target_ids))
     }
 }
 
@@ -227,6 +229,15 @@ impl SearchCandidate {
             .iter()
             .map(|matched| matched.term.clone())
             .collect()
+    }
+
+    #[must_use]
+    pub(crate) fn relationship_target_count(&self) -> usize {
+        self.relationship_matches
+            .iter()
+            .flat_map(|matched| matched.target_ids.iter())
+            .collect::<BTreeSet<_>>()
+            .len()
     }
 }
 

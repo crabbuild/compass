@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::error::Error;
 
 use compass_graph::{
@@ -177,6 +178,30 @@ fn snapshot_is_deterministic_and_reuses_immutable_objects() -> Result<(), Box<dy
     assert_eq!(reader.outgoing("a", limits(4))?.len(), 2);
     assert_eq!(reader.incoming("b", limits(4))?.len(), 2);
     assert!(reader.outgoing("b", limits(4))?.is_empty());
+    let node_ids = ["a".to_owned(), "b".to_owned()]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        reader
+            .get_nodes_by_ids_bounded_work(&node_ids, limits(4))?
+            .into_iter()
+            .map(|node| node.id)
+            .collect::<Vec<_>>(),
+        ["a", "b"]
+    );
+    let edge_ids = graph()
+        .links
+        .into_iter()
+        .map(|edge| edge.id)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        reader
+            .get_edges_by_ids_bounded_work(&edge_ids, limits(4))?
+            .into_iter()
+            .map(|edge| edge.id)
+            .collect::<Vec<_>>(),
+        edge_ids.into_iter().collect::<Vec<_>>()
+    );
     let (named, named_truncated) = reader.nodes_by_normalized_name("A", limits(4))?;
     assert!(!named_truncated);
     assert_eq!(
@@ -269,6 +294,233 @@ fn nodes_for_terms_matches_diacritic_normalized_queries() -> Result<(), Box<dyn 
         ["cafe"]
     );
 
+    Ok(())
+}
+
+#[test]
+fn identifier_subword_capability_is_found_in_a_multilevel_terms_tree() -> Result<(), Box<dyn Error>>
+{
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut document = graph();
+    document.nodes.clear();
+    document.links.clear();
+    document.nodes.push(node("caller"));
+    for index in 0..4_200 {
+        let target_id = format!("term-{index:04}");
+        let mut term_node = node(&target_id);
+        term_node.name = format!("UniqueCapabilityTerm{index:04}");
+        term_node.qualified_name = format!("fixture::UniqueCapabilityTerm{index:04}");
+        document.nodes.push(term_node);
+        let call_id = edge_id("caller", EdgeKind::Calls, &target_id, None, None);
+        document.links.push(EdgeRecord {
+            id: call_id.clone(),
+            key: call_id,
+            source: "caller".to_owned(),
+            target: target_id,
+            kind: EdgeKind::Calls,
+            occurrence_rule: None,
+            relationship_site: None,
+            details: None,
+            evidence: vec![evidence()],
+            weight: None,
+            context: None,
+            deferred: false,
+            diagnostics: Vec::new(),
+        });
+    }
+
+    let prepared = builder.prepare(&store, &document)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    let terms = reader
+        .manifest()
+        .roots
+        .iter()
+        .find(|root| root.index == IndexKind::Terms)
+        .ok_or("terms root missing")?;
+    assert!(terms.entry_count > 4_096);
+    assert!(reader.supports_identifier_subwords()?);
+    assert!(reader.supports_relationship_terms()?);
+    assert!(reader.relationship_source_matches_term("caller", "uniquecapabilityterm4199")?);
+    let (source_ids, truncated, work) = reader
+        .source_ids_for_exact_relationship_term_bounded_work(
+            "uniquecapabilityterm4199",
+            limits(128),
+        )?;
+    assert!(!truncated);
+    assert_eq!(source_ids, ["caller"]);
+    assert_eq!(work.node_ids_decoded, 1);
+    let (target_ids, target_truncated, target_work) = reader
+        .relationship_target_ids_for_source_terms_bounded_work(
+            "caller",
+            &["uniquecapabilityterm4199".to_owned()]
+                .into_iter()
+                .collect(),
+            limits(128),
+        )?;
+    assert!(!target_truncated);
+    assert_eq!(target_ids, ["term-4199"]);
+    assert_eq!(target_work.node_ids_decoded, 1);
+    let common_terms = ["capability".to_owned(), "unique".to_owned()]
+        .into_iter()
+        .collect();
+    let (bounded_targets, bounded_truncated, bounded_work) = reader
+        .relationship_target_ids_for_source_terms_bounded_work(
+            "caller",
+            &common_terms,
+            limits(17),
+        )?;
+    assert!(bounded_truncated);
+    assert_eq!(bounded_targets.len(), 9);
+    assert_eq!(
+        bounded_targets.first().map(String::as_str),
+        Some("term-0000")
+    );
+    assert_eq!(
+        bounded_targets.last().map(String::as_str),
+        Some("term-0008")
+    );
+    assert_eq!(bounded_work.node_ids_decoded, 17);
+    Ok(())
+}
+
+#[test]
+fn multi_term_prefix_lookup_includes_longer_symbol_terms() -> Result<(), Box<dyn Error>> {
+    let mut document = graph();
+    let mut list = node("n:list");
+    list.name = "list".to_owned();
+    list.qualified_name = "UserService.list".to_owned();
+    let mut listing = node("n:listing");
+    listing.name = "listing".to_owned();
+    listing.qualified_name = "UserService.listing".to_owned();
+    document.nodes.extend([list, listing]);
+    let call_id = edge_id("a", EdgeKind::Calls, "n:list", None, None);
+    document.links.push(EdgeRecord {
+        id: call_id.clone(),
+        key: call_id,
+        source: "a".to_owned(),
+        target: "n:list".to_owned(),
+        kind: EdgeKind::Calls,
+        occurrence_rule: None,
+        relationship_site: None,
+        details: None,
+        evidence: vec![evidence()],
+        weight: None,
+        context: None,
+        deferred: false,
+        diagnostics: Vec::new(),
+    });
+    document.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    let store = MemoryStore::default();
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &document)?;
+    GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+
+    let (nodes, truncated) = reader.nodes_for_terms(
+        &["userservice".to_owned(), "list".to_owned()],
+        SnapshotReadLimits::default(),
+    )?;
+
+    assert!(!truncated);
+    assert_eq!(
+        nodes
+            .into_iter()
+            .map(|node| node.id)
+            .filter(|id| id.starts_with("n:list"))
+            .collect::<Vec<_>>(),
+        ["n:list", "n:listing"]
+    );
+    for term in ["user", "service"] {
+        let (exact_nodes, exact_truncated, _) =
+            reader.nodes_for_exact_term_bounded_work(term, SnapshotReadLimits::default())?;
+        assert!(!exact_truncated);
+        assert_eq!(
+            exact_nodes
+                .into_iter()
+                .map(|node| node.id)
+                .filter(|id| id.starts_with("n:list"))
+                .collect::<Vec<_>>(),
+            ["n:list", "n:listing"]
+        );
+    }
+    let (callers, caller_truncated, _) = reader
+        .source_ids_for_exact_relationship_term_bounded_work(
+            "list",
+            SnapshotReadLimits::default(),
+        )?;
+    assert!(!caller_truncated);
+    assert_eq!(callers, ["a"]);
+    let (targets, target_truncated, target_work) = reader
+        .relationship_target_ids_for_source_terms_bounded_work(
+            "a",
+            &["list".to_owned()].into_iter().collect(),
+            SnapshotReadLimits::default(),
+        )?;
+    assert!(!target_truncated);
+    assert_eq!(targets, ["n:list"]);
+    assert_eq!(target_work.node_ids_decoded, 1);
+    for namespace_only in ["user", "service"] {
+        assert!(!reader.relationship_source_matches_term("a", namespace_only)?);
+    }
+    Ok(())
+}
+
+#[test]
+fn relationship_target_batch_dedupes_shared_targets_under_one_low_bound()
+-> Result<(), Box<dyn Error>> {
+    let mut document = graph();
+    let mut shared = node("t:shared");
+    shared.name = "CheckpointCreate".to_owned();
+    let mut create = node("t:create");
+    create.name = "CreateSession".to_owned();
+    document.nodes.extend([shared, create]);
+    for (rule, target) in [
+        (None, "t:shared"),
+        (Some("parallel"), "t:shared"),
+        (None, "t:create"),
+    ] {
+        let id = edge_id("a", EdgeKind::Calls, target, None, rule);
+        document.links.push(EdgeRecord {
+            id: id.clone(),
+            key: id,
+            source: "a".to_owned(),
+            target: target.to_owned(),
+            kind: EdgeKind::Calls,
+            occurrence_rule: rule.and_then(OccurrenceRule::new),
+            relationship_site: None,
+            details: None,
+            evidence: vec![evidence()],
+            weight: None,
+            context: None,
+            deferred: false,
+            diagnostics: Vec::new(),
+        });
+    }
+    document.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    document.links.sort_by(|left, right| left.id.cmp(&right.id));
+    let store = MemoryStore::default();
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &document)?;
+    GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    let terms = ["checkpoint".to_owned(), "create".to_owned()]
+        .into_iter()
+        .collect();
+
+    let (targets, truncated, work) = reader.relationship_target_ids_for_source_terms_bounded_work(
+        "a",
+        &terms,
+        SnapshotReadLimits::default(),
+    )?;
+    assert!(!truncated);
+    assert_eq!(targets, ["t:create", "t:shared"]);
+    assert_eq!(work.node_ids_decoded, 3);
+
+    let (bounded, bounded_truncated, bounded_work) =
+        reader.relationship_target_ids_for_source_terms_bounded_work("a", &terms, limits(2))?;
+    assert!(bounded_truncated);
+    assert_eq!(bounded, ["t:create", "t:shared"]);
+    assert_eq!(bounded_work.node_ids_decoded, 2);
     Ok(())
 }
 

@@ -1,11 +1,14 @@
 mod support;
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
 use compass_graph::{GraphSnapshotBuilder, GraphSnapshotReader};
-use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
+use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, EdgeKind, GraphDocument, NodeRecord};
+use compass_model::identity::{edge_id, file_id};
+use compass_model::provenance::OccurrenceRule;
 use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, DiscoveryDirection, DiscoveryLimits, DiscoveryQueryRequest,
     DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind, DiscoveryTraversal, ExploreRequest,
@@ -343,6 +346,264 @@ fn discovery_common_prefix_maximum_terms_is_bounded_and_backend_equal()
         if response.truncated {
             assert!(response.seeds.iter().all(|seed| seed.ambiguous));
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn exact_relationship_recall_is_backend_equal_for_dense_daily_workflows()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let node_template = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind.is_callable() && node.source.is_some())
+        .cloned()
+        .ok_or("fixture callable node missing")?;
+    let edge_template = graph.links.first().cloned().ok_or("fixture edge missing")?;
+    let make_node = |id: &str, name: &str, file: &str| -> NodeRecord {
+        let mut node = node_template.clone();
+        node.id = id.to_owned();
+        node.name = name.to_owned();
+        node.qualified_name = format!("Workflow.{name}");
+        if let Some(source) = &mut node.source {
+            source.file = file.to_owned();
+        }
+        node
+    };
+    let make_edge = |_id: &str, source: &str, target: &str| {
+        let mut edge = edge_template.clone();
+        edge.source = source.to_owned();
+        edge.target = target.to_owned();
+        edge.kind = EdgeKind::Calls;
+        let relationship_id = edge_id(
+            source,
+            EdgeKind::Calls,
+            target,
+            edge.relationship_site.as_ref(),
+            edge.occurrence_rule.as_ref().map(|rule| rule.as_str()),
+        );
+        edge.id = relationship_id.clone();
+        edge.key = relationship_id;
+        edge
+    };
+
+    graph.nodes.extend([
+        make_node("z:condense", "CondenseSession", "src/session/strategy.rs"),
+        make_node("n:checkpoint", "CheckpointID", "src/session/id.rs"),
+        make_node("n:create", "CreateSession", "src/session/create.rs"),
+        make_node("n:checkpoint2", "CheckpointStore", "src/session/id.rs"),
+        make_node("n:create2", "CreateData", "src/session/create.rs"),
+        make_node("n:both", "CheckpointCreate", "src/session/create.rs"),
+        make_node("n:create3", "CreateCommit", "src/session/create.rs"),
+        make_node("a:production-three", "run", "src/workflow/three.rs"),
+        make_node("0:test-five", "run", "tests/workflow_test.rs"),
+        make_node("z:save", "SaveStep", "src/history/strategy.rs"),
+        make_node(
+            "n:repository",
+            "RepositoryHandle",
+            "src/history/repository.rs",
+        ),
+        make_node("n:state", "StateHandle", "src/history/state.rs"),
+        make_node("n:recorded", "RecordedMarker", "src/history/record.rs"),
+    ]);
+    graph.links.extend([
+        make_edge("e:condense:checkpoint", "z:condense", "n:checkpoint"),
+        make_edge("e:condense:create", "z:condense", "n:create"),
+        make_edge("e:condense:checkpoint2", "z:condense", "n:checkpoint2"),
+        make_edge("e:condense:create2", "z:condense", "n:create2"),
+        make_edge("e:p3:both", "a:production-three", "n:both"),
+        make_edge("e:p3:checkpoint", "a:production-three", "n:checkpoint"),
+        make_edge("e:p3:create", "a:production-three", "n:create"),
+        make_edge("e:t5:both", "0:test-five", "n:both"),
+        make_edge("e:t5:checkpoint", "0:test-five", "n:checkpoint"),
+        make_edge("e:t5:create", "0:test-five", "n:create"),
+        make_edge("e:t5:create2", "0:test-five", "n:create2"),
+        make_edge("e:t5:create3", "0:test-five", "n:create3"),
+        make_edge("e:save:repository", "z:save", "n:repository"),
+        make_edge("e:save:state", "z:save", "n:state"),
+        make_edge("e:save:recorded", "z:save", "n:recorded"),
+    ]);
+    let mut parallel_create = make_edge("parallel", "z:condense", "n:create");
+    parallel_create.occurrence_rule = OccurrenceRule::new("parallel");
+    let parallel_id = edge_id(
+        &parallel_create.source,
+        EdgeKind::Calls,
+        &parallel_create.target,
+        parallel_create.relationship_site.as_ref(),
+        parallel_create
+            .occurrence_rule
+            .as_ref()
+            .map(|rule| rule.as_str()),
+    );
+    parallel_create.id = parallel_id.clone();
+    parallel_create.key = parallel_id;
+    graph.links.push(parallel_create);
+    graph.nodes.extend([
+        make_node("n:equal:a", "run", "src/equal/a.rs"),
+        make_node("n:equal:b", "run", "src/equal/b.rs"),
+    ]);
+    for index in 0..1_000 {
+        let target_id = format!("n:alpha-beta:{index:04}");
+        graph.nodes.push(make_node(
+            &target_id,
+            "AlphaBeta",
+            "src/targets/alpha_beta.rs",
+        ));
+        graph.links.push(make_edge(
+            &format!("e:equal:a:{index:04}"),
+            "n:equal:a",
+            &target_id,
+        ));
+        graph.links.push(make_edge(
+            &format!("e:equal:b:{index:04}"),
+            "n:equal:b",
+            &target_id,
+        ));
+    }
+    for index in 0..200 {
+        let caller_id = format!("a:create-noise:{index:04}");
+        graph.nodes.push(make_node(
+            &caller_id,
+            &format!("createFixture{index:04}"),
+            "tests/generated/create.rs",
+        ));
+        graph.links.push(make_edge(
+            &format!("e:create-noise:{index:04}"),
+            &caller_id,
+            "n:create",
+        ));
+    }
+    for index in 0..1_100 {
+        let caller_id = format!("m:checkpoint-noise:{index:04}");
+        graph.nodes.push(make_node(
+            &caller_id,
+            &format!("checkpointFixture{index:04}"),
+            "tests/generated/checkpoint.rs",
+        ));
+        graph.links.push(make_edge(
+            &format!("e:checkpoint-noise:{index:04}"),
+            &caller_id,
+            "n:checkpoint",
+        ));
+    }
+    let existing_paths = graph
+        .graph
+        .files
+        .iter()
+        .map(|file| file.path.clone())
+        .collect::<BTreeSet<_>>();
+    let missing_paths = graph
+        .nodes
+        .iter()
+        .filter_map(|node| node.source_file().map(str::to_owned))
+        .filter(|path| !existing_paths.contains(path))
+        .collect::<BTreeSet<_>>();
+    let file_template = graph
+        .graph
+        .files
+        .first()
+        .cloned()
+        .ok_or("fixture file missing")?;
+    for path in missing_paths {
+        let mut file = file_template.clone();
+        file.id = file_id(&path);
+        file.path = path;
+        graph.graph.files.push(file);
+    }
+    graph
+        .graph
+        .files
+        .sort_by(|left, right| left.id.cmp(&right.id));
+    graph.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    graph.links.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    let store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let stored = open_with_store(
+        &store,
+        &graph_path,
+        None,
+        &directory.path().join("store-cache"),
+    )?;
+
+    for (question, target) in [
+        ("how is a checkpoint created", "z:condense"),
+        ("how is repository state recorded", "z:save"),
+    ] {
+        let request = discovery_request(question);
+        let expected = json.discover(request.clone())?;
+        let actual = stored.discover(request)?;
+        assert_discovery_semantically_equal(&actual, &expected)?;
+        for response in [&actual, &expected] {
+            assert_eq!(response.seeds[0].node_id, target, "{question}");
+            assert!(!response.seeds[0].ambiguous, "{question}");
+            if question == "how is a checkpoint created" {
+                assert_eq!(
+                    response
+                        .seeds
+                        .iter()
+                        .map(|seed| seed.node_id.as_str())
+                        .collect::<Vec<_>>(),
+                    ["z:condense", "a:production-three", "0:test-five"]
+                );
+            }
+            assert!(
+                response.diagnostics.iter().all(|diagnostic| !diagnostic
+                    .message
+                    .contains("lacks exact relationship-term postings")),
+                "{question}"
+            );
+        }
+    }
+    let equal_request = discovery_request("alpha beta");
+    let equal_json = json.discover(equal_request.clone())?;
+    let equal_store = stored.discover(equal_request.clone())?;
+    assert_discovery_semantically_equal(&equal_store, &equal_json)?;
+    for response in [&equal_json, &equal_store] {
+        assert!(response.seeds[0].ambiguous);
+        assert_eq!(response.seeds[0].node_id, "n:equal:a");
+        assert_eq!(response.seeds[0].alternatives[0].node_id, "n:equal:b");
+    }
+
+    let reversed_directory = directory.path().join("reversed");
+    fs::create_dir(&reversed_directory)?;
+    let reversed_graph_path = reversed_directory.join("graph.json");
+    graph.nodes.reverse();
+    graph.links.reverse();
+    fs::write(&reversed_graph_path, serde_json::to_vec(&graph)?)?;
+    let reversed_store = publish_phase2_snapshot(&reversed_directory, &reversed_graph_path)?;
+    let reversed_json = open_with_engine(
+        &reversed_graph_path,
+        None,
+        &reversed_directory.join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let reversed_stored = open_with_store(
+        &reversed_store,
+        &reversed_graph_path,
+        None,
+        &reversed_directory.join("store-cache"),
+    )?;
+    for question in [
+        "how is a checkpoint created",
+        "how is repository state recorded",
+        "alpha beta",
+    ] {
+        let request = discovery_request(question);
+        let original = json.discover(request.clone())?;
+        let reversed_json_response = reversed_json.discover(request.clone())?;
+        let reversed_store_response = reversed_stored.discover(request)?;
+        assert_discovery_semantically_equal(&reversed_json_response, &original)?;
+        assert_discovery_semantically_equal(&reversed_store_response, &original)?;
     }
     Ok(())
 }
@@ -952,7 +1213,7 @@ fn explicit_json_selection_survives_a_corrupt_store_sidecar()
 }
 
 #[test]
-fn json_index_v3_is_rebuilt_to_v5() -> Result<(), Box<dyn std::error::Error>> {
+fn json_index_v3_is_rebuilt_to_v7() -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
     support::write_graph(&graph_path)?;
@@ -975,7 +1236,7 @@ fn json_index_v3_is_rebuilt_to_v5() -> Result<(), Box<dyn std::error::Error>> {
         connection.query_row("SELECT value FROM metadata WHERE key='format'", [], |row| {
             row.get(0)
         })?;
-    assert_eq!(format, "compass-code-index/5");
+    assert_eq!(format, "compass-code-index/7");
     Ok(())
 }
 

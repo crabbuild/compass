@@ -17,7 +17,7 @@ use compass_model::query_contract::{
     discovery_scope_postings,
 };
 use compass_store::SqliteStore;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::cql::{QueryError, QueryErrorKind};
 use crate::graph_engine::LocalStoreSnapshot;
@@ -105,6 +105,26 @@ pub(crate) struct TermCandidateRead {
     pub(crate) truncated: bool,
     pub(crate) node_ids_decoded: u64,
     pub(crate) chunks_decoded: u64,
+}
+
+pub(crate) struct RelationshipCandidateRead {
+    pub(crate) source_ids: Vec<String>,
+    pub(crate) truncated: bool,
+    pub(crate) node_ids_decoded: u64,
+    pub(crate) chunks_decoded: u64,
+}
+
+pub(crate) struct RelationshipTargetRead {
+    pub(crate) target_ids: Vec<String>,
+    pub(crate) truncated: bool,
+    pub(crate) ids_decoded: u64,
+}
+
+pub(crate) struct SelectedOutgoingRead {
+    pub(crate) records: Vec<EdgeRecord>,
+    pub(crate) edge_ids: Vec<String>,
+    pub(crate) truncated: bool,
+    pub(crate) examined: usize,
 }
 
 pub(crate) struct CandidateAssemblyPolicy<'a> {
@@ -997,12 +1017,96 @@ impl PinnedDiscoveryBackend<'_> {
         }
     }
 
+    pub(crate) fn outgoing_within_nodes_bounded_work(
+        &self,
+        source: &str,
+        selected_node_ids: &BTreeSet<String>,
+        include_heuristic: bool,
+        limit: usize,
+    ) -> Result<SelectedOutgoingRead, QueryError> {
+        match self {
+            Self::Materialized {
+                graph, adjacency, ..
+            } => {
+                let (indices, truncated, examined) =
+                    adjacency.matching_bounded(graph, source, false, ALL_EDGE_KINDS, true, limit);
+                let mut edges = indices
+                    .into_iter()
+                    .map(|index| graph.links[index].clone())
+                    .filter(|edge| selected_node_ids.contains(&edge.target))
+                    .collect::<Vec<_>>();
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                Ok(SelectedOutgoingRead {
+                    records: edges,
+                    edge_ids: Vec::new(),
+                    truncated,
+                    examined: examined.min(limit),
+                })
+            }
+            Self::Store(reader) => {
+                let (edge_ids, truncated, examined) = reader
+                    .outgoing_edge_ids_within_nodes_bounded_work(
+                        source,
+                        selected_node_ids,
+                        snapshot_limits(limit)?,
+                    )
+                    .map_err(snapshot_error)?;
+                Ok(SelectedOutgoingRead {
+                    records: Vec::new(),
+                    edge_ids,
+                    truncated,
+                    examined,
+                })
+            }
+        }
+    }
+
+    pub(crate) fn edges_by_ids(
+        &self,
+        ids: &BTreeSet<String>,
+    ) -> Result<Vec<EdgeRecord>, QueryError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        match self {
+            Self::Materialized {
+                graph, adjacency, ..
+            } => ids
+                .iter()
+                .map(|id| {
+                    adjacency
+                        .by_id(id)
+                        .map(|index| graph.links[index].clone())
+                        .ok_or_else(|| {
+                            QueryError::new(
+                                QueryErrorKind::GraphInvariant,
+                                "discovery_edge_missing",
+                                format!("outgoing index references missing edge {id}"),
+                            )
+                        })
+                })
+                .collect(),
+            Self::Store(reader) => reader
+                .get_edges_by_ids_bounded_work(ids, snapshot_limits(ids.len())?)
+                .map_err(snapshot_error),
+        }
+    }
+
     pub(crate) fn supports_identifier_subwords(&self) -> Result<bool, QueryError> {
         match self {
             Self::Materialized { .. } => Ok(true),
             Self::Store(reader) => reader
                 .supports_identifier_subwords()
                 .map_err(snapshot_error),
+        }
+    }
+
+    pub(crate) fn supports_relationship_terms(&self) -> Result<bool, QueryError> {
+        match self {
+            Self::Materialized { .. } => Ok(true),
+            Self::Store(reader) => reader.supports_relationship_terms().map_err(snapshot_error),
         }
     }
 
@@ -1036,6 +1140,67 @@ impl PinnedDiscoveryBackend<'_> {
             truncated,
             node_ids_decoded: work.node_ids_decoded,
             chunks_decoded: work.chunks_decoded,
+        }))
+    }
+
+    fn store_relationship_sources(
+        &self,
+        concept: &str,
+        limit: usize,
+    ) -> Result<Option<RelationshipCandidateRead>, QueryError> {
+        let Self::Store(reader) = self else {
+            return Ok(None);
+        };
+        let read_limits = snapshot_limits(limit.max(GRAPH_TERM_POSTING_CHUNK_ITEMS))?;
+        let (mut source_ids, truncated, work) = reader
+            .source_ids_for_exact_relationship_term_bounded_work(concept, read_limits)
+            .map_err(snapshot_error)?;
+        let truncated = truncated || source_ids.len() > limit;
+        source_ids.truncate(limit);
+        Ok(Some(RelationshipCandidateRead {
+            source_ids,
+            truncated,
+            node_ids_decoded: work.node_ids_decoded,
+            chunks_decoded: work.chunks_decoded,
+        }))
+    }
+
+    fn store_relationship_source_matches_term(
+        &self,
+        source_id: &str,
+        concept: &str,
+    ) -> Result<Option<bool>, QueryError> {
+        let Self::Store(reader) = self else {
+            return Ok(None);
+        };
+        reader
+            .relationship_source_matches_term(source_id, concept)
+            .map(Some)
+            .map_err(snapshot_error)
+    }
+
+    fn store_relationship_targets(
+        &self,
+        source_id: &str,
+        concepts: &BTreeSet<String>,
+        limit: usize,
+    ) -> Result<Option<RelationshipTargetRead>, QueryError> {
+        let Self::Store(reader) = self else {
+            return Ok(None);
+        };
+        let (mut target_ids, truncated, work) = reader
+            .relationship_target_ids_for_source_terms_bounded_work(
+                source_id,
+                concepts,
+                snapshot_limits(limit)?,
+            )
+            .map_err(snapshot_error)?;
+        let truncated = truncated || target_ids.len() > limit;
+        target_ids.truncate(limit);
+        Ok(Some(RelationshipTargetRead {
+            target_ids,
+            truncated,
+            ids_decoded: work.node_ids_decoded,
         }))
     }
 }
@@ -1545,7 +1710,10 @@ impl CodeQueryEngine {
                      LIMIT ?2",
             )
             .map_err(sql_error)?;
-        let sql_limit = i64::try_from(candidate_limit.saturating_add(1)).unwrap_or(i64::MAX);
+        let read_envelope = (candidate_limit.max(GRAPH_TERM_POSTING_CHUNK_ITEMS)
+            / GRAPH_TERM_POSTING_CHUNK_ITEMS)
+            .saturating_mul(GRAPH_TERM_POSTING_CHUNK_ITEMS);
+        let sql_limit = i64::try_from(read_envelope).unwrap_or(i64::MAX);
         let mut rows = statement
             .query(params![query, sql_limit])
             .map_err(sql_error)?;
@@ -1561,10 +1729,29 @@ impl CodeQueryEngine {
             })?;
             nodes.push(node);
         }
-        let truncated = nodes.len() > candidate_limit;
-        if truncated {
-            nodes.truncate(candidate_limit);
-        }
+        let truncated = if nodes.len() == read_envelope {
+            let last = nodes.last().ok_or_else(|| {
+                QueryError::new(
+                    QueryErrorKind::Internal,
+                    "term_posting_invariant",
+                    "nonzero term posting envelope returned no rows",
+                )
+            })?;
+            connection
+                .query_row(
+                    "SELECT EXISTS(
+                       SELECT 1
+                         FROM node_fts JOIN nodes n ON n.id = node_fts.node_id
+                        WHERE node_fts MATCH ?1 AND n.id > ?2
+                     )",
+                    params![query, last.id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(sql_error)?
+        } else {
+            false
+        };
+        nodes.truncate(candidate_limit);
         Ok((nodes, truncated))
     }
 
@@ -1584,8 +1771,12 @@ impl CodeQueryEngine {
                 "materialized query engine has no search index",
             )
         })?;
-        let sql_limit = i64::try_from(candidate_limit.saturating_add(1)).unwrap_or(i64::MAX);
+        let read_envelope = (candidate_limit.max(GRAPH_TERM_POSTING_CHUNK_ITEMS)
+            / GRAPH_TERM_POSTING_CHUNK_ITEMS)
+            .saturating_mul(GRAPH_TERM_POSTING_CHUNK_ITEMS);
+        let sql_limit = i64::try_from(read_envelope).unwrap_or(i64::MAX);
         let mut nodes = Vec::new();
+        let mut selected_query = String::new();
         let exact_query = format!("\"{}\"", concept.replace('"', "\"\""));
         let prefix_query = fts_query_from_terms(&[concept.to_owned()]);
         for query in [exact_query, prefix_query] {
@@ -1613,21 +1804,204 @@ impl CodeQueryEngine {
                 nodes.push(node);
             }
             if !nodes.is_empty() {
+                selected_query = query;
                 break;
             }
         }
-        let truncated = nodes.len() > candidate_limit;
+        let truncated = if nodes.len() == read_envelope {
+            let last = nodes.last().ok_or_else(|| {
+                QueryError::new(
+                    QueryErrorKind::Internal,
+                    "term_posting_invariant",
+                    "nonzero discovery term envelope returned no rows",
+                )
+            })?;
+            connection
+                .query_row(
+                    "SELECT EXISTS(
+                       SELECT 1
+                         FROM node_fts JOIN nodes n ON n.id = node_fts.node_id
+                        WHERE node_fts MATCH ?1 AND n.id > ?2
+                     )",
+                    params![selected_query, last.id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(sql_error)?
+        } else {
+            false
+        };
+        let node_ids_decoded = u64::try_from(nodes.len()).unwrap_or(u64::MAX);
         nodes.truncate(candidate_limit);
         let matched_concepts = nodes
             .iter()
             .map(|node| (node.id.clone(), BTreeSet::from([concept.to_owned()])))
             .collect();
         Ok(TermCandidateRead {
-            node_ids_decoded: u64::try_from(nodes.len()).unwrap_or(u64::MAX),
+            node_ids_decoded,
             nodes,
             matched_concepts,
             truncated,
             chunks_decoded: 0,
+        })
+    }
+
+    pub(crate) fn discovery_relationship_sources(
+        &self,
+        backend: &PinnedDiscoveryBackend<'_>,
+        concept: &str,
+        candidate_limit: usize,
+    ) -> Result<RelationshipCandidateRead, QueryError> {
+        if let Some(read) = backend.store_relationship_sources(concept, candidate_limit)? {
+            return Ok(read);
+        }
+        let connection = self.connection.as_ref().ok_or_else(|| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "query_index_missing",
+                "materialized query engine has no search index",
+            )
+        })?;
+        let read_envelope = (candidate_limit.max(GRAPH_TERM_POSTING_CHUNK_ITEMS)
+            / GRAPH_TERM_POSTING_CHUNK_ITEMS)
+            .saturating_mul(GRAPH_TERM_POSTING_CHUNK_ITEMS);
+        let sql_limit = i64::try_from(read_envelope).unwrap_or(i64::MAX);
+        let mut statement = connection
+            .prepare(
+                "SELECT source_id
+                   FROM relationship_terms
+                  WHERE term = ?1
+                  ORDER BY source_id
+                  LIMIT ?2",
+            )
+            .map_err(sql_error)?;
+        let mut rows = statement
+            .query(params![concept, sql_limit])
+            .map_err(sql_error)?;
+        let mut source_ids = Vec::new();
+        while let Some(row) = rows.next().map_err(sql_error)? {
+            source_ids.push(row.get(0).map_err(sql_error)?);
+        }
+        let truncated = if source_ids.len() == read_envelope {
+            let last = source_ids.last().ok_or_else(|| {
+                QueryError::new(
+                    QueryErrorKind::Internal,
+                    "relationship_posting_invariant",
+                    "nonzero relationship posting envelope returned no rows",
+                )
+            })?;
+            connection
+                .query_row(
+                    "SELECT EXISTS(
+                       SELECT 1 FROM relationship_terms
+                        WHERE term = ?1 AND source_id > ?2
+                     )",
+                    params![concept, last],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(sql_error)?
+        } else {
+            false
+        };
+        let node_ids_decoded = u64::try_from(source_ids.len()).unwrap_or(u64::MAX);
+        source_ids.truncate(candidate_limit);
+        Ok(RelationshipCandidateRead {
+            node_ids_decoded,
+            source_ids,
+            truncated,
+            chunks_decoded: 0,
+        })
+    }
+
+    pub(crate) fn discovery_relationship_source_matches_term(
+        &self,
+        backend: &PinnedDiscoveryBackend<'_>,
+        source_id: &str,
+        concept: &str,
+    ) -> Result<bool, QueryError> {
+        if let Some(matches) = backend.store_relationship_source_matches_term(source_id, concept)? {
+            return Ok(matches);
+        }
+        let connection = self.connection.as_ref().ok_or_else(|| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "query_index_missing",
+                "materialized query engine has no search index",
+            )
+        })?;
+        connection
+            .query_row(
+                "SELECT 1
+                   FROM relationship_terms
+                  WHERE term = ?1 AND source_id = ?2",
+                params![concept, source_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|found| found.is_some())
+            .map_err(sql_error)
+    }
+
+    pub(crate) fn discovery_relationship_targets(
+        &self,
+        backend: &PinnedDiscoveryBackend<'_>,
+        source_id: &str,
+        concepts: &BTreeSet<String>,
+        limit: usize,
+    ) -> Result<RelationshipTargetRead, QueryError> {
+        if concepts.is_empty() || limit == 0 {
+            return Ok(RelationshipTargetRead {
+                target_ids: Vec::new(),
+                truncated: false,
+                ids_decoded: 0,
+            });
+        }
+        if let Some(read) = backend.store_relationship_targets(source_id, concepts, limit)? {
+            return Ok(read);
+        }
+        let connection = self.connection.as_ref().ok_or_else(|| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "query_index_missing",
+                "materialized query engine has no search index",
+            )
+        })?;
+        let per_term_limit = limit.div_ceil(concepts.len());
+        let mut target_ids = BTreeSet::new();
+        let mut ids_decoded = 0_u64;
+        let mut truncated = false;
+        for concept in concepts {
+            let decoded = usize::try_from(ids_decoded).unwrap_or(usize::MAX);
+            let remaining = limit.saturating_sub(decoded);
+            if remaining == 0 {
+                truncated = true;
+                break;
+            }
+            let row_limit = remaining.min(per_term_limit);
+            let sql_limit = i64::try_from(row_limit).unwrap_or(i64::MAX);
+            let mut statement = connection
+                .prepare(
+                    "SELECT target_id
+                       FROM relationship_term_targets
+                      WHERE source_id = ?1 AND term = ?2
+                      ORDER BY target_id
+                      LIMIT ?3",
+                )
+                .map_err(sql_error)?;
+            let mut rows = statement
+                .query(params![source_id, concept, sql_limit])
+                .map_err(sql_error)?;
+            let mut term_rows = 0_usize;
+            while let Some(row) = rows.next().map_err(sql_error)? {
+                term_rows = term_rows.saturating_add(1);
+                target_ids.insert(row.get(0).map_err(sql_error)?);
+            }
+            ids_decoded = ids_decoded.saturating_add(u64::try_from(term_rows).unwrap_or(u64::MAX));
+            truncated |= term_rows == row_limit;
+        }
+        Ok(RelationshipTargetRead {
+            target_ids: target_ids.into_iter().collect(),
+            truncated,
+            ids_decoded,
         })
     }
 

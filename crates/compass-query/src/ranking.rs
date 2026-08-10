@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::cmp::{Ordering, Reverse};
 use std::collections::BTreeSet;
 
 use compass_model::code_graph::{NodeKind, NodeRecord};
@@ -12,11 +12,24 @@ pub const QUERY_RANKER_PROFILE_V2: &str = "query-ranker/2";
 #[derive(Clone, Debug)]
 pub(crate) struct RankedSearchResult {
     pub(crate) score: f64,
+    pub(crate) channel_rank: u8,
+    pub(crate) relation_evidence: Option<RelationEvidenceRank>,
     pub(crate) node_id: String,
     pub(crate) matched_fields: Vec<String>,
     pub(crate) matched_terms: Vec<String>,
     pub(crate) node: NodeRecord,
     pub(crate) candidate_source: CandidateSource,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct RelationEvidenceRank {
+    concept_count: usize,
+    production: bool,
+    predicate_match_count: usize,
+    predicate_token_count: Reverse<usize>,
+    target_count: usize,
+    evidence_rank: u8,
+    semantic_rank: u8,
 }
 
 pub(crate) fn rank_search_candidates(
@@ -68,6 +81,8 @@ fn rank_legacy(
             score: f64::from(tier) * 1_000_000.0
                 + f64::from(source_rank)
                 + matched_fields.len() as f64,
+            channel_rank: tier,
+            relation_evidence: None,
             node_id: node.id.clone(),
             matched_fields,
             matched_terms: Vec::new(),
@@ -99,8 +114,6 @@ fn rank_v2(
     let mut ranked = Vec::new();
 
     for candidate in candidates {
-        let source_rank = candidate.best_source_rank();
-        let candidate_source = candidate.best_source();
         let normalized_name = normalize_symbol_name(&candidate.node.name);
         let normalized_qualified = normalize_symbol_name(&candidate.node.qualified_name);
         let normalized_id = strip_diacritics(&candidate.node.id).to_lowercase();
@@ -134,27 +147,85 @@ fn rank_v2(
             .into_iter()
             .filter(|term| query_terms.binary_search(term).is_ok())
             .collect::<BTreeSet<_>>();
+        let relationship_term_count = relationship_terms.len();
+        let indexed_term_count = candidate
+            .indexed_matches
+            .iter()
+            .filter(|term| query_terms.binary_search(term).is_ok())
+            .count();
         if !relationship_terms.is_empty() {
             matched_fields.push("relationship".to_owned());
         }
 
-        let lexical_score = lexical_score_v2(
-            &normalized_query,
-            &normalized_name,
-            &normalized_qualified,
-            &normalized_id,
-            &query_terms,
-            candidate
-                .node
-                .source
-                .as_ref()
-                .map_or("", |source| source.file.as_str()),
-        );
+        let channel_rank =
+            behavior_channel_rank(&candidate, indexed_term_count, relationship_term_count);
+        let relation_evidence = (relationship_term_count >= 2).then(|| {
+            let (predicate_match_count, predicate_token_count) =
+                predicate_alignment(&candidate.node, &query_terms, &relationship_terms);
+            RelationEvidenceRank {
+                concept_count: relationship_term_count,
+                production: !source_is_test_or_generated(&candidate.node),
+                predicate_match_count,
+                // With equal match counts, fewer terminal-name tokens are a
+                // more precise behavior match. No match has zero precision
+                // regardless of the source label length.
+                predicate_token_count: Reverse(if predicate_match_count > 0 {
+                    predicate_token_count
+                } else {
+                    0
+                }),
+                target_count: candidate.relationship_target_count(),
+                evidence_rank: evidence_confidence_rank(&candidate.node),
+                semantic_rank: semantic_seed_rank(&candidate.node),
+            }
+        });
+        let relationship_only_behavior = relationship_term_count >= 2
+            && !candidate.sources.iter().any(|source| {
+                matches!(
+                    source,
+                    CandidateSource::ExactId | CandidateSource::ExactName
+                )
+            });
+        let (source_rank, candidate_source, source_count) = if relationship_only_behavior {
+            (
+                CandidateSource::RelationSeed.priority(),
+                CandidateSource::RelationSeed,
+                1,
+            )
+        } else {
+            (
+                candidate.best_source_rank(),
+                candidate.best_source(),
+                candidate.sources.len(),
+            )
+        };
+
+        let lexical_score = if relationship_only_behavior {
+            0.0
+        } else {
+            lexical_score_v2(
+                &normalized_query,
+                &normalized_name,
+                &normalized_qualified,
+                &normalized_id,
+                &query_terms,
+                candidate
+                    .node
+                    .source
+                    .as_ref()
+                    .map_or("", |source| source.file.as_str()),
+            )
+        };
         let evidence_score = evidence_score(&candidate.node);
-        let trust_score = trust_score_v2(&candidate, matched_fields.len());
+        let trust_score = trust_score_v2(source_rank, source_count, matched_fields.len());
         let semantic_score = semantic_signal_score(&candidate.node);
-        let field_score = semantic_field_score(&candidate.node, &query_terms);
-        let ambiguity_score = ambiguity_signal_score(&candidate);
+        let field_score = if relationship_only_behavior {
+            0.0
+        } else {
+            semantic_field_score(&candidate.node, &query_terms)
+        };
+        let ambiguity_score =
+            ambiguity_signal_score(&candidate, source_rank, relationship_only_behavior);
         let relationship_score = if query_terms.is_empty() {
             0.0
         } else {
@@ -173,9 +244,12 @@ fn rank_v2(
 
         ranked.push(RankedSearchCandidate {
             score,
+            channel_rank,
             tie,
             result: RankedSearchResult {
                 score,
+                channel_rank,
+                relation_evidence,
                 node_id: node.id.clone(),
                 matched_fields,
                 matched_terms,
@@ -212,6 +286,7 @@ fn compare_ranked_results(left: &RankedSearchResult, right: &RankedSearchResult)
 #[derive(Debug)]
 struct RankedSearchCandidate {
     score: f64,
+    channel_rank: u8,
     tie: SearchCandidateTiebreak,
     result: RankedSearchResult,
 }
@@ -221,11 +296,42 @@ fn compare_ranked_candidates(
     right: &RankedSearchCandidate,
 ) -> Ordering {
     right
-        .score
-        .total_cmp(&left.score)
+        .channel_rank
+        .cmp(&left.channel_rank)
+        .then_with(|| {
+            right
+                .result
+                .relation_evidence
+                .cmp(&left.result.relation_evidence)
+        })
+        .then_with(|| right.score.total_cmp(&left.score))
         .then_with(|| right.tie.source_rank.cmp(&left.tie.source_rank))
         .then_with(|| right.tie.compare(&left.tie))
         .then_with(|| left.result.node_id.cmp(&right.result.node_id))
+}
+
+fn behavior_channel_rank(
+    candidate: &SearchCandidate,
+    indexed_term_count: usize,
+    relationship_term_count: usize,
+) -> u8 {
+    if candidate.sources.contains(&CandidateSource::ExactId) {
+        6
+    } else if candidate.sources.contains(&CandidateSource::ExactName) {
+        5
+    } else if relationship_term_count >= 2 {
+        4
+    } else if indexed_term_count >= 2 {
+        3
+    } else if candidate.sources.contains(&CandidateSource::Alias)
+        || candidate.sources.contains(&CandidateSource::TermIndex)
+    {
+        2
+    } else if relationship_term_count == 1 {
+        1
+    } else {
+        0
+    }
 }
 
 #[derive(Debug)]
@@ -323,6 +429,14 @@ fn lexical_score_v2(
 }
 
 fn evidence_score(node: &NodeRecord) -> f64 {
+    match evidence_confidence_rank(node) {
+        3 => 10_000.0,
+        2 => 5_000.0,
+        _ => 1_500.0,
+    }
+}
+
+fn evidence_confidence_rank(node: &NodeRecord) -> u8 {
     let confidence = node
         .evidence
         .iter()
@@ -335,16 +449,16 @@ fn evidence_score(node: &NodeRecord) -> f64 {
         .unwrap_or(EvidenceConfidence::Inferred);
 
     match confidence {
-        EvidenceConfidence::Exact => 10_000.0,
-        EvidenceConfidence::Inferred => 5_000.0,
-        EvidenceConfidence::Ambiguous => 1_500.0,
+        EvidenceConfidence::Exact => 3,
+        EvidenceConfidence::Inferred => 2,
+        EvidenceConfidence::Ambiguous => 1,
     }
 }
 
-fn trust_score_v2(candidate: &SearchCandidate, matched_fields: usize) -> f64 {
-    let mut score = f64::from(candidate.best_source_rank()) * 1_200.0;
+fn trust_score_v2(source_rank: u8, source_count: usize, matched_fields: usize) -> f64 {
+    let mut score = f64::from(source_rank) * 1_200.0;
     score += matched_fields as f64 * 200.0;
-    score += f64::from(candidate.sources.len() as u16) * 3_000.0;
+    score += f64::from(source_count as u16) * 3_000.0;
     score
 }
 
@@ -380,6 +494,36 @@ fn canonical_field_tokens(value: &str) -> BTreeSet<String> {
         .collect()
 }
 
+fn predicate_alignment(
+    node: &NodeRecord,
+    query_terms: &[String],
+    relationship_terms: &BTreeSet<String>,
+) -> (usize, usize) {
+    let behavior = canonical_field_tokens(&node.name);
+    let query_predicates = query_terms
+        .iter()
+        .filter(|term| !relationship_terms.contains(*term))
+        .filter_map(|term| canonical_predicate_token(term))
+        .collect::<BTreeSet<_>>();
+    let matched = behavior
+        .iter()
+        .filter_map(|term| canonical_predicate_token(term))
+        .collect::<BTreeSet<_>>()
+        .intersection(&query_predicates)
+        .count();
+    (matched, behavior.len())
+}
+
+fn canonical_predicate_token(token: &str) -> Option<&'static str> {
+    match token {
+        // Natural-language persistence verbs are equivalent only for ranking
+        // a source behavior that already has trusted multi-concept call
+        // evidence. They never create recall postings or relation eligibility.
+        "record" | "save" | "persist" | "write" | "written" | "store" => Some("persist"),
+        _ => None,
+    }
+}
+
 fn symbol_owner(qualified_name: &str) -> Option<String> {
     if let Some((owner, _)) = qualified_name.rsplit_once("::") {
         return owner
@@ -396,20 +540,24 @@ fn symbol_owner(qualified_name: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn ambiguity_signal_score(candidate: &SearchCandidate) -> f64 {
-    let source_rank = candidate.best_source_rank();
+fn ambiguity_signal_score(
+    candidate: &SearchCandidate,
+    source_rank: u8,
+    relationship_only_behavior: bool,
+) -> f64 {
     let mut score = f64::from(source_rank) * 1_000.0;
 
-    if candidate.sources.contains(&CandidateSource::Fuzzy) {
+    if !relationship_only_behavior && candidate.sources.contains(&CandidateSource::Fuzzy) {
         score -= 12_000.0;
     }
-    if candidate
-        .sources
-        .contains(&CandidateSource::HeuristicFallback)
+    if !relationship_only_behavior
+        && candidate
+            .sources
+            .contains(&CandidateSource::HeuristicFallback)
     {
         score -= 8_000.0;
     }
-    if candidate.sources.is_empty() {
+    if !relationship_only_behavior && candidate.sources.is_empty() {
         score -= 2_000.0;
     }
 
@@ -447,10 +595,10 @@ fn source_is_test_or_generated(node: &NodeRecord) -> bool {
 mod tests {
     use std::collections::BTreeSet;
 
-    use compass_model::code_graph::{NodeKind, NodeRecord};
+    use compass_model::code_graph::{EdgeKind, NodeKind, NodeRecord};
     use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
 
-    use crate::recall::{CandidateSource, SearchCandidate};
+    use crate::recall::{CandidateSource, RelationshipTermMatch, SearchCandidate};
 
     use super::{rank_legacy, rank_search_candidates};
 
@@ -600,6 +748,425 @@ mod tests {
 
         assert_eq!(legacy[0].node_id, "n:a-generated-charge");
         assert_eq!(current[0].node_id, "n:z-payment-charge");
+    }
+
+    #[test]
+    fn multi_term_relationship_behavior_beats_a_partial_lexical_match() {
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:lexical",
+                    "recordStateFixture",
+                    NodeKind::Function,
+                    "tests/state_test.go",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["record".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:workflow",
+                    "save",
+                    NodeKind::Method,
+                    "src/strategy.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::Alias, CandidateSource::RelationSeed]),
+                indexed_matches: BTreeSet::from(["checkpoint".to_owned()]),
+                relationship_matches: ["repository", "state"]
+                    .into_iter()
+                    .map(|term| RelationshipTermMatch {
+                        term: term.to_owned(),
+                        kind: EdgeKind::Calls,
+                        target_ids: BTreeSet::from([format!("target:{term}")]),
+                    })
+                    .collect(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "repository state recorded",
+            &[
+                "record".to_owned(),
+                "repository".to_owned(),
+                "state".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:workflow");
+        assert_eq!(ranked[0].candidate_source, CandidateSource::RelationSeed);
+    }
+
+    #[test]
+    fn relationship_only_test_helper_words_do_not_beat_a_production_workflow() {
+        let relationship_matches = ["checkpoint", "create"]
+            .into_iter()
+            .map(|term| RelationshipTermMatch {
+                term: term.to_owned(),
+                kind: EdgeKind::Calls,
+                target_ids: BTreeSet::from([format!("target:{term}")]),
+            })
+            .collect::<BTreeSet<_>>();
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:test-helper",
+                    "createCheckpointHelper",
+                    NodeKind::Function,
+                    "tests/checkpoint_test.go",
+                    false,
+                ),
+                sources: BTreeSet::from([
+                    CandidateSource::TermIndex,
+                    CandidateSource::RelationSeed,
+                ]),
+                indexed_matches: BTreeSet::from(["checkpoint".to_owned()]),
+                relationship_matches: relationship_matches.clone(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:workflow",
+                    "condense",
+                    NodeKind::Method,
+                    "src/strategy.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::RelationSeed]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches,
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "checkpoint created",
+            &["checkpoint".to_owned(), "create".to_owned()],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:workflow");
+        assert_eq!(ranked[1].candidate_source, CandidateSource::RelationSeed);
+    }
+
+    #[test]
+    fn trusted_multi_term_relationship_match_beats_equal_direct_term_coverage() {
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:direct",
+                    "saveRepositoryState",
+                    NodeKind::Method,
+                    "src/state.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["repository".to_owned(), "state".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:relationship",
+                    "save",
+                    NodeKind::Method,
+                    "src/workflow.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::RelationSeed]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: ["repository", "state"]
+                    .into_iter()
+                    .map(|term| RelationshipTermMatch {
+                        term: term.to_owned(),
+                        kind: EdgeKind::Calls,
+                        target_ids: BTreeSet::from([format!("target:{term}")]),
+                    })
+                    .collect(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "save repository state",
+            &[
+                "save".to_owned(),
+                "repository".to_owned(),
+                "state".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:relationship");
+    }
+
+    #[test]
+    fn uncovered_persistence_predicate_beats_repeated_entity_terms_and_broad_fanout() {
+        let relation = |targets: &[&str]| {
+            ["repository", "state"]
+                .into_iter()
+                .map(|term| RelationshipTermMatch {
+                    term: term.to_owned(),
+                    kind: EdgeKind::Calls,
+                    target_ids: targets.iter().map(|target| (*target).to_owned()).collect(),
+                })
+                .collect::<BTreeSet<_>>()
+        };
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:lifecycle",
+                    "RepositoryStateManager",
+                    NodeKind::Function,
+                    "src/lifecycle.go",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::RelationSeed]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: relation(&["t:repository", "t:state:1", "t:state:2"]),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:save-step",
+                    "SaveStep",
+                    NodeKind::Method,
+                    "src/manual_commit_git.go",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::RelationSeed]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: relation(&["t:repository", "t:state:1"]),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how is repository state recorded",
+            &[
+                "record".to_owned(),
+                "repository".to_owned(),
+                "state".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:save-step");
+        assert_eq!(ranked[0].candidate_source, CandidateSource::RelationSeed);
+        assert!(ranked[0].relation_evidence > ranked[1].relation_evidence);
+    }
+
+    #[test]
+    fn persistence_predicates_are_whole_tokens_not_substrings() {
+        let relation = ["repository", "state"]
+            .into_iter()
+            .map(|term| RelationshipTermMatch {
+                term: term.to_owned(),
+                kind: EdgeKind::Calls,
+                target_ids: BTreeSet::from([format!("target:{term}")]),
+            })
+            .collect::<BTreeSet<_>>();
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:rewrite",
+                    "RewriteStep",
+                    NodeKind::Method,
+                    "src/rewrite.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::RelationSeed]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: relation.clone(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:write",
+                    "WriteStep",
+                    NodeKind::Method,
+                    "src/write.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::RelationSeed]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: relation,
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how is repository state written",
+            &[
+                "repository".to_owned(),
+                "state".to_owned(),
+                "written".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:write");
+        assert!(ranked[0].relation_evidence > ranked[1].relation_evidence);
+    }
+
+    #[test]
+    fn equally_aligned_relation_candidates_retain_equal_ambiguity_evidence() {
+        let relation = ["repository", "state"]
+            .into_iter()
+            .map(|term| RelationshipTermMatch {
+                term: term.to_owned(),
+                kind: EdgeKind::Calls,
+                target_ids: BTreeSet::from([format!("target:{term}")]),
+            })
+            .collect::<BTreeSet<_>>();
+        let candidates = ["n:first", "n:second"]
+            .into_iter()
+            .map(|id| SearchCandidate {
+                node: node(id, "SaveStep", NodeKind::Method, "src/step.rs", false),
+                sources: BTreeSet::from([CandidateSource::RelationSeed]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: relation.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        let ranked = rank_search_candidates(
+            "how is repository state recorded",
+            &[
+                "record".to_owned(),
+                "repository".to_owned(),
+                "state".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].relation_evidence, ranked[1].relation_evidence);
+    }
+
+    #[test]
+    fn relation_predicate_precision_precedes_support_count() {
+        let relation = |targets: &[&str]| {
+            ["repository", "state"]
+                .into_iter()
+                .map(|term| RelationshipTermMatch {
+                    term: term.to_owned(),
+                    kind: EdgeKind::Calls,
+                    target_ids: targets.iter().map(|target| (*target).to_owned()).collect(),
+                })
+                .collect::<BTreeSet<_>>()
+        };
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:less-precise",
+                    "SaveTaskStep",
+                    NodeKind::Method,
+                    "src/task.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::RelationSeed]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: relation(&["t:repository", "t:state:1", "t:state:2"]),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:precise",
+                    "SaveStep",
+                    NodeKind::Method,
+                    "src/step.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::RelationSeed]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: relation(&["t:repository", "t:state:1"]),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how is repository state recorded",
+            &[
+                "record".to_owned(),
+                "repository".to_owned(),
+                "state".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:precise");
+    }
+
+    #[test]
+    fn persistence_vocabulary_alone_does_not_create_relation_eligibility() {
+        let candidates = vec![SearchCandidate {
+            node: node(
+                "n:save-helper",
+                "SaveStep",
+                NodeKind::Method,
+                "src/helper.rs",
+                false,
+            ),
+            sources: BTreeSet::from([CandidateSource::TermIndex]),
+            indexed_matches: BTreeSet::from(["save".to_owned()]),
+            relationship_matches: BTreeSet::new(),
+        }];
+
+        let ranked = rank_search_candidates(
+            "how is repository state recorded",
+            &[
+                "record".to_owned(),
+                "repository".to_owned(),
+                "state".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].candidate_source, CandidateSource::TermIndex);
+        assert!(ranked[0].relation_evidence.is_none());
+        assert_ne!(ranked[0].channel_rank, 4);
+    }
+
+    #[test]
+    fn uncovered_nouns_are_not_treated_as_operation_predicates() {
+        let relationship_matches = ["repository", "state"]
+            .into_iter()
+            .map(|term| RelationshipTermMatch {
+                term: term.to_owned(),
+                kind: EdgeKind::Calls,
+                target_ids: BTreeSet::from([format!("target:{term}")]),
+            })
+            .collect();
+        let candidates = vec![SearchCandidate {
+            node: node(
+                "n:lifecycle",
+                "LifecycleManager",
+                NodeKind::Function,
+                "src/lifecycle.rs",
+                false,
+            ),
+            sources: BTreeSet::from([CandidateSource::RelationSeed]),
+            indexed_matches: BTreeSet::new(),
+            relationship_matches,
+        }];
+
+        let ranked = rank_search_candidates(
+            "repository state lifecycle",
+            &[
+                "repository".to_owned(),
+                "state".to_owned(),
+                "lifecycle".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(
+            ranked[0]
+                .relation_evidence
+                .map(|evidence| evidence.predicate_match_count),
+            Some(0)
+        );
     }
 
     #[test]

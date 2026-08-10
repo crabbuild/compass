@@ -153,12 +153,51 @@ ranked first; ordering remains deterministic and backend-neutral.
 
 Discovery term indexes preserve their existing full tokens and add bounded
 camel-case, acronym, and underscore subwords derived from raw symbol names,
-qualified names, and aliases. The immutable store records this additive
-capability as an empty reserved term posting, which older same-major readers
-ignore. Current readers still open snapshots without the capability but report
-incomplete discovery coverage; rebuild the graph to make identifier-subword
-recall equivalent across the JSON and store engines. The disposable SQLite FTS
-cache is rebuilt automatically under its new internal format version.
+qualified names, and aliases. They also add exact relationship-term postings
+from source-backed callable nodes through direct `calls` edges whose evidence
+is entirely exact and non-heuristic. Relationship postings use only the called
+target's terminal symbol name; namespace and owner terms from its qualified
+name remain available to direct lexical recall but do not become caller
+evidence. Parallel edges are deduplicated for this recall index; inferred,
+ambiguous, mixed-confidence, heuristic, source-less, and non-callable sources
+do not participate.
+
+Candidates with at least two trusted relationship concepts are ordered by
+concept coverage, production status, uncovered operation-predicate alignment,
+predicate precision, distinct supporting targets, evidence confidence, and
+semantic kind. The persistence predicate family (`record`, `save`, `persist`,
+`write`, and `store`) is a whole-token ranking equivalence only: it cannot add
+a posting, candidate, relationship concept, or relation eligibility. Equal
+evidence vectors remain explicitly ambiguous.
+
+Discovery traversal bounds adjacency reads by remaining node capacity and
+stops endpoint hydration at the node cap. Store-backed final edge assembly
+scans unit-valued outgoing references, rejects targets outside the selected
+subgraph before record hydration, and resolves the remaining edge IDs through
+a bounded shared tree traversal. This preserves canonical parallel-edge order
+and exact edge omissions when the reference scan completes; a shared expansion
+limit still produces explicit incomplete counts. Exact term candidates and
+adjacency records use bounded multi-key tree walks so immutable branch and leaf
+objects are decoded once per batch. A pinned request reader retains only
+digest-verified, decoded, schema-validated tree objects in an 8 MiB envelope
+with a 7 MiB decoded-object budget and a 1,024-object ceiling. Branches are
+retained preferentially and leaves use LRU eviction; cache hits do not bypass
+any logical item, byte, object, depth, or truncation accounting.
+
+The immutable store records identifier and relationship capabilities as
+separate empty reserved postings in its existing additive terms root, which
+older same-major readers ignore. Relationship membership is also stored as a
+bounded unit-valued `(source, term)` key so a complete sparse posting can prove
+membership in one truncated dense posting without scanning adjacency. The v2
+relationship capability also stores bounded unit-valued
+`(source, term, target)` evidence so ranking can count distinct query-supporting
+callees without inflating parallel calls or one callee that matches multiple
+concepts. Current readers still open snapshots without either capability but
+report incomplete discovery coverage; rebuild the graph to make discovery
+recall equivalent across the JSON and store engines. The disposable SQLite
+query cache adds `relationship_terms(term, source_id)` and
+`relationship_term_targets(term, source_id, target_id)` tables, uses internal
+format v7, and is rebuilt automatically.
 
 Optional MCP query feedback remains local and disabled by default.
 `COMPASS_QUERY_LOG=<path>` writes the versioned `compass.query-log/1` JSONL

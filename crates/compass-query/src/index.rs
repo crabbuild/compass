@@ -11,7 +11,10 @@ use compass_graph::SnapshotSelector;
 use compass_ir::{PROGRAM_SCHEMA, ProgramBundle};
 use compass_model::code_graph::GraphDocument;
 use compass_model::query_contract::CODE_QUERY_SCHEMA_V1;
-use compass_model::search::identifier_search_terms;
+use compass_model::search::{
+    direct_call_source_identifier_postings, direct_call_source_identifier_targets,
+    identifier_search_terms,
+};
 use compass_store::Store;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use sha2::{Digest, Sha256};
@@ -24,7 +27,7 @@ use crate::graph_engine::{
     read_store_ref,
 };
 
-const INDEX_FORMAT_VERSION: &str = "compass-code-index/5";
+const INDEX_FORMAT_VERSION: &str = "compass-code-index/7";
 
 /// Selects the source used to hydrate the typed query engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -551,6 +554,14 @@ fn build_index(
              CREATE TABLE files(path TEXT PRIMARY KEY, digest TEXT NOT NULL, json TEXT NOT NULL);
              CREATE TABLE evidence(owner_type TEXT NOT NULL, owner_id TEXT NOT NULL, position INTEGER NOT NULL, json TEXT NOT NULL);
              CREATE TABLE aliases(node_id TEXT NOT NULL, alias TEXT NOT NULL);
+             CREATE TABLE relationship_terms(
+               term TEXT NOT NULL, source_id TEXT NOT NULL,
+               PRIMARY KEY(term, source_id)
+             ) WITHOUT ROWID;
+             CREATE TABLE relationship_term_targets(
+               term TEXT NOT NULL, source_id TEXT NOT NULL, target_id TEXT NOT NULL,
+               PRIMARY KEY(source_id, term, target_id)
+             ) WITHOUT ROWID;
              CREATE TABLE program_joins(graph_node_id TEXT NOT NULL, symbol_id TEXT NOT NULL, json TEXT NOT NULL);
              CREATE VIRTUAL TABLE node_fts USING fts5(
                node_id UNINDEXED, name, qualified_name, aliases, kind, roles,
@@ -703,6 +714,24 @@ fn build_index(
                     )
                     .map_err(sql_error)?;
             }
+        }
+        for (term, source_ids) in direct_call_source_identifier_postings(graph) {
+            for source_id in source_ids {
+                transaction
+                    .execute(
+                        "INSERT INTO relationship_terms VALUES(?1,?2)",
+                        params![term, source_id],
+                    )
+                    .map_err(sql_error)?;
+            }
+        }
+        for (term, source_id, target_id) in direct_call_source_identifier_targets(graph) {
+            transaction
+                .execute(
+                    "INSERT INTO relationship_term_targets VALUES(?1,?2,?3)",
+                    params![term, source_id, target_id],
+                )
+                .map_err(sql_error)?;
         }
         for edge in &graph.links {
             transaction
