@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use compass_graph::{
     GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS, GRAPH_TERM_POSTING_CHUNK_ITEMS,
-    GraphSnapshotReader, SnapshotReadLimits,
+    GraphSnapshotReader, SnapshotReadLimits, TermPostingWork,
 };
 use compass_ir::ProgramBundle;
 use compass_model::code_graph::{EdgeKind, EdgeRecord, FileRecord, GraphDocument, NodeRecord};
@@ -1112,27 +1112,74 @@ impl PinnedDiscoveryBackend<'_> {
 
     fn store_term_candidates(
         &self,
-        concept: &str,
+        concepts: &[String],
         limit: usize,
     ) -> Result<Option<TermCandidateRead>, QueryError> {
         let Self::Store(reader) = self else {
             return Ok(None);
         };
-        let terms = [concept.to_owned()];
         let read_limits = snapshot_limits(limit.max(GRAPH_TERM_POSTING_CHUNK_ITEMS))?;
-        let (mut nodes, mut truncated, mut work) = reader
-            .nodes_for_exact_term_bounded_work(concept, read_limits)
-            .map_err(snapshot_error)?;
+        let exact_read_limits = snapshot_limits(
+            limit
+                .checked_div(concepts.len().max(1))
+                .unwrap_or(limit)
+                .max(GRAPH_TERM_POSTING_CHUNK_ITEMS),
+        )?;
+        let (mut nodes, mut truncated, mut work) = if let [concept] = concepts {
+            reader
+                .nodes_for_exact_term_bounded_work(concept, exact_read_limits)
+                .map_err(snapshot_error)?
+        } else {
+            let mut intersection = None::<BTreeMap<String, NodeRecord>>;
+            let mut exact_truncated = false;
+            let mut exact_work = TermPostingWork::default();
+            for concept in concepts {
+                let (term_nodes, term_truncated, term_work) = reader
+                    .nodes_for_exact_term_bounded_work(concept, exact_read_limits)
+                    .map_err(snapshot_error)?;
+                exact_truncated |= term_truncated;
+                exact_work.chunks_decoded = exact_work
+                    .chunks_decoded
+                    .saturating_add(term_work.chunks_decoded);
+                exact_work.node_ids_decoded = exact_work
+                    .node_ids_decoded
+                    .saturating_add(term_work.node_ids_decoded);
+                let term_ids = term_nodes
+                    .iter()
+                    .map(|node| node.id.clone())
+                    .collect::<BTreeSet<_>>();
+                match &mut intersection {
+                    Some(previous) => previous.retain(|id, _| term_ids.contains(id)),
+                    None => {
+                        intersection = Some(
+                            term_nodes
+                                .into_iter()
+                                .map(|node| (node.id.clone(), node))
+                                .collect(),
+                        );
+                    }
+                }
+                if intersection.as_ref().is_some_and(BTreeMap::is_empty) {
+                    break;
+                }
+            }
+            (
+                intersection.unwrap_or_default().into_values().collect(),
+                exact_truncated,
+                exact_work,
+            )
+        };
         if nodes.is_empty() && !truncated {
             (nodes, truncated, work) = reader
-                .nodes_for_terms_bounded_work(&terms, read_limits)
+                .nodes_for_terms_bounded_work(concepts, read_limits)
                 .map_err(snapshot_error)?;
         }
         let truncated = truncated || nodes.len() > limit;
         nodes.truncate(limit);
+        let matched = concepts.iter().cloned().collect::<BTreeSet<_>>();
         let matched_concepts = nodes
             .iter()
-            .map(|node| (node.id.clone(), BTreeSet::from([concept.to_owned()])))
+            .map(|node| (node.id.clone(), matched.clone()))
             .collect();
         Ok(Some(TermCandidateRead {
             nodes,
@@ -1758,10 +1805,10 @@ impl CodeQueryEngine {
     pub(crate) fn discovery_term_candidates(
         &self,
         backend: &PinnedDiscoveryBackend<'_>,
-        concept: &str,
+        concepts: &[String],
         candidate_limit: usize,
     ) -> Result<TermCandidateRead, QueryError> {
-        if let Some(read) = backend.store_term_candidates(concept, candidate_limit)? {
+        if let Some(read) = backend.store_term_candidates(concepts, candidate_limit)? {
             return Ok(read);
         }
         let connection = self.connection.as_ref().ok_or_else(|| {
@@ -1777,8 +1824,12 @@ impl CodeQueryEngine {
         let sql_limit = i64::try_from(read_envelope).unwrap_or(i64::MAX);
         let mut nodes = Vec::new();
         let mut selected_query = String::new();
-        let exact_query = format!("\"{}\"", concept.replace('"', "\"\""));
-        let prefix_query = fts_query_from_terms(&[concept.to_owned()]);
+        let exact_query = concepts
+            .iter()
+            .map(|concept| format!("\"{}\"", concept.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let prefix_query = fts_query_from_terms(concepts);
         for query in [exact_query, prefix_query] {
             let mut statement = connection
                 .prepare(
@@ -1832,9 +1883,10 @@ impl CodeQueryEngine {
         };
         let node_ids_decoded = u64::try_from(nodes.len()).unwrap_or(u64::MAX);
         nodes.truncate(candidate_limit);
+        let matched = concepts.iter().cloned().collect::<BTreeSet<_>>();
         let matched_concepts = nodes
             .iter()
-            .map(|node| (node.id.clone(), BTreeSet::from([concept.to_owned()])))
+            .map(|node| (node.id.clone(), matched.clone()))
             .collect();
         Ok(TermCandidateRead {
             node_ids_decoded,

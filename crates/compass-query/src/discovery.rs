@@ -58,6 +58,8 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
 
 const MAX_SCOPE_AMBIGUITY_CANDIDATES: usize = 8;
 const MAX_RELATIONSHIP_SUPPORT_TARGETS: usize = 8;
+const MAX_DISCOVERY_INTERSECTION_PROBES: usize = 8;
+const MAX_PRIMARY_INTERSECTION_ITEMS: usize = 2_048;
 
 #[derive(Clone, Debug)]
 struct RankedDiscoveryCandidate {
@@ -333,13 +335,20 @@ impl CodeQueryEngine {
         let candidate_probe_limit =
             usize::try_from(compass_model::query_contract::MAX_DISCOVERY_CANDIDATE_PROBES)
                 .unwrap_or(usize::MAX);
-        let concepts = prepared
+        let mut concepts = prepared
             .ranking_terms
             .iter()
             .cloned()
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
+        concepts.sort_by(|left, right| {
+            crate::ranking::canonical_predicate_token(right)
+                .is_some()
+                .cmp(&crate::ranking::canonical_predicate_token(left).is_some())
+                .then_with(|| right.len().cmp(&left.len()))
+                .then_with(|| left.cmp(right))
+        });
         let mut pool = SearchCandidatePool::new(RecallBudget {
             max_total_candidates: direct_limit,
             max_per_source: direct_limit,
@@ -349,6 +358,7 @@ impl CodeQueryEngine {
         let mut probes = 0_usize;
         let mut truncated = false;
         let mut term_postings_truncated = false;
+        let mut exact_name_recall_complete = false;
 
         guard.check()?;
         if probes < candidate_probe_limit && nodes_read < candidate_read_limit {
@@ -369,6 +379,7 @@ impl CodeQueryEngine {
             let remaining = candidate_read_limit.saturating_sub(nodes_read).min(64);
             let (nodes, read_truncated) =
                 backend.nodes_by_normalized_name(question, remaining.max(1))?;
+            exact_name_recall_complete = !read_truncated;
             nodes_read = nodes_read.saturating_add(nodes.len());
             truncated |= read_truncated;
             for node in nodes {
@@ -380,6 +391,8 @@ impl CodeQueryEngine {
             }
         }
 
+        let reserved_term_capacity = direct_limit / 2;
+        let non_term_capacity = direct_limit.saturating_sub(reserved_term_capacity);
         for concept in &concepts {
             guard.check()?;
             if probes >= candidate_probe_limit || nodes_read >= candidate_read_limit {
@@ -393,6 +406,9 @@ impl CodeQueryEngine {
             nodes_read = nodes_read.saturating_add(nodes.len());
             truncated |= alias_truncated;
             for node in nodes {
+                if pool.len() >= non_term_capacity {
+                    break;
+                }
                 if discovery_scope_matches(&node, scope) {
                     let id = node.id.clone();
                     let _ = pool.add(CandidateSource::Alias, node);
@@ -408,6 +424,56 @@ impl CodeQueryEngine {
         } else {
             candidate_read_limit
         };
+        let intersection_terms = selective_intersection_terms(&concepts);
+        for (intersection_index, intersection) in intersection_terms.iter().enumerate() {
+            guard.check()?;
+            let remaining = lexical_read_limit.saturating_sub(nodes_read);
+            let groups_remaining = intersection_terms
+                .len()
+                .saturating_sub(intersection_index)
+                .saturating_add(concepts.len())
+                .max(1);
+            let fair_limit = remaining / groups_remaining;
+            let fair_limit = if intersection_index == 0 {
+                fair_limit.max(remaining.min(MAX_PRIMARY_INTERSECTION_ITEMS))
+            } else {
+                fair_limit
+            };
+            let minimum =
+                compass_graph::GRAPH_TERM_POSTING_CHUNK_ITEMS.saturating_mul(intersection.len());
+            if probes >= candidate_probe_limit || fair_limit < minimum {
+                term_postings_truncated = true;
+                break;
+            }
+            probes += 1;
+            let read = self.discovery_term_candidates(backend, intersection, fair_limit)?;
+            nodes_read = nodes_read
+                .saturating_add(usize::try_from(read.node_ids_decoded).unwrap_or(usize::MAX));
+            probes =
+                probes.saturating_add(usize::try_from(read.chunks_decoded).unwrap_or(usize::MAX));
+            term_postings_truncated |=
+                read.truncated || nodes_read > lexical_read_limit || probes > candidate_probe_limit;
+            for node in read.nodes {
+                if !discovery_scope_matches(&node, scope) {
+                    continue;
+                }
+                let matched = read
+                    .matched_concepts
+                    .get(&node.id)
+                    .cloned()
+                    .unwrap_or_default();
+                let candidate =
+                    term_candidates
+                        .entry(node.id.clone())
+                        .or_insert_with(|| SearchCandidate {
+                            node,
+                            sources: BTreeSet::from([CandidateSource::TermIndex]),
+                            indexed_matches: BTreeSet::new(),
+                            relationship_matches: BTreeSet::new(),
+                        });
+                candidate.indexed_matches.extend(matched);
+            }
+        }
         for (concept_index, concept) in concepts.iter().enumerate() {
             guard.check()?;
             let remaining = lexical_read_limit.saturating_sub(nodes_read);
@@ -420,7 +486,8 @@ impl CodeQueryEngine {
                 break;
             }
             probes += 1;
-            let read = self.discovery_term_candidates(backend, concept, fair_limit)?;
+            let read =
+                self.discovery_term_candidates(backend, std::slice::from_ref(concept), fair_limit)?;
             nodes_read = nodes_read
                 .saturating_add(usize::try_from(read.node_ids_decoded).unwrap_or(usize::MAX));
             probes =
@@ -716,7 +783,12 @@ impl CodeQueryEngine {
             pool.into_vec(),
             candidate_limit,
         );
+        let exact_dominance_complete = ranked.first().is_some_and(|candidate| {
+            candidate.channel_rank == 6
+                || (candidate.channel_rank == 5 && exact_name_recall_complete)
+        });
         let ambiguity_complete = !truncated
+            || exact_dominance_complete
             || (complete_relationship_candidate
                 && ranked
                     .first()
@@ -981,6 +1053,42 @@ impl CodeQueryEngine {
             complete.then(|| u64::try_from(omitted_edges).unwrap_or(u64::MAX));
         Ok(complete)
     }
+}
+
+fn selective_intersection_terms(concepts: &[String]) -> Vec<Vec<String>> {
+    if concepts.len() < 2 {
+        return Vec::new();
+    }
+    let mut pairs = Vec::new();
+    for left in 0..concepts.len() {
+        for right in left.saturating_add(1)..concepts.len() {
+            pairs.push(vec![concepts[left].clone(), concepts[right].clone()]);
+        }
+    }
+    pairs.sort_by(|left, right| {
+        intersection_predicate_count(right)
+            .cmp(&intersection_predicate_count(left))
+            .then_with(|| intersection_token_bytes(right).cmp(&intersection_token_bytes(left)))
+            .then_with(|| left.cmp(right))
+    });
+
+    let mut intersections = pairs;
+    if concepts.len() <= 4 {
+        intersections.push(concepts.to_vec());
+    }
+    intersections.truncate(MAX_DISCOVERY_INTERSECTION_PROBES);
+    intersections
+}
+
+fn intersection_predicate_count(concepts: &[String]) -> usize {
+    concepts
+        .iter()
+        .filter(|concept| crate::ranking::canonical_predicate_token(concept).is_some())
+        .count()
+}
+
+fn intersection_token_bytes(concepts: &[String]) -> usize {
+    concepts.iter().map(String::len).sum()
 }
 
 fn infer_discovery_direction(question: &str) -> (DiscoveryDirection, DiscoveryDirectionSource) {
@@ -1585,6 +1693,8 @@ mod tests {
     use crate::recall::{CandidateSource, RecallBudget, SearchCandidatePool};
     use crate::{CodeQueryEngine, QueryEngineKind};
 
+    use super::selective_intersection_terms;
+
     fn node(id: &str, name: &str) -> NodeRecord {
         NodeRecord {
             id: id.to_owned(),
@@ -2120,7 +2230,7 @@ mod tests {
 
         assert!(response.truncated);
         assert_eq!(response.stats.candidates_admitted, 188);
-        assert_eq!(response.stats.candidate_probes, 129);
+        assert_eq!(response.stats.candidate_probes, 130);
         Ok(())
     }
 
@@ -2177,6 +2287,74 @@ mod tests {
     }
 
     #[test]
+    fn complete_exact_name_lookup_ignores_lower_channel_alias_truncation()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut nodes = vec![anchored_node(
+            "n:exact",
+            "unique target",
+            "src/target.rs",
+            1,
+        )];
+        for index in 0..200 {
+            nodes.push(anchored_node(
+                &format!("n:alias:{index:03}"),
+                "target",
+                &format!("tests/aliases/{index:03}.rs"),
+                index + 10,
+            ));
+        }
+        let engine = engine(nodes, Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "unique target".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert!(response.truncated);
+        assert_eq!(response.seeds[0].node_id, "n:exact");
+        assert_eq!(
+            response.seeds[0].candidate_source,
+            DiscoverySeedSource::ExactName
+        );
+        assert!(!response.seeds[0].ambiguous);
+        Ok(())
+    }
+
+    #[test]
+    fn selective_intersections_are_deterministic_and_bounded() {
+        let concepts = (0..12)
+            .map(|index| format!("term{index:02}"))
+            .collect::<Vec<_>>();
+
+        let first = selective_intersection_terms(&concepts);
+        let second = selective_intersection_terms(&concepts);
+
+        assert_eq!(first, second);
+        assert_eq!(first.len(), super::MAX_DISCOVERY_INTERSECTION_PROBES);
+        assert!(first.iter().all(|intersection| intersection.len() == 2));
+    }
+
+    #[test]
+    fn selective_intersections_prioritize_specific_behavior_pairs() {
+        let concepts = vec![
+            "http".to_owned(),
+            "process".to_owned(),
+            "request".to_owned(),
+        ];
+
+        let intersections = selective_intersection_terms(&concepts);
+
+        assert_eq!(
+            intersections,
+            vec![
+                vec!["process".to_owned(), "request".to_owned()],
+                vec!["http".to_owned(), "process".to_owned()],
+                vec!["http".to_owned(), "request".to_owned()],
+                concepts,
+            ]
+        );
+    }
+
+    #[test]
     fn equal_relationship_callers_are_reported_as_ambiguous()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut nodes = vec![
@@ -2208,12 +2386,22 @@ mod tests {
     }
 
     #[test]
-    fn relation_evidence_prefers_production_support_four_and_dedupes_cross_concept_targets()
+    fn direct_concept_intersection_precedes_ranked_relationship_evidence()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut nodes = vec![
-            anchored_node("z:production-four", "run", "src/workflow/four.rs", 1),
-            anchored_node("a:production-three", "run", "src/workflow/three.rs", 2),
-            anchored_node("0:test-five", "run", "tests/workflow_test.rs", 3),
+            anchored_node(
+                "z:production-four",
+                "createWorkflow",
+                "src/workflow/four.rs",
+                1,
+            ),
+            anchored_node(
+                "a:production-three",
+                "createWorkflow",
+                "src/workflow/three.rs",
+                2,
+            ),
+            anchored_node("0:test-five", "createWorkflow", "tests/workflow_test.rs", 3),
             anchored_node("t:both", "CheckpointCreate", "src/targets.rs", 10),
             anchored_node("t:checkpoint:1", "CheckpointID", "src/targets.rs", 11),
             anchored_node("t:checkpoint:2", "CheckpointStore", "src/targets.rs", 12),
@@ -2244,10 +2432,10 @@ mod tests {
         let reversed = engine(nodes, edges).discover(query)?;
 
         assert_eq!(response, reversed);
-        assert_eq!(response.seeds[0].node_id, "z:production-four");
+        assert_eq!(response.seeds[0].node_id, "t:both");
         assert!(!response.seeds[0].ambiguous);
-        assert_eq!(response.seeds[1].node_id, "a:production-three");
-        assert_eq!(response.seeds[2].node_id, "0:test-five");
+        assert_eq!(response.seeds[1].node_id, "z:production-four");
+        assert_eq!(response.seeds[2].node_id, "a:production-three");
         Ok(())
     }
 

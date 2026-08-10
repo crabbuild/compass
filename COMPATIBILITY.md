@@ -162,13 +162,25 @@ evidence. Parallel edges are deduplicated for this recall index; inferred,
 ambiguous, mixed-confidence, heuristic, source-less, and non-callable sources
 do not participate.
 
-Candidates with at least two trusted relationship concepts are ordered by
-concept coverage, production status, uncovered operation-predicate alignment,
-predicate precision, distinct supporting targets, evidence confidence, and
-semantic kind. The persistence predicate family (`record`, `save`, `persist`,
-`write`, and `store`) is a whole-token ranking equivalence only: it cannot add
-a posting, candidate, relationship concept, or relation eligibility. Equal
-evidence vectors remain explicitly ambiguous.
+Direct symbols and candidates with at least two trusted relationship concepts
+share one deterministic behavior-ranking channel. They are ordered by
+production status, bounded operation-predicate alignment, direct
+terminal/owner concept coverage, semantic kind, field and predicate precision,
+relationship concept coverage, distinct supporting targets, and evidence
+confidence. A relationship candidate keeps its lexical or alias source when
+it also has direct indexed evidence; only relationship-only recall is labeled
+as a relation seed. Fixed whole-token operation families (including
+persistence, dispatch, invocation, processing, recognition, refresh,
+resolution, and scheduling) affect ranking only: they cannot add a posting,
+candidate, relationship concept, or relation eligibility. Equal evidence
+vectors remain explicitly ambiguous.
+
+Discovery performs at most eight deterministic multi-concept term-index
+intersections before independent term unions. Intersection reads spend the
+same candidate, posting, object, byte, and probe budgets as all other recall;
+exhaustion remains explicit truncation rather than an empty result. A complete
+exact-name lookup can prove its top channel despite truncation in lower recall
+channels, while duplicate exact names remain ambiguous.
 
 Discovery traversal bounds adjacency reads by remaining node capacity and
 stops endpoint hydration at the node cap. Store-backed final edge assembly

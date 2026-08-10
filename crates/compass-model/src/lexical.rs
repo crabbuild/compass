@@ -48,6 +48,7 @@ pub fn canonical_code_token(token: String) -> String {
         "loaded" | "loading" => "load".to_owned(),
         "formatted" | "formatting" => "format".to_owned(),
         "parsed" | "parsing" => "parse".to_owned(),
+        "processed" | "processing" => "process".to_owned(),
         "dispatched" | "dispatching" => "dispatch".to_owned(),
         "implemented" | "implementing" => "implement".to_owned(),
         "handled" | "handling" => "handle".to_owned(),
@@ -185,6 +186,7 @@ mod tests {
             ("invoking", "invoke"),
             ("recognized", "recognize"),
             ("scheduling", "schedule"),
+            ("processed", "process"),
             ("analysis", "analysis"),
             ("路由", "路由"),
         ];

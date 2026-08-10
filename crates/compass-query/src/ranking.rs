@@ -34,13 +34,15 @@ pub(crate) fn resolution_rank_is_strictly_better(
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct RelationEvidenceRank {
-    concept_count: usize,
     production: bool,
     predicate_match_count: usize,
+    direct_concept_count: usize,
+    semantic_rank: u8,
+    direct_token_count: Reverse<usize>,
     predicate_token_count: Reverse<usize>,
+    concept_count: usize,
     target_count: usize,
     evidence_rank: u8,
-    semantic_rank: u8,
 }
 
 pub(crate) fn rank_search_candidates(
@@ -164,33 +166,43 @@ fn rank_v2(
             .iter()
             .filter(|term| query_terms.binary_search(term).is_ok())
             .count();
+        let (direct_concept_count, direct_token_count) =
+            direct_field_evidence(&candidate.node, &query_terms);
         if !relationship_terms.is_empty() {
             matched_fields.push("relationship".to_owned());
         }
 
         let channel_rank =
-            behavior_channel_rank(&candidate, indexed_term_count, relationship_term_count);
-        let relation_evidence = (relationship_term_count >= 2).then(|| {
-            let (predicate_match_count, predicate_token_count) =
-                predicate_alignment(&candidate.node, &query_terms, &relationship_terms);
-            RelationEvidenceRank {
-                concept_count: relationship_term_count,
-                production: !source_is_test_or_generated(&candidate.node),
-                predicate_match_count,
-                // With equal match counts, fewer terminal-name tokens are a
-                // more precise behavior match. No match has zero precision
-                // regardless of the source label length.
-                predicate_token_count: Reverse(if predicate_match_count > 0 {
-                    predicate_token_count
-                } else {
-                    0
-                }),
-                target_count: candidate.relationship_target_count(),
-                evidence_rank: evidence_confidence_rank(&candidate.node),
-                semantic_rank: semantic_seed_rank(&candidate.node),
-            }
-        });
+            behavior_channel_rank(&candidate, direct_concept_count, relationship_term_count);
+        let relation_evidence =
+            (direct_concept_count >= 2 || relationship_term_count >= 2).then(|| {
+                let (predicate_match_count, predicate_token_count) =
+                    predicate_alignment(&candidate.node, &query_terms);
+                RelationEvidenceRank {
+                    direct_concept_count,
+                    semantic_rank: semantic_seed_rank(&candidate.node),
+                    direct_token_count: Reverse(if direct_concept_count > 0 {
+                        direct_token_count
+                    } else {
+                        0
+                    }),
+                    concept_count: relationship_term_count,
+                    production: !source_is_test_or_generated(&candidate.node),
+                    predicate_match_count,
+                    // With equal match counts, fewer terminal-name tokens are a
+                    // more precise behavior match. No match has zero precision
+                    // regardless of the source label length.
+                    predicate_token_count: Reverse(if predicate_match_count > 0 {
+                        predicate_token_count
+                    } else {
+                        0
+                    }),
+                    target_count: candidate.relationship_target_count(),
+                    evidence_rank: evidence_confidence_rank(&candidate.node),
+                }
+            });
         let relationship_only_behavior = relationship_term_count >= 2
+            && indexed_term_count == 0
             && !candidate.sources.iter().any(|source| {
                 matches!(
                     source,
@@ -323,17 +335,15 @@ fn compare_ranked_candidates(
 
 fn behavior_channel_rank(
     candidate: &SearchCandidate,
-    indexed_term_count: usize,
+    direct_concept_count: usize,
     relationship_term_count: usize,
 ) -> u8 {
     if candidate.sources.contains(&CandidateSource::ExactId) {
         6
     } else if candidate.sources.contains(&CandidateSource::ExactName) {
         5
-    } else if relationship_term_count >= 2 {
+    } else if relationship_term_count >= 2 || direct_concept_count >= 2 {
         4
-    } else if indexed_term_count >= 2 {
-        3
     } else if candidate.sources.contains(&CandidateSource::Alias)
         || candidate.sources.contains(&CandidateSource::TermIndex)
     {
@@ -505,15 +515,21 @@ fn canonical_field_tokens(value: &str) -> BTreeSet<String> {
         .collect()
 }
 
-fn predicate_alignment(
-    node: &NodeRecord,
-    query_terms: &[String],
-    relationship_terms: &BTreeSet<String>,
-) -> (usize, usize) {
+fn direct_field_evidence(node: &NodeRecord, terms: &[String]) -> (usize, usize) {
+    let mut fields = canonical_field_tokens(&node.name);
+    if let Some(owner) = symbol_owner(&node.qualified_name) {
+        fields.extend(canonical_field_tokens(&owner));
+    }
+    (
+        terms.iter().filter(|term| fields.contains(*term)).count(),
+        fields.len(),
+    )
+}
+
+fn predicate_alignment(node: &NodeRecord, query_terms: &[String]) -> (usize, usize) {
     let behavior = canonical_field_tokens(&node.name);
     let query_predicates = query_terms
         .iter()
-        .filter(|term| !relationship_terms.contains(*term))
         .filter_map(|term| canonical_predicate_token(term))
         .collect::<BTreeSet<_>>();
     let matched = behavior
@@ -525,12 +541,21 @@ fn predicate_alignment(
     (matched, behavior.len())
 }
 
-fn canonical_predicate_token(token: &str) -> Option<&'static str> {
+pub(crate) fn canonical_predicate_token(token: &str) -> Option<&'static str> {
     match token {
         // Natural-language persistence verbs are equivalent only for ranking
         // a source behavior that already has trusted multi-concept call
         // evidence. They never create recall postings or relation eligibility.
         "record" | "save" | "persist" | "write" | "written" | "store" => Some("persist"),
+        "add" => Some("add"),
+        "create" => Some("create"),
+        "dispatch" => Some("dispatch"),
+        "invoke" => Some("invoke"),
+        "process" => Some("process"),
+        "recognize" => Some("recognize"),
+        "refresh" => Some("refresh"),
+        "resolve" => Some("resolve"),
+        "run" | "schedule" => Some("execute"),
         _ => None,
     }
 }
@@ -591,15 +616,26 @@ fn semantic_seed_rank(node: &NodeRecord) -> u8 {
 
 fn source_is_test_or_generated(node: &NodeRecord) -> bool {
     let source = node.source_file().unwrap_or("").to_lowercase();
-    source.split('/').any(|component| {
+    let source_is_test = source.split('/').any(|component| {
         matches!(
             component,
-            "test" | "tests" | "testing" | "fixtures" | "vendor" | "generated"
+            "test"
+                | "tests"
+                | "testing"
+                | "fixtures"
+                | "vendor"
+                | "generated"
+                | "generator"
+                | "generators"
         )
     }) || source
         .rsplit('/')
         .next()
-        .is_some_and(|name| name.starts_with("test_") || name.ends_with("_test.go"))
+        .is_some_and(|name| name.starts_with("test_") || name.ends_with("_test.go"));
+    source_is_test
+        || canonical_field_tokens(&node.qualified_name)
+            .iter()
+            .any(|term| matches!(term.as_str(), "test" | "testing" | "fixture" | "generated"))
 }
 
 #[cfg(test)]
@@ -813,7 +849,7 @@ mod tests {
     }
 
     #[test]
-    fn relationship_only_test_helper_words_do_not_beat_a_production_workflow() {
+    fn production_relationship_workflow_beats_a_direct_test_helper() {
         let relationship_matches = ["checkpoint", "create"]
             .into_iter()
             .map(|term| RelationshipTermMatch {
@@ -860,11 +896,107 @@ mod tests {
         );
 
         assert_eq!(ranked[0].node_id, "n:workflow");
-        assert_eq!(ranked[1].candidate_source, CandidateSource::RelationSeed);
+        assert_eq!(ranked[1].candidate_source, CandidateSource::TermIndex);
     }
 
     #[test]
-    fn trusted_multi_term_relationship_match_beats_equal_direct_term_coverage() {
+    fn qualified_test_namespace_is_not_ranked_as_production() {
+        let relationship_matches = ["checkpoint", "create"]
+            .into_iter()
+            .map(|term| RelationshipTermMatch {
+                term: term.to_owned(),
+                kind: EdgeKind::Calls,
+                target_ids: BTreeSet::from([format!("target:{term}")]),
+            })
+            .collect::<BTreeSet<_>>();
+        let candidates = vec![
+            SearchCandidate {
+                node: owned_node(
+                    "n:test-helper",
+                    "createWorkflow",
+                    "crate::tests::createWorkflow",
+                    "src/lib.rs",
+                ),
+                sources: BTreeSet::from([CandidateSource::RelationSeed]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: relationship_matches.clone(),
+            },
+            SearchCandidate {
+                node: owned_node(
+                    "n:production",
+                    "createWorkflow",
+                    "crate::workflow::createWorkflow",
+                    "src/lib.rs",
+                ),
+                sources: BTreeSet::from([CandidateSource::RelationSeed]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches,
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "checkpoint created",
+            &["checkpoint".to_owned(), "create".to_owned()],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:production");
+    }
+
+    #[test]
+    fn generator_helper_does_not_beat_a_runtime_behavior() {
+        let candidates = vec![
+            SearchCandidate {
+                node: owned_node(
+                    "n:generator",
+                    "save",
+                    "Rails::Generators::ActiveModel::save",
+                    "railties/lib/rails/generators/active_model.rb",
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from([
+                    "active".to_owned(),
+                    "model".to_owned(),
+                    "save".to_owned(),
+                ]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: owned_node(
+                    "n:runtime",
+                    "save",
+                    "ActiveRecord::Persistence::save",
+                    "activerecord/lib/active_record/persistence.rb",
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from([
+                    "active".to_owned(),
+                    "record".to_owned(),
+                    "save".to_owned(),
+                ]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how does Active Record persistence save a model",
+            &[
+                "active".to_owned(),
+                "model".to_owned(),
+                "persistence".to_owned(),
+                "record".to_owned(),
+                "save".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:runtime");
+    }
+
+    #[test]
+    fn direct_behavior_fit_beats_equal_relationship_coverage() {
         let candidates = vec![
             SearchCandidate {
                 node: node(
@@ -910,7 +1042,7 @@ mod tests {
             usize::MAX,
         );
 
-        assert_eq!(ranked[0].node_id, "n:relationship");
+        assert_eq!(ranked[0].node_id, "n:direct");
     }
 
     #[test]

@@ -536,7 +536,7 @@ fn exact_relationship_recall_is_backend_equal_for_dense_daily_workflows()
     )?;
 
     for (question, target) in [
-        ("how is a checkpoint created", "z:condense"),
+        ("how is a checkpoint created", "n:both"),
         ("how is repository state recorded", "z:save"),
     ] {
         let request = discovery_request(question);
@@ -553,7 +553,7 @@ fn exact_relationship_recall_is_backend_equal_for_dense_daily_workflows()
                         .iter()
                         .map(|seed| seed.node_id.as_str())
                         .collect::<Vec<_>>(),
-                    ["z:condense", "a:production-three", "0:test-five"]
+                    ["n:both", "z:condense", "a:production-three"]
                 );
             }
             assert!(
@@ -570,8 +570,11 @@ fn exact_relationship_recall_is_backend_equal_for_dense_daily_workflows()
     assert_discovery_semantically_equal(&equal_store, &equal_json)?;
     for response in [&equal_json, &equal_store] {
         assert!(response.seeds[0].ambiguous);
-        assert_eq!(response.seeds[0].node_id, "n:equal:a");
-        assert_eq!(response.seeds[0].alternatives[0].node_id, "n:equal:b");
+        assert_eq!(response.seeds[0].node_id, "n:alpha-beta:0000");
+        assert_eq!(
+            response.seeds[0].alternatives[0].node_id,
+            "n:alpha-beta:0001"
+        );
     }
 
     let reversed_directory = directory.path().join("reversed");
