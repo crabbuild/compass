@@ -2656,6 +2656,8 @@ fn install_codex_hook(root: &Path, lines: &mut Vec<String>) -> Result<(), String
 fn install_opencode(root: &Path, lines: &mut Vec<String>) -> Result<(), String> {
     let config = root.join(".opencode/opencode.json");
     let plugin = root.join(".opencode/plugins/compass.js");
+    preflight_plugin_array(&config)?;
+    preflight_managed_adapter(&plugin, OPENCODE_PLUGIN)?;
     write_managed_adapter(plugin, OPENCODE_PLUGIN)?;
     lines.push(
         "  .opencode/plugins/compass.js  ->  auto-discovered tool.execute.before hook written"
@@ -2673,6 +2675,8 @@ fn install_opencode(root: &Path, lines: &mut Vec<String>) -> Result<(), String> 
 fn install_kilo_plugin(root: &Path, lines: &mut Vec<String>) -> Result<(), String> {
     let plugin = root.join(".kilo/plugins/compass.js");
     let config = root.join(".kilo/kilo.json");
+    preflight_plugin_array(&config)?;
+    preflight_managed_adapter(&plugin, KILO_PLUGIN)?;
     write_managed_adapter(plugin.clone(), KILO_PLUGIN)?;
     lines.push(
         "  .kilo/plugins/compass.js  ->  auto-discovered tool.execute.before hook written"

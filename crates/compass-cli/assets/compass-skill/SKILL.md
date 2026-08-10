@@ -76,7 +76,7 @@ codebase question:
    the final `Pagination:` line. If a seed is ambiguous, repeat the query with
    its exact node ID.
 5. If pagination reports `next=<cursor>`, repeat the unchanged question and
-   semantic options with `--cursor <cursor>`; the text budget may change.
+   semantic options with `--cursor <cursor>`; `--text-budget N` may change.
    Reach `next=none` before an exhaustive
    claim; otherwise disclose that additional pages remain.
 6. Inspect the returned nodes, relations, and source locations.

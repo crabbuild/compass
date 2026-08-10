@@ -18,8 +18,9 @@ Daily workflow:
 - Inspect direction, ambiguity, graph completeness, domain truncation, and the
   final Pagination line before relying on a result.
 - When a seed is ambiguous, repeat the query with the exact node ID.
-- Follow `next=<cursor>` with the unchanged question and options when the
-  requested scope must be exhaustive; stop at `next=none`.
+- Follow `next=<cursor>` with the unchanged question and options plus
+  `--cursor <cursor>` when the requested scope must be exhaustive; stop at
+  `next=none`.
 - Open only the cited source needed to verify decisive claims.
 - Treat missing paths, inferred edges, and partial results as uncertain
   evidence, not proof.
