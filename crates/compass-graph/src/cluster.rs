@@ -270,7 +270,10 @@ pub fn label_communities_by_hub(
 
 fn community_human_label(node: &NodeRecord) -> String {
     let language = node.language_name().unwrap_or("unknown");
-    let file = node.source_file().filter(|file| !file.is_empty()).unwrap_or("unknown");
+    let file = node
+        .source_file()
+        .filter(|file| !file.is_empty())
+        .unwrap_or("unknown");
     let kind = node.kind_name();
     let mut name = node.string("name");
     if name.is_empty() {
@@ -1382,12 +1385,10 @@ mod tests {
     fn duplicate_hub_labels_are_disambiguated() {
         let mut document = graph(&["a", "b", "c", "d"], &[("a", "b"), ("c", "d")]);
         for node in &mut document.nodes {
-            node.attributes
-                .insert("name".to_owned(), json!("shared"));
+            node.attributes.insert("name".to_owned(), json!("shared"));
             node.attributes
                 .insert("language".to_owned(), json!("python"));
-            node.attributes
-                .insert("kind".to_owned(), json!("function"));
+            node.attributes.insert("kind".to_owned(), json!("function"));
             node.attributes
                 .insert("source_file".to_owned(), json!("src/example.rs"));
             node.attributes
@@ -1425,12 +1426,10 @@ mod tests {
     fn duplicate_canonical_community_keys_share_label() {
         let mut document = graph(&["a", "b", "c", "d"], &[("a", "b"), ("c", "d")]);
         for node in &mut document.nodes {
-            node.attributes
-                .insert("name".to_owned(), json!("shared"));
+            node.attributes.insert("name".to_owned(), json!("shared"));
             node.attributes
                 .insert("language".to_owned(), json!("python"));
-            node.attributes
-                .insert("kind".to_owned(), json!("function"));
+            node.attributes.insert("kind".to_owned(), json!("function"));
             node.attributes
                 .insert("source_file".to_owned(), json!("src/shared.rs"));
             node.attributes

@@ -2405,10 +2405,7 @@ impl<'a> ReportGraph<'a> {
         }
         let source = node.source_file().unwrap_or_default();
         (!source.is_empty()
-            && Path::new(source)
-                .file_name()
-                .and_then(|name| name.to_str())
-                == Some(label.as_str()))
+            && Path::new(source).file_name().and_then(|name| name.to_str()) == Some(label.as_str()))
             || (label.starts_with('.') && label.ends_with("()"))
             || (label.ends_with("()") && self.degree(id) <= 1)
     }
