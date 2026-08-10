@@ -65,7 +65,7 @@ class ConfigTests(unittest.TestCase):
     def test_compass_oracle_cannot_fall_back_to_substring_only(self) -> None:
         raw = (ROOT / "repositories.toml").read_text(encoding="utf-8")
         raw = raw.replace(
-            'expectedSeeds = [{ qualifiedName = "django.urls.resolvers.URLResolver", source = { file = "django/urls/resolvers.py", startLine = 503 } }]\n',
+            'expectedSeeds = [{ qualifiedName = "django.urls.resolvers.URLResolver::resolve", source = { file = "django/urls/resolvers.py", startLine = 670 } }]\n',
             "",
             1,
         )
@@ -78,8 +78,8 @@ class ConfigTests(unittest.TestCase):
     def test_expected_seed_requires_source_even_when_forbidden_seed_does_not(self) -> None:
         raw = (ROOT / "repositories.toml").read_text(encoding="utf-8")
         raw = raw.replace(
-            'expectedSeeds = [{ qualifiedName = "django.urls.resolvers.URLResolver", source = { file = "django/urls/resolvers.py", startLine = 503 } }]',
-            'expectedSeeds = [{ qualifiedName = "django.urls.resolvers.URLResolver" }]',
+            'expectedSeeds = [{ qualifiedName = "django.urls.resolvers.URLResolver::resolve", source = { file = "django/urls/resolvers.py", startLine = 670 } }]',
+            'expectedSeeds = [{ qualifiedName = "django.urls.resolvers.URLResolver::resolve" }]',
             1,
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -91,8 +91,8 @@ class ConfigTests(unittest.TestCase):
     def test_allow_no_match_cannot_also_declare_a_seed(self) -> None:
         raw = (ROOT / "repositories.toml").read_text(encoding="utf-8")
         raw = raw.replace(
-            'expectedDirection = "both"\nrelevantNodes = [{ qualifiedName = "django.urls.resolvers.URLResolver"',
-            'expectedDirection = "both"\nallowNoMatch = true\nrelevantNodes = [{ qualifiedName = "django.urls.resolvers.URLResolver"',
+            'expectedDirection = "both"\nrelevantNodes = [{ qualifiedName = "django.urls.resolvers.URLResolver::resolve"',
+            'expectedDirection = "both"\nallowNoMatch = true\nrelevantNodes = [{ qualifiedName = "django.urls.resolvers.URLResolver::resolve"',
             1,
         )
         with tempfile.TemporaryDirectory() as directory:

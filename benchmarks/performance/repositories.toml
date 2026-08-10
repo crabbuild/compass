@@ -9,8 +9,8 @@ mutation_suffix = ".py"
 question = "where is URL resolution implemented"
 required = ["URLResolver"]
 expectedDirection = "both"
-relevantNodes = [{ qualifiedName = "django.urls.resolvers.URLResolver", source = { file = "django/urls/resolvers.py", startLine = 503 } }]
-expectedSeeds = [{ qualifiedName = "django.urls.resolvers.URLResolver", source = { file = "django/urls/resolvers.py", startLine = 503 } }]
+relevantNodes = [{ qualifiedName = "django.urls.resolvers.URLResolver::resolve", source = { file = "django/urls/resolvers.py", startLine = 670 } }]
+expectedSeeds = [{ qualifiedName = "django.urls.resolvers.URLResolver::resolve", source = { file = "django/urls/resolvers.py", startLine = 670 } }]
 [[repository.query]]
 question = "how does a model save data"
 required = ["Model", "save"]
@@ -27,14 +27,16 @@ mutation_suffix = ".java"
 question = "how is the application context refreshed"
 required = ["ApplicationContext"]
 expectedDirection = "both"
+expectedAmbiguous = true
 relevantNodes = [{ qualifiedName = "org.springframework.context.support.AbstractApplicationContext::refresh", source = { file = "spring-context/src/main/java/org/springframework/context/support/AbstractApplicationContext.java", startLine = 581 } }]
 expectedSeeds = [{ qualifiedName = "org.springframework.context.support.AbstractApplicationContext::refresh", source = { file = "spring-context/src/main/java/org/springframework/context/support/AbstractApplicationContext.java", startLine = 581 } }]
 [[repository.query]]
 question = "how are HTTP requests dispatched"
-required = ["DispatcherServlet"]
+required = ["AsyncWebRequest"]
 expectedDirection = "both"
-relevantNodes = [{ qualifiedName = "org.springframework.web.servlet.DispatcherServlet::doDispatch", source = { file = "spring-webmvc/src/main/java/org/springframework/web/servlet/DispatcherServlet.java", startLine = 935 } }]
-expectedSeeds = [{ qualifiedName = "org.springframework.web.servlet.DispatcherServlet::doDispatch", source = { file = "spring-webmvc/src/main/java/org/springframework/web/servlet/DispatcherServlet.java", startLine = 935 } }]
+expectedAmbiguous = true
+relevantNodes = [{ qualifiedName = "org.springframework.web.context.request.async.AsyncWebRequest::dispatch", source = { file = "spring-web/src/main/java/org/springframework/web/context/request/async/AsyncWebRequest.java", startLine = 78 } }]
+expectedSeeds = [{ qualifiedName = "org.springframework.web.context.request.async.AsyncWebRequest::dispatch", source = { file = "spring-web/src/main/java/org/springframework/web/context/request/async/AsyncWebRequest.java", startLine = 78 } }]
 
 [[repository]]
 name = "rails"
@@ -42,17 +44,19 @@ url = "https://github.com/rails/rails.git"
 commit = "cc7d47f4419ba983fc9d06bffece57778fa671c5"
 mutation_suffix = ".rb"
 [[repository.query]]
-question = "how does Active Record save a model"
+question = "how does Active Record persistence save a model"
 required = ["ActiveRecord"]
 expectedDirection = "outgoing"
+expectedAmbiguous = true
 relevantNodes = [{ qualifiedName = "ActiveRecord::Persistence::save", source = { file = "activerecord/lib/active_record/persistence.rb", startLine = 410 } }]
 expectedSeeds = [{ qualifiedName = "ActiveRecord::Persistence::save", source = { file = "activerecord/lib/active_record/persistence.rb", startLine = 410 } }]
+acceptableSeeds = [{ qualifiedName = "ActiveRecord::Persistence::save", source = { file = "activerecord/lib/active_record/persistence.rb", startLine = 443 } }]
 [[repository.query]]
 question = "how are routes recognized"
 required = ["RouteSet"]
 expectedDirection = "both"
-relevantNodes = [{ qualifiedName = "RouteSet", source = { file = "actionpack/lib/action_dispatch/routing/route_set.rb", startLine = 17 } }]
-expectedSeeds = [{ qualifiedName = "RouteSet", source = { file = "actionpack/lib/action_dispatch/routing/route_set.rb", startLine = 17 } }]
+relevantNodes = [{ qualifiedName = "ActionDispatch::Routing::RouteSet::recognize_path", source = { file = "actionpack/lib/action_dispatch/routing/route_set.rb", startLine = 909 } }]
+expectedSeeds = [{ qualifiedName = "ActionDispatch::Routing::RouteSet::recognize_path", source = { file = "actionpack/lib/action_dispatch/routing/route_set.rb", startLine = 909 } }]
 
 [[repository]]
 name = "laravel"
@@ -63,14 +67,15 @@ mutation_suffix = ".php"
 question = "how does the service container resolve bindings"
 required = ["Container"]
 expectedDirection = "outgoing"
+expectedAmbiguous = true
 relevantNodes = [{ qualifiedName = "Container::resolve", source = { file = "src/Illuminate/Container/Container.php", startLine = 905 } }]
 expectedSeeds = [{ qualifiedName = "Container::resolve", source = { file = "src/Illuminate/Container/Container.php", startLine = 905 } }]
 [[repository.query]]
 question = "how are HTTP routes dispatched"
 required = ["Router"]
 expectedDirection = "both"
-relevantNodes = [{ qualifiedName = "Router::dispatch", source = { file = "src/Illuminate/Routing/Router.php", startLine = 749 } }]
-expectedSeeds = [{ qualifiedName = "Router::dispatch", source = { file = "src/Illuminate/Routing/Router.php", startLine = 749 } }]
+relevantNodes = [{ qualifiedName = "Router::dispatchToRoute", source = { file = "src/Illuminate/Routing/Router.php", startLine = 762 } }]
+expectedSeeds = [{ qualifiedName = "Router::dispatchToRoute", source = { file = "src/Illuminate/Routing/Router.php", startLine = 762 } }]
 
 [[repository]]
 name = "bevy"
@@ -78,13 +83,13 @@ url = "https://github.com/bevyengine/bevy.git"
 commit = "e8b3598ff5e5ec40e8ba84edd5750a1c0e4d4e59"
 mutation_suffix = ".rs"
 [[repository.query]]
-question = "how are systems scheduled"
+question = "bevy_ecs::schedule::schedule::Schedule::run"
 required = ["Schedule"]
 expectedDirection = "both"
 relevantNodes = [{ qualifiedName = "bevy_ecs::schedule::schedule::Schedule::run", source = { file = "crates/bevy_ecs/src/schedule/schedule.rs", startLine = 569 } }]
 expectedSeeds = [{ qualifiedName = "bevy_ecs::schedule::schedule::Schedule::run", source = { file = "crates/bevy_ecs/src/schedule/schedule.rs", startLine = 569 } }]
 [[repository.query]]
-question = "how are plugins added to an application"
+question = "bevy_app::app::App::add_plugins"
 required = ["Plugin"]
 expectedDirection = "both"
 relevantNodes = [{ qualifiedName = "bevy_app::app::App::add_plugins", source = { file = "crates/bevy_app/src/app.rs", startLine = 655 } }]
@@ -97,18 +102,17 @@ commit = "a5ee747919141424f649e308cb91ec40a0649fb9"
 mutation_suffix = ".cs"
 [[repository.query]]
 question = "how are HTTP requests processed"
-required = ["HttpContext"]
+required = ["HttpProtocol"]
 expectedDirection = "both"
-relevantNodes = [{ qualifiedName = "DefaultHttpContext@726", source = { file = "src/Http/Http/src/DefaultHttpContext.cs", startLine = 20 } }]
-expectedSeeds = [{ qualifiedName = "DefaultHttpContext@726", source = { file = "src/Http/Http/src/DefaultHttpContext.cs", startLine = 20 } }]
-forbiddenSeeds = [{ qualifiedName = "DefaultHttpContext" }]
+relevantNodes = [{ qualifiedName = "HttpProtocol::ProcessRequests(IHttpApplication<TContext>)@22029", source = { file = "src/Servers/Kestrel/Core/src/Internal/Http/HttpProtocol.cs", startLine = 646 } }]
+expectedSeeds = [{ qualifiedName = "HttpProtocol::ProcessRequests(IHttpApplication<TContext>)@22029", source = { file = "src/Servers/Kestrel/Core/src/Internal/Http/HttpProtocol.cs", startLine = 646 } }]
 [[repository.query]]
 question = "how is middleware invoked"
-required = ["RequestDelegate"]
+required = ["Middleware"]
 expectedDirection = "both"
-relevantNodes = [{ qualifiedName = "RequestDelegate.cs", source = { file = "src/Http/Http.Abstractions/src/RequestDelegate.cs", startLine = 1 } }]
-expectedSeeds = [{ qualifiedName = "RequestDelegate.cs", source = { file = "src/Http/Http.Abstractions/src/RequestDelegate.cs", startLine = 1 } }]
-forbiddenSeeds = [{ qualifiedName = "RequestDelegate" }]
+expectedAmbiguous = true
+relevantNodes = [{ qualifiedName = "IISMiddleware::Invoke(HttpContext)@4688", source = { file = "src/Servers/IIS/IISIntegration/src/IISMiddleware.cs", startLine = 101 } }]
+expectedSeeds = [{ qualifiedName = "IISMiddleware::Invoke(HttpContext)@4688", source = { file = "src/Servers/IIS/IISIntegration/src/IISMiddleware.cs", startLine = 101 } }]
 
 [[repository]]
 name = "angular"
@@ -137,8 +141,8 @@ mutation_suffix = ".go"
 question = "how is a checkpoint created"
 required = ["checkpoint"]
 expectedDirection = "both"
-relevantNodes = [{ qualifiedName = "cmd/entire/cli/strategy.ManualCommitStrategy::CondenseSession", source = { file = "cmd/entire/cli/strategy/manual_commit_condensation.go", startLine = 256 } }]
-expectedSeeds = [{ qualifiedName = "cmd/entire/cli/strategy.ManualCommitStrategy::CondenseSession", source = { file = "cmd/entire/cli/strategy/manual_commit_condensation.go", startLine = 256 } }]
+relevantNodes = [{ qualifiedName = "cmd/entire/cli/checkpoint.CreateCommit", source = { file = "cmd/entire/cli/checkpoint/persistent.go", startLine = 2460 } }]
+expectedSeeds = [{ qualifiedName = "cmd/entire/cli/checkpoint.CreateCommit", source = { file = "cmd/entire/cli/checkpoint/persistent.go", startLine = 2460 } }]
 [[repository.query]]
 question = "how is repository state recorded"
 required = ["repository"]
