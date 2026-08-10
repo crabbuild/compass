@@ -310,23 +310,21 @@ fn community_disambiguator(node: &NodeRecord) -> Option<String> {
     if qualified_name.is_empty() {
         qualified_name = range.clone();
     }
-    file.and_then(|file| {
+    file.map(|file| {
         if !range.is_empty() {
-            Some(format!("{file}:{range}"))
+            format!("{file}:{range}")
         } else {
             if !qualified_name.is_empty() {
-                Some(format!("{file}:{qualified_name}"))
+                format!("{file}:{qualified_name}")
             } else {
-                Some(file.to_owned())
+                file.to_owned()
             }
         }
     })
-    .or_else(|| {
-        if qualified_name.is_empty() {
-            None
-        } else {
-            Some(qualified_name)
-        }
+    .or(if qualified_name.is_empty() {
+        None
+    } else {
+        Some(qualified_name)
     })
 }
 
