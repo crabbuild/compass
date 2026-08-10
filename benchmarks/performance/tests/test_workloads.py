@@ -622,6 +622,58 @@ class WorkloadTests(unittest.TestCase):
         self.assertFalse(failure.passed)
         self.assertTrue(any("top-ranked" in item for item in failure.failures))
 
+    def test_compass_ambiguity_oracle_applies_to_the_top_ranked_seed(self) -> None:
+        oracle = QueryOracle(
+            "find target",
+            expected_seeds=(node_oracle("pkg.Target", "src/target.rs"),),
+            expected_ambiguous=False,
+        )
+        base = {
+            "schema": "compass.query.discovery/1",
+            "selectedDirection": "both",
+            "nodes": [
+                {
+                    "id": "target",
+                    "qualifiedName": "pkg.Target",
+                    "source": {"file": "src/target.rs"},
+                },
+                {
+                    "id": "other",
+                    "qualifiedName": "pkg.Other",
+                    "source": {"file": "src/other.rs"},
+                },
+            ],
+            "edges": [],
+            "diagnostics": [],
+            "stats": {},
+            "truncated": False,
+        }
+        lower_rank_ambiguous = dict(
+            base,
+            seeds=[
+                {"nodeId": "target", "ambiguous": False},
+                {"nodeId": "other", "ambiguous": True},
+            ],
+        )
+        top_rank_ambiguous = dict(
+            base,
+            seeds=[
+                {"nodeId": "target", "ambiguous": True},
+                {"nodeId": "other", "ambiguous": False},
+            ],
+        )
+
+        accepted = validate_query_output(
+            discovery_json(lower_rank_ambiguous), oracle, tool="compass"
+        )
+        rejected = validate_query_output(
+            discovery_json(top_rank_ambiguous), oracle, tool="compass"
+        )
+
+        self.assertTrue(accepted.passed, accepted.failures)
+        self.assertFalse(rejected.passed)
+        self.assertTrue(any("ambiguity mismatch" in item for item in rejected.failures))
+
     def test_compass_relevant_node_requires_matching_source_anchor(self) -> None:
         oracle = QueryOracle(
             "find target",

@@ -564,7 +564,7 @@ def _validate_compass_discovery(
         failures.append(
             f"direction mismatch: expected {oracle.expected_direction}, got {selected_direction}"
         )
-    ambiguous = any(bool(seed.get("ambiguous")) for seed in seed_records)
+    ambiguous = bool(seed_records[0].get("ambiguous")) if seed_records else False
     if ambiguous != oracle.expected_ambiguous:
         failures.append(
             f"ambiguity mismatch: expected {oracle.expected_ambiguous}, got {ambiguous}"
