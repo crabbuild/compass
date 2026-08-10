@@ -1956,9 +1956,10 @@ mod tests {
         let invoke = |name: &str, value: Value| {
             server.invoke(name, value.as_object().cloned().unwrap_or_default())
         };
+        let get_node = invoke("get_node", json!({"source":"a","target":"b"}));
         assert!(
-            invoke("get_node", json!({"source":"a","target":"b"}))
-                .contains("requires compass.graph/1")
+            get_node.contains("discovery controls require a typed compass.graph/1 artifact"),
+            "{get_node}"
         );
         let neighbors = invoke("get_neighbors", json!({"label":"Beta"}));
         assert!(neighbors.contains("--> Delta"));

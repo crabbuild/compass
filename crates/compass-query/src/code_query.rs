@@ -23,7 +23,7 @@ use crate::cql::{QueryError, QueryErrorKind};
 use crate::graph_engine::LocalStoreSnapshot;
 use crate::index::QueryEngineKind;
 use crate::join_program_evidence;
-use crate::ranking::rank_search_candidates;
+use crate::ranking::{rank_search_candidates, resolution_rank_is_strictly_better};
 use crate::recall::{CandidateSource, RecallBudget, SearchCandidatePool};
 use crate::source::{VerifiedSource, verified_source};
 use crate::telemetry::QueryInstrumentation;
@@ -2499,21 +2499,22 @@ impl CodeQueryEngine {
             });
             return Ok(None);
         }
-        let relation_seeded = candidates
-            .iter()
-            .filter(|candidate| candidate.sources.contains(&CandidateSource::RelationSeed))
-            .collect::<Vec<_>>();
-        if let [candidate] = relation_seeded.as_slice() {
+        let candidate_count = candidates.len();
+        let ranked =
+            rank_search_candidates(query, &prepared.ranking_terms, candidates, candidate_limit);
+        if let [candidate] = ranked.as_slice() {
             return Ok(Some(candidate.node.id.clone()));
         }
-        if let [candidate] = candidates.as_slice() {
+        if let [candidate, runner_up, ..] = ranked.as_slice()
+            && resolution_rank_is_strictly_better(candidate, runner_up)
+        {
             return Ok(Some(candidate.node.id.clone()));
         }
         response.diagnostics.push(QueryDiagnostic {
             code: QueryDiagnosticCode::AmbiguousMatch,
             message: format!(
                 "Symbol {query:?} recalled {} candidates; provide a qualified name or exact ID",
-                candidates.len()
+                candidate_count
             ),
             node_id: None,
             path: None,

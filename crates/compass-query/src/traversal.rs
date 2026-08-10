@@ -7,7 +7,10 @@ use compass_model::{EdgeIndex, Graph, NodeIndex};
 use serde_json::{Map, Value};
 use thiserror::Error;
 
-use crate::score::{find_exact_nodes, find_node, pick_scored_endpoint, pick_seeds, score_nodes};
+use crate::score::{
+    TextRankProfile, find_exact_nodes, find_node, pick_scored_endpoint, pick_seeds, score_nodes,
+    score_nodes_with_profile,
+};
 use crate::text::{infer_context_filters, normalize_context_filters, query_terms, sanitize_label};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -35,6 +38,7 @@ struct NaturalQueryAssembly {
     expanded_relationships: u64,
     omitted_edges: Option<u64>,
     truncated: bool,
+    candidates_truncated: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -55,6 +59,12 @@ struct NaturalQueryEdge {
     kind: String,
     occurrence: Option<String>,
     site: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProfiledTextPageOptions {
+    pub page: TextPageOptions,
+    pub rank_profile: TextRankProfile,
 }
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
@@ -112,12 +122,47 @@ pub fn query_graph_text_page(
     explicit_contexts: &[String],
     overlay: &HashMap<String, Map<String, Value>>,
 ) -> Result<String, TextPaginationError> {
-    let TextPageOptions { token_budget, page } = options;
+    query_graph_text_page_with_profile(
+        graph,
+        question,
+        mode,
+        depth,
+        ProfiledTextPageOptions {
+            page: options,
+            rank_profile: TextRankProfile::FullScanV1,
+        },
+        explicit_contexts,
+        overlay,
+    )
+}
+
+pub fn query_graph_text_page_with_profile(
+    graph: &Graph,
+    question: &str,
+    mode: TraversalMode,
+    depth: usize,
+    options: ProfiledTextPageOptions,
+    explicit_contexts: &[String],
+    overlay: &HashMap<String, Map<String, Value>>,
+) -> Result<String, TextPaginationError> {
+    let ProfiledTextPageOptions {
+        page: TextPageOptions { token_budget, page },
+        rank_profile: profile,
+    } = options;
     validate_pagination(token_budget, page)?;
-    let Some(assembly) = assemble_natural_query(graph, question, mode, depth, explicit_contexts)
-    else {
+    let (assembly, candidates_truncated) =
+        assemble_natural_query(graph, question, mode, depth, explicit_contexts, profile);
+    let Some(assembly) = assembly else {
         return if page == 1 {
-            Ok("No matching nodes found.".to_owned())
+            if profile == TextRankProfile::FullScanV1 {
+                Ok("No matching nodes found.".to_owned())
+            } else {
+                Ok(format!(
+                    "No matching nodes found. Ranker: {}. Candidate retrieval: {}.",
+                    profile.as_str(),
+                    retrieval_state(candidates_truncated)
+                ))
+            }
         } else {
             Err(TextPaginationError::PageOutOfRange {
                 requested: page,
@@ -141,6 +186,13 @@ pub fn query_graph_text_page(
         ),
         format!("Start: [{labels}]"),
     ];
+    if profile != TextRankProfile::FullScanV1 {
+        header.push(format!("Ranker: {}", profile.as_str()));
+        header.push(format!(
+            "Candidate retrieval: {}",
+            retrieval_state(assembly.candidates_truncated)
+        ));
+    }
     if !assembly.contexts.is_empty() {
         header.push(format!(
             "Context: {} ({})",
@@ -185,9 +237,12 @@ fn assemble_natural_query(
     mode: TraversalMode,
     depth: usize,
     explicit_contexts: &[String],
-) -> Option<NaturalQueryAssembly> {
+    profile: TextRankProfile,
+) -> (Option<NaturalQueryAssembly>, bool) {
     let terms = query_terms(question);
-    let scores = score_nodes(graph, &terms, true);
+    let profiled_scores = score_nodes_with_profile(graph, &terms, true, profile);
+    let candidates_truncated = profiled_scores.candidates_truncated;
+    let scores = profiled_scores.scores;
     let max_seeds = usize::try_from(DiscoveryLimits::default().max_seeds).unwrap_or(usize::MAX);
     let equally_ranked_seed_candidates = scores.ranked.first().map_or(0, |first| {
         scores
@@ -199,7 +254,7 @@ fn assemble_natural_query(
     let mut seeds = pick_seeds(graph, &scores, max_seeds, 0.2);
     seeds.truncate(max_seeds);
     if seeds.is_empty() {
-        return None;
+        return (None, candidates_truncated);
     }
     let normalized = normalize_context_filters(explicit_contexts);
     let (contexts, context_source) = if normalized.is_empty() {
@@ -214,17 +269,25 @@ fn assemble_natural_query(
         TraversalMode::Bfs => bfs(&filtered, &seeds, depth),
         TraversalMode::Dfs => dfs(&filtered, &seeds, depth),
     };
-    Some(NaturalQueryAssembly {
-        seeds,
-        nodes: selection.nodes,
-        edges: selection.edges,
-        contexts,
-        context_source,
-        equally_ranked_seed_candidates,
-        expanded_relationships: selection.expanded_relationships,
-        omitted_edges: selection.omitted_edges,
-        truncated: selection.truncated,
-    })
+    (
+        Some(NaturalQueryAssembly {
+            seeds,
+            nodes: selection.nodes,
+            edges: selection.edges,
+            contexts,
+            context_source,
+            equally_ranked_seed_candidates,
+            expanded_relationships: selection.expanded_relationships,
+            omitted_edges: selection.omitted_edges,
+            truncated: selection.truncated,
+            candidates_truncated,
+        }),
+        candidates_truncated,
+    )
+}
+
+fn retrieval_state(truncated: bool) -> &'static str {
+    if truncated { "truncated" } else { "complete" }
 }
 
 pub fn render_shortest_path(

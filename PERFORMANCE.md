@@ -100,6 +100,47 @@ limits the total multi-source recall pool and is never expanded to
 100,000-node in-process ceiling now covers direct search and natural-query
 planning as well as callers, impact, and node trails.
 
+### Shadow text-ranker qualification
+
+The generic text-traversal ranker has an opt-in
+`text-ranker/bm25-v1` qualification profile. It is not selected by the CLI or
+MCP defaults. Run its controlled 100,000-node comparison with:
+
+```bash
+CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
+  scripts/qualify_text_ranker_bm25.sh
+```
+
+The script builds a release-mode qualification executable and runs each
+profile in a separate process so OS-reported peak RSS is comparable. Each run
+checks the exact top node ID, records the first query, then records 31 warm
+samples. The synthetic question has one rare matching symbol; it is useful for
+measuring indexed lookup overhead but does not represent common-term posting
+scans or a real-repository relevance distribution.
+
+One macOS Apple Silicon development run on 2026-08-08 produced:
+
+| Profile | First query | Warm p50 | Warm p95 | Maximum RSS | Top ID |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `text-ranker/full-scan-v1` | 158.868 ms | 155.983 ms | 157.671 ms | 281,444,352 B | expected |
+| `text-ranker/bm25-v1` | 366.502 ms | 0.005 ms | 0.010 ms | 322,453,504 B | expected |
+
+The BM25 first query includes lazy construction of 202,008 terms for 100,000
+documents. On this run it was about 131% slower on first use and maximum RSS
+was about 14.6% higher, while warm rare-term lookup was substantially faster.
+The very small warm measurements are timer-sensitive and should not be
+generalized into a universal speedup.
+
+The compact reviewed language goldens currently give both profiles 1.0 for
+Success@1, MRR, Recall@5/20, and nDCG on four answerable Python/Rust/TypeScript/
+Unicode questions, plus 1.0 no-answer precision on one negative question. That
+small equal-score result demonstrates no regression on those cases; it does
+not demonstrate the required 10% relative Recall@5 improvement. Because the
+cold-query and memory observations also exceed the 10% review threshold, this
+evidence does not support making BM25 the default. It remains a shadow profile
+pending real-repository judgments and a decision about amortization or a more
+compact/persistent index.
+
 ## Compass Store release qualification
 
 The local store release harness records the adapter's build/query timings,

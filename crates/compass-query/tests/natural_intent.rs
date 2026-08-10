@@ -159,7 +159,10 @@ fn structural_intents_use_bounded_fuzzy_recall_and_relation_evidence()
         )?;
         let response = engine.query_natural(request("who calls UserService.lits?"))?;
         assert_eq!(response.operation, CodeQueryOperation::Callers);
-        assert!(response.nodes.iter().any(|node| node.id == "n:list"));
+        assert!(
+            response.nodes.iter().any(|node| node.id == "n:list"),
+            "{response:#?}"
+        );
         assert!(!response.nodes.iter().any(|node| node.id == "n:ilts"));
         assert!(response.edges.iter().any(|edge| edge.target == "n:list"));
     }

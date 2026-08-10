@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value};
 
-use crate::{EdgeRecord, GraphDocument, GraphError, NodeRecord, QueryIndex, SchemaFingerprint};
+use crate::{
+    EdgeRecord, GraphDocument, GraphError, LexicalIndex, NodeRecord, QueryIndex, SchemaFingerprint,
+};
 
 pub type NodeIndex = usize;
 pub type EdgeIndex = usize;
@@ -262,6 +264,12 @@ impl Graph {
     #[must_use]
     pub fn query_index(&self) -> &QueryIndex {
         &self.query_index
+    }
+
+    /// Return the graph-derived lexical index, building it on first use.
+    #[must_use]
+    pub fn lexical_index(&self) -> &LexicalIndex {
+        self.query_index.lexical_index(&self.nodes)
     }
 
     #[must_use]
