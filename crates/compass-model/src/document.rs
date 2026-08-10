@@ -83,6 +83,63 @@ impl NodeRecord {
     }
 
     #[must_use]
+    pub fn display_label(&self) -> String {
+        if let Some(value) = self
+            .attributes
+            .get("label")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return value.to_owned();
+        }
+        if let Some(value) = self
+            .attributes
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return value.to_owned();
+        }
+        if let Some(value) = self
+            .attributes
+            .get("qualifiedName")
+            .or_else(|| self.attributes.get("qualified_name"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return value.to_owned();
+        }
+        if let Some(value) = self
+            .attributes
+            .get("signature")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return value.to_owned();
+        }
+        if let Some(file) = self.source_file().filter(|file| !file.is_empty()) {
+            let file = shorten_display_path(file);
+            let location = self.string("source_location");
+            if location.is_empty() {
+                file
+            } else {
+                format!("{file}:{location}")
+            }
+        } else {
+            let location = self.string("source_location");
+            if location.is_empty() {
+                self.id.clone()
+            } else {
+                location
+            }
+        }
+    }
+
+    #[must_use]
     pub fn source_file(&self) -> Option<&str> {
         self.attributes
             .get("source_file")
@@ -544,6 +601,27 @@ fn source_anchor_location(anchor: &Map<String, Value>) -> Option<String> {
             format!("L{start_line}:{start_column}-L{end_line}:{end_column}")
         },
     ))
+}
+
+fn shorten_display_path(path: &str) -> String {
+    if path.len() <= 40 {
+        return path.to_owned();
+    }
+    match (Path::new(path).parent(), Path::new(path).file_name()) {
+        (Some(parent), Some(name)) => {
+            let parent_name = parent.file_name().and_then(|part| part.to_str());
+            if let Some(parent_name) = parent_name {
+                if parent_name.is_empty() {
+                    path.to_owned()
+                } else {
+                    format!("{parent_name}/{}", name.to_string_lossy())
+                }
+            } else {
+                path.to_owned()
+            }
+        }
+        _ => path.to_owned(),
+    }
 }
 
 fn evidence_anchor<'a>(

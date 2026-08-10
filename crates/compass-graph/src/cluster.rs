@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
-use compass_model::{EdgeRecord, GraphDocument};
+use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use rayon::prelude::*;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -15,6 +15,21 @@ const LOUVAIN_THRESHOLD: f64 = 1e-4;
 const LOUVAIN_MAX_LEVEL: usize = 10;
 
 pub type Communities = BTreeMap<usize, Vec<String>>;
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+struct CommunityCanonicalKey {
+    kind: String,
+    source_file: String,
+    source_range: String,
+    qualified_name: String,
+}
+
+#[derive(Clone, Debug)]
+struct CommunityCandidate {
+    community: usize,
+    base_label: String,
+    disambiguator: Option<String>,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ClusterOptions {
@@ -165,12 +180,10 @@ pub fn label_communities_by_hub(
             degrees[right] += 1;
         }
     }
-    let labels = document
-        .nodes
-        .iter()
-        .map(|node| (node.id.as_str(), node.label()))
-        .collect::<HashMap<_, _>>();
     let mut output = BTreeMap::new();
+    let mut canonical_keys = HashMap::<CommunityCanonicalKey, usize>::new();
+    let mut community_to_candidate = Vec::<(usize, usize)>::new();
+    let mut candidates = Vec::<CommunityCandidate>::new();
     for (community, members) in communities {
         let hub = members
             .iter()
@@ -180,17 +193,170 @@ pub fn label_communities_by_hub(
                     .cmp(&degrees[*left])
                     .then_with(|| left_id.cmp(right_id))
             });
-        let fallback = format!("Community {community}");
-        let name = hub
-            .and_then(|(id, _)| labels.get(id.as_str()).copied().or(Some(id.as_str())))
-            .map(str::trim)
-            .map(|value| value.strip_suffix("()").unwrap_or(value))
-            .filter(|value| !value.is_empty())
-            .unwrap_or(&fallback)
-            .to_owned();
-        output.insert(*community, name);
+        let (base_label, disambiguator, canonical_key) = hub
+            .and_then(|(_, index)| document.nodes.get(index))
+            .map(|hub| {
+                let key = community_canonical_key(hub);
+                let disambiguator = community_disambiguator(hub);
+                let base_label = community_human_label(hub);
+                (base_label, disambiguator, key)
+            })
+            .unwrap_or_else(|| {
+                let key = CommunityCanonicalKey {
+                    kind: "symbol".to_owned(),
+                    source_file: format!("community-{community}"),
+                    source_range: format!("{community}"),
+                    qualified_name: String::new(),
+                };
+                (
+                    format!("Community {community}"),
+                    Some(format!("Community {community}")),
+                    key,
+                )
+            });
+
+        let key = canonical_key;
+        let index = canonical_keys.entry(key).or_insert_with(|| {
+            let index = candidates.len();
+            candidates.push(CommunityCandidate {
+                community: *community,
+                base_label,
+                disambiguator,
+            });
+            index
+        });
+        community_to_candidate.push((*community, *index));
+    }
+
+    let mut label_counts = HashMap::<String, usize>::new();
+    for candidate in &candidates {
+        *label_counts
+            .entry(candidate.base_label.clone())
+            .or_insert(0) += 1;
+    }
+
+    let mut resolved = HashMap::<usize, String>::new();
+    let mut suffix_counts = HashMap::<String, usize>::new();
+    for (index, candidate) in candidates.iter().enumerate() {
+        let duplicate_count = *label_counts.get(&candidate.base_label).unwrap_or(&1);
+        let resolved_label = if duplicate_count <= 1 {
+            candidate.base_label.clone()
+        } else {
+            let suffix = candidate
+                .disambiguator
+                .clone()
+                .unwrap_or_else(|| format!("Community {}", candidate.community));
+            let base_name = format!("{} ({suffix})", candidate.base_label);
+            let seen = suffix_counts
+                .entry(base_name.clone())
+                .and_modify(|count| *count += 1)
+                .or_insert(0);
+            if *seen <= 1 {
+                base_name
+            } else {
+                format!("{base_name} #{seen}")
+            }
+        };
+        resolved.insert(index, resolved_label);
+    }
+
+    for (community, index) in community_to_candidate {
+        if let Some(label) = resolved.get(&index) {
+            output.insert(community, label.to_owned());
+        }
     }
     output
+}
+
+fn community_human_label(node: &NodeRecord) -> String {
+    let language = node.language_name().unwrap_or("unknown");
+    let file = node.source_file().filter(|file| !file.is_empty()).unwrap_or("unknown");
+    let kind = node.kind_name();
+    let mut name = node.string("name");
+    if name.is_empty() {
+        name = node.string("qualifiedName");
+    }
+    if name.is_empty() {
+        name = node.string("qualified_name");
+    }
+    if name.is_empty() {
+        name = node.string("signature");
+    }
+    if name.is_empty() {
+        name = node.string("label");
+    }
+    if name.is_empty() {
+        name = node.id.clone();
+    }
+    format!("{language}::{file}::{kind}::{name}")
+}
+
+fn community_disambiguator(node: &NodeRecord) -> Option<String> {
+    let file = node.source_file().filter(|file| !file.is_empty());
+    let range = source_range(node);
+    let mut qualified_name = node.string("qualifiedName");
+    if qualified_name.is_empty() {
+        qualified_name = node.string("qualified_name");
+    }
+    if qualified_name.is_empty() {
+        qualified_name = node.string("signature");
+    }
+    if qualified_name.is_empty() {
+        qualified_name = node.string("name");
+    }
+    if qualified_name.is_empty() {
+        qualified_name = range.clone();
+    }
+    file.and_then(|file| {
+        if !range.is_empty() {
+            Some(format!("{file}:{range}"))
+        } else {
+            if !qualified_name.is_empty() {
+                Some(format!("{file}:{qualified_name}"))
+            } else {
+                Some(file.to_owned())
+            }
+        }
+    })
+    .or_else(|| {
+        if qualified_name.is_empty() {
+            None
+        } else {
+            Some(qualified_name)
+        }
+    })
+}
+
+fn community_canonical_key(node: &NodeRecord) -> CommunityCanonicalKey {
+    let mut qualified_name = node.string("qualifiedName");
+    if qualified_name.is_empty() {
+        qualified_name = node.string("qualified_name");
+    }
+    CommunityCanonicalKey {
+        kind: node.kind_name().to_owned(),
+        source_file: node
+            .source_file()
+            .filter(|file| !file.is_empty())
+            .unwrap_or("unknown")
+            .to_owned(),
+        source_range: source_range(node),
+        qualified_name,
+    }
+}
+
+fn source_range(node: &NodeRecord) -> String {
+    if let (Some(start), Some(end)) = (node.unsigned("line_start"), node.unsigned("line_end")) {
+        if start == end {
+            return format!("L{start}");
+        }
+        return format!("L{start}-L{end}");
+    }
+    let range = node.string("source_location");
+    if !range.is_empty() {
+        range
+    } else {
+        String::new()
+    }
 }
 
 #[must_use]
@@ -1210,5 +1376,82 @@ mod tests {
         let weighted = WeightedGraph::from_document(&document);
         assert_eq!(weighted.len(), 1);
         assert_eq!(weighted.edge_count(), 0);
+    }
+
+    #[test]
+    fn duplicate_hub_labels_are_disambiguated() {
+        let mut document = graph(&["a", "b", "c", "d"], &[("a", "b"), ("c", "d")]);
+        for node in &mut document.nodes {
+            node.attributes
+                .insert("name".to_owned(), json!("shared"));
+            node.attributes
+                .insert("language".to_owned(), json!("python"));
+            node.attributes
+                .insert("kind".to_owned(), json!("function"));
+            node.attributes
+                .insert("source_file".to_owned(), json!("src/example.rs"));
+            node.attributes
+                .insert("source_location".to_owned(), json!("L1"));
+        }
+        document.nodes[0]
+            .attributes
+            .insert("source_file".to_owned(), json!("src/shared.rs"));
+        document.nodes[0]
+            .attributes
+            .insert("source_location".to_owned(), json!("L10"));
+        document.nodes[2]
+            .attributes
+            .insert("source_file".to_owned(), json!("src/shared.rs"));
+        document.nodes[2]
+            .attributes
+            .insert("source_location".to_owned(), json!("L20"));
+        let communities = BTreeMap::from([
+            (0, vec!["a".to_owned(), "b".to_owned()]),
+            (1, vec!["c".to_owned(), "d".to_owned()]),
+        ]);
+
+        let labels = label_communities_by_hub(&document, &communities);
+        assert_eq!(
+            labels.get(&0),
+            Some(&"python::src/shared.rs::function::shared (src/shared.rs:L10)".to_owned())
+        );
+        assert_eq!(
+            labels.get(&1),
+            Some(&"python::src/shared.rs::function::shared (src/shared.rs:L20)".to_owned())
+        );
+    }
+
+    #[test]
+    fn duplicate_canonical_community_keys_share_label() {
+        let mut document = graph(&["a", "b", "c", "d"], &[("a", "b"), ("c", "d")]);
+        for node in &mut document.nodes {
+            node.attributes
+                .insert("name".to_owned(), json!("shared"));
+            node.attributes
+                .insert("language".to_owned(), json!("python"));
+            node.attributes
+                .insert("kind".to_owned(), json!("function"));
+            node.attributes
+                .insert("source_file".to_owned(), json!("src/shared.rs"));
+            node.attributes
+                .insert("source_location".to_owned(), json!("L10"));
+            node.attributes
+                .insert("qualifiedName".to_owned(), json!("pkg::shared"));
+        }
+
+        let communities = BTreeMap::from([
+            (0, vec!["a".to_owned(), "b".to_owned()]),
+            (1, vec!["c".to_owned(), "d".to_owned()]),
+        ]);
+
+        let labels = label_communities_by_hub(&document, &communities);
+        assert_eq!(
+            labels.get(&0),
+            Some(&"python::src/shared.rs::function::shared".to_owned())
+        );
+        assert_eq!(
+            labels.get(&1),
+            Some(&"python::src/shared.rs::function::shared".to_owned())
+        );
     }
 }
