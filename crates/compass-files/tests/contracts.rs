@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fs::{self, FileTimes};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 
 use compass_files::{
@@ -11,7 +13,7 @@ use compass_files::{
     write_text_atomic,
 };
 use compass_files::{FileType, IgnorePolicy};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -21,6 +23,24 @@ struct PortableAstFixture {
     edges: Vec<serde_json::Value>,
     #[serde(default)]
     framework_facts: Vec<serde_json::Value>,
+}
+
+struct TrackedPortableAst<'a> {
+    active: &'a AtomicUsize,
+    maximum: &'a AtomicUsize,
+}
+
+impl Serialize for TrackedPortableAst<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.maximum.fetch_max(active, Ordering::SeqCst);
+        thread::sleep(Duration::from_millis(1));
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        serializer.serialize_u8(1)
+    }
 }
 
 #[test]
@@ -501,6 +521,31 @@ fn streaming_portable_ast_batch_round_trips() -> Result<(), Box<dyn Error>> {
         cache.load(&source, &CacheKind::Ast, None, false)?,
         Some(expected)
     );
+    Ok(())
+}
+
+#[test]
+fn streaming_portable_ast_batch_encodes_one_entry_at_a_time() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let paths = (0..256)
+        .map(|index| {
+            let path = directory.path().join(format!("streamed-{index}.rs"));
+            fs::write(&path, "fn streamed() {}\n")?;
+            Ok::<_, std::io::Error>(path)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let active = AtomicUsize::new(0);
+    let maximum = AtomicUsize::new(0);
+    let value = TrackedPortableAst {
+        active: &active,
+        maximum: &maximum,
+    };
+    let entries = paths.iter().map(|path| (path, &value)).collect::<Vec<_>>();
+    let mut cache = Cache::open(directory.path(), CacheOptions::output_directory(None))?;
+
+    cache.write_portable_ast_batch_ref(&entries)?;
+
+    assert_eq!(maximum.load(Ordering::SeqCst), 1);
     Ok(())
 }
 

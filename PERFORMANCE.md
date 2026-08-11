@@ -332,6 +332,16 @@ question pass rate, adversarial no-answer specificity, and cold/incremental
 memory. The complete methodology, results, limitations, and prioritized gates
 are in [Low-inference evaluation against Graphify](docs/implementation/low-inference-graphify-evaluation.md).
 
+A 2026-08-11 resolver-admission follow-up preserved the ordered low graph while
+moving rejected inference before graph-record allocation and compacting exact
+duplicate Rust test candidates. Correcting streaming AST cache publication to
+encode one entry at a time then produced three fresh exact-equivalent samples
+with a 2.37 s wall-time median and 673.8 MiB peak-RSS median. These are
+diagnostic development samples, not a promoted baseline: Compass still used
+about 4.50x the documented Graphify cold RSS, so the memory gate remains
+failed. The linked evaluation records the intermediate samples and explicit
+CPU/memory tradeoffs.
+
 ## Incremental and language-hardening observations
 
 A follow-up release-binary smoke run on 2026-08-04 used four small,

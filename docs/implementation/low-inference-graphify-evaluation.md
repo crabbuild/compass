@@ -292,6 +292,22 @@ remains failed. The next memory work must compact or stream the remaining
 string-dense evidence representation; clustering and final graph serialization
 are not the dominant cold allocation.
 
+Stage-correlated RSS sampling then found that the nominally streaming portable
+AST cache writer still encoded large batches in parallel, retaining concurrent
+MessagePack buffers and compression workspaces. Enforcing its documented
+one-entry-at-a-time contract produced three fresh samples with a 2.37 s median
+and 673.8 MiB median peak RSS. All three again retained byte-equivalent ordered
+nodes and relationships. Cache publication itself increased from about 0.11 s
+to 0.25–0.28 s, while total observed wall time decreased in these samples;
+that total-time change is diagnostic and may reflect lower allocator and CPU
+contention rather than guaranteed throughput.
+
+Relative to the preceding 756.2 MiB median, this additional change reduced
+median RSS by 10.9%. Compass still used about 4.50x Graphify's documented cold
+RSS, so this does not pass the memory gate. It removes an avoidable concurrent
+allocation layer; it does not eliminate the remaining resolver, graph, and
+publication working sets.
+
 ## Work required to surpass Graphify
 
 1. **Move inference admission before materialization.** Thread the selected

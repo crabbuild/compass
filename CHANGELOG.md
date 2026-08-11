@@ -63,6 +63,12 @@
   graph-level coverage and diagnostics now describe admitted records instead
   of inference that was constructed only to be discarded.
 
+- Make streaming portable-AST cache publication encode and atomically write
+  one entry at a time for every batch size. Large cold builds no longer retain
+  concurrent MessagePack buffers and compression workspaces under an API whose
+  documented purpose is bounded residency; the parallel encode-then-publish
+  API remains available where callers explicitly accept batch memory.
+
 - Add a digest-pinned 500-question, AI-reviewed synthetic relevance matrix
   covering all query classes, execute it in CI with strict ranking, recall,
   intent, structural, no-answer, and work bounds, and keep its generated JSON
