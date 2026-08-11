@@ -7,7 +7,7 @@ use compass_graph::{
     extraction_from_v1, normalize_document_v1,
     normalize_document_v1_with_evidence_best_effort_owned_at_inference,
     normalize_document_v1_with_inventory_best_effort_owned, normalize_v1, normalize_v1_best_effort,
-    normalize_v1_best_effort_with_inference, prefilter_extraction_inference,
+    normalize_v1_best_effort_with_inference,
 };
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::code_graph::{
