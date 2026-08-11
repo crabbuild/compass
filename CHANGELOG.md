@@ -53,6 +53,14 @@
   capability is v2, and the disposable SQLite query accelerator now uses
   internal format v7 and rebuilds automatically.
 
+- Thread inference admission into universal, generic, and language-member
+  resolution so low builds do not materialize deferred receivers, heuristic
+  calls, or inferred external placeholders. Preserve exact test roles without
+  retaining discarded inferred test edges. Published low nodes and
+  relationships remain equivalent to the prior authoritative post-filter;
+  graph-level coverage and diagnostics now describe admitted records instead
+  of inference that was constructed only to be discarded.
+
 - Add a digest-pinned 500-question, AI-reviewed synthetic relevance matrix
   covering all query classes, execute it in CI with strict ranking, recall,
   intent, structural, no-answer, and work bounds, and keep its generated JSON

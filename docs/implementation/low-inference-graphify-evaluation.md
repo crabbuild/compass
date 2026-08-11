@@ -246,6 +246,36 @@ is discarded. Moving evidence admission earlier is required for low inference
 to become a cold-build optimization rather than primarily an output and query
 optimization.
 
+### Resolver-admission follow-up
+
+A subsequent implementation threads the selected level into universal,
+generic, and language-member resolution. Low resolution now suppresses
+deferred receivers, inferred source-backed calls, and qualified external
+placeholders before their graph records are allocated. Exact `tests`
+relationships still publish normally; a successfully resolved inferred test
+relationship can assign the structural test role without retaining its
+discarded edge or placeholder.
+
+One fresh delta-rs validation sample after that change completed in 2.45 s
+with 798.0 MiB peak RSS. This is a 40.4% wall-time reduction and a 26.0% RSS
+reduction relative to the cold median above, but it is a single diagnostic
+sample rather than a replacement median. It still uses 5.33x Graphify's
+documented cold RSS, so the memory gate remains failed.
+
+The follow-up graph retained the same 9,982 nodes, 25,206 relationships, and
+532 communities. Its ordered node and relationship arrays were byte-equivalent
+to the pre-admission low artifact. Graph coverage entries decreased from 4,907
+to 4,535 and diagnostics from 470 to 466 because those graph-level sections
+now describe records admitted by low resolution, rather than inferred records
+that were later filtered. This is an observable reporting change, not a graph
+recall claim.
+
+Internal inventory identified the remaining cold-memory floor: 9,280
+declarations, 7,482 scopes, 23,243 bindings, 88,447 occurrences, and 118,935
+relationship candidates coexist before resolution on this corpus. The next
+memory work must compact or stream this string-dense evidence representation;
+clustering and final graph serialization are not the dominant cold allocation.
+
 ## Work required to surpass Graphify
 
 1. **Move inference admission before materialization.** Thread the selected

@@ -1,6 +1,7 @@
 //! Deterministic projection of resolution decisions into graph records.
 
 use super::*;
+use crate::ResolutionAdmission;
 
 mod edges;
 mod nodes;
@@ -18,10 +19,20 @@ struct PreparedTarget<'a> {
     declaration_id: Option<String>,
     external_qualified_name: Option<String>,
     deferred_qualified_name: Option<String>,
+    emit_edge: bool,
 }
 
 impl UniversalResolutionIndex {
     pub fn materialize(&self, nodes: &mut Vec<NodeRecord>, edges: &mut Vec<EdgeRecord>) {
+        self.materialize_at_inference(nodes, edges, ResolutionAdmission::Max);
+    }
+
+    pub(crate) fn materialize_at_inference(
+        &self,
+        nodes: &mut Vec<NodeRecord>,
+        edges: &mut Vec<EdgeRecord>,
+        admission: ResolutionAdmission,
+    ) {
         let db = ResolutionDb::new(self);
         let mut profile_started = Instant::now();
         let overloads = declaration_overloads(self.facts.declarations.values());
@@ -84,7 +95,7 @@ impl UniversalResolutionIndex {
             .collect::<AHashMap<_, _>>();
         let candidate_ids = self.candidate_ids();
         profile_internal("universal candidate ordering", &mut profile_started);
-        let decisions = candidate_ids
+        let decision_batches = candidate_ids
             .into_par_iter()
             .map(|candidate_id| {
                 let decision = self.resolve(candidate_id);
@@ -94,8 +105,22 @@ impl UniversalResolutionIndex {
                     }
                     _ => None,
                 };
-                let allow_possible = !matches!(decision, ResolutionDecision::Ambiguous { .. });
-                let mut decisions = vec![(candidate_id, decision)];
+                let candidate = &self.facts.candidates[candidate_id];
+                let test_source_id = (admission == ResolutionAdmission::Low
+                    && candidate.relation == CandidateRelation::Tests
+                    && !matches!(
+                        decision,
+                        ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved
+                    ))
+                .then(|| graph_ids.get(&candidate.source_declaration_id).cloned())
+                .flatten();
+                let allow_primary = decision_is_needed(candidate, &decision, admission);
+                let allow_possible = admission.admits_source_backed_inference()
+                    && !matches!(decision, ResolutionDecision::Ambiguous { .. });
+                let mut decisions = Vec::with_capacity(1 + usize::from(allow_possible));
+                if allow_primary {
+                    decisions.push((candidate_id, decision));
+                }
                 if allow_possible {
                     decisions.extend(
                         db.possible_receiver_dispatches(
@@ -117,12 +142,20 @@ impl UniversalResolutionIndex {
                         }),
                     );
                 }
-                decisions
+                (test_source_id, decisions)
             })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .flatten()
             .collect::<Vec<_>>();
+        let mut test_source_ids = AHashSet::new();
+        let mut decisions = Vec::new();
+        for (test_source_id, mut batch) in decision_batches {
+            if let Some(test_source_id) = test_source_id {
+                test_source_ids.insert(test_source_id);
+            }
+            decisions.append(&mut batch);
+        }
+        if admission == ResolutionAdmission::Low {
+            mark_test_roles(nodes, &test_source_ids);
+        }
         profile_internal("universal candidate decisions", &mut profile_started);
         let prepared_targets = decisions
             .into_par_iter()
@@ -140,6 +173,7 @@ impl UniversalResolutionIndex {
                         declaration_id: Some(target.id.clone()),
                         external_qualified_name: None,
                         deferred_qualified_name: None,
+                        emit_edge: true,
                     })
                 }
                 ResolutionDecision::ResolvedInventory {
@@ -155,6 +189,7 @@ impl UniversalResolutionIndex {
                         declaration_id: None,
                         external_qualified_name: None,
                         deferred_qualified_name: None,
+                        emit_edge: true,
                     })
                 }
                 ResolutionDecision::QualifiedExternal {
@@ -171,6 +206,7 @@ impl UniversalResolutionIndex {
                         declaration_id: None,
                         external_qualified_name: Some(qualified_name),
                         deferred_qualified_name: None,
+                        emit_edge: admission.admits_qualified_external(),
                     })
                 }
                 ResolutionDecision::DeferredReceiver {
@@ -187,6 +223,7 @@ impl UniversalResolutionIndex {
                         declaration_id: None,
                         external_qualified_name: None,
                         deferred_qualified_name: Some(qualified_name),
+                        emit_edge: admission.admits_deferred_receiver(),
                     })
                 }
                 ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved => None,
@@ -236,13 +273,15 @@ impl UniversalResolutionIndex {
                 .as_deref()
                 .and_then(|id| self.facts.declarations.get(id))
                 .map(|declaration| &declaration.range);
-            resolved_targets.push((
-                prepared.candidate_id,
-                prepared.target,
-                prepared.rule,
-                prepared.target_kind,
-                target_site,
-            ));
+            if prepared.emit_edge {
+                resolved_targets.push((
+                    prepared.candidate_id,
+                    prepared.target,
+                    prepared.rule,
+                    prepared.target_kind,
+                    target_site,
+                ));
+            }
         }
         profile_internal("universal target projection", &mut profile_started);
         let materialized = resolved_targets
@@ -423,6 +462,53 @@ impl UniversalResolutionIndex {
             .collect::<Vec<_>>();
         edges.extend(materialized);
         profile_internal("universal edge materialization", &mut profile_started);
+    }
+}
+
+fn mark_test_roles(nodes: &mut [NodeRecord], test_source_ids: &AHashSet<String>) {
+    for node in nodes
+        .iter_mut()
+        .filter(|node| test_source_ids.contains(&node.id))
+    {
+        let roles = node
+            .attributes
+            .entry("roles".to_owned())
+            .or_insert_with(|| Value::Array(Vec::new()));
+        if let Some(roles) = roles.as_array_mut()
+            && !roles.iter().any(|role| role.as_str() == Some("test"))
+        {
+            roles.push(Value::String("test".to_owned()));
+        }
+    }
+}
+
+fn decision_is_needed(
+    candidate: &RelationshipCandidate,
+    decision: &ResolutionDecision,
+    admission: ResolutionAdmission,
+) -> bool {
+    match decision {
+        ResolutionDecision::Resolved { evidence, .. }
+        | ResolutionDecision::ResolvedInventory { evidence, .. } => {
+            resolution_rule_is_admitted(evidence.rule, admission)
+        }
+        ResolutionDecision::QualifiedExternal { .. } => {
+            admission.admits_qualified_external() || candidate.binding_id.is_some()
+        }
+        ResolutionDecision::DeferredReceiver { .. } => admission.admits_deferred_receiver(),
+        ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved => false,
+    }
+}
+
+fn resolution_rule_is_admitted(rule: ResolutionRule, admission: ResolutionAdmission) -> bool {
+    match rule {
+        ResolutionRule::ClosedWorldReceiverDispatch
+        | ResolutionRule::IncompleteHierarchyReceiverDispatch => {
+            admission.admits_source_backed_inference()
+        }
+        ResolutionRule::QualifiedExternal => admission.admits_qualified_external(),
+        ResolutionRule::DeferredReceiver => admission.admits_deferred_receiver(),
+        _ => true,
     }
 }
 

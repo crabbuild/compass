@@ -10,6 +10,45 @@ pub use program::{
     ProgramProjectionSites, apply_program_projection, collect_program_projection_sites,
 };
 
+/// Maximum inference that cross-file resolution may materialize.
+///
+/// This mirrors the graph publication levels at the resolver ownership
+/// boundary so discarded relationships do not first allocate full graph
+/// records. Existing resolver entry points retain their historical `Max`
+/// behavior; build orchestration opts into an explicit level.
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub enum ResolutionAdmission {
+    /// Resolve relationships backed by exact structural evidence only.
+    Low,
+    /// Also admit inferred relationships between source-backed declarations.
+    Medium,
+    /// Also admit explicitly qualified external relationships.
+    High,
+    /// Admit deferred receivers and every other bounded inference.
+    #[default]
+    Max,
+}
+
+impl ResolutionAdmission {
+    const fn admits_source_backed_inference(self) -> bool {
+        self as u8 >= Self::Medium as u8
+    }
+
+    const fn admits_qualified_external(self) -> bool {
+        self as u8 >= Self::High as u8
+    }
+
+    const fn admits_deferred_receiver(self) -> bool {
+        matches!(self, Self::Max)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ResolutionMode {
+    evidence_prevalidated: bool,
+    admission: ResolutionAdmission,
+}
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -306,7 +345,10 @@ pub fn resolve_with_root(
         sources,
         root,
         project_edges,
-        false,
+        ResolutionMode {
+            evidence_prevalidated: false,
+            admission: ResolutionAdmission::Max,
+        },
     )
 }
 
@@ -319,7 +361,13 @@ pub fn resolve_owned_with_root(
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
-    resolve_owned_with_root_impl(&mut extractions, sources, root, false)
+    resolve_owned_with_root_impl(
+        &mut extractions,
+        sources,
+        root,
+        false,
+        ResolutionAdmission::Max,
+    )
 }
 
 /// Resolve owned facts whose universal evidence was validated at its trust boundary.
@@ -334,7 +382,25 @@ pub fn resolve_prevalidated_owned_with_root(
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
-    resolve_owned_with_root_impl(&mut extractions, sources, root, true)
+    resolve_owned_with_root_impl(
+        &mut extractions,
+        sources,
+        root,
+        true,
+        ResolutionAdmission::Max,
+    )
+}
+
+/// Resolve prevalidated owned facts while suppressing relationships that the
+/// selected graph profile cannot publish.
+#[must_use]
+pub fn resolve_prevalidated_owned_with_root_at_inference(
+    mut extractions: Vec<Extraction>,
+    sources: &HashMap<String, String>,
+    root: &Path,
+    admission: ResolutionAdmission,
+) -> Extraction {
+    resolve_owned_with_root_impl(&mut extractions, sources, root, true, admission)
 }
 
 fn resolve_owned_with_root_impl(
@@ -342,6 +408,7 @@ fn resolve_owned_with_root_impl(
     sources: &HashMap<String, String>,
     root: &Path,
     evidence_prevalidated: bool,
+    admission: ResolutionAdmission,
 ) -> Extraction {
     let mut profile_started = Instant::now();
     let language_facts = members::collect_language_call_facts_owned(extractions);
@@ -412,7 +479,10 @@ fn resolve_owned_with_root_impl(
         sources,
         root,
         project_edges,
-        evidence_prevalidated,
+        ResolutionMode {
+            evidence_prevalidated,
+            admission,
+        },
     )
 }
 
@@ -908,8 +978,12 @@ fn finish_resolution(
     sources: &HashMap<String, String>,
     root: &Path,
     project_edges: Vec<EdgeRecord>,
-    evidence_prevalidated: bool,
+    mode: ResolutionMode,
 ) -> Extraction {
+    let ResolutionMode {
+        evidence_prevalidated,
+        admission,
+    } = mode;
     let mut profile_started = Instant::now();
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut project_edges = project_edges;
@@ -1040,7 +1114,9 @@ fn finish_resolution(
             )
         };
         match index {
-            Ok(index) => index.materialize(&mut merged.nodes, &mut merged.edges),
+            Ok(index) => {
+                index.materialize_at_inference(&mut merged.nodes, &mut merged.edges, admission)
+            }
             Err(error) => {
                 if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
                     eprintln!("[compass internal] universal resolution failed: {error}");
@@ -1088,8 +1164,8 @@ fn finish_resolution(
     // candidate selection together, then apply the historical generic-first
     // append order and duplicate suppression at the single mutation point.
     let (mut generic_edges, (language_nodes, mut language_edges)) = rayon::join(
-        || resolve_cross_file_call_additions(&merged, &language_facts.calls),
-        || members::resolve_language_call_facts_additions(&language_facts, &merged),
+        || resolve_cross_file_call_additions(&merged, &language_facts.calls, admission),
+        || members::resolve_language_call_facts_additions(&language_facts, &merged, admission),
     );
     let generic_keys = generic_edges
         .iter()
@@ -4583,13 +4659,15 @@ fn resolve_cross_file_calls_with_root(
 }
 
 fn resolve_cross_file_calls_with_root_calls(extraction: &mut Extraction, raw_calls: &[RawCall]) {
-    let additions = resolve_cross_file_call_additions(extraction, raw_calls);
+    let additions =
+        resolve_cross_file_call_additions(extraction, raw_calls, ResolutionAdmission::Max);
     extraction.edges.extend(additions);
 }
 
 fn resolve_cross_file_call_additions(
     extraction: &Extraction,
     raw_calls: &[RawCall],
+    admission: ResolutionAdmission,
 ) -> Vec<EdgeRecord> {
     let eligible_calls = raw_calls.iter().filter(|raw| {
         !raw.callee.is_empty()
@@ -4763,7 +4841,8 @@ fn resolve_cross_file_call_additions(
         }
         let indirect = raw.extensions.get("indirect").and_then(Value::as_bool) == Some(true);
         if indirect {
-            if target != raw.caller_nid
+            if admission.admits_source_backed_inference()
+                && target != raw.caller_nid
                 && callable.contains(&target)
                 && call_like.insert((
                     raw.caller_nid.clone(),
@@ -4788,6 +4867,9 @@ fn resolve_cross_file_call_additions(
             continue;
         }
         if target == raw.caller_nid || (!import_evidence && is_javascript(&raw.source_file)) {
+            continue;
+        }
+        if !import_evidence && !admission.admits_source_backed_inference() {
             continue;
         }
         if existing.insert((

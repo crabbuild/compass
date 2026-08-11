@@ -51,8 +51,9 @@ use compass_output::{
     graph_view_model_document, render_agent_report_markdown, render_orientation_json, write_html,
 };
 use compass_resolve::{
-    apply_program_projection, collect_program_projection_sites, merge_decl_def_classes_if_needed,
-    merge_decl_def_classes_if_needed_changed, resolve_prevalidated_owned_with_root,
+    ResolutionAdmission, apply_program_projection, collect_program_projection_sites,
+    merge_decl_def_classes_if_needed, merge_decl_def_classes_if_needed_changed,
+    resolve_prevalidated_owned_with_root_at_inference,
 };
 use compass_store::{
     GRAPH_SCHEMA_V1, STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef,
@@ -3232,9 +3233,21 @@ fn build_graph_inner_unscoped(
     drop(ordered_paths);
     drop(ast_id_remap);
     drop(ast_root_marker);
+    profile_extraction_inventory(&ordered);
     let program_projection_sites = collect_program_projection_sites(&ordered);
     profile_internal("Program projection site collection", &mut internal_started);
-    let mut resolved = resolve_prevalidated_owned_with_root(ordered, &source_text, &root);
+    let resolution_admission = match options.inference_level {
+        InferenceLevel::Low => ResolutionAdmission::Low,
+        InferenceLevel::Medium => ResolutionAdmission::Medium,
+        InferenceLevel::High => ResolutionAdmission::High,
+        InferenceLevel::Max => ResolutionAdmission::Max,
+    };
+    let mut resolved = resolve_prevalidated_owned_with_root_at_inference(
+        ordered,
+        &source_text,
+        &root,
+        resolution_admission,
+    );
     profile_internal("cross-file resolution total", &mut internal_started);
     drop(source_text);
     internal_started = Instant::now();
@@ -7043,6 +7056,59 @@ fn profile_internal_duration(label: &str, elapsed: Duration) {
     }
 }
 
+fn profile_extraction_inventory(extractions: &[Extraction]) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_none() {
+        return;
+    }
+    let mut declarations = 0_usize;
+    let mut scopes = 0_usize;
+    let mut bindings = 0_usize;
+    let mut occurrences = 0_usize;
+    let mut candidates = 0_usize;
+    let mut external_candidates = 0_usize;
+    let mut hierarchy_candidates = 0_usize;
+    let mut relations = BTreeMap::<&'static str, usize>::new();
+    for batch in extractions
+        .iter()
+        .filter_map(|extraction| extraction.semantic_evidence.as_ref())
+    {
+        declarations = declarations.saturating_add(batch.declarations.len());
+        scopes = scopes.saturating_add(batch.scopes.len());
+        bindings = bindings.saturating_add(batch.bindings.len());
+        occurrences = occurrences.saturating_add(batch.occurrences.len());
+        candidates = candidates.saturating_add(batch.candidates.len());
+        for candidate in &batch.candidates {
+            if candidate.constraints.allow_external {
+                external_candidates = external_candidates.saturating_add(1);
+            }
+            if candidate.constraints.hierarchy.is_some() {
+                hierarchy_candidates = hierarchy_candidates.saturating_add(1);
+            }
+            let relation = match candidate.relation {
+                compass_languages::CandidateRelation::Calls => "calls",
+                compass_languages::CandidateRelation::IndirectCalls => "indirect_calls",
+                compass_languages::CandidateRelation::Tests => "tests",
+                compass_languages::CandidateRelation::References => "references",
+                compass_languages::CandidateRelation::Contains => "contains",
+                compass_languages::CandidateRelation::Owns => "owns",
+                _ => "other",
+            };
+            *relations.entry(relation).or_default() += 1;
+        }
+    }
+    eprintln!(
+        "[compass internal] extraction inventory: raw_nodes={} raw_edges={} declarations={declarations} scopes={scopes} bindings={bindings} occurrences={occurrences} candidates={candidates} external_candidates={external_candidates} hierarchy_candidates={hierarchy_candidates} relations={relations:?}",
+        extractions
+            .iter()
+            .map(|extraction| extraction.nodes.len())
+            .sum::<usize>(),
+        extractions
+            .iter()
+            .map(|extraction| extraction.edges.len())
+            .sum::<usize>(),
+    );
+}
+
 fn join_program_worker(
     handle: Option<std::thread::JoinHandle<Result<(ProgramBuildSummary, Duration), CoreError>>>,
     timings: &mut BuildTimings,
@@ -7241,10 +7307,17 @@ mod tests {
                     value.execute();
                     external_crate::Service::call();
                 }
+
+                #[test]
+                fn test_run() {
+                    external_crate::Service::call();
+                }
             "#,
         )?;
 
         let mut previous = None;
+        let mut low_graph = None;
+        let mut max_graph = None;
         for level in [
             InferenceLevel::Low,
             InferenceLevel::Medium,
@@ -7268,6 +7341,9 @@ mod tests {
                 .count();
             if level == InferenceLevel::Low {
                 assert_eq!(inferred, 0);
+                low_graph = Some((document.nodes.clone(), document.links.clone()));
+            } else if level == InferenceLevel::Max {
+                max_graph = Some(document.clone());
             }
             if let Some((nodes, edges, inferred_before)) = previous {
                 assert!(document.nodes.len() >= nodes);
@@ -7278,6 +7354,11 @@ mod tests {
         }
         let (_, _, max_inferred) = previous.ok_or("inference levels were not built")?;
         assert!(max_inferred > 0);
+        let (low_nodes, low_edges) = low_graph.ok_or("low inference graph was not built")?;
+        let mut filtered_max = max_graph.ok_or("max inference graph was not built")?;
+        apply_inference_level(&mut filtered_max, InferenceLevel::Low);
+        assert_eq!(low_nodes, filtered_max.nodes);
+        assert_eq!(low_edges, filtered_max.links);
         Ok(())
     }
 
