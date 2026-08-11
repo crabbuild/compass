@@ -2379,14 +2379,15 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         ))
     }
 
-    /// Return candidates for one exact normalized term posting. Discovery uses
-    /// exact token matches before the broader bounded prefix channel so dense
-    /// shared prefixes cannot hide a present identifier token.
-    pub fn nodes_for_exact_term_bounded_work(
+    /// Return node IDs for one exact normalized term posting without hydrating
+    /// node records. Multi-term discovery intersects these compact IDs first
+    /// so common postings do not force full-record reads for candidates that a
+    /// later term will reject.
+    pub fn node_ids_for_exact_term_bounded_work(
         &self,
         term: &str,
         limits: SnapshotReadLimits,
-    ) -> Result<(Vec<NodeRecord>, bool, TermPostingWork), SnapshotError> {
+    ) -> Result<(Vec<String>, bool, TermPostingWork), SnapshotError> {
         let normalized = normalize_search_term(term);
         if normalized.is_empty() {
             return Ok((Vec::new(), false, TermPostingWork::default()));
@@ -2434,6 +2435,19 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 }
             }
         }
+        Ok((ids.into_iter().collect(), truncated, work))
+    }
+
+    /// Return candidates for one exact normalized term posting. Discovery uses
+    /// exact token matches before the broader bounded prefix channel so dense
+    /// shared prefixes cannot hide a present identifier token.
+    pub fn nodes_for_exact_term_bounded_work(
+        &self,
+        term: &str,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<NodeRecord>, bool, TermPostingWork), SnapshotError> {
+        let (ids, truncated, work) = self.node_ids_for_exact_term_bounded_work(term, limits)?;
+        let ids = ids.into_iter().collect::<BTreeSet<_>>();
         let nodes =
             self.get_nodes_by_ids_bounded_work(&ids, point_lookup_batch_limits(ids.len()))?;
         Ok((nodes, truncated, work))

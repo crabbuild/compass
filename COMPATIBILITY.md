@@ -108,6 +108,12 @@ pagination uses the versioned `compass.query.discovery-text-page/1` cursor;
 JSON rejects those presentation-only controls.
 
 Default discovery JSON remains the strict `compass.query.discovery/1` shape.
+The focused default neighborhood is 64 nodes and 128 edges. The existing hard
+ceilings remain 500 nodes and 1,000 edges, and callers that require the wider
+neighborhood can continue to request it explicitly with `--max-nodes 500
+--max-edges 1000` or the equivalent typed request fields. This changes only
+default breadth; the v1 request and response schemas, ordering, truncation,
+and omission contracts are unchanged.
 The additive `--result-envelope` option requires `--format json` and returns a
 typed `compass.query.discovery-result/1` envelope containing the unchanged v1
 result plus its query-owned `semanticResultDigest`. The digest is computed from
@@ -203,8 +209,10 @@ scans unit-valued outgoing references, rejects targets outside the selected
 subgraph before record hydration, and resolves the remaining edge IDs through
 a bounded shared tree traversal. This preserves canonical parallel-edge order
 and exact edge omissions when the reference scan completes; a shared expansion
-limit still produces explicit incomplete counts. Exact term candidates and
-adjacency records use bounded multi-key tree walks so immutable branch and leaf
+limit still produces explicit incomplete counts. Multi-concept exact-term
+recall intersects compact node IDs before hydrating the surviving node records.
+Exact term candidates and adjacency records use bounded multi-key tree walks so
+immutable branch and leaf
 objects are decoded once per batch. A pinned request reader retains only
 digest-verified, decoded, schema-validated tree objects in an 8 MiB envelope
 with a 7 MiB decoded-object budget and a 1,024-object ceiling. Branches are

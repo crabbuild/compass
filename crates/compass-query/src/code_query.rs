@@ -1213,12 +1213,12 @@ impl PinnedDiscoveryBackend<'_> {
                 .nodes_for_exact_term_bounded_work(concept, exact_read_limits)
                 .map_err(snapshot_error)?
         } else {
-            let mut intersection = None::<BTreeMap<String, NodeRecord>>;
+            let mut intersection = None::<BTreeSet<String>>;
             let mut exact_truncated = false;
             let mut exact_work = TermPostingWork::default();
             for concept in concepts {
-                let (term_nodes, term_truncated, term_work) = reader
-                    .nodes_for_exact_term_bounded_work(concept, exact_read_limits)
+                let (term_ids, term_truncated, term_work) = reader
+                    .node_ids_for_exact_term_bounded_work(concept, exact_read_limits)
                     .map_err(snapshot_error)?;
                 exact_truncated |= term_truncated;
                 exact_work.chunks_decoded = exact_work
@@ -1227,30 +1227,24 @@ impl PinnedDiscoveryBackend<'_> {
                 exact_work.node_ids_decoded = exact_work
                     .node_ids_decoded
                     .saturating_add(term_work.node_ids_decoded);
-                let term_ids = term_nodes
-                    .iter()
-                    .map(|node| node.id.clone())
-                    .collect::<BTreeSet<_>>();
+                let term_ids = term_ids.into_iter().collect::<BTreeSet<_>>();
                 match &mut intersection {
-                    Some(previous) => previous.retain(|id, _| term_ids.contains(id)),
-                    None => {
-                        intersection = Some(
-                            term_nodes
-                                .into_iter()
-                                .map(|node| (node.id.clone(), node))
-                                .collect(),
-                        );
-                    }
+                    Some(previous) => previous.retain(|id| term_ids.contains(id)),
+                    None => intersection = Some(term_ids),
                 }
-                if intersection.as_ref().is_some_and(BTreeMap::is_empty) {
+                if intersection.as_ref().is_some_and(BTreeSet::is_empty) {
                     break;
                 }
             }
-            (
-                intersection.unwrap_or_default().into_values().collect(),
-                exact_truncated,
-                exact_work,
-            )
+            let ids = intersection.unwrap_or_default();
+            let nodes = if ids.is_empty() {
+                Vec::new()
+            } else {
+                reader
+                    .get_nodes_by_ids_bounded_work(&ids, snapshot_limits(ids.len())?)
+                    .map_err(snapshot_error)?
+            };
+            (nodes, exact_truncated, exact_work)
         };
         if nodes.is_empty() && !truncated {
             (nodes, truncated, work) = reader

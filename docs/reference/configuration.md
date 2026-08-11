@@ -288,6 +288,8 @@ Natural-language discovery:
 --text-budget N
 --cursor TOKEN
 --graph PATH | --at REV
+--max-nodes N
+--max-edges N
 ```
 
 `--context VALUE` filters stored relationship evidence contexts such as `call`,
@@ -299,6 +301,9 @@ scope over `community`, `source`, `package`, or `node`.
 (default 2,000). Follow the opaque `next` cursor with the same semantic query;
 the presentation-only text budget may change. `--traverse`, `--budget`, and
 `--page` explicitly select the bounded legacy compatibility renderer.
+The default semantic neighborhood contains at most 64 nodes and 128 edges.
+`--max-nodes` and `--max-edges` may raise those bounds to the hard ceilings of
+500 nodes and 1,000 edges when a wider response is intentional.
 
 CompassQL:
 

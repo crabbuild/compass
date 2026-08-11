@@ -899,10 +899,19 @@ fn render_page(page: &Page, style: HelpStyle) -> String {
     }
     let details = add_help_option(page.details);
     let details = if page.path == "query" {
-        details.replace(
-            "Query an exact immutable realization; conflicts with --graph",
-            "Resolve REV once to an immutable typed realization; conflicts with --graph",
-        )
+        details
+            .replace(
+                "Query an exact immutable realization; conflicts with --graph",
+                "Resolve REV once to an immutable typed realization; conflicts with --graph",
+            )
+            .replace(
+                "default/hard maximum: 500",
+                "default: 64; hard maximum: 500",
+            )
+            .replace(
+                "default/hard maximum: 1000",
+                "default: 128; hard maximum: 1000",
+            )
     } else if matches!(page.path, "init" | "update" | "extract" | "watch") {
         details
             .replace("Graph storage [default: json]", "Graph storage [default: sqlite]")

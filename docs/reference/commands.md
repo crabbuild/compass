@@ -212,6 +212,8 @@ compass query "<question>"
   [--cursor TOKEN]
   [--budget N]
   [--page N]
+  [--max-nodes N]
+  [--max-edges N]
   [--graph PATH | --at REV]
 ```
 
@@ -223,6 +225,9 @@ requires `--format json` and opt-in wraps the unchanged discovery result in
 Without this flag, the existing JSON shape remains unchanged. `--traverse`,
 `--budget`, or `--page` explicitly select legacy relevance traversal and cannot
 be mixed with discovery controls. CompassQL routing is unchanged.
+The default focused neighborhood is 64 nodes and 128 edges. Use
+`--max-nodes 500 --max-edges 1000` when a query intentionally needs the full
+supported breadth; these remain hard ceilings rather than new defaults.
 
 `--context VALUE` is a relationship filter for traversal evidence contexts such
 as `call`, `import`, or `route`. It is not a node, file, package, community, or

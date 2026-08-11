@@ -4511,6 +4511,15 @@ fn query_help(frontend: Frontend) -> String {
     let help = format!(
         "Usage: {prefix} query \"<question>\" [--direction auto|incoming|outgoing|both] [--scope KIND:VALUE] [--context VALUE] [--dfs] [--format text|json] [--graph PATH|--at REV]\n\nNatural discovery options (default for a typed graph):\n  --direction <VALUE>               Direction: auto, incoming, outgoing, or both [default: auto]\n  --scope <KIND:VALUE>              Repeatable OR scope; KIND is community, source, package, or node\n  --context <VALUE>                 Repeatable strict relationship-context filter\n  --dfs                             Use depth-first expansion [default: breadth-first]\n  --include-heuristic               Include heuristic evidence [default: excluded]\n  --format <text|json>              Discovery output [default: text]\n  --text-budget <N>                 Approximate tokens in one text page [default: 2000]\n  --cursor <TOKEN>                  Continue the same immutable semantic result (text only)\n  --max-depth <N>                   Traversal depth [default: 2; hard maximum: 8]\n  --max-seeds <N>                   Ranked seed count [default: 3; hard maximum: 3]\n  --max-candidates <N>              Ranked candidate count [default/hard maximum: 256]\n  --max-nodes <N>                   Returned node count [default/hard maximum: 500]\n  --max-edges <N>                   Returned edge count [default/hard maximum: 1000]\n  --max-expanded-relationships <N>  Examined relationships [default/hard maximum: 10000]\n  --max-response-bytes <N>          Serialized response bytes [default/hard maximum: 8388608]\n  --timeout-ms <N>                  Discovery deadline in milliseconds [default/hard maximum: 30000]\n\nLegacy traversal options:\n  --traverse                        Force legacy relevance traversal\n  --budget <N>                      Approximate tokens per page [default: 2000]\n  --page <N>                        Result page, starting at 1 [default: 1]\n\nGraph selection:\n  --graph <PATH>                    Read a graph JSON file\n  --at <REV>                        Resolve REV once to an immutable typed realization; conflicts with --graph\n\nCompassQL options:\n  --cql                             Use CompassQL mode\n  --timeout-ms <N>                  CompassQL execution timeout\n  --max-expanded-relationships <N>  CompassQL relationship expansion limit\n  Run `{prefix} help query` for all CompassQL controls and examples.\n\nDiscovery limits must be positive; values above a hard maximum are rejected rather than clamped. JSON rejects text pagination controls. Legacy --traverse, --budget, and --page cannot be mixed with discovery controls."
     );
+    let help = help
+        .replace(
+            "default/hard maximum: 500",
+            "default: 64; hard maximum: 500",
+        )
+        .replace(
+            "default/hard maximum: 1000",
+            "default: 128; hard maximum: 1000",
+        );
     format!(
         "{help}\n  --result-envelope                 Wrap JSON with a query-owned semantic digest"
     )

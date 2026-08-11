@@ -432,9 +432,20 @@ fn multi_term_prefix_lookup_includes_longer_symbol_terms() -> Result<(), Box<dyn
         ["n:list", "n:listing"]
     );
     for term in ["user", "service"] {
+        let (exact_ids, id_truncated, id_work) =
+            reader.node_ids_for_exact_term_bounded_work(term, SnapshotReadLimits::default())?;
         let (exact_nodes, exact_truncated, _) =
             reader.nodes_for_exact_term_bounded_work(term, SnapshotReadLimits::default())?;
+        assert!(!id_truncated);
         assert!(!exact_truncated);
+        assert_eq!(
+            exact_ids
+                .iter()
+                .filter(|id| id.starts_with("n:list"))
+                .collect::<Vec<_>>(),
+            ["n:list", "n:listing"]
+        );
+        assert!(id_work.node_ids_decoded >= u64::try_from(exact_ids.len()).unwrap_or(u64::MAX));
         assert_eq!(
             exact_nodes
                 .into_iter()
