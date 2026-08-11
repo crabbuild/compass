@@ -17,6 +17,10 @@ from benchmarks.performance.compass.audit import (
     wilson_interval,
 )
 from benchmarks.performance.compass.correctness import index_graph
+from benchmarks.performance.compass.occurrences import (
+    independent_source_inventory,
+    source_construct_inventory_sha256,
+)
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -56,6 +60,25 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(6, payload["auditedAcceptedEdges"])
         self.assertEqual(2, payload["precision"]["numerator"])
         self.assertEqual(6, payload["precision"]["denominator"])
+        self.assertEqual(0.4, payload["f1"])
+        self.assertEqual(1, payload["ambiguity"]["numerator"])
+        self.assertEqual(3, payload["ambiguity"]["denominator"])
+        self.assertEqual(
+            {
+                "python": {
+                    "scannedFiles": 1,
+                    "parsedFiles": 1,
+                    "unsupportedFiles": 0,
+                    "coverage": 1.0,
+                }
+            },
+            payload["sourceCoverage"],
+        )
+        self.assertEqual(0.4, payload["strata"]["language"]["python"]["f1"])
+        self.assertEqual(
+            1 / 3,
+            payload["strata"]["language"]["python"]["ambiguityRate"],
+        )
         self.assertEqual(
             {
                 "cross_language_match": 1,
@@ -79,6 +102,46 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(6, result.precision.denominator)
         self.assertEqual(2, result.precision.numerator)
         self.assertEqual(1, result.judgments["invalid"])
+
+    def test_partial_source_population_is_reportable_but_not_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            partial = copy.deepcopy(self.base)
+            partial["sourceOracles"][0]["scannedFiles"] = 2
+            partial["sourceOracles"][0]["parsedFiles"] = 1
+            manifest = load_manifest(self.write_manifest(partial, Path(temporary)))
+
+        self.assertEqual(2, manifest.source_oracles[0].scanned_files)
+        self.assertEqual(1, manifest.source_oracles[0].parsed_files)
+
+    def test_partial_source_population_fails_qualification_with_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".compass-audit-commit").write_text("0" * 40, encoding="utf-8")
+            (root / "main.py").write_bytes((BASE_CORPUS / "main.py").read_bytes())
+            (root / "broken.py").write_text("def broken(:\n", encoding="utf-8")
+            inventory = independent_source_inventory(root, "python")
+            partial = copy.deepcopy(self.base)
+            partial["mode"] = "qualification"
+            partial["sourceOracles"][0].update(
+                {
+                    "scannedFiles": inventory.scanned_files,
+                    "parsedFiles": inventory.parsed_files,
+                    "inventorySha256": source_construct_inventory_sha256(
+                        "python", inventory
+                    ),
+                }
+            )
+            result = run_audit(
+                self.write_manifest(partial, root),
+                BASE_GRAPH,
+                root,
+            )
+
+        self.assertEqual(1, result.source_coverage["python"]["unsupportedFiles"])
+        self.assertTrue(
+            any("complete source coverage is required" in failure for failure in result.failures),
+            result.failures,
+        )
 
     def test_stale_snippet_and_graph_hashes_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -184,8 +247,11 @@ class AuditTests(unittest.TestCase):
             root = Path(temporary)
             incomplete = copy.deepcopy(self.base)
             incomplete["sourceOracles"][0]["parsedFiles"] = 0
-            with self.assertRaisesRegex(AuditError, "completely parsed"):
-                load_manifest(self.write_manifest(incomplete, root))
+            incomplete_manifest = self.write_manifest(incomplete, root)
+            loaded = load_manifest(incomplete_manifest)
+            self.assertEqual(0, loaded.source_oracles[0].parsed_files)
+            with self.assertRaisesRegex(AuditError, "coverage mismatch"):
+                run_audit(incomplete_manifest, BASE_GRAPH, BASE_CORPUS)
 
             unpinned = copy.deepcopy(self.base)
             unpinned["sourceOracles"] = []

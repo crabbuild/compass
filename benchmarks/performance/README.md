@@ -296,6 +296,13 @@ provider, scanned/parsed counts, and inventory SHA-256 into its
 inventory from the pinned corpus; copying only selected records cannot conceal
 an unsupported, skipped, or stale source population.
 
+Audit results report precision, recall, F1, source-oracle ambiguity, and
+scanned/parsed/unsupported file coverage. Language and relation strata carry
+their own precision, recall, F1, and ambiguity measures. Incomplete source
+coverage remains visible in conformance output but fails the production
+qualification gate; unsupported files cannot disappear behind a smaller
+denominator.
+
 The checked-in `audits/universal-core.json` is only a small conformance fixture.
 Production qualification still requires the fixed sample, precision, Wilson
 lower-bound, capability, corpus, relation, diversity, and recall thresholds
