@@ -188,6 +188,8 @@ fn raw_edge_collision_keys(edges: &[RawEdgeRecord]) -> HashSet<String> {
 fn raw_edge_collision_key(edge: &RawEdgeRecord) -> String {
     let attributes = &edge.attributes;
     let values = [
+        Value::String(edge.source.clone()),
+        Value::String(edge.target.clone()),
         attributes.get("relation").cloned().unwrap_or(Value::Null),
         attributes
             .get("source_anchor")
