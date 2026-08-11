@@ -48,7 +48,7 @@ impl ResolutionDb<'_> {
         let Some(candidate) = self.facts.candidates.get(candidate_id) else {
             return ResolutionDecision::Unresolved;
         };
-        self.resolve_candidate(candidate)
+        self.resolve_candidate(&candidate)
     }
 
     pub(in crate::evidence) fn resolve_candidate(

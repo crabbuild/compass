@@ -322,6 +322,24 @@ memory gate still fails at about 4.08x Graphify's documented RSS. Closing it
 requires eliminating additional simultaneous index/projection and graph/
 publication working sets, not relabeling this reduction as success.
 
+The next revision stopped carrying full `RelationshipCandidate` objects
+through secondary-index construction. After the original batch and aggregate
+limits and low test-alias checks succeed, candidate fields are moved into a
+resolver-private interned table while the per-file batches are drained. The
+public evidence/cache schema is unchanged, duplicate IDs still fail
+explicitly, and resolution inflates only the bounded candidate currently being
+examined.
+
+Three fresh clustered delta-rs samples completed with a 2.63 s wall-time
+median and 598.9 MiB median peak RSS. All three retained byte-equivalent
+ordered 9,982-node and 25,206-relationship arrays. Relative to the preceding
+610.7 MiB median, RSS decreased 1.9% while wall time increased 7.8%. Compass
+still used about 4.00x Graphify's documented cold RSS. This is a measured
+representation improvement, but it also proves that compacting only as
+already-materialized batches enter the resolver cannot remove the extraction
+allocator high-water mark. The remaining work must avoid corpus-wide full
+candidate and occurrence materialization at the producer/cache handoff.
+
 ## Work required to surpass Graphify
 
 1. **Move inference admission before materialization.** Thread the selected

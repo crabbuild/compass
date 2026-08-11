@@ -29,7 +29,7 @@ pub(crate) use projection::is_replaced_relation;
 
 pub use api::{ResolutionDecision, ResolutionEvidence, ResolutionRule, UniversalResolutionLimits};
 use budget::LookupBudget;
-use facts::{FactStore, FactTable};
+use facts::{CandidateSlot, CandidateTable, CandidateTableBuilder, FactStore, FactTable};
 use index::ResolutionIndexes;
 use languages::policy::LanguagePolicyKind;
 use languages::rust::{
@@ -145,23 +145,25 @@ pub struct UniversalResolutionIndex {
 }
 
 impl UniversalResolutionIndex {
-    fn ordered_candidates(&self) -> Vec<&RelationshipCandidate> {
-        let db = ResolutionDb::new(self);
+    fn ordered_candidates(&self) -> Vec<CandidateSlot> {
         let mut ordered = self
             .facts
             .candidates
-            .values()
-            .map(|candidate| {
-                let range = db
-                    .occurrence(candidate)
+            .slots()
+            .map(|slot| {
+                let range = self
+                    .facts
+                    .candidates
+                    .occurrence_id(slot)
+                    .and_then(|id| self.facts.occurrences.get(id))
                     .map(|occurrence| &occurrence.range)
                     .or_else(|| {
                         self.facts
                             .declarations
-                            .get(&candidate.source_declaration_id)
+                            .get(self.facts.candidates.source_declaration_id(slot)?)
                             .map(|declaration| &declaration.range)
                     });
-                (candidate, range)
+                (slot, range)
             })
             .collect::<Vec<_>>();
         ordered.par_sort_unstable_by(|(left, left_range), (right, right_range)| {
@@ -183,7 +185,12 @@ impl UniversalResolutionIndex {
                         .map_or(u64::MAX, |range| range.end_byte)
                         .cmp(&right_range.map_or(u64::MAX, |range| range.end_byte))
                 })
-                .then_with(|| left.id.cmp(&right.id))
+                .then_with(|| {
+                    self.facts
+                        .candidates
+                        .id(*left)
+                        .cmp(&self.facts.candidates.id(*right))
+                })
         });
         ordered
             .into_iter()
@@ -195,7 +202,7 @@ impl UniversalResolutionIndex {
     pub fn candidate_ids(&self) -> Vec<&str> {
         self.ordered_candidates()
             .into_iter()
-            .map(|candidate| candidate.id.as_str())
+            .filter_map(|slot| self.facts.candidates.id(slot))
             .collect()
     }
 }

@@ -132,7 +132,7 @@ impl ResolutionDb<'_> {
         };
         let mut possible = BTreeMap::<String, ResolutionRule>::new();
         if let Some(declaration_id) =
-            self.possible_incomplete_hierarchy_member(language, &receiver, candidate)
+            self.possible_incomplete_hierarchy_member(language, &receiver, &candidate)
             && exact_declaration_id != Some(declaration_id.as_str())
         {
             possible.insert(
@@ -154,12 +154,12 @@ impl ResolutionDb<'_> {
                             && self.hierarchy_has_unresolved_base(language, &descendant)
                         {
                             let decision = self
-                                .resolve_exact_receiver_member(language, &descendant, candidate)
+                                .resolve_exact_receiver_member(language, &descendant, &candidate)
                                 .or_else(|| {
                                     self.resolve_source_proven_receiver_prefix(
                                         language,
                                         &descendant,
-                                        candidate,
+                                        &candidate,
                                     )
                                 });
                             match decision {
@@ -191,7 +191,7 @@ impl ResolutionDb<'_> {
                 continue;
             }
             for owner in linearization.iter().skip(start) {
-                match self.unique_receiver_member_id(language, owner, candidate) {
+                match self.unique_receiver_member_id(language, owner, &candidate) {
                     Ok(Some(declaration_id)) => {
                         if exact_declaration_id != Some(declaration_id.as_str()) {
                             possible

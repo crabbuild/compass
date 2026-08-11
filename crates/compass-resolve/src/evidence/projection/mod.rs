@@ -11,8 +11,8 @@ use edges::*;
 pub(in crate::evidence) use nodes::is_deferred_receiver;
 use nodes::*;
 
-struct PreparedTarget<'a> {
-    candidate_id: &'a str,
+struct PreparedTarget {
+    candidate_slot: CandidateSlot,
     candidate_id_override: Option<String>,
     relation_override: Option<CandidateRelation>,
     target: String,
@@ -24,8 +24,8 @@ struct PreparedTarget<'a> {
     emit_edge: bool,
 }
 
-struct PendingDecision<'a> {
-    candidate_id: &'a str,
+struct PendingDecision {
+    candidate_slot: CandidateSlot,
     candidate_id_override: Option<String>,
     relation_override: Option<CandidateRelation>,
     decision: ResolutionDecision,
@@ -106,9 +106,10 @@ impl UniversalResolutionIndex {
         profile_internal("universal candidate ordering", &mut profile_started);
         let decision_batches = candidates
             .into_par_iter()
-            .map(|candidate| {
+            .filter_map(|candidate_slot| {
+                let candidate = self.facts.candidates.at(candidate_slot)?;
                 let candidate_id = candidate.id.as_str();
-                let decision = db.resolve_candidate(candidate);
+                let decision = db.resolve_candidate(&candidate);
                 let exact_declaration_id = match &decision {
                     ResolutionDecision::Resolved { declaration_id, .. } => {
                         Some(declaration_id.clone())
@@ -123,7 +124,7 @@ impl UniversalResolutionIndex {
                     ))
                 .then(|| graph_ids.get(&candidate.source_declaration_id).cloned())
                 .flatten();
-                let allow_primary = decision_is_needed(candidate, &decision, admission);
+                let allow_primary = decision_is_needed(&candidate, &decision, admission);
                 let allow_possible = admission.admits_source_backed_inference()
                     && !matches!(decision, ResolutionDecision::Ambiguous { .. });
                 let aliased_tests = self.low_test_aliases.get(candidate_id);
@@ -145,7 +146,7 @@ impl UniversalResolutionIndex {
                     }
                     if decision_is_needed(&test_candidate, &test_decision, admission) {
                         decisions.push(PendingDecision {
-                            candidate_id,
+                            candidate_slot,
                             candidate_id_override: Some(test_id.clone()),
                             relation_override: Some(CandidateRelation::Tests),
                             decision: test_decision,
@@ -154,7 +155,7 @@ impl UniversalResolutionIndex {
                 }
                 if allow_primary {
                     decisions.push(PendingDecision {
-                        candidate_id,
+                        candidate_slot,
                         candidate_id_override: None,
                         relation_override: None,
                         decision,
@@ -168,7 +169,7 @@ impl UniversalResolutionIndex {
                         )
                         .into_iter()
                         .map(|(declaration_id, rule)| PendingDecision {
-                            candidate_id,
+                            candidate_slot,
                             candidate_id_override: None,
                             relation_override: None,
                             decision: ResolutionDecision::Resolved {
@@ -181,7 +182,7 @@ impl UniversalResolutionIndex {
                         }),
                     );
                 }
-                (test_source_id, decisions)
+                Some((test_source_id, decisions))
             })
             .collect::<Vec<_>>();
         let mut test_source_ids = AHashSet::new();
@@ -205,7 +206,7 @@ impl UniversalResolutionIndex {
                 } => {
                     let target = self.facts.declarations.get(&declaration_id)?;
                     Some(PreparedTarget {
-                        candidate_id: pending.candidate_id,
+                        candidate_slot: pending.candidate_slot,
                         candidate_id_override: pending.candidate_id_override,
                         relation_override: pending.relation_override,
                         target: graph_ids[&target.id].clone(),
@@ -223,7 +224,7 @@ impl UniversalResolutionIndex {
                 } => {
                     let kind = inventory_kinds.get(&graph_node_id).cloned();
                     Some(PreparedTarget {
-                        candidate_id: pending.candidate_id,
+                        candidate_slot: pending.candidate_slot,
                         candidate_id_override: pending.candidate_id_override,
                         relation_override: pending.relation_override,
                         target: graph_node_id,
@@ -239,10 +240,10 @@ impl UniversalResolutionIndex {
                     qualified_name,
                     evidence,
                 } => {
-                    let candidate = self.facts.candidates.get(pending.candidate_id)?;
+                    let candidate = self.facts.candidates.at(pending.candidate_slot)?;
                     let id = make_id(&["external", &candidate.language, &qualified_name]);
                     Some(PreparedTarget {
-                        candidate_id: pending.candidate_id,
+                        candidate_slot: pending.candidate_slot,
                         candidate_id_override: pending.candidate_id_override,
                         relation_override: pending.relation_override,
                         target: id,
@@ -258,10 +259,10 @@ impl UniversalResolutionIndex {
                     qualified_name,
                     evidence,
                 } => {
-                    let candidate = self.facts.candidates.get(pending.candidate_id)?;
+                    let candidate = self.facts.candidates.at(pending.candidate_slot)?;
                     let id = make_id(&["deferred", &candidate.language, &qualified_name]);
                     Some(PreparedTarget {
-                        candidate_id: pending.candidate_id,
+                        candidate_slot: pending.candidate_slot,
                         candidate_id_override: pending.candidate_id_override,
                         relation_override: pending.relation_override,
                         target: id,
@@ -281,7 +282,7 @@ impl UniversalResolutionIndex {
             .collect::<Vec<_>>();
         let mut resolved_targets = Vec::with_capacity(prepared_targets.len());
         for mut prepared in prepared_targets {
-            let Some(original_candidate) = self.facts.candidates.get(prepared.candidate_id) else {
+            let Some(original_candidate) = self.facts.candidates.at(prepared.candidate_slot) else {
                 continue;
             };
             let overridden_candidate = prepared.candidate_id_override.as_ref().map(|id| {
@@ -292,7 +293,7 @@ impl UniversalResolutionIndex {
                 }
                 candidate
             });
-            let candidate = overridden_candidate.as_ref().unwrap_or(original_candidate);
+            let candidate = overridden_candidate.as_ref().unwrap_or(&original_candidate);
             if let Some(qualified_name) = prepared.external_qualified_name.take() {
                 if let Some(position) = external_positions.get(&prepared.target).copied() {
                     merge_external_node(&mut nodes[position], candidate);
@@ -333,7 +334,7 @@ impl UniversalResolutionIndex {
                 .map(|declaration| &declaration.range);
             if prepared.emit_edge {
                 resolved_targets.push((
-                    prepared.candidate_id,
+                    prepared.candidate_slot,
                     prepared.candidate_id_override,
                     prepared.relation_override,
                     prepared.target,
@@ -348,7 +349,7 @@ impl UniversalResolutionIndex {
             .into_par_iter()
             .filter_map(
                 |(
-                    candidate_id,
+                    candidate_slot,
                     candidate_id_override,
                     relation_override,
                     target,
@@ -356,7 +357,7 @@ impl UniversalResolutionIndex {
                     target_kind,
                     target_site,
                 )| {
-                    let original_candidate = self.facts.candidates.get(candidate_id)?;
+                    let original_candidate = self.facts.candidates.at(candidate_slot)?;
                     let overridden_candidate = candidate_id_override.map(|id| {
                         let mut candidate = original_candidate.clone();
                         candidate.id = id;
@@ -365,7 +366,7 @@ impl UniversalResolutionIndex {
                         }
                         candidate
                     });
-                    let candidate = overridden_candidate.as_ref().unwrap_or(original_candidate);
+                    let candidate = overridden_candidate.as_ref().unwrap_or(&original_candidate);
                     let owner_source = self
                         .facts
                         .declarations

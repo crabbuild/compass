@@ -228,20 +228,20 @@ impl IndexBuilder<'_> {
         let mut declarations = Vec::with_capacity(capacities[0]);
         let mut occurrences = Vec::with_capacity(capacities[1]);
         let mut bindings = Vec::with_capacity(capacities[2]);
-        let mut candidates = Vec::with_capacity(capacities[3]);
+        let mut candidates = CandidateTableBuilder::with_capacity(capacities[3]);
         let mut scopes = Vec::with_capacity(capacities[4]);
         profile_internal("universal evidence validation", &mut profile_started);
         for batch in batches {
             declarations.extend(batch.declarations);
             occurrences.extend(batch.occurrences);
             bindings.extend(batch.bindings);
-            candidates.extend(batch.candidates);
+            candidates.extend(batch.candidates)?;
             scopes.extend(batch.scopes);
         }
         let declarations = FactTable::from_values(declarations)?;
         let occurrences = FactTable::from_values(occurrences)?;
         let bindings = FactTable::from_values(bindings)?;
-        let candidates = FactTable::from_values(candidates)?;
+        let candidates = candidates.finish()?;
         let scopes = FactTable::from_values(scopes)?;
         profile_internal("universal fact collection", &mut profile_started);
         let rust_source_wildcard_targets = if languages.rust {

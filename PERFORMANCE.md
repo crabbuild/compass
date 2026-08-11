@@ -348,8 +348,16 @@ again with exact ordered graph equivalence. Relative to the preceding cache-
 only median, RSS decreased 9.4% while total time increased about 3.0%; the
 universal-resolution stage itself rose from roughly 0.29 s to 0.40 s because
 borrowed ID lookup is now binary search. Compass still used about 4.08x the
-documented Graphify cold RSS. These remain diagnostic development samples and
-do not promote a passing memory baseline.
+documented Graphify cold RSS.
+
+Compacting relationship candidates into a resolver-private interned table as
+the validated per-file batches are drained produced a subsequent three-sample
+median of 2.63 s and 598.9 MiB. Ordered nodes and relationships remained byte-
+equivalent in every sample. The 1.9% RSS reduction came with a 7.8% wall-time
+increase and still used about 4.00x Graphify's documented cold RSS. This result
+is retained as an honest intermediate bound: eliminating the remaining gap
+requires compact or streamed evidence before corpus-wide per-file candidate
+and occurrence objects coexist, not additional late filtering.
 
 ## Incremental and language-hardening observations
 
