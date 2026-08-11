@@ -8,6 +8,7 @@ mod merge;
 mod pipeline;
 mod program;
 mod raw_guard;
+mod review;
 mod watch;
 mod watch_scheduler;
 
@@ -33,6 +34,7 @@ pub use pipeline::{
     build_graph_with_layers_and_tiebreaker, build_graph_with_layers_retained,
     build_graph_with_semantic, build_local_graph,
 };
+pub use review::{ReviewError, review_change_request, review_change_request_exact};
 pub use watch::{
     WatchBackend, WatchBuildReason, WatchError, WatchOptions, WatchStatus, watch_local_graph,
 };

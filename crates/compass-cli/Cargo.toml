@@ -52,6 +52,7 @@ compass-model = { path = "../compass-model", version = "0.3.7" }
 compass-mcp = { path = "../compass-mcp", version = "0.3.7" }
 compass-output = { path = "../compass-output", version = "0.3.7" }
 compass-postgres = { path = "../compass-postgres", version = "0.3.7" }
+compass-pr-intelligence = { path = "../compass-pr-intelligence", version = "0.3.7" }
 compass-prs = { path = "../compass-prs", version = "0.3.7" }
 compass-query = { path = "../compass-query", version = "0.3.7" }
 compass-store = { path = "../compass-store", version = "0.3.7" }

@@ -13,6 +13,7 @@ mod html;
 mod json;
 mod obsidian;
 mod report;
+mod review;
 mod svg;
 mod tree;
 mod viewer_model;
@@ -55,6 +56,10 @@ pub use report::{
     generate_report, graph_artifact_identity, render_agent_report_markdown,
     render_orientation_json, render_orientation_markdown, validate_orientation_graph_identity,
 };
+pub use review::{
+    MAX_REVIEW_RENDER_BYTES, RenderedReview, render_review_json, render_review_markdown,
+    render_review_markdown_bounded, render_review_sarif, render_review_text,
+};
 pub use svg::{SvgOptions, spring_layout, svg_document, write_svg};
 pub use tree::{TreeNode, TreeOptions, build_tree, tree_html_document, write_tree_html};
 pub use viewer_model::{
@@ -72,6 +77,12 @@ pub enum OutputError {
     OrientationBudgetExceeded { rendered_chars: usize, limit: usize },
     #[error("graph report Markdown is {rendered_chars} characters; limit is {limit}")]
     ReportBudgetExceeded { rendered_chars: usize, limit: usize },
+    #[error("PR review output is {rendered_bytes} bytes; limit is {limit}")]
+    ReviewBudgetExceeded { rendered_bytes: usize, limit: usize },
+    #[error("invalid PR review output: {0}")]
+    InvalidReview(String),
+    #[error(transparent)]
+    Review(#[from] compass_pr_intelligence::PrIntelligenceError),
     #[error("invalid orientation model: {reason}")]
     InvalidOrientationModel { reason: &'static str },
     #[error(transparent)]

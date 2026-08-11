@@ -86,6 +86,29 @@ compass diff "$BASE_SHA" "$HEAD_SHA" \
 Use full commit SHAs supplied by the CI provider. Avoid fetch-on-demand inside
 historical materialization; make required commits available during checkout.
 
+## Recipe 5: publish a PR review
+
+Use the root reusable Action from a dedicated job that does not execute
+contributor-controlled scripts. Pin it and checkout to reviewed full Action
+commit SHAs:
+
+```yaml
+- uses: actions/checkout@<full-commit-sha>
+  with:
+    fetch-depth: 0
+    persist-credentials: false
+- uses: crabbuild/compass@<full-commit-sha>
+  with:
+    fail-on: none
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Start with `fail-on: none`. Use `deterministic` only for the typed gate policy;
+never turn advisory risk into a branch gate. Forks retain the report artifact
+and job summary but skip comments. See the
+[GitHub PR review guide](../guides/github-pr-review.md) for permissions,
+delivery, and safe job isolation.
+
 ## Cache strategy
 
 Cache keys should include:

@@ -1,0 +1,9 @@
+[
+  {"name":"exact","confidence":"exact","completeness":"downstream_complete","merge":"clean","expected_band":"moderate","expected_gate":"fail"},
+  {"name":"inferred","confidence":"inferred","completeness":"downstream_complete","merge":"clean","expected_band":"moderate","expected_gate":"pass"},
+  {"name":"ambiguous","confidence":"unknown","completeness":"downstream_complete","merge":"clean","expected_band":"moderate","expected_gate":"pass"},
+  {"name":"partial","confidence":"exact","completeness":"downstream_partial","merge":"clean","expected_band":"high","expected_gate":"indeterminate"},
+  {"name":"identical","confidence":"none","completeness":"local_exact","merge":"clean","expected_band":"low","expected_gate":"pass"},
+  {"name":"conflicted","confidence":"exact","completeness":"local_exact","merge":"conflicted","expected_band":"unavailable","expected_gate":"indeterminate"},
+  {"name":"corrupt_incompatible","confidence":"none","completeness":"local_exact","merge":"clean","expected_band":"low","expected_gate":"pass"}
+]

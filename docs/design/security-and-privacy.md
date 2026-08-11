@@ -103,6 +103,29 @@ GitHub PR workflows, PostgreSQL introspection, Google Workspace export, and
 Neo4j/FalkorDB push all cross explicit service boundaries. Consult command help
 and network policy.
 
+### GitHub PR review and Action delivery
+
+`compass review --base/--head` treats the checkout and Git objects as
+untrusted data. It passes arguments separately, bounds Git duration/output,
+uses `git merge-tree`, writes only a deterministic synthetic commit object, and
+does not switch branches, fetch, run hooks, load submodules, invoke package
+managers, or execute repository code. GitHub mode additionally uses bounded
+`gh api` metadata and file pagination, then rejects revision drift.
+
+The reusable Action downloads one exact release and checksum from its fixed
+release repository, verifies both checksum and archive layout, and analyzes
+without placing the comment token in the analysis environment. Artifact and
+job summary publication precede comment delivery. The token is passed only to
+the pinned delivery step, which validates report schema, digest, exact
+repository/PR/revision identity, and comment size before bounded API calls.
+
+Use the Action in a dedicated job that has not executed contributor-controlled
+scripts or binaries. Merely isolating the token in a later step does not make a
+runner safe after untrusted code has run; a background process could survive
+between steps. Keep tests/builds in a separate read-only job. Fork PRs never
+receive comment delivery, even when a token input is present. Do not use
+`pull_request_target` to check out or execute a contributor head.
+
 ### MCP HTTP
 
 HTTP service mode can expose graph and source-location information. Bind
@@ -275,6 +298,14 @@ malformed UTF-8, and missing executable behavior.
 - [ ] Do not edit preferred pointers or Prolly keys.
 - [ ] Do not copy/delete live resources piecemeal.
 - [ ] Use explicit recovery commands.
+
+### GitHub PR review
+
+- [ ] Pin checkout and Compass Action references to reviewed full commit SHAs.
+- [ ] Give the review job `contents: read` and only the comment permission it needs.
+- [ ] Do not execute contributor-controlled code in the token-bearing review job.
+- [ ] Keep `fail-on` at `none` or `deterministic`; advisory risk is not policy.
+- [ ] Protect report, SARIF, Markdown, and logs like source artifacts.
 
 ### External export
 
