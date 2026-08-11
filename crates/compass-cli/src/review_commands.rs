@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use compass_history::{ExtractionFingerprint, Repository};
-use compass_pr_intelligence::{Completeness, MergeOutcome, RepositoryIdentity};
+use compass_pr_intelligence::{Completeness, RepositoryIdentity};
 use compass_prs::{
     ChangeRequestSource, GithubChangeRequestSource, LocalGitChangeRequestSource, SystemRunner,
     detect_repository_identity,
