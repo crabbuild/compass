@@ -38,6 +38,15 @@ class ConfigTests(unittest.TestCase):
                     all(node.source is not None for node in oracle.relevant_nodes)
                 )
 
+    def test_focused_delta_suite_has_independent_positive_and_negative_labels(self) -> None:
+        suite = load_suite(ROOT / "delta-rs-low-oracles.toml")
+        self.assertEqual([item.name for item in suite.repositories], ["delta-rs"])
+        queries = suite.repositories[0].queries
+        self.assertEqual(len(queries), 25)
+        self.assertEqual(sum(query.allow_no_match for query in queries), 5)
+        self.assertTrue(all(query.judgment_source == "manual_source_review" for query in queries))
+        self.assertTrue(all(query.judgment_reason for query in queries))
+
     def test_unknown_field_is_rejected(self) -> None:
         raw = (ROOT / "repositories.toml").read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as directory:

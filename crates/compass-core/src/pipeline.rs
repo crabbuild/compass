@@ -17,15 +17,15 @@ use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
     GRAPH_JSON_DELTA_MAX_SOURCE_BYTES, GRAPH_SNAPSHOT_MAX_OBJECTS,
     GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder, GraphSnapshotGcStats,
-    InventoryEvidence, PublicationOmissions, SnapshotSelector, SourceDigest,
-    build_owned_with_tiebreaker as build_document, canonical_edge_kind, canonical_raw_edge_sites,
-    cluster, deduped_node_count, extraction_from_v1, garbage_collect_graph_snapshots,
-    graph_insights, graph_snapshot_needs_gc, label_communities_by_hub,
-    normalize_document_v1_with_evidence_best_effort_owned,
-    normalize_document_v1_with_inventory_and_source_digests_best_effort_owned,
-    normalize_document_v1_with_inventory_best_effort, remap_communities_to_previous,
-    score_communities, write_canonical_graph_json,
-    write_fact_neutral_graph_json_delta_prevalidated,
+    IncrementalClusterLimits, InferenceLevel, InventoryEvidence, PublicationOmissions,
+    SnapshotSelector, SourceDigest, apply_inference_level,
+    build_owned_with_tiebreaker_at_inference as build_document, canonical_edge_kind,
+    canonical_raw_edge_sites, cluster_incremental, deduped_node_count, extraction_from_v1,
+    garbage_collect_graph_snapshots, graph_insights, graph_snapshot_needs_gc,
+    label_communities_by_hub, normalize_document_v1_with_evidence_best_effort_owned_at_inference,
+    normalize_document_v1_with_inventory_and_source_digests_best_effort_owned_at_inference,
+    normalize_document_v1_with_inventory_best_effort_at_inference, score_communities,
+    write_canonical_graph_json, write_fact_neutral_graph_json_delta_prevalidated,
 };
 use compass_languages::{
     BindingFact, DeclarationFact, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL,
@@ -113,6 +113,11 @@ pub struct BuildOptions {
     /// default query index for bounded, large-graph reads; `--store json`
     /// opts out when only the portable artifact is wanted.
     pub graph_storage: GraphStorage,
+    /// Maximum inferred relationship class admitted to the published graph.
+    ///
+    /// Extraction caches retain complete evidence regardless of this policy;
+    /// changing the level deterministically republishes a coherent subgraph.
+    pub inference_level: InferenceLevel,
     pub gitignore: bool,
     pub ignore_policy: IgnorePolicy,
     pub extra_excludes: Vec<String>,
@@ -353,6 +358,7 @@ impl BuildOptions {
             no_cluster: false,
             no_viz: false,
             graph_storage: GraphStorage::default(),
+            inference_level: InferenceLevel::default(),
             gitignore: true,
             ignore_policy: IgnorePolicy::CurrentCheckout,
             extra_excludes: Vec::new(),
@@ -1450,7 +1456,6 @@ fn fact_neutral_pre_cache_sources(
     let has_nonempty_semantic = semantic.is_some_and(|layer| !semantic_layer_is_empty(layer));
     if options.force
         || options.purpose != BuildPurpose::Extract
-        || !options.no_cluster
         || options.program_analysis
         || has_nonempty_semantic
         || !supplemental.is_empty()
@@ -1569,7 +1574,6 @@ fn fact_neutral_incremental_candidate(
     let has_nonempty_semantic = semantic.is_some_and(|layer| !semantic_layer_is_empty(layer));
     if options.force
         || options.purpose != BuildPurpose::Extract
-        || !options.no_cluster
         || options.program_analysis
         || has_nonempty_semantic
         || !supplemental.is_empty()
@@ -1907,13 +1911,22 @@ fn publish_fact_neutral_incremental(
     if let Some(metrics) = store_metrics {
         record_store_metrics(timings, metrics);
     }
-    remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
+    let community_ids = current
+        .nodes
+        .iter()
+        .filter_map(|node| node.community.as_ref().map(|community| community.id))
+        .collect::<BTreeSet<_>>();
+    let communities = community_ids.len();
+    let clustered = !options.no_cluster;
+    if !clustered {
+        remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
+    }
     save_output_stats(
         &output_dir,
         published_nodes,
         published_edges,
-        0,
-        false,
+        communities,
+        clustered,
         omissions,
     )?;
     write_ast_fact_digest_state(&output_dir, fact_state)?;
@@ -1933,7 +1946,7 @@ fn publish_fact_neutral_incremental(
         sources.len(),
         published_nodes,
         published_edges,
-        0,
+        communities,
         omissions,
         None,
         graph_seal,
@@ -1960,7 +1973,7 @@ fn publish_fact_neutral_incremental(
         empty_files,
         nodes: published_nodes,
         edges: published_edges,
-        communities: 0,
+        communities,
         omitted_nodes: omissions.nodes,
         omitted_edges: omissions.edges,
         identity_collisions: omissions.identity_collisions,
@@ -3384,7 +3397,14 @@ fn build_graph_inner_unscoped(
             &root,
             deduped_node_count(&resolved.nodes),
         )?;
-        let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
+        let document = build_document(
+            resolved,
+            true,
+            true,
+            Some(&root),
+            tiebreaker,
+            options.inference_level,
+        )?;
         profile_internal_duration(
             "no-cluster graph document build",
             no_cluster_graph_started.elapsed(),
@@ -3395,20 +3415,23 @@ fn build_graph_inner_unscoped(
             .clone()
             .or_else(|| git_commit(&root));
         let no_cluster_normalization_started = Instant::now();
-        let published = normalize_document_v1_with_inventory_and_source_digests_best_effort_owned(
-            document,
-            &root,
-            configuration_digest,
-            source_commit.as_deref(),
-            detection_inventory(
-                &detection,
-                semantic,
-                &extraction_failures,
-                &extraction_partials,
+        let mut published =
+            normalize_document_v1_with_inventory_and_source_digests_best_effort_owned_at_inference(
+                document,
                 &root,
-            ),
-            Some(&fresh_source_digests),
-        )?;
+                configuration_digest,
+                source_commit.as_deref(),
+                detection_inventory(
+                    &detection,
+                    semantic,
+                    &extraction_failures,
+                    &extraction_partials,
+                    &root,
+                ),
+                Some(&fresh_source_digests),
+                options.inference_level,
+            )?;
+        apply_inference_level(&mut published.document, options.inference_level);
         profile_internal_duration(
             "no-cluster v1 normalization",
             no_cluster_normalization_started.elapsed(),
@@ -3563,7 +3586,14 @@ fn build_graph_inner_unscoped(
             None,
         ));
     }
-    let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
+    let document = build_document(
+        resolved,
+        true,
+        true,
+        Some(&root),
+        tiebreaker,
+        options.inference_level,
+    )?;
     profile_internal("graph document build and dedup", &mut internal_started);
     timings.graph_assembly = stage_started.elapsed();
     stage_started = Instant::now();
@@ -3589,7 +3619,7 @@ fn build_graph_inner_unscoped(
     if unchanged_layers && supplemental.is_empty() && !options.force && unchanged_artifacts_complete
     {
         let preflight_started = Instant::now();
-        let preflight = normalize_document_v1_with_inventory_best_effort(
+        let mut preflight = normalize_document_v1_with_inventory_best_effort_at_inference(
             &document,
             &root,
             graph_configuration_digest(options, &output_dir)?,
@@ -3601,11 +3631,14 @@ fn build_graph_inner_unscoped(
                 &extraction_partials,
                 &root,
             ),
+            options.inference_level,
         )?;
+        apply_inference_level(&mut preflight.document, options.inference_level);
+        let preflight_document = preflight.document.to_legacy_document()?;
         profile_internal_duration("graph.json v1 preflight", preflight_started.elapsed());
         if !preflight.omissions.is_partial()
             && GraphDocument::load(&output_dir.join("graph.json"))
-                .is_ok_and(|existing| topology_is_unchanged(&existing, &document))
+                .is_ok_and(|existing| topology_is_unchanged(&existing, &preflight_document))
         {
             let communities = previous_communities(&output_dir.join("graph.json"))
                 .values()
@@ -3629,8 +3662,8 @@ fn build_graph_inner_unscoped(
                 &output_dir,
                 &manifest_path,
                 sources.len(),
-                document.nodes.len(),
-                document.links.len(),
+                preflight_document.nodes.len(),
+                preflight_document.links.len(),
                 communities,
                 PublicationOmissions::default(),
                 program.as_ref(),
@@ -3656,8 +3689,8 @@ fn build_graph_inner_unscoped(
                     files_extracted: missing.len(),
                     files_cached: sources.len().saturating_sub(missing.len()),
                     empty_files,
-                    nodes: document.nodes.len(),
-                    edges: document.links.len(),
+                    nodes: preflight_document.nodes.len(),
+                    edges: preflight_document.links.len(),
                     communities,
                     omitted_nodes: 0,
                     omitted_edges: 0,
@@ -3719,8 +3752,12 @@ fn build_graph_inner_unscoped(
         publication_evidence_started.elapsed(),
     );
     let normalization_started = Instant::now();
-    let mut published =
-        normalize_document_v1_with_evidence_best_effort_owned(raw_document, publication_evidence)?;
+    let mut published = normalize_document_v1_with_evidence_best_effort_owned_at_inference(
+        raw_document,
+        publication_evidence,
+        options.inference_level,
+    )?;
+    apply_inference_level(&mut published.document, options.inference_level);
     profile_internal_duration(
         "graph.json v1 normalization",
         normalization_started.elapsed(),
@@ -3738,30 +3775,38 @@ fn build_graph_inner_unscoped(
         resolution: options.resolution,
         exclude_hubs_percentile: options.exclude_hubs,
     };
-    let ((previous, previous_elapsed), (current, cluster_elapsed)) = rayon::join(
-        || {
-            let started = Instant::now();
-            let previous = if std::env::var_os("COMPASS_HISTORY_BUILD").is_some() {
-                HashMap::new()
-            } else {
-                previous_communities(&output_dir.join("graph.json"))
-            };
-            (previous, started.elapsed())
-        },
-        || {
-            let started = Instant::now();
-            let current = cluster(&document, cluster_options);
-            (current, started.elapsed())
-        },
-    );
-    profile_internal_duration("load previous communities", previous_elapsed);
-    profile_internal_duration("Louvain clustering", cluster_elapsed);
-    internal_started = Instant::now();
-    let communities = if previous.is_empty() {
-        current
+    let previous_started = Instant::now();
+    let history_build = std::env::var_os("COMPASS_HISTORY_BUILD").is_some();
+    let previous = if history_build {
+        HashMap::new()
     } else {
-        remap_communities_to_previous(&current, &previous)
+        previous_communities(&output_dir.join("graph.json"))
     };
+    let previous_elapsed = previous_started.elapsed();
+    profile_internal_duration("load previous communities", previous_elapsed);
+    let changed_sources = missing
+        .iter()
+        .map(|path| relative_fact_path(path, &root))
+        .collect::<BTreeSet<_>>();
+    let cluster_started = Instant::now();
+    let clustered = cluster_incremental(
+        &document,
+        &previous,
+        &changed_sources,
+        cluster_options,
+        IncrementalClusterLimits::default(),
+    );
+    let cluster_elapsed = cluster_started.elapsed();
+    profile_internal_duration(
+        if clustered.used_incremental {
+            "bounded incremental clustering"
+        } else {
+            "Louvain clustering"
+        },
+        cluster_elapsed,
+    );
+    internal_started = Instant::now();
+    let communities = clustered.communities;
     timings.graph_assembly += stage_started.elapsed();
     stage_started = Instant::now();
     let labels = label_communities_by_hub(&document, &communities);
@@ -4220,6 +4265,7 @@ fn build_profile(options: &BuildOptions) -> BuildProfile {
             GraphStorage::Sqlite => "sqlite",
         }
         .to_owned(),
+        inference_level: options.inference_level.as_str().to_owned(),
         max_source_bytes: options.max_source_bytes,
     }
 }
@@ -4233,7 +4279,7 @@ fn current_orientation_health(
     } else {
         PublicationStatus::Complete
     };
-    let profile = format!(
+    let mut profile = format!(
         "{}; cluster={}; code_only={}; program={}; storage={}",
         match options.purpose {
             BuildPurpose::Update => "update",
@@ -4247,6 +4293,9 @@ fn current_orientation_health(
             GraphStorage::Sqlite => "sqlite",
         }
     );
+    if options.inference_level != InferenceLevel::Max {
+        profile.push_str(&format!("; inference={}", options.inference_level.as_str()));
+    }
     let mut exclusions = options.scope.exclude.clone();
     exclusions.extend(options.extra_excludes.iter().cloned());
     exclusions.sort();
@@ -7112,6 +7161,7 @@ mod tests {
 
     use compass_graph::{GraphSnapshotReader, IndexKind};
     use compass_model::code_graph::GraphDocument as V1GraphDocument;
+    use compass_model::provenance::{EvidenceConfidence, effective_confidence};
     use serde_json::{Map, Value};
 
     use super::*;
@@ -7150,6 +7200,85 @@ mod tests {
                 value.contains("update") && value.contains("code_only=true")
             })
         );
+    }
+
+    #[test]
+    fn inference_level_changes_profile_identity_without_changing_the_default_profile() {
+        let default = BuildOptions::new(".");
+        let default_profile = build_profile(&default);
+        let default_json = serde_json::to_value(&default_profile).unwrap_or_default();
+        assert!(default_json.get("inference_level").is_none());
+
+        let mut medium = default;
+        medium.inference_level = InferenceLevel::Medium;
+        let medium_profile = build_profile(&medium);
+        assert_eq!(
+            serde_json::to_value(&medium_profile)
+                .unwrap_or_default()
+                .get("inference_level"),
+            Some(&Value::String("medium".to_owned()))
+        );
+        assert_ne!(default_profile, medium_profile);
+        assert!(
+            current_orientation_health(&medium, PublicationOmissions::default())
+                .build_profile
+                .as_deref()
+                .is_some_and(|profile| profile.contains("inference=medium"))
+        );
+    }
+
+    #[test]
+    fn build_inference_levels_publish_nested_coherent_graphs() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().join("source");
+        fs::create_dir(&root)?;
+        fs::write(
+            root.join("lib.rs"),
+            r#"
+                use external_crate::ExternalType;
+
+                fn run(value: ExternalType) {
+                    value.execute();
+                    external_crate::Service::call();
+                }
+            "#,
+        )?;
+
+        let mut previous = None;
+        for level in [
+            InferenceLevel::Low,
+            InferenceLevel::Medium,
+            InferenceLevel::High,
+            InferenceLevel::Max,
+        ] {
+            let mut options = BuildOptions::new(&root);
+            options.output_root = Some(directory.path().join("artifacts"));
+            options.graph_storage = GraphStorage::Json;
+            options.inference_level = level;
+            options.no_cluster = true;
+            options.no_viz = true;
+            let result = build_local_graph(&options)?;
+            let document = V1GraphDocument::load(&result.output_dir.join("graph.json"))?;
+            let inferred = document
+                .links
+                .iter()
+                .filter(|edge| {
+                    effective_confidence(&edge.evidence) == Some(EvidenceConfidence::Inferred)
+                })
+                .count();
+            if level == InferenceLevel::Low {
+                assert_eq!(inferred, 0);
+            }
+            if let Some((nodes, edges, inferred_before)) = previous {
+                assert!(document.nodes.len() >= nodes);
+                assert!(document.links.len() >= edges);
+                assert!(inferred >= inferred_before);
+            }
+            previous = Some((document.nodes.len(), document.links.len(), inferred));
+        }
+        let (_, _, max_inferred) = previous.ok_or("inference levels were not built")?;
+        assert!(max_inferred > 0);
+        Ok(())
     }
 
     #[test]
@@ -8361,6 +8490,60 @@ mod tests {
         assert_ne!(
             implementation_hash(&semantic_graph),
             implementation_hash(&changed_graph)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn clustered_fact_neutral_incremental_reuses_community_artifacts() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        let source = root.join("main.py");
+        fs::write(
+            &source,
+            "def helper():\n    return 1\n\ndef main():\n    return helper()\n",
+        )?;
+        let mut options = BuildOptions::new(root);
+        options.no_cluster = false;
+        options.no_viz = true;
+        options.purpose = BuildPurpose::Extract;
+        options.graph_storage = GraphStorage::Json;
+        let empty_semantic = SemanticLayer {
+            fragment: json!({"nodes": [], "edges": [], "hyperedges": []}),
+            refreshed_files: Vec::new(),
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+
+        let cold = build_graph_with_semantic(&options, &empty_semantic)?;
+        assert!(cold.communities > 0);
+        let cold_analysis = fs::read(cold.output_dir.join("analysis.json"))?;
+        let cold_graph = V1GraphDocument::load(&cold.output_dir.join("graph.json"))?;
+        let cold_assignments = cold_graph
+            .nodes
+            .iter()
+            .map(|node| (node.id.clone(), node.community.clone()))
+            .collect::<BTreeMap<_, _>>();
+
+        fs::write(
+            &source,
+            "def helper():\n    return 1\n\ndef main():\n    return helper()\n\n# metadata only\n",
+        )?;
+        let changed = build_graph_with_semantic(&options, &empty_semantic)?;
+        let changed_graph = V1GraphDocument::load(&changed.output_dir.join("graph.json"))?;
+        let changed_assignments = changed_graph
+            .nodes
+            .iter()
+            .map(|node| (node.id.clone(), node.community.clone()))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(changed.timings.graph_assembly, Duration::ZERO);
+        assert_eq!(changed.communities, cold.communities);
+        assert_eq!(changed_assignments, cold_assignments);
+        assert_eq!(
+            fs::read(changed.output_dir.join("analysis.json"))?,
+            cold_analysis
         );
         Ok(())
     }

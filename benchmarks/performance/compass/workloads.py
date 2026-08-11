@@ -2,21 +2,30 @@
 
 from __future__ import annotations
 
+import ast
 from contextlib import contextmanager
 from dataclasses import replace
 import hashlib
 import json
 import math
 from pathlib import Path
+import re
+import shutil
 import sqlite3
 import subprocess
-import shutil
 import sys
 from typing import Iterator
 
 from .adapters import ToolAdapter
 from .correctness import index_graph
-from .model import CorrectnessResult, QueryOracle, RepositorySpec, Sample, WorkloadResult
+from .model import (
+    CorrectnessResult,
+    QueryNodeOracle,
+    QueryOracle,
+    RepositorySpec,
+    Sample,
+    WorkloadResult,
+)
 from .process import ProcessSpec, run_measured
 from .stats import summarize
 from .workspace import guarded_remove
@@ -68,6 +77,10 @@ _DISCOVERY_WORK_LIMITS = {
     "returnedEdges": 1_000,
 }
 _MAX_QUERY_OUTPUT_BYTES = 20 * 1024 * 1024
+_GRAPHIFY_NODE = re.compile(
+    r"^NODE (?P<label>.*?) \[src=(?P<source>.*?) loc=L(?P<line>[0-9]+)(?: |\])"
+)
+_GRAPHIFY_START = re.compile(r"\| Start: (?P<starts>\[.*\])(?: \| |$)")
 
 
 def _git(checkout: Path, *arguments: str) -> str:
@@ -687,6 +700,9 @@ def _validate_compass_discovery(
             "ambiguity_correct": ambiguous == oracle.expected_ambiguous,
             "source_anchor_count": source_anchor_count,
             "no_match_false_positive": no_match_false_positive,
+            "no_match_correct": oracle.allow_no_match and no_match and not seed_records,
+            "independently_labeled": oracle.judgment_source is not None,
+            "oracle_judgment_source": oracle.judgment_source or "unlabeled",
             **{_camel_to_snake(field): value for field, value in work.items()},
             "complete": not bool(payload.get("truncated")),
             "legacy_semantic_digest": legacy_digest,
@@ -720,11 +736,126 @@ def validate_query_output(
         for forbidden in oracle.forbidden
         if forbidden.casefold() in folded
     )
+    graphify_nodes = sum(
+        line.lstrip().startswith("NODE ") for line in text.splitlines()
+    )
+    observed_graphify_nodes = _graphify_nodes(text)
+    observed_graphify_seeds = _graphify_seed_nodes(text, observed_graphify_nodes)
+    expected_or_acceptable = oracle.expected_seeds + oracle.acceptable_seeds
+    missing_graphify_seeds = [
+        node
+        for node in oracle.expected_seeds
+        if not _graphify_node_matches(observed_graphify_seeds, node)
+    ]
+    if missing_graphify_seeds:
+        failures.append(
+            "missing independently labeled Graphify seeds: "
+            f"{[node.qualified_name for node in missing_graphify_seeds]!r}"
+        )
+    if not oracle.expected_seeds and oracle.acceptable_seeds and not any(
+        _graphify_node_matches(observed_graphify_seeds, node)
+        for node in oracle.acceptable_seeds
+    ):
+        failures.append("no independently labeled acceptable Graphify seed was returned")
+    returned_graphify_forbidden = [
+        node
+        for node in oracle.forbidden_seeds
+        if _graphify_node_matches(observed_graphify_seeds, node)
+    ]
+    if returned_graphify_forbidden:
+        failures.append(
+            "independently labeled forbidden Graphify seed returned: "
+            f"{[node.qualified_name for node in returned_graphify_forbidden]!r}"
+        )
+    top_one = bool(observed_graphify_seeds) and any(
+        _graphify_node_matches(observed_graphify_seeds[:1], node)
+        for node in expected_or_acceptable
+    )
+    if observed_graphify_seeds and expected_or_acceptable and not top_one:
+        failures.append("top-ranked Graphify seed is neither expected nor acceptable")
+    relevant_hits_at_ten = sum(
+        _graphify_node_matches(observed_graphify_seeds[:10], node)
+        for node in oracle.relevant_nodes
+    )
+    recall_at_ten = (
+        relevant_hits_at_ten / len(oracle.relevant_nodes)
+        if oracle.relevant_nodes
+        else 0.0
+    )
+    reciprocal_rank_at_ten = 0.0
+    for rank, seed in enumerate(observed_graphify_seeds[:10], 1):
+        if any(_graphify_node_matches([seed], node) for node in oracle.relevant_nodes):
+            reciprocal_rank_at_ten = 1.0 / rank
+            break
+    if oracle.allow_no_match and graphify_nodes:
+        failures.append(
+            f"independent no-match oracle returned {graphify_nodes} graph node(s)"
+        )
     canonical = "\n".join(sorted(line.strip() for line in text.splitlines() if line.strip()))
     return CorrectnessResult(
         passed=not failures,
         digest=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
         failures=tuple(failures),
+        metrics={
+            "top1": top_one,
+            "mrr_at_10": reciprocal_rank_at_ten,
+            "recall_at_10": recall_at_ten,
+            "no_match_correct": oracle.allow_no_match and graphify_nodes == 0,
+            "independently_labeled": oracle.judgment_source is not None,
+            "oracle_judgment_source": oracle.judgment_source or "unlabeled",
+            "source_anchor_count": sum(bool(source) for _, source, _ in observed_graphify_nodes),
+            "complete": "[!] TRUNCATED" not in text,
+        },
+    )
+
+
+def _graphify_nodes(text: str) -> list[tuple[str, str, int]]:
+    nodes = []
+    for line in text.splitlines():
+        matched = _GRAPHIFY_NODE.match(line.strip())
+        if matched is not None:
+            nodes.append(
+                (
+                    matched.group("label").removeprefix(".").removesuffix("()").casefold(),
+                    matched.group("source").replace("\\", "/"),
+                    int(matched.group("line")),
+                )
+            )
+    return nodes
+
+
+def _graphify_seed_nodes(
+    text: str, observed: list[tuple[str, str, int]]
+) -> list[tuple[str, str, int]]:
+    for line in text.splitlines():
+        matched = _GRAPHIFY_START.search(line.strip())
+        if matched is None:
+            continue
+        try:
+            starts = ast.literal_eval(matched.group("starts"))
+        except (SyntaxError, ValueError):
+            return []
+        if not isinstance(starts, list) or not all(
+            isinstance(start, str) for start in starts
+        ):
+            return []
+        return observed[: len(starts)]
+    return []
+
+
+def _graphify_node_matches(
+    observed: list[tuple[str, str, int]], oracle: QueryNodeOracle
+) -> bool:
+    terminal = re.split(r"::|[./]", oracle.qualified_name)[-1]
+    expected_label = terminal.removeprefix(".").removesuffix("()").casefold()
+    if oracle.source is None:
+        return any(label == expected_label for label, _, _ in observed)
+    expected_source = oracle.source.file.replace("\\", "/")
+    return any(
+        label == expected_label
+        and source == expected_source
+        and (oracle.source.start_line is None or line == oracle.source.start_line)
+        for label, source, line in observed
     )
 
 

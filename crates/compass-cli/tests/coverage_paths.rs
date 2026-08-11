@@ -638,9 +638,7 @@ fn completed_read_query_diagnostic_merge_tree_and_export_commands_run_end_to_end
         vec![
             "query".to_owned(),
             "attention".to_owned(),
-            "--dfs".to_owned(),
             "--budget=100".to_owned(),
-            "--context=model.py".to_owned(),
             format!("--graph={graph}"),
         ],
         vec![
@@ -816,8 +814,6 @@ fn split_value_read_export_and_cluster_forms_complete_against_a_real_graph()
             "attention".to_owned(),
             "--budget".to_owned(),
             "80".to_owned(),
-            "--context".to_owned(),
-            "call".to_owned(),
             "--graph".to_owned(),
             graph_text.clone(),
         ],

@@ -40,6 +40,8 @@ class QueryOracle:
     expected_direction: str = "both"
     expected_ambiguous: bool = False
     allow_no_match: bool = False
+    judgment_source: str | None = None
+    judgment_reason: str | None = None
 
 
 @dataclass(frozen=True)

@@ -404,30 +404,9 @@ fn open_from_local_store(
     program_path: Option<&Path>,
 ) -> Result<CodeQueryEngine, QueryError> {
     let snapshot = open_local_store_snapshot(graph_path)?;
-    let reader = snapshot.reader()?;
-    let metadata = reader.metadata_summary().map_err(|error| {
-        QueryError::new(
-            QueryErrorKind::CorruptArtifact,
-            "store_graph_snapshot_failed",
-            error.to_string(),
-        )
-    })?;
-    let graph_identity = reader.manifest().graph_digest.clone();
-    let publication_summary = reader
-        .graph_diagnostic_by_code("publication_omission_summary")
-        .map_err(|error| {
-            QueryError::new(
-                QueryErrorKind::CorruptArtifact,
-                "store_graph_snapshot_failed",
-                error.to_string(),
-            )
-        })?;
-    let partial_graph_message = publication_summary.map(|diagnostic| {
-        format!(
-            "Published graph coverage is incomplete: {}",
-            diagnostic.message
-        )
-    });
+    let graph_identity = snapshot.graph_identity.clone();
+    let build_generation_identity = snapshot.build_generation_identity.clone();
+    let partial_graph_message = snapshot.partial_graph_message.clone();
     let (program, _) = load_program(program_path)?;
     let index_path = snapshot.store_path.clone();
     Ok(CodeQueryEngine {
@@ -439,7 +418,7 @@ fn open_from_local_store(
         partial_graph_message,
         engine_kind: QueryEngineKind::Store,
         graph_identity,
-        build_generation_identity: metadata.graph.build.generation_id,
+        build_generation_identity,
         search_query_cache: std::sync::Mutex::new(Default::default()),
         fuzzy_lookup_cache: std::sync::Mutex::new(Default::default()),
     })

@@ -31,6 +31,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::inference::{InferenceLevel, prefilter_extraction_inference};
 use crate::quarantine::{PublicationOutcome, QuarantineCollector};
 
 /// Version of the normalization and publication contract behind graph schema v1.
@@ -732,8 +733,13 @@ pub fn normalize_v1(
     extraction: Extraction,
     evidence: BuildEvidence,
 ) -> Result<GraphDocument, GraphError> {
-    normalize_v1_with_mode(extraction, evidence, PublicationMode::Strict)
-        .map(|outcome| outcome.document)
+    normalize_v1_with_mode(
+        extraction,
+        evidence,
+        PublicationMode::Strict,
+        InferenceLevel::Max,
+    )
+    .map(|outcome| outcome.document)
 }
 
 /// Publish the largest strict-valid graph after quarantining invalid records.
@@ -741,7 +747,23 @@ pub fn normalize_v1_best_effort(
     extraction: Extraction,
     evidence: BuildEvidence,
 ) -> Result<PublicationOutcome, GraphError> {
-    normalize_v1_with_mode(extraction, evidence, PublicationMode::BestEffort)
+    normalize_v1_best_effort_with_inference(extraction, evidence, InferenceLevel::Max)
+}
+
+/// Publish the largest strict-valid graph while suppressing provably
+/// disallowed call edges after they have contributed raw normalization facts
+/// but before typed edge materialization.
+pub fn normalize_v1_best_effort_with_inference(
+    extraction: Extraction,
+    evidence: BuildEvidence,
+    inference_level: InferenceLevel,
+) -> Result<PublicationOutcome, GraphError> {
+    normalize_v1_with_mode(
+        extraction,
+        evidence,
+        PublicationMode::BestEffort,
+        inference_level,
+    )
 }
 
 fn prepare_edge(
@@ -1021,6 +1043,7 @@ fn normalize_v1_with_mode(
     mut extraction: Extraction,
     mut evidence: BuildEvidence,
     mode: PublicationMode,
+    inference_level: InferenceLevel,
 ) -> Result<PublicationOutcome, GraphError> {
     let mut profile_started = Instant::now();
     let mut quarantine = QuarantineCollector::default();
@@ -1059,6 +1082,8 @@ fn normalize_v1_with_mode(
         &mut quarantine,
     )?;
     profile_v1("v1 generic symbol resolution", &mut profile_started);
+    prefilter_extraction_inference(&mut extraction, inference_level);
+    profile_v1("v1 inference admission", &mut profile_started);
 
     if mode == PublicationMode::BestEffort && !canonical_raw_order {
         if extraction.nodes.len() < 512 {
@@ -2808,6 +2833,24 @@ pub fn normalize_document_v1_with_inventory_best_effort(
     normalize_v1_best_effort(extraction, evidence)
 }
 
+pub fn normalize_document_v1_with_inventory_best_effort_at_inference(
+    document: &compass_model::GraphDocument,
+    repository_root: &Path,
+    configuration_digest: impl Into<String>,
+    source_commit: Option<&str>,
+    inventory: Vec<InventoryEvidence>,
+    inference_level: InferenceLevel,
+) -> Result<PublicationOutcome, GraphError> {
+    let (extraction, evidence) = document_publication_input(
+        document,
+        repository_root,
+        configuration_digest,
+        source_commit,
+        inventory,
+    )?;
+    normalize_v1_best_effort_with_inference(extraction, evidence, inference_level)
+}
+
 /// Publish an owned analysis document without cloning its node and edge facts.
 ///
 /// Callers that already hold a deterministic publication-only document can
@@ -2855,6 +2898,26 @@ pub fn normalize_document_v1_with_inventory_and_source_digests_best_effort_owned
     normalize_v1_best_effort(extraction, evidence)
 }
 
+pub fn normalize_document_v1_with_inventory_and_source_digests_best_effort_owned_at_inference(
+    document: compass_model::GraphDocument,
+    repository_root: &Path,
+    configuration_digest: impl Into<String>,
+    source_commit: Option<&str>,
+    inventory: Vec<InventoryEvidence>,
+    source_digests: Option<&BTreeMap<String, SourceDigest>>,
+    inference_level: InferenceLevel,
+) -> Result<PublicationOutcome, GraphError> {
+    let (extraction, evidence) = document_publication_input_owned(
+        document,
+        repository_root,
+        configuration_digest,
+        source_commit,
+        inventory,
+        source_digests,
+    )?;
+    normalize_v1_best_effort_with_inference(extraction, evidence, inference_level)
+}
+
 /// Publish an owned analysis document using evidence prepared from the same
 /// immutable document before ownership transfer.
 pub fn normalize_document_v1_with_evidence_best_effort_owned(
@@ -2862,6 +2925,18 @@ pub fn normalize_document_v1_with_evidence_best_effort_owned(
     evidence: BuildEvidence,
 ) -> Result<PublicationOutcome, GraphError> {
     normalize_v1_best_effort(document_extraction_owned(document), evidence)
+}
+
+pub fn normalize_document_v1_with_evidence_best_effort_owned_at_inference(
+    document: compass_model::GraphDocument,
+    evidence: BuildEvidence,
+    inference_level: InferenceLevel,
+) -> Result<PublicationOutcome, GraphError> {
+    normalize_v1_best_effort_with_inference(
+        document_extraction_owned(document),
+        evidence,
+        inference_level,
+    )
 }
 
 fn document_publication_input(

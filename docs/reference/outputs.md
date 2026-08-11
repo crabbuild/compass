@@ -151,6 +151,30 @@ share an endpoint pair (ordered for directed graphs, unordered for undirected
 graphs), including repeated self-loops. Consumers do not need to request this
 promotion.
 
+### Inference levels
+
+Graph-building commands accept `--inference-level low|medium|high|max`. The
+levels are deterministic and nested:
+
+| Level | Published relationship evidence |
+| --- | --- |
+| `low` | exact relationships only |
+| `medium` | `low`, plus inferred relationships whose endpoints are both source-backed |
+| `high` | `medium`, plus explicitly qualified external relationships anchored in source syntax |
+| `max` | all retained inference, including deferred-receiver relationships |
+
+`max` is the default and preserves the complete graph behavior. Lower levels
+filter after evidence normalization, prune unreferenced inferred placeholder
+nodes, and keep every retained edge endpoint valid. The selected level is part
+of the build profile and configuration digest, so an output built at one level
+is not reused as though it represented another. This policy is intentional
+selection, not a publication omission.
+
+Inference controls graph breadth, not source anchoring. An inferred edge may
+still have an exact relationship site while its target identity remains
+unproven. Use `compass diagnose quality --json` to inspect exact/inferred ratios
+for the selected output.
+
 ### Consumer requirements
 
 - preserve unknown attributes;
@@ -200,6 +224,13 @@ The report can include:
 
 It is intended for people and can evolve in prose/format. Do not parse it when
 structured data or command JSON exists.
+
+Community evidence labels use the highest-connectivity member's concise name
+when it is unique. When multiple communities share that name, Compass adds a
+compact source or wiring-site anchor and, only if needed, the graph-local
+community ID. These labels are deterministic navigation aids, not community
+identity; consumers that need identity should use the community ID and member
+set instead.
 
 The report begins with a bounded Agent Orientation for first-session or broad
 repository context. `orientation.json` is the versioned machine form of that

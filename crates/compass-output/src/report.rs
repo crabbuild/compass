@@ -2371,10 +2371,10 @@ impl<'a> ReportGraph<'a> {
                 })
             },
             |node| {
-                self.node_identity_and_anchor_are_safe(&node.id, node.label())
+                self.node_identity_and_anchor_are_safe(&node.id, &node.display_label())
                     .then(|| OrientationNodeReference {
                         id: node.id.clone(),
-                        label: node.label().to_owned(),
+                        label: node.display_label(),
                         anchor: node_anchor(node),
                     })
             },
@@ -2399,13 +2399,13 @@ impl<'a> ReportGraph<'a> {
         let Some(node) = self.positions.get(id) else {
             return false;
         };
-        let label = node.label();
+        let label = node.display_label();
         if label.is_empty() {
             return false;
         }
         let source = node.source_file().unwrap_or_default();
         (!source.is_empty()
-            && Path::new(source).file_name().and_then(|name| name.to_str()) == Some(label))
+            && Path::new(source).file_name().and_then(|name| name.to_str()) == Some(label.as_str()))
             || (label.starts_with('.') && label.ends_with("()"))
             || (label.ends_with("()") && self.degree(id) <= 1)
     }

@@ -73,13 +73,16 @@ Only this command resolves and installs Graphify:
 
 ```bash
 python3 benchmarks/performance/harness.py compare \
+  --inference-level low \
   --output target/performance/runs/comparison
 ```
 
 Both tools use the same corpus commits. Build comparisons use the same
-structural profile: Compass `--code-only --no-cluster --no-viz --store json`
-and Graphify's native `--code-only` profile. Every cold, warm, incremental, and
-fresh natural-language query row must independently reach
+publishable structural profile: Compass `--code-only --no-viz --store json`
+and Graphify's native `--code-only` profile, both with community clustering.
+`--inference-level` selects Compass's `low`, `medium`, `high`, or `max`
+profile and is recorded in tool metadata; it defaults to `max`. Every cold,
+warm, incremental, and fresh natural-language query row must independently reach
 `graphify p50 / compass p50 >= 5.00`; averages cannot hide a failed row.
 Compass build peak RSS must not exceed Graphify, and Graphify's shared graph
 facts must remain present and compatible in Compass. Only fresh natural-query
@@ -89,6 +92,34 @@ the cross-tool ratio because Graphify has no equivalent workload.
 
 The comparison environment is isolated under `target/performance/` and is not a
 Compass runtime or development dependency.
+
+### Focused Delta accuracy oracles
+
+`delta-rs-low-oracles.toml` is a smaller, non-promotable qualification suite
+for inference and query iteration. It pins one Delta repository revision and
+contains 20 manually source-reviewed positive seed labels plus five manually
+source-reviewed negative controls. Each label records its independent judgment
+source and reason. Negative controls deliberately share generic terms such as
+`vacuum`, `snapshot`, or `merge` with real symbols; returning a graph node for
+one of those isolated terms is scored as a false positive for both tools.
+For Graphify, seed accuracy is evaluated only against the source-anchored
+`NODE` records corresponding to its declared `Start` list; finding the labeled
+symbol later in a broad traversal does not count as selecting the right seed.
+Top-1, MRR@10, recall@10, completeness, and exact source-anchor counts are
+reported with the same labels used for Compass.
+
+Run the focused low-inference comparison with:
+
+```bash
+python3 benchmarks/performance/harness.py compare \
+  --suite benchmarks/performance/delta-rs-low-oracles.toml \
+  --inference-level low \
+  --output target/performance/runs/delta-rs-low
+```
+
+The loader accepts one to eight repositories so focused suites use the same
+bounded runner and correctness implementation. Only the complete checked-in
+eight-repository suite remains eligible for baseline promotion.
 
 ## Analyze external comparison runs
 

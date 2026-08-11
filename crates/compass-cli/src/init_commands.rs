@@ -5,13 +5,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
 
-use compass_core::GraphStorage;
+use compass_core::{GraphStorage, InferenceLevel};
 use compass_files::{
     BuildScope, DetectOptions, Detection, PROJECT_CONFIG_RELATIVE_PATH, ProjectConfig,
     ScopeMatcher, detect,
 };
 
 use crate::ide_contract::{PROGRESS_SCHEMA, ProgressEvent, ProgressState, ProgressWriter};
+use crate::parse_inference_level;
 use crate::{
     BuildOperation, Frontend, Outcome, command_build_with_precomputed_detection, write_outcome,
 };
@@ -25,6 +26,7 @@ struct InitOptions {
     timing: bool,
     program: bool,
     graph_storage: GraphStorage,
+    inference_level: InferenceLevel,
 }
 
 pub fn run_init(
@@ -343,6 +345,12 @@ fn run_init_with_builder(
     if options.graph_storage == GraphStorage::Sqlite {
         build_arguments.extend(["--store".to_owned(), "sqlite".to_owned()]);
     }
+    if options.inference_level != InferenceLevel::Max {
+        build_arguments.extend([
+            "--inference-level".to_owned(),
+            options.inference_level.as_str().to_owned(),
+        ]);
+    }
     let outcome = build(&root, &build_arguments, detection, operation_started);
     if outcome.code != 0 {
         let _ = writeln!(
@@ -416,6 +424,7 @@ fn parse(args: &[String]) -> Result<InitOptions, String> {
         timing: false,
         program: false,
         graph_storage: GraphStorage::default(),
+        inference_level: InferenceLevel::default(),
     };
     let mut root_seen = false;
     let mut index = 0;
@@ -434,6 +443,18 @@ fn parse(args: &[String]) -> Result<InitOptions, String> {
             }
             value if value.starts_with("--store=") => {
                 options.graph_storage = parse_graph_storage(&value[8..])?;
+            }
+            "--inference-level" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(
+                        "error: --inference-level requires low, medium, high, or max".to_owned(),
+                    );
+                };
+                options.inference_level = parse_inference_level(value)?;
+            }
+            value if value.starts_with("--inference-level=") => {
+                options.inference_level = parse_inference_level(&value[18..])?;
             }
             "--include" | "--exclude" => {
                 let name = args[index].clone();
@@ -482,5 +503,26 @@ fn parse_graph_storage(value: &str) -> Result<GraphStorage, String> {
         _ => Err(format!(
             "error: --store must be json or sqlite (found {value})"
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_accepts_inference_level_value_forms() -> Result<(), String> {
+        let split = parse(&[
+            ".".to_owned(),
+            "--inference-level".to_owned(),
+            "medium".to_owned(),
+        ])?;
+        assert_eq!(split.inference_level, InferenceLevel::Medium);
+
+        let equals = parse(&["--inference-level=high".to_owned()])?;
+        assert_eq!(equals.inference_level, InferenceLevel::High);
+        assert!(parse(&["--inference-level=automatic".to_owned()]).is_err());
+        assert!(parse(&["--inference-level".to_owned()]).is_err());
+        Ok(())
     }
 }

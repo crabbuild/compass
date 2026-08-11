@@ -14,6 +14,7 @@ pub(crate) struct RankedSearchResult {
     pub(crate) score: f64,
     pub(crate) channel_rank: u8,
     pub(crate) relation_evidence: Option<RelationEvidenceRank>,
+    pub(crate) operation_root: Option<OperationRootRank>,
     pub(crate) node_id: String,
     pub(crate) matched_fields: Vec<String>,
     pub(crate) matched_terms: Vec<String>,
@@ -25,11 +26,16 @@ pub(crate) fn resolution_rank_is_strictly_better(
     candidate: &RankedSearchResult,
     runner_up: &RankedSearchResult,
 ) -> bool {
-    candidate.channel_rank > runner_up.channel_rank
-        || (candidate.channel_rank == runner_up.channel_rank
-            && (candidate.relation_evidence > runner_up.relation_evidence
-                || (candidate.relation_evidence == runner_up.relation_evidence
-                    && candidate.score.total_cmp(&runner_up.score).is_gt())))
+    if candidate.channel_rank != runner_up.channel_rank {
+        return candidate.channel_rank > runner_up.channel_rank;
+    }
+    if candidate.operation_root != runner_up.operation_root {
+        return candidate.operation_root > runner_up.operation_root;
+    }
+    if candidate.relation_evidence != runner_up.relation_evidence {
+        return candidate.relation_evidence > runner_up.relation_evidence;
+    }
+    candidate.score.total_cmp(&runner_up.score).is_gt()
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -96,6 +102,7 @@ fn rank_query_v1_reference(
                 + matched_fields.len() as f64,
             channel_rank: tier,
             relation_evidence: None,
+            operation_root: None,
             node_id: node.id.clone(),
             matched_fields,
             matched_terms: Vec::new(),
@@ -123,6 +130,7 @@ fn rank_v2(
         .into_iter()
         .collect::<Vec<_>>();
     let query_terms = std::mem::take(&mut ranked_terms);
+    let query_initialisms = query_initialisms(query);
 
     let mut ranked = Vec::new();
 
@@ -168,12 +176,17 @@ fn rank_v2(
             .count();
         let (direct_concept_count, direct_token_count) =
             direct_field_evidence(&candidate.node, &query_terms);
+        let operation_root = operation_root_rank(&candidate.node, &query_terms, &query_initialisms);
         if !relationship_terms.is_empty() {
             matched_fields.push("relationship".to_owned());
         }
 
-        let channel_rank =
-            behavior_channel_rank(&candidate, direct_concept_count, relationship_term_count);
+        let channel_rank = behavior_channel_rank(
+            &candidate,
+            direct_concept_count,
+            relationship_term_count,
+            operation_root,
+        );
         let relation_evidence =
             (direct_concept_count >= 2 || relationship_term_count >= 2).then(|| {
                 let (predicate_match_count, predicate_token_count) =
@@ -268,11 +281,13 @@ fn rank_v2(
         ranked.push(RankedSearchCandidate {
             score,
             channel_rank,
+            operation_root,
             tie,
             result: RankedSearchResult {
                 score,
                 channel_rank,
                 relation_evidence,
+                operation_root,
                 node_id: node.id.clone(),
                 matched_fields,
                 matched_terms,
@@ -310,6 +325,7 @@ fn compare_ranked_results(left: &RankedSearchResult, right: &RankedSearchResult)
 struct RankedSearchCandidate {
     score: f64,
     channel_rank: u8,
+    operation_root: Option<OperationRootRank>,
     tie: SearchCandidateTiebreak,
     result: RankedSearchResult,
 }
@@ -321,6 +337,7 @@ fn compare_ranked_candidates(
     right
         .channel_rank
         .cmp(&left.channel_rank)
+        .then_with(|| right.operation_root.cmp(&left.operation_root))
         .then_with(|| {
             right
                 .result
@@ -337,12 +354,14 @@ fn behavior_channel_rank(
     candidate: &SearchCandidate,
     direct_concept_count: usize,
     relationship_term_count: usize,
+    operation_root: Option<OperationRootRank>,
 ) -> u8 {
     if candidate.sources.contains(&CandidateSource::ExactId) {
         6
     } else if candidate.sources.contains(&CandidateSource::ExactName) {
         5
-    } else if relationship_term_count >= 2 || direct_concept_count >= 2 {
+    } else if operation_root.is_some() || relationship_term_count >= 2 || direct_concept_count >= 2
+    {
         4
     } else if candidate.sources.contains(&CandidateSource::Alias)
         || candidate.sources.contains(&CandidateSource::TermIndex)
@@ -353,6 +372,108 @@ fn behavior_channel_rank(
     } else {
         0
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct OperationRootRank {
+    full_subject_match: bool,
+    predicate_matches: usize,
+    matched_subject_tokens: usize,
+    exact_terminal: bool,
+    terminal_tokens: Reverse<usize>,
+    builder: bool,
+}
+
+fn operation_root_rank(
+    node: &NodeRecord,
+    terms: &[String],
+    query_initialisms: &BTreeSet<String>,
+) -> Option<OperationRootRank> {
+    if !matches!(
+        node.kind,
+        NodeKind::Class
+            | NodeKind::Struct
+            | NodeKind::Interface
+            | NodeKind::Trait
+            | NodeKind::Protocol
+            | NodeKind::Enum
+            | NodeKind::TypeAlias
+    ) || node.source_file().is_none_or(str::is_empty)
+        || source_is_test_or_generated(node)
+    {
+        return None;
+    }
+
+    let terminal_tokens = canonical_field_tokens(&node.name);
+    let builder = normalize_symbol_name(&node.name).ends_with("builder");
+    let subject_tokens = terminal_tokens
+        .iter()
+        .filter(|term| !is_operation_role_token(term) && canonical_predicate_token(term).is_none())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let predicate_tokens = terminal_tokens
+        .iter()
+        .filter_map(|term| canonical_predicate_token(term))
+        .collect::<BTreeSet<_>>();
+    let query_predicates = terms
+        .iter()
+        .filter_map(|term| canonical_predicate_token(term))
+        .collect::<BTreeSet<_>>();
+    let matched_subject_tokens = subject_tokens
+        .iter()
+        .filter(|subject| {
+            terms.binary_search(subject).is_ok() || query_initialisms.contains(*subject)
+        })
+        .count();
+    let predicate_matches = predicate_tokens.intersection(&query_predicates).count();
+    let direct_predicate_matches = terminal_tokens
+        .iter()
+        .filter(|term| {
+            canonical_predicate_token(term).is_some() && terms.binary_search(term).is_ok()
+        })
+        .count();
+    let predicate_only_root = subject_tokens.is_empty() && direct_predicate_matches > 0;
+    let full_subject_match = predicate_only_root
+        || (!subject_tokens.is_empty() && matched_subject_tokens == subject_tokens.len());
+    let exact_terminal =
+        predicate_only_root || (subject_tokens.len() == 1 && matched_subject_tokens == 1);
+    let subject_root = matched_subject_tokens > 0
+        && (builder || full_subject_match || matched_subject_tokens >= 2);
+
+    (predicate_only_root || subject_root).then_some(OperationRootRank {
+        full_subject_match,
+        predicate_matches,
+        matched_subject_tokens,
+        exact_terminal,
+        terminal_tokens: Reverse(terminal_tokens.len()),
+        builder,
+    })
+}
+
+fn query_initialisms(query: &str) -> BTreeSet<String> {
+    let tokens = search_tokens(query);
+    let mut initialisms = BTreeSet::new();
+    // Three-to-five-token initialisms cover common code-domain acronyms while
+    // avoiding ubiquitous two-word prose fragments such as "how is".
+    for width in 3..=5 {
+        for window in tokens.windows(width) {
+            let initialism = window
+                .iter()
+                .filter_map(|token| token.chars().next())
+                .collect::<String>();
+            if initialism.len() == width {
+                initialisms.insert(initialism);
+            }
+        }
+    }
+    initialisms
+}
+
+fn is_operation_role_token(token: &str) -> bool {
+    matches!(
+        token,
+        "builder" | "factory" | "handler" | "manager" | "provider" | "service"
+    )
 }
 
 #[derive(Debug)]
@@ -543,19 +664,33 @@ fn predicate_alignment(node: &NodeRecord, query_terms: &[String]) -> (usize, usi
 
 pub(crate) fn canonical_predicate_token(token: &str) -> Option<&'static str> {
     match token {
-        // Natural-language persistence verbs are equivalent only for ranking
-        // a source behavior that already has trusted multi-concept call
-        // evidence. They never create recall postings or relation eligibility.
-        "record" | "save" | "persist" | "write" | "written" | "store" => Some("persist"),
+        // Action equivalence is ranking-only. It never creates recall
+        // postings, operation-root eligibility, or relationship evidence.
+        "record" | "save" | "persist" | "write" | "written" | "store" | "storage" => {
+            Some("persist")
+        }
         "add" => Some("add"),
         "create" => Some("create"),
+        "change" | "configure" | "set" => Some("configure"),
+        "check" => Some("check"),
+        "compact" => Some("compact"),
+        "convert" => Some("convert"),
+        "delete" => Some("delete"),
         "dispatch" => Some("dispatch"),
         "invoke" => Some("invoke"),
+        "load" => Some("load"),
+        "merge" => Some("merge"),
+        "open" => Some("open"),
+        "optimize" => Some("optimize"),
         "process" => Some("process"),
         "recognize" => Some("recognize"),
         "refresh" => Some("refresh"),
+        "represent" => Some("represent"),
         "resolve" => Some("resolve"),
+        "restore" => Some("restore"),
         "run" | "schedule" => Some("execute"),
+        "update" => Some("update"),
+        "vacuum" => Some("vacuum"),
         _ => None,
     }
 }
@@ -1043,6 +1178,364 @@ mod tests {
         );
 
         assert_eq!(ranked[0].node_id, "n:direct");
+    }
+
+    #[test]
+    fn source_backed_builder_is_the_operation_root_for_natural_questions() {
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:generic",
+                    "writeDeltaTableData",
+                    NodeKind::Function,
+                    "src/operations.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from([
+                    "data".to_owned(),
+                    "delta".to_owned(),
+                    "table".to_owned(),
+                    "write".to_owned(),
+                ]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:builder",
+                    "WriteBuilder",
+                    NodeKind::Struct,
+                    "src/operations/write.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["write".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how does delta write data to a table",
+            &[
+                "data".to_owned(),
+                "delta".to_owned(),
+                "table".to_owned(),
+                "write".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:builder");
+        assert_eq!(ranked[0].channel_rank, 4);
+    }
+
+    #[test]
+    fn source_less_builder_does_not_claim_operation_root_evidence() {
+        let candidates = vec![SearchCandidate {
+            node: node(
+                "n:synthetic-builder",
+                "WriteBuilder",
+                NodeKind::Struct,
+                "",
+                false,
+            ),
+            sources: BTreeSet::from([CandidateSource::TermIndex]),
+            indexed_matches: BTreeSet::from(["write".to_owned()]),
+            relationship_matches: BTreeSet::new(),
+        }];
+
+        let ranked = rank_search_candidates(
+            "how is data written",
+            &["data".to_owned(), "write".to_owned()],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_ne!(ranked[0].channel_rank, 4);
+        assert!(ranked[0].operation_root.is_none());
+    }
+
+    #[test]
+    fn predicate_synonyms_rank_but_do_not_create_operation_root_eligibility() {
+        let candidates = vec![SearchCandidate {
+            node: node(
+                "n:write-builder",
+                "WriteBuilder",
+                NodeKind::Struct,
+                "src/write.rs",
+                false,
+            ),
+            sources: BTreeSet::from([CandidateSource::Fuzzy]),
+            indexed_matches: BTreeSet::new(),
+            relationship_matches: BTreeSet::new(),
+        }];
+
+        let ranked = rank_search_candidates(
+            "how are records saved",
+            &["record".to_owned(), "save".to_owned()],
+            candidates,
+            usize::MAX,
+        );
+
+        assert!(ranked[0].operation_root.is_none());
+        assert_ne!(ranked[0].channel_rank, 4);
+    }
+
+    #[test]
+    fn exact_single_token_type_is_a_representation_root() {
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:method",
+                    "tableSnapshot",
+                    NodeKind::Method,
+                    "src/table.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["snapshot".to_owned(), "table".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:snapshot",
+                    "Snapshot",
+                    NodeKind::Struct,
+                    "src/snapshot.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["snapshot".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "where is a table snapshot represented",
+            &["snapshot".to_owned(), "table".to_owned()],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:snapshot");
+    }
+
+    #[test]
+    fn complete_subject_coverage_precedes_a_generic_mutator_predicate() {
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:add-column",
+                    "AddColumnBuilder",
+                    NodeKind::Struct,
+                    "src/add_column.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["add".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:constraint",
+                    "ConstraintBuilder",
+                    NodeKind::Struct,
+                    "src/constraints.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["constraint".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how are table constraints added",
+            &[
+                "add".to_owned(),
+                "constraint".to_owned(),
+                "table".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:constraint");
+    }
+
+    #[test]
+    fn precise_operation_subject_beats_a_broader_type_with_the_same_predicate() {
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:broad-update",
+                    "UpdateTableMetadataBuilder",
+                    NodeKind::Struct,
+                    "src/table.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["table".to_owned(), "update".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:update",
+                    "UpdateBuilder",
+                    NodeKind::Struct,
+                    "src/update.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["update".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how are rows updated in a table",
+            &["row".to_owned(), "table".to_owned(), "update".to_owned()],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:update");
+    }
+
+    #[test]
+    fn complete_multi_concept_representation_beats_a_role_type() {
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:builder",
+                    "DeltaTableBuilder",
+                    NodeKind::Struct,
+                    "src/builder.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["delta".to_owned(), "table".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:state",
+                    "DeltaTableState",
+                    NodeKind::Struct,
+                    "src/state.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from([
+                    "delta".to_owned(),
+                    "state".to_owned(),
+                    "table".to_owned(),
+                ]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "where is delta table state represented",
+            &[
+                "delta".to_owned(),
+                "represent".to_owned(),
+                "state".to_owned(),
+                "table".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:state");
+    }
+
+    #[test]
+    fn action_specific_root_beats_the_matching_representation_type() {
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:properties",
+                    "TableProperties",
+                    NodeKind::Struct,
+                    "src/properties.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["properties".to_owned(), "table".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:set-properties",
+                    "SetTablePropertiesBuilder",
+                    NodeKind::Struct,
+                    "src/set_properties.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["properties".to_owned(), "table".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how are table properties changed",
+            &[
+                "change".to_owned(),
+                "properties".to_owned(),
+                "table".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:set-properties");
+    }
+
+    #[test]
+    fn phrase_initialism_selects_the_specific_operation_root() {
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:load",
+                    "LoadBuilder",
+                    NodeKind::Struct,
+                    "src/load.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["load".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:cdf-load",
+                    "CdfLoadBuilder",
+                    NodeKind::Struct,
+                    "src/load_cdf.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["load".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how is change data feed loaded",
+            &[
+                "change".to_owned(),
+                "data".to_owned(),
+                "feed".to_owned(),
+                "load".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:cdf-load");
     }
 
     #[test]

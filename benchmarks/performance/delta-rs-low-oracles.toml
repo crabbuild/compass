@@ -1,0 +1,246 @@
+schema = "compass.performance-suite/1"
+
+[[repository]]
+name = "delta-rs"
+url = "https://github.com/delta-io/delta-rs.git"
+commit = "c27874c10043b5ccf0207d27eee148be0a033c6e"
+mutation_suffix = ".rs"
+
+[[repository.query]]
+question = "how is a Delta table opened from a URL"
+required = ["DeltaTableBuilder", "open_table"]
+forbidden = ["VacuumBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::table::builder::DeltaTableBuilder", source = { file = "crates/core/src/table/builder.rs", startLine = 94 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::table::builder::DeltaTableBuilder", source = { file = "crates/core/src/table/builder.rs", startLine = 94 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned source declares DeltaTableBuilder as the URL/configuration entry point for opening a table."
+
+[[repository.query]]
+question = "where is Delta table state represented"
+required = ["DeltaTable", "DeltaTableState"]
+forbidden = ["MergeBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::table::state::DeltaTableState", source = { file = "crates/core/src/table/state.rs", startLine = 33 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::table::state::DeltaTableState", source = { file = "crates/core/src/table/state.rs", startLine = 33 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned source declaration is the table-state representation."
+
+[[repository.query]]
+question = "how is a transaction commit prepared and executed"
+required = ["CommitBuilder", "PreparedCommit"]
+forbidden = ["VacuumBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::kernel::transaction::CommitBuilder", source = { file = "crates/core/src/kernel/transaction/mod.rs", startLine = 591 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::kernel::transaction::CommitBuilder", source = { file = "crates/core/src/kernel/transaction/mod.rs", startLine = 591 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned transaction module defines CommitBuilder as the commit orchestration entry point."
+
+[[repository.query]]
+question = "where are transaction commit properties configured"
+required = ["CommitProperties"]
+forbidden = ["RestoreBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::kernel::transaction::CommitProperties", source = { file = "crates/core/src/kernel/transaction/mod.rs", startLine = 514 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::kernel::transaction::CommitProperties", source = { file = "crates/core/src/kernel/transaction/mod.rs", startLine = 514 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned declaration owns transaction commit configuration."
+
+[[repository.query]]
+question = "how does delta-rs write data to a table"
+required = ["WriteBuilder"]
+forbidden = ["CdfLoadBuilder"]
+expectedDirection = "outgoing"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::write::WriteBuilder", source = { file = "crates/core/src/operations/write/mod.rs", startLine = 128 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::write::WriteBuilder", source = { file = "crates/core/src/operations/write/mod.rs", startLine = 128 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned write operation exposes WriteBuilder as its operation root."
+
+[[repository.query]]
+question = "how are source rows merged into a Delta table"
+required = ["MergeBuilder", "MergeMetrics"]
+forbidden = ["VacuumBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::merge::MergeBuilder", source = { file = "crates/core/src/operations/merge/mod.rs", startLine = 150 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::merge::MergeBuilder", source = { file = "crates/core/src/operations/merge/mod.rs", startLine = 150 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned merge operation exposes MergeBuilder as its operation root."
+
+[[repository.query]]
+question = "how are expired files vacuumed"
+required = ["VacuumBuilder", "VacuumMetrics"]
+forbidden = ["MergeBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::vacuum::VacuumBuilder", source = { file = "crates/core/src/operations/vacuum.rs", startLine = 96 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::vacuum::VacuumBuilder", source = { file = "crates/core/src/operations/vacuum.rs", startLine = 96 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned vacuum operation exposes VacuumBuilder as its operation root."
+
+[[repository.query]]
+question = "how are Delta table files compacted and optimized"
+required = ["OptimizeBuilder"]
+forbidden = ["RestoreBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::optimize::OptimizeBuilder", source = { file = "crates/core/src/operations/optimize.rs", startLine = 277 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::optimize::OptimizeBuilder", source = { file = "crates/core/src/operations/optimize.rs", startLine = 277 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned optimize operation exposes OptimizeBuilder as its operation root."
+
+[[repository.query]]
+question = "how is a Delta table restored to an earlier version"
+required = ["RestoreBuilder", "RestoreMetrics"]
+forbidden = ["DeleteBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::restore::RestoreBuilder", source = { file = "crates/core/src/operations/restore.rs", startLine = 81 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::restore::RestoreBuilder", source = { file = "crates/core/src/operations/restore.rs", startLine = 81 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned restore operation exposes RestoreBuilder as its operation root."
+
+[[repository.query]]
+question = "how are rows deleted from a Delta table"
+required = ["DeleteBuilder", "DeleteMetrics"]
+forbidden = ["RestoreBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::delete::DeleteBuilder", source = { file = "crates/core/src/operations/delete.rs", startLine = 96 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::delete::DeleteBuilder", source = { file = "crates/core/src/operations/delete.rs", startLine = 96 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned delete operation exposes DeleteBuilder as its operation root."
+
+[[repository.query]]
+question = "how are rows updated in a Delta table"
+required = ["UpdateBuilder", "UpdateMetrics"]
+forbidden = ["CdfLoadBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::update::UpdateBuilder", source = { file = "crates/core/src/operations/update.rs", startLine = 86 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::update::UpdateBuilder", source = { file = "crates/core/src/operations/update.rs", startLine = 86 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned update operation exposes UpdateBuilder as its operation root."
+
+[[repository.query]]
+question = "how is change data feed loaded"
+required = ["CdfLoadBuilder"]
+forbidden = ["FileSystemCheckBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::load_cdf::CdfLoadBuilder", source = { file = "crates/core/src/operations/load_cdf.rs", startLine = 47 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::load_cdf::CdfLoadBuilder", source = { file = "crates/core/src/operations/load_cdf.rs", startLine = 47 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned change-data-feed operation exposes CdfLoadBuilder as its root."
+
+[[repository.query]]
+question = "how are missing data files checked"
+required = ["FileSystemCheckBuilder"]
+forbidden = ["CdfLoadBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::filesystem_check::FileSystemCheckBuilder", source = { file = "crates/core/src/operations/filesystem_check.rs", startLine = 43 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::filesystem_check::FileSystemCheckBuilder", source = { file = "crates/core/src/operations/filesystem_check.rs", startLine = 43 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned file-system-check operation exposes FileSystemCheckBuilder as its root."
+
+[[repository.query]]
+question = "how are Parquet files converted into a Delta table"
+required = ["ConvertToDeltaBuilder"]
+forbidden = ["LoadBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::convert_to_delta::ConvertToDeltaBuilder", source = { file = "crates/core/src/operations/convert_to_delta.rs", startLine = 106 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::convert_to_delta::ConvertToDeltaBuilder", source = { file = "crates/core/src/operations/convert_to_delta.rs", startLine = 106 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned conversion operation exposes ConvertToDeltaBuilder as its root."
+
+[[repository.query]]
+question = "where is a new Delta table created"
+required = ["CreateBuilder"]
+forbidden = ["LoadBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::create::CreateBuilder", source = { file = "crates/core/src/operations/create.rs", startLine = 79 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::create::CreateBuilder", source = { file = "crates/core/src/operations/create.rs", startLine = 79 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned create operation exposes CreateBuilder as its operation root."
+
+[[repository.query]]
+question = "how are table constraints added"
+required = ["ConstraintBuilder"]
+forbidden = ["AddColumnBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::constraints::ConstraintBuilder", source = { file = "crates/core/src/operations/constraints.rs", startLine = 28 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::constraints::ConstraintBuilder", source = { file = "crates/core/src/operations/constraints.rs", startLine = 28 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned constraints operation exposes ConstraintBuilder as its root."
+
+[[repository.query]]
+question = "how are columns added to a Delta table"
+required = ["AddColumnBuilder"]
+forbidden = ["ConstraintBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::add_column::AddColumnBuilder", source = { file = "crates/core/src/operations/add_column.rs", startLine = 23 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::add_column::AddColumnBuilder", source = { file = "crates/core/src/operations/add_column.rs", startLine = 23 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned add-column operation exposes AddColumnBuilder as its root."
+
+[[repository.query]]
+question = "how are Delta table properties changed"
+required = ["SetTablePropertiesBuilder"]
+forbidden = ["AddColumnBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::operations::set_tbl_properties::SetTablePropertiesBuilder", source = { file = "crates/core/src/operations/set_tbl_properties.rs", startLine = 22 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::operations::set_tbl_properties::SetTablePropertiesBuilder", source = { file = "crates/core/src/operations/set_tbl_properties.rs", startLine = 22 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned set-properties operation exposes SetTablePropertiesBuilder as its root."
+
+[[repository.query]]
+question = "where is a table snapshot represented"
+required = ["Snapshot"]
+forbidden = ["VacuumBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::kernel::snapshot::Snapshot", source = { file = "crates/core/src/kernel/snapshot/mod.rs", startLine = 156 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::kernel::snapshot::Snapshot", source = { file = "crates/core/src/kernel/snapshot/mod.rs", startLine = 156 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned kernel declaration defines Snapshot as the table snapshot representation."
+
+[[repository.query]]
+question = "how are transaction log storage backends abstracted"
+required = ["LogStore", "LogStoreFactory"]
+forbidden = ["WriteBuilder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "deltalake_core::logstore::LogStore", source = { file = "crates/core/src/logstore/mod.rs", startLine = 369 } }]
+expectedSeeds = [{ qualifiedName = "deltalake_core::logstore::LogStore", source = { file = "crates/core/src/logstore/mod.rs", startLine = 369 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The pinned logstore module defines LogStore as the storage-backend abstraction."
+
+# The negative controls were checked case-insensitively across the exact pinned
+# source tree. Their terms deliberately overlap real generic graph vocabulary,
+# so one-token fallback ranking cannot count as a correct answer.
+
+[[repository.query]]
+question = "QzxvQuantumBananaSync"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The exact composite identifier is absent from the pinned source tree; quantum, banana, and qzxv are also absent."
+
+[[repository.query]]
+question = "FlorbGizmoTransactionQuasar"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The exact composite identifier is absent from the pinned source tree; florb, gizmo, and quasar are also absent."
+
+[[repository.query]]
+question = "NebulaVacuumPineappleWidget"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The exact composite identifier is absent from the pinned source tree; only generic vacuum vocabulary may overlap."
+
+[[repository.query]]
+question = "CeruleanSnapshotWalrusFactory"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The exact composite identifier is absent from the pinned source tree; only generic snapshot or factory vocabulary may overlap."
+
+[[repository.query]]
+question = "ZorpMergeCactusProtocol"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The exact composite identifier is absent from the pinned source tree; only generic merge or protocol vocabulary may overlap."

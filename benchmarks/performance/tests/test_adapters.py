@@ -95,13 +95,13 @@ class AdapterTests(unittest.TestCase):
                 "extract",
                 "/repo",
                 "--code-only",
-                "--no-cluster",
                 "--no-viz",
                 "--store",
                 "json",
                 "--timing",
                 "--out",
                 "/output",
+                "--no-cluster",
             ),
         )
         self.assertEqual(
@@ -116,6 +116,17 @@ class AdapterTests(unittest.TestCase):
                 "json",
             ),
         )
+
+    def test_compass_comparison_profile_controls_inference_and_clustering(self) -> None:
+        adapter = CompassAdapter(
+            Path("/opt/compass"),
+            revision("compass"),
+            inference_level="low",
+            cluster=True,
+        )
+        build = adapter.build_command(Path("/repo"), Path("/output"))
+        self.assertNotIn("--no-cluster", build)
+        self.assertEqual(build[-2:], ("--inference-level", "low"))
 
     def test_graphify_is_explicit_and_isolated(self) -> None:
         adapter = GraphifyAdapter(Path("/venv/bin/python"), revision("graphify"))

@@ -405,7 +405,11 @@ def qualify(args: argparse.Namespace, *, comparison: bool) -> int:
     corpora = []
     shared_gates: list[GateReport] = []
     with workspace.acquire():
-        compass = CompassAdapter.prepare(args.source_root)
+        compass = CompassAdapter.prepare(
+            args.source_root,
+            inference_level=args.inference_level,
+            cluster=comparison,
+        )
         graphify = (
             GraphifyAdapter.prepare(workspace, commit=graphify_commit)
             if comparison
@@ -641,6 +645,12 @@ def _common(parser: argparse.ArgumentParser, *, execution: bool = False) -> None
         parser.add_argument("--build-timeout", type=float, default=1800)
         parser.add_argument("--graph-comparison-timeout", type=float, default=600)
         parser.add_argument("--query-timeout", type=float, default=120)
+        parser.add_argument(
+            "--inference-level",
+            choices=("low", "medium", "high", "max"),
+            default="max",
+            help="select the Compass inference profile (default: max)",
+        )
         parser.add_argument("--baseline", type=Path)
         parser.add_argument("--reuse-corpora-root", type=Path)
         parser.add_argument("--reuse-query-artifacts", type=Path)
