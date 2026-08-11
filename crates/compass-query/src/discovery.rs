@@ -488,6 +488,73 @@ impl CodeQueryEngine {
             }
         }
 
+        // Source-backed type declarations form a compact, complete channel
+        // for representation and abstraction questions. When the existing
+        // ranker proves that the best declaration outranks every omitted
+        // non-type, finish before hydrating broad generic term postings.
+        if let Some(read) = backend.declaration_candidates(
+            &prepared.ranking_terms,
+            candidate_read_limit.saturating_sub(nodes_read),
+        )? {
+            probes = probes
+                .saturating_add(1)
+                .saturating_add(usize::try_from(read.chunks_decoded).unwrap_or(usize::MAX));
+            nodes_read = nodes_read
+                .saturating_add(usize::try_from(read.node_ids_decoded).unwrap_or(usize::MAX));
+            let mut declaration_pool = pool.clone();
+            declaration_pool.extend_total_budget(candidate_limit);
+            for node in read.nodes {
+                if !discovery_scope_matches(&node, scope) {
+                    continue;
+                }
+                let matches = operation_indexed_matches(&node, &prepared.ranking_terms);
+                let id = node.id.clone();
+                let _ = declaration_pool.add(CandidateSource::TermIndex, node);
+                let _ = declaration_pool.add_indexed_matches(&id, matches);
+            }
+            let declaration_pool_truncated = declaration_pool.is_truncated();
+            let ranked = rank_search_candidates(
+                question,
+                &prepared.ranking_terms,
+                declaration_pool.into_vec(),
+                candidate_limit,
+            );
+            let required_seed_count = usize::try_from(limits.max_seeds)
+                .unwrap_or(usize::MAX)
+                .min(usize::try_from(limits.max_nodes).unwrap_or(usize::MAX));
+            if !read.truncated
+                && !declaration_pool_truncated
+                && ranked.len() >= required_seed_count
+                && ranked.iter().take(required_seed_count).all(|candidate| {
+                    candidate
+                        .operation_root
+                        .is_some_and(OperationRootRank::dominates_omitted_non_type)
+                })
+            {
+                return Ok(DiscoveryCandidateSelection {
+                    candidates: ranked
+                        .into_iter()
+                        .map(|result| RankedDiscoveryCandidate {
+                            matched_terms: result.matched_terms,
+                            matched_fields: result.matched_fields,
+                            source: discovery_candidate_source(result.candidate_source),
+                            node: result.node,
+                            score: result.score,
+                            channel_rank: result.channel_rank,
+                            relation_evidence: result.relation_evidence,
+                            operation_root: result.operation_root,
+                        })
+                        .collect(),
+                    nodes_read: u64::try_from(nodes_read).unwrap_or(u64::MAX),
+                    probes: u64::try_from(probes).unwrap_or(u64::MAX),
+                    expanded_relationships: 0,
+                    relationship_terms_supported: backend.supports_relationship_terms()?,
+                    ambiguity_complete: true,
+                    truncated: false,
+                });
+            }
+        }
+
         let reserved_term_capacity = direct_limit / 2;
         let non_term_capacity = direct_limit.saturating_sub(reserved_term_capacity);
         for concept in &concepts {

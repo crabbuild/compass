@@ -402,6 +402,12 @@ impl OperationRootRank {
     pub(crate) const fn is_operation_role_aligned(self) -> bool {
         self.operation_role_aligned
     }
+
+    /// Whether a complete type-declaration recall channel proves that this
+    /// candidate outranks every omitted non-type candidate.
+    pub(crate) const fn dominates_omitted_non_type(self) -> bool {
+        self.full_subject_match && (self.exact_terminal || self.matched_subject_tokens >= 2)
+    }
 }
 
 fn operation_root_rank(

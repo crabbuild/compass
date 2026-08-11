@@ -739,6 +739,70 @@ fn operation_role_fast_path_is_backend_neutral_and_bounded()
 }
 
 #[test]
+fn store_representation_discovery_uses_complete_declarations_before_generic_postings()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let template = graph
+        .nodes
+        .first()
+        .ok_or("fixture graph has no nodes")?
+        .clone();
+    for (id, name) in [
+        ("n:delta-table-state", "DeltaTableState"),
+        ("n:delta-table", "DeltaTable"),
+        ("n:table-state", "TableState"),
+    ] {
+        let mut declaration = template.clone();
+        declaration.id = id.to_owned();
+        declaration.kind = NodeKind::Struct;
+        declaration.name = name.to_owned();
+        declaration.qualified_name = format!("crate::{name}");
+        graph.nodes.push(declaration);
+    }
+    for index in 0..300 {
+        let mut noise = template.clone();
+        noise.id = format!("n:noise-{index:03}");
+        noise.kind = NodeKind::Function;
+        noise.name = format!("delta_table_state_noise_{index:03}");
+        noise.qualified_name = format!("crate::noise::{}", noise.name);
+        graph.nodes.push(noise);
+    }
+    graph.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&graph_path, serde_json::to_vec_pretty(&graph)?)?;
+    let _store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let stored = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("store-cache"),
+        EngineSelection::Store,
+    )?;
+    let mut request = discovery_request("where is delta table state represented");
+    request.limits.max_nodes = 3;
+    request.limits.max_edges = 1;
+    let expected = json.discover(request.clone())?;
+    let actual = stored.discover(request)?;
+
+    assert_discovery_semantically_equal(&actual, &expected)?;
+    assert_eq!(actual.seeds[0].node_id, "n:delta-table-state");
+    assert!(
+        actual.stats.candidate_nodes <= 16,
+        "declaration fast path decoded {} candidate IDs",
+        actual.stats.candidate_nodes
+    );
+    Ok(())
+}
+
+#[test]
 fn store_query_engine_cache_reuses_exact_identity_invalidates_and_evicts()
 -> Result<(), Box<dyn std::error::Error>> {
     let first_directory = tempfile::tempdir()?;

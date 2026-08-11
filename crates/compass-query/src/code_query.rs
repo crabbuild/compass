@@ -1193,6 +1193,35 @@ impl PinnedDiscoveryBackend<'_> {
         }
     }
 
+    pub(crate) fn declaration_candidates(
+        &self,
+        terms: &[String],
+        limit: usize,
+    ) -> Result<Option<TermCandidateRead>, QueryError> {
+        let Self::Store(reader) = self else {
+            return Ok(None);
+        };
+        if !reader
+            .supports_declaration_terms()
+            .map_err(snapshot_error)?
+        {
+            return Ok(None);
+        }
+        let minimum = GRAPH_TERM_POSTING_CHUNK_ITEMS.saturating_mul(terms.len().max(1));
+        let (mut nodes, truncated, work) = reader
+            .declaration_nodes_for_terms_bounded_work(terms, snapshot_limits(limit.max(minimum))?)
+            .map_err(snapshot_error)?;
+        let truncated = truncated || nodes.len() > limit;
+        nodes.truncate(limit);
+        Ok(Some(TermCandidateRead {
+            nodes,
+            matched_concepts: BTreeMap::new(),
+            truncated,
+            node_ids_decoded: work.node_ids_decoded,
+            chunks_decoded: work.chunks_decoded,
+        }))
+    }
+
     fn store_term_candidates(
         &self,
         concepts: &[String],
