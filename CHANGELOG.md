@@ -54,7 +54,9 @@
   immutable store reader with a bounded decoded-object cache per request.
   Intersect multi-concept exact-term IDs before hydrating surviving records,
   and make the normal discovery neighborhood a focused 64 nodes and 128 edges
-  while retaining 500/1,000 as explicit hard ceilings.
+  while retaining 500/1,000 as explicit hard ceilings. Compare the full
+  specificity rank before labeling natural-query alternatives as ambiguous,
+  while preserving equal-rank and exact-name ambiguity.
   Legacy store snapshots remain readable and report incomplete identifier or
   relationship coverage until they are rebuilt; operation queries use the
   existing bounded fallback until the compact role index is available. The

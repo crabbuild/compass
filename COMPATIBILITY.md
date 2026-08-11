@@ -180,6 +180,11 @@ persistence, dispatch, invocation, processing, recognition, refresh,
 resolution, and scheduling) affect ranking only: they cannot add a posting,
 candidate, relationship concept, or relation eligibility. Equal evidence
 vectors remain explicitly ambiguous.
+Natural-query alternatives now require the same channel, operation,
+relationship, and calibrated score rank before they are labeled ambiguous.
+This removes false ambiguity between a specifically ranked operation or
+representation and a weaker same-name/helper candidate. Equal-rank candidates
+and duplicate exact-name lookups remain explicit ambiguity.
 
 For explicit action predicates, discovery first reads one compact exact-term
 index restricted to source-backed operation-role declarations. It may finish

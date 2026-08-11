@@ -1744,14 +1744,13 @@ fn discovery_seeds(
                 .filter(|other| {
                     other.node.id != candidate.node.id
                         && other.channel_rank == candidate.channel_rank
-                        && if candidate.channel_rank == 4 {
-                            other.operation_root == candidate.operation_root
-                                && other.relation_evidence == candidate.relation_evidence
-                        } else {
-                            other.score.total_cmp(&candidate.score).is_eq()
-                                || source_backed_name_collision(candidate, other)
-                                || calibrated_low_margin(candidate.score, other.score)
-                        }
+                        && other.operation_root == candidate.operation_root
+                        && other.relation_evidence == candidate.relation_evidence
+                        && (other.score.total_cmp(&candidate.score).is_eq()
+                            || calibrated_low_margin(candidate.score, other.score)
+                            || (candidate.source == DiscoverySeedSource::ExactName
+                                && other.source == DiscoverySeedSource::ExactName
+                                && source_backed_name_collision(candidate, other)))
                 })
                 .map(|other| DiscoveryAlternative {
                     node_id: other.node.id.clone(),
@@ -2890,6 +2889,37 @@ mod tests {
         let response = engine.discover(query)?;
 
         assert_eq!(response.seeds[0].node_id, "n:table");
+        Ok(())
+    }
+
+    #[test]
+    fn stronger_natural_rank_resolves_same_name_operation_helpers()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut operation = anchored_node(
+            "n:delete-operation",
+            "DeleteBuilder",
+            "src/operations/delete.rs",
+            10,
+        );
+        operation.kind = NodeKind::Struct;
+        operation.qualified_name = "operations::delete::DeleteBuilder".to_owned();
+        let mut nested = anchored_node(
+            "n:delete-merge-helper",
+            "DeleteBuilder",
+            "src/operations/merge.rs",
+            20,
+        );
+        nested.kind = NodeKind::Struct;
+        nested.qualified_name = "operations::merge::DeleteBuilder".to_owned();
+        let engine = engine(vec![nested, operation], Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "how are rows deleted from a table".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "n:delete-operation");
+        assert!(!response.seeds[0].ambiguous);
+        assert!(response.seeds[0].alternatives.is_empty());
         Ok(())
     }
 
