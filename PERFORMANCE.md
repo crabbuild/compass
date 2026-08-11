@@ -429,6 +429,26 @@ three otherwise correct Top-1 rows. Only strict passes are timing-eligible in
 the comparison harness, so these quality results do not manufacture a latency
 claim from failed rows.
 
+A subsequent checked-in Delta qualification on 2026-08-11 used the focused
+64-node/128-edge defaults, ID-first multi-term intersection, and full-rank
+ambiguity comparison. Source review independently confirmed that the unscoped
+`CommitProperties` question legitimately names both the Rust-core and
+Python-facing public declarations, so the oracle now requires that ambiguity
+instead of forcing a language preference. All 20 positive labels and all five
+negative controls passed, and every one of 250 fresh-process plus 250
+persistent-MCP measured samples was correctness-eligible. Across the 25 rows,
+fresh-process p50 ranged from 0.0467 to 0.5495 seconds and p95 from 0.0483 to
+0.5655 seconds; every row stayed below the 0.59-second p95 target. Positive
+persistent-MCP p50 ranged from 0.1599 to 0.4760 seconds, while the five
+constant-work negative controls ranged from 0.00146 to 0.00172 seconds. Fresh
+peak RSS ranged from 19.75 to 84.33 MiB. The shared MCP server peaked at 123.30
+MiB for the complete session, which is process high-water rather than per-query
+memory. The harness performs one unmeasured warmup per row, so “fresh” means a
+new CLI process over warmed filesystem state, not a cold-page-cache claim. The
+complete run passed its correctness gate; raw evidence is retained outside the
+repository under the qualification workspace and is not a promoted
+cross-platform baseline.
+
 ## Incremental and language-hardening observations
 
 A follow-up release-binary smoke run on 2026-08-04 used four small,

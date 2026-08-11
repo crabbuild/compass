@@ -56,7 +56,9 @@
   and make the normal discovery neighborhood a focused 64 nodes and 128 edges
   while retaining 500/1,000 as explicit hard ceilings. Compare the full
   specificity rank before labeling natural-query alternatives as ambiguous,
-  while preserving equal-rank and exact-name ambiguity.
+  while preserving equal-rank and exact-name ambiguity. Admit explicit `path
+  from <symbol> to <symbol>` questions when both endpoints are exact symbol
+  references, without weakening generic multi-concept no-answer admission.
   Legacy store snapshots remain readable and report incomplete identifier or
   relationship coverage until they are rebuilt; operation queries use the
   existing bounded fallback until the compact role index is available. The

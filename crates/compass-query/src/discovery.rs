@@ -1252,6 +1252,9 @@ fn retain_specific_discovery_candidates(
         }
         return false;
     }
+    if is_explicit_binary_path_question(question, ranked) {
+        return false;
+    }
     if distinct_terms < 3
         || ranked.iter().any(|candidate| {
             candidate.channel_rank >= 4
@@ -1263,6 +1266,32 @@ fn retain_specific_discovery_candidates(
     }
     ranked.clear();
     false
+}
+
+fn is_explicit_binary_path_question(
+    question: &str,
+    ranked: &[crate::ranking::RankedSearchResult],
+) -> bool {
+    let question_tokens = search_tokens(question).into_iter().collect::<BTreeSet<_>>();
+    if !["path", "from", "to"]
+        .into_iter()
+        .all(|token| question_tokens.contains(token))
+    {
+        return false;
+    }
+    ranked
+        .iter()
+        .filter_map(|candidate| {
+            let name_tokens = search_tokens(&candidate.node.name);
+            (!name_tokens.is_empty()
+                && name_tokens
+                    .iter()
+                    .all(|token| question_tokens.contains(token)))
+            .then(|| canonical_declaration_name(&candidate.node.name))
+        })
+        .collect::<BTreeSet<_>>()
+        .len()
+        >= 2
 }
 
 fn is_composite_identifier_query(question: &str, terms: &[String]) -> bool {
@@ -2273,6 +2302,32 @@ mod tests {
         let response = engine.discover(request(DiscoveryDirection::Auto))?;
         assert_eq!(response.selected_direction, DiscoveryDirection::Both);
         assert_eq!(response.direction_source, DiscoveryDirectionSource::Neutral);
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_path_question_admits_two_exact_symbol_references()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![
+                anchored_node("n:caller", "Caller", "src/lib.rs", 1),
+                anchored_node("n:target", "Target", "src/lib.rs", 2),
+            ],
+            vec![edge("e:call", "n:caller", "n:target")],
+        );
+        let mut query = request(DiscoveryDirection::Auto);
+        query.question = "path from Caller to Target".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert!(!response.seeds.is_empty());
+        assert!(response.nodes.iter().any(|node| node.id == "n:target"));
+        assert!(
+            response
+                .edges
+                .iter()
+                .any(|edge| { edge.source == "n:caller" && edge.target == "n:target" })
+        );
         Ok(())
     }
 

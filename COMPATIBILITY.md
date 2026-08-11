@@ -207,6 +207,9 @@ isolated generic subword hits, the response is an explicit `no_match` instead
 of presenting unrelated symbols as an answer. This tightens result admission
 without changing the `compass.query.discovery/1` schema or deterministic rank
 ordering of admitted candidates.
+An explicit `path from <symbol> to <symbol>` question is admitted when recall
+proves two distinct exact terminal symbol references. This narrow structural
+case preserves path discovery without admitting generic multi-concept noise.
 
 Discovery traversal bounds adjacency reads by remaining node capacity and
 stops endpoint hydration at the node cap. Store-backed final edge assembly
