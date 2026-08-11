@@ -39,6 +39,7 @@ to yours:
 - [Integrate Compass with other tools](guides/integrating-compass.md)
 - [Set up a coding assistant](guides/assistant-setup.md)
 - [Use versioned graph history](guides/versioned-history.md)
+- [Review pull requests in GitHub](guides/github-pr-review.md)
 - [Operate watch, serve, hooks, and providers](guides/operations.md)
 - [Solve a concrete problem](cookbook/README.md)
 - [Look up commands and contracts](reference/commands.md)
@@ -64,6 +65,7 @@ to yours:
 | [Integrating Compass](guides/integrating-compass.md) | Stable, machine-readable data in another tool |
 | [Assistant setup](guides/assistant-setup.md) | A native Compass skill installed at the right scope |
 | [Versioned history](guides/versioned-history.md) | Immutable graphs and diffs for exact Git commits |
+| [GitHub PR review](guides/github-pr-review.md) | Evidence-qualified reports, safe comments, and deterministic gates |
 | [Operations](guides/operations.md) | Safe operation of long-running and optional surfaces |
 
 ### Copy a recipe
@@ -84,6 +86,7 @@ The [cookbook index](cookbook/README.md) routes to:
 | [Outputs](reference/outputs.md) | `compass-out/`, graph JSON, query results, and history exports |
 | [Document formats](reference/document-formats.md) | Markdown fields, limits, and discovery versus extraction |
 | [Framework routes](reference/framework-routes.md) | Recognized routing shapes, graph projection, and conservative boundaries |
+| [PR Intelligence](reference/pr-intelligence.md) | Canonical report, fingerprints, completeness, risk rubric, and gates |
 | [Compatibility](reference/compatibility.md) | Compass contracts, hard cutovers, and portability |
 | [CompassQL](COMPASSQL.md) | Canonical language and runtime contract |
 | [CompassQL support](COMPASSQL_SUPPORT.md) | Checked syntax and feature matrix |

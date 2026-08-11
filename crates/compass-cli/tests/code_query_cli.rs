@@ -93,7 +93,11 @@ fn natural_query_defaults_to_discovery_and_preserves_explicit_legacy_traversal()
         );
         assert_eq!(outcome.code, 0, "{question}: {}", outcome.stderr);
         assert!(outcome.stdout.starts_with("Discovery:"), "{question}");
-        assert!(outcome.stdout.contains(expected_node), "{question}");
+        assert!(
+            outcome.stdout.contains(expected_node),
+            "{question}: {}",
+            outcome.stdout
+        );
         assert!(outcome.stdout.contains("Direction:"), "{question}");
         assert!(outcome.stdout.contains("Pagination:"), "{question}");
     }

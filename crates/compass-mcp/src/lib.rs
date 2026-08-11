@@ -29,7 +29,8 @@ use compass_output::{
     validate_orientation_graph_identity,
 };
 use compass_prs::{
-    ProcessRunner, SystemRunner, compute_pr_impact, detect_default_branch, fetch_pr_files,
+    ChangeRequestSource, LocalGitChangeRequestSource, ProcessRunner, SystemRunner,
+    compute_pr_impact, detect_default_branch, detect_repository_identity, fetch_pr_files,
     fetch_prs, fetch_worktrees, format_prs_text, parse_ci,
 };
 use compass_query::{
@@ -235,6 +236,24 @@ impl GraphStore {
         )
     }
 
+    fn review_root(&self, project_path: Option<&str>) -> Result<PathBuf, String> {
+        if let Some(project) = project_path {
+            return Ok(PathBuf::from(project));
+        }
+        let graph = if self.inner.default_graph.is_absolute() {
+            self.inner.default_graph.clone()
+        } else {
+            std::env::current_dir()
+                .map_err(|error| error.to_string())?
+                .join(&self.inner.default_graph)
+        };
+        Ok(graph
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(graph.as_path())
+            .to_path_buf())
+    }
+
     fn load(&self, project_path: Option<&str>) -> Result<Arc<GraphContext>, String> {
         let path = self.resolve(project_path)?;
         let metadata =
@@ -427,9 +446,22 @@ impl CompassMcp {
         if name == "query_graph" {
             code_query::validate_query_graph_arguments(arguments)?;
         }
-        let project_path = arguments
-            .remove("project_path")
-            .and_then(|value| value.as_str().map(str::to_owned));
+        let project_path = match arguments.remove("project_path") {
+            Some(Value::String(path)) => Some(path),
+            Some(_) => {
+                return Err(InvocationError::InvalidParams(
+                    "project_path must be a string".to_owned(),
+                ));
+            }
+            None => None,
+        };
+        if name == "review_pull_request" {
+            let root = self
+                .store
+                .review_root(project_path.as_deref())
+                .map_err(InvocationError::Internal)?;
+            return invoke_review_tool(arguments, &root);
+        }
         if name == "query_graph" && natural_discovery_requested(arguments) {
             let graph_path = self
                 .store
@@ -763,6 +795,15 @@ fn tool_specs() -> Vec<Tool> {
             "Return all actionable open PRs (correct base, not stale) with full graph impact data so you can reason about review priority, merge order, and conflict risk. Call this when the user asks 'what PRs should I review?' or 'what's ready to merge?'",
             json!({"type":"object","properties":{"base":{"type":"string","description":"Base branch to filter PRs by (auto-detected if omitted)"},"repo":{"type":"string","description":"GitHub repo (owner/repo). Defaults to current repo."}}}),
         ),
+        tool(
+            "review_pull_request",
+            "Analyze exact local target and pull-request revisions with the canonical Compass PR Intelligence report. Git objects and matching history realizations must already exist; the tool never fetches or executes source.",
+            json!({"type":"object","additionalProperties":false,"properties":{
+                "base":{"type":"string","minLength":1,"maxLength":4096,"description":"Exact local target revision"},
+                "head":{"type":"string","minLength":1,"maxLength":4096,"description":"Exact local pull-request head revision"},
+                "fingerprint":{"type":"string","pattern":"^[0-9a-f]{64}$","description":"Optional extraction fingerprint required at both revisions"}
+            },"required":["base","head"]}),
+        ),
     ];
     for spec in &mut specs {
         Arc::make_mut(&mut spec.input_schema)
@@ -776,6 +817,145 @@ fn tool_specs() -> Vec<Tool> {
         }
     }
     specs
+}
+
+fn invoke_review_tool(
+    arguments: &Map<String, Value>,
+    root: &Path,
+) -> Result<ToolInvocation, InvocationError> {
+    for name in arguments.keys() {
+        if !matches!(name.as_str(), "base" | "head" | "fingerprint") {
+            return Err(InvocationError::InvalidParams(format!(
+                "unknown review_pull_request argument {name:?}"
+            )));
+        }
+    }
+    let base = string_argument(arguments, "base")?;
+    let head = string_argument(arguments, "head")?;
+    for (name, value) in [("base", base), ("head", head)] {
+        if value.is_empty() || value.len() > 4_096 || value.chars().any(char::is_control) {
+            return Err(InvocationError::InvalidParams(format!(
+                "{name} must contain 1 to 4096 non-control characters"
+            )));
+        }
+    }
+    let fingerprint = match arguments.get("fingerprint") {
+        Some(Value::String(value)) => {
+            value
+                .parse::<compass_history::ExtractionFingerprint>()
+                .map_err(|_| {
+                    InvocationError::InvalidParams(
+                        "fingerprint must be a lowercase SHA-256 digest".to_owned(),
+                    )
+                })?;
+            Some(value.as_str())
+        }
+        Some(_) => {
+            return Err(InvocationError::InvalidParams(
+                "fingerprint must be a string".to_owned(),
+            ));
+        }
+        None => None,
+    };
+    let root_text = root.as_os_str().to_string_lossy();
+    if root_text.is_empty()
+        || root_text.len() > 32_768
+        || root_text.contains('\u{fffd}')
+        || root_text.chars().any(char::is_control)
+    {
+        return Err(InvocationError::InvalidParams(
+            "project_path must contain 1 to 32768 non-control characters".to_owned(),
+        ));
+    }
+    let repository = compass_history::Repository::discover(root)
+        .map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
+    let identity = detect_repository_identity(&SystemRunner, repository.root())
+        .map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
+    let request =
+        LocalGitChangeRequestSource::new(&SystemRunner, repository.root(), identity, base, head)
+            .capture()
+            .map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
+    let old = repository
+        .resolve(&request.revisions.target_head)
+        .map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
+    let comparison_revision = request
+        .revisions
+        .merge_result
+        .object_id()
+        .unwrap_or(&request.revisions.pull_request_head);
+    let new = repository
+        .resolve(comparison_revision)
+        .map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
+    let history = compass_history::HistoryStore::open_existing(&repository)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?
+        .ok_or_else(|| {
+            InvocationError::InvalidParams(
+                "no immutable graph history exists; materialize both exact revisions with `compass history build` before invoking review_pull_request"
+                    .to_owned(),
+            )
+        })?;
+    let old_version = select_review_realization(&history, &old, fingerprint)?;
+    let new_version = select_review_realization(&history, &new, fingerprint)?;
+    let report = compass_core::review_change_request_exact(
+        &repository,
+        &history,
+        &request,
+        &old_version,
+        &new_version,
+        compass_pr_intelligence::Completeness::LocalExact,
+    )
+    .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    review_tool_invocation(report)
+}
+
+fn review_tool_invocation(
+    report: compass_pr_intelligence::PullRequestReport,
+) -> Result<ToolInvocation, InvocationError> {
+    let text = format!(
+        "PR review: {:?} advisory risk, {} findings, {} gate results",
+        report.advisory_risk.band,
+        report.findings.len(),
+        report.gates.len()
+    );
+    Ok(ToolInvocation {
+        text,
+        structured_content: Some(transport_envelope(
+            serde_json::to_value(report)
+                .map_err(|error| InvocationError::Internal(error.to_string()))?,
+        )?),
+    })
+}
+
+fn select_review_realization(
+    history: &compass_history::HistoryStore,
+    commit: &compass_history::CommitId,
+    fingerprint: Option<&str>,
+) -> Result<compass_history::PublishedVersion, InvocationError> {
+    if let Some(fingerprint) = fingerprint {
+        let mut matches = history
+            .list(Some(commit))
+            .map_err(|error| InvocationError::Internal(error.to_string()))?
+            .into_iter()
+            .filter(|version| version.version.extraction_fingerprint == fingerprint)
+            .collect::<Vec<_>>();
+        if matches.len() == 1 {
+            return matches.pop().ok_or_else(|| {
+                InvocationError::Internal("matching realization disappeared".to_owned())
+            });
+        }
+        return Err(InvocationError::InvalidParams(format!(
+            "revision {commit} has {} realizations with extraction fingerprint {fingerprint}; expected exactly one",
+            matches.len()
+        )));
+    }
+    history
+        .preferred(commit)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?
+        .ok_or_else(|| {
+            InvocationError::InvalidParams(format!(
+                "revision {commit} has no preferred complete realization; run `compass history build {commit}`"
+            ))
+        })
 }
 
 fn tool(name: &'static str, description: &'static str, schema: Value) -> Tool {
@@ -1795,13 +1975,109 @@ mod tests {
         let graph = temp.path().join("graph.json");
         sample(&graph)?;
         let server = CompassMcp::new(graph);
-        assert_eq!(CompassMcp::tools().len(), 15);
+        assert_eq!(CompassMcp::tools().len(), 16);
         assert_eq!(CompassMcp::resources().len(), 7);
         let text = server.invoke("graph_stats", Map::new());
         assert_eq!(
             text,
             "Nodes: 2\nEdges: 1\nCommunities: 1\nEXTRACTED: 100%\nINFERRED: 0%\nAMBIGUOUS: 0%\n"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn review_tool_contract_is_strict_and_validates_before_repository_access()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let tools = CompassMcp::tools();
+        let review = tools
+            .iter()
+            .find(|tool| tool.name == "review_pull_request")
+            .ok_or("review tool is missing")?;
+        assert_eq!(review.input_schema["additionalProperties"], false);
+        assert_eq!(review.input_schema["required"], json!(["base", "head"]));
+
+        let mut arguments = Map::new();
+        arguments.insert("base".to_owned(), Value::String("main".to_owned()));
+        arguments.insert("head".to_owned(), Value::String("feature".to_owned()));
+        arguments.insert("fingerprint".to_owned(), json!(42));
+        let error = invoke_review_tool(&arguments, Path::new("."))
+            .err()
+            .ok_or("invalid fingerprint unexpectedly reached repository access")?;
+        assert!(error.to_string().contains("fingerprint must be a string"));
+
+        arguments.remove("fingerprint");
+        arguments.insert("unexpected".to_owned(), Value::Bool(true));
+        let error = invoke_review_tool(&arguments, Path::new("."))
+            .err()
+            .ok_or("unknown argument unexpectedly reached repository access")?;
+        assert!(
+            error
+                .to_string()
+                .contains("unknown review_pull_request argument")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn review_tool_envelope_preserves_the_canonical_report_without_projection()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use compass_pr_intelligence::{
+            AdvisoryRisk, Completeness, GateResult, GateState, MergeOutcome, PullRequestReport,
+            ReportIdentity, RepositoryIdentity, RevisionSet, RiskBand, report_digest,
+        };
+
+        let mut report = PullRequestReport {
+            schema: compass_pr_intelligence::REPORT_SCHEMA.to_owned(),
+            identity: ReportIdentity {
+                repository: RepositoryIdentity {
+                    forge: "github".to_owned(),
+                    host: "github.com".to_owned(),
+                    owner: "crabbuild".to_owned(),
+                    name: "compass".to_owned(),
+                },
+                pull_request_number: Some(42),
+                revisions: RevisionSet {
+                    merge_base: "1".repeat(40),
+                    pull_request_head: "2".repeat(40),
+                    target_head: "3".repeat(40),
+                    merge_result: MergeOutcome::Clean {
+                        object_id: "4".repeat(40),
+                    },
+                },
+                graph_schema: "networkx-node-link/v1".to_owned(),
+                extractor_version: "extractor/1".to_owned(),
+                configuration_digest: "5".repeat(64),
+                policy_pack_digest: format!("sha256:{}", "6".repeat(64)),
+                evidence_manifest_digest: format!("sha256:{}", "7".repeat(64)),
+            },
+            completeness: Completeness::LocalExact,
+            findings: Vec::new(),
+            risk_factors: Vec::new(),
+            advisory_risk: AdvisoryRisk {
+                rubric_version: 1,
+                score: Some(0),
+                band: RiskBand::Low,
+                explanation: "Advisory only".to_owned(),
+            },
+            gates: vec![GateResult {
+                id: "proven-contract-break".to_owned(),
+                rule_version: 1,
+                state: GateState::Pass,
+                statement: "No exact break".to_owned(),
+                finding_fingerprints: Vec::new(),
+            }],
+            omissions: Vec::new(),
+            report_digest: format!("sha256:{}", "0".repeat(64)),
+        };
+        report.report_digest = report_digest(&report)?;
+        report.validate()?;
+        let expected = serde_json::to_value(&report)?;
+        let invocation = review_tool_invocation(report).map_err(|error| error.to_string())?;
+        let structured = invocation
+            .structured_content
+            .ok_or("review structured content is missing")?;
+        assert_eq!(structured["result"], expected);
+        assert_eq!(structured["transportTruncation"]["truncated"], false);
         Ok(())
     }
 

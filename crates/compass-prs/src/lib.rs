@@ -1,7 +1,14 @@
 //! Native GitHub PR dashboard and graph-impact analysis for Compass.
 
+mod change_request;
+
+pub use change_request::{
+    ChangeRequestSource, GithubChangeRequestSource, LocalGitChangeRequestSource,
+    detect_repository_identity,
+};
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -107,6 +114,15 @@ pub enum PrsError {
     InvalidJson(serde_json::Error),
     #[error("GitHub returned an invalid PR record: {0}")]
     InvalidRecord(String),
+    #[error("could not write input to {program}: {source}")]
+    Input {
+        program: String,
+        source: std::io::Error,
+    },
+    #[error("change request changed while its evidence was being captured: {0}")]
+    RevisionDrift(String),
+    #[error("change request evidence exceeds a bounded limit: {0}")]
+    EvidenceLimit(String),
     #[error("gh CLI not found or not authenticated. Run: gh auth login")]
     GithubUnavailable,
 }
@@ -118,6 +134,22 @@ pub trait ProcessRunner: Sync {
         arguments: &[String],
         timeout: Duration,
     ) -> Result<ProcessOutput, PrsError>;
+
+    fn run_with_input(
+        &self,
+        program: &str,
+        arguments: &[String],
+        input: &[u8],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, PrsError> {
+        if input.is_empty() {
+            self.run(program, arguments, timeout)
+        } else {
+            Err(PrsError::InvalidRecord(format!(
+                "the configured process runner cannot provide stdin to {program}"
+            )))
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -132,6 +164,16 @@ impl ProcessRunner for SystemRunner {
     ) -> Result<ProcessOutput, PrsError> {
         run_bounded(program, arguments, timeout)
     }
+
+    fn run_with_input(
+        &self,
+        program: &str,
+        arguments: &[String],
+        input: &[u8],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, PrsError> {
+        run_bounded_with_input(program, arguments, input, timeout)
+    }
 }
 
 fn run_bounded(
@@ -139,9 +181,27 @@ fn run_bounded(
     arguments: &[String],
     timeout: Duration,
 ) -> Result<ProcessOutput, PrsError> {
+    run_bounded_with_input(program, arguments, &[], timeout)
+}
+
+fn run_bounded_with_input(
+    program: &str,
+    arguments: &[String],
+    input: &[u8],
+    timeout: Duration,
+) -> Result<ProcessOutput, PrsError> {
+    if input.len() > MAX_PROCESS_OUTPUT {
+        return Err(PrsError::EvidenceLimit(format!(
+            "process input exceeds {MAX_PROCESS_OUTPUT} bytes"
+        )));
+    }
     let mut child = Command::new(program)
         .args(arguments)
-        .stdin(Stdio::null())
+        .stdin(if input.is_empty() {
+            Stdio::null()
+        } else {
+            Stdio::piped()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -149,6 +209,16 @@ fn run_bounded(
             program: program.to_owned(),
             source,
         })?;
+    if !input.is_empty() {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| PrsError::InvalidRecord(format!("{program} stdin was not available")))?;
+        stdin.write_all(input).map_err(|source| PrsError::Input {
+            program: program.to_owned(),
+            source,
+        })?;
+    }
     let stdout = child
         .stdout
         .take()

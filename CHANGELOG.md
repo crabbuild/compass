@@ -12,6 +12,12 @@
   sticky-comment delivery, and `fail-on: none|deterministic`; advisory risk
   never blocks merging.
 
+- Qualify PR dependency risk with typed topology evidence. Ordinary dependency
+  changes no longer count as cross-boundary impact without differing community
+  identities, and changed edges receive a cycle factor only when a bounded,
+  directed strongly connected component proves cycle participation. Semantic
+  diff derived caches advance to engine version 2.
+
 - Keep `GRAPH_REPORT.md` community evidence labels concise while making them
   deterministic and unique within a graph. Repeated hub names now gain compact
   source or wiring-site context, with the graph-local community ID used only

@@ -1,6 +1,6 @@
 ---
 name: compass
-description: "Use for graph-first codebase navigation and repository analysis: architecture maps, dependency or call-graph tracing, symbol and repository search, change-impact review, historical diffs, CompassQL, graph refreshes, exports, MCP serving, or project artifacts. Also use when the user invokes /compass or asks about Compass."
+description: "Use for graph-first codebase navigation and repository analysis: architecture maps, dependency or call-graph tracing, symbol and repository search, pull-request risk review, change-impact review, historical diffs, CompassQL, graph refreshes, exports, MCP serving, or project artifacts. Also use when the user invokes /compass or asks about Compass."
 compatibility: "Requires the Compass CLI; works with Agent Skills-compatible coding agents."
 metadata:
   version: "1"
@@ -186,6 +186,8 @@ Do not force every request through `query`:
 - Repository structure: `tree`.
 - Editor or automation capability negotiation: `capabilities --format json`.
 - Revision-specific evidence: `history`, `diff`, or `--at REV`.
+- Exact pull-request risk evidence: `review` with either local `--base`/`--head`
+  revisions or an explicit GitHub `--pr`/`--repo` identity.
 - Stale structural output: `update`; stale semantic output: `extract`.
 - Existing extraction with stale communities: `cluster-only`; stale names only:
   `label --missing-only`.
@@ -235,7 +237,7 @@ Load only the reference needed for the current request:
 - Watch mode and added external sources: `references/add-watch.md`
 - Wiki, visual, graph-database exports: `references/exports.md`
 - MCP serving and client boundaries: `references/serve.md`
-- Repository cloning, PRs, global and merged graphs: `references/github-and-merge.md`
+- Repository cloning, PR triage and risk review, global and merged graphs: `references/github-and-merge.md`
 - Saved answers and learned project lessons: `references/reflections.md`
 - Diagnostics, benchmarks, and recovery tools: `references/operations.md`
 - Graph schema, confidence, and provenance: `references/extraction-spec.md`

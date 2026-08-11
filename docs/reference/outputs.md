@@ -452,6 +452,29 @@ After writing any HTML page, an interactive Compass CLI asks before opening it
 in the default browser; Enter or `n` leaves the page closed. Scripts, pipes,
 redirected commands, and CI never prompt or launch a browser.
 
+## PR review JSON, Markdown, and SARIF
+
+```bash
+compass review --base BASE --head HEAD --format json
+compass review --base BASE --head HEAD --format markdown
+compass review --base BASE --head HEAD --format sarif
+```
+
+JSON uses strict schema `compass.pr_intelligence.report/1` and is the canonical
+authority. It binds exact revision and graph-profile identity, evidence
+manifest, completeness, ordered `cmpprv1` findings, rubric factors, advisory
+risk, deterministic gates, canonical omissions, and a content digest.
+
+Markdown and text expose the same fingerprints and finding count unless an
+explicit Markdown projection budget omits findings. In that case the footer
+states the exact omitted count; the canonical report and digest are unchanged.
+SARIF 2.1.0 stores each Compass fingerprint in `partialFingerprints` and keeps
+report identity, completeness, factors, gates, evidence, and omissions in
+properties. SARIF severity is a presentation hint, not merge policy.
+
+See the [PR Intelligence contract](pr-intelligence.md) before writing a
+consumer.
+
 ## History export
 
 ### `graph-json`

@@ -409,6 +409,38 @@ diffs, the exact Git patch fallback, and meaningful code-graph changes.
 `--output` is rejected for text and JSON; there is no alternate semantic-diff
 export command.
 
+### `review`
+
+```text
+compass review --base REV --head REV
+  [--repo OWNER/REPO] [--host HOST] [--pull-request-number N]
+  [--fingerprint SHA256]
+  [--format text|json|markdown|sarif]
+  [--output PATH]
+  [--max-findings N --max-output-bytes N]
+
+compass review --pr NUMBER --repo OWNER/REPO [--host HOST]
+  [--fingerprint SHA256]
+  [--format text|json|markdown|sarif]
+  [--output PATH]
+```
+
+`review` emits the canonical `compass.pr_intelligence.report/1` result or one
+of its deterministic projections. Local mode resolves exact objects and never
+fetches. `--repo`, `--host`, and `--pull-request-number` bind a frozen CI
+identity without selecting the GitHub adapter. `--pr` selects bounded GitHub
+metadata/file pagination through `gh` and requires those full objects locally.
+
+The command creates or reuses comparable immutable graph realizations and
+fails explicitly on profile mismatch. A clean candidate is analyzed at its
+deterministic synthetic merge; a conflict uses the PR-head realization and
+reports unavailable/indeterminate merge-dependent conclusions. `--output`
+writes atomically. Markdown-only budgets report exact projection omissions.
+Advisory risk and typed gate state do not change the CLI success code.
+
+See [PR Intelligence](pr-intelligence.md) for schema, rubric, bounds, MCP, and
+gate semantics.
+
 ## Service
 
 ### `serve`

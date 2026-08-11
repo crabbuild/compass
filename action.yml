@@ -1,0 +1,246 @@
+name: Compass PR risk review
+description: Produce one evidence-qualified Compass PR Intelligence report, artifact, summary, and optional sticky comment.
+author: CrabBuild
+
+branding:
+  icon: git-pull-request
+  color: purple
+
+inputs:
+  compass-version:
+    description: Exact released Compass version containing the review command.
+    required: true
+  release-repository:
+    description: GitHub OWNER/REPO containing the pinned Compass release.
+    required: false
+    default: crabbuild/compass
+  base:
+    description: Full target commit object ID. Defaults to the pull_request or merge_group event.
+    required: false
+  head:
+    description: Full pull-request head commit object ID. Defaults to the pull_request or merge_group event.
+    required: false
+  pull-request-number:
+    description: Pull request number. Defaults to the pull_request event.
+    required: false
+  repository:
+    description: Reviewed OWNER/REPO. Defaults to github.repository.
+    required: false
+  fingerprint:
+    description: Optional exact Compass extraction fingerprint required at both realizations.
+    required: false
+  fail-on:
+    description: none or deterministic. Advisory risk never fails the Action.
+    required: false
+    default: none
+  comment:
+    description: Upsert the marker-owned pull-request comment when write permission is safe.
+    required: false
+    default: "true"
+  github-token:
+    description: Token used only by the isolated delivery step. Omit to disable comments.
+    required: false
+  artifact-name:
+    description: Uploaded artifact name.
+    required: false
+    default: compass-pr-review
+  retention-days:
+    description: Artifact retention in days.
+    required: false
+    default: "14"
+
+outputs:
+  report-path:
+    description: Canonical compass.pr_intelligence.report/1 JSON path.
+    value: ${{ steps.paths.outputs.report }}
+  sarif-path:
+    description: SARIF 2.1.0 projection path.
+    value: ${{ steps.paths.outputs.sarif }}
+  outcome:
+    description: pass, deterministic-fail, indeterminate, advisory, or analysis-error.
+    value: ${{ steps.gate.outputs.outcome }}
+  comment-outcome:
+    description: created, updated, permission-denied, fork-read-only, disabled, no-token, no-pull-request, or delivery-error.
+    value: ${{ steps.comment-status.outputs.outcome }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install pinned Compass release
+      shell: bash
+      env:
+        COMPASS_ACTION_VERSION: ${{ inputs.compass-version }}
+        COMPASS_ACTION_RELEASE_REPOSITORY: ${{ inputs.release-repository }}
+      run: bash "$GITHUB_ACTION_PATH/.github/actions/pr-review/install.sh"
+
+    - name: Freeze exact review context
+      id: context
+      shell: bash
+      env:
+        COMPASS_ACTION_BASE: ${{ inputs.base }}
+        COMPASS_ACTION_HEAD: ${{ inputs.head }}
+        COMPASS_ACTION_PR: ${{ inputs.pull-request-number }}
+        COMPASS_ACTION_REPOSITORY: ${{ inputs.repository }}
+        COMPASS_ACTION_COMMENT: ${{ inputs.comment }}
+        COMPASS_ACTION_HAS_TOKEN: ${{ inputs.github-token != '' }}
+      run: node "$GITHUB_ACTION_PATH/.github/actions/pr-review/prepare.mjs"
+
+    - name: Prepare report paths
+      id: paths
+      shell: bash
+      run: |
+        review_dir="$RUNNER_TEMP/compass-pr-review-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        mkdir -p "$review_dir"
+        {
+          echo "directory=$review_dir"
+          echo "report=$review_dir/report.json"
+          echo "markdown=$review_dir/report.md"
+          echo "sarif=$review_dir/report.sarif"
+          echo "log=$review_dir/analysis.log"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Analyze exact candidate without write credentials
+      id: analyze
+      shell: bash
+      env:
+        COMPASS_ACTION_BASE: ${{ steps.context.outputs.base }}
+        COMPASS_ACTION_HEAD: ${{ steps.context.outputs.head }}
+        COMPASS_ACTION_FINGERPRINT: ${{ inputs.fingerprint }}
+        COMPASS_ACTION_REPOSITORY: ${{ steps.context.outputs.repository }}
+        COMPASS_ACTION_HOST: ${{ steps.context.outputs.host }}
+        COMPASS_ACTION_PR: ${{ steps.context.outputs.pull-request-number }}
+        COMPASS_ACTION_REPORT: ${{ steps.paths.outputs.report }}
+        COMPASS_ACTION_LOG: ${{ steps.paths.outputs.log }}
+      run: |
+        args=(review --base "$COMPASS_ACTION_BASE" --head "$COMPASS_ACTION_HEAD" --repo "$COMPASS_ACTION_REPOSITORY" --host "$COMPASS_ACTION_HOST" --format json --output "$COMPASS_ACTION_REPORT")
+        if [ -n "$COMPASS_ACTION_PR" ]; then
+          args+=(--pull-request-number "$COMPASS_ACTION_PR")
+        fi
+        if [ -n "$COMPASS_ACTION_FINGERPRINT" ]; then
+          args+=(--fingerprint "$COMPASS_ACTION_FINGERPRINT")
+        fi
+        set +e
+        compass "${args[@]}" >"$COMPASS_ACTION_LOG.stdout" 2>"$COMPASS_ACTION_LOG"
+        status=$?
+        set -e
+        if [ "$status" -eq 0 ]; then
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+          echo "exit-code=$status" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Render bounded Markdown and SARIF
+      if: steps.analyze.outputs.ok == 'true'
+      shell: bash
+      env:
+        COMPASS_ACTION_BASE: ${{ steps.context.outputs.base }}
+        COMPASS_ACTION_HEAD: ${{ steps.context.outputs.head }}
+        COMPASS_ACTION_FINGERPRINT: ${{ inputs.fingerprint }}
+        COMPASS_ACTION_REPOSITORY: ${{ steps.context.outputs.repository }}
+        COMPASS_ACTION_HOST: ${{ steps.context.outputs.host }}
+        COMPASS_ACTION_PR: ${{ steps.context.outputs.pull-request-number }}
+        COMPASS_ACTION_MARKDOWN: ${{ steps.paths.outputs.markdown }}
+        COMPASS_ACTION_SARIF: ${{ steps.paths.outputs.sarif }}
+      run: |
+        common=(--base "$COMPASS_ACTION_BASE" --head "$COMPASS_ACTION_HEAD" --repo "$COMPASS_ACTION_REPOSITORY" --host "$COMPASS_ACTION_HOST")
+        if [ -n "$COMPASS_ACTION_PR" ]; then
+          common+=(--pull-request-number "$COMPASS_ACTION_PR")
+        fi
+        if [ -n "$COMPASS_ACTION_FINGERPRINT" ]; then
+          common+=(--fingerprint "$COMPASS_ACTION_FINGERPRINT")
+        fi
+        compass review "${common[@]}" --format markdown --max-findings 100 --max-output-bytes 55000 --output "$COMPASS_ACTION_MARKDOWN"
+        compass review "${common[@]}" --format sarif --output "$COMPASS_ACTION_SARIF"
+
+    - name: Write truthful job summary
+      shell: bash
+      env:
+        COMPASS_ACTION_OK: ${{ steps.analyze.outputs.ok }}
+        COMPASS_ACTION_MARKDOWN: ${{ steps.paths.outputs.markdown }}
+        COMPASS_ACTION_LOG: ${{ steps.paths.outputs.log }}
+      run: node "$GITHUB_ACTION_PATH/.github/actions/pr-review/summary.mjs"
+
+    - name: Upload review evidence on GitHub.com
+      if: github.server_url == 'https://github.com'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.paths.outputs.directory }}/*
+        if-no-files-found: error
+        retention-days: ${{ inputs.retention-days }}
+
+    - name: Upload review evidence on GitHub Enterprise Server
+      if: github.server_url != 'https://github.com'
+      uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1, required by GHES
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.paths.outputs.directory }}/*
+        if-no-files-found: error
+        retention-days: ${{ inputs.retention-days }}
+
+    - name: Upsert safe marker-owned comment
+      id: deliver
+      if: steps.analyze.outputs.ok == 'true' && steps.context.outputs.allow-comment == 'true'
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const deliver = require(`${process.env.GITHUB_ACTION_PATH}/.github/actions/pr-review/delivery.cjs`);
+          await deliver({
+            github,
+            core,
+            reportPath: process.env.COMPASS_ACTION_REPORT,
+            markdownPath: process.env.COMPASS_ACTION_MARKDOWN,
+            repository: process.env.COMPASS_ACTION_REPOSITORY,
+            host: process.env.COMPASS_ACTION_HOST,
+            pullRequestNumber: Number(process.env.COMPASS_ACTION_PR),
+            expectedBase: process.env.COMPASS_ACTION_BASE,
+            expectedHead: process.env.COMPASS_ACTION_HEAD,
+            actionIdentity: 'crabbuild/compass/pr-review@1',
+          });
+      env:
+        COMPASS_ACTION_REPORT: ${{ steps.paths.outputs.report }}
+        COMPASS_ACTION_MARKDOWN: ${{ steps.paths.outputs.markdown }}
+        COMPASS_ACTION_REPOSITORY: ${{ steps.context.outputs.repository }}
+        COMPASS_ACTION_HOST: ${{ steps.context.outputs.host }}
+        COMPASS_ACTION_PR: ${{ steps.context.outputs.pull-request-number }}
+        COMPASS_ACTION_BASE: ${{ steps.context.outputs.base }}
+        COMPASS_ACTION_HEAD: ${{ steps.context.outputs.head }}
+
+    - name: Record disabled or fork-safe comment outcome
+      if: steps.context.outputs.allow-comment != 'true'
+      id: no-delivery
+      shell: bash
+      env:
+        COMPASS_ACTION_COMMENT_REASON: ${{ steps.context.outputs.comment-reason }}
+      run: |
+        echo "Comment delivery skipped: $COMPASS_ACTION_COMMENT_REASON"
+
+    - name: Record comment delivery outcome in job summary
+      id: comment-status
+      if: always()
+      shell: bash
+      env:
+        COMPASS_ACTION_COMMENT_OUTCOME: ${{ steps.deliver.outputs.outcome || steps.context.outputs.comment-reason }}
+      run: |
+        case "$COMPASS_ACTION_COMMENT_OUTCOME" in
+          created|updated|permission-denied|fork-read-only|disabled|no-token|no-pull-request) ;;
+          *) COMPASS_ACTION_COMMENT_OUTCOME=delivery-error ;;
+        esac
+        echo "outcome=$COMPASS_ACTION_COMMENT_OUTCOME" >> "$GITHUB_OUTPUT"
+        printf '\n### Comment delivery\n\n`%s`\n' "$COMPASS_ACTION_COMMENT_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Apply deterministic gate policy last
+      id: gate
+      shell: bash
+      env:
+        COMPASS_ACTION_ANALYSIS_OK: ${{ steps.analyze.outputs.ok }}
+        COMPASS_ACTION_REPORT: ${{ steps.paths.outputs.report }}
+        COMPASS_ACTION_FAIL_ON: ${{ inputs.fail-on }}
+        COMPASS_ACTION_EXPECTED_REPOSITORY: ${{ steps.context.outputs.repository }}
+        COMPASS_ACTION_EXPECTED_HOST: ${{ steps.context.outputs.host }}
+        COMPASS_ACTION_EXPECTED_PR: ${{ steps.context.outputs.pull-request-number }}
+        COMPASS_ACTION_EXPECTED_BASE: ${{ steps.context.outputs.base }}
+        COMPASS_ACTION_EXPECTED_HEAD: ${{ steps.context.outputs.head }}
+      run: node "$GITHUB_ACTION_PATH/.github/actions/pr-review/gate.mjs"

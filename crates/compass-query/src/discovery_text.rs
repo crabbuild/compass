@@ -454,6 +454,10 @@ fn canonical_response_bytes(
     response: &DiscoveryQueryResponse,
 ) -> Result<Vec<u8>, serde_json::Error> {
     let mut canonical = response.clone();
+    // Execution counters may differ between equivalent JSON, SQLite, and
+    // immutable-history backends. They are operational telemetry, not part of
+    // the semantic result guarded by pagination and result envelopes.
+    canonical.stats = Default::default();
     canonical.relation_contexts.sort();
     canonical.relation_contexts.dedup();
     canonical.scope.sort_by(|left, right| {
@@ -813,6 +817,22 @@ mod tests {
         assert_ne!(
             discovery_request_digest(&left, false)?,
             discovery_request_digest(&right, true)?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_result_digest_excludes_backend_execution_counters()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let left = response()?;
+        let mut right = left.clone();
+        right.stats.candidate_probes = 17;
+        right.stats.candidate_nodes = 23;
+        right.stats.expanded_relationships = 42;
+
+        assert_eq!(
+            discovery_response_digest(&left)?,
+            discovery_response_digest(&right)?
         );
         Ok(())
     }

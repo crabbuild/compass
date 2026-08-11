@@ -174,7 +174,20 @@ pub struct SemanticFinding {
     pub verification: Verification,
     pub reviewer_action: String,
     pub evidence: Vec<EvidenceRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependency_topology: Option<DependencyTopology>,
     pub completeness: BTreeMap<String, Completeness>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DependencyTopology {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_community: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_community: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participates_in_cycle: Option<bool>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -294,6 +307,15 @@ pub trait SnapshotReader {
         side: SnapshotSide,
         symbol_id: &str,
     ) -> Result<Vec<String>, SemanticDiffError>;
+
+    fn dependency_participates_in_cycle(
+        &self,
+        _side: SnapshotSide,
+        _source: &str,
+        _target: &str,
+    ) -> Result<Option<bool>, SemanticDiffError> {
+        Ok(None)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

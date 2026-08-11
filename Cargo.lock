@@ -973,6 +973,7 @@ dependencies = [
  "compass-model",
  "compass-output",
  "compass-postgres",
+ "compass-pr-intelligence",
  "compass-program",
  "compass-prs",
  "compass-query",
@@ -1013,9 +1014,11 @@ dependencies = [
  "compass-languages",
  "compass-model",
  "compass-output",
+ "compass-pr-intelligence",
  "compass-program",
  "compass-reflect",
  "compass-resolve",
+ "compass-semantic-diff",
  "compass-store",
  "notify",
  "num_cpus",
@@ -1208,8 +1211,10 @@ dependencies = [
  "compass-core",
  "compass-files",
  "compass-graph",
+ "compass-history",
  "compass-model",
  "compass-output",
+ "compass-pr-intelligence",
  "compass-prs",
  "compass-query",
  "compass-store",
@@ -1257,6 +1262,7 @@ dependencies = [
  "compass-graph",
  "compass-history",
  "compass-model",
+ "compass-pr-intelligence",
  "compass-query",
  "rayon",
  "serde",
@@ -1285,6 +1291,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "compass-pr-intelligence"
+version = "0.3.7"
+dependencies = [
+ "compass-semantic-diff",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "compass-program"
 version = "0.3.7"
 dependencies = [
@@ -1306,8 +1323,10 @@ version = "0.3.7"
 dependencies = [
  "compass-files",
  "compass-model",
+ "compass-pr-intelligence",
  "regex",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.19",
  "time",

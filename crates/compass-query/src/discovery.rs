@@ -1082,6 +1082,9 @@ fn retain_specific_discovery_candidates(
     terms: &[String],
     ranked: &mut Vec<crate::ranking::RankedSearchResult>,
 ) -> bool {
+    if crate::intent::plan_natural_query(question).is_ok_and(|plan| plan.routes_to_typed_query()) {
+        return false;
+    }
     let distinct_terms = terms.iter().collect::<BTreeSet<_>>().len();
     let composite_identifier = !question.chars().any(char::is_whitespace)
         && question

@@ -77,11 +77,19 @@ long-lived. Every command in this group writes local state.
   registry.
 - `compass prs`: inspect pull requests, worktrees, likely conflicts, base
   branches, and graph impact.
+- `compass review`: analyze one exact target/head candidate and emit a typed PR
+  Intelligence report as reviewer text, canonical JSON, bounded Markdown, or
+  SARIF. Local mode resolves `--base` and `--head` without fetching; GitHub mode
+  freezes the revisions identified by `--pr` and `--repo` and requires those
+  objects in the local repository.
 - `compass merge-driver`: three-way merge entry point for a configured Git merge
   driver, not an ordinary file merge command.
 
 Keep repository origins and graph revisions visible when composing results.
 Never treat PR impact as proof of a textual conflict.
+Advisory risk from `review` is reviewer evidence, not an exit-status policy.
+Only the Action's explicit `fail-on: deterministic` setting may turn a proven
+deterministic gate failure into a failing check.
 
 ## Knowledge and semantic operations
 

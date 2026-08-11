@@ -20,6 +20,7 @@ mod provider_commands;
 mod prs_commands;
 mod query_commands;
 mod result_commands;
+mod review_commands;
 mod semantic_commands;
 mod semantic_diff_commands;
 mod semantic_diff_render;
@@ -387,6 +388,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "add" => ingest_commands::command_add(frontend, &args),
         "label" => label_commands::command_label(frontend, &args),
         "prs" => prs_commands::command_prs(frontend, &args),
+        "review" => review_commands::command(&args),
         "hook" => hook_commands::command_hook(frontend, &args),
         "hook-spawn" => hook_commands::command_hook_spawn(frontend, &args),
         "hook-refresh" => command_hook_refresh(frontend, &args),
