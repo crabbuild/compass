@@ -417,6 +417,26 @@ graph, averaging 904.9 bytes each. The artifact-size opportunity is therefore
 real, but it is in shared provenance/anchor representation rather than removal
 of occurrence-distinct parallel edges.
 
+### Focused all-level deterministic replay
+
+The same pinned delta-rs corpus was then built at `medium`, `high`, and `max`
+with clustered default-SQLite output. A second forced build at each level
+reproduced the exact first graph digest:
+
+| Level | Nodes | Relationships | Communities | JSON bytes | First build | Peak RSS | SHA-256 prefix |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| low | 9,982 | 25,206 | 532 | 34,116,625 | 4.30 s median | 434.8 MiB median | `971d5882` |
+| medium | 9,982 | 25,219 | 528 | 34,137,117 | 4.43 s | 433.0 MiB | `27492c72` |
+| high | 21,368 | 56,640 | 749 | 85,047,812 | 5.91 s | 722.8 MiB | `8a70927b` |
+| max | 34,384 | 93,247 | 1,078 | 143,936,676 | 9.02 s | 1,120.9 MiB | `dc87abf2` |
+
+Only low has three measured samples; the other timing/RSS rows are one sample
+plus an unmeasured deterministic rebuild. The replay is focused corpus
+evidence, not the required eight-repository all-level qualification. It shows
+that medium adds only 13 source-backed inferred edges on delta-rs, while high
+and max expose a distinct external/deferred graph-size and memory ceiling that
+low-only tuning does not address.
+
 ## Work required to surpass Graphify
 
 1. **Move inference admission before materialization.** Thread the selected

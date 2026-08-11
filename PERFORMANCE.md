@@ -434,6 +434,25 @@ artifact cost, but semantic-pair deduplication is not a valid remedy. Further
 compaction must preserve every distinct site, direction, occurrence rule, and
 provenance record.
 
+A focused all-level delta-rs replay then exercised `medium`, `high`, and `max`
+with the same clustered default-SQLite profile and forced each build a second
+time. Every profile reproduced its exact graph SHA-256:
+
+| Level | Nodes | Relationships | Communities | JSON bytes | First build | Peak RSS | SHA-256 prefix |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| low | 9,982 | 25,206 | 532 | 34,116,625 | 4.30 s median | 434.8 MiB median | `971d5882` |
+| medium | 9,982 | 25,219 | 528 | 34,137,117 | 4.43 s | 433.0 MiB | `27492c72` |
+| high | 21,368 | 56,640 | 749 | 85,047,812 | 5.91 s | 722.8 MiB | `8a70927b` |
+| max | 34,384 | 93,247 | 1,078 | 143,936,676 | 9.02 s | 1,120.9 MiB | `dc87abf2` |
+
+The low row retains the three-sample result above; the other performance rows
+are single samples plus an unmeasured exact forced rebuild, not promoted
+baselines. This proves deterministic nested publication on the pinned corpus
+but not complete-suite qualification. It also exposes a separate high/max
+memory problem: admitting external and deferred inference more than doubles
+the clustered graph and drives max past 1 GiB, so low-only improvements cannot
+stand in for all-level performance.
+
 A subsequent query-hydration replay used the same pinned delta-rs SQLite
 artifact and seven fresh release-binary processes per independently labeled
 negative identifier. Moving the already-established absent composite-
