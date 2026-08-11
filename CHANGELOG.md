@@ -39,7 +39,10 @@
   back to full Louvain for removals or oversized regions. Reduce immutable-store
   query startup reads, reject unsupported one-term fallback seeds for
   multi-concept discovery, and add a pinned Delta suite with independently
-  labeled positive and negative accuracy oracles.
+  labeled positive and negative accuracy oracles. Apply the established absent
+  composite-identifier no-answer rule before generic term and relationship
+  posting hydration, preserving exact ID/name ranking and ambiguity while
+  making proven no-answer queries constant-work.
 
 - Improve agent discovery accuracy and latency with deterministic identifier-
   subword postings, exact trusted-call relationship-term postings, bounded

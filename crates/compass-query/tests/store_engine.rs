@@ -298,6 +298,39 @@ fn discovery_is_identical_for_json_store_direct_document_and_immutable_selectors
 }
 
 #[test]
+fn composite_identifier_no_match_skips_store_posting_hydration()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let stored = open_with_store(
+        &store,
+        &graph_path,
+        None,
+        &directory.path().join("store-cache"),
+    )?;
+    let request = discovery_request("NebulaUserServiceWidget");
+    let expected = json.discover(request.clone())?;
+    let actual = stored.discover(request)?;
+
+    assert_discovery_semantically_equal(&actual, &expected)?;
+    for response in [actual, expected] {
+        assert!(response.seeds.is_empty());
+        assert_eq!(response.stats.candidate_nodes, 0);
+        assert_eq!(response.stats.candidate_probes, 2);
+        assert!(!response.truncated);
+    }
+    Ok(())
+}
+
+#[test]
 fn discovery_common_prefix_maximum_terms_is_bounded_and_backend_equal()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

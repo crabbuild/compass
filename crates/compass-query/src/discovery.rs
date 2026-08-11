@@ -393,6 +393,27 @@ impl CodeQueryEngine {
             }
         }
 
+        // An absent composite identifier is intentionally exact-only: the
+        // final specificity gate below rejects every alias, term,
+        // relationship, and fuzzy candidate for this query shape. Finish a
+        // proven no-match now instead of hydrating generic postings that
+        // cannot be admitted. Exact hits continue through the normal ranking
+        // path so their contextual seeds and ambiguity remain unchanged.
+        if is_composite_identifier_query(question, &prepared.ranking_terms)
+            && pool.len() == 0
+            && exact_name_recall_complete
+        {
+            return Ok(DiscoveryCandidateSelection {
+                candidates: Vec::new(),
+                nodes_read: u64::try_from(nodes_read).unwrap_or(u64::MAX),
+                probes: u64::try_from(probes).unwrap_or(u64::MAX),
+                expanded_relationships: 0,
+                relationship_terms_supported: backend.supports_relationship_terms()?,
+                ambiguity_complete: true,
+                truncated: false,
+            });
+        }
+
         let reserved_term_capacity = direct_limit / 2;
         let non_term_capacity = direct_limit.saturating_sub(reserved_term_capacity);
         for concept in &concepts {
@@ -1083,12 +1104,7 @@ fn retain_specific_discovery_candidates(
     ranked: &mut Vec<crate::ranking::RankedSearchResult>,
 ) -> bool {
     let distinct_terms = terms.iter().collect::<BTreeSet<_>>().len();
-    let composite_identifier = !question.chars().any(char::is_whitespace)
-        && question
-            .chars()
-            .all(|character| character.is_alphanumeric() || character == '_')
-        && distinct_terms >= 3;
-    if composite_identifier {
+    if is_composite_identifier_query(question, terms) {
         if !ranked.iter().any(|candidate| candidate.channel_rank >= 5) {
             ranked.clear();
             return true;
@@ -1106,6 +1122,14 @@ fn retain_specific_discovery_candidates(
     }
     ranked.clear();
     false
+}
+
+fn is_composite_identifier_query(question: &str, terms: &[String]) -> bool {
+    !question.chars().any(char::is_whitespace)
+        && question
+            .chars()
+            .all(|character| character.is_alphanumeric() || character == '_')
+        && terms.iter().collect::<BTreeSet<_>>().len() >= 3
 }
 
 fn operation_predicate_posting_complete(
@@ -2000,6 +2024,8 @@ mod tests {
         let response = engine.discover(query)?;
 
         assert!(response.seeds.is_empty());
+        assert_eq!(response.stats.candidate_nodes, 0);
+        assert_eq!(response.stats.candidate_probes, 2);
         assert!(
             response
                 .diagnostics
@@ -2027,6 +2053,8 @@ mod tests {
         let response = engine.discover(query)?;
 
         assert!(response.seeds.is_empty());
+        assert_eq!(response.stats.candidate_nodes, 0);
+        assert_eq!(response.stats.candidate_probes, 2);
         assert!(!response.truncated);
         assert!(
             response

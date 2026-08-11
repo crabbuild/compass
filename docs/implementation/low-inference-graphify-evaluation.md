@@ -72,6 +72,30 @@ Persistent Compass p50 was `0.024` to `0.555` seconds for those rows, showing
 that startup removal helps most when little graph work remains but does not
 dominate broader searches.
 
+An additional 2026-08-11 hydration replay isolated the remaining negative-
+query cost on the same immutable SQLite artifact. Seven fresh release-binary
+processes per row showed that the four slow rows decoded 684 to 3,471 generic
+candidate IDs even though the existing composite-identifier specificity rule
+would reject every non-exact channel when no exact candidate exists. Moving
+that no-answer decision directly after exact-ID and exact-name lookup produced
+these medians:
+
+| Negative identifier | Before | After | Candidate nodes after |
+| --- | ---: | ---: | ---: |
+| `QzxvQuantumBananaSync` | 0.04 s | 0.02 s | 0 |
+| `FlorbGizmoTransactionQuasar` | 0.37 s | 0.05 s | 0 |
+| `NebulaVacuumPineappleWidget` | 0.38 s | 0.02 s | 0 |
+| `CeruleanSnapshotWalrusFactory` | 0.35 s | 0.01 s | 0 |
+| `ZorpMergeCactusProtocol` | 0.52 s | 0.02 s | 0 |
+
+All five remained deterministic no-answer results with two exact probes, and
+the exact composite `AddColumnBuilder` remained an `exact_name` hit. The full
+`compass-query` suite, store/JSON parity regression, and the independently
+labeled relevance qualification passed. These samples had warm filesystem
+caches and are a focused before/after result, not a new cross-platform or
+positive-query speed claim. They demonstrate that candidate hydration, not
+process startup or rendering, was the dominant cost for this negative shape.
+
 The low graph contained 9,982 nodes and 25,206 relationships, versus
 Graphify's 9,670 nodes and 27,173 relationships. Compass published 25,206
 exact-evidence relationships: 24,489 AST, 615 artifact, 100 convention, and
@@ -361,7 +385,9 @@ candidate and occurrence materialization at the producer/cache handoff.
    candidate hydration, traversal, and text rendering independently; qualify
    both fresh CLI and persistent MCP sessions. The immediate cross-tool gate
    is at most 0.59 s on this corpus without increasing query work or weakening
-   deterministic results.
+   deterministic results. Composite-identifier negatives now meet this gate
+   with constant exact-channel work; positive and ordinary natural-language
+   rows still require independent hydration and ranking qualification.
 5. **Create an independent quality denominator.** Graphify overlap is useful
    differential evidence, not truth. Expand compiler/source oracles and
    adjudicated samples for declarations, imports, calls, members, returns,

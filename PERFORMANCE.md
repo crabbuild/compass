@@ -359,6 +359,17 @@ is retained as an honest intermediate bound: eliminating the remaining gap
 requires compact or streamed evidence before corpus-wide per-file candidate
 and occurrence objects coexist, not additional late filtering.
 
+A subsequent query-hydration replay used the same pinned delta-rs SQLite
+artifact and seven fresh release-binary processes per independently labeled
+negative identifier. Moving the already-established absent composite-
+identifier admission rule ahead of generic posting hydration reduced median
+latency from `0.04`--`0.52` seconds to `0.01`--`0.05` seconds. The slowest row
+fell from `0.52` to `0.02` seconds while decoded candidate work fell from
+3,471 nodes to zero; every row performed only exact-ID and exact-name probes.
+All five negative oracles remained no-answer, and the exact composite
+`AddColumnBuilder` still resolved through `exact_name`. This is a focused
+warm-filesystem diagnostic rather than a promoted cross-platform baseline.
+
 ## Incremental and language-hardening observations
 
 A follow-up release-binary smoke run on 2026-08-04 used four small,
