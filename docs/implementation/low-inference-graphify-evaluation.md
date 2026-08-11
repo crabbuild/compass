@@ -19,6 +19,76 @@ no-answer check exposed Compass's willingness to return candidates after only
 one generic subword matched. Low inference is therefore an opt-in precision
 and size control, not evidence that the performance work is complete.
 
+## Post-mitigation replay
+
+A complete focused replay ran on 2026-08-11 at Compass commit
+`54b69f390b2051a5a55e939246b9e2d7961fa57a`. It used the same pinned delta-rs
+and Graphify commits, three build repetitions, ten measured batches for each
+of 20 independently source-reviewed positive queries and five independently
+source-reviewed negative controls, and one unmeasured warmup per query mode.
+The run was complete, but failed its declared qualification gates; none of the
+thresholds or oracle labels were relaxed.
+
+| Build workload | Compass low p50 | Graphify p50 | Graphify / Compass | Compass RSS | Graphify RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Cold | 4.312 s | 7.337 s | 1.70x | 1,101.17 MiB | 149.47 MiB |
+| Unchanged warm | 0.318 s | 3.833 s | 12.04x | 24.47 MiB | 230.44 MiB |
+| One-file incremental | 1.218 s | 3.810 s | 3.13x | 141.11 MiB | 232.42 MiB |
+
+The Graphify incremental samples were individually eligible and stable
+(`3.808`, `3.810`, and `3.835` seconds), although this focused runner did not
+publish an aggregate ratio for that row. The displayed p50 and ratio are the
+median and direct quotient of those retained samples. Compared with the
+earlier diagnostic, bounded incremental clustering reduced Compass's p50 from
+4.111 seconds to 1.218 seconds and peak RSS from 1,312.2 MiB to 141.11 MiB.
+Cold time and memory remained essentially unchanged, so early admission has
+not yet moved far enough upstream to avoid the dominant extraction and
+resolution allocations.
+
+| Independently labeled query metric | Compass low | Graphify |
+| --- | ---: | ---: |
+| Positive Top-1 | 8/20 (40%) | 1/20 (5%) |
+| Positive MRR@10 | 0.4917 | 0.1125 |
+| Positive recall@10 | 60% | 20% |
+| Complete positive answer | 6/20 (30%) | 1/20 (5%) |
+| Negative-control accuracy | 5/5 (100%) | 5/5 (100%) |
+
+These scores count one deterministic measured iteration per label; all ten
+measured batches produced the same ranking evidence. Compass therefore
+substantially outscored Graphify on this focused source-reviewed set and passed
+all of these generic-subword negative controls. It still failed 12 strict
+positive rows through a combination of a wrong top seed, unexpected ambiguity,
+or a missing independently labeled seed. Graphify failed 19 strict positive
+rows. This is evidence for these 25 labels, not a population-wide accuracy
+estimate.
+
+Only rows that passed each tool's strict correctness checks were timing
+eligible. No positive query row passed both tools, so the replay does not
+support a cross-tool positive-query speed claim. Both tools passed all five
+negative rows. Compass fresh-process p50 was `0.084` to `0.606` seconds there;
+Graphify was `0.539` to `0.686` seconds. Compass achieved the required 5x
+speedup on one negative row (`6.46x`) and `1.12x` to `1.33x` on the other four.
+Persistent Compass p50 was `0.024` to `0.555` seconds for those rows, showing
+that startup removal helps most when little graph work remains but does not
+dominate broader searches.
+
+The low graph contained 9,982 nodes and 25,206 relationships, versus
+Graphify's 9,670 nodes and 27,173 relationships. Compass published 25,206
+exact-evidence relationships: 24,489 AST, 615 artifact, 100 convention, and
+two configuration origins. Thus convention-backed inference was 0.40% of the
+low graph, compared with Graphify's 1,031 `INFERRED` relationships (3.79%).
+The source-aware comparator still reported 82 missing and two ambiguous
+Graphify node hypotheses, plus 4,957 missing and 36 ambiguous Graphify edge
+hypotheses. Those are compatibility diagnostics rather than precision or
+recall denominators.
+
+The focused run therefore validates the incremental-clustering and query-
+specificity mitigations, but not the 5x cold/query or build-memory goals. The
+largest remaining engineering gaps are moving admission before expensive
+resolver allocation, reducing cold-build peak memory, improving the 12 failed
+positive rankings without regressing negative controls, and reducing the
+non-startup portion of bounded graph search.
+
 ## Reproduction boundary
 
 This diagnostic ran on 2026-08-10 with:
