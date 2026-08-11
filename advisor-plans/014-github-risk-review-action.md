@@ -226,13 +226,13 @@ with write-capable credentials.
 
 ## Done criteria
 
-- [ ] All four phases meet their acceptance criteria in order.
-- [ ] Risk factors, completeness, and gates have versioned machine contracts.
-- [ ] CLI, MCP, Action, and renderers consume one domain report.
-- [ ] Exact revisions and profile comparability are proven in tests.
-- [ ] Fork and permission behavior is documented and locally mocked.
-- [ ] Relevant baseline/gate commands pass; any unrun full-workspace check is reported.
-- [ ] `advisor-plans/README.md` marks this plan DONE.
+- [x] All four phases meet their acceptance criteria in order.
+- [x] Risk factors, completeness, and gates have versioned machine contracts.
+- [x] CLI, MCP, Action, and renderers consume one domain report.
+- [x] Exact revisions and profile comparability are proven in tests.
+- [x] Fork and permission behavior is documented and locally mocked.
+- [x] Relevant baseline/gate commands pass; any unrun full-workspace check is reported.
+- [x] `advisor-plans/README.md` marks this plan DONE.
 
 ## STOP conditions
 

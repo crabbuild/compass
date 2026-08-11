@@ -27,6 +27,10 @@ Graphify remains comparison context only. The program preserves Compass's
 native, compiler-free structural tier and makes any compiler/SCIP enrichment
 explicit, optional, fresh, and provenance-preserving.
 
+Plan 014 ships a typed pull-request risk review report and a reusable GitHub
+Action. It consumes immutable history and semantic diff evidence while keeping
+advisory risk separate from deterministic merge gates.
+
 ## Execution order and status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -44,6 +48,7 @@ explicit, optional, fresh, and provenance-preserving.
 | 011 | Add a bounded native RTF decoder with explicit fidelity diagnostics | P2 | L | 007, 008 | TODO |
 | 012 | Qualify document graphs across formats, limits, and determinism | P1 | M | 009, 010, 011 | TODO |
 | 013 | Make TypeScript and JavaScript code graphs best in class | P1 | XL | —; final gate should consume 005 or equivalent | IN PROGRESS |
+| 014 | Ship typed pull-request risk review and a reusable GitHub Action | P1 | L | Immutable history and semantic diff; coordinate with Compass Guard | DONE |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 
@@ -73,6 +78,9 @@ Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
   compiler/framework enhancements follow only after the native graph qualifies.
   Its final public claim should consume plan 005's exact-production-evidence
   model or an equivalent release-candidate gate.
+- Plan 014 consumes immutable history and semantic diff evidence, preserves the
+  boundary between advisory risk and deterministic gates, and ships the
+  reusable GitHub review Action.
 
 ## Direction options not promoted to implementation plans
 
