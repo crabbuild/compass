@@ -31,6 +31,15 @@ struct PendingDecision {
     decision: ResolutionDecision,
 }
 
+const EDGE_MATERIALIZATION_BATCH_SIZE: usize = 4_096;
+
+fn next_edge_materialization_batch<T>(values: &mut impl Iterator<Item = T>) -> Option<Vec<T>> {
+    let batch = values
+        .take(EDGE_MATERIALIZATION_BATCH_SIZE)
+        .collect::<Vec<_>>();
+    (!batch.is_empty()).then_some(batch)
+}
+
 impl UniversalResolutionIndex {
     pub fn materialize(&self, nodes: &mut Vec<NodeRecord>, edges: &mut Vec<EdgeRecord>) {
         self.materialize_inner(nodes, edges, ResolutionAdmission::Max, false);
@@ -379,159 +388,51 @@ impl UniversalResolutionIndex {
             }
         }
         profile_internal("universal target projection", &mut profile_started);
-        let materialized = resolved_targets
-            .into_par_iter()
-            .filter_map(
-                |(
-                    candidate_slot,
-                    candidate_id_override,
-                    relation_override,
-                    target,
-                    resolution_rule,
-                    target_kind,
-                    target_site,
-                )| {
-                    let original_candidate = self.facts.candidates.at(candidate_slot)?;
-                    let overridden_candidate = candidate_id_override.map(|id| {
-                        let mut candidate = original_candidate.clone();
-                        candidate.id = id;
-                        if let Some(relation) = relation_override {
-                            candidate.relation = relation;
-                        }
-                        candidate
-                    });
-                    let candidate = overridden_candidate.as_ref().unwrap_or(&original_candidate);
-                    let owner_source = self
-                        .facts
-                        .declarations
-                        .get(&candidate.source_declaration_id)
-                        .map(|declaration| graph_ids[&declaration.id].clone())?;
-                    let annotation_source = (candidate.relation == CandidateRelation::Decorates)
-                        .then(|| {
-                            let occurrence = db.occurrence(candidate)?;
-                            self.facts
-                                .declarations
-                                .values()
-                                .filter(|declaration| {
-                                    declaration.kind == "annotation"
-                                        && declaration.name == occurrence.spelling()
-                                        && declaration.range.source_file
-                                            == occurrence.range().source_file
-                                        && declaration.range.start_byte
-                                            <= occurrence.range().start_byte
-                                        && declaration.range.end_byte >= occurrence.range().end_byte
-                                })
-                                .min_by_key(|declaration| {
-                                    (declaration.range.start_byte, declaration.id.as_str())
-                                })
-                                .map(|declaration| graph_ids[&declaration.id].clone())
-                        })
-                        .flatten();
-                    let source = annotation_source
-                        .clone()
-                        .unwrap_or_else(|| owner_source.clone());
-                    let (source, target) = if candidate.relation == CandidateRelation::Contains {
-                        (source, target)
-                    } else if db.occurrence(candidate).is_some_and(|occurrence| {
-                        occurrence.role() == compass_languages::SemanticRole::Receiver
-                    }) {
-                        (target, source)
-                    } else {
-                        (source, target)
-                    };
-                    let exact_target = candidate
-                        .constraints
-                        .exact_target_declaration_id
-                        .as_deref()
-                        .and_then(|id| self.facts.declarations.get(id));
-                    let relation = if candidate.relation == CandidateRelation::Decorates
-                        && annotation_source.is_some()
-                    {
-                        "decorates"
-                    } else if db.occurrence(candidate).is_some_and(|occurrence| {
-                        occurrence.role() == compass_languages::SemanticRole::Receiver
-                    }) {
-                        "method"
-                    } else if candidate.language == "go"
-                        && candidate.relation == CandidateRelation::Calls
-                        && target_kind.as_deref().is_some_and(|kind| {
-                            matches!(kind, "struct" | "interface" | "type_alias")
-                        })
-                    {
-                        "references"
-                    } else {
-                        relation_name(candidate.relation)
-                    };
-                    let site = db
-                        .occurrence(candidate)
-                        .map(OccurrenceRef::range)
-                        .or_else(|| exact_target.map(|target| &target.range))
-                        .or_else(|| {
-                            matches!(
-                                candidate.relation,
-                                CandidateRelation::Contains | CandidateRelation::Owns
-                            )
-                            .then_some(target_site)
-                            .flatten()
-                        })
-                        .or_else(|| {
-                            self.facts
-                                .declarations
-                                .get(&candidate.source_declaration_id)
-                                .map(|declaration| &declaration.range)
-                        });
-                    let site = site?;
-                    // Exact resolution and bounded possible dispatches can project
-                    // more than one target for a candidate. Downstream publication
-                    // performs contract-level semantic edge coalescing.
-                    if source == target && relation != "calls" {
-                        return None;
-                    }
-                    let target_source_file = target_site.map(|range| range.source_file.as_str());
-                    let project_metadata =
-                        db.typescript_project_metadata(candidate, target_source_file);
-                    let binding = candidate
-                        .binding_id
-                        .as_deref()
-                        .and_then(|binding_id| self.facts.bindings.get(binding_id));
-                    let occurrence = db.occurrence(candidate);
-                    let edge = materialized_edge(
-                        source,
+        // Edge records carry a comparatively large provenance map. Building
+        // every record in one parallel collection temporarily duplicates the
+        // complete resolved edge set immediately before it is moved into the
+        // graph. Keep the indexed parallel ordering, but bound that overlap to
+        // one deterministic batch at a time.
+        let mut resolved_targets = resolved_targets.into_iter();
+        while let Some(target_batch) = next_edge_materialization_batch(&mut resolved_targets) {
+            let materialized = target_batch
+                .into_par_iter()
+                .filter_map(
+                    |(
+                        candidate_slot,
+                        candidate_id_override,
+                        relation_override,
                         target,
-                        relation,
-                        candidate,
-                        occurrence,
-                        binding,
-                        target_kind.as_deref(),
-                        target_source_file,
-                        site,
                         resolution_rule,
-                        &candidate.language,
-                        project_metadata.as_ref(),
-                    );
-                    let mut materialized = vec![edge.clone()];
-                    if candidate.relation == CandidateRelation::Reexports
-                        && binding.is_some_and(|binding| {
-                            let target_name = binding
-                                .qualified_target
-                                .rsplit([':', '.'])
-                                .find(|name| !name.is_empty())
-                                .unwrap_or_default();
-                            binding.spelling != target_name
-                                || occurrence
-                                    .and_then(OccurrenceRef::qualifier)
-                                    .is_some_and(|qualifier| qualifier != binding.spelling)
-                        })
-                    {
-                        let export_name = binding.map(|binding| binding.spelling.as_str());
-                        let alias_source = export_name.and_then(|export_name| {
-                            occurrence.and_then(|occurrence| {
+                        target_kind,
+                        target_site,
+                    )| {
+                        let original_candidate = self.facts.candidates.at(candidate_slot)?;
+                        let overridden_candidate = candidate_id_override.map(|id| {
+                            let mut candidate = original_candidate.clone();
+                            candidate.id = id;
+                            if let Some(relation) = relation_override {
+                                candidate.relation = relation;
+                            }
+                            candidate
+                        });
+                        let candidate =
+                            overridden_candidate.as_ref().unwrap_or(&original_candidate);
+                        let owner_source = self
+                            .facts
+                            .declarations
+                            .get(&candidate.source_declaration_id)
+                            .map(|declaration| graph_ids[&declaration.id].clone())?;
+                        let annotation_source = (candidate.relation
+                            == CandidateRelation::Decorates)
+                            .then(|| {
+                                let occurrence = db.occurrence(candidate)?;
                                 self.facts
                                     .declarations
                                     .values()
                                     .filter(|declaration| {
-                                        declaration.kind == "export"
-                                            && declaration.name == export_name
+                                        declaration.kind == "annotation"
+                                            && declaration.name == occurrence.spelling()
                                             && declaration.range.source_file
                                                 == occurrence.range().source_file
                                             && declaration.range.start_byte
@@ -544,36 +445,184 @@ impl UniversalResolutionIndex {
                                     })
                                     .map(|declaration| graph_ids[&declaration.id].clone())
                             })
-                        });
-                        if let Some(alias_source) = alias_source {
-                            let mut attributes = edge.attributes.clone();
-                            attributes
-                                .insert("relation".to_owned(), Value::String("aliases".to_owned()));
-                            attributes.insert(
-                                "context".to_owned(),
-                                Value::String("export_alias".to_owned()),
-                            );
-                            attributes.insert(
-                                "rule".to_owned(),
-                                Value::String(format!(
-                                    "universal-reexport-alias-{}",
-                                    resolution_rule_name(resolution_rule)
-                                )),
-                            );
-                            materialized.push(EdgeRecord {
-                                source: alias_source,
-                                target: edge.target.clone(),
-                                attributes,
+                            .flatten();
+                        let source = annotation_source
+                            .clone()
+                            .unwrap_or_else(|| owner_source.clone());
+                        let (source, target) = if candidate.relation == CandidateRelation::Contains
+                        {
+                            (source, target)
+                        } else if db.occurrence(candidate).is_some_and(|occurrence| {
+                            occurrence.role() == compass_languages::SemanticRole::Receiver
+                        }) {
+                            (target, source)
+                        } else {
+                            (source, target)
+                        };
+                        let exact_target = candidate
+                            .constraints
+                            .exact_target_declaration_id
+                            .as_deref()
+                            .and_then(|id| self.facts.declarations.get(id));
+                        let relation = if candidate.relation == CandidateRelation::Decorates
+                            && annotation_source.is_some()
+                        {
+                            "decorates"
+                        } else if db.occurrence(candidate).is_some_and(|occurrence| {
+                            occurrence.role() == compass_languages::SemanticRole::Receiver
+                        }) {
+                            "method"
+                        } else if candidate.language == "go"
+                            && candidate.relation == CandidateRelation::Calls
+                            && target_kind.as_deref().is_some_and(|kind| {
+                                matches!(kind, "struct" | "interface" | "type_alias")
+                            })
+                        {
+                            "references"
+                        } else {
+                            relation_name(candidate.relation)
+                        };
+                        let site = db
+                            .occurrence(candidate)
+                            .map(OccurrenceRef::range)
+                            .or_else(|| exact_target.map(|target| &target.range))
+                            .or_else(|| {
+                                matches!(
+                                    candidate.relation,
+                                    CandidateRelation::Contains | CandidateRelation::Owns
+                                )
+                                .then_some(target_site)
+                                .flatten()
+                            })
+                            .or_else(|| {
+                                self.facts
+                                    .declarations
+                                    .get(&candidate.source_declaration_id)
+                                    .map(|declaration| &declaration.range)
                             });
+                        let site = site?;
+                        // Exact resolution and bounded possible dispatches can project
+                        // more than one target for a candidate. Downstream publication
+                        // performs contract-level semantic edge coalescing.
+                        if source == target && relation != "calls" {
+                            return None;
                         }
-                    }
-                    Some(materialized)
-                },
-            )
-            .flatten()
-            .collect::<Vec<_>>();
-        edges.extend(materialized);
+                        let target_source_file =
+                            target_site.map(|range| range.source_file.as_str());
+                        let project_metadata =
+                            db.typescript_project_metadata(candidate, target_source_file);
+                        let binding = candidate
+                            .binding_id
+                            .as_deref()
+                            .and_then(|binding_id| self.facts.bindings.get(binding_id));
+                        let occurrence = db.occurrence(candidate);
+                        let edge = materialized_edge(
+                            source,
+                            target,
+                            relation,
+                            candidate,
+                            occurrence,
+                            binding,
+                            target_kind.as_deref(),
+                            target_source_file,
+                            site,
+                            resolution_rule,
+                            &candidate.language,
+                            project_metadata.as_ref(),
+                        );
+                        let alias_edge = if candidate.relation == CandidateRelation::Reexports
+                            && binding.is_some_and(|binding| {
+                                let target_name = binding
+                                    .qualified_target
+                                    .rsplit([':', '.'])
+                                    .find(|name| !name.is_empty())
+                                    .unwrap_or_default();
+                                binding.spelling != target_name
+                                    || occurrence
+                                        .and_then(OccurrenceRef::qualifier)
+                                        .is_some_and(|qualifier| qualifier != binding.spelling)
+                            }) {
+                            let export_name = binding.map(|binding| binding.spelling.as_str());
+                            let alias_source = export_name.and_then(|export_name| {
+                                occurrence.and_then(|occurrence| {
+                                    self.facts
+                                        .declarations
+                                        .values()
+                                        .filter(|declaration| {
+                                            declaration.kind == "export"
+                                                && declaration.name == export_name
+                                                && declaration.range.source_file
+                                                    == occurrence.range().source_file
+                                                && declaration.range.start_byte
+                                                    <= occurrence.range().start_byte
+                                                && declaration.range.end_byte
+                                                    >= occurrence.range().end_byte
+                                        })
+                                        .min_by_key(|declaration| {
+                                            (declaration.range.start_byte, declaration.id.as_str())
+                                        })
+                                        .map(|declaration| graph_ids[&declaration.id].clone())
+                                })
+                            });
+                            alias_source.map(|alias_source| {
+                                let mut attributes = edge.attributes.clone();
+                                attributes.insert(
+                                    "relation".to_owned(),
+                                    Value::String("aliases".to_owned()),
+                                );
+                                attributes.insert(
+                                    "context".to_owned(),
+                                    Value::String("export_alias".to_owned()),
+                                );
+                                attributes.insert(
+                                    "rule".to_owned(),
+                                    Value::String(format!(
+                                        "universal-reexport-alias-{}",
+                                        resolution_rule_name(resolution_rule)
+                                    )),
+                                );
+                                EdgeRecord {
+                                    source: alias_source,
+                                    target: edge.target.clone(),
+                                    attributes,
+                                }
+                            })
+                        } else {
+                            None
+                        };
+                        let mut materialized =
+                            Vec::with_capacity(1 + usize::from(alias_edge.is_some()));
+                        materialized.push(edge);
+                        materialized.extend(alias_edge);
+                        Some(materialized)
+                    },
+                )
+                .flatten()
+                .collect::<Vec<_>>();
+            edges.extend(materialized);
+        }
         profile_internal("universal edge materialization", &mut profile_started);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EDGE_MATERIALIZATION_BATCH_SIZE, next_edge_materialization_batch};
+
+    #[test]
+    fn edge_materialization_batches_are_bounded_and_ordered() {
+        let mut values = 0..EDGE_MATERIALIZATION_BATCH_SIZE + 1;
+
+        let first = next_edge_materialization_batch(&mut values);
+        let second = next_edge_materialization_batch(&mut values);
+
+        assert_eq!(
+            first.as_ref().map(Vec::len),
+            Some(EDGE_MATERIALIZATION_BATCH_SIZE)
+        );
+        assert_eq!(first.and_then(|batch| batch.last().copied()), Some(4_095));
+        assert_eq!(second, Some(vec![EDGE_MATERIALIZATION_BATCH_SIZE]));
+        assert_eq!(next_edge_materialization_batch(&mut values), None);
     }
 }
 
