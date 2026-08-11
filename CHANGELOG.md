@@ -56,8 +56,10 @@
 - Thread inference admission into universal, generic, and language-member
   resolution so low builds do not materialize deferred receivers, heuristic
   calls, or inferred external placeholders. Preserve exact test roles without
-  retaining discarded inferred test edges. Published low nodes and
-  relationships remain equivalent to the prior authoritative post-filter;
+  retaining discarded inferred test edges. After enforcing the original
+  evidence limits, compact uniquely paired duplicate `tests` candidates while
+  independently resolving their relation-sensitive rules. Published low nodes
+  and relationships remain equivalent to the prior authoritative post-filter;
   graph-level coverage and diagnostics now describe admitted records instead
   of inference that was constructed only to be discarded.
 

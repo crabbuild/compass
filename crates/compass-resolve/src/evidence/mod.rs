@@ -142,6 +142,7 @@ pub struct UniversalResolutionIndex {
     indexes: ResolutionIndexes,
     project: ProjectContext,
     budget: LookupBudget,
+    low_test_aliases: AHashMap<String, Vec<String>>,
 }
 
 impl UniversalResolutionIndex {

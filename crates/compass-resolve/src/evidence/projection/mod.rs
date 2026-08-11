@@ -13,6 +13,8 @@ use nodes::*;
 
 struct PreparedTarget<'a> {
     candidate_id: &'a str,
+    candidate_id_override: Option<String>,
+    relation_override: Option<CandidateRelation>,
     target: String,
     rule: ResolutionRule,
     target_kind: Option<String>,
@@ -20,6 +22,13 @@ struct PreparedTarget<'a> {
     external_qualified_name: Option<String>,
     deferred_qualified_name: Option<String>,
     emit_edge: bool,
+}
+
+struct PendingDecision<'a> {
+    candidate_id: &'a str,
+    candidate_id_override: Option<String>,
+    relation_override: Option<CandidateRelation>,
+    decision: ResolutionDecision,
 }
 
 impl UniversalResolutionIndex {
@@ -106,7 +115,7 @@ impl UniversalResolutionIndex {
                     _ => None,
                 };
                 let candidate = &self.facts.candidates[candidate_id];
-                let test_source_id = (admission == ResolutionAdmission::Low
+                let mut test_source_id = (admission == ResolutionAdmission::Low
                     && candidate.relation == CandidateRelation::Tests
                     && !matches!(
                         decision,
@@ -117,9 +126,39 @@ impl UniversalResolutionIndex {
                 let allow_primary = decision_is_needed(candidate, &decision, admission);
                 let allow_possible = admission.admits_source_backed_inference()
                     && !matches!(decision, ResolutionDecision::Ambiguous { .. });
-                let mut decisions = Vec::with_capacity(1 + usize::from(allow_possible));
+                let aliased_tests = self.low_test_aliases.get(candidate_id);
+                let mut decisions = Vec::with_capacity(
+                    1 + usize::from(allow_possible) + aliased_tests.map_or(0, Vec::len),
+                );
+                for test_id in aliased_tests.into_iter().flatten() {
+                    let mut test_candidate = candidate.clone();
+                    test_candidate.id.clone_from(test_id);
+                    test_candidate.relation = CandidateRelation::Tests;
+                    let test_decision = db.resolve_candidate(&test_candidate);
+                    if !matches!(
+                        test_decision,
+                        ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved
+                    ) {
+                        test_source_id = graph_ids
+                            .get(&test_candidate.source_declaration_id)
+                            .cloned();
+                    }
+                    if decision_is_needed(&test_candidate, &test_decision, admission) {
+                        decisions.push(PendingDecision {
+                            candidate_id,
+                            candidate_id_override: Some(test_id.clone()),
+                            relation_override: Some(CandidateRelation::Tests),
+                            decision: test_decision,
+                        });
+                    }
+                }
                 if allow_primary {
-                    decisions.push((candidate_id, decision));
+                    decisions.push(PendingDecision {
+                        candidate_id,
+                        candidate_id_override: None,
+                        relation_override: None,
+                        decision,
+                    });
                 }
                 if allow_possible {
                     decisions.extend(
@@ -128,17 +167,17 @@ impl UniversalResolutionIndex {
                             exact_declaration_id.as_deref(),
                         )
                         .into_iter()
-                        .map(|(declaration_id, rule)| {
-                            (
-                                candidate_id,
-                                ResolutionDecision::Resolved {
-                                    declaration_id,
-                                    evidence: ResolutionEvidence {
-                                        rule,
-                                        candidate_count: 1,
-                                    },
+                        .map(|(declaration_id, rule)| PendingDecision {
+                            candidate_id,
+                            candidate_id_override: None,
+                            relation_override: None,
+                            decision: ResolutionDecision::Resolved {
+                                declaration_id,
+                                evidence: ResolutionEvidence {
+                                    rule,
+                                    candidate_count: 1,
                                 },
-                            )
+                            },
                         }),
                     );
                 }
@@ -159,14 +198,16 @@ impl UniversalResolutionIndex {
         profile_internal("universal candidate decisions", &mut profile_started);
         let prepared_targets = decisions
             .into_par_iter()
-            .map(|(candidate_id, decision)| match decision {
+            .map(|pending| match pending.decision {
                 ResolutionDecision::Resolved {
                     declaration_id,
                     evidence,
                 } => {
                     let target = self.facts.declarations.get(&declaration_id)?;
                     Some(PreparedTarget {
-                        candidate_id,
+                        candidate_id: pending.candidate_id,
+                        candidate_id_override: pending.candidate_id_override,
+                        relation_override: pending.relation_override,
                         target: graph_ids[&target.id].clone(),
                         rule: evidence.rule,
                         target_kind: Some(target.kind.clone()),
@@ -182,7 +223,9 @@ impl UniversalResolutionIndex {
                 } => {
                     let kind = inventory_kinds.get(&graph_node_id).cloned();
                     Some(PreparedTarget {
-                        candidate_id,
+                        candidate_id: pending.candidate_id,
+                        candidate_id_override: pending.candidate_id_override,
+                        relation_override: pending.relation_override,
                         target: graph_node_id,
                         rule: evidence.rule,
                         target_kind: kind,
@@ -196,10 +239,12 @@ impl UniversalResolutionIndex {
                     qualified_name,
                     evidence,
                 } => {
-                    let candidate = &self.facts.candidates[candidate_id];
+                    let candidate = &self.facts.candidates[pending.candidate_id];
                     let id = make_id(&["external", &candidate.language, &qualified_name]);
                     Some(PreparedTarget {
-                        candidate_id,
+                        candidate_id: pending.candidate_id,
+                        candidate_id_override: pending.candidate_id_override,
+                        relation_override: pending.relation_override,
                         target: id,
                         rule: evidence.rule,
                         target_kind: None,
@@ -213,10 +258,12 @@ impl UniversalResolutionIndex {
                     qualified_name,
                     evidence,
                 } => {
-                    let candidate = &self.facts.candidates[candidate_id];
+                    let candidate = &self.facts.candidates[pending.candidate_id];
                     let id = make_id(&["deferred", &candidate.language, &qualified_name]);
                     Some(PreparedTarget {
-                        candidate_id,
+                        candidate_id: pending.candidate_id,
+                        candidate_id_override: pending.candidate_id_override,
+                        relation_override: pending.relation_override,
                         target: id,
                         rule: evidence.rule,
                         target_kind: None,
@@ -234,7 +281,16 @@ impl UniversalResolutionIndex {
             .collect::<Vec<_>>();
         let mut resolved_targets = Vec::with_capacity(prepared_targets.len());
         for mut prepared in prepared_targets {
-            let candidate = &self.facts.candidates[prepared.candidate_id];
+            let original_candidate = &self.facts.candidates[prepared.candidate_id];
+            let overridden_candidate = prepared.candidate_id_override.as_ref().map(|id| {
+                let mut candidate = original_candidate.clone();
+                candidate.id.clone_from(id);
+                if let Some(relation) = prepared.relation_override {
+                    candidate.relation = relation;
+                }
+                candidate
+            });
+            let candidate = overridden_candidate.as_ref().unwrap_or(original_candidate);
             if let Some(qualified_name) = prepared.external_qualified_name.take() {
                 if let Some(position) = external_positions.get(&prepared.target).copied() {
                     merge_external_node(&mut nodes[position], candidate);
@@ -276,6 +332,8 @@ impl UniversalResolutionIndex {
             if prepared.emit_edge {
                 resolved_targets.push((
                     prepared.candidate_id,
+                    prepared.candidate_id_override,
+                    prepared.relation_override,
                     prepared.target,
                     prepared.rule,
                     prepared.target_kind,
@@ -287,8 +345,25 @@ impl UniversalResolutionIndex {
         let materialized = resolved_targets
             .into_par_iter()
             .filter_map(
-                |(candidate_id, target, resolution_rule, target_kind, target_site)| {
-                    let candidate = &self.facts.candidates[candidate_id];
+                |(
+                    candidate_id,
+                    candidate_id_override,
+                    relation_override,
+                    target,
+                    resolution_rule,
+                    target_kind,
+                    target_site,
+                )| {
+                    let original_candidate = &self.facts.candidates[candidate_id];
+                    let overridden_candidate = candidate_id_override.map(|id| {
+                        let mut candidate = original_candidate.clone();
+                        candidate.id = id;
+                        if let Some(relation) = relation_override {
+                            candidate.relation = relation;
+                        }
+                        candidate
+                    });
+                    let candidate = overridden_candidate.as_ref().unwrap_or(original_candidate);
                     let owner_source = self
                         .facts
                         .declarations

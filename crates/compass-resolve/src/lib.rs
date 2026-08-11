@@ -1097,12 +1097,13 @@ fn finish_resolution(
             .as_ref()
             .map_or(&[][..], |project| project.edges.as_slice());
         let index = if evidence_prevalidated {
-            evidence::UniversalResolutionIndex::new_with_prevalidated_project_inventory_owned(
+            evidence::UniversalResolutionIndex::new_with_prevalidated_project_inventory_owned_at_inference(
                 evidence_batches,
                 &merged.nodes,
                 project_edges,
                 &canonical_root,
                 evidence::UniversalResolutionLimits::default(),
+                admission,
             )
         } else {
             evidence::UniversalResolutionIndex::new_with_project_inventory_owned(

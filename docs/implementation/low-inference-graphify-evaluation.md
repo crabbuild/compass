@@ -272,9 +272,25 @@ recall claim.
 
 Internal inventory identified the remaining cold-memory floor: 9,280
 declarations, 7,482 scopes, 23,243 bindings, 88,447 occurrences, and 118,935
-relationship candidates coexist before resolution on this corpus. The next
-memory work must compact or stream this string-dense evidence representation;
-clustering and final graph serialization are not the dominant cold allocation.
+relationship candidates coexist before resolution on this corpus. Of those,
+21,524 Rust `tests` candidates are exact storage duplicates of uniquely paired
+`calls` candidates. Low resolution now validates the original aggregate limits
+first, retains ambiguous or mismatched pairs, and then stores those exact pairs
+as compact aliases. Each alias is still resolved independently with its
+original `tests` relation, preserving relation-sensitive resolution rules and
+the ordered graph contract.
+
+Three fresh samples with this additional compaction had a 2.88 s median and
+756.2 MiB median peak RSS. Every sample's ordered 9,982 nodes and 25,206
+relationships remained byte-equivalent to the pre-admission low artifact.
+Compared with the 798.0 MiB single sample above, median RSS was 5.2% lower
+while median wall time was 17.6% higher; this cross-sample comparison remains
+diagnostic rather than a replacement controlled baseline. Independent
+resolution deliberately trades some CPU for a lower retained evidence set.
+Compass still used 5.05x Graphify's documented cold RSS, so the memory gate
+remains failed. The next memory work must compact or stream the remaining
+string-dense evidence representation; clustering and final graph serialization
+are not the dominant cold allocation.
 
 ## Work required to surpass Graphify
 

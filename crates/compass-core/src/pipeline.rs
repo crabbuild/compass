@@ -7303,6 +7303,12 @@ mod tests {
             r#"
                 use external_crate::ExternalType;
 
+                struct LocalService;
+
+                impl LocalService {
+                    fn call() {}
+                }
+
                 fn run(value: ExternalType) {
                     value.execute();
                     external_crate::Service::call();
@@ -7310,6 +7316,7 @@ mod tests {
 
                 #[test]
                 fn test_run() {
+                    LocalService::call();
                     external_crate::Service::call();
                 }
             "#,

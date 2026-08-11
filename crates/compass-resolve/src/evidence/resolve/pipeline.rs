@@ -48,6 +48,13 @@ impl ResolutionDb<'_> {
         let Some(candidate) = self.facts.candidates.get(candidate_id) else {
             return ResolutionDecision::Unresolved;
         };
+        self.resolve_candidate(candidate)
+    }
+
+    pub(in crate::evidence) fn resolve_candidate(
+        &self,
+        candidate: &RelationshipCandidate,
+    ) -> ResolutionDecision {
         let context = CandidateContext::new(self, candidate);
         for stage in ResolutionStage::ORDER {
             if let StageOutcome::Decided(decision) = self.run_stage(stage, &context) {
