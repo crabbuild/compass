@@ -33,7 +33,7 @@ struct PendingDecision {
 
 impl UniversalResolutionIndex {
     pub fn materialize(&self, nodes: &mut Vec<NodeRecord>, edges: &mut Vec<EdgeRecord>) {
-        self.materialize_at_inference(nodes, edges, ResolutionAdmission::Max);
+        self.materialize_inner(nodes, edges, ResolutionAdmission::Max, false);
     }
 
     pub(crate) fn materialize_at_inference(
@@ -42,7 +42,16 @@ impl UniversalResolutionIndex {
         edges: &mut Vec<EdgeRecord>,
         admission: ResolutionAdmission,
     ) {
-        let db = ResolutionDb::new(self);
+        self.materialize_inner(nodes, edges, admission, true);
+    }
+
+    fn materialize_inner(
+        &self,
+        nodes: &mut Vec<NodeRecord>,
+        edges: &mut Vec<EdgeRecord>,
+        admission: ResolutionAdmission,
+        release_resolution_indexes: bool,
+    ) {
         let mut profile_started = Instant::now();
         let overloads = declaration_overloads(self.facts.declarations.values());
         let graph_ids = materialized_declaration_ids(self.facts.declarations.values());
@@ -104,6 +113,11 @@ impl UniversalResolutionIndex {
             .collect::<AHashMap<_, _>>();
         let candidates = self.ordered_candidates();
         profile_internal("universal candidate ordering", &mut profile_started);
+        let resolution_indexes = self
+            .indexes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let db = ResolutionDb::new(self, &resolution_indexes);
         let decision_batches = candidates
             .into_par_iter()
             .filter_map(|candidate_slot| {
@@ -197,6 +211,26 @@ impl UniversalResolutionIndex {
             mark_test_roles(nodes, &test_source_ids);
         }
         profile_internal("universal candidate decisions", &mut profile_started);
+        // Target and edge projection only reads primary facts plus project
+        // metadata. Release the large name/member/hierarchy lookup indexes as
+        // soon as every resolution decision is fixed so they do not overlap
+        // the materialized graph records at the cold-build high-water mark.
+        drop(resolution_indexes);
+        if release_resolution_indexes {
+            let released = {
+                let mut indexes = self
+                    .indexes
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                std::mem::take(&mut *indexes)
+            };
+            drop(released);
+        }
+        // Projection reads only facts and project metadata. Keep an explicit
+        // empty index set so the shared read-only helper cannot accidentally
+        // regain a dependency on the released resolution indexes.
+        let projection_indexes = ResolutionIndexes::default();
+        let db = ResolutionDb::new(self, &projection_indexes);
         let prepared_targets = decisions
             .into_par_iter()
             .map(|pending| match pending.decision {

@@ -1137,6 +1137,50 @@ impl GraphDocument {
         legacy_document(directed, multigraph, &graph, nodes, links)
     }
 
+    /// Consume a compatibility projection produced from a typed document and
+    /// reconstruct the strict authority without retaining both full record
+    /// sets at once.
+    ///
+    /// This is the inverse of [`Self::into_legacy_document`]. It is intended
+    /// for bounded analysis stages that still consume the compatibility view:
+    /// callers may move the typed authority into that view, run the analysis,
+    /// and then move the records back before publication. Unknown top-level
+    /// compatibility fields are rejected because `compass.graph/1` has a
+    /// closed envelope.
+    pub fn from_legacy_document(document: crate::GraphDocument) -> Result<Self, GraphError> {
+        let crate::GraphDocument {
+            directed,
+            multigraph,
+            graph,
+            nodes,
+            links,
+            extras,
+        } = document;
+        if !extras.is_empty() {
+            return Err(corrupt_projection(
+                "legacy projection contains unknown top-level fields",
+            ));
+        }
+        let graph = serde_json::from_value(Value::Object(graph)).map_err(GraphError::Corrupt)?;
+        let nodes = nodes
+            .into_iter()
+            .map(typed_node_record)
+            .collect::<Result<Vec<_>, _>>()?;
+        let links = links
+            .into_iter()
+            .map(typed_edge_record)
+            .collect::<Result<Vec<_>, _>>()?;
+        let document = Self {
+            directed,
+            multigraph,
+            graph,
+            nodes,
+            links,
+        };
+        validate_code_graph(&document)?;
+        Ok(document)
+    }
+
     #[must_use]
     pub fn size_cap_exceeded(path: &Path) -> Option<(u64, u64)> {
         let size = path.metadata().ok()?.len();
@@ -1406,6 +1450,26 @@ fn legacy_edge_record(edge: &EdgeRecord) -> Result<crate::EdgeRecord, GraphError
     })
 }
 
+fn typed_node_record(node: crate::NodeRecord) -> Result<NodeRecord, GraphError> {
+    let mut object = node.attributes;
+    object.insert("id".to_owned(), Value::String(node.id));
+    serde_json::from_value(Value::Object(object)).map_err(GraphError::Corrupt)
+}
+
+fn typed_edge_record(edge: crate::EdgeRecord) -> Result<EdgeRecord, GraphError> {
+    let mut object = edge.attributes;
+    object.insert("source".to_owned(), Value::String(edge.source));
+    object.insert("target".to_owned(), Value::String(edge.target));
+    serde_json::from_value(Value::Object(object)).map_err(GraphError::Corrupt)
+}
+
+fn corrupt_projection(message: &str) -> GraphError {
+    GraphError::Corrupt(serde_json::Error::io(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        message,
+    )))
+}
+
 fn file_digest(path: &Path) -> Result<String, GraphError> {
     let file = File::open(path).map_err(|source| GraphError::Read {
         path: crate::graph::absolute_path(path),
@@ -1497,10 +1561,13 @@ mod tests {
     use std::io::Write;
     use std::path::Path;
 
+    use crate::identity::file_id;
+    use crate::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
     use sha2::{Digest, Sha256};
 
     use super::{
-        BuildMetadata, GraphDocument, content_cache_path, load_opened_with_artifact_digest,
+        BuildMetadata, CommunityMetadata, ExtractionStatus, FileRecord, GraphDocument, NodeKind,
+        NodeRecord, content_cache_path, load_opened_with_artifact_digest,
         load_opened_with_artifact_digest_after_metadata,
     };
 
@@ -1521,6 +1588,67 @@ mod tests {
             content_cache_path(Path::new("compass-out/graph.json"), "abc123"),
             Path::new("compass-out/cache/graph.json.abc123.content-v1.cache")
         );
+    }
+
+    #[test]
+    fn consuming_legacy_projection_round_trips_typed_records() -> Result<(), crate::GraphError> {
+        let mut expected = document();
+        expected.graph.files.push(FileRecord {
+            id: file_id("src/lib.rs"),
+            path: "src/lib.rs".to_owned(),
+            language: Some("rust".to_owned()),
+            content_digest: "sha256:test".to_owned(),
+            byte_size: 7,
+            generated: false,
+            extraction_status: ExtractionStatus::Extracted,
+            extractor_versions: vec!["test".to_owned()],
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+        });
+        let anchor = SourceAnchor {
+            file: "src/lib.rs".to_owned(),
+            start_byte: 0,
+            end_byte: 7,
+            start_line: 1,
+            start_column: 0,
+            end_line: 1,
+            end_column: 7,
+        };
+        expected.nodes.push(NodeRecord {
+            id: "fn:example".to_owned(),
+            kind: NodeKind::Function,
+            roles: Vec::new(),
+            name: "example".to_owned(),
+            qualified_name: "crate::example".to_owned(),
+            language: Some("rust".to_owned()),
+            framework: None,
+            source: Some(anchor.clone()),
+            details: None,
+            evidence: vec![Provenance {
+                origin: EvidenceOrigin::Ast,
+                extractor: "test".to_owned(),
+                confidence: EvidenceConfidence::Exact,
+                rule: None,
+                anchors: vec![anchor],
+                wiring_site: None,
+                score: None,
+                candidates: Vec::new(),
+            }],
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+            community: Some(CommunityMetadata {
+                id: 7,
+                label: Some("Example".to_owned()),
+                score: None,
+                color: None,
+            }),
+        });
+
+        let legacy = expected.clone().into_legacy_document()?;
+        let actual = GraphDocument::from_legacy_document(legacy)?;
+
+        assert_eq!(actual, expected);
+        Ok(())
     }
 
     #[test]

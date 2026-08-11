@@ -11,10 +11,13 @@ pub(in crate::evidence) struct ResolutionDb<'a> {
 }
 
 impl<'a> ResolutionDb<'a> {
-    pub(in crate::evidence) const fn new(index: &'a UniversalResolutionIndex) -> Self {
+    pub(in crate::evidence) const fn new(
+        index: &'a UniversalResolutionIndex,
+        indexes: &'a ResolutionIndexes,
+    ) -> Self {
         Self {
             facts: &index.facts,
-            indexes: &index.indexes,
+            indexes,
             project: &index.project,
             budget: index.budget,
         }

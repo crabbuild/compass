@@ -383,6 +383,18 @@ This improves the operating-system high-water mark without changing graph
 semantics, but does not replace the required compact or streamed evidence
 producer work.
 
+Releasing the universal resolver's secondary name, member, hierarchy, and
+language lookup indexes after every resolution decision is fixed, together
+with consuming rather than cloning the typed/compatibility graph projection,
+then produced fresh samples of `3.87`, `3.94`, and `3.96` seconds. Maximum RSS
+was `465,977,344`, `466,878,464`, and `469,958,656` bytes, for medians of 3.94
+seconds and 445.3 MiB. That is 3.9% faster and 6.4% less RSS than the preceding
+no-arena median. Every graph remained exactly 34,117,849 bytes with SHA-256
+`77c49b1f6bf4b6280898d005c1ffc53107feeef3e073dd1883025788e047722d`.
+Compass therefore remains about 2.98x the retained 149.47 MiB Graphify cold
+RSS; this closes an avoidable lifetime overlap but does not close the producer
+evidence or graph-record representation gap.
+
 A subsequent query-hydration replay used the same pinned delta-rs SQLite
 artifact and seven fresh release-binary processes per independently labeled
 negative identifier. Moving the already-established absent composite-

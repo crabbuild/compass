@@ -944,7 +944,7 @@ impl IndexBuilder<'_> {
                 scopes,
                 definition_ranges,
             },
-            indexes: ResolutionIndexes {
+            indexes: Mutex::new(ResolutionIndexes {
                 names: NameIndexes {
                     by_qualified,
                     by_module_name,
@@ -981,7 +981,7 @@ impl IndexBuilder<'_> {
                     impl_traits: rust_impl_traits,
                     source_wildcard_targets: rust_source_wildcard_targets,
                 },
-            },
+            }),
             project: ProjectContext {
                 root: root.to_path_buf(),
                 typescript_project_modules,

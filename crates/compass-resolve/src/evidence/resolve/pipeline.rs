@@ -39,7 +39,11 @@ impl ResolutionStage {
 
 impl UniversalResolutionIndex {
     pub fn resolve(&self, candidate_id: &str) -> ResolutionDecision {
-        ResolutionDb::new(self).resolve(candidate_id)
+        let indexes = self
+            .indexes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        ResolutionDb::new(self, &indexes).resolve(candidate_id)
     }
 }
 

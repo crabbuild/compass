@@ -3778,8 +3778,13 @@ fn build_graph_inner_unscoped(
     if published.document.nodes.is_empty() {
         return Err(CoreError::EmptyGraph);
     }
-    let report_health = current_orientation_health(options, published.omissions);
-    let document = published.document.to_legacy_document()?;
+    let omissions = published.omissions;
+    let report_health = current_orientation_health(options, omissions);
+    // Legacy clustering and report code needs a compatibility projection, but
+    // retaining it beside the complete typed authority doubles the dominant
+    // graph working set. Move records into the projection and reconstruct the
+    // strict authority after those consumers finish instead.
+    let document = published.document.into_legacy_document()?;
 
     // A history realization must depend only on the target commit and build
     // profile. Prior community numbering is current-worktree operational state
@@ -3966,11 +3971,10 @@ fn build_graph_inner_unscoped(
         overview_elapsed,
     );
 
-    // The legacy projection is needed only by clustering, reports, and the
-    // bounded overview.  Release it before serializing the typed authority so
-    // large builds do not retain two complete graph representations while the
-    // SQLite/JSON publication path is writing its final artifacts.
-    drop(document);
+    // Move the compatibility records back into the typed authority before
+    // publication. The consuming conversion drains each record, so the two
+    // complete representations never coexist.
+    let mut published_document = V1GraphDocument::from_legacy_document(document)?;
 
     let publish_started = Instant::now();
     let graph_output_started = Instant::now();
@@ -3983,7 +3987,7 @@ fn build_graph_inner_unscoped(
                 .map(move |member| (member.as_str(), *community))
         })
         .collect::<HashMap<_, _>>();
-    for node in &mut published.document.nodes {
+    for node in &mut published_document.nodes {
         let Some(&community_index) = node_communities.get(node.id.as_str()) else {
             continue;
         };
@@ -3996,22 +4000,21 @@ fn build_graph_inner_unscoped(
             color: None,
         });
     }
-    let published_nodes = published.document.nodes.len();
-    let published_edges = published.document.links.len();
-    let omissions = published.omissions;
+    let published_nodes = published_document.nodes.len();
+    let published_edges = published_document.links.len();
     let serialization_started = Instant::now();
     let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
         let (metrics, seal) =
-            if let Some(previous) = load_graph_delta_base(&output_dir, &published.document) {
-                publish_graph_and_store_delta(&output_dir, &previous, &published.document)?
+            if let Some(previous) = load_graph_delta_base(&output_dir, &published_document) {
+                publish_graph_and_store_delta(&output_dir, &previous, &published_document)?
             } else {
-                publish_graph_and_store_from_canonical(&output_dir, &published.document)?
+                publish_graph_and_store_from_canonical(&output_dir, &published_document)?
             };
         (Some(metrics), Some(seal))
     } else {
         let graph_path = output_dir.join("graph.json");
         let receipt = write_atomic_with_digest(&graph_path, |writer| {
-            write_canonical_graph_json(&published.document, writer).map_err(|source| {
+            write_canonical_graph_json(&published_document, writer).map_err(|source| {
                 compass_files::FileError::Io {
                     path: graph_path.clone(),
                     source,
@@ -4051,7 +4054,7 @@ fn build_graph_inner_unscoped(
     profile_internal_duration("graph.json v1 serialization", serialization_elapsed);
     profile_internal("graph.json v1 publication", &mut output_profile_started);
     let graph_output_elapsed = graph_output_started.elapsed();
-    let retained_document = retain_artifacts.then_some(published.document);
+    let retained_document = retain_artifacts.then_some(published_document);
     profile_internal_duration("graph publication", graph_output_elapsed);
     internal_started = Instant::now();
     timings.graph_assembly += stage_started.elapsed();

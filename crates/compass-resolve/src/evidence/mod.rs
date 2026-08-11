@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::Hash;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Instant;
 
 use ahash::{AHashMap, AHashSet};
@@ -141,7 +142,7 @@ struct TypeScriptExportWalk<'a> {
 
 pub struct UniversalResolutionIndex {
     facts: FactStore,
-    indexes: ResolutionIndexes,
+    indexes: Mutex<ResolutionIndexes>,
     project: ProjectContext,
     budget: LookupBudget,
     low_test_aliases: AHashMap<String, Vec<String>>,

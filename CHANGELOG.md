@@ -87,9 +87,11 @@
   Compact validated occurrences into a private slot-backed string table and
   retain only the role, spelling, qualifier, context, and exact range consumed
   by resolution.
-  Borrowed lookup and explicit duplicate-ID rejection preserve graph semantics
-  while reducing the transient resolver working set without changing the
-  public evidence or cache schema.
+  Release secondary resolver indexes after every build decision is fixed, and
+  consume the legacy clustering/report projection instead of retaining it
+  beside a complete typed graph. Borrowed lookup and explicit duplicate-ID
+  rejection preserve graph semantics while reducing the transient resolver
+  working set without changing the public evidence, cache, or graph schema.
 
 - Add a digest-pinned 500-question, AI-reviewed synthetic relevance matrix
   covering all query classes, execute it in CI with strict ranking, recall,
