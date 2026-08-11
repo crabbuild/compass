@@ -151,6 +151,30 @@ share an endpoint pair (ordered for directed graphs, unordered for undirected
 graphs), including repeated self-loops. Consumers do not need to request this
 promotion.
 
+### Inference levels
+
+Graph-building commands accept `--inference-level low|medium|high|max`. The
+levels are deterministic and nested:
+
+| Level | Published relationship evidence |
+| --- | --- |
+| `low` | exact relationships only |
+| `medium` | `low`, plus inferred relationships whose endpoints are both source-backed |
+| `high` | `medium`, plus explicitly qualified external relationships anchored in source syntax |
+| `max` | all retained inference, including deferred-receiver relationships |
+
+`max` is the default and preserves the complete graph behavior. Lower levels
+filter after evidence normalization, prune unreferenced inferred placeholder
+nodes, and keep every retained edge endpoint valid. The selected level is part
+of the build profile and configuration digest, so an output built at one level
+is not reused as though it represented another. This policy is intentional
+selection, not a publication omission.
+
+Inference controls graph breadth, not source anchoring. An inferred edge may
+still have an exact relationship site while its target identity remains
+unproven. Use `compass diagnose quality --json` to inspect exact/inferred ratios
+for the selected output.
+
 ### Consumer requirements
 
 - preserve unknown attributes;

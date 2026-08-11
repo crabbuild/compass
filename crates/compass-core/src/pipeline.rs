@@ -16,8 +16,8 @@ use compass_files::{
 use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
     GRAPH_JSON_DELTA_MAX_SOURCE_BYTES, GRAPH_SNAPSHOT_MAX_OBJECTS,
-    GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder, GraphSnapshotGcStats,
-    InventoryEvidence, PublicationOmissions, SnapshotSelector, SourceDigest,
+    GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder, GraphSnapshotGcStats, InferenceLevel,
+    InventoryEvidence, PublicationOmissions, SnapshotSelector, SourceDigest, apply_inference_level,
     build_owned_with_tiebreaker as build_document, canonical_edge_kind, canonical_raw_edge_sites,
     cluster, deduped_node_count, extraction_from_v1, garbage_collect_graph_snapshots,
     graph_insights, graph_snapshot_needs_gc, label_communities_by_hub,
@@ -113,6 +113,11 @@ pub struct BuildOptions {
     /// default query index for bounded, large-graph reads; `--store json`
     /// opts out when only the portable artifact is wanted.
     pub graph_storage: GraphStorage,
+    /// Maximum inferred relationship class admitted to the published graph.
+    ///
+    /// Extraction caches retain complete evidence regardless of this policy;
+    /// changing the level deterministically republishes a coherent subgraph.
+    pub inference_level: InferenceLevel,
     pub gitignore: bool,
     pub ignore_policy: IgnorePolicy,
     pub extra_excludes: Vec<String>,
@@ -353,6 +358,7 @@ impl BuildOptions {
             no_cluster: false,
             no_viz: false,
             graph_storage: GraphStorage::default(),
+            inference_level: InferenceLevel::default(),
             gitignore: true,
             ignore_policy: IgnorePolicy::CurrentCheckout,
             extra_excludes: Vec::new(),
@@ -3395,20 +3401,22 @@ fn build_graph_inner_unscoped(
             .clone()
             .or_else(|| git_commit(&root));
         let no_cluster_normalization_started = Instant::now();
-        let published = normalize_document_v1_with_inventory_and_source_digests_best_effort_owned(
-            document,
-            &root,
-            configuration_digest,
-            source_commit.as_deref(),
-            detection_inventory(
-                &detection,
-                semantic,
-                &extraction_failures,
-                &extraction_partials,
+        let mut published =
+            normalize_document_v1_with_inventory_and_source_digests_best_effort_owned(
+                document,
                 &root,
-            ),
-            Some(&fresh_source_digests),
-        )?;
+                configuration_digest,
+                source_commit.as_deref(),
+                detection_inventory(
+                    &detection,
+                    semantic,
+                    &extraction_failures,
+                    &extraction_partials,
+                    &root,
+                ),
+                Some(&fresh_source_digests),
+            )?;
+        apply_inference_level(&mut published.document, options.inference_level);
         profile_internal_duration(
             "no-cluster v1 normalization",
             no_cluster_normalization_started.elapsed(),
@@ -3589,7 +3597,7 @@ fn build_graph_inner_unscoped(
     if unchanged_layers && supplemental.is_empty() && !options.force && unchanged_artifacts_complete
     {
         let preflight_started = Instant::now();
-        let preflight = normalize_document_v1_with_inventory_best_effort(
+        let mut preflight = normalize_document_v1_with_inventory_best_effort(
             &document,
             &root,
             graph_configuration_digest(options, &output_dir)?,
@@ -3602,10 +3610,12 @@ fn build_graph_inner_unscoped(
                 &root,
             ),
         )?;
+        apply_inference_level(&mut preflight.document, options.inference_level);
+        let preflight_document = preflight.document.to_legacy_document()?;
         profile_internal_duration("graph.json v1 preflight", preflight_started.elapsed());
         if !preflight.omissions.is_partial()
             && GraphDocument::load(&output_dir.join("graph.json"))
-                .is_ok_and(|existing| topology_is_unchanged(&existing, &document))
+                .is_ok_and(|existing| topology_is_unchanged(&existing, &preflight_document))
         {
             let communities = previous_communities(&output_dir.join("graph.json"))
                 .values()
@@ -3629,8 +3639,8 @@ fn build_graph_inner_unscoped(
                 &output_dir,
                 &manifest_path,
                 sources.len(),
-                document.nodes.len(),
-                document.links.len(),
+                preflight_document.nodes.len(),
+                preflight_document.links.len(),
                 communities,
                 PublicationOmissions::default(),
                 program.as_ref(),
@@ -3656,8 +3666,8 @@ fn build_graph_inner_unscoped(
                     files_extracted: missing.len(),
                     files_cached: sources.len().saturating_sub(missing.len()),
                     empty_files,
-                    nodes: document.nodes.len(),
-                    edges: document.links.len(),
+                    nodes: preflight_document.nodes.len(),
+                    edges: preflight_document.links.len(),
                     communities,
                     omitted_nodes: 0,
                     omitted_edges: 0,
@@ -3721,6 +3731,7 @@ fn build_graph_inner_unscoped(
     let normalization_started = Instant::now();
     let mut published =
         normalize_document_v1_with_evidence_best_effort_owned(raw_document, publication_evidence)?;
+    apply_inference_level(&mut published.document, options.inference_level);
     profile_internal_duration(
         "graph.json v1 normalization",
         normalization_started.elapsed(),
@@ -4220,6 +4231,7 @@ fn build_profile(options: &BuildOptions) -> BuildProfile {
             GraphStorage::Sqlite => "sqlite",
         }
         .to_owned(),
+        inference_level: options.inference_level.as_str().to_owned(),
         max_source_bytes: options.max_source_bytes,
     }
 }
@@ -4233,7 +4245,7 @@ fn current_orientation_health(
     } else {
         PublicationStatus::Complete
     };
-    let profile = format!(
+    let mut profile = format!(
         "{}; cluster={}; code_only={}; program={}; storage={}",
         match options.purpose {
             BuildPurpose::Update => "update",
@@ -4247,6 +4259,9 @@ fn current_orientation_health(
             GraphStorage::Sqlite => "sqlite",
         }
     );
+    if options.inference_level != InferenceLevel::Max {
+        profile.push_str(&format!("; inference={}", options.inference_level.as_str()));
+    }
     let mut exclusions = options.scope.exclude.clone();
     exclusions.extend(options.extra_excludes.iter().cloned());
     exclusions.sort();
@@ -7112,6 +7127,7 @@ mod tests {
 
     use compass_graph::{GraphSnapshotReader, IndexKind};
     use compass_model::code_graph::GraphDocument as V1GraphDocument;
+    use compass_model::provenance::{EvidenceConfidence, effective_confidence};
     use serde_json::{Map, Value};
 
     use super::*;
@@ -7150,6 +7166,85 @@ mod tests {
                 value.contains("update") && value.contains("code_only=true")
             })
         );
+    }
+
+    #[test]
+    fn inference_level_changes_profile_identity_without_changing_the_default_profile() {
+        let default = BuildOptions::new(".");
+        let default_profile = build_profile(&default);
+        let default_json = serde_json::to_value(&default_profile).unwrap_or_default();
+        assert!(default_json.get("inference_level").is_none());
+
+        let mut medium = default;
+        medium.inference_level = InferenceLevel::Medium;
+        let medium_profile = build_profile(&medium);
+        assert_eq!(
+            serde_json::to_value(&medium_profile)
+                .unwrap_or_default()
+                .get("inference_level"),
+            Some(&Value::String("medium".to_owned()))
+        );
+        assert_ne!(default_profile, medium_profile);
+        assert!(
+            current_orientation_health(&medium, PublicationOmissions::default())
+                .build_profile
+                .as_deref()
+                .is_some_and(|profile| profile.contains("inference=medium"))
+        );
+    }
+
+    #[test]
+    fn build_inference_levels_publish_nested_coherent_graphs() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().join("source");
+        fs::create_dir(&root)?;
+        fs::write(
+            root.join("lib.rs"),
+            r#"
+                use external_crate::ExternalType;
+
+                fn run(value: ExternalType) {
+                    value.execute();
+                    external_crate::Service::call();
+                }
+            "#,
+        )?;
+
+        let mut previous = None;
+        for level in [
+            InferenceLevel::Low,
+            InferenceLevel::Medium,
+            InferenceLevel::High,
+            InferenceLevel::Max,
+        ] {
+            let mut options = BuildOptions::new(&root);
+            options.output_root = Some(directory.path().join("artifacts"));
+            options.graph_storage = GraphStorage::Json;
+            options.inference_level = level;
+            options.no_cluster = true;
+            options.no_viz = true;
+            let result = build_local_graph(&options)?;
+            let document = V1GraphDocument::load(&result.output_dir.join("graph.json"))?;
+            let inferred = document
+                .links
+                .iter()
+                .filter(|edge| {
+                    effective_confidence(&edge.evidence) == Some(EvidenceConfidence::Inferred)
+                })
+                .count();
+            if level == InferenceLevel::Low {
+                assert_eq!(inferred, 0);
+            }
+            if let Some((nodes, edges, inferred_before)) = previous {
+                assert!(document.nodes.len() >= nodes);
+                assert!(document.links.len() >= edges);
+                assert!(inferred >= inferred_before);
+            }
+            previous = Some((document.nodes.len(), document.links.len(), inferred));
+        }
+        let (_, _, max_inferred) = previous.ok_or("inference levels were not built")?;
+        assert!(max_inferred > 0);
+        Ok(())
     }
 
     #[test]

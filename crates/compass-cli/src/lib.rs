@@ -38,8 +38,8 @@ use std::time::{Duration, Instant};
 
 use compass_core::{
     BuildFileProgress, BuildOptions, BuildPurpose, BuildResult, BuildTimings,
-    ClusterExistingOptions, ExportInputs, GraphStorage, LoadedGraph, SemanticLayer, WatchBackend,
-    WatchBuildReason, WatchOptions, WatchStatus, build_graph_with_layers,
+    ClusterExistingOptions, ExportInputs, GraphStorage, InferenceLevel, LoadedGraph, SemanticLayer,
+    WatchBackend, WatchBuildReason, WatchOptions, WatchStatus, build_graph_with_layers,
     build_graph_with_layers_and_progress, build_graph_with_layers_and_tiebreaker,
     cluster_existing_graph, default_graph_path, diagnose_graph_file, diagnose_graph_quality,
     format_diagnostic_json, format_diagnostic_report, format_quality_json, format_quality_report,
@@ -1017,6 +1017,7 @@ fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> 
     let mut excludes = Vec::new();
     let mut program_artifacts = Vec::new();
     let mut graph_storage = GraphStorage::default();
+    let mut inference_level = InferenceLevel::default();
     let mut force_polling = false;
     let mut index = 0;
     while index < args.len() {
@@ -1050,6 +1051,18 @@ fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> 
                 graph_storage = parse_graph_storage(&value[8..])?;
             }
             "--store" => return Err("error: --store requires json or sqlite".to_owned()),
+            "--inference-level" if index + 1 < args.len() => {
+                inference_level = parse_inference_level(&args[index + 1])?;
+                index += 1;
+            }
+            value if value.starts_with("--inference-level=") => {
+                inference_level = parse_inference_level(&value[18..])?;
+            }
+            "--inference-level" => {
+                return Err(
+                    "error: --inference-level requires low, medium, high, or max".to_owned(),
+                );
+            }
             "--exclude" if index + 1 < args.len() => {
                 excludes.push(args[index + 1].clone());
                 index += 1;
@@ -1097,6 +1110,7 @@ fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> 
     options.build.no_cluster = no_cluster;
     options.build.no_viz = no_viz;
     options.build.graph_storage = graph_storage;
+    options.build.inference_level = inference_level;
     options.build.gitignore = gitignore;
     options.build.extra_excludes = excludes;
     options.build.program_analysis = program_requested || !program_artifacts.is_empty();
@@ -1646,6 +1660,7 @@ fn command_build_with_validation_inner(
     let mut no_program = false;
     let mut program_requested = false;
     let mut graph_storage = GraphStorage::default();
+    let mut inference_level = InferenceLevel::default();
     let mut gitignore = true;
     let mut code_only = false;
     let mut cargo = false;
@@ -1799,6 +1814,25 @@ fn command_build_with_validation_inner(
                     "error: --store requires json or sqlite".to_owned(),
                 );
             }
+            "--inference-level" if index + 1 < args.len() => {
+                inference_level = match parse_inference_level(&args[index + 1]) {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error),
+                };
+                index += 1;
+            }
+            value if value.starts_with("--inference-level=") => {
+                inference_level = match parse_inference_level(&value[18..]) {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error),
+                };
+            }
+            "--inference-level" => {
+                return extract_parse_failure(
+                    frontend,
+                    "error: --inference-level requires low, medium, high, or max".to_owned(),
+                );
+            }
             "--exclude" if index + 1 < args.len() => {
                 excludes.push(args[index + 1].clone());
                 index += 1;
@@ -1889,7 +1923,7 @@ fn command_build_with_validation_inner(
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
-                    "Usage: compass update [path] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
+                    "Usage: compass update [path] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
                 });
             }
             value if value.starts_with('-') => {
@@ -1942,6 +1976,7 @@ fn command_build_with_validation_inner(
     options.no_cluster = no_cluster;
     options.no_viz = no_viz;
     options.graph_storage = graph_storage;
+    options.inference_level = inference_level;
     options.gitignore = gitignore;
     if environment_truthy("COMPASS_HISTORY_BUILD") {
         options.ignore_policy = compass_files::IgnorePolicy::HistoricalCommit;
@@ -2206,6 +2241,18 @@ fn parse_graph_storage(value: &str) -> Result<GraphStorage, String> {
         "sqlite" => Ok(GraphStorage::Sqlite),
         _ => Err(format!(
             "error: --store must be json or sqlite (found {value})"
+        )),
+    }
+}
+
+pub(crate) fn parse_inference_level(value: &str) -> Result<InferenceLevel, String> {
+    match value {
+        "low" => Ok(InferenceLevel::Low),
+        "medium" => Ok(InferenceLevel::Medium),
+        "high" => Ok(InferenceLevel::High),
+        "max" => Ok(InferenceLevel::Max),
+        _ => Err(format!(
+            "error: --inference-level must be low, medium, high, or max (found {value})"
         )),
     }
 }
@@ -2780,7 +2827,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: compass extract [PATH] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: compass extract [PATH] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {
@@ -4514,7 +4561,7 @@ fn graph_load_outcome(error: GraphError) -> Outcome {
 }
 
 fn watch_help() -> String {
-    "Usage: compass watch [PATH] [--program] [--program-artifact PATH] [--no-program] [--debounce SECONDS] [--store json|sqlite] [--out DIR] [--no-cluster] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--poll]"
+    "Usage: compass watch [PATH] [--program] [--program-artifact PATH] [--no-program] [--debounce SECONDS] [--store json|sqlite] [--inference-level low|medium|high|max] [--out DIR] [--no-cluster] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--poll]"
         .to_owned()
 }
 
@@ -4938,6 +4985,8 @@ mod mcp_option_tests {
             "0.25".to_owned(),
             "--out".to_owned(),
             "artifacts".to_owned(),
+            "--inference-level".to_owned(),
+            "high".to_owned(),
             "--exclude".to_owned(),
             "target".to_owned(),
             "--poll".to_owned(),
@@ -4945,6 +4994,7 @@ mod mcp_option_tests {
         let watch = parse_watch_options(&args)?.ok_or("unexpected help")?;
         assert_eq!(watch.debounce, Duration::from_millis(250));
         assert_eq!(watch.build.output_root, Some(PathBuf::from("artifacts")));
+        assert_eq!(watch.build.inference_level, InferenceLevel::High);
         assert_eq!(watch.build.extra_excludes, ["target"]);
         assert!(watch.force_polling);
         assert!(watch.adaptive);
@@ -5009,5 +5059,21 @@ mod mcp_option_tests {
             assert!(parse_positive_u64(invalid, "--max-source-bytes").is_err());
         }
         assert!(extract_help().contains("[--max-source-bytes N]"));
+    }
+
+    #[test]
+    fn inference_level_parser_is_closed_and_defaults_to_max()
+    -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(InferenceLevel::default(), InferenceLevel::Max);
+        assert_eq!(parse_inference_level("low")?, InferenceLevel::Low);
+        assert_eq!(parse_inference_level("medium")?, InferenceLevel::Medium);
+        assert_eq!(parse_inference_level("high")?, InferenceLevel::High);
+        assert_eq!(parse_inference_level("max")?, InferenceLevel::Max);
+        for invalid in ["", "none", "maximum", "HIGH"] {
+            assert!(parse_inference_level(invalid).is_err());
+        }
+        assert!(watch_help().contains("--inference-level low|medium|high|max"));
+        assert!(extract_help().contains("--inference-level low|medium|high|max"));
+        Ok(())
     }
 }

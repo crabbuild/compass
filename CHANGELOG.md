@@ -7,6 +7,13 @@
   source or wiring-site context, with the graph-local community ID used only
   as a final tie-breaker; unique names remain unchanged.
 
+- Add deterministic `--inference-level low|medium|high|max` controls to
+  structural graph builds. Lower levels retain exact or source-backed evidence
+  and can admit explicitly qualified external relationships without the full
+  deferred-receiver expansion; `max` remains the compatibility-preserving
+  default. Filtered builds prune unreferenced inferred placeholders and bind
+  the selected level into build-profile/cache identity.
+
 - Improve agent discovery accuracy and latency with deterministic identifier-
   subword postings, exact trusted-call relationship-term postings, bounded
   proof-complete caller recall, distinct supporting-callee evidence, fair

@@ -223,6 +223,12 @@ legacy `--no-program` flag remains accepted and continues to request the
 structural-only profile. Program inspection commands remain read-only and
 require an existing canonical Program IR artifact.
 
+Structural build commands accept the additive
+`--inference-level low|medium|high|max` profile input. `max` remains the
+default and preserves complete publication behavior. Non-default levels are
+part of the build profile and configuration digest; changing the level
+republishes a coherent graph without changing `compass.graph/1`.
+
 The `extract --code-only` profile excludes document extractors from structural
 node and edge publication while retaining the scanned file inventory and its
 status records.

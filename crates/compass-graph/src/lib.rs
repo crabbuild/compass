@@ -3,6 +3,7 @@
 mod analyze;
 mod cluster;
 mod dedup;
+mod inference;
 mod quarantine;
 mod snapshot;
 mod v1;
@@ -22,6 +23,7 @@ pub use dedup::{
     AmbiguousPair, DedupError, DedupResult, DedupStats, EntityTiebreaker, deduplicate_entities,
     deduplicate_entities_with_tiebreaker,
 };
+pub use inference::{InferenceLevel, InferenceSelection, apply_inference_level};
 pub use quarantine::{MAX_QUARANTINE_EXAMPLES, PublicationOmissions, PublicationOutcome};
 pub use snapshot::{
     CanonicalGraphDocument, GRAPH_JSON_DELTA_MAX_SOURCE_BYTES, GRAPH_SNAPSHOT_LAYOUT_V2,

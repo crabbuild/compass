@@ -28,6 +28,7 @@ compass init [PATH]
   [--exclude GLOB]
   [--program]
   [--store json|sqlite]
+  [--inference-level low|medium|high|max]
   [--yes]
   [--force]
 ```
@@ -52,6 +53,7 @@ compass update [PATH]
   [--program-artifact PATH]
   [--out DIR]
   [--store json|sqlite]
+  [--inference-level low|medium|high|max]
   [--no-program]
   [--no-cluster]
   [--force]
@@ -73,6 +75,9 @@ projected. `--no-program` conflicts with `--program-artifact`.
 Graph storage defaults to `sqlite`; `--store json` opts out of the validated
 local store sidecar without replacing `graph.json`. JSON remains the portable
 authority, while the sidecar keeps large graphs queryable under bounded memory.
+Inference defaults to `max`. Use `low` for exact-only automation, `medium` for
+source-backed inferred resolution, or `high` to additionally retain explicitly
+qualified external references without deferred-receiver expansion.
 
 ### `extract`
 
@@ -99,6 +104,7 @@ compass extract [PATH]
   [--timing]
   [--out DIR]
   [--store json|sqlite]
+  [--inference-level low|medium|high|max]
   [--no-cluster]
   [--force]
   [--no-viz]
@@ -131,6 +137,7 @@ compass watch [PATH]
   [--program-artifact PATH]
   [--no-program]
   [--store json|sqlite]
+  [--inference-level low|medium|high|max]
   [--out DIR]
   [--no-cluster]
   [--no-viz]
