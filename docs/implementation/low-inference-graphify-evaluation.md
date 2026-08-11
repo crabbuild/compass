@@ -378,6 +378,32 @@ about 3.96x Graphify's documented cold RSS. This is an exact but modest
 resolver-local reduction, not evidence that the producer/cache high-water
 mark is solved.
 
+### Final admission replay and resolver-edge identity pruning
+
+A clean replay of the final admission binary completed in 4.12 seconds with
+461,357,056 bytes (440.0 MiB) maximum RSS. Its canonical graph contained 9,982
+nodes, 25,206 relationships, 532 communities, and 1,212 structural test roles.
+The 34,116,625-byte artifact had SHA-256
+`971d588275cbad097ed1f7b5f54e32b86a80fadd8875760e3848b9948069f573`.
+This is the semantic reference for subsequent final-admission measurements;
+hashes reported above remain historical evidence for their recorded binaries.
+
+The materialized resolver edge still duplicated candidate and occurrence IDs
+after their relation, occurrence rule, exact anchor, endpoints, and provenance
+were fixed. Those IDs have no consumer on ordinary resolved edges; the
+separate universal project-edge path retains its candidate ID through its own
+deduplication boundary. Removing only the dead ordinary-edge copies produced
+three fresh clustered samples at 4.30/4.36/4.06 seconds and
+455,966,720/455,131,136/462,143,488 bytes maximum RSS. The medians are 4.30
+seconds and 434.8 MiB. Every graph was byte-identical to the clean replay,
+including all 1,212 test roles.
+
+This is a diagnostic 1.2% RSS reduction relative to the single clean replay,
+not a replacement controlled baseline. Compass still used about 2.91x
+Graphify's retained 149.47 MiB cold RSS. The experiment establishes that dead
+identity attributes are removable without losing parallel-edge meaning, but
+also that field pruning alone cannot close the representation gap.
+
 ## Work required to surpass Graphify
 
 1. **Move inference admission before materialization.** Thread the selected

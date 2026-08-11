@@ -118,17 +118,13 @@ pub(super) fn materialized_edge(
             OCCURRENCE_RULE_ATTRIBUTE.to_owned(),
             Value::String(occurrence_rule),
         ),
-        (
-            "evidence_candidate_id".to_owned(),
-            Value::String(candidate.id.clone()),
-        ),
     ]);
-    if let Some(occurrence_id) = candidate.occurrence_id.as_ref() {
-        attributes.insert(
-            "evidence_occurrence_id".to_owned(),
-            Value::String(occurrence_id.clone()),
-        );
-    }
+    // Candidate and occurrence IDs are resolver-internal lookup identities.
+    // At this point their relation, occurrence rule, exact anchor, endpoints,
+    // and provenance have already been projected into the public edge. Do not
+    // duplicate those long IDs in every transient JSON attribute map. The
+    // separate universal project-edge builder retains candidate IDs until its
+    // own deduplication pass because that path still consumes them.
     if matches!(
         candidate.relation,
         CandidateRelation::Imports | CandidateRelation::Reexports

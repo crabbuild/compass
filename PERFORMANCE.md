@@ -395,6 +395,29 @@ Compass therefore remains about 2.98x the retained 149.47 MiB Graphify cold
 RSS; this closes an avoidable lifetime overlap but does not close the producer
 evidence or graph-record representation gap.
 
+Replaying the final admission binary established a new clean-head reference:
+one clustered delta-rs low build completed in 4.12 seconds with 461,357,056
+bytes (440.0 MiB) maximum RSS. Its 9,982 nodes, 25,206 relationships, 532
+communities, and 1,212 structural test roles produced a 34,116,625-byte graph
+with SHA-256
+`971d588275cbad097ed1f7b5f54e32b86a80fadd8875760e3848b9948069f573`.
+The earlier `77c49...` artifacts above remain evidence for their recorded
+revisions but are not the semantic reference for changes after final resolver
+stage admission.
+
+Dropping resolver-only candidate and occurrence lookup IDs once each edge's
+typed relation, occurrence rule, exact anchor, endpoints, and provenance were
+materialized then produced three fresh samples at 4.30, 4.36, and 4.06
+seconds, with maximum RSS of 455,966,720, 455,131,136, and 462,143,488 bytes.
+The medians are 4.30 seconds and 434.8 MiB. All three graphs were byte-identical
+to the clean-head reference above, including the test-role count. Relative to
+the single clean-head replay this is a diagnostic 1.2% RSS reduction, not a
+controlled baseline replacement; Compass still used about 2.91x Graphify's
+retained 149.47 MiB cold RSS. The result removes dead transient identity
+strings without weakening multiplicity or provenance, but confirms that the
+remaining gap requires a compact edge representation rather than additional
+attribute pruning.
+
 A subsequent query-hydration replay used the same pinned delta-rs SQLite
 artifact and seven fresh release-binary processes per independently labeled
 negative identifier. Moving the already-established absent composite-
