@@ -37,8 +37,10 @@ FIXTURE = Path(__file__).parent / "fixtures" / "compass_graph.json"
 FAKE_TOOL = Path(__file__).parent / "helpers" / "fake_tool.py"
 
 
-def node_oracle(qualified_name: str, source: str) -> QueryNodeOracle:
-    return QueryNodeOracle(qualified_name, QuerySourceAnchorOracle(source))
+def node_oracle(
+    qualified_name: str, source: str, start_line: int | None = None
+) -> QueryNodeOracle:
+    return QueryNodeOracle(qualified_name, QuerySourceAnchorOracle(source, start_line))
 
 
 def discovery_json(payload: dict[str, object]) -> str:
@@ -476,6 +478,69 @@ class WorkloadTests(unittest.TestCase):
             QueryOracle("where", ("URLResolver",), ("WrongRoute",)),
         )
         self.assertFalse(result.passed)
+
+    def test_graphify_query_validation_scores_independent_negative_controls(self) -> None:
+        oracle = QueryOracle(
+            "QzxvQuantumBananaSync",
+            allow_no_match=True,
+            judgment_source="manual_source_review",
+            judgment_reason="absent from pinned source",
+        )
+
+        false_positive = validate_query_output(
+            "Traversal: BFS\nNODE sync [src=src/sync.rs]",
+            oracle,
+            tool="graphify",
+        )
+        no_answer = validate_query_output(
+            "No seed nodes found for the query.",
+            oracle,
+            tool="graphify",
+        )
+
+        self.assertFalse(false_positive.passed)
+        self.assertFalse(false_positive.metrics["no_match_correct"])
+        self.assertTrue(no_answer.passed)
+        self.assertTrue(no_answer.metrics["no_match_correct"])
+        self.assertTrue(no_answer.metrics["independently_labeled"])
+
+    def test_graphify_query_validation_uses_independent_name_source_and_line_identity(self) -> None:
+        oracle = QueryOracle(
+            "how are rows deleted",
+            expected_seeds=(
+                node_oracle(
+                    "DeleteBuilder",
+                    "crates/core/src/operations/delete.rs",
+                    96,
+                ),
+            ),
+            judgment_source="manual_source_review",
+            judgment_reason="reviewed pinned declaration",
+        )
+
+        accepted = validate_query_output(
+            "Traversal: BFS depth=2 | Start: ['DeleteBuilder'] | 1 nodes found\n"
+            "NODE DeleteBuilder [src=crates/core/src/operations/delete.rs loc=L96 community=7]",
+            oracle,
+            tool="graphify",
+        )
+        wrong_line = validate_query_output(
+            "Traversal: BFS depth=2 | Start: ['DeleteBuilder'] | 1 nodes found\n"
+            "NODE DeleteBuilder [src=crates/core/src/operations/delete.rs loc=L97 community=7]",
+            oracle,
+            tool="graphify",
+        )
+        traversal_only = validate_query_output(
+            "Traversal: BFS depth=2 | Start: ['Table'] | 2 nodes found\n"
+            "NODE Table [src=src/table.rs loc=L1 community=1]\n"
+            "NODE DeleteBuilder [src=crates/core/src/operations/delete.rs loc=L96 community=7]",
+            oracle,
+            tool="graphify",
+        )
+
+        self.assertTrue(accepted.passed, accepted.failures)
+        self.assertFalse(wrong_line.passed)
+        self.assertFalse(traversal_only.passed)
 
     def test_compass_query_validation_uses_typed_discovery_evidence(self) -> None:
         oracle = QueryOracle(

@@ -1130,6 +1130,31 @@ fn active_phase2_snapshot_rejects_a_stale_store_reference() -> Result<(), Box<dy
 }
 
 #[test]
+fn active_phase2_snapshot_rejects_another_store_namespace() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
+    let reference_path = directory.path().join(STORE_REF_FILE_NAME);
+    let mut reference: StoreRef = serde_json::from_slice(&fs::read(&reference_path)?)?;
+    reference.namespace = "another.graph".to_owned();
+    fs::write(reference_path, serde_json::to_vec(&reference)?)?;
+
+    let error = match open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("cache"),
+        EngineSelection::Store,
+    ) {
+        Ok(_) => return Err("foreign store namespace was accepted".into()),
+        Err(error) => error,
+    };
+    assert_eq!(error.code(), "store_ref_invalid");
+    Ok(())
+}
+
+#[test]
 fn opened_store_reader_remains_pinned_when_the_active_selector_changes()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

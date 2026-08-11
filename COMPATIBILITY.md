@@ -182,6 +182,16 @@ exhaustion remains explicit truncation rather than an empty result. A complete
 exact-name lookup can prove its top channel despite truncation in lower recall
 channels, while duplicate exact names remain ambiguous.
 
+For a question with at least three distinct concepts, discovery now requires
+one exact identifier/name, a source-backed operation or representation type,
+at least two direct matched concepts, or trusted multi-concept relationship
+evidence somewhere in the ranked pool. A composite identifier containing at
+least three concepts requires an exact name or ID. If recall finds only
+isolated generic subword hits, the response is an explicit `no_match` instead
+of presenting unrelated symbols as an answer. This tightens result admission
+without changing the `compass.query.discovery/1` schema or deterministic rank
+ordering of admitted candidates.
+
 Discovery traversal bounds adjacency reads by remaining node capacity and
 stops endpoint hydration at the node cap. Store-backed final edge assembly
 scans unit-valued outgoing references, rejects targets outside the selected
@@ -228,6 +238,28 @@ Structural build commands accept the additive
 default and preserves complete publication behavior. Non-default levels are
 part of the build profile and configuration digest; changing the level
 republishes a coherent graph without changing `compass.graph/1`.
+
+## Pull-request intelligence contract
+
+`compass review` and MCP `review_pull_request` add the strict
+`compass.pr_intelligence.report/1` machine contract. Unknown fields, unknown
+enum values, malformed digests, invalid references, and unknown major versions
+fail explicitly. Finding identities use `cmpprv1:<sha256>`; the advisory
+integer rubric is version 1; each deterministic gate has its own rule version.
+Presentation formats and the reusable GitHub Action consume this report and do
+not redefine its semantics.
+
+The report binds full Git revision IDs, graph/profile identity, and an evidence
+manifest. A profile mismatch is an error. Conflicts and incomplete evidence
+remain explicit and cannot become a clean gate result. Advisory risk is never a
+merge gate. The Action supports only `fail-on: none|deterministic`, where
+`deterministic` consults typed `GateResult::Fail` states rather than risk band,
+score, SARIF level, or prose.
+
+This is additive in the `0.3.x` line. Existing `compass diff`, `compass prs`,
+graph, history, and MCP contracts are unchanged. Consumers that adopt the new
+report must reject unknown majors and validate `report_digest`. See the
+[PR Intelligence reference](docs/reference/pr-intelligence.md).
 
 The `extract --code-only` profile excludes document extractors from structural
 node and edge publication while retaining the scanned file inventory and its

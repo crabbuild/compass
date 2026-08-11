@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Add canonical `compass.pr_intelligence.report/1` review analysis over exact
+  immutable target, PR-head, and synthetic-merge realizations, with stable
+  `cmpprv1` findings, explicit completeness, a versioned advisory integer
+  rubric, and independently versioned deterministic gates. Expose the same
+  report through `compass review`, JSON/text/Markdown/SARIF projections, and
+  MCP `review_pull_request`. Add a checksum-pinned reusable GitHub Action with
+  read-only analysis, evidence artifact and job summary, fork-safe bounded
+  sticky-comment delivery, and `fail-on: none|deterministic`; advisory risk
+  never blocks merging.
+
 - Keep `GRAPH_REPORT.md` community evidence labels concise while making them
   deterministic and unique within a graph. Repeated hub names now gain compact
   source or wiring-site context, with the graph-local community ID used only
@@ -19,6 +29,17 @@
   Add a pinned delta-rs diagnostic covering build latency and memory, graph
   integrity and provenance, natural and exact query recall, query latency, and
   adversarial no-answer behavior.
+
+- Admit provably disallowed inferred calls after resolver, semantic, entity,
+  and endpoint resolution but before node-link materialization, preserving
+  duplicate evidence, unresolved and constructible targets, omission
+  diagnostics, and the authoritative v1 policy pass. Reuse clustered community
+  artifacts for fact-neutral edits, locally
+  recluster bounded affected communities for small topology changes, and fall
+  back to full Louvain for removals or oversized regions. Reduce immutable-store
+  query startup reads, reject unsupported one-term fallback seeds for
+  multi-concept discovery, and add a pinned Delta suite with independently
+  labeled positive and negative accuracy oracles.
 
 - Improve agent discovery accuracy and latency with deterministic identifier-
   subword postings, exact trusted-call relationship-term postings, bounded

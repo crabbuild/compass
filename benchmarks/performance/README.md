@@ -93,6 +93,34 @@ the cross-tool ratio because Graphify has no equivalent workload.
 The comparison environment is isolated under `target/performance/` and is not a
 Compass runtime or development dependency.
 
+### Focused Delta accuracy oracles
+
+`delta-rs-low-oracles.toml` is a smaller, non-promotable qualification suite
+for inference and query iteration. It pins one Delta repository revision and
+contains 20 manually source-reviewed positive seed labels plus five manually
+source-reviewed negative controls. Each label records its independent judgment
+source and reason. Negative controls deliberately share generic terms such as
+`vacuum`, `snapshot`, or `merge` with real symbols; returning a graph node for
+one of those isolated terms is scored as a false positive for both tools.
+For Graphify, seed accuracy is evaluated only against the source-anchored
+`NODE` records corresponding to its declared `Start` list; finding the labeled
+symbol later in a broad traversal does not count as selecting the right seed.
+Top-1, MRR@10, recall@10, completeness, and exact source-anchor counts are
+reported with the same labels used for Compass.
+
+Run the focused low-inference comparison with:
+
+```bash
+python3 benchmarks/performance/harness.py compare \
+  --suite benchmarks/performance/delta-rs-low-oracles.toml \
+  --inference-level low \
+  --output target/performance/runs/delta-rs-low
+```
+
+The loader accepts one to eight repositories so focused suites use the same
+bounded runner and correctness implementation. Only the complete checked-in
+eight-repository suite remains eligible for baseline promotion.
+
 ## Analyze external comparison runs
 
 `analyze.py` profiles Compass and Graphify graphs that were built outside the

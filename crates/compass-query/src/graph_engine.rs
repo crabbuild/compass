@@ -153,6 +153,9 @@ pub(crate) struct LocalStoreSnapshot {
     pub(crate) store: SqliteStore,
     pub(crate) selector: SnapshotSelector,
     pub(crate) store_path: PathBuf,
+    pub(crate) graph_identity: String,
+    pub(crate) build_generation_identity: String,
+    pub(crate) partial_graph_message: Option<String>,
 }
 
 impl LocalStoreSnapshot {
@@ -331,27 +334,49 @@ pub(crate) fn open_local_store_snapshot(
             error.to_string(),
         )
     })?;
-    let actual = store
-        .graph_snapshot_reference_for(&reference.snapshot_id, &reference.manifest_digest)
-        .map_err(|error| {
-            QueryError::new(
-                QueryErrorKind::CorruptArtifact,
-                "store_ref_store_read_failed",
-                error.to_string(),
-            )
-        })?;
-    if actual != reference || reader.manifest().graph_digest != reference.graph_digest {
+    if reader.manifest().graph_digest != reference.graph_digest {
         return Err(QueryError::new(
             QueryErrorKind::CorruptArtifact,
             "store_ref_mismatch",
             "store.ref does not describe the selected immutable graph snapshot",
         ));
     }
+    let graph_identity = reader.manifest().graph_digest.clone();
+    let build_generation_identity = reader
+        .metadata_summary()
+        .map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_snapshot_failed",
+                error.to_string(),
+            )
+        })?
+        .graph
+        .build
+        .generation_id;
+    let partial_graph_message = reader
+        .graph_diagnostic_by_code("publication_omission_summary")
+        .map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_snapshot_failed",
+                error.to_string(),
+            )
+        })?
+        .map(|diagnostic| {
+            format!(
+                "Published graph coverage is incomplete: {}",
+                diagnostic.message
+            )
+        });
     drop(reader);
     Ok(LocalStoreSnapshot {
         store,
         selector,
         store_path,
+        graph_identity,
+        build_generation_identity,
+        partial_graph_message,
     })
 }
 
@@ -428,7 +453,7 @@ pub(crate) fn read_store_ref(graph_path: &Path) -> Result<StoreRef, QueryError> 
             error.to_string(),
         )
     })?;
-    reference.validate().map_err(|error| {
+    reference.validate_local_sqlite_graph().map_err(|error| {
         QueryError::new(
             QueryErrorKind::CorruptArtifact,
             "store_ref_invalid",

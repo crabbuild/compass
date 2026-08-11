@@ -14,8 +14,9 @@ pub use analyze::{
     surprising_connections,
 };
 pub use cluster::{
-    ClusterOptions, Communities, cluster, cohesion_score, community_member_signatures,
-    label_communities_by_hub, remap_communities_to_previous, score_communities,
+    ClusterOptions, Communities, IncrementalClusterLimits, IncrementalClusterResult, cluster,
+    cluster_incremental, cohesion_score, community_member_signatures, label_communities_by_hub,
+    remap_communities_to_previous, score_communities,
 };
 pub use compass_languages::{RawEdgeRecord, RawNodeRecord};
 use dedup::deduplicate_owned;
@@ -23,7 +24,10 @@ pub use dedup::{
     AmbiguousPair, DedupError, DedupResult, DedupStats, EntityTiebreaker, deduplicate_entities,
     deduplicate_entities_with_tiebreaker,
 };
-pub use inference::{InferenceLevel, InferenceSelection, apply_inference_level};
+pub use inference::{
+    InferenceLevel, InferenceSelection, apply_inference_level, prefilter_extraction_inference,
+};
+use inference::{prefilter_raw_edges_inference, prune_orphan_external_placeholders};
 pub use quarantine::{MAX_QUARANTINE_EXAMPLES, PublicationOmissions, PublicationOutcome};
 pub use snapshot::{
     CanonicalGraphDocument, GRAPH_JSON_DELTA_MAX_SOURCE_BYTES, GRAPH_SNAPSHOT_LAYOUT_V2,
@@ -40,10 +44,15 @@ pub use snapshot::{
 pub use v1::{
     BuildEvidence, InventoryEvidence, SourceDigest, V1_PUBLICATION_SEMANTICS_VERSION,
     canonical_edge_kind, canonical_raw_edge_sites, extraction_from_v1, normalize_document_v1,
-    normalize_document_v1_with_evidence_best_effort_owned, normalize_document_v1_with_inventory,
+    normalize_document_v1_with_evidence_best_effort_owned,
+    normalize_document_v1_with_evidence_best_effort_owned_at_inference,
+    normalize_document_v1_with_inventory,
     normalize_document_v1_with_inventory_and_source_digests_best_effort_owned,
+    normalize_document_v1_with_inventory_and_source_digests_best_effort_owned_at_inference,
     normalize_document_v1_with_inventory_best_effort,
+    normalize_document_v1_with_inventory_best_effort_at_inference,
     normalize_document_v1_with_inventory_best_effort_owned, normalize_v1, normalize_v1_best_effort,
+    normalize_v1_best_effort_with_inference,
 };
 
 use std::borrow::Cow;
@@ -132,11 +141,32 @@ pub fn build_with_tiebreaker(
 /// Build a graph from an owned extraction without first cloning the complete
 /// node and edge inventory into a temporary combined extraction.
 pub fn build_owned_with_tiebreaker(
+    extraction: Extraction,
+    directed: bool,
+    dedup: bool,
+    root: Option<&Path>,
+    tiebreaker: Option<&mut dyn EntityTiebreaker>,
+) -> Result<GraphDocument, DedupError> {
+    build_owned_with_tiebreaker_at_inference(
+        extraction,
+        directed,
+        dedup,
+        root,
+        tiebreaker,
+        InferenceLevel::Max,
+    )
+}
+
+/// Build an owned graph while admitting inferred relationships at the final
+/// raw-record boundary, after endpoint rewrites and duplicate evidence have
+/// been resolved but before the node-link document is materialized.
+pub fn build_owned_with_tiebreaker_at_inference(
     mut extraction: Extraction,
     directed: bool,
     dedup: bool,
     root: Option<&Path>,
     tiebreaker: Option<&mut dyn EntityTiebreaker>,
+    inference_level: InferenceLevel,
 ) -> Result<GraphDocument, DedupError> {
     let mut profile_started = Instant::now();
     if dedup && !extraction.nodes.is_empty() {
@@ -150,7 +180,7 @@ pub fn build_owned_with_tiebreaker(
         extraction.edges = result.edges;
     }
     profile_internal("graph entity deduplication", &mut profile_started);
-    let document = build_from_owned_extraction(extraction, directed, root);
+    let document = build_from_owned_extraction(extraction, directed, root, inference_level);
     profile_internal("graph extraction conversion", &mut profile_started);
     Ok(document)
 }
@@ -162,13 +192,14 @@ pub fn build_from_extraction(
     directed: bool,
     root: Option<&Path>,
 ) -> GraphDocument {
-    build_from_owned_extraction(extraction.clone(), directed, root)
+    build_from_owned_extraction(extraction.clone(), directed, root, InferenceLevel::Max)
 }
 
 fn build_from_owned_extraction(
     mut extraction: Extraction,
     directed: bool,
     root: Option<&Path>,
+    inference_level: InferenceLevel,
 ) -> GraphDocument {
     let mut profile_started = Instant::now();
     let mut graph_diagnostics = extraction
@@ -427,6 +458,8 @@ fn build_from_owned_extraction(
             links.push(edge);
         }
     }
+    prefilter_raw_edges_inference(&nodes, &mut links, inference_level);
+    profile_internal("graph inference admission", &mut profile_started);
     profile_internal("graph edge normalization", &mut profile_started);
 
     let mut graph = Map::new();
@@ -439,6 +472,8 @@ fn build_from_owned_extraction(
         root,
     );
     graph_diagnostics.append(&mut hyperedge_diagnostics);
+    prune_orphan_external_placeholders(&mut nodes, &links, &hyperedges, inference_level);
+    profile_internal("graph placeholder admission", &mut profile_started);
     if !hyperedges.is_empty() {
         graph.insert("hyperedges".to_owned(), Value::Array(hyperedges));
     }

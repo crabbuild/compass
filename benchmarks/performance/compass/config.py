@@ -32,6 +32,8 @@ _QUERY_KEYS = {
     "expectedDirection",
     "expectedAmbiguous",
     "allowNoMatch",
+    "judgmentSource",
+    "judgmentReason",
 }
 _SEED_KEYS = {"qualifiedName", "source"}
 _SOURCE_KEYS = {"file", "startLine"}
@@ -126,8 +128,8 @@ def load_suite(path: Path) -> Suite:
     if document.get("schema") != SUITE_SCHEMA:
         raise ValueError(f"unsupported suite schema: {document.get('schema')!r}")
     records = document.get("repository")
-    if not isinstance(records, list) or len(records) != 8:
-        raise ValueError("suite must declare exactly eight repositories")
+    if not isinstance(records, list) or not 1 <= len(records) <= 8:
+        raise ValueError("suite must declare between one and eight repositories")
 
     repositories: list[RepositorySpec] = []
     names: set[str] = set()
@@ -186,6 +188,31 @@ def load_suite(path: Path) -> Suite:
                     f"repository {name} query[{query_index}] cannot combine "
                     "allowNoMatch with expectedSeeds or acceptableSeeds"
                 )
+            judgment_source = query.get("judgmentSource")
+            judgment_reason = query.get("judgmentReason")
+            if judgment_source is not None and judgment_source not in {
+                "manual_source_review",
+                "compiler_oracle",
+            }:
+                raise ValueError(
+                    f"repository {name} query[{query_index}] has invalid judgmentSource"
+                )
+            if judgment_reason is not None and (
+                not isinstance(judgment_reason, str) or not judgment_reason.strip()
+            ):
+                raise ValueError(
+                    f"repository {name} query[{query_index}] has invalid judgmentReason"
+                )
+            if (judgment_source is None) != (judgment_reason is None):
+                raise ValueError(
+                    f"repository {name} query[{query_index}] must declare judgmentSource "
+                    "and judgmentReason together"
+                )
+            if allow_no_match and judgment_source is None:
+                raise ValueError(
+                    f"repository {name} query[{query_index}] no-match oracle requires "
+                    "an independent judgmentSource and judgmentReason"
+                )
             queries.append(
                 QueryOracle(
                     question=question.strip(),
@@ -199,6 +226,10 @@ def load_suite(path: Path) -> Suite:
                     expected_direction=expected_direction,
                     expected_ambiguous=expected_ambiguous,
                     allow_no_match=allow_no_match,
+                    judgment_source=judgment_source,
+                    judgment_reason=(
+                        judgment_reason.strip() if isinstance(judgment_reason, str) else None
+                    ),
                 )
             )
         names.add(name)

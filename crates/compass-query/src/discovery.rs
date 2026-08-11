@@ -17,7 +17,7 @@ use compass_model::query_contract::{
 use crate::code_query::{
     PinnedDiscoveryBackend, query_edge, query_node, recall_fuzzy_term_variants, search_query_terms,
 };
-use crate::ranking::{RelationEvidenceRank, rank_search_candidates};
+use crate::ranking::{OperationRootRank, RelationEvidenceRank, rank_search_candidates};
 use crate::recall::{
     CandidateSource, RecallBudget, RelationshipTermMatch, SearchCandidate, SearchCandidatePool,
 };
@@ -67,6 +67,7 @@ struct RankedDiscoveryCandidate {
     score: f64,
     channel_rank: u8,
     relation_evidence: Option<RelationEvidenceRank>,
+    operation_root: Option<OperationRootRank>,
     matched_terms: Vec<String>,
     matched_fields: Vec<String>,
     source: DiscoverySeedSource,
@@ -359,6 +360,7 @@ impl CodeQueryEngine {
         let mut truncated = false;
         let mut term_postings_truncated = false;
         let mut exact_name_recall_complete = false;
+        let mut complete_direct_terms = BTreeSet::new();
 
         guard.check()?;
         if probes < candidate_probe_limit && nodes_read < candidate_read_limit {
@@ -488,6 +490,9 @@ impl CodeQueryEngine {
             probes += 1;
             let read =
                 self.discovery_term_candidates(backend, std::slice::from_ref(concept), fair_limit)?;
+            if !read.truncated {
+                complete_direct_terms.insert(concept.clone());
+            }
             nodes_read = nodes_read
                 .saturating_add(usize::try_from(read.node_ids_decoded).unwrap_or(usize::MAX));
             probes =
@@ -777,18 +782,34 @@ impl CodeQueryEngine {
         }
         truncated |= term_postings_truncated && !complete_relationship_candidate;
         truncated |= pool.is_truncated();
-        let ranked = rank_search_candidates(
+        let mut ranked = rank_search_candidates(
             question,
             &prepared.ranking_terms,
             pool.into_vec(),
             candidate_limit,
         );
+        let specificity_no_match =
+            retain_specific_discovery_candidates(question, &prepared.ranking_terms, &mut ranked);
+        let no_match_complete = specificity_no_match && exact_name_recall_complete;
+        let effective_truncated = truncated && !no_match_complete;
         let exact_dominance_complete = ranked.first().is_some_and(|candidate| {
             candidate.channel_rank == 6
                 || (candidate.channel_rank == 5 && exact_name_recall_complete)
         });
-        let ambiguity_complete = !truncated
+        let operation_dominance_complete = ranked.first().is_some_and(|candidate| {
+            candidate.operation_root.is_some()
+                && operation_predicate_posting_complete(
+                    &candidate.node,
+                    &prepared.ranking_terms,
+                    &complete_direct_terms,
+                )
+                && ranked
+                    .get(1)
+                    .is_none_or(|runner_up| candidate.operation_root > runner_up.operation_root)
+        });
+        let ambiguity_complete = !effective_truncated
             || exact_dominance_complete
+            || operation_dominance_complete
             || (complete_relationship_candidate
                 && ranked
                     .first()
@@ -805,6 +826,7 @@ impl CodeQueryEngine {
                 score: result.score,
                 channel_rank: result.channel_rank,
                 relation_evidence: result.relation_evidence,
+                operation_root: result.operation_root,
             });
         }
         Ok(DiscoveryCandidateSelection {
@@ -814,7 +836,7 @@ impl CodeQueryEngine {
             expanded_relationships,
             relationship_terms_supported,
             ambiguity_complete,
-            truncated,
+            truncated: effective_truncated,
         })
     }
 
@@ -1053,6 +1075,49 @@ impl CodeQueryEngine {
             complete.then(|| u64::try_from(omitted_edges).unwrap_or(u64::MAX));
         Ok(complete)
     }
+}
+
+fn retain_specific_discovery_candidates(
+    question: &str,
+    terms: &[String],
+    ranked: &mut Vec<crate::ranking::RankedSearchResult>,
+) -> bool {
+    let distinct_terms = terms.iter().collect::<BTreeSet<_>>().len();
+    let composite_identifier = !question.chars().any(char::is_whitespace)
+        && question
+            .chars()
+            .all(|character| character.is_alphanumeric() || character == '_')
+        && distinct_terms >= 3;
+    if composite_identifier {
+        if !ranked.iter().any(|candidate| candidate.channel_rank >= 5) {
+            ranked.clear();
+            return true;
+        }
+        return false;
+    }
+    if distinct_terms < 3
+        || ranked.iter().any(|candidate| {
+            candidate.channel_rank >= 4
+                || candidate.matched_terms.len() >= 2
+                || candidate.relation_evidence.is_some()
+        })
+    {
+        return false;
+    }
+    ranked.clear();
+    false
+}
+
+fn operation_predicate_posting_complete(
+    node: &NodeRecord,
+    terms: &[String],
+    complete_direct_terms: &BTreeSet<String>,
+) -> bool {
+    search_tokens(&node.name).into_iter().any(|term| {
+        crate::ranking::canonical_predicate_token(&term).is_some()
+            && terms.binary_search(&term).is_ok()
+            && complete_direct_terms.contains(&term)
+    })
 }
 
 fn selective_intersection_terms(concepts: &[String]) -> Vec<Vec<String>> {
@@ -1390,7 +1455,8 @@ fn discovery_seeds(
                     other.node.id != candidate.node.id
                         && other.channel_rank == candidate.channel_rank
                         && if candidate.channel_rank == 4 {
-                            other.relation_evidence == candidate.relation_evidence
+                            other.operation_root == candidate.operation_root
+                                && other.relation_evidence == candidate.relation_evidence
                         } else {
                             other.score.total_cmp(&candidate.score).is_eq()
                                 || source_backed_name_collision(candidate, other)
@@ -1918,6 +1984,79 @@ mod tests {
         let response = engine.discover(request(DiscoveryDirection::Auto))?;
         assert_eq!(response.selected_direction, DiscoveryDirection::Both);
         assert_eq!(response.direction_source, DiscoveryDirectionSource::Neutral);
+        Ok(())
+    }
+
+    #[test]
+    fn multi_concept_discovery_rejects_isolated_generic_subword_noise()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![node("n:sync", "sync"), node("n:quantum", "quantum")],
+            Vec::new(),
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "QzxvQuantumBananaSync".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert!(response.seeds.is_empty());
+        assert!(
+            response
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == QueryDiagnosticCode::NoMatch)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn absent_composite_identifier_is_a_proven_no_match_despite_generic_posting_noise()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let nodes = (0..512)
+            .map(|index| {
+                node(
+                    &format!("n:vacuum:{index:04}"),
+                    &format!("VacuumWorker{index:04}"),
+                )
+            })
+            .collect();
+        let engine = engine(nodes, Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "NebulaVacuumPineappleWidget".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert!(response.seeds.is_empty());
+        assert!(!response.truncated);
+        assert!(
+            response
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == QueryDiagnosticCode::NoMatch)
+        );
+        assert!(
+            response
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != QueryDiagnosticCode::BoundedTruncation)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn multi_concept_discovery_preserves_exact_composite_identifiers()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![node("n:qzxv-quantum-banana-sync", "QzxvQuantumBananaSync")],
+            Vec::new(),
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "QzxvQuantumBananaSync".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds.len(), 1);
+        assert_eq!(response.seeds[0].node_id, "n:qzxv-quantum-banana-sync");
         Ok(())
     }
 
