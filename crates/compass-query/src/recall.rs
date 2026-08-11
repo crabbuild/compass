@@ -74,7 +74,7 @@ pub(crate) struct RecallBudget {
     pub(crate) max_fuzzy_candidates: usize,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct SearchCandidatePool {
     candidates: BTreeMap<String, SearchCandidate>,
     source_counts: BTreeMap<CandidateSource, usize>,

@@ -6,6 +6,10 @@ use unicode_normalization::char::is_combining_mark;
 use crate::code_graph::{EdgeKind, GraphDocument};
 use crate::provenance::{EvidenceConfidence, EvidenceOrigin};
 
+pub const OPERATION_ROLE_TOKENS: &[&str] = &[
+    "builder", "factory", "handler", "manager", "provider", "service",
+];
+
 /// Return deterministic normalized full and identifier-subword terms.
 ///
 /// The full tokens preserve compatibility with existing search indexes while

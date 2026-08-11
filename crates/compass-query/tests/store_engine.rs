@@ -6,7 +6,9 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 
 use compass_graph::{GraphSnapshotBuilder, GraphSnapshotReader};
-use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, EdgeKind, GraphDocument, NodeRecord};
+use compass_model::code_graph::{
+    CODE_GRAPH_SCHEMA_V1, EdgeKind, GraphDocument, NodeKind, NodeRecord,
+};
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::OccurrenceRule;
 use compass_model::query_contract::{
@@ -687,6 +689,52 @@ fn default_query_open_prefers_published_store_and_matches_json()
     drop(store_engine);
     let reopened = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
     assert_eq!(reopened.engine_kind(), QueryEngineKind::Store);
+    Ok(())
+}
+
+#[test]
+fn operation_role_fast_path_is_backend_neutral_and_bounded()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let template = graph.nodes.first().ok_or("fixture graph has no nodes")?;
+    let mut table = template.clone();
+    table.id = "n:delta-table".to_owned();
+    table.kind = NodeKind::Struct;
+    table.name = "DeltaTable".to_owned();
+    table.qualified_name = "crate::DeltaTable".to_owned();
+    let mut builder = template.clone();
+    builder.id = "n:delta-table-builder".to_owned();
+    builder.kind = NodeKind::Struct;
+    builder.name = "DeltaTableBuilder".to_owned();
+    builder.qualified_name = "crate::DeltaTableBuilder".to_owned();
+    graph.nodes.extend([table, builder]);
+    graph.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&graph_path, serde_json::to_vec_pretty(&graph)?)?;
+    let store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let stored = open_with_store(
+        &store,
+        &graph_path,
+        None,
+        &directory.path().join("store-cache"),
+    )?;
+    let request = discovery_request("how is a delta table opened");
+    let expected = json.discover(request.clone())?;
+    let actual = stored.discover(request)?;
+
+    assert_discovery_semantically_equal(&actual, &expected)?;
+    assert_eq!(actual.seeds[0].node_id, "n:delta-table-builder");
+    assert!(actual.stats.candidate_nodes <= 2);
+    assert!(actual.stats.candidate_probes <= 8);
     Ok(())
 }
 

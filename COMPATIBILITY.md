@@ -175,9 +175,14 @@ resolution, and scheduling) affect ranking only: they cannot add a posting,
 candidate, relationship concept, or relation eligibility. Equal evidence
 vectors remain explicitly ambiguous.
 
-Discovery performs at most eight deterministic multi-concept term-index
-intersections before independent term unions. Intersection reads spend the
-same candidate, posting, object, byte, and probe budgets as all other recall;
+For explicit action predicates, discovery first reads one compact exact-term
+index restricted to source-backed operation-role declarations. It may finish
+from that index only when the complete role set proves that the top role also
+dominates omitted non-role types; location-style questions otherwise continue
+through general recall. Legacy snapshots use at most 18 deterministic bounded
+role-name/intersection probes. Discovery then performs at most eight general
+multi-concept term-index intersections before independent term unions. Every
+read spends the same candidate, posting, object, byte, and probe budgets;
 exhaustion remains explicit truncation rather than an empty result. A complete
 exact-name lookup can prove its top channel despite truncation in lower recall
 channels, while duplicate exact names remain ambiguous.
@@ -206,12 +211,15 @@ with a 7 MiB decoded-object budget and a 1,024-object ceiling. Branches are
 retained preferentially and leaves use LRU eviction; cache hits do not bypass
 any logical item, byte, object, depth, or truncation accounting.
 
-The immutable store records identifier and relationship capabilities as
-separate empty reserved postings in its existing additive terms root, which
-older same-major readers ignore. Relationship membership is also stored as a
-bounded unit-valued `(source, term)` key so a complete sparse posting can prove
-membership in one truncated dense posting without scanning adjacency. The v2
-relationship capability also stores bounded unit-valued
+The immutable store records identifier, operation-role, and relationship
+capabilities as separate empty reserved postings in its existing additive
+terms root, which older same-major readers ignore. Snapshots without the
+operation-role capability remain readable and use the bounded role fallback;
+no candidate meaning is invented from the missing accelerator. Relationship
+membership is also stored as a bounded unit-valued `(source, term)` key so a
+complete sparse posting can prove membership in one truncated dense posting
+without scanning adjacency. The v2 relationship capability also stores
+bounded unit-valued
 `(source, term, target)` evidence so ranking can count distinct query-supporting
 callees without inflating parallel calls or one callee that matches multiple
 concepts. Current readers still open snapshots without either capability but

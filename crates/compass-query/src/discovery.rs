@@ -13,11 +13,15 @@ use compass_model::query_contract::{
     MAX_DISCOVERY_QUESTION_BYTES, QueryDiagnostic, QueryDiagnosticCode,
     canonical_discovery_scope_value, discovery_scope_matches,
 };
+use compass_model::search::OPERATION_ROLE_TOKENS;
 
 use crate::code_query::{
     PinnedDiscoveryBackend, query_edge, query_node, recall_fuzzy_term_variants, search_query_terms,
 };
-use crate::ranking::{OperationRootRank, RelationEvidenceRank, rank_search_candidates};
+use crate::ranking::{
+    OperationRootRank, RelationEvidenceRank, is_explicit_operation_predicate,
+    rank_search_candidates,
+};
 use crate::recall::{
     CandidateSource, RecallBudget, RelationshipTermMatch, SearchCandidate, SearchCandidatePool,
 };
@@ -59,6 +63,7 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
 const MAX_SCOPE_AMBIGUITY_CANDIDATES: usize = 8;
 const MAX_RELATIONSHIP_SUPPORT_TARGETS: usize = 8;
 const MAX_DISCOVERY_INTERSECTION_PROBES: usize = 8;
+const MAX_OPERATION_ROLE_PROBES: usize = 18;
 const MAX_PRIMARY_INTERSECTION_ITEMS: usize = 2_048;
 
 #[derive(Clone, Debug)]
@@ -414,6 +419,75 @@ impl CodeQueryEngine {
             });
         }
 
+        if prepared
+            .ranking_terms
+            .iter()
+            .any(|term| is_explicit_operation_predicate(term))
+            && let Some(read) = backend.operation_role_candidates(
+                &operation_role_recall_terms(&prepared.ranking_terms),
+                candidate_read_limit.saturating_sub(nodes_read),
+            )?
+        {
+            probes = probes
+                .saturating_add(1)
+                .saturating_add(usize::try_from(read.chunks_decoded).unwrap_or(usize::MAX));
+            nodes_read = nodes_read
+                .saturating_add(usize::try_from(read.node_ids_decoded).unwrap_or(usize::MAX));
+            let mut role_pool = pool.clone();
+            role_pool.extend_total_budget(candidate_limit);
+            for node in read.nodes {
+                if !discovery_scope_matches(&node, scope) {
+                    continue;
+                }
+                let matches = operation_indexed_matches(&node, &prepared.ranking_terms);
+                let id = node.id.clone();
+                let _ = role_pool.add(CandidateSource::TermIndex, node);
+                let _ = role_pool.add_indexed_matches(&id, matches);
+            }
+            let role_pool_truncated = role_pool.is_truncated();
+            let ranked = rank_search_candidates(
+                question,
+                &prepared.ranking_terms,
+                role_pool.into_vec(),
+                candidate_limit,
+            );
+            let location_question = question
+                .split_whitespace()
+                .next()
+                .is_some_and(|word| word.eq_ignore_ascii_case("where"));
+            if !read.truncated
+                && !role_pool_truncated
+                && ranked.first().is_some_and(|candidate| {
+                    candidate.operation_root.is_some_and(|rank| {
+                        rank.dominates_omitted_type()
+                            || (!location_question && rank.is_operation_role_aligned())
+                    })
+                })
+            {
+                return Ok(DiscoveryCandidateSelection {
+                    candidates: ranked
+                        .into_iter()
+                        .map(|result| RankedDiscoveryCandidate {
+                            matched_terms: result.matched_terms,
+                            matched_fields: result.matched_fields,
+                            source: discovery_candidate_source(result.candidate_source),
+                            node: result.node,
+                            score: result.score,
+                            channel_rank: result.channel_rank,
+                            relation_evidence: result.relation_evidence,
+                            operation_root: result.operation_root,
+                        })
+                        .collect(),
+                    nodes_read: u64::try_from(nodes_read).unwrap_or(u64::MAX),
+                    probes: u64::try_from(probes).unwrap_or(u64::MAX),
+                    expanded_relationships: 0,
+                    relationship_terms_supported: backend.supports_relationship_terms()?,
+                    ambiguity_complete: true,
+                    truncated: false,
+                });
+            }
+        }
+
         let reserved_term_capacity = direct_limit / 2;
         let non_term_capacity = direct_limit.saturating_sub(reserved_term_capacity);
         for concept in &concepts {
@@ -447,6 +521,73 @@ impl CodeQueryEngine {
         } else {
             candidate_read_limit
         };
+        for (name, matched) in operation_role_name_variants(&concepts) {
+            guard.check()?;
+            if probes >= candidate_probe_limit || nodes_read >= lexical_read_limit {
+                term_postings_truncated = true;
+                break;
+            }
+            probes += 1;
+            let remaining = lexical_read_limit.saturating_sub(nodes_read).min(64);
+            let (nodes, name_truncated) =
+                backend.nodes_by_normalized_name(&name, remaining.max(1))?;
+            nodes_read = nodes_read.saturating_add(nodes.len());
+            term_postings_truncated |= name_truncated;
+            for node in nodes {
+                if !discovery_scope_matches(&node, scope) {
+                    continue;
+                }
+                let candidate =
+                    term_candidates
+                        .entry(node.id.clone())
+                        .or_insert_with(|| SearchCandidate {
+                            node,
+                            sources: BTreeSet::from([CandidateSource::TermIndex]),
+                            indexed_matches: BTreeSet::new(),
+                            relationship_matches: BTreeSet::new(),
+                        });
+                candidate.indexed_matches.extend(matched.iter().cloned());
+            }
+        }
+        for intersection in operation_role_intersection_terms(&concepts) {
+            guard.check()?;
+            let remaining = lexical_read_limit.saturating_sub(nodes_read);
+            let read_limit = remaining.min(compass_graph::GRAPH_TERM_POSTING_CHUNK_ITEMS);
+            if probes >= candidate_probe_limit
+                || read_limit < compass_graph::GRAPH_TERM_POSTING_CHUNK_ITEMS
+            {
+                term_postings_truncated = true;
+                break;
+            }
+            probes += 1;
+            let read = self.discovery_term_candidates(backend, &intersection, read_limit)?;
+            nodes_read = nodes_read
+                .saturating_add(usize::try_from(read.node_ids_decoded).unwrap_or(usize::MAX));
+            probes =
+                probes.saturating_add(usize::try_from(read.chunks_decoded).unwrap_or(usize::MAX));
+            term_postings_truncated |=
+                read.truncated || nodes_read > lexical_read_limit || probes > candidate_probe_limit;
+            for node in read.nodes {
+                if !discovery_scope_matches(&node, scope) {
+                    continue;
+                }
+                let matched = read
+                    .matched_concepts
+                    .get(&node.id)
+                    .cloned()
+                    .unwrap_or_default();
+                let candidate =
+                    term_candidates
+                        .entry(node.id.clone())
+                        .or_insert_with(|| SearchCandidate {
+                            node,
+                            sources: BTreeSet::from([CandidateSource::TermIndex]),
+                            indexed_matches: BTreeSet::new(),
+                            relationship_matches: BTreeSet::new(),
+                        });
+                candidate.indexed_matches.extend(matched);
+            }
+        }
         let intersection_terms = selective_intersection_terms(&concepts);
         for (intersection_index, intersection) in intersection_terms.iter().enumerate() {
             guard.check()?;
@@ -1169,6 +1310,131 @@ fn selective_intersection_terms(concepts: &[String]) -> Vec<Vec<String>> {
     intersections
 }
 
+fn operation_role_intersection_terms(concepts: &[String]) -> Vec<Vec<String>> {
+    let action = concepts
+        .iter()
+        .find(|concept| is_explicit_operation_predicate(concept));
+    let Some(action) = action else {
+        return Vec::new();
+    };
+
+    let mut intersections = vec![vec![action.clone(), "builder".to_owned()]];
+    let subject_pairs = operation_subject_pairs(concepts);
+    for role in OPERATION_ROLE_TOKENS {
+        for pair in &subject_pairs {
+            let mut intersection = pair.clone();
+            intersection.push((*role).to_owned());
+            intersections.push(intersection);
+            if intersections.len() == MAX_OPERATION_ROLE_PROBES {
+                return intersections;
+            }
+        }
+    }
+    for role in OPERATION_ROLE_TOKENS.iter().skip(1) {
+        intersections.push(vec![action.clone(), (*role).to_owned()]);
+        if intersections.len() == MAX_OPERATION_ROLE_PROBES {
+            break;
+        }
+    }
+    intersections
+}
+
+fn operation_role_recall_terms(concepts: &[String]) -> Vec<String> {
+    let mut terms = concepts.iter().cloned().collect::<BTreeSet<_>>();
+    for concept in concepts {
+        match crate::ranking::canonical_predicate_token(concept) {
+            Some("configure") => {
+                terms.extend(["change", "configure", "set"].map(str::to_owned));
+            }
+            Some("execute") => {
+                terms.extend(["execute", "run", "schedule"].map(str::to_owned));
+            }
+            Some("persist") => {
+                terms.extend(
+                    ["persist", "record", "save", "store", "write", "written"].map(str::to_owned),
+                );
+            }
+            _ => {}
+        }
+    }
+    terms.into_iter().collect()
+}
+
+fn operation_indexed_matches(node: &NodeRecord, concepts: &[String]) -> Vec<String> {
+    let mut symbol_terms = compass_model::search::identifier_search_terms(&node.name);
+    symbol_terms.extend(compass_model::search::identifier_search_terms(
+        &node.qualified_name,
+    ));
+    concepts
+        .iter()
+        .filter(|concept| {
+            symbol_terms.contains(*concept)
+                || crate::ranking::canonical_predicate_token(concept).is_some_and(|predicate| {
+                    symbol_terms.iter().any(|term| {
+                        crate::ranking::canonical_predicate_token(term) == Some(predicate)
+                    })
+                })
+        })
+        .cloned()
+        .collect()
+}
+
+fn operation_role_name_variants(concepts: &[String]) -> Vec<(String, Vec<String>)> {
+    if !concepts
+        .iter()
+        .any(|concept| is_explicit_operation_predicate(concept))
+    {
+        return Vec::new();
+    }
+
+    let mut variants = Vec::new();
+    if let Some(action) = concepts
+        .iter()
+        .find(|concept| is_explicit_operation_predicate(concept))
+    {
+        for role in OPERATION_ROLE_TOKENS {
+            variants.push((format!("{action}{role}"), vec![action.clone()]));
+        }
+    }
+    for pair in operation_subject_pairs(concepts).into_iter().take(1) {
+        for role in OPERATION_ROLE_TOKENS {
+            variants.push((format!("{}{}{}", pair[0], pair[1], role), pair.clone()));
+        }
+    }
+    for concept in concepts
+        .iter()
+        .filter(|concept| !is_explicit_operation_predicate(concept))
+    {
+        for role in OPERATION_ROLE_TOKENS {
+            variants.push((format!("{concept}{role}"), vec![concept.clone()]));
+            if variants.len() == MAX_OPERATION_ROLE_PROBES {
+                return variants;
+            }
+        }
+    }
+    variants
+}
+
+fn operation_subject_pairs(concepts: &[String]) -> Vec<Vec<String>> {
+    let subjects = concepts
+        .iter()
+        .filter(|concept| !is_explicit_operation_predicate(concept))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut pairs = Vec::new();
+    for left in 0..subjects.len() {
+        for right in left.saturating_add(1)..subjects.len() {
+            pairs.push(vec![subjects[left].clone(), subjects[right].clone()]);
+        }
+    }
+    pairs.sort_by(|left, right| {
+        intersection_token_bytes(right)
+            .cmp(&intersection_token_bytes(left))
+            .then_with(|| left.cmp(right))
+    });
+    pairs
+}
+
 fn intersection_predicate_count(concepts: &[String]) -> usize {
     concepts
         .iter()
@@ -1783,7 +2049,7 @@ mod tests {
     use crate::recall::{CandidateSource, RecallBudget, SearchCandidatePool};
     use crate::{CodeQueryEngine, QueryEngineKind};
 
-    use super::selective_intersection_terms;
+    use super::{operation_role_intersection_terms, selective_intersection_terms};
 
     fn node(id: &str, name: &str) -> NodeRecord {
         NodeRecord {
@@ -2397,7 +2663,7 @@ mod tests {
 
         assert!(response.truncated);
         assert_eq!(response.stats.candidates_admitted, 188);
-        assert_eq!(response.stats.candidate_probes, 130);
+        assert_eq!(response.stats.candidate_probes, 149);
         Ok(())
     }
 
@@ -2519,6 +2785,112 @@ mod tests {
                 concepts,
             ]
         );
+    }
+
+    #[test]
+    fn operation_role_intersections_are_action_gated_and_bounded() {
+        let concepts = vec!["merge".to_owned(), "source".to_owned(), "table".to_owned()];
+
+        let intersections = operation_role_intersection_terms(&concepts);
+
+        assert_eq!(intersections.len(), 12);
+        assert!(intersections.len() <= super::MAX_OPERATION_ROLE_PROBES);
+        assert_eq!(
+            intersections[0],
+            vec!["merge".to_owned(), "builder".to_owned()]
+        );
+        assert_eq!(
+            intersections[1],
+            vec![
+                "source".to_owned(),
+                "table".to_owned(),
+                "builder".to_owned()
+            ]
+        );
+        assert!(
+            operation_role_intersection_terms(&["represent".to_owned(), "state".to_owned(),])
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn action_query_admits_a_matching_operation_role_before_a_data_type()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut table = anchored_node("n:table", "DeltaTable", "src/table.rs", 10);
+        table.kind = NodeKind::Struct;
+        let mut builder =
+            anchored_node("n:builder", "DeltaTableBuilder", "src/table/builder.rs", 20);
+        builder.kind = NodeKind::Struct;
+        let engine = engine(vec![table, builder], Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "how is a Delta table opened from a URL".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "n:builder");
+        assert_eq!(
+            response.seeds[0].candidate_source,
+            DiscoverySeedSource::TermIndex
+        );
+        assert!(response.stats.candidate_nodes <= 2);
+        assert!(response.stats.candidate_probes <= 3);
+        Ok(())
+    }
+
+    #[test]
+    fn role_fast_path_defers_when_an_omitted_type_can_be_more_specific()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut commit_properties = anchored_node(
+            "n:commit-properties",
+            "CommitProperties",
+            "src/transaction.rs",
+            10,
+        );
+        commit_properties.kind = NodeKind::Struct;
+        commit_properties.qualified_name = "transaction::CommitProperties".to_owned();
+        let mut commit_builder = anchored_node(
+            "n:commit-builder",
+            "CommitBuilder",
+            "src/transaction.rs",
+            20,
+        );
+        commit_builder.kind = NodeKind::Struct;
+        let mut table_properties = anchored_node(
+            "n:set-table-properties",
+            "SetTablePropertiesBuilder",
+            "src/set_properties.rs",
+            30,
+        );
+        table_properties.kind = NodeKind::Struct;
+        let engine = engine(
+            vec![commit_properties, commit_builder, table_properties],
+            Vec::new(),
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "where are transaction commit properties configured".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "n:commit-properties");
+        Ok(())
+    }
+
+    #[test]
+    fn representation_query_still_prefers_the_matching_data_type()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut table = anchored_node("n:table", "DeltaTable", "src/table.rs", 10);
+        table.kind = NodeKind::Struct;
+        let mut builder =
+            anchored_node("n:builder", "DeltaTableBuilder", "src/table/builder.rs", 20);
+        builder.kind = NodeKind::Struct;
+        let engine = engine(vec![table, builder], Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "where is a Delta table represented".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "n:table");
+        Ok(())
     }
 
     #[test]

@@ -370,6 +370,19 @@ public evidence and cache schema are unchanged. This small result reinforces
 that resolver-local compaction is useful but cannot remove the earlier
 producer/cache high-water mark or the later index/graph overlap.
 
+Disabling mimalloc's process-wide reserved arena for one-shot builds then
+produced three exact-equivalent clustered samples at `4.26`, `4.10`, and
+`4.06` seconds, with peak RSS of `500,957,184`, `494,026,752`, and
+`498,925,568` bytes. The median is 4.10 seconds and 475.8 MiB: 19.6% less RSS
+than the preceding occurrence-table median, but 54.7% more wall time. Compass
+still used about 3.18x the documented Graphify cold RSS, although it remained
+1.79x faster than the retained 7.337-second Graphify cold median. All three
+Compass graphs were the same canonical 34,117,849 bytes with SHA-256
+`77c49b1f6bf4b6280898d005c1ffc53107feeef3e073dd1883025788e047722d`.
+This improves the operating-system high-water mark without changing graph
+semantics, but does not replace the required compact or streamed evidence
+producer work.
+
 A subsequent query-hydration replay used the same pinned delta-rs SQLite
 artifact and seven fresh release-binary processes per independently labeled
 negative identifier. Moving the already-established absent composite-
@@ -380,6 +393,29 @@ fell from `0.52` to `0.02` seconds while decoded candidate work fell from
 All five negative oracles remained no-answer, and the exact composite
 `AddColumnBuilder` still resolved through `exact_name`. This is a focused
 warm-filesystem diagnostic rather than a promoted cross-platform baseline.
+
+A later operation-admission replay added a compact immutable term index over
+source-backed operation-role declarations. One fresh process per 20 positive
+and five negative source-reviewed labels, with `--max-nodes 3 --max-edges 1`
+to isolate seed admission from neighborhood expansion, produced 19/20 Top-1,
+20/20 Top-3, and 5/5 no-answer results. Median latency was 0.066 seconds, the
+observed p95 was 0.542 seconds, and the maximum was 0.892 seconds. Median
+candidate work was 25 decoded nodes; operation rows commonly decoded 5--44.
+The remaining broad representation rows decoded as many as 6,407 nodes and
+account for the tail. The sole Top-1 disagreement ranked the Python
+`CommitProperties` declaration ahead of the independently labeled Rust
+`CommitProperties`; the labeled declaration remained second. This focused
+result does not claim default 500-node neighborhood latency, which remains a
+separate traversal/hydration target.
+
+Running the checked-in correctness validator once per label with the default
+discovery limits produced 21/25 strict passes: 16/20 positives plus all five
+negative controls. Positive Top-1 was 19/20, MRR@10 was 0.975, and recall@10
+was 100%. The four failed positive rows were the same `CommitProperties`
+cross-language Top-1 disagreement plus unexpected ambiguity on that row and
+three otherwise correct Top-1 rows. Only strict passes are timing-eligible in
+the comparison harness, so these quality results do not manufacture a latency
+claim from failed rows.
 
 ## Incremental and language-hardening observations
 

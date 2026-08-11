@@ -15,15 +15,19 @@ fn main() -> ExitCode {
         Some("extract" | "update")
     );
     if one_shot_build
-        && std::env::var_os("MIMALLOC_PURGE_DELAY").is_none()
+        && (std::env::var_os("MIMALLOC_PURGE_DELAY").is_none()
+            || std::env::var_os("MIMALLOC_DISALLOW_ARENA_ALLOC").is_none())
         && std::env::var_os(ALLOCATOR_CONFIGURED).is_none()
         && let Ok(executable) = std::env::current_exe()
     {
         let mut command = Command::new(executable);
-        command
-            .args(&arguments)
-            .env("MIMALLOC_PURGE_DELAY", "100")
-            .env(ALLOCATOR_CONFIGURED, "1");
+        command.args(&arguments).env(ALLOCATOR_CONFIGURED, "1");
+        if std::env::var_os("MIMALLOC_PURGE_DELAY").is_none() {
+            command.env("MIMALLOC_PURGE_DELAY", "100");
+        }
+        if std::env::var_os("MIMALLOC_DISALLOW_ARENA_ALLOC").is_none() {
+            command.env("MIMALLOC_DISALLOW_ARENA_ALLOC", "1");
+        }
         #[cfg(unix)]
         {
             let _error = command.exec();

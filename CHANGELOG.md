@@ -48,13 +48,20 @@
   subword postings, exact trusted-call relationship-term postings, bounded
   proof-complete caller recall, distinct supporting-callee evidence, fair
   candidate allocation, persistence-predicate precision within trusted
-  relation candidates, capacity-aware traversal, selected-subgraph edge-ref
-  filtering, bounded batched node and edge hydration, and one pinned immutable
-  store reader with a bounded decoded-object cache per request.
+  relation candidates, a compact source-backed operation-role term index,
+  subject-complete action ranking, capacity-aware traversal, selected-subgraph
+  edge-ref filtering, bounded batched node and edge hydration, and one pinned
+  immutable store reader with a bounded decoded-object cache per request.
   Legacy store snapshots remain readable and report incomplete identifier or
-  relationship coverage until they are rebuilt. The immutable relationship
-  capability is v2, and the disposable SQLite query accelerator now uses
-  internal format v7 and rebuilds automatically.
+  relationship coverage until they are rebuilt; operation queries use the
+  existing bounded fallback until the compact role index is available. The
+  immutable relationship capability is v2, and the disposable SQLite query
+  accelerator now uses internal format v7 and rebuilds automatically.
+
+- Configure one-shot graph builds to use mimalloc without its process-wide
+  reserved arena while preserving explicit operator allocator settings. This
+  lets freed extraction and resolver pages return to the operating system
+  between build stages instead of accumulating in a 1 GiB arena.
 
 - Thread inference admission into universal, generic, and language-member
   resolution so low builds do not materialize deferred receivers, heuristic
