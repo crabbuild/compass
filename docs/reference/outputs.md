@@ -201,6 +201,13 @@ The report can include:
 It is intended for people and can evolve in prose/format. Do not parse it when
 structured data or command JSON exists.
 
+Community evidence labels use the highest-connectivity member's concise name
+when it is unique. When multiple communities share that name, Compass adds a
+compact source or wiring-site anchor and, only if needed, the graph-local
+community ID. These labels are deterministic navigation aids, not community
+identity; consumers that need identity should use the community ID and member
+set instead.
+
 The report begins with a bounded Agent Orientation for first-session or broad
 repository context. `orientation.json` is the versioned machine form of that
 same fitted model. Compass publishes both from one coherent build input and

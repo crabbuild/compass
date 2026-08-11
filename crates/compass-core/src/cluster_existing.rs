@@ -560,6 +560,37 @@ mod tests {
     }
 
     #[test]
+    fn cluster_only_publishes_disambiguated_community_labels_in_graph_report()
+    -> Result<(), Box<dyn Error>> {
+        let mut fixture = managed_graph_fixture_with_json(
+            r#"{
+                "directed": false,
+                "multigraph": false,
+                "graph": {},
+                "nodes": [
+                    {"id": "a", "label": "shared", "kind": "function", "source_file": "crates/core/src/left.rs", "line_start": 10},
+                    {"id": "b", "label": "left_member", "kind": "function", "source_file": "crates/core/src/left.rs", "line_start": 20},
+                    {"id": "c", "label": "shared", "kind": "function", "source_file": "crates/core/src/right.rs", "line_start": 30},
+                    {"id": "d", "label": "right_member", "kind": "function", "source_file": "crates/core/src/right.rs", "line_start": 40}
+                ],
+                "links": [
+                    {"source": "a", "target": "b", "relation": "calls"},
+                    {"source": "c", "target": "d", "relation": "calls"}
+                ]
+            }"#,
+        )?;
+        fixture.options.no_label = false;
+        fixture.options.min_community_size = 1;
+
+        let result = cluster_existing_graph(&fixture.options)?;
+        assert_eq!(result.communities, 2);
+        let report = fs::read_to_string(fixture.output.join("GRAPH_REPORT.md"))?;
+        assert!(report.contains("Evidence label: shared (src/left.rs:L10)"));
+        assert!(report.contains("Evidence label: shared (src/right.rs:L30)"));
+        Ok(())
+    }
+
+    #[test]
     fn cluster_only_failure_does_not_publish_a_partial_artifact_set() -> Result<(), Box<dyn Error>>
     {
         let fixture = managed_graph_fixture()?;
@@ -652,11 +683,7 @@ mod tests {
     }
 
     fn managed_graph_fixture() -> Result<ManagedGraphFixture, Box<dyn Error>> {
-        let temporary = tempfile::tempdir()?;
-        let output = temporary.path().join("compass-out");
-        let guard = BuildGuard::begin(&output)?;
-        write_text_atomic(
-            guard.staging_directory().join("graph.json"),
+        managed_graph_fixture_with_json(
             r#"{
                 "directed": true,
                 "multigraph": false,
@@ -669,7 +696,16 @@ mod tests {
                     {"source": "a", "target": "b", "relation": "calls", "file": "src/lib.rs", "line": 1}
                 ]
             }"#,
-        )?;
+        )
+    }
+
+    fn managed_graph_fixture_with_json(
+        graph_json: &str,
+    ) -> Result<ManagedGraphFixture, Box<dyn Error>> {
+        let temporary = tempfile::tempdir()?;
+        let output = temporary.path().join("compass-out");
+        let guard = BuildGuard::begin(&output)?;
+        write_text_atomic(guard.staging_directory().join("graph.json"), graph_json)?;
         guard.commit_with_artifacts(&["graph.json"])?;
         BuildGuard::publish_root_artifacts(&output, &["graph.json"], true)?;
         let active = BuildGuard::resolve_current_snapshot_directory(&output)?;

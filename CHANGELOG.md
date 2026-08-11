@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Keep `GRAPH_REPORT.md` community evidence labels concise while making them
+  deterministic and unique within a graph. Repeated hub names now gain compact
+  source or wiring-site context, with the graph-local community ID used only
+  as a final tie-breaker; unique names remain unchanged.
+
 - Improve agent discovery accuracy and latency with deterministic identifier-
   subword postings, exact trusted-call relationship-term postings, bounded
   proof-complete caller recall, distinct supporting-callee evidence, fair
