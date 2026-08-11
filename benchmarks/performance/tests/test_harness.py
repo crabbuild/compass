@@ -41,6 +41,10 @@ class HarnessTests(unittest.TestCase):
                 ]
             ).command,
         )
+        self.assertEqual(
+            "multiplicity",
+            parser.parse_args(["multiplicity", "--graph", "graph.json"]).command,
+        )
 
     def test_comparison_is_explicit(self) -> None:
         parser = build_parser()

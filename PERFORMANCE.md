@@ -418,6 +418,22 @@ strings without weakening multiplicity or provenance, but confirms that the
 remaining gap requires a compact edge representation rather than additional
 attribute pruning.
 
+A bounded streaming multiplicity audit of that same canonical graph found
+25,206 unique edge IDs, 23,209 semantic `(source, relation, target)` pairs, and
+1,076 pairs with parallel occurrences. Those repeated pairs represent 3,073
+edges at distinct source sites; collapsing each pair to one edge would discard
+1,997 real occurrences. The audit found zero duplicate edge IDs, zero duplicate
+pair/site records, and zero missing relationship sites. Calls account for 533
+parallel pairs, tests for 295, references for 173, and the remaining 75 span
+instantiation, reads, exports, returns, and type relationships.
+
+The relationship array serialized to 22,808,206 bytes, 66.9% of the complete
+34,116,625-byte graph, with a mean of 904.9 bytes per relationship. This proves
+both sides of the serialization gap: relationship representation is the main
+artifact cost, but semantic-pair deduplication is not a valid remedy. Further
+compaction must preserve every distinct site, direction, occurrence rule, and
+provenance record.
+
 A subsequent query-hydration replay used the same pinned delta-rs SQLite
 artifact and seven fresh release-binary processes per independently labeled
 negative identifier. Moving the already-established absent composite-

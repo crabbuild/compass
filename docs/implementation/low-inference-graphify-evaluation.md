@@ -404,6 +404,19 @@ Graphify's retained 149.47 MiB cold RSS. The experiment establishes that dead
 identity attributes are removable without losing parallel-edge meaning, but
 also that field pruning alone cannot close the representation gap.
 
+The bounded streaming multiplicity audit over the same graph reported 25,206
+unique edge IDs and 23,209 semantic `(source, relation, target)` pairs. There
+were 1,076 parallel pairs containing 3,073 distinct source occurrences, so
+pair-only coalescing would lose 1,997 real events. The audit found no duplicate
+edge IDs, duplicate pair/site records, or missing relationship sites. Calls
+contributed 533 parallel pairs, tests 295, and references 173; the remainder
+were distributed across construction, reads, exports, returns, and type facts.
+
+Relationships serialized to 22,808,206 bytes, or 66.9% of the 34,116,625-byte
+graph, averaging 904.9 bytes each. The artifact-size opportunity is therefore
+real, but it is in shared provenance/anchor representation rather than removal
+of occurrence-distinct parallel edges.
+
 ## Work required to surpass Graphify
 
 1. **Move inference admission before materialization.** Thread the selected

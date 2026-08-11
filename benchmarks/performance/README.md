@@ -308,6 +308,19 @@ Production qualification still requires the fixed sample, precision, Wilson
 lower-bound, capability, corpus, relation, diversity, and recall thresholds
 enforced by `compass/audit.py`.
 
+Audit occurrence multiplicity and relationship serialization separately:
+
+```bash
+python3 benchmarks/performance/harness.py multiplicity \
+  --graph /path/to/pinned/compass/graph.json
+```
+
+The bounded streaming report groups exact `(source, relation, target)` pairs,
+counts repeated source occurrences, rejects duplicate edge IDs or duplicate
+pair/site records, and reports serialized relationship bytes by relation.
+Repeated pairs are therefore not treated as removable duplication unless their
+source occurrence is also identical.
+
 ## Output and interruption policy
 
 `run.json` contains exact tool, environment, corpus, command, timing, memory,
