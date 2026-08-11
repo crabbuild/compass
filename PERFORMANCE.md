@@ -507,6 +507,44 @@ complete run passed its correctness gate; raw evidence is retained outside the
 repository under the qualification workspace and is not a promoted
 cross-platform baseline.
 
+A subsequent declaration-admission replay at Compass revision `2e9d1455`
+projected the existing exact term postings onto source-backed type
+declarations. The store can finish from this compact channel only when it read
+the complete declaration set and the unchanged ranker proves every requested
+seed outranks omitted non-types. The canonical graph artifacts did not change:
+low retained SHA-256 `971d5882...` and max retained `dc87abf2...`. The SQLite
+store grew from 35,995,648 to 36,405,248 bytes for low (1.14%) and from
+113,033,216 to 113,278,976 bytes for max (0.22%).
+
+Across all 25 reviewed questions, decoded candidate IDs fell from 21,543 to
+897 in low (95.84%) and from 25,978 to 913 in max (96.49%). The four formerly
+broad declaration rows changed as follows:
+
+| Question | Low candidate IDs | Max candidate IDs |
+| --- | ---: | ---: |
+| Delta table state | 6,407 -> 245 | 6,985 -> 251 |
+| commit properties | 5,958 -> 64 | 6,357 -> 65 |
+| table snapshot | 4,691 -> 143 | 6,917 -> 149 |
+| log-store abstraction | 4,132 -> 90 | 5,364 -> 93 |
+
+Every low and max matrix again passed all 25 labels in both 250-sample fresh
+CLI and 250-sample persistent-MCP modes. Low retained all ranked seed lists.
+Max changed one rank-3 seed for the state question from `DeltaTableFactory` to
+the more specific `DeltaTable`; Top-1 and the independently labeled result were
+unchanged, and low/max now agree for that row instead of allowing max-only
+inferred relationship evidence to promote the factory.
+
+The max run improved aggregate fresh p95 from 1.067 to 0.518 seconds and peak
+RSS from 126.72 to 91.75 MiB; persistent p95 improved from 1.259 to 0.367
+seconds and the server high-water fell from 237.52 to 176.23 MiB. Two complete
+low runs exposed runner noise in different modes: fresh p50 was stable at
+0.252--0.264 seconds, but aggregate p95 ranged from 0.290 to 0.609 seconds;
+persistent p50 was 0.193--0.198 seconds while p95 ranged from 0.244 to 0.542
+seconds. The slow samples switched from persistent to fresh between repeats,
+so this result does not promote the better timing or claim a cross-platform
+latency bound. Candidate work, correctness, graph identity, and store size were
+deterministic across those runs.
+
 ## Incremental and language-hardening observations
 
 A follow-up release-binary smoke run on 2026-08-04 used four small,

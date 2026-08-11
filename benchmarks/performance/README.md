@@ -108,6 +108,11 @@ symbol later in a broad traversal does not count as selecting the right seed.
 Top-1, MRR@10, recall@10, completeness, and exact source-anchor counts are
 reported with the same labels used for Compass.
 
+The same suite is also used across inference levels. A result is not
+quality-eligible merely because it is faster: each level must pass the source-
+anchored positive, ambiguity, and no-answer judgments, and its run metadata
+must bind the exact graph/store artifact used for every sample.
+
 Run the focused low-inference comparison with:
 
 ```bash

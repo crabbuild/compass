@@ -5058,6 +5058,14 @@ mod tests {
                 b"00000000",
             ],
         )?);
+        term_entries.remove(&encode_graph_index_key(
+            IndexKind::Terms,
+            &[
+                b"declaration",
+                DECLARATION_TERM_INDEX_CAPABILITY_V1.as_bytes(),
+                b"00000000",
+            ],
+        )?);
         let term_entry_count = term_entries.len() as u64;
         let mut writer = ObjectWriter::new(&store)?;
         let term_digest = build_index_tree(&mut writer, IndexKind::Terms, term_entries)?;
@@ -5077,6 +5085,7 @@ mod tests {
             .ok_or_else(|| SnapshotError::Corrupt("active snapshot is missing".to_owned()))?;
         assert!(reader.nodes(SnapshotReadLimits::default())?.is_empty());
         assert!(reader.supports_identifier_subwords()?);
+        assert!(!reader.supports_declaration_terms()?);
         assert!(!reader.supports_relationship_terms()?);
         assert_eq!(
             reader
