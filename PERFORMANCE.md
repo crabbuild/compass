@@ -418,6 +418,19 @@ strings without weakening multiplicity or provenance, but confirms that the
 remaining gap requires a compact edge representation rather than additional
 attribute pruning.
 
+Reusing the build's existing bounded Rayon pool for AST extraction, rather
+than creating and destroying a second pool before resolution, then produced
+fresh SQLite samples at 4.49, 4.56, and 4.70 seconds. Maximum RSS was
+430,489,600, 431,833,088, and 431,194,112 bytes, for medians of 4.56 seconds
+and 411.2 MiB. Every graph remained exactly 34,116,625 bytes with SHA-256
+`971d588275cbad097ed1f7b5f54e32b86a80fadd8875760e3848b9948069f573`.
+The worker policy still bounds mid-sized extraction at eight deterministic
+chunks and honors `--max-workers`; the chunks now execute on the long-lived
+pipeline pool so their allocator pages can be reused by resolution. Relative
+to the preceding median this reduced RSS by 5.4% while increasing wall time by
+6.0%. Compass still used about 2.75x Graphify's retained 149.47 MiB cold RSS,
+so compact or streamed producer evidence remains the required next step.
+
 A bounded streaming multiplicity audit of that same canonical graph found
 25,206 unique edge IDs, 23,209 semantic `(source, relation, target)` pairs, and
 1,076 pairs with parallel occurrences. Those repeated pairs represent 3,073

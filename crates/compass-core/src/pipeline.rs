@@ -2717,7 +2717,8 @@ fn build_graph_inner_unscoped(
     }
     let worker_count = options
         .max_workers
-        .unwrap_or_else(|| default_ast_workers(missing.len()));
+        .unwrap_or_else(|| default_ast_workers(missing.len()))
+        .max(1);
     // Resolver source text is only consulted by the PHP type-reference pass.
     // Keeping every decoded source string alive across extraction and graph
     // publication otherwise duplicates the repository's source footprint in
@@ -2729,29 +2730,13 @@ fn build_graph_inner_unscoped(
     });
     // An explicit worker count is an opt-in performance decision. Honor it
     // even for smaller repositories so callers can trade parser-table
-    // residency for throughput instead of silently falling back to the
-    // sequential path below. The automatic path uses the same bounded local
-    // pool once enough missing files exist to amortize parser-table residency.
-    // On small repositories, a single requested worker remains sequential; it
-    // avoids paying for a pool that cannot add parallelism.
+    // residency for throughput. On small repositories, a single requested
+    // worker remains sequential so pool scheduling cannot dominate extraction.
     let parallel_extraction = should_parallel_extract(options, missing.len());
-    let worker_pool = if parallel_extraction {
-        Some(
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(worker_count)
-                .thread_name(|index| format!("compass-ast-{index}"))
-                .build()
-                .map_err(|error| CoreError::WorkerPool(error.to_string()))?,
-        )
-    } else {
-        None
-    };
     profile_internal("extract setup and cache load", &mut internal_started);
-    // A Rayon worker pool costs more resident memory than it saves time when
-    // only a handful of files are missing. Below the measured crossover stay
-    // sequential; above it use a bounded local pool so an embedding
-    // application's global Rayon settings cannot silently serialize cold
-    // extraction or multiply parser working sets without an explicit opt-in.
+    // The full build already runs inside Compass's bounded pipeline pool.
+    // Reuse those workers so parser/evidence pages remain available to later
+    // phases instead of being abandoned when a short-lived nested pool exits.
     let completed_files = Mutex::new(0_usize);
     let total_files = missing.len();
     let extract_source =
@@ -2863,20 +2848,22 @@ fn build_graph_inner_unscoped(
             .collect::<Vec<_>>()
     } else {
         let worker_evidence = Arc::clone(&project_evidence);
-        let extract = || {
-            missing
-                .par_iter()
-                .map_init(
-                    || Engine::with_project_evidence(Arc::clone(&worker_evidence)),
-                    extract_source,
-                )
-                .collect::<Vec<_>>()
-        };
-        if let Some(pool) = &worker_pool {
-            pool.install(extract)
-        } else {
-            extract()
-        }
+        let chunk_size = missing.len().div_ceil(worker_count).max(1);
+        missing
+            .par_chunks(chunk_size)
+            .map_init(
+                || Engine::with_project_evidence(Arc::clone(&worker_evidence)),
+                |engine, paths| {
+                    paths
+                        .iter()
+                        .map(|path| extract_source(engine, path))
+                        .collect::<Vec<_>>()
+                },
+            )
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flatten()
+            .collect()
     };
     let mut extraction_failures = BTreeMap::new();
     let mut fresh = missing
@@ -3219,15 +3206,12 @@ fn build_graph_inner_unscoped(
     };
     let cached_source_text: HashMap<_, _> = if sources.len() < 256 {
         sources.iter().filter_map(read_cached_source).collect()
-    } else if let Some(pool) = &worker_pool {
-        pool.install(|| sources.par_iter().filter_map(read_cached_source).collect())
     } else {
         sources.par_iter().filter_map(read_cached_source).collect()
     };
     fresh_source_text.extend(cached_source_text);
     let source_text = fresh_source_text;
     profile_internal("resolver source inventory", &mut internal_started);
-    drop(worker_pool);
     drop(project_evidence);
     drop(fresh_paths);
     drop(ordered_paths);
@@ -4796,14 +4780,6 @@ fn write_store_ref(output_dir: &Path, reference: &StoreRef) -> Result<(), CoreEr
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-fn default_ast_workers(missing: usize) -> usize {
-    available_worker_count()
-        .min(default_ast_worker_cap(missing))
-        .max(1)
-}
-
-#[cfg(not(target_os = "macos"))]
 fn default_ast_workers(missing: usize) -> usize {
     available_worker_count()
         .min(default_ast_worker_cap(missing))
@@ -4821,10 +4797,9 @@ fn available_worker_count() -> usize {
     num_cpus::get()
 }
 
-// Large cold repositories retain enough per-file parser state for worker
-// parallelism to dominate peak RSS. Keep the automatic path bounded by the
-// host-aware pipeline ceiling; callers that have a known memory budget can
-// still opt into a different count through BuildOptions::max_workers.
+// Large cold repositories have enough files to amortize the pipeline ceiling.
+// Smaller repositories retain the established lower parser concurrency while
+// still reusing the long-lived pool's allocator pages in later build phases.
 const LARGE_REPOSITORY_AST_WORKER_CAP: usize = PIPELINE_RAYON_WORKER_CAP;
 const LARGE_REPOSITORY_AST_WORKER_MIN_FILES: usize = 1_024;
 const AUTOMATIC_PARALLEL_EXTRACT_MIN_FILES: usize = 32;
