@@ -425,10 +425,7 @@ fn operation_root_rank(
             terms.binary_search(subject).is_ok() || query_initialisms.contains(*subject)
         })
         .count();
-    let predicate_matches = predicate_tokens
-        .iter()
-        .intersection(&query_predicates)
-        .count();
+    let predicate_matches = predicate_tokens.intersection(&query_predicates).count();
     let direct_predicate_matches = terminal_tokens
         .iter()
         .filter(|term| {
