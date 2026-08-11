@@ -342,6 +342,15 @@ about 4.50x the documented Graphify cold RSS, so the memory gate remains
 failed. The linked evaluation records the intermediate samples and explicit
 CPU/memory tradeoffs.
 
+Replacing the resolver's duplicate owned-ID hash keys with sorted fact tables
+then produced a final three-sample median of 2.44 s and 610.7 MiB peak RSS,
+again with exact ordered graph equivalence. Relative to the preceding cache-
+only median, RSS decreased 9.4% while total time increased about 3.0%; the
+universal-resolution stage itself rose from roughly 0.29 s to 0.40 s because
+borrowed ID lookup is now binary search. Compass still used about 4.08x the
+documented Graphify cold RSS. These remain diagnostic development samples and
+do not promote a passing memory baseline.
+
 ## Incremental and language-hardening observations
 
 A follow-up release-binary smoke run on 2026-08-04 used four small,

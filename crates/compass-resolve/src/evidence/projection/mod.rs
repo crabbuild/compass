@@ -102,19 +102,19 @@ impl UniversalResolutionIndex {
             })
             .map(|(index, node)| (node.id.clone(), index))
             .collect::<AHashMap<_, _>>();
-        let candidate_ids = self.candidate_ids();
+        let candidates = self.ordered_candidates();
         profile_internal("universal candidate ordering", &mut profile_started);
-        let decision_batches = candidate_ids
+        let decision_batches = candidates
             .into_par_iter()
-            .map(|candidate_id| {
-                let decision = self.resolve(candidate_id);
+            .map(|candidate| {
+                let candidate_id = candidate.id.as_str();
+                let decision = db.resolve_candidate(candidate);
                 let exact_declaration_id = match &decision {
                     ResolutionDecision::Resolved { declaration_id, .. } => {
                         Some(declaration_id.clone())
                     }
                     _ => None,
                 };
-                let candidate = &self.facts.candidates[candidate_id];
                 let mut test_source_id = (admission == ResolutionAdmission::Low
                     && candidate.relation == CandidateRelation::Tests
                     && !matches!(
@@ -239,7 +239,7 @@ impl UniversalResolutionIndex {
                     qualified_name,
                     evidence,
                 } => {
-                    let candidate = &self.facts.candidates[pending.candidate_id];
+                    let candidate = self.facts.candidates.get(pending.candidate_id)?;
                     let id = make_id(&["external", &candidate.language, &qualified_name]);
                     Some(PreparedTarget {
                         candidate_id: pending.candidate_id,
@@ -258,7 +258,7 @@ impl UniversalResolutionIndex {
                     qualified_name,
                     evidence,
                 } => {
-                    let candidate = &self.facts.candidates[pending.candidate_id];
+                    let candidate = self.facts.candidates.get(pending.candidate_id)?;
                     let id = make_id(&["deferred", &candidate.language, &qualified_name]);
                     Some(PreparedTarget {
                         candidate_id: pending.candidate_id,
@@ -281,7 +281,9 @@ impl UniversalResolutionIndex {
             .collect::<Vec<_>>();
         let mut resolved_targets = Vec::with_capacity(prepared_targets.len());
         for mut prepared in prepared_targets {
-            let original_candidate = &self.facts.candidates[prepared.candidate_id];
+            let Some(original_candidate) = self.facts.candidates.get(prepared.candidate_id) else {
+                continue;
+            };
             let overridden_candidate = prepared.candidate_id_override.as_ref().map(|id| {
                 let mut candidate = original_candidate.clone();
                 candidate.id.clone_from(id);
@@ -354,7 +356,7 @@ impl UniversalResolutionIndex {
                     target_kind,
                     target_site,
                 )| {
-                    let original_candidate = &self.facts.candidates[candidate_id];
+                    let original_candidate = self.facts.candidates.get(candidate_id)?;
                     let overridden_candidate = candidate_id_override.map(|id| {
                         let mut candidate = original_candidate.clone();
                         candidate.id = id;

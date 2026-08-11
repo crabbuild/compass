@@ -308,6 +308,20 @@ RSS, so this does not pass the memory gate. It removes an avoidable concurrent
 allocation layer; it does not eliminate the remaining resolver, graph, and
 publication working sets.
 
+The resolver's primary fact maps also duplicated each fact's long owned ID as
+an independently allocated hash key. Replacing those maps with deterministic
+sorted fact tables retained borrowed lookup and explicit duplicate-ID failure
+without changing a serialized contract. Three final-revision samples completed
+with a 2.44 s median and 610.7 MiB median peak RSS, and all ordered nodes and
+relationships remained byte-equivalent. Relative to the preceding cache-only
+median, RSS decreased 9.4% while total time increased about 3.0%.
+
+The local tradeoff is more visible than the total: universal resolution rose
+from roughly 0.29 s to 0.40 s because ID lookup now uses binary search. The
+memory gate still fails at about 4.08x Graphify's documented RSS. Closing it
+requires eliminating additional simultaneous index/projection and graph/
+publication working sets, not relabeling this reduction as success.
+
 ## Work required to surpass Graphify
 
 1. **Move inference admission before materialization.** Thread the selected

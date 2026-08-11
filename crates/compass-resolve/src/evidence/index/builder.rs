@@ -222,32 +222,27 @@ impl IndexBuilder<'_> {
 
         let go_module_path = languages.go.then(|| read_go_module_path(root)).flatten();
         // Reserve the checked aggregate fact counts before consuming the
-        // batches. A corpus-scale evidence index otherwise grows each primary
-        // map by repeated rehashes while the old and new tables overlap in
-        // memory.
-        let mut declarations = AHashMap::with_capacity(capacities[0]);
-        let mut occurrences = AHashMap::with_capacity(capacities[1]);
-        let mut bindings = AHashMap::with_capacity(capacities[2]);
-        let mut candidates = AHashMap::with_capacity(capacities[3]);
-        let mut scopes = AHashMap::with_capacity(capacities[4]);
+        // batches. Moving facts into one allocation per sorted primary table
+        // avoids repeated vector growth while the per-file batch containers
+        // are still being drained.
+        let mut declarations = Vec::with_capacity(capacities[0]);
+        let mut occurrences = Vec::with_capacity(capacities[1]);
+        let mut bindings = Vec::with_capacity(capacities[2]);
+        let mut candidates = Vec::with_capacity(capacities[3]);
+        let mut scopes = Vec::with_capacity(capacities[4]);
         profile_internal("universal evidence validation", &mut profile_started);
         for batch in batches {
-            for fact in batch.declarations {
-                insert_unique(&mut declarations, fact.id.clone(), fact)?;
-            }
-            for fact in batch.occurrences {
-                insert_unique(&mut occurrences, fact.id.clone(), fact)?;
-            }
-            for fact in batch.bindings {
-                insert_unique(&mut bindings, fact.id.clone(), fact)?;
-            }
-            for fact in batch.candidates {
-                insert_unique(&mut candidates, fact.id.clone(), fact)?;
-            }
-            for fact in batch.scopes {
-                insert_unique(&mut scopes, fact.id.clone(), fact)?;
-            }
+            declarations.extend(batch.declarations);
+            occurrences.extend(batch.occurrences);
+            bindings.extend(batch.bindings);
+            candidates.extend(batch.candidates);
+            scopes.extend(batch.scopes);
         }
+        let declarations = FactTable::from_values(declarations)?;
+        let occurrences = FactTable::from_values(occurrences)?;
+        let bindings = FactTable::from_values(bindings)?;
+        let candidates = FactTable::from_values(candidates)?;
+        let scopes = FactTable::from_values(scopes)?;
         profile_internal("universal fact collection", &mut profile_started);
         let rust_source_wildcard_targets = if languages.rust {
             declarations
@@ -261,8 +256,10 @@ impl IndexBuilder<'_> {
         } else {
             AHashSet::new()
         };
-        let mut declaration_ids = declarations.keys().cloned().collect::<Vec<_>>();
-        declaration_ids.sort_unstable();
+        let declaration_ids = declarations
+            .values()
+            .map(|declaration| declaration.id.clone())
+            .collect::<Vec<_>>();
         if u32::try_from(declaration_ids.len()).is_err() {
             return Err("universal declaration slot count exceeds u32".to_owned());
         }

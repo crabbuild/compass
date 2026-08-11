@@ -69,6 +69,12 @@
   documented purpose is bounded residency; the parallel encode-then-publish
   API remains available where callers explicitly accept batch memory.
 
+- Store universal resolver declarations, scopes, bindings, occurrences, and
+  relationship candidates in deterministic sorted fact tables instead of hash
+  maps that duplicate every fact's owned ID as a second key. Borrowed binary
+  lookup preserves explicit duplicate-ID rejection and graph semantics while
+  reducing the transient resolver working set.
+
 - Add a digest-pinned 500-question, AI-reviewed synthetic relevance matrix
   covering all query classes, execute it in CI with strict ranking, recall,
   intent, structural, no-answer, and work bounds, and keep its generated JSON

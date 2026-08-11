@@ -1,4 +1,3 @@
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::Hash;
 use std::path::Path;
@@ -30,7 +29,7 @@ pub(crate) use projection::is_replaced_relation;
 
 pub use api::{ResolutionDecision, ResolutionEvidence, ResolutionRule, UniversalResolutionLimits};
 use budget::LookupBudget;
-use facts::FactStore;
+use facts::{FactStore, FactTable};
 use index::ResolutionIndexes;
 use languages::policy::LanguagePolicyKind;
 use languages::rust::{
@@ -146,14 +145,13 @@ pub struct UniversalResolutionIndex {
 }
 
 impl UniversalResolutionIndex {
-    #[must_use]
-    pub fn candidate_ids(&self) -> Vec<&str> {
+    fn ordered_candidates(&self) -> Vec<&RelationshipCandidate> {
         let db = ResolutionDb::new(self);
         let mut ordered = self
             .facts
             .candidates
-            .iter()
-            .map(|(id, candidate)| {
+            .values()
+            .map(|candidate| {
                 let range = db
                     .occurrence(candidate)
                     .map(|occurrence| &occurrence.range)
@@ -163,10 +161,10 @@ impl UniversalResolutionIndex {
                             .get(&candidate.source_declaration_id)
                             .map(|declaration| &declaration.range)
                     });
-                (id.as_str(), range)
+                (candidate, range)
             })
             .collect::<Vec<_>>();
-        ordered.par_sort_unstable_by(|(left_id, left_range), (right_id, right_range)| {
+        ordered.par_sort_unstable_by(|(left, left_range), (right, right_range)| {
             left_range
                 .map(|range| range.source_file.as_str())
                 .unwrap_or_default()
@@ -185,9 +183,20 @@ impl UniversalResolutionIndex {
                         .map_or(u64::MAX, |range| range.end_byte)
                         .cmp(&right_range.map_or(u64::MAX, |range| range.end_byte))
                 })
-                .then_with(|| left_id.cmp(right_id))
+                .then_with(|| left.id.cmp(&right.id))
         });
-        ordered.into_iter().map(|(id, _)| id).collect()
+        ordered
+            .into_iter()
+            .map(|(candidate, _)| candidate)
+            .collect()
+    }
+
+    #[must_use]
+    pub fn candidate_ids(&self) -> Vec<&str> {
+        self.ordered_candidates()
+            .into_iter()
+            .map(|candidate| candidate.id.as_str())
+            .collect()
     }
 }
 
@@ -459,16 +468,6 @@ fn profile_internal(label: &str, started: &mut Instant) {
     }
 }
 
-fn insert_unique<T>(map: &mut AHashMap<String, T>, id: String, value: T) -> Result<(), String> {
-    match map.entry(id) {
-        Entry::Occupied(entry) => Err(format!("duplicate universal evidence id {:?}", entry.key())),
-        Entry::Vacant(entry) => {
-            entry.insert(value);
-            Ok(())
-        }
-    }
-}
-
 fn sort_declaration_index<K: Eq + Hash>(
     index: &mut AHashMap<K, Vec<DeclarationSlot>>,
     declaration_ids: &[String],
@@ -501,8 +500,8 @@ fn candidate_storage_limit(candidate_limit: usize) -> usize {
 }
 
 fn unique_definition_ranges(
-    declarations: &AHashMap<String, DeclarationFact>,
-    scopes: &AHashMap<String, compass_languages::ScopeFact>,
+    declarations: &FactTable<DeclarationFact>,
+    scopes: &FactTable<compass_languages::ScopeFact>,
 ) -> BTreeMap<String, EvidenceRange> {
     let mut ranges = BTreeMap::new();
     let mut ambiguous = BTreeSet::new();

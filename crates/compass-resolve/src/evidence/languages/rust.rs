@@ -329,11 +329,11 @@ pub(in crate::evidence) fn rust_external_wildcard_target_is_explicit(
 }
 
 pub(in crate::evidence) fn rust_impl_associated_type_index(
-    declarations: &AHashMap<String, DeclarationFact>,
+    declarations: &FactTable<DeclarationFact>,
     declaration_ids: &[String],
-    scopes: &AHashMap<String, compass_languages::ScopeFact>,
-    candidates: &AHashMap<String, RelationshipCandidate>,
-    occurrences: &AHashMap<String, OccurrenceFact>,
+    scopes: &FactTable<compass_languages::ScopeFact>,
+    candidates: &FactTable<RelationshipCandidate>,
+    occurrences: &FactTable<OccurrenceFact>,
     candidate_limit: usize,
 ) -> AHashMap<(String, String, String), AssociatedTypeSet> {
     let mut implementations = AHashMap::<String, Vec<&RelationshipCandidate>>::new();
@@ -444,7 +444,7 @@ pub(in crate::evidence) fn rust_impl_associated_trait_name_index(
 }
 
 pub(in crate::evidence) fn rust_impl_trait_index(
-    candidates: &AHashMap<String, RelationshipCandidate>,
+    candidates: &FactTable<RelationshipCandidate>,
     candidate_limit: usize,
 ) -> AHashMap<(String, String), RustImplTraitSet> {
     let mut index = AHashMap::<(String, String), RustImplTraitSet>::new();
