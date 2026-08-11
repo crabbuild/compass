@@ -437,11 +437,11 @@ Python-facing public declarations, so the oracle now requires that ambiguity
 instead of forcing a language preference. All 20 positive labels and all five
 negative controls passed, and every one of 250 fresh-process plus 250
 persistent-MCP measured samples was correctness-eligible. Across the 25 rows,
-fresh-process p50 ranged from 0.0467 to 0.5495 seconds and p95 from 0.0483 to
-0.5655 seconds; every row stayed below the 0.59-second p95 target. Positive
-persistent-MCP p50 ranged from 0.1599 to 0.4760 seconds, while the five
-constant-work negative controls ranged from 0.00146 to 0.00172 seconds. Fresh
-peak RSS ranged from 19.75 to 84.33 MiB. The shared MCP server peaked at 123.30
+fresh-process p50 ranged from 0.0481 to 0.5500 seconds and p95 from 0.0483 to
+0.5647 seconds; every row stayed below the 0.59-second p95 target. Positive
+persistent-MCP p50 ranged from 0.1613 to 0.4806 seconds, while the five
+constant-work negative controls ranged from 0.00147 to 0.00169 seconds. Fresh
+peak RSS ranged from 19.64 to 84.31 MiB. The shared MCP server peaked at 147.48
 MiB for the complete session, which is process high-water rather than per-query
 memory. The harness performs one unmeasured warmup per row, so “fresh” means a
 new CLI process over warmed filesystem state, not a cold-page-cache claim. The
