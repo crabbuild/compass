@@ -46,11 +46,11 @@ without LibreOffice, Python, credentials, or a model.
 
 | Purpose | Command | Expected on success |
 |---|---|---|
-| Media | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-media --locked` | exit 0 |
-| Files | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-files --locked` | exit 0 |
-| Semantic | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-semantic --locked` | exit 0 |
-| Core | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-core --locked` | exit 0 |
-| Lint | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo clippy -p compass-media -p compass-files -p compass-semantic -p compass-core --all-targets --all-features --locked -- -D warnings` | exit 0 |
+| Media | `cargo test -p compass-media --locked` | exit 0 |
+| Files | `cargo test -p compass-files --locked` | exit 0 |
+| Semantic | `cargo test -p compass-semantic --locked` | exit 0 |
+| Core | `cargo test -p compass-core --locked` | exit 0 |
+| Lint | `cargo clippy -p compass-media -p compass-files -p compass-semantic -p compass-core --all-targets --all-features --locked -- -D warnings` | exit 0 |
 | Format | `cargo fmt --all -- --check` | exit 0 |
 | Boundary | `sh scripts/check_product_boundary.sh` | exit 0 |
 

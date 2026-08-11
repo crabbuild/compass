@@ -48,7 +48,7 @@ For a clean local checkout at the pinned commit, avoid a second clone with:
 ```bash
 ./scripts/qualify_code_graph_v1.sh \
   --repositories tests/qualification/code-graph-v1-repositories.toml \
-  --local-repository /Volumes/Workspace/Github/Entire
+  --local-repository <qualification-corpus-root>/Entire
 ```
 
 The release-corpus mode verifies the manifest pin, requires a clean source

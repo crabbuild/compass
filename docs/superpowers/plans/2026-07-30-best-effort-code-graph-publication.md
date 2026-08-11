@@ -103,7 +103,7 @@ Run:
 
 ```bash
 cargo fmt --all
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target cargo check -p compass-model --locked
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target cargo check -p compass-model --locked
 ```
 
 Expected: both commands exit 0.
@@ -123,7 +123,7 @@ Add tests proving:
 Run:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target cargo test -p compass-model --test code_graph_validation --locked
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target cargo test -p compass-model --test code_graph_validation --locked
 ```
 
 Expected: all tests pass.
@@ -239,7 +239,7 @@ Run:
 
 ```bash
 cargo fmt --all
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target cargo check -p compass-graph --locked
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target cargo check -p compass-graph --locked
 ```
 
 Expected: both commands exit 0.
@@ -262,7 +262,7 @@ Add tests for:
 Run:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target cargo test -p compass-graph --test graph_v1_normalization --locked
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target cargo test -p compass-graph --test graph_v1_normalization --locked
 ```
 
 Expected: all tests pass.
@@ -332,8 +332,8 @@ Add tests proving:
 Run:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target cargo test -p compass-graph --locked
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target cargo clippy -p compass-graph --all-targets --locked -- -D warnings
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target cargo test -p compass-graph --locked
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target cargo clippy -p compass-graph --all-targets --locked -- -D warnings
 ```
 
 Expected: both commands exit 0.
@@ -412,8 +412,8 @@ Add coverage for:
 Run:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target cargo test -p compass-core --test loading_coverage --locked
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target cargo test -p compass-cli --lib --locked
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target cargo test -p compass-core --test loading_coverage --locked
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target cargo test -p compass-cli --lib --locked
 ```
 
 Expected: both commands exit 0.
@@ -472,8 +472,8 @@ Test complete and partial graphs across search, callers, callees, impact, explor
 Run:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target cargo test -p compass-query --locked
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target cargo clippy -p compass-query --all-targets --locked -- -D warnings
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target cargo test -p compass-query --locked
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target cargo clippy -p compass-query --all-targets --locked -- -D warnings
 ```
 
 Expected: both commands exit 0.
@@ -554,7 +554,7 @@ Run:
 
 ```bash
 cargo fmt --all --check
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target cargo test --workspace --lib --bins --tests --locked
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target cargo test --workspace --lib --bins --tests --locked
 ```
 
 Expected: formatting passes and all non-ignored tests pass.
@@ -564,7 +564,7 @@ Expected: formatting passes and all non-ignored tests pass.
 Run:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target cargo clippy -p compass-model -p compass-graph -p compass-core -p compass-query -p compass-cli --all-targets --locked -- -D warnings
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target cargo clippy -p compass-model -p compass-graph -p compass-core -p compass-query -p compass-cli --all-targets --locked -- -D warnings
 ```
 
 Expected: exit 0 with no warnings.
@@ -574,7 +574,7 @@ Expected: exit 0 with no warnings.
 Run:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target bash scripts/qualify_code_graph_v1.sh --fixtures-only
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target bash scripts/qualify_code_graph_v1.sh --fixtures-only
 ```
 
 Expected: the production binary builds and every fixture, invariant, framework flow, and deterministic comparison passes. Record the complete qualification summary in the handoff.
@@ -600,7 +600,7 @@ Expected: no whitespace errors, only intended files, and scoped commits.
 **Files:**
 
 - No repository source modifications
-- Write benchmark logs under `/Volumes/Workspace/compass-heavy-framework-best-effort-20260730/`
+- Write benchmark logs under `<qualification-corpus-root>/compass-heavy-framework-best-effort-20260730/`
 
 **Interfaces:**
 
@@ -613,8 +613,8 @@ Expected: no whitespace errors, only intended files, and scoped commits.
 Run:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/compass-v1-remediation-target cargo build --release --locked -p compass-cli --bin compass
-shasum -a 256 /Volumes/Workspace/compass-v1-remediation-target/release/compass
+CARGO_TARGET_DIR=<qualification-corpus-root>/compass-v1-remediation-target cargo build --release --locked -p compass-cli --bin compass
+shasum -a 256 <qualification-corpus-root>/compass-v1-remediation-target/release/compass
 ```
 
 Record the commit and binary hash.

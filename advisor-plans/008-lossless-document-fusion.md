@@ -67,12 +67,12 @@ boundaries.
 
 | Purpose | Command | Expected on success |
 |---|---|---|
-| Semantic | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-semantic --locked` | exit 0 |
-| Core | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-core --locked` | exit 0 |
-| Graph | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-graph --locked` | exit 0 |
-| CLI contract | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-cli --test compass_product --locked` | exit 0 |
-| Qualification | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main ./scripts/qualify_code_graph_v1.sh --fixtures-only` | exit 0 |
-| Lint | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo clippy -p compass-semantic -p compass-core -p compass-graph --all-targets --all-features --locked -- -D warnings` | exit 0 |
+| Semantic | `cargo test -p compass-semantic --locked` | exit 0 |
+| Core | `cargo test -p compass-core --locked` | exit 0 |
+| Graph | `cargo test -p compass-graph --locked` | exit 0 |
+| CLI contract | `cargo test -p compass-cli --test compass_product --locked` | exit 0 |
+| Qualification | `./scripts/qualify_code_graph_v1.sh --fixtures-only` | exit 0 |
+| Lint | `cargo clippy -p compass-semantic -p compass-core -p compass-graph --all-targets --all-features --locked -- -D warnings` | exit 0 |
 | Format | `cargo fmt --all -- --check` | exit 0 |
 
 Stop if the external target volume is unavailable; never build into the repo.

@@ -211,8 +211,7 @@ The Rust-side candidate seam has one opt-in compiler differential fixture. Run
 it from a checkout with the pinned Node dependencies installed:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923 \
-  cargo test -p compass-languages --test typescript_oracle_differential \
+cargo test -p compass-languages --test typescript_oracle_differential \
   --locked -- --ignored
 ```
 
@@ -224,9 +223,8 @@ the separate checker oracle and keep the candidate adapter out of production:
 
 ```bash
 RUST_MIN_STACK=33554432 \
-COMPASS_TS_QUALIFICATION_ROOT=/Volumes/Workspace/Github/<owner>/<pinned-corpus> \
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
-  cargo test -p compass-languages --test typescript_target_differential \
+COMPASS_TS_QUALIFICATION_ROOT=<qualification-corpus-root>/<owner>/<pinned-corpus> \
+cargo test -p compass-languages --test typescript_target_differential \
   checker_oracle_adjudicates_local_candidate_targets --locked -- --ignored --nocapture
 ```
 

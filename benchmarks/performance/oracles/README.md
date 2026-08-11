@@ -51,17 +51,16 @@ Run them against an external, read-only corpus after `npm ci`:
 
 ```bash
 node benchmarks/performance/oracles/typescript-source-oracle.mjs \
-  --root /Volumes/Workspace/Github/<owner>/<repository> --jsonl
+  --root <qualification-corpus-root>/<owner>/<repository> --jsonl
 node benchmarks/performance/oracles/typescript-resolution-oracle.mjs \
-  --root /Volumes/Workspace/Github/<owner>/<repository>
+  --root <qualification-corpus-root>/<owner>/<repository>
 ```
 
 The ignored Rust differential harness compares the source oracle's accepted
 construct ranges with the test-only Compass candidate emitter:
 
 ```bash
-COMPASS_TS_QUALIFICATION_ROOT=/Volumes/Workspace/Github/<owner>/<repository> \
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923 \
+COMPASS_TS_QUALIFICATION_ROOT=<qualification-corpus-root>/<owner>/<repository> \
 cargo test -p compass-languages --test typescript_corpus_differential \
   --locked -- --ignored --nocapture
 ```
@@ -75,8 +74,7 @@ Run target adjudication explicitly (it is ignored so normal native tests remain
 Node-free):
 
 ```bash
-COMPASS_TS_QUALIFICATION_ROOT=/Volumes/Workspace/Github/<owner>/<repository> \
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923 \
+COMPASS_TS_QUALIFICATION_ROOT=<qualification-corpus-root>/<owner>/<repository> \
 cargo test -p compass-languages --test typescript_target_differential \
   --locked -- --ignored --nocapture
 ```
@@ -91,9 +89,8 @@ explicit report path. The report is atomically written only when this ignored
 qualification test is run; it is never produced by normal Compass builds:
 
 ```bash
-COMPASS_TS_QUALIFICATION_ROOT=/Volumes/Workspace/Github/<owner>/<repository> \
-COMPASS_TS_TARGET_REPORT=/Volumes/Workspace/<run>/typescript-target-report.json \
-CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-6923 \
+COMPASS_TS_QUALIFICATION_ROOT=<qualification-corpus-root>/<owner>/<repository> \
+COMPASS_TS_TARGET_REPORT=<qualification-corpus-root>/<run>/typescript-target-report.json \
 cargo test -p compass-languages --test typescript_target_differential \
   --locked -- --ignored --nocapture
 ```
@@ -108,8 +105,8 @@ reason for every non-correct label under
 
 ```bash
 python3 benchmarks/performance/harness.py typescript-scorecard \
-  --scorecard /Volumes/Workspace/<run>/typescript-scorecard.json \
-  --output /Volumes/Workspace/<run>/typescript-scorecard-result.json
+  --scorecard <qualification-corpus-root>/<run>/typescript-scorecard.json \
+  --output <qualification-corpus-root>/<run>/typescript-scorecard-result.json
 ```
 
 The evaluator computes precision, 95% Wilson bounds, recall, target-cluster

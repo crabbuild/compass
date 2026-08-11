@@ -62,11 +62,11 @@ For every shipped format, qualification must assert:
 
 | Purpose | Command | Expected on success |
 |---|---|---|
-| Document qualification | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main ./scripts/qualify_document_graph_v1.sh --fixtures-only` | exit 0; all format cases pass |
-| Code qualification | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main ./scripts/qualify_code_graph_v1.sh --fixtures-only` | exit 0 |
-| Product contract | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test -p compass-cli --test compass_product --locked` | exit 0 |
-| Workspace tests | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo test --workspace --lib --bins --locked` | exit 0 |
-| Workspace lint | `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-main cargo clippy --workspace --lib --bins --locked -- -D warnings` | exit 0 |
+| Document qualification | `./scripts/qualify_document_graph_v1.sh --fixtures-only` | exit 0; all format cases pass |
+| Code qualification | `./scripts/qualify_code_graph_v1.sh --fixtures-only` | exit 0 |
+| Product contract | `cargo test -p compass-cli --test compass_product --locked` | exit 0 |
+| Workspace tests | `cargo test --workspace --lib --bins --locked` | exit 0 |
+| Workspace lint | `cargo clippy --workspace --lib --bins --locked -- -D warnings` | exit 0 |
 | Format | `cargo fmt --all -- --check` | exit 0 |
 | Boundary | `sh scripts/check_product_boundary.sh` | exit 0 |
 
@@ -169,7 +169,7 @@ It must:
 - accept `--fixtures-only` and reject unknown flags;
 - require `CARGO_TARGET_DIR` to be an absolute path outside the Compass checkout
   rather than silently choosing a local target; local executions under this
-  repository must use `/Volumes/Workspace/crabbuild-target/compass-main`, while
+  repository must use its own dedicated Cargo target directory, while
   CI may use a checkout-specific directory under its runner temp volume;
 - run manifest validation and the typed cross-format test;
 - run product-boundary checks relevant to documents;
