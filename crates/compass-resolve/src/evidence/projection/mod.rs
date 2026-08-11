@@ -132,7 +132,7 @@ impl UniversalResolutionIndex {
             .filter_map(|candidate_slot| {
                 let candidate = self.facts.candidates.at(candidate_slot)?;
                 let candidate_id = candidate.id.as_str();
-                let decision = db.resolve_candidate(&candidate);
+                let decision = db.resolve_candidate(&candidate, admission);
                 let exact_declaration_id = match &decision {
                     ResolutionDecision::Resolved { declaration_id, .. } => {
                         Some(declaration_id.clone())
@@ -158,7 +158,7 @@ impl UniversalResolutionIndex {
                     let mut test_candidate = candidate.clone();
                     test_candidate.id.clone_from(test_id);
                     test_candidate.relation = CandidateRelation::Tests;
-                    let test_decision = db.resolve_candidate(&test_candidate);
+                    let test_decision = db.resolve_candidate(&test_candidate, admission);
                     if !matches!(
                         test_decision,
                         ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved
