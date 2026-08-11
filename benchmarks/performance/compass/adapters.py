@@ -188,12 +188,21 @@ class ToolAdapter:
 
 @dataclass(frozen=True)
 class CompassAdapter(ToolAdapter):
+    inference_level: str = "max"
+    cluster: bool = False
+
     @property
     def supports_persistent_queries(self) -> bool:
         return True
 
     @classmethod
-    def prepare(cls, source_root: Path) -> "CompassAdapter":
+    def prepare(
+        cls,
+        source_root: Path,
+        *,
+        inference_level: str = "max",
+        cluster: bool = False,
+    ) -> "CompassAdapter":
         status = _git_value(source_root, "status", "--porcelain=v1", "--untracked-files=all")
         if status:
             raise RuntimeError(f"Compass source checkout must be clean:\n{status}")
@@ -218,7 +227,14 @@ class CompassAdapter(ToolAdapter):
         metadata["rustc"] = _run(["rustc", "--version"], cwd=source_root)
         metadata["cargo"] = _run(["cargo", "--version"], cwd=source_root)
         metadata["profile"] = "release"
-        return cls(binary, ToolRevision(**{**revision.__dict__, "metadata": metadata}))
+        metadata["inference_level"] = inference_level
+        metadata["cluster"] = cluster
+        return cls(
+            binary,
+            ToolRevision(**{**revision.__dict__, "metadata": metadata}),
+            inference_level,
+            cluster,
+        )
 
     def build_command(self, checkout: Path, output: Path, *, force: bool = False) -> tuple[str, ...]:
         command = [
@@ -226,7 +242,6 @@ class CompassAdapter(ToolAdapter):
             "extract",
             str(checkout),
             "--code-only",
-            "--no-cluster",
             "--no-viz",
             "--store",
             "json",
@@ -234,6 +249,10 @@ class CompassAdapter(ToolAdapter):
             "--out",
             str(output),
         ]
+        if not self.cluster:
+            command.append("--no-cluster")
+        if self.inference_level != "max":
+            command.extend(("--inference-level", self.inference_level))
         if force:
             command.append("--force")
         return tuple(command)

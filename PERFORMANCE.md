@@ -320,6 +320,18 @@ These cross-tool observations are diagnostic evidence rather than a promoted
 Compass baseline. The remaining build gap is primarily the richer graph size
 and durable publication contract, not an unresolved duplicate atomic flush.
 
+### Delta-rs low-inference diagnostic
+
+A 2026-08-10 follow-up compared the new `low` inference profile with Graphify
+0.9.37 on pinned delta-rs, including symmetric clustered and no-cluster build
+profiles, cold/warm/incremental timing and RSS, graph integrity and provenance,
+source-verified natural-query recall, exact identifiers, and adversarial
+no-answer behavior. Compass won clustered cold and warm build time and
+published a fully source-backed graph, but still lost query latency, strict
+question pass rate, adversarial no-answer specificity, and cold/incremental
+memory. The complete methodology, results, limitations, and prioritized gates
+are in [Low-inference evaluation against Graphify](docs/implementation/low-inference-graphify-evaluation.md).
+
 ## Incremental and language-hardening observations
 
 A follow-up release-binary smoke run on 2026-08-04 used four small,

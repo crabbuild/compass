@@ -14,6 +14,12 @@
   default. Filtered builds prune unreferenced inferred placeholders and bind
   the selected level into build-profile/cache identity.
 
+- Make the performance harness select and record an inference level, and use
+  symmetric community clustering for explicit Compass/Graphify comparisons.
+  Add a pinned delta-rs diagnostic covering build latency and memory, graph
+  integrity and provenance, natural and exact query recall, query latency, and
+  adversarial no-answer behavior.
+
 - Improve agent discovery accuracy and latency with deterministic identifier-
   subword postings, exact trusted-call relationship-term postings, bounded
   proof-complete caller recall, distinct supporting-callee evidence, fair
