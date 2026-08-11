@@ -364,7 +364,11 @@ test("fork context suppresses comment delivery before any token-bearing step", (
 });
 
 test("installer pins release identity, checksum, and archive layout", () => {
+  const action = fs.readFileSync(path.join(__dirname, "../../../action.yml"), "utf8");
   const installer = fs.readFileSync(path.join(__dirname, "install.sh"), "utf8");
+  const versionInput = action.match(/  compass-version:\n([\s\S]*?)  release-repository:/)?.[1] ?? "";
+  assert.match(versionInput, /    required: true\n/);
+  assert.doesNotMatch(versionInput, /    default:/);
   assert.match(installer, /releases\/download\/compass-v\$version/);
   assert.match(installer, /sha256sum -c|shasum -a 256 -c/);
   assert.match(installer, /release archive has an unsafe or unexpected layout/);

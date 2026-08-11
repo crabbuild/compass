@@ -249,15 +249,24 @@ integer rubric is version 1; each deterministic gate has its own rule version.
 Presentation formats and the reusable GitHub Action consume this report and do
 not redefine its semantics.
 
-The report binds full Git revision IDs, graph/profile identity, and an evidence
-manifest. A profile mismatch is an error. Conflicts and incomplete evidence
-remain explicit and cannot become a clean gate result. Advisory risk is never a
-merge gate. The Action supports only `fail-on: none|deterministic`, where
-`deterministic` consults typed `GateResult::Fail` states rather than risk band,
-score, SARIF level, or prose.
+Dependency findings in `compass.semantic_diff.report/1` may now carry the
+optional strict `dependency_topology` object. It records source/target community
+IDs when present and bounded directed-cycle participation when the snapshot
+adapter can prove it. Semantic-diff derived-cache engine version 2 prevents
+older cached reports from masquerading as current topology evidence.
 
-This is additive in the `0.3.x` line. Existing `compass diff`, `compass prs`,
-graph, history, and MCP contracts are unchanged. Consumers that adopt the new
+The PR Intelligence report binds full Git revision IDs, graph/profile identity,
+and an evidence manifest. A profile mismatch is an error. Conflicts and
+incomplete evidence remain explicit and cannot become a clean gate result.
+Advisory risk is never a merge gate. The Action supports only
+`fail-on: none|deterministic`, where `deterministic` consults typed
+`GateResult::Fail` states rather than risk band, score, SARIF level, or prose.
+Its required `compass-version` input must name an exact released version
+containing `compass review`; there is no fallback binary version.
+
+This is additive in the `0.3.x` line. Existing `compass prs`, graph, history,
+and MCP contracts are unchanged; `compass diff` gains only the optional typed
+topology field above. Consumers that adopt the new
 report must reject unknown majors and validate `report_digest`. See the
 [PR Intelligence reference](docs/reference/pr-intelligence.md).
 

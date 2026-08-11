@@ -172,15 +172,17 @@ fn profile_mismatch_fails_before_risk_evaluation() -> Result<(), Box<dyn std::er
         'b',
         profile(Some(("feature", "different")))?,
     )?)?;
-    let error = compass_core::review_change_request(
+    let error = match compass_core::review_change_request(
         &history,
         &change_request(),
         &base,
         &result,
         &semantic_report(),
         Completeness::LocalExact,
-    )
-    .expect_err("profile mismatch must fail");
+    ) {
+        Ok(_) => return Err("profile mismatch unexpectedly succeeded".into()),
+        Err(error) => error,
+    };
     assert!(error.to_string().contains("profile"));
     Ok(())
 }

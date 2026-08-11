@@ -8,9 +8,8 @@ branding:
 
 inputs:
   compass-version:
-    description: Exact released Compass version to install.
-    required: false
-    default: "0.3.7"
+    description: Exact released Compass version containing the review command.
+    required: true
   release-repository:
     description: GitHub OWNER/REPO containing the pinned Compass release.
     required: false

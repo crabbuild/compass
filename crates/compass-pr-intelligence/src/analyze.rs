@@ -395,9 +395,29 @@ fn risk_factors(
                 .or_default()
                 .insert(fingerprint.clone());
         }
-        if finding.finding_type == semantic::FindingType::DependencyChange {
+        if finding
+            .dependency_topology
+            .as_ref()
+            .is_some_and(|topology| {
+                matches!(
+                    (topology.source_community, topology.target_community),
+                    (Some(source), Some(target)) if source != target
+                )
+            })
+        {
             grouped
                 .entry(RiskFactorKind::CrossBoundaryImpact)
+                .or_default()
+                .insert(fingerprint.clone());
+        }
+        if finding
+            .dependency_topology
+            .as_ref()
+            .and_then(|topology| topology.participates_in_cycle)
+            == Some(true)
+        {
+            grouped
+                .entry(RiskFactorKind::Cycle)
                 .or_default()
                 .insert(fingerprint.clone());
         }

@@ -99,11 +99,14 @@ commit SHAs:
     persist-credentials: false
 - uses: crabbuild/compass@<full-commit-sha>
   with:
+    compass-version: <exact-compatible-release>
     fail-on: none
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-Start with `fail-on: none`. Use `deterministic` only for the typed gate policy;
+Set `compass-version` to an exact release containing `compass review`; the
+Action intentionally has no binary-version default. Start with `fail-on: none`.
+Use `deterministic` only for the typed gate policy;
 never turn advisory risk into a branch gate. Forks retain the report artifact
 and job summary but skip comments. See the
 [GitHub PR review guide](../guides/github-pr-review.md) for permissions,

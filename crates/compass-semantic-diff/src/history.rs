@@ -1,3 +1,5 @@
+use std::cell::OnceCell;
+
 use compass_analysis::FunctionSummary;
 use compass_history::{
     ChangeKind, ChangeSink, GraphChange, HistoryError, HistoryRecord, HistoryRecordKey,
@@ -31,6 +33,8 @@ pub fn compare_history_realizations(
     let snapshots = HistorySnapshots {
         old: old_reader,
         new: new_reader,
+        old_topology: OnceCell::new(),
+        new_topology: OnceCell::new(),
     };
     let test_evidence = StaticTestEvidence::new(&snapshots, SnapshotSide::New);
     compare(SemanticDiffInput {
@@ -56,6 +60,8 @@ pub fn compare_history_realizations(
 struct HistorySnapshots<'a> {
     old: RealizationReader<'a>,
     new: RealizationReader<'a>,
+    old_topology: OnceCell<Result<Option<crate::DependencyCycleIndex>, String>>,
+    new_topology: OnceCell<Result<Option<crate::DependencyCycleIndex>, String>>,
 }
 
 impl HistorySnapshots<'_> {
@@ -64,6 +70,30 @@ impl HistorySnapshots<'_> {
             SnapshotSide::Old => &self.old,
             SnapshotSide::New => &self.new,
         }
+    }
+
+    fn topology(
+        &self,
+        side: SnapshotSide,
+    ) -> Result<Option<&crate::DependencyCycleIndex>, SemanticDiffError> {
+        let topology = match side {
+            SnapshotSide::Old => &self.old_topology,
+            SnapshotSide::New => &self.new_topology,
+        };
+        topology
+            .get_or_init(|| {
+                let graph = match self.reader(side).graph_document() {
+                    Ok(graph) => graph,
+                    Err(HistoryError::TrustedGraphUnavailable { .. }) => return Ok(None),
+                    Err(error) => return Err(error.to_string()),
+                };
+                crate::DependencyCycleIndex::from_graph(&graph)
+                    .map(Some)
+                    .map_err(|error| error.to_string())
+            })
+            .as_ref()
+            .map(Option::as_ref)
+            .map_err(|error| SemanticDiffError::Evidence(error.clone()))
     }
 }
 
@@ -156,6 +186,17 @@ impl SnapshotReader for HistorySnapshots<'_> {
                 "reverse-call key returned another record type".to_owned(),
             )),
         }
+    }
+
+    fn dependency_participates_in_cycle(
+        &self,
+        side: SnapshotSide,
+        source: &str,
+        target: &str,
+    ) -> Result<Option<bool>, SemanticDiffError> {
+        Ok(self
+            .topology(side)?
+            .map(|topology| topology.participates_in_cycle(source, target)))
     }
 }
 

@@ -86,6 +86,29 @@ fn local_review_writes_round_trippable_exact_report() -> Result<(), Box<dyn std:
     assert_eq!(report.identity.revisions.target_head, base);
     assert_eq!(report.identity.revisions.pull_request_head, head);
     assert!(report.identity.revisions.merge_result.is_clean());
+
+    let preserved_path = directory.path().join("bounded-review.md");
+    std::fs::write(&preserved_path, "preserve-me")?;
+    let bounded = run(
+        directory.path(),
+        &[
+            "review",
+            "--base",
+            &base,
+            "--head",
+            &head,
+            "--format",
+            "markdown",
+            "--max-output-bytes",
+            "1",
+            "--output",
+            preserved_path.to_str().ok_or("bounded report path")?,
+        ],
+    )?;
+    assert_eq!(bounded.status.code(), Some(1));
+    assert!(bounded.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&bounded.stderr).contains("PR review output is"));
+    assert_eq!(std::fs::read_to_string(preserved_path)?, "preserve-me");
     Ok(())
 }
 

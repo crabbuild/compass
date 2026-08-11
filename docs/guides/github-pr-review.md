@@ -65,12 +65,16 @@ jobs:
           persist-credentials: false
       - uses: crabbuild/compass@<full-commit-sha>
         with:
+          compass-version: <exact-compatible-release>
           fail-on: none
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-Replace both placeholders with reviewed immutable Action commits. The Action
-downloads the exact configured Compass release and checksum, validates the
+Replace the commit placeholders with reviewed immutable Action commits and set
+`compass-version` to an exact released version that contains `compass review`.
+The Action has no binary-version default, so it cannot silently install an
+older release that lacks the command. It downloads the exact configured
+Compass release and checksum, validates the
 archive layout, runs analysis without the token in its environment, uploads
 the evidence, writes the job summary, and only then passes the token to the
 pinned comment-delivery step.

@@ -1391,6 +1391,7 @@ mod tests {
             },
             reviewer_action: "review".to_owned(),
             evidence: Vec::new(),
+            dependency_topology: None,
             completeness: BTreeMap::new(),
         }
     }

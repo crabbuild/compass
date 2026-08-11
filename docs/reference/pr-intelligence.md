@@ -72,7 +72,7 @@ The score is a deterministic bounded integer, capped at 100:
 | --- | ---: | ---: |
 | Public contract change | 20 | 40 |
 | Affected caller or consumer | 4 | 24 |
-| Dependency/boundary impact | 10 | 20 |
+| Cross-community dependency impact | 10 | 20 |
 | Typed cycle evidence | 20 | 20 |
 | Non-exact witness confidence | 4 | 16 |
 | Verification gap | 12 | 36 |
@@ -83,8 +83,11 @@ Bands are `low` (0–19), `moderate` (20–44), `high` (45–69), and `critical`
 (70–100). `unavailable` has no score. Risk is advisory only: neither the CLI
 nor the Action turns a band into a merge gate.
 
-The cycle factor is reserved for typed cycle evidence. Version 1 does not
-infer it from finding prose.
+Cross-boundary points require typed source and target community identities that
+differ; an ordinary dependency change is not treated as a boundary crossing.
+Cycle points require bounded, directed topology evidence that the changed
+dependency participates in a cycle. Neither factor is inferred from finding
+prose.
 
 ## Deterministic gates
 

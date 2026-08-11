@@ -1571,7 +1571,7 @@ fn query_path_and_explain_read_the_selected_materialized_commit()
     let query = run(
         compass,
         directory.path(),
-        &["query", "legacy service", "--at", "HEAD~1"],
+        &["query", "legacy service", "--traverse", "--at", "HEAD~1"],
     )?;
     assert!(
         query.status.success(),
@@ -2244,9 +2244,17 @@ fn historical_build_uses_only_the_exact_commit_tree_and_historical_ignore_policy
         let query = run(
             compass,
             directory.path(),
-            &["query", absent, "--at", "HEAD"],
+            &["query", absent, "--format=json", "--at", "HEAD"],
         )?;
-        assert!(!String::from_utf8_lossy(&query.stdout).contains(absent));
+        assert!(query.status.success());
+        let response: serde_json::Value = serde_json::from_slice(&query.stdout)?;
+        let nodes = response["nodes"].as_array().ok_or("discovery nodes")?;
+        assert!(nodes.iter().all(|node| {
+            node["name"].as_str() != Some(absent)
+                && node["qualifiedName"]
+                    .as_str()
+                    .is_none_or(|name| !name.ends_with(absent))
+        }));
     }
     assert!(!directory.path().join("compass-out").exists());
     Ok(())

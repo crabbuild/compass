@@ -724,6 +724,10 @@ fn dependency_finding(
         .any(|item| is_test_source(&item.source_file))
         || matches!(delta.relation.as_str(), "uses" | "references")
         || (!source_file.is_empty() && source_file == target_file);
+    let participates_in_cycle =
+        input
+            .snapshots
+            .dependency_participates_in_cycle(side, &delta.source, &delta.target)?;
     let mut finding = base_finding(
         FindingType::DependencyChange,
         &format!("{}:{}:{}", delta.source, delta.relation, delta.target),
@@ -747,6 +751,17 @@ fn dependency_finding(
         evidence,
         "Confirm the new dependency direction and affected module boundary are intentional.",
     );
+    let dependency_topology = crate::DependencyTopology {
+        source_community: source.as_ref().and_then(|node| node.unsigned("community")),
+        target_community: target.as_ref().and_then(|node| node.unsigned("community")),
+        participates_in_cycle,
+    };
+    if dependency_topology.source_community.is_some()
+        || dependency_topology.target_community.is_some()
+        || dependency_topology.participates_in_cycle.is_some()
+    {
+        finding.dependency_topology = Some(dependency_topology);
+    }
     finding.routine = routine;
     Ok(finding)
 }
@@ -1502,6 +1517,7 @@ fn base_finding(
         },
         reviewer_action: reviewer_action.into(),
         evidence,
+        dependency_topology: None,
         completeness: BTreeMap::from([
             ("signature".to_owned(), Completeness::Complete),
             ("implementation".to_owned(), Completeness::Partial),

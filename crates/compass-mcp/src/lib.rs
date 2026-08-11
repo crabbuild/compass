@@ -1975,7 +1975,7 @@ mod tests {
         let graph = temp.path().join("graph.json");
         sample(&graph)?;
         let server = CompassMcp::new(graph);
-        assert_eq!(CompassMcp::tools().len(), 15);
+        assert_eq!(CompassMcp::tools().len(), 16);
         assert_eq!(CompassMcp::resources().len(), 7);
         let text = server.invoke("graph_stats", Map::new());
         assert_eq!(

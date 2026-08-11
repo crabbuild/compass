@@ -2,13 +2,13 @@ use std::collections::BTreeMap;
 
 use compass_pr_intelligence::{
     ChangeRequest, Completeness, EvidenceManifest, EvidenceSource, GateState, GraphSnapshot,
-    MergeOutcome, PullRequestReport, RepositoryIdentity, RevisionSet, RiskBand, analyze,
-    canonical_json_bytes,
+    MergeOutcome, PullRequestReport, RepositoryIdentity, RevisionSet, RiskBand, RiskFactorKind,
+    analyze, canonical_json_bytes,
 };
 use compass_semantic_diff::{
-    AffectedConsumer, Comparison, Compatibility, Confidence, EvidenceRef, FindingOrigin,
-    FindingType, GraphDelta, SemanticDiffReport, SemanticFinding, Verification, VerificationState,
-    WitnessHop, WitnessPath,
+    AffectedConsumer, Comparison, Compatibility, Confidence, DependencyTopology, EvidenceRef,
+    FindingOrigin, FindingType, GraphDelta, SemanticDiffReport, SemanticFinding, Verification,
+    VerificationState, WitnessHop, WitnessPath,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -118,6 +118,7 @@ fn semantic_finding(confidence: Confidence) -> SemanticFinding {
             record_key: None,
             capability: "signature".to_owned(),
         }],
+        dependency_topology: None,
         completeness: BTreeMap::new(),
     }
 }
@@ -236,6 +237,39 @@ fn incomplete_evidence_never_reduces_advisory_risk() -> Result<(), Box<dyn std::
     assert!(partial.advisory_risk.score >= complete.advisory_risk.score);
     assert!(partial.advisory_risk.band >= complete.advisory_risk.band);
     assert_eq!(partial.gates[0].state, GateState::Indeterminate);
+    Ok(())
+}
+
+#[test]
+fn dependency_factors_require_typed_topology_evidence() -> Result<(), Box<dyn std::error::Error>> {
+    let mut dependency = semantic_finding(Confidence::Exact);
+    dependency.finding_type = FindingType::DependencyChange;
+    dependency.public_surface = false;
+    dependency.compatibility = Compatibility::Behavioral;
+    dependency.affected_consumers.clear();
+    dependency.witness_paths.clear();
+    dependency.verification.state = VerificationState::Covered;
+    dependency.verification.recommended_tests.clear();
+    dependency.verification.reason = "Exact test coverage".to_owned();
+
+    let unqualified = clean_report(Completeness::DownstreamComplete, Some(dependency.clone()))?;
+    assert!(unqualified.risk_factors.is_empty());
+
+    dependency.dependency_topology = Some(DependencyTopology {
+        source_community: Some(7),
+        target_community: Some(9),
+        participates_in_cycle: Some(true),
+    });
+    let qualified = clean_report(Completeness::DownstreamComplete, Some(dependency))?;
+    let kinds = qualified
+        .risk_factors
+        .iter()
+        .map(|factor| factor.kind)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        kinds,
+        [RiskFactorKind::CrossBoundaryImpact, RiskFactorKind::Cycle]
+    );
     Ok(())
 }
 
