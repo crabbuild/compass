@@ -164,8 +164,7 @@ impl ResolutionDb<'_> {
         }
         let Some(qualifier) = self.occurrence(candidate).and_then(|occurrence| {
             occurrence
-                .qualifier
-                .as_deref()
+                .qualifier()
                 .filter(|qualifier| qualifier.contains('.'))
         }) else {
             return Ok(None);

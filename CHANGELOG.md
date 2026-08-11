@@ -77,6 +77,9 @@
   fact's owned ID as a second key. Move relationship candidates into a private
   interned table while validated per-file batches are drained, retaining
   bounded per-candidate inflation during index construction and projection.
+  Compact validated occurrences into a private slot-backed string table and
+  retain only the role, spelling, qualifier, context, and exact range consumed
+  by resolution.
   Borrowed lookup and explicit duplicate-ID rejection preserve graph semantics
   while reducing the transient resolver working set without changing the
   public evidence or cache schema.

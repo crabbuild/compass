@@ -1,6 +1,7 @@
 //! Validated primary facts consumed by immutable resolution indexes.
 
 use super::*;
+use compass_languages::OccurrenceFact;
 
 pub(in crate::evidence) trait FactId {
     fn fact_id(&self) -> &str;
@@ -64,6 +65,112 @@ impl<T: FactId> FactTable<T> {
 
 pub(in crate::evidence) type CandidateSlot = u32;
 type StringSlot = u32;
+
+struct CompactOccurrence {
+    id: StringSlot,
+    role: compass_languages::SemanticRole,
+    spelling: StringSlot,
+    qualifier: Option<StringSlot>,
+    context: Option<StringSlot>,
+    range: EvidenceRange,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::evidence) struct OccurrenceRef<'a> {
+    occurrence: &'a CompactOccurrence,
+    strings: &'a [String],
+}
+
+pub(in crate::evidence) struct OccurrenceTable {
+    strings: Vec<String>,
+    values: Vec<CompactOccurrence>,
+}
+
+impl OccurrenceTable {
+    pub(in crate::evidence) fn from_values(values: Vec<OccurrenceFact>) -> Result<Self, String> {
+        let mut strings = StringPoolBuilder::default();
+        let mut compact = Vec::with_capacity(values.len());
+        for occurrence in values {
+            compact.push(CompactOccurrence::new(occurrence, &mut strings)?);
+        }
+        let strings = strings.finish()?;
+        compact.sort_unstable_by(|left, right| {
+            strings[left.id as usize].cmp(&strings[right.id as usize])
+        });
+        if let Some(duplicate) = compact
+            .windows(2)
+            .find(|pair| strings[pair[0].id as usize] == strings[pair[1].id as usize])
+        {
+            return Err(format!(
+                "duplicate universal evidence id {:?}",
+                strings[duplicate[0].id as usize]
+            ));
+        }
+        compact.shrink_to_fit();
+        Ok(Self {
+            strings,
+            values: compact,
+        })
+    }
+
+    pub(in crate::evidence) fn get(&self, id: &str) -> Option<OccurrenceRef<'_>> {
+        let index = self
+            .values
+            .binary_search_by(|occurrence| self.string(occurrence.id).cmp(id))
+            .ok()?;
+        self.values.get(index).map(|occurrence| OccurrenceRef {
+            occurrence,
+            strings: &self.strings,
+        })
+    }
+
+    pub(in crate::evidence) const fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    fn string(&self, slot: StringSlot) -> &str {
+        &self.strings[slot as usize]
+    }
+}
+
+impl CompactOccurrence {
+    fn new(occurrence: OccurrenceFact, strings: &mut StringPoolBuilder) -> Result<Self, String> {
+        Ok(Self {
+            id: strings.intern(occurrence.id)?,
+            role: occurrence.role,
+            spelling: strings.intern(occurrence.spelling)?,
+            qualifier: strings.intern_option(occurrence.qualifier)?,
+            context: strings.intern_option(occurrence.context)?,
+            range: occurrence.range,
+        })
+    }
+}
+
+impl<'a> OccurrenceRef<'a> {
+    pub(in crate::evidence) const fn role(self) -> compass_languages::SemanticRole {
+        self.occurrence.role
+    }
+
+    pub(in crate::evidence) fn spelling(self) -> &'a str {
+        &self.strings[self.occurrence.spelling as usize]
+    }
+
+    pub(in crate::evidence) fn qualifier(self) -> Option<&'a str> {
+        self.occurrence
+            .qualifier
+            .map(|slot| self.strings[slot as usize].as_str())
+    }
+
+    pub(in crate::evidence) fn context(self) -> Option<&'a str> {
+        self.occurrence
+            .context
+            .map(|slot| self.strings[slot as usize].as_str())
+    }
+
+    pub(in crate::evidence) const fn range(self) -> &'a EvidenceRange {
+        &self.occurrence.range
+    }
+}
 
 struct CompactCandidate {
     id: StringSlot,
@@ -402,7 +509,7 @@ impl StringPoolBuilder {
 pub(super) struct FactStore {
     pub(super) declarations: FactTable<DeclarationFact>,
     pub(super) declaration_ids: Vec<String>,
-    pub(super) occurrences: FactTable<OccurrenceFact>,
+    pub(super) occurrences: OccurrenceTable,
     pub(super) bindings: FactTable<compass_languages::BindingFact>,
     pub(super) candidates: CandidateTable,
     pub(super) scopes: FactTable<compass_languages::ScopeFact>,
@@ -412,11 +519,11 @@ pub(super) struct FactStore {
 #[cfg(test)]
 mod tests {
     use compass_languages::{
-        CandidateRelation, HierarchyConstraint, ReceiverDispatchStrategy, RelationshipCandidate,
-        ResolutionConstraint,
+        CandidateRelation, EvidenceRange, HierarchyConstraint, OccurrenceFact,
+        ReceiverDispatchStrategy, RelationshipCandidate, ResolutionConstraint, SemanticRole,
     };
 
-    use super::{CandidateTable, FactId, FactTable};
+    use super::{CandidateTable, FactId, FactTable, OccurrenceTable};
 
     struct TestFact {
         id: String,
@@ -442,6 +549,41 @@ mod tests {
 
     fn fact(id: &str) -> TestFact {
         TestFact { id: id.to_owned() }
+    }
+
+    #[test]
+    fn occurrence_table_round_trips_every_compacted_field() -> Result<(), String> {
+        let occurrence = OccurrenceFact {
+            id: "occurrence:1".to_owned(),
+            language: "rust".to_owned(),
+            role: SemanticRole::Call,
+            owner_declaration_id: "declaration:owner".to_owned(),
+            spelling: "execute".to_owned(),
+            qualifier: Some("worker".to_owned()),
+            context: Some("member".to_owned()),
+            scope_id: Some("scope:1".to_owned()),
+            range: EvidenceRange {
+                source_file: "src/lib.rs".to_owned(),
+                start_byte: 11,
+                end_byte: 18,
+                start_line: 2,
+                start_column: 4,
+                end_line: 2,
+                end_column: 11,
+            },
+        };
+        let table = OccurrenceTable::from_values(vec![occurrence.clone()])?;
+        let compact = table
+            .get(&occurrence.id)
+            .ok_or_else(|| "missing compact occurrence".to_owned())?;
+
+        assert_eq!(compact.role(), occurrence.role);
+        assert_eq!(compact.spelling(), occurrence.spelling);
+        assert_eq!(compact.qualifier(), occurrence.qualifier.as_deref());
+        assert_eq!(compact.context(), occurrence.context.as_deref());
+        assert_eq!(compact.range(), &occurrence.range);
+        assert_eq!(table.len(), 1);
+        Ok(())
     }
 
     #[test]

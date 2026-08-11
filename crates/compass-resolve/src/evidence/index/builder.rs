@@ -239,7 +239,7 @@ impl IndexBuilder<'_> {
             scopes.extend(batch.scopes);
         }
         let declarations = FactTable::from_values(declarations)?;
-        let occurrences = FactTable::from_values(occurrences)?;
+        let occurrences = OccurrenceTable::from_values(occurrences)?;
         let bindings = FactTable::from_values(bindings)?;
         let candidates = candidates.finish()?;
         let scopes = FactTable::from_values(scopes)?;
@@ -534,7 +534,7 @@ impl IndexBuilder<'_> {
                         .occurrence_id
                         .as_deref()
                         .and_then(|id| occurrences.get(id))
-                        .map(|occurrence| &occurrence.range);
+                        .map(|occurrence| occurrence.range());
                     let entry = direct_bases
                         .entry((candidate.language.clone(), owner.qualified_name.clone()))
                         .or_insert_with(|| DirectBaseSet {
@@ -887,7 +887,7 @@ impl IndexBuilder<'_> {
                 .occurrence_id
                 .as_deref()
                 .and_then(|id| occurrences.get(id))
-                .map_or(u64::MAX, |occurrence| occurrence.range.start_byte);
+                .map_or(u64::MAX, |occurrence| occurrence.range().start_byte);
             return_entries
                 .entry((candidate.language.clone(), callable.qualified_name.clone()))
                 .or_default()
@@ -896,7 +896,7 @@ impl IndexBuilder<'_> {
                 .occurrence_id
                 .as_deref()
                 .and_then(|id| occurrences.get(id))
-                .and_then(|occurrence| occurrence.context.as_deref())
+                .and_then(OccurrenceRef::context)
                 == Some("rust-outer-nominal-return")
             {
                 outer_return_entries

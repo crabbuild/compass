@@ -359,6 +359,17 @@ is retained as an honest intermediate bound: eliminating the remaining gap
 requires compact or streamed evidence before corpus-wide per-file candidate
 and occurrence objects coexist, not additional late filtering.
 
+Moving the 88,447 validated occurrences into a resolver-private slot-backed
+string table produced a further three-sample median of 2.65 s and 592.1 MiB.
+The canonical 34,117,849-byte graph remained byte-identical to the preceding
+artifact. Relative to the candidate-compaction median, RSS decreased 1.14%
+and wall time increased 0.8%; Compass still used about 3.96x Graphify's
+documented cold RSS. The compact table drops language, owner, and scope only
+after evidence validation because no resolution stage reads those fields; the
+public evidence and cache schema are unchanged. This small result reinforces
+that resolver-local compaction is useful but cannot remove the earlier
+producer/cache high-water mark or the later index/graph overlap.
+
 A subsequent query-hydration replay used the same pinned delta-rs SQLite
 artifact and seven fresh release-binary processes per independently labeled
 negative identifier. Moving the already-established absent composite-

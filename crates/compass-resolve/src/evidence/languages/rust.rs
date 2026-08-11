@@ -239,7 +239,7 @@ impl ResolutionDb<'_> {
         if !matches!(candidate.target_spelling.as_str(), "Send" | "Sized")
             || self
                 .occurrence(&candidate)
-                .is_none_or(|occurrence| occurrence.qualifier.is_some())
+                .is_none_or(|occurrence| occurrence.qualifier().is_some())
         {
             return false;
         }
@@ -333,7 +333,7 @@ pub(in crate::evidence) fn rust_impl_associated_type_index(
     declaration_ids: &[String],
     scopes: &FactTable<compass_languages::ScopeFact>,
     candidates: &CandidateTable,
-    occurrences: &FactTable<OccurrenceFact>,
+    occurrences: &OccurrenceTable,
     candidate_limit: usize,
 ) -> AHashMap<(String, String, String), AssociatedTypeSet> {
     let mut implementations = AHashMap::<String, Vec<RelationshipCandidate>>::new();
@@ -366,7 +366,7 @@ pub(in crate::evidence) fn rust_impl_associated_type_index(
                     .occurrence_id
                     .as_deref()
                     .and_then(|id| occurrences.get(id))?;
-                range_contains(&scope.range, &occurrence.range)
+                range_contains(&scope.range, occurrence.range())
                     .then_some(candidate.constraints.qualified_name.as_ref())
                     .flatten()
             })

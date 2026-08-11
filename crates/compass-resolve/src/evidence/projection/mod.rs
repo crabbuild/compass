@@ -380,12 +380,12 @@ impl UniversalResolutionIndex {
                                 .values()
                                 .filter(|declaration| {
                                     declaration.kind == "annotation"
-                                        && declaration.name == occurrence.spelling
+                                        && declaration.name == occurrence.spelling()
                                         && declaration.range.source_file
-                                            == occurrence.range.source_file
+                                            == occurrence.range().source_file
                                         && declaration.range.start_byte
-                                            <= occurrence.range.start_byte
-                                        && declaration.range.end_byte >= occurrence.range.end_byte
+                                            <= occurrence.range().start_byte
+                                        && declaration.range.end_byte >= occurrence.range().end_byte
                                 })
                                 .min_by_key(|declaration| {
                                     (declaration.range.start_byte, declaration.id.as_str())
@@ -399,7 +399,7 @@ impl UniversalResolutionIndex {
                     let (source, target) = if candidate.relation == CandidateRelation::Contains {
                         (source, target)
                     } else if db.occurrence(candidate).is_some_and(|occurrence| {
-                        occurrence.role == compass_languages::SemanticRole::Receiver
+                        occurrence.role() == compass_languages::SemanticRole::Receiver
                     }) {
                         (target, source)
                     } else {
@@ -415,7 +415,7 @@ impl UniversalResolutionIndex {
                     {
                         "decorates"
                     } else if db.occurrence(candidate).is_some_and(|occurrence| {
-                        occurrence.role == compass_languages::SemanticRole::Receiver
+                        occurrence.role() == compass_languages::SemanticRole::Receiver
                     }) {
                         "method"
                     } else if candidate.language == "go"
@@ -430,7 +430,7 @@ impl UniversalResolutionIndex {
                     };
                     let site = db
                         .occurrence(candidate)
-                        .map(|occurrence| &occurrence.range)
+                        .map(OccurrenceRef::range)
                         .or_else(|| exact_target.map(|target| &target.range))
                         .or_else(|| {
                             matches!(
@@ -485,7 +485,7 @@ impl UniversalResolutionIndex {
                                 .unwrap_or_default();
                             binding.spelling != target_name
                                 || occurrence
-                                    .and_then(|occurrence| occurrence.qualifier.as_deref())
+                                    .and_then(OccurrenceRef::qualifier)
                                     .is_some_and(|qualifier| qualifier != binding.spelling)
                         })
                     {
@@ -499,11 +499,11 @@ impl UniversalResolutionIndex {
                                         declaration.kind == "export"
                                             && declaration.name == export_name
                                             && declaration.range.source_file
-                                                == occurrence.range.source_file
+                                                == occurrence.range().source_file
                                             && declaration.range.start_byte
-                                                <= occurrence.range.start_byte
+                                                <= occurrence.range().start_byte
                                             && declaration.range.end_byte
-                                                >= occurrence.range.end_byte
+                                                >= occurrence.range().end_byte
                                     })
                                     .min_by_key(|declaration| {
                                         (declaration.range.start_byte, declaration.id.as_str())

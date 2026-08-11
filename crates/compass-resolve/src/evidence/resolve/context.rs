@@ -62,7 +62,7 @@ impl<'a> CandidateContext<'a> {
 
     pub(super) fn qualifier<'b>(&'b self, db: &'b ResolutionDb<'_>) -> Option<&'b str> {
         db.occurrence(self.candidate())
-            .and_then(|occurrence| occurrence.qualifier.as_deref())
+            .and_then(OccurrenceRef::qualifier)
     }
 
     pub(super) fn has_unbound_qualified_receiver(&self, db: &ResolutionDb<'_>) -> bool {

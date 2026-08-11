@@ -57,13 +57,13 @@ impl ResolutionDb<'_> {
         };
         let (keys, project_resolved) = self
             .typescript_project_module_keys(
-                &occurrence.range.source_file,
+                &occurrence.range().source_file,
                 &module,
                 if matches!(
                     candidate.relation,
                     CandidateRelation::Imports | CandidateRelation::Reexports
                 ) {
-                    occurrence.context.as_deref()
+                    occurrence.context()
                 } else {
                     None
                 },
@@ -72,7 +72,7 @@ impl ResolutionDb<'_> {
                 || {
                     (
                         typescript_import_module_keys(
-                            &occurrence.range.source_file,
+                            &occurrence.range().source_file,
                             &module,
                             &self.project.root,
                         ),

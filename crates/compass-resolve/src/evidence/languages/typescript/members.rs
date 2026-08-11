@@ -229,7 +229,7 @@ impl ResolutionDb<'_> {
                     .map(|(module, _)| module.to_owned())
             })?;
         let importer =
-            typescript_project_importer_key(&occurrence.range.source_file, &self.project.root)?;
+            typescript_project_importer_key(&occurrence.range().source_file, &self.project.root)?;
         let target_keys = target_source_file
             .map(|source| typescript_source_module_keys(source, &self.project.root))
             .unwrap_or_else(|| vec![String::new()]);

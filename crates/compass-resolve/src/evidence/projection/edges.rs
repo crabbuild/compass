@@ -8,7 +8,7 @@ pub(super) fn materialized_edge(
     target: String,
     relation: &str,
     candidate: &RelationshipCandidate,
-    occurrence: Option<&OccurrenceFact>,
+    occurrence: Option<OccurrenceRef<'_>>,
     binding: Option<&BindingFact>,
     target_kind: Option<&str>,
     target_source_file: Option<&str>,
@@ -22,17 +22,17 @@ pub(super) fn materialized_edge(
         ("calls", ResolutionRule::DeferredReceiver) => "deferred_receiver_call",
         ("calls", _) => "call",
         ("indirect_call", _) => occurrence
-            .and_then(|occurrence| occurrence.context.as_deref())
+            .and_then(OccurrenceRef::context)
             .unwrap_or("reference"),
         ("references", _) if candidate.relation == CandidateRelation::Decorates => "decorator",
         ("decorates", _) => "decorator",
         ("references", _)
             if occurrence.is_some_and(|occurrence| {
-                occurrence.role == compass_languages::SemanticRole::CallableReference
+                occurrence.role() == compass_languages::SemanticRole::CallableReference
             }) =>
         {
             occurrence
-                .and_then(|occurrence| occurrence.context.as_deref())
+                .and_then(OccurrenceRef::context)
                 .unwrap_or("reference")
         }
         ("imports_from", _)
@@ -41,7 +41,7 @@ pub(super) fn materialized_edge(
             "submodule_import"
         }
         ("imports_from", _) => occurrence
-            .and_then(|occurrence| occurrence.context.as_deref())
+            .and_then(OccurrenceRef::context)
             .unwrap_or("import"),
         ("re_exports", _) => "export",
         ("inherits", _) => "base_type",

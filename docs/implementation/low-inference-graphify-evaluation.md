@@ -364,6 +364,20 @@ already-materialized batches enter the resolver cannot remove the extraction
 allocator high-water mark. The remaining work must avoid corpus-wide full
 candidate and occurrence materialization at the producer/cache handoff.
 
+The next representation pass moved all 88,447 validated occurrences into a
+resolver-private string pool and slot table. It retains the exact range plus
+the role, spelling, qualifier, and context consumed by resolution, while
+dropping language, owner, and scope only after the unchanged validation
+boundary proves the original batch. Three fresh samples reported 2.86/2.57/
+2.65 s and 616,022,016/620,822,528/644,366,336 bytes peak RSS, for medians of
+2.65 s and 592.1 MiB. The 34,117,849-byte canonical graph had the same
+`3bf374f10463a1d8fa81533cd59c2240cf9814298d9cf5026a7492d6ed68b0af`
+SHA-256 digest as the preceding artifact. Relative to candidate compaction,
+median RSS decreased 1.14% and wall time increased 0.8%; Compass still used
+about 3.96x Graphify's documented cold RSS. This is an exact but modest
+resolver-local reduction, not evidence that the producer/cache high-water
+mark is solved.
+
 ## Work required to surpass Graphify
 
 1. **Move inference admission before materialization.** Thread the selected

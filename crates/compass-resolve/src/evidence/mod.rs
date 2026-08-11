@@ -6,8 +6,8 @@ use std::time::Instant;
 use ahash::{AHashMap, AHashSet};
 use compass_languages::{
     BindingFact, CandidateRelation, DeclarationFact, EvidenceLimits, EvidenceRange,
-    HierarchyConstraint, OccurrenceFact, ReceiverDispatchStrategy, RelationshipCandidate,
-    SemanticEvidenceBatch, make_id, validate_evidence,
+    HierarchyConstraint, ReceiverDispatchStrategy, RelationshipCandidate, SemanticEvidenceBatch,
+    make_id, validate_evidence,
 };
 use compass_model::provenance::{NODE_PROVENANCE_ANCHOR_ATTRIBUTE, OCCURRENCE_RULE_ATTRIBUTE};
 use rayon::prelude::*;
@@ -29,7 +29,10 @@ pub(crate) use projection::is_replaced_relation;
 
 pub use api::{ResolutionDecision, ResolutionEvidence, ResolutionRule, UniversalResolutionLimits};
 use budget::LookupBudget;
-use facts::{CandidateSlot, CandidateTable, CandidateTableBuilder, FactStore, FactTable};
+use facts::{
+    CandidateSlot, CandidateTable, CandidateTableBuilder, FactStore, FactTable, OccurrenceRef,
+    OccurrenceTable,
+};
 use index::ResolutionIndexes;
 use languages::policy::LanguagePolicyKind;
 use languages::rust::{
@@ -156,7 +159,7 @@ impl UniversalResolutionIndex {
                     .candidates
                     .occurrence_id(slot)
                     .and_then(|id| self.facts.occurrences.get(id))
-                    .map(|occurrence| &occurrence.range)
+                    .map(OccurrenceRef::range)
                     .or_else(|| {
                         self.facts
                             .declarations
@@ -236,7 +239,7 @@ impl ResolutionDb<'_> {
     pub(in crate::evidence) fn occurrence(
         &self,
         candidate: &RelationshipCandidate,
-    ) -> Option<&OccurrenceFact> {
+    ) -> Option<OccurrenceRef<'_>> {
         candidate
             .occurrence_id
             .as_deref()
