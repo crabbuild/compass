@@ -939,8 +939,7 @@ fn build_communities(
                 .collect::<Vec<_>>();
             // Stable sorting preserves the deterministic community-member order
             // when two candidates have equal connectivity.
-            representatives
-                .sort_by(|left, right| graph.degree(&right.id).cmp(&graph.degree(&left.id)));
+            representatives.sort_by_key(|right| std::cmp::Reverse(graph.degree(&right.id)));
             representatives.truncate(if detailed {
                 REPRESENTATIVE_LIMIT
             } else {
@@ -1856,10 +1855,7 @@ fn fit_orientation_budget(model: &mut AgentOrientation) {
 }
 
 fn fit_orientation_json_budget(model: &mut AgentOrientation) {
-    loop {
-        let Ok(rendered) = serde_json::to_vec_pretty(model) else {
-            break;
-        };
+    while let Ok(rendered) = serde_json::to_vec_pretty(model) {
         if rendered.len() <= ORIENTATION_JSON_FIT_BYTES || model.communities.is_empty() {
             break;
         }
@@ -2050,7 +2046,7 @@ fn render_orientation_markdown_with_community_limit(
                 community.adjacent_community_count,
                 community.strongest_adjacent.len(),
             )),
-            community_link_list(&community.strongest_adjacent, &community_labels),
+            community_link_list(&community.strongest_adjacent, community_labels),
         ));
         if let (Some(incoming_total), Some(outgoing_total), Some(incoming), Some(outgoing)) = (
             community.incoming_community_count,
@@ -2064,12 +2060,12 @@ fn render_orientation_markdown_with_community_limit(
                     incoming_total,
                     incoming.len(),
                 )),
-                community_link_list(incoming, &community_labels),
+                community_link_list(incoming, community_labels),
                 inline_disclosure(SectionOmission::from_total_shown(
                     outgoing_total,
                     outgoing.len(),
                 )),
-                community_link_list(outgoing, &community_labels),
+                community_link_list(outgoing, community_labels),
             ));
         }
     }
@@ -2370,7 +2366,7 @@ fn append_community_directory(
                 community.adjacent_community_count,
                 community.strongest_adjacent.len(),
             )),
-            community_link_list(&community.strongest_adjacent, &community_labels),
+            community_link_list(&community.strongest_adjacent, community_labels),
         ));
         if let (Some(incoming_total), Some(outgoing_total), Some(incoming), Some(outgoing)) = (
             community.incoming_community_count,
@@ -2384,12 +2380,12 @@ fn append_community_directory(
                     incoming_total,
                     incoming.len(),
                 )),
-                community_link_list(incoming, &community_labels),
+                community_link_list(incoming, community_labels),
                 inline_disclosure(SectionOmission::from_total_shown(
                     outgoing_total,
                     outgoing.len(),
                 )),
-                community_link_list(outgoing, &community_labels),
+                community_link_list(outgoing, community_labels),
             ));
         }
     }
