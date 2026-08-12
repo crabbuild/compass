@@ -2046,7 +2046,7 @@ fn render_orientation_markdown_with_community_limit(
                 community.adjacent_community_count,
                 community.strongest_adjacent.len(),
             )),
-            community_link_list(&community.strongest_adjacent, community_labels),
+            community_link_list(&community.strongest_adjacent, &community_labels),
         ));
         if let (Some(incoming_total), Some(outgoing_total), Some(incoming), Some(outgoing)) = (
             community.incoming_community_count,
@@ -2060,12 +2060,12 @@ fn render_orientation_markdown_with_community_limit(
                     incoming_total,
                     incoming.len(),
                 )),
-                community_link_list(incoming, community_labels),
+                community_link_list(incoming, &community_labels),
                 inline_disclosure(SectionOmission::from_total_shown(
                     outgoing_total,
                     outgoing.len(),
                 )),
-                community_link_list(outgoing, community_labels),
+                community_link_list(outgoing, &community_labels),
             ));
         }
     }
