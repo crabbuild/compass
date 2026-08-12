@@ -3969,7 +3969,7 @@ fn resolve_php_type_references(extraction: &mut Extraction, sources: &HashMap<St
         facts.insert(source_file.clone(), (namespace, uses));
     }
 
-    let mut internal_types = HashMap::new();
+    let mut internal_types = BTreeMap::<String, BTreeSet<(String, String)>>::new();
     for node in &extraction.nodes {
         let source_file = string_attribute(node, "source_file");
         let Some((namespace, _)) = facts.get(&source_file) else {
@@ -3980,6 +3980,7 @@ fn resolve_php_type_references(extraction: &mut Extraction, sources: &HashMap<St
             || label.ends_with(')')
             || label.contains('.')
             || is_file_node(node, &source_file)
+            || !is_type_like_definition(node)
         {
             continue;
         }
@@ -3990,7 +3991,8 @@ fn resolve_php_type_references(extraction: &mut Extraction, sources: &HashMap<St
         };
         internal_types
             .entry(fqn.to_ascii_lowercase())
-            .or_insert_with(|| node.id.clone());
+            .or_default()
+            .insert((node.id.clone(), source_file));
     }
 
     let mut created = HashSet::new();
@@ -4003,7 +4005,8 @@ fn resolve_php_type_references(extraction: &mut Extraction, sources: &HashMap<St
         ) {
             continue;
         }
-        let Some((namespace, uses)) = facts.get(&edge.string("source_file")) else {
+        let source_file = edge.string("source_file");
+        let Some((namespace, uses)) = facts.get(&source_file) else {
             continue;
         };
         let Some(label) = stub_labels.get(&edge.target) else {
@@ -4018,8 +4021,21 @@ fn resolve_php_type_references(extraction: &mut Extraction, sources: &HashMap<St
         let Some(fqn) = fqn else {
             continue;
         };
-        let target = if let Some(target) = internal_types.get(&fqn.to_ascii_lowercase()) {
-            target.clone()
+        let target = if let Some(candidates) = internal_types.get(&fqn.to_ascii_lowercase()) {
+            let mut same_file = candidates
+                .iter()
+                .filter(|(_, candidate_source)| candidate_source == &source_file);
+            let first_same_file = same_file.next();
+            if let Some((target, _)) = first_same_file {
+                if same_file.next().is_some() {
+                    continue;
+                }
+                target.clone()
+            } else if let Some((target, _)) = candidates.first().filter(|_| candidates.len() == 1) {
+                target.clone()
+            } else {
+                continue;
+            }
         } else if explicit {
             make_id(&[&fqn])
         } else {
@@ -4394,15 +4410,15 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
 }
 
 fn is_type_like_definition(node: &NodeRecord) -> bool {
-    if string_attribute(node, "type") == "namespace"
-        || string_attribute(node, "file_type") != "code"
-    {
+    let legacy_kind = string_attribute(node, "type");
+    if legacy_kind == "namespace" || string_attribute(node, "file_type") != "code" {
         return false;
     }
     let kind = string_attribute(node, "symbol_kind");
-    if !kind.is_empty() {
+    let effective_kind = if kind.is_empty() { &legacy_kind } else { &kind };
+    if !effective_kind.is_empty() {
         return matches!(
-            kind.as_str(),
+            effective_kind.as_str(),
             "class"
                 | "component"
                 | "enum"
@@ -6218,5 +6234,57 @@ mod tests {
                 ("API".to_owned(), "Vendor\\Package\\Contract".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn php_type_resolution_is_order_independent_and_rejects_ambiguous_definitions() {
+        let sources = HashMap::from([
+            (
+                "tests/Local.php".to_owned(),
+                "<?php\nnamespace Fixtures;\nclass Post {}\n".to_owned(),
+            ),
+            (
+                "tests/Remote.php".to_owned(),
+                "<?php\nnamespace Fixtures;\nclass Post {}\n".to_owned(),
+            ),
+            (
+                "tests/Ambiguous.php".to_owned(),
+                "<?php\nnamespace Fixtures;\n".to_owned(),
+            ),
+        ]);
+        let make_extraction = || Extraction {
+            nodes: vec![
+                node("local-post", "Post", "tests/Local.php", "class"),
+                node("remote-post", "Post", "tests/Remote.php", "class"),
+                node("method-post", "Post", "tests/Local.php", "method"),
+                node("post-stub", "Post", "", "stub"),
+            ],
+            edges: vec![edge(
+                "local-consumer",
+                "post-stub",
+                "references",
+                "tests/Local.php",
+            )],
+            ..Extraction::default()
+        };
+
+        let mut forward = make_extraction();
+        resolve_php_type_references(&mut forward, &sources);
+        assert_eq!(forward.edges[0].target, "local-post");
+
+        let mut reversed = make_extraction();
+        reversed.nodes.reverse();
+        resolve_php_type_references(&mut reversed, &sources);
+        assert_eq!(reversed.edges[0].target, "local-post");
+
+        let mut ambiguous = make_extraction();
+        ambiguous.edges[0] = edge(
+            "ambiguous-consumer",
+            "post-stub",
+            "references",
+            "tests/Ambiguous.php",
+        );
+        resolve_php_type_references(&mut ambiguous, &sources);
+        assert_eq!(ambiguous.edges[0].target, "post-stub");
     }
 }

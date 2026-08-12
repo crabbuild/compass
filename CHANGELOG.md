@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Make PHP extraction and type resolution fail closed for colliding exact or
+  case-folded symbols instead of selecting a hash-iteration winner. Qualified
+  duplicate types now prefer one unique same-file declaration and otherwise
+  remain unresolved. Advance extraction semantics to v9 so affected cached
+  facts rebuild automatically.
+
 - Add canonical `compass.pr_intelligence.report/1` review analysis over exact
   immutable target, PR-head, and synthetic-merge realizations, with stable
   `cmpprv1` findings, explicit completeness, a versioned advisory integer
