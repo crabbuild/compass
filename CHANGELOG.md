@@ -164,6 +164,33 @@
   repository-relative identity for universal framework facts so shallow source
   paths are published instead of being mistaken for temporary-directory paths.
 
+## 0.3.8 - 2026-08-11
+
+- Make evidence-first structural inference the default, with explicit
+  `--inference-level low|medium|high|max` controls. Low builds preserve
+  exact/source-backed relationships, bind the level into cache/build identity,
+  and remain deterministic.
+
+- Improve natural and agent discovery with indexed identifier/subword and
+  relationship-term recall, bounded caller/operation-role discovery,
+  capacity-aware traversal, focused default neighborhoods, and constant-work
+  proven no-answer behavior while preserving ambiguity, direction, provenance,
+  and bounded contracts.
+
+- Reduce resolver/query memory and latency with compact deterministic
+  fact/occurrence tables, bounded AST-cache publication, shared readers/object
+  caching, targeted index release, and pinned discovery/delta/performance
+  qualification.
+
+- Add typed pull-request risk review over immutable target, PR-head, and
+  synthetic-merge realizations, with deterministic cmpprv1 findings,
+  completeness/advisory risk projections, CLI/MCP surfaces, a fork-safe
+  read-only GitHub Action, and cycle-aware dependency topology.
+
+- Harden PHP symbol resolution and graph publication determinism, preserve
+  wildcard/import source anchors and directed multigraph evidence, and improve
+  community labels/report references.
+
 ## 0.3.7 - 2026-08-08
 
 - Improve natural-language query recall and ranking with bounded exact, alias,
