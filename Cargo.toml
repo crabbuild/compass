@@ -38,7 +38,7 @@ resolver = "3"
 exclude = ["fuzz", "vendor/gemm-common"]
 
 [workspace.package]
-version = "0.3.9"
+version = "0.3.10"
 edition = "2024"
 rust-version = "1.97"
 license = "MIT OR Apache-2.0"
