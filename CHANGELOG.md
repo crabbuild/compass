@@ -21,8 +21,10 @@
   and selected-neighborhood fitting, plus independent node and relationship
   labels. Add bounded 1–4-hop selection isolation with incoming/outgoing edge
   filtering, layout spacing, a navigable minimap, and discoverable keyboard
-  shortcuts. Add the `workbench-json` machine export while preserving plain
-  `compass.viewer.graph/1` JSON compatibility.
+  shortcuts. Resuming a settled nested community graph now reheats its layout
+  so pause/resume produces visible physics movement. Add the `workbench-json`
+  machine export while preserving plain `compass.viewer.graph/1` JSON
+  compatibility.
 
 - Make PHP extraction and type resolution fail closed for colliding exact or
   case-folded symbols instead of selecting a hash-iteration winner. Qualified
