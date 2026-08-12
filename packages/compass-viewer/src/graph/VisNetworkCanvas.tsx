@@ -83,6 +83,27 @@ const STATIC_VISIBLE_LABEL_LIMIT = 200;
 const MINIMAP_POSITION_LIMIT = 1_500;
 const MIN_VIEW_SCALE = 0.1;
 const MAX_VIEW_SCALE = 3;
+const LAYOUT_REHEAT_DISTANCE = 12;
+const LAYOUT_REHEAT_NODE_LIMIT = 1_500;
+
+function reheatGraphLayout(
+  network: Network,
+  visibleNodeIds: ReadonlySet<string>
+): void {
+  const nodeIds = [...visibleNodeIds].sort().slice(0, LAYOUT_REHEAT_NODE_LIMIT);
+  const positions = network.getPositions(nodeIds);
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  nodeIds.forEach((id, index) => {
+    const position = positions[id];
+    if (!position) return;
+    const angle = index * goldenAngle;
+    network.moveNode(
+      id,
+      position.x + Math.cos(angle) * LAYOUT_REHEAT_DISTANCE,
+      position.y + Math.sin(angle) * LAYOUT_REHEAT_DISTANCE
+    );
+  });
+}
 
 function cameraAnimation(duration: number) {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -394,6 +415,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     const [minimapSnapshot, setMinimapSnapshot] = useState<GraphMinimapSnapshot | null>(null);
     const physicsRunningRef = useRef(physicsRunning);
     physicsRunningRef.current = physicsRunning;
+    const previousPhysicsRunningRef = useRef(physicsRunning);
     const eventHandlersRef = useRef<GraphNetworkHandlers>({
       onFocus,
       onOpenSource,
@@ -725,9 +747,15 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     useEffect(() => {
       const network = networkRef.current;
       if (!network) return;
+      const wasRunning = previousPhysicsRunningRef.current;
+      previousPhysicsRunningRef.current = physicsRunning;
       network.setOptions({ physics: { enabled: physicsRunning } });
-      if (physicsRunning) network.startSimulation();
-      else network.stopSimulation();
+      if (physicsRunning) {
+        if (!wasRunning) reheatGraphLayout(network, visibleNodeIdsRef.current);
+        network.startSimulation();
+      } else {
+        network.stopSimulation();
+      }
     }, [edgeData, nodeData, physicsRunning]);
 
     useEffect(() => {

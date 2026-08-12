@@ -239,6 +239,23 @@ test("community double-click enters lazy detail, source opens, and Back restores
   )).toBe(0);
   await expect(page.getByRole("button", { name: "Back to community overview" })).toBeVisible();
 
+  const resumeLayout = page.getByRole("button", { name: "Resume layout" });
+  await expect(resumeLayout).toBeVisible();
+  const graphCanvas = page.locator(".compass-canvas canvas").first();
+  const pausedFrame = await graphCanvas.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+  await resumeLayout.click();
+  await expect(page.getByRole("button", { name: "Pause layout" })).toBeVisible();
+  await expect.poll(async () => graphCanvas.evaluate(
+    (canvas: HTMLCanvasElement) => canvas.toDataURL()
+  )).not.toBe(pausedFrame);
+  await page.getByRole("button", { name: "Pause layout" }).click();
+  await expect(page.getByRole("button", { name: "Resume layout" })).toBeVisible();
+  await page.waitForTimeout(100);
+  const stoppedFrame = await graphCanvas.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+  await page.waitForTimeout(250);
+  await expect(graphCanvas.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()))
+    .resolves.toBe(stoppedFrame);
+
   await search.fill("run");
   await page.getByRole("option", { name: /^run/i }).click();
   await page.waitForTimeout(300);
