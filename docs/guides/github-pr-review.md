@@ -129,6 +129,12 @@ Treat the JSON, Markdown, SARIF, and logs as source-sensitive. They can expose
 internal symbols, paths, dependencies, and verification gaps. Apply the same
 artifact access and retention policy as the repository.
 
+For an additive readiness summary, run `compass review` with `--readiness`.
+This preserves the canonical report and emits a separate digest-linked
+`compass.pr-readiness/1` envelope. A read-only workflow example is available at
+[PR readiness Action example](../examples/pr-readiness-action.yml). Pin all
+production actions and Compass versions to reviewed immutable releases.
+
 ## Related pages
 
 - [PR Intelligence contract](../reference/pr-intelligence.md)

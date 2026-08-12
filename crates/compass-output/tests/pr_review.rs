@@ -1,12 +1,13 @@
 use compass_output::{
-    render_review_json, render_review_markdown, render_review_markdown_bounded,
-    render_review_sarif, render_review_text,
+    render_readiness_json, render_readiness_markdown, render_review_json, render_review_markdown,
+    render_review_markdown_bounded, render_review_sarif, render_review_text,
 };
 use compass_pr_intelligence::{
-    AdvisoryRisk, Completeness, Confidence, Finding, FindingType, Freshness, GateResult, GateState,
-    Location, MergeOutcome, PullRequestReport, ReportIdentity, RepositoryIdentity, RevisionSet,
-    RiskBand, RiskFactor, RiskFactorKind, VerificationPlan, VerificationState, WitnessHop,
-    report_digest,
+    AdvisoryRisk, ChangeHunk, ChangeRequest, Completeness, Confidence, Finding, FindingType,
+    Freshness, GateResult, GateState, LocalOwnership, Location, MergeOutcome, PullRequestReadiness,
+    PullRequestReport, ReadinessExtractionFingerprints, ReportIdentity, RepositoryIdentity,
+    RevisionSet, RiskBand, RiskFactor, RiskFactorKind, SourceRange, VerificationPlan,
+    VerificationState, WitnessHop, build_readiness, report_digest,
 };
 
 fn report() -> Result<PullRequestReport, Box<dyn std::error::Error>> {
@@ -122,13 +123,17 @@ fn all_projections_preserve_fingerprint_and_count() -> Result<(), Box<dyn std::e
 fn bounded_markdown_reports_exact_omission_without_mutating_digest()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut report = report()?;
+    let second_fingerprint =
+        "cmpprv1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned();
     let second = Finding {
-        fingerprint: "cmpprv1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-            .to_owned(),
+        fingerprint: second_fingerprint.clone(),
         statement: "Second finding".to_owned(),
         ..report.findings[0].clone()
     };
     report.findings.push(second);
+    report.gates[0]
+        .finding_fingerprints
+        .push(second_fingerprint);
     report.report_digest = report_digest(&report)?;
     let digest = report.report_digest.clone();
     let rendered = render_review_markdown_bounded(&report, 1, 16 * 1024)?;
@@ -139,5 +144,53 @@ fn bounded_markdown_reports_exact_omission_without_mutating_digest()
             .contains("Exactly 1 finding(s) were omitted")
     );
     assert_eq!(report.report_digest, digest);
+    Ok(())
+}
+
+#[test]
+fn readiness_json_round_trips_and_markdown_references_the_canonical_report()
+-> Result<(), Box<dyn std::error::Error>> {
+    let report = report()?;
+    let request = ChangeRequest {
+        repository: report.identity.repository.clone(),
+        pull_request_number: report.identity.pull_request_number,
+        revisions: report.identity.revisions.clone(),
+        hunks: vec![ChangeHunk {
+            old_path: "src/api.rs".to_owned(),
+            new_path: "src/api.rs".to_owned(),
+            status: "modified".to_owned(),
+            old: SourceRange {
+                start_line: 1,
+                line_count: 1,
+            },
+            new: SourceRange {
+                start_line: 1,
+                line_count: 1,
+            },
+            patch_digest: format!("sha256:{}", "8".repeat(64)),
+        }],
+    };
+    let readiness = build_readiness(
+        &report,
+        &request,
+        ReadinessExtractionFingerprints {
+            base: "9".repeat(64),
+            comparison: "a".repeat(64),
+        },
+        vec![LocalOwnership {
+            path: "src/api.rs".to_owned(),
+            contributor: "maintainer@example.test".to_owned(),
+            commits: 2,
+            evidence_revision: report.identity.revisions.pull_request_head.clone(),
+        }],
+        None,
+    )?;
+    let json = render_readiness_json(&readiness)?;
+    let markdown = render_readiness_markdown(&readiness)?;
+    assert_eq!(PullRequestReadiness::from_json(json.as_bytes())?, readiness);
+    assert!(markdown.contains(&report.report_digest));
+    assert!(markdown.contains(&readiness.extraction_fingerprints.base));
+    assert!(markdown.contains(&readiness.evidence_manifest_digest));
+    assert!(markdown.contains("advisory only"));
     Ok(())
 }

@@ -299,7 +299,7 @@ fn enum_value<T>(
     parse(value).ok_or_else(|| format!("unsupported '{name}' value {value:?}"))
 }
 
-fn limits(arguments: &Map<String, Value>) -> Result<CodeQueryLimits, String> {
+pub(super) fn limits(arguments: &Map<String, Value>) -> Result<CodeQueryLimits, String> {
     let defaults = CodeQueryLimits::default();
     Ok(CodeQueryLimits {
         max_depth: u32_value(arguments, "max_depth", defaults.max_depth)?,

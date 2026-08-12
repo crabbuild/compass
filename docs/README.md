@@ -36,6 +36,7 @@ Start with [Getting started](getting-started.md), then choose the task closest
 to yours:
 
 - [Explore an unfamiliar codebase](guides/exploring-a-codebase.md)
+- [Compose task-oriented context](guides/task-context.md)
 - [Integrate Compass with other tools](guides/integrating-compass.md)
 - [Set up a coding assistant](guides/assistant-setup.md)
 - [Use versioned graph history](guides/versioned-history.md)
@@ -62,6 +63,7 @@ to yours:
 | --- | --- |
 | [Getting started](getting-started.md) | A working local graph and your first useful answers |
 | [Exploring a codebase](guides/exploring-a-codebase.md) | A repeatable architecture-reading workflow |
+| [Task context](guides/task-context.md) | A bounded, verified evidence packet for explain, modify, debug, or test work |
 | [Integrating Compass](guides/integrating-compass.md) | Stable, machine-readable data in another tool |
 | [Assistant setup](guides/assistant-setup.md) | A native Compass skill installed at the right scope |
 | [Versioned history](guides/versioned-history.md) | Immutable graphs and diffs for exact Git commits |

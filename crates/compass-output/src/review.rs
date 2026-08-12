@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use compass_pr_intelligence::{
-    Finding, FindingType, GateState, MergeOutcome, PullRequestReport, canonical_json_bytes,
-    report_digest,
+    Finding, FindingType, GateState, MergeOutcome, PullRequestReadiness, PullRequestReport,
+    canonical_json_bytes, readiness_digest, report_digest,
 };
 use serde_json::{Value, json};
 
@@ -27,6 +27,127 @@ pub fn render_review_json(report: &PullRequestReport) -> Result<String, OutputEr
         });
     }
     String::from_utf8(bytes).map_err(|error| OutputError::InvalidReview(error.to_string()))
+}
+
+pub fn render_readiness_json(readiness: &PullRequestReadiness) -> Result<String, OutputError> {
+    verify_readiness(readiness)?;
+    let bytes = canonical_json_bytes(readiness)?;
+    if bytes.len() > MAX_REVIEW_RENDER_BYTES {
+        return Err(OutputError::ReviewBudgetExceeded {
+            rendered_bytes: bytes.len(),
+            limit: MAX_REVIEW_RENDER_BYTES,
+        });
+    }
+    String::from_utf8(bytes).map_err(|error| OutputError::InvalidReview(error.to_string()))
+}
+
+pub fn render_readiness_markdown(readiness: &PullRequestReadiness) -> Result<String, OutputError> {
+    verify_readiness(readiness)?;
+    let facets = &readiness.facets;
+    let mut output = String::new();
+    let _ = writeln!(output, "## Compass PR readiness\n");
+    let _ = writeln!(output, "Canonical report: `{}`  ", readiness.report_digest);
+    let _ = writeln!(
+        output,
+        "Readiness envelope: `{}`  ",
+        readiness.readiness_digest
+    );
+    let _ = writeln!(
+        output,
+        "Revisions: base `{}`, PR head `{}`, target head `{}`  ",
+        readiness.revisions.merge_base,
+        readiness.revisions.pull_request_head,
+        readiness.revisions.target_head
+    );
+    let _ = writeln!(
+        output,
+        "Extraction fingerprints: base `{}`, comparison `{}`  ",
+        readiness.extraction_fingerprints.base, readiness.extraction_fingerprints.comparison
+    );
+    let _ = writeln!(
+        output,
+        "Evidence manifest: `{}`\n",
+        readiness.evidence_manifest_digest
+    );
+    output.push_str("### Evidence facets\n\n");
+    let _ = writeln!(
+        output,
+        "- Signature/body: **{:?}** · {} signature findings · {} body findings",
+        facets.signature_body.state,
+        facets.signature_body.signature_finding_fingerprints.len(),
+        facets.signature_body.body_finding_fingerprints.len()
+    );
+    let _ = writeln!(
+        output,
+        "- Impact: **{:?}** · {} direct entities · {} transitive entities",
+        facets.impact.state,
+        facets.impact.direct_entities.len(),
+        facets.impact.transitive_entities.len()
+    );
+    let _ = writeln!(
+        output,
+        "- Tests: **{:?}** · {} exact mappings · {} recommendations — {}",
+        facets.tests.state,
+        facets.tests.exact_tests.len(),
+        facets.tests.recommended_tests.len(),
+        escape_markdown(&facets.tests.statement)
+    );
+    let _ = writeln!(
+        output,
+        "- Documentation drift: **{:?}** (advisory only) — {}",
+        facets.documentation_drift.state,
+        escape_markdown(&facets.documentation_drift.statement)
+    );
+    if !facets
+        .documentation_drift
+        .linked_documentation_entities
+        .is_empty()
+    {
+        let _ = writeln!(
+            output,
+            "  - Linked documentation entities: {}",
+            facets
+                .documentation_drift
+                .linked_documentation_entities
+                .iter()
+                .map(|entity| format!("`{}`", escape_markdown(entity)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    let _ = writeln!(
+        output,
+        "- Local ownership: **{:?}** · {} records — {}",
+        facets.local_ownership.state,
+        facets.local_ownership.records.len(),
+        escape_markdown(&facets.local_ownership.statement)
+    );
+    if !facets.local_ownership.records.is_empty() {
+        output.push_str("\n### Bounded local ownership\n\n");
+        for record in &facets.local_ownership.records {
+            let _ = writeln!(
+                output,
+                "- `{}` · `{}` · {} commits at `{}`",
+                escape_markdown(&record.path),
+                escape_markdown(&record.contributor),
+                record.commits,
+                record.evidence_revision
+            );
+        }
+    }
+    if !readiness.missing_evidence.is_empty() {
+        output.push_str("\n### Missing evidence\n\n");
+        for omission in &readiness.missing_evidence {
+            let _ = writeln!(
+                output,
+                "- `{}` · {} — {}",
+                escape_markdown(&omission.category),
+                omission.count,
+                escape_markdown(&omission.reason)
+            );
+        }
+    }
+    enforce_budget(output)
 }
 
 pub fn render_review_text(report: &PullRequestReport) -> Result<String, OutputError> {
@@ -404,6 +525,18 @@ fn verify(report: &PullRequestReport) -> Result<(), OutputError> {
         return Err(OutputError::InvalidReview(
             "canonical report digest does not match its content".to_owned(),
         ));
+    }
+    Ok(())
+}
+
+fn verify_readiness(readiness: &PullRequestReadiness) -> Result<(), OutputError> {
+    readiness.validate()?;
+    let expected = readiness_digest(readiness)?;
+    if expected != readiness.readiness_digest {
+        return Err(OutputError::InvalidReview(format!(
+            "readiness digest mismatch: expected {expected}, found {}",
+            readiness.readiness_digest
+        )));
     }
     Ok(())
 }

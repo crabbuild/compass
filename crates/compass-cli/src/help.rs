@@ -95,6 +95,7 @@ const GROUPS: &[Group] = &[
             "impact",
             "explore",
             "node",
+            "context",
             "call-graph",
             "query",
             "program",
@@ -143,6 +144,12 @@ const GROUPS: &[Group] = &[
 ];
 
 const PAGES: &[Page] = &[
+    page!(
+        "context",
+        "Compose bounded, verified evidence for a coding task",
+        ["compass context <explain|modify|debug|test> <TARGET> [OPTIONS]"],
+        "Arguments:\n  <INTENT>                 Task intent: explain, modify, debug, or test\n  <TARGET>                 Exact symbol ID, name, or qualified name\n\nOptions:\n  --graph <PATH>           Graph JSON [default: compass-out/graph.json]\n  --program <PATH>         Optional Program IR bundle\n  --root <PATH>            Repository root for digest-verified source [default: current directory]\n  --memory <PATH>          Reflection memory directory [default: GRAPH_DIR/memory]\n  --engine <default|json|store> Query backend [default: default]\n  --format <text|json>     Output format [default: text]\n  --max-depth <N>          Maximum impact depth\n  --max-nodes <N>          Maximum nodes per evidence query\n  --max-edges <N>          Maximum edges per evidence query\n  --max-paths <N>          Maximum paths per evidence query\n  --max-candidates <N>     Maximum target candidates\n  --max-source-bytes <N>   Maximum verified source bytes\n  --max-knowledge-items <N> Maximum linked memory records\n  --max-response-bytes <N> Maximum composed response bytes\n\nExamples:\n  compass context explain crate::Parser::parse\n  compass context modify symbol-id --format json\n\nNotes:\n  Fuzzy candidates are suggestions only. Compass composes structural evidence only after one exact identity resolves; ambiguity is never resolved by first match."
+    ),
     page!(
         "ask",
         "Route a natural-language question to a typed code-graph query",
@@ -539,7 +546,7 @@ const PAGES: &[Page] = &[
             "compass review --base <REV> --head <REV> [OPTIONS]",
             "compass review --pr <NUMBER> --repo <OWNER/REPO> [OPTIONS]"
         ],
-        "Input modes:\n  --base <REV>               Exact local target revision (requires --head)\n  --head <REV>               Exact local pull-request head (requires --base)\n  --pr <NUMBER>              GitHub pull request number (requires --repo)\n  --repo <OWNER/REPO>        Repository identity; selects GitHub with --pr\n\nOptions:\n  --host <HOST>              GitHub Enterprise hostname [default: github.com]\n  --pull-request-number <N>  Bind PR identity in local --base/--head mode\n  --fingerprint <SHA256>     Require one extraction fingerprint at both revisions\n  --format <FORMAT>          text, json, markdown, or sarif [default: text]\n  --output <PATH>            Atomically write the selected projection\n  --max-findings <N>         Markdown-only projection bound\n  --max-output-bytes <N>     Markdown-only byte bound (reports exact omissions)\n\nExamples:\n  compass review --base origin/main --head HEAD\n  compass review --base main --head feature --format json --output review.json\n  compass review --base main --head feature --repo crabbuild/compass --pull-request-number 42\n  compass review --pr 42 --repo crabbuild/compass --format markdown\n\nNotes:\n  Local mode never fetches Git objects. GitHub mode freezes full object IDs and requires those objects locally. Advisory risk never determines the command exit status; deterministic gate policy belongs to the Action's fail-on input."
+        "Input modes:\n  --base <REV>               Exact local target revision (requires --head)\n  --head <REV>               Exact local pull-request head (requires --base)\n  --pr <NUMBER>              GitHub pull request number (requires --repo)\n  --repo <OWNER/REPO>        Repository identity; selects GitHub with --pr\n\nOptions:\n  --host <HOST>              GitHub Enterprise hostname [default: github.com]\n  --pull-request-number <N>  Bind PR identity in local --base/--head mode\n  --fingerprint <SHA256>     Require one extraction fingerprint at both revisions\n  --format <FORMAT>          text, json, markdown, or sarif [default: text]\n  --readiness                Emit compass.pr-readiness/1 (JSON or Markdown; default: Markdown)\n  --output <PATH>            Atomically write the selected projection\n  --max-findings <N>         Markdown-only report projection bound\n  --max-output-bytes <N>     Markdown-only report byte bound (reports exact omissions)\n\nExamples:\n  compass review --base origin/main --head HEAD\n  compass review --base main --head feature --format json --output review.json\n  compass review --base main --head feature --readiness --format json\n  compass review --pr 42 --repo crabbuild/compass --format markdown\n\nNotes:\n  Local mode never fetches Git objects. GitHub mode freezes full object IDs and requires those objects locally. Readiness is an additive envelope referencing the unchanged canonical report digest. Documentation drift is advisory; unknown test evidence is never reported as untested."
     ),
     page!(
         "hook",
@@ -1132,7 +1139,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 48);
+        assert_eq!(roots.len(), 49);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");

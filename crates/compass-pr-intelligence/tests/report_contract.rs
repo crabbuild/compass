@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
 use compass_pr_intelligence::{
-    ChangeRequest, Completeness, EvidenceManifest, EvidenceSource, GateState, GraphSnapshot,
-    MergeOutcome, PullRequestReport, RepositoryIdentity, RevisionSet, RiskBand, RiskFactorKind,
-    analyze, canonical_json_bytes,
+    ChangeHunk, ChangeRequest, Completeness, EvidenceManifest, EvidenceSource, FacetState,
+    GateState, GraphSnapshot, LocalOwnership, MergeOutcome, PullRequestReadiness,
+    PullRequestReport, ReadinessExtractionFingerprints, RepositoryIdentity, RevisionSet, RiskBand,
+    RiskFactorKind, SourceRange, analyze, build_readiness, canonical_json_bytes,
 };
 use compass_semantic_diff::{
     AffectedConsumer, Comparison, Compatibility, Confidence, DependencyTopology, EvidenceRef,
@@ -25,6 +26,13 @@ fn repository() -> RepositoryIdentity {
         host: "local".to_owned(),
         owner: "fixture".to_owned(),
         name: "project".to_owned(),
+    }
+}
+
+fn extraction_fingerprints() -> ReadinessExtractionFingerprints {
+    ReadinessExtractionFingerprints {
+        base: PROFILE.to_owned(),
+        comparison: PROFILE.to_owned(),
     }
 }
 
@@ -173,6 +181,95 @@ fn identical_input_is_byte_identical_and_round_trips() -> Result<(), Box<dyn std
     assert_eq!(first_bytes, canonical_json_bytes(&second)?);
     assert_eq!(first, PullRequestReport::from_json(&first_bytes)?);
     assert_eq!(first.gates[0].state, GateState::Fail);
+    Ok(())
+}
+
+#[test]
+fn readiness_is_additive_deterministic_and_conservative_about_tests_and_docs()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut documented_change = semantic_finding(Confidence::Exact);
+    documented_change.witness_paths[0].hops[0].relation = "documents".to_owned();
+    let report = clean_report(Completeness::DownstreamComplete, Some(documented_change))?;
+    let report_bytes = canonical_json_bytes(&report)?;
+    let mut change = request(MergeOutcome::Clean {
+        object_id: RESULT.to_owned(),
+    });
+    change.hunks.push(ChangeHunk {
+        old_path: "src/api.rs".to_owned(),
+        new_path: "src/api.rs".to_owned(),
+        status: "modified".to_owned(),
+        old: SourceRange {
+            start_line: 1,
+            line_count: 1,
+        },
+        new: SourceRange {
+            start_line: 1,
+            line_count: 1,
+        },
+        patch_digest: DIGEST.to_owned(),
+    });
+    let ownership = vec![LocalOwnership {
+        path: "src/api.rs".to_owned(),
+        contributor: "maintainer@example.test".to_owned(),
+        commits: 3,
+        evidence_revision: HEAD.to_owned(),
+    }];
+    let first = build_readiness(
+        &report,
+        &change,
+        extraction_fingerprints(),
+        ownership.clone(),
+        None,
+    )?;
+    let second = build_readiness(&report, &change, extraction_fingerprints(), ownership, None)?;
+    let first_bytes = canonical_json_bytes(&first)?;
+    assert_eq!(first_bytes, canonical_json_bytes(&second)?);
+    assert_eq!(first, PullRequestReadiness::from_json(&first_bytes)?);
+    assert_eq!(first.report_digest, report.report_digest);
+    assert_eq!(canonical_json_bytes(&report)?, report_bytes);
+    assert_eq!(first.facets.documentation_drift.state, FacetState::Advisory);
+    assert!(first.facets.documentation_drift.advisory_only);
+    assert!(
+        !first
+            .facets
+            .documentation_drift
+            .linked_documentation_entities
+            .is_empty()
+    );
+    assert_eq!(first.facets.tests.state, FacetState::Advisory);
+    assert!(
+        first
+            .facets
+            .tests
+            .statement
+            .contains("does not claim tests were run")
+    );
+    Ok(())
+}
+
+#[test]
+fn absent_test_and_ownership_evidence_remain_unknown_not_untested()
+-> Result<(), Box<dyn std::error::Error>> {
+    let report = clean_report(Completeness::DownstreamComplete, None)?;
+    let change = request(MergeOutcome::Clean {
+        object_id: RESULT.to_owned(),
+    });
+    let readiness = build_readiness(
+        &report,
+        &change,
+        extraction_fingerprints(),
+        Vec::new(),
+        Some("local history unavailable".to_owned()),
+    )?;
+    assert_eq!(readiness.facets.tests.state, FacetState::Unknown);
+    assert!(
+        readiness
+            .facets
+            .tests
+            .statement
+            .contains("unknown rather than untested")
+    );
+    assert_eq!(readiness.facets.local_ownership.state, FacetState::Unknown);
     Ok(())
 }
 

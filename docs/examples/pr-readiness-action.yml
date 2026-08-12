@@ -1,0 +1,31 @@
+name: Compass PR readiness example
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+      - name: Build exact immutable graph history
+        run: |
+          compass history build "${{ github.event.pull_request.base.sha }}"
+          compass history build "${{ github.event.pull_request.head.sha }}" --profile-from "${{ github.event.pull_request.base.sha }}"
+      - name: Render additive readiness evidence
+        run: |
+          compass review \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --repo "${{ github.repository }}" \
+            --pull-request-number "${{ github.event.pull_request.number }}" \
+            --readiness --format markdown --output readiness.md
+          cat readiness.md >> "$GITHUB_STEP_SUMMARY"
+
+# Pin actions and Compass to reviewed immutable versions in production. This
+# example is read-only and does not turn advisory facets into merge gates.

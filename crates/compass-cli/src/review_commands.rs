@@ -29,6 +29,7 @@ struct Options {
     output: Option<PathBuf>,
     max_findings: Option<usize>,
     max_output_bytes: Option<usize>,
+    readiness: bool,
 }
 
 pub(crate) fn command(args: &[String]) -> Outcome {
@@ -116,30 +117,56 @@ fn execute(args: &[String]) -> Result<String, ReviewCommandError> {
         options.fingerprint.as_deref(),
     )
     .map_err(ReviewCommandError::Runtime)?;
-    let report = compass_core::review_change_request_exact(
-        &repository,
-        &resolved.history,
-        &request,
-        &resolved.old,
-        &resolved.new,
-        Completeness::LocalExact,
-    )
-    .map_err(runtime)?;
-    let rendered = match options.format {
-        Format::Text => compass_output::render_review_text(&report).map_err(runtime)?,
-        Format::Json => compass_output::render_review_json(&report).map_err(runtime)?,
-        Format::Markdown => {
-            compass_output::render_review_markdown_bounded(
-                &report,
-                options.max_findings.unwrap_or(report.findings.len()),
-                options
-                    .max_output_bytes
-                    .unwrap_or(compass_output::MAX_REVIEW_RENDER_BYTES),
-            )
-            .map_err(runtime)?
-            .content
+    let rendered = if options.readiness {
+        let bundle = compass_core::review_change_request_ready_exact(
+            &repository,
+            &resolved.history,
+            &request,
+            &resolved.old,
+            &resolved.new,
+            Completeness::LocalExact,
+            &SystemRunner,
+        )
+        .map_err(runtime)?;
+        match options.format {
+            Format::Json => {
+                compass_output::render_readiness_json(&bundle.readiness).map_err(runtime)?
+            }
+            Format::Markdown => {
+                compass_output::render_readiness_markdown(&bundle.readiness).map_err(runtime)?
+            }
+            Format::Text | Format::Sarif => {
+                return Err(ReviewCommandError::Usage(
+                    "--readiness supports --format json or markdown".to_owned(),
+                ));
+            }
         }
-        Format::Sarif => compass_output::render_review_sarif(&report).map_err(runtime)?,
+    } else {
+        let report = compass_core::review_change_request_exact(
+            &repository,
+            &resolved.history,
+            &request,
+            &resolved.old,
+            &resolved.new,
+            Completeness::LocalExact,
+        )
+        .map_err(runtime)?;
+        match options.format {
+            Format::Text => compass_output::render_review_text(&report).map_err(runtime)?,
+            Format::Json => compass_output::render_review_json(&report).map_err(runtime)?,
+            Format::Markdown => {
+                compass_output::render_review_markdown_bounded(
+                    &report,
+                    options.max_findings.unwrap_or(report.findings.len()),
+                    options
+                        .max_output_bytes
+                        .unwrap_or(compass_output::MAX_REVIEW_RENDER_BYTES),
+                )
+                .map_err(runtime)?
+                .content
+            }
+            Format::Sarif => compass_output::render_review_sarif(&report).map_err(runtime)?,
+        }
     };
     if let Some(path) = options.output {
         compass_files::write_text_atomic(&path, &rendered).map_err(runtime)?;
@@ -163,6 +190,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     let mut output = None;
     let mut max_findings = None;
     let mut max_output_bytes = None;
+    let mut readiness = false;
     let mut index = 0;
     while index < args.len() {
         let argument = &args[index];
@@ -253,6 +281,12 @@ fn parse(args: &[String]) -> Result<Options, String> {
                     return Err("duplicate --max-output-bytes".to_owned());
                 }
             }
+            "--readiness" => {
+                if inline.is_some() || readiness {
+                    return Err("duplicate or valued --readiness".to_owned());
+                }
+                readiness = true;
+            }
             value if value.starts_with('-') => return Err(format!("unknown option {value}")),
             value => return Err(format!("unexpected positional argument {value:?}")),
         }
@@ -290,6 +324,21 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 .to_owned(),
         );
     }
+    if readiness && matches!(format, Format::Text) {
+        if format_set {
+            return Err("--readiness supports --format json or markdown".to_owned());
+        }
+        format = Format::Markdown;
+    }
+    if readiness && matches!(format, Format::Sarif) {
+        return Err("--readiness supports --format json or markdown".to_owned());
+    }
+    if readiness && (max_findings.is_some() || max_output_bytes.is_some()) {
+        return Err(
+            "--max-findings and --max-output-bytes apply only to canonical report Markdown"
+                .to_owned(),
+        );
+    }
     Ok(Options {
         base,
         head,
@@ -302,6 +351,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         output,
         max_findings,
         max_output_bytes,
+        readiness,
     })
 }
 
@@ -441,6 +491,61 @@ mod tests {
                 "--host=github.example.com".to_owned(),
             ])
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn readiness_is_an_additive_unvalued_flag() {
+        let options = parse(&[
+            "--base=main".to_owned(),
+            "--head=HEAD".to_owned(),
+            "--readiness".to_owned(),
+            "--format=json".to_owned(),
+        ]);
+        assert!(options.as_ref().is_ok_and(|options| options.readiness));
+        assert!(
+            parse(&[
+                "--base=main".to_owned(),
+                "--head=HEAD".to_owned(),
+                "--readiness".to_owned(),
+            ])
+            .is_ok_and(|options| options.format == Format::Markdown)
+        );
+        assert!(
+            parse(&[
+                "--base=main".to_owned(),
+                "--head=HEAD".to_owned(),
+                "--readiness=value".to_owned(),
+            ])
+            .is_err()
+        );
+        assert!(
+            parse(&[
+                "--base=main".to_owned(),
+                "--head=HEAD".to_owned(),
+                "--readiness".to_owned(),
+                "--format=text".to_owned(),
+            ])
+            .is_err()
+        );
+        assert!(
+            parse(&[
+                "--base=main".to_owned(),
+                "--head=HEAD".to_owned(),
+                "--readiness".to_owned(),
+                "--format=sarif".to_owned(),
+            ])
+            .is_err()
+        );
+        assert!(
+            parse(&[
+                "--base=main".to_owned(),
+                "--head=HEAD".to_owned(),
+                "--readiness".to_owned(),
+                "--format=markdown".to_owned(),
+                "--max-findings=1".to_owned(),
+            ])
+            .is_err()
         );
     }
 

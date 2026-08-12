@@ -8,6 +8,7 @@ mod analyze;
 mod canonical;
 mod error;
 mod model;
+mod readiness;
 
 pub use analyze::analyze;
 pub use canonical::{canonical_json_bytes, evidence_manifest_digest, report_digest};
@@ -18,6 +19,11 @@ pub use model::{
     GraphSnapshot, Location, MergeOutcome, Omission, PullRequestReport, REPORT_SCHEMA,
     RUBRIC_VERSION, ReportIdentity, RepositoryIdentity, RevisionSet, RiskBand, RiskFactor,
     RiskFactorKind, SourceRange, VerificationPlan, VerificationState, WitnessHop,
+};
+pub use readiness::{
+    DOC_DRIFT_RULE_VERSION, DocDriftFacet, FacetState, ImpactFacet, LocalOwnership, OwnershipFacet,
+    PR_READINESS_SCHEMA, PullRequestReadiness, ReadinessExtractionFingerprints, ReadinessFacets,
+    SignatureBodyFacet, TestReadinessFacet, build_readiness, readiness_digest,
 };
 
 /// Stable fingerprint schema for canonical findings.

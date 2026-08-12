@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add bounded `compass.task-context/1` packets through `compass context` and
+  MCP `task_context`, with exact target resolution, digest-verified source,
+  provenance, linked reflection memory, deterministic omissions, work
+  accounting, and result digests. Add an independent
+  `compass.pr-readiness/1` envelope through `compass review --readiness` and
+  MCP `pr_readiness`, preserving the canonical PR report digest while
+  summarizing signature/body changes, impact, static test evidence, advisory
+  documentation drift, and bounded local ownership.
+
 - Add the versioned `compass.viewer.workbench/1` export contract and a shared
   navigation shell for offline HTML and VS Code. `compass export html` now
   accepts repeatable code, call, impact, affected, architecture, history, and

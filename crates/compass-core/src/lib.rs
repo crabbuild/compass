@@ -9,6 +9,7 @@ mod pipeline;
 mod program;
 mod raw_guard;
 mod review;
+mod task_context;
 mod watch;
 mod watch_scheduler;
 
@@ -34,7 +35,16 @@ pub use pipeline::{
     build_graph_with_layers_and_tiebreaker, build_graph_with_layers_retained,
     build_graph_with_semantic, build_local_graph,
 };
-pub use review::{ReviewError, review_change_request, review_change_request_exact};
+pub use review::{
+    PullRequestReadinessBundle, ReviewError, review_change_request, review_change_request_exact,
+    review_change_request_ready_exact,
+};
+pub use task_context::{
+    TASK_CONTEXT_PROFILE_SCHEMA, TASK_CONTEXT_SCHEMA, TaskContext, TaskContextError,
+    TaskContextIntent, TaskContextKnowledge, TaskContextLimits, TaskContextOmission,
+    TaskContextRequest, TaskContextSection, TaskContextSectionKind, TaskContextTarget,
+    TaskContextWork, build_task_context,
+};
 pub use watch::{
     WatchBackend, WatchBuildReason, WatchError, WatchOptions, WatchStatus, watch_local_graph,
 };
