@@ -177,6 +177,16 @@
   repository-relative identity for universal framework facts so shallow source
   paths are published instead of being mistaken for temporary-directory paths.
 
+## 0.3.9 - 2026-08-12
+
+- Add the versioned `compass.viewer.workbench/1` export contract and a shared
+  navigation shell for offline HTML and VS Code. `compass export html` now
+  supports repeatable code, call, impact, affected, architecture, history, and
+  artifact lenses, relationship/evidence/node-kind/language filters,
+  deterministic depth layouts, bounded camera controls, 1–4-hop selection
+  isolation, minimap navigation, keyboard shortcuts, and the `workbench-json`
+  machine export while preserving `compass.viewer.graph/1` compatibility.
+
 ## 0.3.8 - 2026-08-11
 
 - Make evidence-first structural inference the default, with explicit
