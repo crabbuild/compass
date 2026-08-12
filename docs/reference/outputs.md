@@ -244,13 +244,18 @@ from that validated model; it never trusts an adjacent Markdown file by name.
 The Architecture Map highlights up to twelve leading communities. The later
 Community Directory is the broader navigation index: it ranks every non-empty
 community, including thin communities, by member count and connectivity, shows
-as many as fit within the 256,000-character report bound (up to 256), and lists
-up to twelve high-connectivity entry points with source anchors for each. The
-compact orientation remains bounded to 16,000 characters, while its JSON and
-the MCP resource transport share a 4 MiB envelope. Every bounded list reports
-exact shown and omitted counts. Headings and boundary links prefer evidence
-labels; graph-local numeric IDs remain visible as `community:<id>` query scopes
-where an agent needs an exact follow-up command.
+as many as fit within the 256,000-character report bound (up to 4,096), and
+splits presentation into two tiers. The top 32 ranked communities receive full
+detail with up to twelve high-connectivity entry points and four strongest
+links per direction. Every remaining retained community receives a compact
+one-line index entry containing its rank, evidence label, exact query scope,
+member count, cohesion, connectivity, and best source-anchored entry point.
+
+The compact orientation remains bounded to 16,000 characters, while its JSON
+and the MCP resource transport share a 4 MiB envelope. Every bounded list
+reports exact shown and omitted counts. Headings and boundary links prefer
+evidence labels; graph-local numeric IDs remain visible as `community:<id>`
+query scopes where an agent needs an exact follow-up command.
 
 ## `graph.html`
 

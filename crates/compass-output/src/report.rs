@@ -29,13 +29,15 @@ const ORIENTATION_JSON_FIT_BYTES: usize = ORIENTATION_JSON_MAX_BYTES - PUBLICATI
 // Both limits are explicit so an adversarial graph cannot grow output without
 // bound.
 const ORIENTATION_COMMUNITY_LIMIT: usize = 12;
-const COMMUNITY_LIMIT: usize = 256;
+const DETAILED_COMMUNITY_LIMIT: usize = 32;
+const COMMUNITY_LIMIT: usize = 4_096;
 const HUB_LIMIT: usize = 16;
 const RISK_LIMIT: usize = 8;
 const QUERY_LIMIT: usize = 16;
 const DETAIL_LIMIT: usize = 12;
 const ORIENTATION_REPRESENTATIVE_LIMIT: usize = 4;
 const REPRESENTATIVE_LIMIT: usize = 12;
+const COMPACT_REPRESENTATIVE_LIMIT: usize = 1;
 const COMMUNITY_LINK_LIMIT: usize = 4;
 const MIX_LIMIT: usize = 8;
 const ARGV_LIMIT: usize = 8;
@@ -928,7 +930,9 @@ fn build_communities(
     let models = eligible
         .into_iter()
         .take(COMMUNITY_LIMIT)
-        .map(|(community, members)| {
+        .enumerate()
+        .map(|(rank, (community, members))| {
+            let detailed = rank < DETAILED_COMMUNITY_LIMIT;
             let mut representatives = members
                 .iter()
                 .filter_map(|member| graph.node_reference(member))
@@ -937,15 +941,23 @@ fn build_communities(
             // when two candidates have equal connectivity.
             representatives
                 .sort_by(|left, right| graph.degree(&right.id).cmp(&graph.degree(&left.id)));
-            representatives.truncate(REPRESENTATIVE_LIMIT);
+            representatives.truncate(if detailed {
+                REPRESENTATIVE_LIMIT
+            } else {
+                COMPACT_REPRESENTATIVE_LIMIT
+            });
             let representative_coverage =
                 SectionOmission::from_total_shown(members.len(), representatives.len());
             let connectivity = graph.community_connectivity.get(&community);
             let incident_edge_count = connectivity.map_or(0, |value| value.incident_edge_count);
             let adjacent_community_count = connectivity.map_or(0, |value| value.adjacent.len());
-            let strongest_adjacent = connectivity
-                .map(|value| rank_community_links(&value.adjacent))
-                .unwrap_or_default();
+            let strongest_adjacent = if detailed {
+                connectivity
+                    .map(|value| rank_community_links(&value.adjacent))
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             let (
                 incoming_community_count,
                 outgoing_community_count,
@@ -955,16 +967,20 @@ fn build_communities(
                 (
                     Some(connectivity.map_or(0, |value| value.incoming.len())),
                     Some(connectivity.map_or(0, |value| value.outgoing.len())),
-                    Some(
+                    Some(if detailed {
                         connectivity
                             .map(|value| rank_community_links(&value.incoming))
-                            .unwrap_or_default(),
-                    ),
-                    Some(
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    }),
+                    Some(if detailed {
                         connectivity
                             .map(|value| rank_community_links(&value.outgoing))
-                            .unwrap_or_default(),
-                    ),
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    }),
                 )
             } else {
                 (None, None, None, None)
@@ -1862,7 +1878,11 @@ fn fit_orientation_json_budget(model: &mut AgentOrientation) {
 }
 
 fn fit_report_budget(model: &mut AgentOrientation, obsidian: bool) {
-    while char_count(&render_report_markdown(model, obsidian)) > REPORT_MARKDOWN_FIT_CHARS {
+    loop {
+        let rendered_chars = char_count(&render_report_markdown(model, obsidian));
+        if rendered_chars <= REPORT_MARKDOWN_FIT_CHARS {
+            break;
+        }
         if model.details.publication_diagnostics.pop().is_some() {
             model
                 .omissions
@@ -1893,7 +1913,14 @@ fn fit_report_budget(model: &mut AgentOrientation, obsidian: bool) {
                 .omissions
                 .surprising_connections
                 .set_shown(model.details.surprising_connections.len());
-        } else if model.communities.pop().is_some() {
+        } else if !model.communities.is_empty() {
+            let scaled = model
+                .communities
+                .len()
+                .saturating_mul(REPORT_MARKDOWN_FIT_CHARS)
+                / rendered_chars;
+            let next = scaled.min(model.communities.len().saturating_sub(1));
+            model.communities.truncate(next);
             model
                 .omissions
                 .communities
@@ -2289,13 +2316,24 @@ fn append_community_directory(
     lines.extend([
         String::new(),
         "## Community Directory".to_owned(),
-        "- Start here, then use labels with `compass path` or the exact scope with `compass query`. Communities are ranked by member count and connectivity."
+        "- Start here, then use labels with `compass path` or the exact scope with `compass query`. Communities are ranked by member count, connectivity, label, and stable ID."
             .to_owned(),
         disclosure(model.omissions.communities),
     ]);
-    for community in &model.communities {
+    let detailed_count = DETAILED_COMMUNITY_LIMIT.min(model.communities.len());
+    lines.extend([
+        "### Detailed Communities".to_owned(),
+        format!(
+            "- Detail coverage: retained={} · detailed={} · compact={} · report-wide omitted={}",
+            model.communities.len(),
+            detailed_count,
+            model.communities.len().saturating_sub(detailed_count),
+            model.omissions.communities.omitted,
+        ),
+    ]);
+    for community in model.communities.iter().take(detailed_count) {
         lines.push(format!(
-            "### {}",
+            "#### {}",
             markdown_value(&community.label, MARKDOWN_VALUE_MAX_CHARS)
         ));
         lines.push(format!(
@@ -2350,6 +2388,50 @@ fn append_community_directory(
                 community_link_list(outgoing, &community_labels),
             ));
         }
+    }
+    let compact = &model.communities[detailed_count..];
+    if !compact.is_empty() || model.omissions.communities.omitted > 0 {
+        lines.extend([
+            "### Remaining Communities (Compact Ranked Index)".to_owned(),
+            disclosure(SectionOmission::from_total_shown(
+                model
+                    .omissions
+                    .communities
+                    .total
+                    .saturating_sub(detailed_count),
+                compact.len(),
+            )),
+        ]);
+    }
+    for (offset, community) in compact.iter().enumerate() {
+        let entry = community.representatives.first().map_or_else(
+            || "unknown".to_owned(),
+            |value| node_references(std::slice::from_ref(value)),
+        );
+        lines.push(format!(
+            "- {}. {} · scope=community:{} · members={} · cohesion={} · incident edges={} · adjacent communities={} · leading entry: {}{}",
+            detailed_count.saturating_add(offset).saturating_add(1),
+            markdown_value(&community.label, MARKDOWN_VALUE_MAX_CHARS),
+            community.id,
+            community.member_count,
+            community
+                .cohesion
+                .map_or_else(|| "unknown".to_owned(), |value| format!("{value:.2}")),
+            community.incident_edge_count,
+            community.adjacent_community_count,
+            entry,
+            if obsidian {
+                format!(
+                    " · Obsidian note: {}",
+                    markdown_value(
+                        &safe_community_name(&community.label),
+                        MARKDOWN_VALUE_MAX_CHARS
+                    )
+                )
+            } else {
+                String::new()
+            },
+        ));
     }
 }
 

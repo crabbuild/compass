@@ -226,6 +226,7 @@ fn orientation_is_bounded_deterministic_and_markdown_safe() -> Result<(), Box<dy
                         | "## Publication Diagnostic Evidence"
                 ) || line
                     .strip_prefix("### ")
+                    .or_else(|| line.strip_prefix("#### "))
                     .is_some_and(|label| !label.is_empty())
             })
     );
@@ -283,7 +284,7 @@ fn orientation_is_bounded_deterministic_and_markdown_safe() -> Result<(), Box<dy
 
 #[test]
 fn report_is_a_label_first_directory_of_all_bounded_communities() -> Result<(), Box<dyn Error>> {
-    let nodes = (0..1_401)
+    let nodes = (0..1_402)
         .map(|index| {
             json!({
                 "id": format!("internal::node::{index}"),
@@ -309,6 +310,10 @@ fn report_is_a_label_first_directory_of_all_bounded_communities() -> Result<(), 
             )
         })
         .collect::<BTreeMap<_, _>>();
+    communities
+        .get_mut(&139)
+        .ok_or("missing ranking fixture community")?
+        .push("internal::node::1401".to_owned());
     communities.insert(140, vec!["internal::node::1400".to_owned()]);
     let labels = (0..141)
         .map(|community| (community, format!("Subsystem {community}")))
@@ -331,12 +336,22 @@ fn report_is_a_label_first_directory_of_all_bounded_communities() -> Result<(), 
     );
 
     assert_eq!(model.communities.len(), 141);
+    assert_eq!(model.communities[0].id, 139);
+    assert_eq!(model.communities[0].member_count, 11);
     assert!(
         model
             .communities
             .iter()
+            .take(32)
             .filter(|community| community.member_count == 10)
             .all(|community| community.representatives.len() == 10)
+    );
+    assert!(
+        model
+            .communities
+            .iter()
+            .skip(32)
+            .all(|community| community.representatives.len() == 1)
     );
     let orientation = render_orientation_markdown(&model)?;
     assert!(orientation.contains("Coverage: total=141 · shown=12 · omitted=129"));
@@ -344,9 +359,15 @@ fn report_is_a_label_first_directory_of_all_bounded_communities() -> Result<(), 
 
     let report = render_agent_report_markdown(&model, false)?;
     assert!(report.contains("## Community Directory"));
+    assert!(report.contains("### Detailed Communities"));
+    assert!(report.contains("### Remaining Communities (Compact Ranked Index)"));
+    assert!(report.contains("retained=141 · detailed=32 · compact=109"));
     for community in 0..141 {
-        assert!(report.contains(&format!("### Subsystem {community}")));
-        assert!(report.contains(&format!("Query scope: community:{community}")));
+        assert!(report.contains(&format!("Subsystem {community}")));
+        assert!(
+            report.contains(&format!("Query scope: community:{community}"))
+                || report.contains(&format!("scope=community:{community}"))
+        );
     }
     assert!(report.contains("Entry points (total=10 shown=10 omitted=0)"));
     assert!(!report.contains("id=internal::node::"));
@@ -436,6 +457,8 @@ fn nonportable_argv_preserves_exact_punctuation_without_markdown_structure()
                         | "## Suggested Compass Queries"
                         | "## Learned Graph Questions"
                         | "### Exact O'Reilly ∗ ［node］ C:＼path ‹tag› ʼʼʼ $HOME ｜ ＃ ！ &"
+                        | "### Detailed Communities"
+                        | "#### Exact O'Reilly ∗ ［node］ C:＼path ‹tag› ʼʼʼ $HOME ｜ ＃ ！ &"
                 )
             })
     );
