@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Make `GRAPH_REPORT.md` a more complete, label-first architecture entry map.
+  The compact Agent Orientation still highlights the leading communities, while
+  the bounded Community Directory now retains up to 4,096 ranked non-empty
+  communities, including thin communities. The top 32 receive full boundary
+  evidence and up to twelve high-connectivity entry points; every remaining
+  retained community receives a compact ranked index row with its best anchored
+  entry point. Numeric community scopes remain only where they are useful for
+  copyable `compass query --scope community:<id>` follow-up.
+  Raise the full report to 256,000 characters, the compact orientation to
+  16,000 characters, and the shared orientation/MCP resource envelope to 4 MiB.
+
 - Add bounded `compass.task-context/1` packets through `compass context` and
   MCP `task_context`, with exact target resolution, digest-verified source,
   provenance, linked reflection memory, deterministic omissions, work
