@@ -536,7 +536,9 @@ export default { ...base, isString: value => true };
     let spread_default = spread
         .declarations
         .iter()
-        .find(|declaration| declaration.qualified_name == "spread-default.default")
+        .find(|declaration| {
+            declaration.qualified_name == "spread-default.default" && declaration.kind == "variable"
+        })
         .expect("proven spread default owner");
     assert!(
         spread
