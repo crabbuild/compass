@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add the versioned `compass.viewer.workbench/1` export contract and a shared
+  navigation shell for offline HTML and VS Code. `compass export html` now
+  accepts repeatable code, call, impact, affected, architecture, history, and
+  artifact lenses in one self-contained page; strict parsing rejects unknown
+  or format-incompatible options. Add relationship, evidence, node-kind, and
+  language filters, explicit coverage state, deterministic depth layouts, and
+  the `workbench-json` machine export while preserving plain
+  `compass.viewer.graph/1` JSON compatibility.
+
 - Make PHP extraction and type resolution fail closed for colliding exact or
   case-folded symbols instead of selecting a hash-iteration winner. Qualified
   duplicate types now prefer one unique same-file declaration and otherwise

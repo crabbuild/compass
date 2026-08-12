@@ -28,8 +28,10 @@ is found first on `PATH`, Compass stops before running a workflow and offers
 ## Workflows
 
 - Initialize, update, and watch a repository from the Compass activity bar.
-- Explore the current graph with the active `compass export html` visual
-  language adapted to the current VS Code theme. Single-click a node to inspect
+- Explore the current graph and focused impact/query projections in the shared
+  Compass graph workbench, with the active `compass export html` visual
+  language adapted to the current VS Code theme. The workbench rail switches
+  lenses while preserving repository context. Single-click a node to inspect
   it; double-click an overview community to load its detailed graph, use
   **Overview** to go back, and double-click a detail node with an exact file and
   line/byte location to open source. Hover a relationship to see its direction,
@@ -72,9 +74,11 @@ completed and total file count plus the file currently being indexed.
 **Refresh Compass Status** in the Workspace title reads repository state again.
 It never initializes, updates, or watches a graph.
 
-Open **Code graph** to inspect connected nodes, filter communities, search, and
-open source. Drag the inspector divider to resize it, or use its header control
-to collapse and expand it.
+Open **Code graph** to inspect connected nodes, filter by relationship,
+evidence, node kind, or language, search, and open source. Impact and other
+typed query results open as another lens beside the code graph rather than
+replacing its context. Drag the inspector divider to resize it, or use its
+header control to collapse and expand it.
 
 ### Trace calls from the editor
 

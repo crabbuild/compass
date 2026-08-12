@@ -111,6 +111,32 @@ pub(crate) fn load_typed_graph_at(
     Ok((realization, document))
 }
 
+pub(crate) fn load_history_view_model_at(
+    revision: &str,
+    node_limit: isize,
+) -> Result<(String, String, compass_output::GraphViewModel), String> {
+    let repository =
+        Repository::discover(&std::env::current_dir().map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?;
+    let commit = repository
+        .resolve(revision)
+        .map_err(|error| error.to_string())?;
+    let options = configured_build_options(&repository)?;
+    let (history, preferred) =
+        resolve_or_materialize(&repository, commit.clone(), &options, false, false)?;
+    let reader = history
+        .reader(&preferred.id)
+        .map_err(|error| error.to_string())?;
+    let model = compass_output::historical_view_model(
+        &reader,
+        format!("{} @ {commit}", repository.root().display()),
+        node_limit,
+        None,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok((commit.to_string(), preferred.id.to_string(), model))
+}
+
 pub(crate) fn resolve_or_materialize(
     repository: &Repository,
     commit: CommitId,

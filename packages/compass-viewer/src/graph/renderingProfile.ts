@@ -7,6 +7,7 @@ export const AGGREGATED_EDGE_RENDER_LIMIT = 4_000;
 export type GraphRenderingProfile = "interactive" | "static";
 export type GraphLayoutStyle =
   | "automatic"
+  | "hierarchical"
   | "circle"
   | "concentric"
   | "spiral"
@@ -98,9 +99,36 @@ export function seedGraphLayoutPositions(
       || left.id.localeCompare(right.id));
     return seedConcentricPositions(topologyOrdered);
   }
+  if (style === "hierarchical") return seedHierarchicalPositions(communityOrdered);
   if (style === "spiral") return seedSpiralPositions(communityOrdered);
 
   return seedGroupedGridPositions(communityOrdered, aggregated);
+}
+
+function seedHierarchicalPositions(
+  nodes: readonly GraphNode[]
+): ReadonlyMap<string, { x: number; y: number }> {
+  const levels = new Map<number, GraphNode[]>();
+  for (const node of nodes) {
+    const depth = node.depth ?? (node.root ? 0 : 1);
+    const level = levels.get(depth) ?? [];
+    level.push(node);
+    levels.set(depth, level);
+  }
+  const ordered = [...levels.entries()].sort(([left], [right]) => left - right);
+  const positions = new Map<string, { x: number; y: number }>();
+  for (const [depth, level] of ordered) {
+    level.sort((left, right) =>
+      Number(right.root ?? false) - Number(left.root ?? false)
+      || (right.degree ?? 0) - (left.degree ?? 0)
+      || left.id.localeCompare(right.id));
+    const spacing = 148;
+    level.forEach((node, index) => positions.set(node.id, {
+      x: (index - (level.length - 1) / 2) * spacing,
+      y: depth * 168
+    }));
+  }
+  return positions;
 }
 
 function seedConcentricPositions(

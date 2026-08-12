@@ -91,6 +91,14 @@ under the selected output root by default. It also materializes
 `GRAPH_REPORT.md`, `manifest.json`, and optional `graph.html` at that stable
 root path. Compass retains an immutable snapshot behind those conventional
 paths as its coherent internal authority.
+
+The self-contained HTML viewer embeds `compass.viewer.workbench/1`, an additive
+ordered container for code, call, impact, affected, architecture, historical,
+and artifact-lens models. Each view carries explicit bounded coverage. Plain
+`compass export json` remains `compass.viewer.graph/1`; requesting one or more
+views, or using `compass export workbench-json`, returns the workbench contract.
+Consumers must reject an unknown workbench major version. The HTML DOM and CSS
+remain presentation details rather than machine contracts.
 Passing `--store sqlite` also publishes a validated `store.sqlite3`
 sidecar and typed `store.ref` selector. Typed code queries use JSON by default;
 `--engine store` explicitly selects and validates the sidecar. The SQLite file

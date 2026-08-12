@@ -1,5 +1,12 @@
 import { createRoot } from "react-dom/client";
-import { CallGraph, CallGraphResponseSchema, mergeExpansion, type CallGraphResponse } from "@compass/viewer";
+import {
+  CallGraphResponseSchema,
+  VisualizationWorkbench,
+  WORKBENCH_SCHEMA,
+  mergeExpansion,
+  type CallGraphResponse,
+  type WorkbenchModel
+} from "@compass/viewer";
 import { GraphLoadingState, type GraphLoadingCopy } from "./GraphLoadingState";
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
@@ -43,17 +50,38 @@ function renderError(message: string): void {
 
 function render(): void {
   if (!graph) return;
+  const workbench: WorkbenchModel = {
+    schema: WORKBENCH_SCHEMA,
+    title: `Calls from ${graph.rootSymbol}`,
+    graphIdentity: `repository:${repositoryId}`,
+    defaultView: "call",
+    views: [{
+      id: "call",
+      title: `Calls · ${graph.rootSymbol}`,
+      description: "Caller and callee evidence around the selected symbol",
+      coverage: {
+        status: graph.truncated || graph.coverage.partial ? "partial" : "complete",
+        truncated: graph.truncated,
+        nodes: graph.nodes.length,
+        edges: graph.edges.length,
+        limitations: graph.coverage.limitations ?? []
+      },
+      kind: "call",
+      root: graph.rootSymbol,
+      graph
+    }]
+  };
   root.render(
-    <CallGraph
-      graph={graph}
+    <VisualizationWorkbench
+      workbench={workbench}
       host={{
         openSource(source) {
           vscode.postMessage({ type: "openSource", repositoryId, source });
         },
-        expand(symbol, direction, depth) {
+        expandCall(symbol, direction, depth) {
           vscode.postMessage({ type: "expand", symbol, direction, depth });
         },
-        changeDirection(direction) {
+        changeCallDirection(direction) {
           renderLoading();
           vscode.postMessage({ type: "changeDirection", direction });
         }

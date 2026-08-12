@@ -37,6 +37,10 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use compass_analysis::{
+    CallGraphDirection, UniversalCallGraphRequest, UniversalCallGraphRoot,
+    build_universal_call_graph,
+};
 use compass_core::{
     BuildFileProgress, BuildOptions, BuildPurpose, BuildResult, BuildTimings,
     ClusterExistingOptions, ExportInputs, GraphStorage, InferenceLevel, LoadedGraph, SemanticLayer,
@@ -54,15 +58,18 @@ use compass_graph::god_nodes;
 use compass_graphdb::{push_to_falkordb, push_to_neo4j};
 use compass_model::GraphError;
 use compass_model::query_contract::{
-    DiscoveryDirection, DiscoveryLimits, DiscoveryQueryRequest, DiscoveryQueryResponse,
-    DiscoveryScope, DiscoveryScopeKind, DiscoveryTraversal,
+    CodeQueryLimits, DiscoveryDirection, DiscoveryLimits, DiscoveryQueryRequest,
+    DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind, DiscoveryTraversal, ImpactRequest,
 };
 use compass_output::{
-    AgentOrientation, CallflowOptions, CallflowSection, CanvasOptions, HtmlOptions,
-    ObsidianOptions, SvgOptions, TreeOptions, WikiOptions, callflow_view_model, export_obsidian,
-    export_wiki, graph_community_view_model_document, graph_view_model_document, node_filenames,
+    AffectedLensOptions, AgentOrientation, ArtifactLens, CallflowOptions, CallflowSection,
+    CanvasOptions, HtmlOptions, ObsidianOptions, SvgOptions, TreeOptions, WikiOptions,
+    WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel, WorkbenchView,
+    WorkbenchViewContent, affected_lens_view_model, artifact_lens_view_model, callflow_view_model,
+    export_obsidian, export_wiki, graph_artifact_identity, graph_community_view_model_document,
+    graph_view_model_bundle_document, graph_view_model_document, node_filenames,
     render_orientation_json, validate_orientation_graph_identity, write_callflow_html,
-    write_canvas, write_cypher, write_graphml, write_html, write_svg, write_tree_html,
+    write_canvas, write_cypher, write_graphml, write_svg, write_tree_html, write_workbench_html,
 };
 use compass_query::{
     DEFAULT_AFFECTED_RELATIONS, DEFAULT_TEXT_TOKEN_BUDGET, DiscoveryTextPageOptions,
@@ -2839,6 +2846,218 @@ fn saved_graph_root() -> Option<PathBuf> {
     (!root.is_empty()).then(|| PathBuf::from(root))
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ExportViewRequest {
+    Code,
+    Architecture,
+    Call(String),
+    Impact(String),
+    Affected(String),
+    History { base: String, target: String },
+    Artifact(ArtifactLens),
+}
+
+struct ExportViewOptions<'a> {
+    direction: CallGraphDirection,
+    depth: u32,
+    max_nodes: usize,
+    max_edges: usize,
+    include_heuristic: bool,
+    relations: &'a [String],
+    program_path: Option<&'a Path>,
+}
+
+fn parse_export_view(value: &str) -> Result<ExportViewRequest, String> {
+    if value == "code" {
+        Ok(ExportViewRequest::Code)
+    } else if value == "architecture" {
+        Ok(ExportViewRequest::Architecture)
+    } else if let Some(root) = value.strip_prefix("call:").filter(|root| !root.is_empty()) {
+        Ok(ExportViewRequest::Call(root.to_owned()))
+    } else if let Some(root) = value
+        .strip_prefix("impact:")
+        .filter(|root| !root.is_empty())
+    {
+        Ok(ExportViewRequest::Impact(root.to_owned()))
+    } else if let Some(root) = value
+        .strip_prefix("affected:")
+        .filter(|root| !root.is_empty())
+    {
+        Ok(ExportViewRequest::Affected(root.to_owned()))
+    } else if let Some(range) = value.strip_prefix("history:") {
+        parse_history_view(range)
+    } else if let Some(lens) = value.strip_prefix("artifact:") {
+        parse_artifact_lens(lens).map(ExportViewRequest::Artifact)
+    } else {
+        Err(format!(
+            "invalid view '{value}'; expected code, architecture, call:SYMBOL, impact:SYMBOL, affected:NODE, history:OLD..NEW, or artifact:LENS"
+        ))
+    }
+}
+
+fn parse_history_view(value: &str) -> Result<ExportViewRequest, String> {
+    let (base, target) = value
+        .split_once("..")
+        .filter(|(base, target)| !base.is_empty() && !target.is_empty())
+        .ok_or_else(|| "history view must use OLD..NEW".to_owned())?;
+    Ok(ExportViewRequest::History {
+        base: base.to_owned(),
+        target: target.to_owned(),
+    })
+}
+
+fn parse_artifact_lens(value: &str) -> Result<ArtifactLens, String> {
+    match value {
+        "dependencies" | "dependency" => Ok(ArtifactLens::Dependencies),
+        "routes" | "route" => Ok(ArtifactLens::Routes),
+        "data" => Ok(ArtifactLens::Data),
+        "messaging" | "messages" | "jobs" => Ok(ArtifactLens::Messaging),
+        "tests" | "test" => Ok(ArtifactLens::Tests),
+        "provenance" | "aliases" => Ok(ArtifactLens::Provenance),
+        _ => Err(format!(
+            "unknown artifact lens '{value}'; expected dependencies, routes, data, messaging, tests, or provenance"
+        )),
+    }
+}
+
+fn parse_call_direction(value: &str) -> Result<CallGraphDirection, String> {
+    match value {
+        "callers" => Ok(CallGraphDirection::Callers),
+        "callees" => Ok(CallGraphDirection::Callees),
+        "both" => Ok(CallGraphDirection::Both),
+        _ => Err("--direction must be callers, callees, or both".to_owned()),
+    }
+}
+
+fn validate_export_options(
+    format: &str,
+    seen: &std::collections::BTreeSet<&str>,
+    views: &[ExportViewRequest],
+) -> Result<(), String> {
+    let allowed: &[&str] = match format {
+        "html" => &[
+            "--graph",
+            "--labels",
+            "--node-limit",
+            "--no-viz",
+            "--output",
+            "--view",
+            "--direction",
+            "--depth",
+            "--max-nodes",
+            "--max-edges",
+            "--relation",
+            "--include-heuristic",
+            "--program",
+        ],
+        "json" | "viewer-json" => &[
+            "--graph",
+            "--labels",
+            "--node-limit",
+            "--community",
+            "--view",
+            "--direction",
+            "--depth",
+            "--max-nodes",
+            "--max-edges",
+            "--relation",
+            "--include-heuristic",
+            "--program",
+        ],
+        "workbench-json" => &[
+            "--graph",
+            "--labels",
+            "--node-limit",
+            "--view",
+            "--direction",
+            "--depth",
+            "--max-nodes",
+            "--max-edges",
+            "--relation",
+            "--include-heuristic",
+            "--program",
+        ],
+        "callflow-html" => &[
+            "--graph",
+            "--labels",
+            "--report",
+            "--sections",
+            "--output",
+            "--lang",
+            "--max-sections",
+            "--diagram-scale",
+            "--max-diagram-nodes",
+            "--max-diagram-edges",
+        ],
+        "callflow-json" => &[
+            "--graph",
+            "--labels",
+            "--report",
+            "--sections",
+            "--lang",
+            "--max-sections",
+            "--diagram-scale",
+            "--max-diagram-nodes",
+            "--max-diagram-edges",
+        ],
+        "obsidian" => &["--graph", "--labels", "--dir"],
+        "wiki" | "svg" => &["--graph", "--labels"],
+        "graphml" => &["--graph"],
+        "neo4j" | "falkordb" => &["--graph", "--push", "--user", "--password"],
+        _ => &[],
+    };
+    if let Some(option) = seen.iter().find(|option| !allowed.contains(option)) {
+        return Err(format!("{option} is not valid with export {format}"));
+    }
+    if seen.contains("--community") && !views.is_empty() {
+        return Err("--community cannot be combined with workbench views".to_owned());
+    }
+    if seen.contains("--direction")
+        && !views
+            .iter()
+            .any(|view| matches!(view, ExportViewRequest::Call(_)))
+    {
+        return Err("--direction requires a call graph view".to_owned());
+    }
+    if seen.contains("--include-heuristic")
+        && !views
+            .iter()
+            .any(|view| matches!(view, ExportViewRequest::Impact(_)))
+    {
+        return Err("--include-heuristic requires an impact graph view".to_owned());
+    }
+    if seen.contains("--relation")
+        && !views
+            .iter()
+            .any(|view| matches!(view, ExportViewRequest::Affected(_)))
+    {
+        return Err("--relation requires an affected graph view".to_owned());
+    }
+    if seen.contains("--program")
+        && !views
+            .iter()
+            .any(|view| matches!(view, ExportViewRequest::Call(_)))
+    {
+        return Err("--program requires a call graph view".to_owned());
+    }
+    if seen.contains("--depth")
+        && !views.iter().any(|view| {
+            matches!(
+                view,
+                ExportViewRequest::Call(_)
+                    | ExportViewRequest::Impact(_)
+                    | ExportViewRequest::Affected(_)
+            )
+        })
+    {
+        return Err("--depth requires a call, impact, or affected graph view".to_owned());
+    }
+    if (seen.contains("--max-nodes") || seen.contains("--max-edges")) && views.is_empty() {
+        return Err("--max-nodes and --max-edges require a requested view".to_owned());
+    }
+    Ok(())
+}
+
 fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     let Some(format) = args.first().map(String::as_str) else {
         return Outcome::failure(export_help());
@@ -2851,6 +3070,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
         "html"
             | "json"
             | "viewer-json"
+            | "workbench-json"
             | "callflow-html"
             | "callflow-json"
             | "obsidian"
@@ -2861,6 +3081,14 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
             | "falkordb"
     ) {
         return Outcome::failure(export_help());
+    }
+    if args.len() == 2 && matches!(args[1].as_str(), "-h" | "--help") {
+        return Outcome::success(match format {
+            "html" | "workbench-json" => export_workbench_help(format),
+            "json" | "viewer-json" => export_json_help(),
+            "callflow-html" | "callflow-json" => callflow_help(),
+            _ => export_help(),
+        });
     }
     let mut graph_path = default_graph_path();
     let mut graph_explicit = false;
@@ -2889,6 +3117,15 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
         .unwrap_or_else(|| Path::new("."))
         .join("obsidian");
     let mut push_uri = None;
+    let mut view_requests = Vec::new();
+    let mut view_depth = 3_u32;
+    let mut view_max_nodes = 500_usize;
+    let mut view_max_edges = 1_000_usize;
+    let mut view_direction = CallGraphDirection::Both;
+    let mut include_heuristic = false;
+    let mut view_relations = Vec::new();
+    let mut program_path = None;
+    let mut seen_options = std::collections::BTreeSet::new();
     let mut push_user = "neo4j".to_owned();
     let mut push_password = if format == "falkordb" {
         std::env::var("FALKORDB_PASSWORD").ok()
@@ -2902,6 +3139,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
         let next = || args.get(index + 1).cloned();
         match argument {
             "--graph" => {
+                seen_options.insert("--graph");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --graph requires a path".to_owned());
                 };
@@ -2910,6 +3148,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--labels" => {
+                seen_options.insert("--labels");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --labels requires a path".to_owned());
                 };
@@ -2918,6 +3157,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--report" => {
+                seen_options.insert("--report");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --report requires a path".to_owned());
                 };
@@ -2926,6 +3166,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--sections" => {
+                seen_options.insert("--sections");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --sections requires a path".to_owned());
                 };
@@ -2933,6 +3174,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--output" => {
+                seen_options.insert("--output");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --output requires a path".to_owned());
                 };
@@ -2940,6 +3182,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--dir" => {
+                seen_options.insert("--dir");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --dir requires a path".to_owned());
                 };
@@ -2947,6 +3190,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--push" => {
+                seen_options.insert("--push");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --push requires a URI".to_owned());
                 };
@@ -2954,6 +3198,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--user" => {
+                seen_options.insert("--user");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --user requires a value".to_owned());
                 };
@@ -2961,6 +3206,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--password" => {
+                seen_options.insert("--password");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --password requires a value".to_owned());
                 };
@@ -2968,6 +3214,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--lang" => {
+                seen_options.insert("--lang");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --lang requires a value".to_owned());
                 };
@@ -2975,6 +3222,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--max-sections" => {
+                seen_options.insert("--max-sections");
                 let Some(value) = parse_usize(next(), "--max-sections") else {
                     return Outcome::failure("error: --max-sections must be an integer".to_owned());
                 };
@@ -2982,6 +3230,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--max-diagram-nodes" => {
+                seen_options.insert("--max-diagram-nodes");
                 let Some(value) = parse_usize(next(), "--max-diagram-nodes") else {
                     return Outcome::failure(
                         "error: --max-diagram-nodes must be an integer".to_owned(),
@@ -2991,6 +3240,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--max-diagram-edges" => {
+                seen_options.insert("--max-diagram-edges");
                 let Some(value) = parse_usize(next(), "--max-diagram-edges") else {
                     return Outcome::failure(
                         "error: --max-diagram-edges must be an integer".to_owned(),
@@ -3000,6 +3250,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--node-limit" => {
+                seen_options.insert("--node-limit");
                 let Some(value) = next().and_then(|value| value.parse::<isize>().ok()) else {
                     return Outcome::failure("error: --node-limit must be an integer".to_owned());
                 };
@@ -3007,6 +3258,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--community" if matches!(format, "json" | "viewer-json") => {
+                seen_options.insert("--community");
                 let Some(value) = next().and_then(|value| value.parse::<usize>().ok()) else {
                     return Outcome::failure(
                         "error: --community must be a non-negative integer".to_owned(),
@@ -3022,6 +3274,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 if matches!(format, "json" | "viewer-json")
                     && value.starts_with("--community=") =>
             {
+                seen_options.insert("--community");
                 let Some(value) = value
                     .strip_prefix("--community=")
                     .and_then(|value| value.parse::<usize>().ok())
@@ -3047,6 +3300,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 );
             }
             "--diagram-scale" => {
+                seen_options.insert("--diagram-scale");
                 let Some(value) = next().and_then(|value| value.parse::<f64>().ok()) else {
                     return Outcome::failure("error: --diagram-scale must be a number".to_owned());
                 };
@@ -3054,8 +3308,155 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--no-viz" => {
+                seen_options.insert("--no-viz");
                 no_viz = true;
                 index += 1;
+            }
+            "--view" => {
+                let Some(value) = next() else {
+                    return Outcome::failure(
+                        "error: --view requires a view specification".to_owned(),
+                    );
+                };
+                match parse_export_view(&value) {
+                    Ok(view) => view_requests.push(view),
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--view");
+                index += 2;
+            }
+            "--code-graph" => {
+                view_requests.push(ExportViewRequest::Code);
+                seen_options.insert("--view");
+                index += 1;
+            }
+            "--architecture-graph" => {
+                view_requests.push(ExportViewRequest::Architecture);
+                seen_options.insert("--view");
+                index += 1;
+            }
+            "--call-graph" => {
+                let Some(value) = next().filter(|value| !value.is_empty()) else {
+                    return Outcome::failure("error: --call-graph requires a symbol".to_owned());
+                };
+                view_requests.push(ExportViewRequest::Call(value));
+                seen_options.insert("--view");
+                index += 2;
+            }
+            "--impact-graph" => {
+                let Some(value) = next().filter(|value| !value.is_empty()) else {
+                    return Outcome::failure("error: --impact-graph requires a symbol".to_owned());
+                };
+                view_requests.push(ExportViewRequest::Impact(value));
+                seen_options.insert("--view");
+                index += 2;
+            }
+            "--affected-graph" => {
+                let Some(value) = next().filter(|value| !value.is_empty()) else {
+                    return Outcome::failure(
+                        "error: --affected-graph requires a node or label".to_owned(),
+                    );
+                };
+                view_requests.push(ExportViewRequest::Affected(value));
+                seen_options.insert("--view");
+                index += 2;
+            }
+            "--history-graph" => {
+                let Some(value) = next() else {
+                    return Outcome::failure("error: --history-graph requires OLD..NEW".to_owned());
+                };
+                match parse_history_view(&value) {
+                    Ok(view) => view_requests.push(view),
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--view");
+                index += 2;
+            }
+            "--artifact-lens" => {
+                let Some(value) = next() else {
+                    return Outcome::failure(
+                        "error: --artifact-lens requires a lens name".to_owned(),
+                    );
+                };
+                match parse_artifact_lens(&value) {
+                    Ok(lens) => view_requests.push(ExportViewRequest::Artifact(lens)),
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--view");
+                index += 2;
+            }
+            "--direction" => {
+                let Some(value) = next() else {
+                    return Outcome::failure(
+                        "error: --direction requires callers, callees, or both".to_owned(),
+                    );
+                };
+                match parse_call_direction(&value) {
+                    Ok(direction) => view_direction = direction,
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--direction");
+                index += 2;
+            }
+            "--depth" => {
+                let Some(value) = next()
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .filter(|value| *value > 0)
+                else {
+                    return Outcome::failure(
+                        "error: --depth must be a positive integer".to_owned(),
+                    );
+                };
+                view_depth = value;
+                seen_options.insert("--depth");
+                index += 2;
+            }
+            "--max-nodes" => {
+                let Some(value) = next()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .filter(|value| *value > 0)
+                else {
+                    return Outcome::failure(
+                        "error: --max-nodes must be a positive integer".to_owned(),
+                    );
+                };
+                view_max_nodes = value;
+                seen_options.insert("--max-nodes");
+                index += 2;
+            }
+            "--max-edges" => {
+                let Some(value) = next()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .filter(|value| *value > 0)
+                else {
+                    return Outcome::failure(
+                        "error: --max-edges must be a positive integer".to_owned(),
+                    );
+                };
+                view_max_edges = value;
+                seen_options.insert("--max-edges");
+                index += 2;
+            }
+            "--relation" => {
+                let Some(value) = next().filter(|value| !value.is_empty()) else {
+                    return Outcome::failure("error: --relation requires a value".to_owned());
+                };
+                view_relations.push(value);
+                seen_options.insert("--relation");
+                index += 2;
+            }
+            "--include-heuristic" => {
+                include_heuristic = true;
+                seen_options.insert("--include-heuristic");
+                index += 1;
+            }
+            "--program" => {
+                let Some(value) = next() else {
+                    return Outcome::failure("error: --program requires a path".to_owned());
+                };
+                program_path = Some(PathBuf::from(value));
+                seen_options.insert("--program");
+                index += 2;
             }
             "-h" | "--help" if matches!(format, "callflow-html" | "callflow-json") => {
                 return Outcome::success(callflow_help());
@@ -3082,8 +3483,68 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 graph_explicit = true;
                 index += 1;
             }
-            _ => index += 1,
+            value if value.starts_with("--view=") => {
+                match parse_export_view(&value[7..]) {
+                    Ok(view) => view_requests.push(view),
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--view");
+                index += 1;
+            }
+            value if value.starts_with("--call-graph=") => {
+                let symbol = &value[13..];
+                if symbol.is_empty() {
+                    return Outcome::failure("error: --call-graph requires a symbol".to_owned());
+                }
+                view_requests.push(ExportViewRequest::Call(symbol.to_owned()));
+                seen_options.insert("--view");
+                index += 1;
+            }
+            value if value.starts_with("--impact-graph=") => {
+                let symbol = &value[15..];
+                if symbol.is_empty() {
+                    return Outcome::failure("error: --impact-graph requires a symbol".to_owned());
+                }
+                view_requests.push(ExportViewRequest::Impact(symbol.to_owned()));
+                seen_options.insert("--view");
+                index += 1;
+            }
+            value if value.starts_with("--affected-graph=") => {
+                let root = &value[17..];
+                if root.is_empty() {
+                    return Outcome::failure(
+                        "error: --affected-graph requires a node or label".to_owned(),
+                    );
+                }
+                view_requests.push(ExportViewRequest::Affected(root.to_owned()));
+                seen_options.insert("--view");
+                index += 1;
+            }
+            value if value.starts_with("--history-graph=") => {
+                match parse_history_view(&value[16..]) {
+                    Ok(view) => view_requests.push(view),
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--view");
+                index += 1;
+            }
+            value if value.starts_with("--artifact-lens=") => {
+                match parse_artifact_lens(&value[16..]) {
+                    Ok(lens) => view_requests.push(ExportViewRequest::Artifact(lens)),
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--view");
+                index += 1;
+            }
+            value => {
+                return Outcome::failure(format!(
+                    "error: unexpected export {format} argument {value}"
+                ));
+            }
         }
+    }
+    if let Err(error) = validate_export_options(format, &seen_options, &view_requests) {
+        return Outcome::failure(format!("error: {error}"));
     }
     graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&graph_path) {
         Ok(path) => path,
@@ -3100,7 +3561,10 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
             report_path = output_dir.join("GRAPH_REPORT.md");
         }
     }
-    if matches!(format, "json" | "viewer-json") && node_limit < 1 {
+    if (matches!(format, "json" | "viewer-json" | "workbench-json")
+        || (format == "html" && !no_viz))
+        && node_limit < 1
+    {
         return Outcome::failure("error: --node-limit must be a positive integer".to_owned());
     }
     let mut inputs = match ExportInputs::load(&graph_path) {
@@ -3123,44 +3587,118 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
         inputs.report = fs::read_to_string(&report_path).unwrap_or_default();
     }
     let output_dir = graph_path.parent().unwrap_or_else(|| Path::new("."));
+    let requested_workbench = !view_requests.is_empty() || format == "workbench-json";
     let result = match format {
-        "html" => export_html(&inputs, output_dir, no_viz, node_limit),
-        "json" | "viewer-json" => {
-            let options = HtmlOptions {
-                community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
-                member_counts: None,
-                node_limit: Some(node_limit),
-                learning_overlay: None,
-            };
-            let model = if let Some(community) = community {
-                graph_community_view_model_document(
-                    &inputs.document,
-                    &inputs.communities,
-                    &graph_path,
-                    &options,
-                    community,
-                )
-                .map_err(|error| error.to_string())
+        "html" => {
+            let path = output_path
+                .clone()
+                .unwrap_or_else(|| output_dir.join("graph.html"));
+            if no_viz {
+                if path.exists()
+                    && let Err(error) = fs::remove_file(&path)
+                {
+                    return Outcome::failure(format!(
+                        "error: could not remove {}: {error}",
+                        path.display()
+                    ));
+                }
+                Ok(ExportOutput::text(
+                    "--no-viz: skipped graph.html".to_owned(),
+                ))
             } else {
-                graph_view_model_document(
-                    &inputs.document,
-                    &inputs.communities,
+                build_export_workbench(
+                    &inputs,
                     &graph_path,
-                    &options,
+                    node_limit,
+                    &view_requests,
+                    &ExportViewOptions {
+                        direction: view_direction,
+                        depth: view_depth,
+                        max_nodes: view_max_nodes,
+                        max_edges: view_max_edges,
+                        include_heuristic,
+                        relations: &view_relations,
+                        program_path: program_path.as_deref(),
+                    },
                 )
-                .map_err(|error| error.to_string())
-                .and_then(|model| {
-                    model.ok_or_else(|| "graph has no renderable community overview".to_owned())
-                })
-            };
-            model
+                .and_then(|model| export_workbench_html(&model, path))
+            }
+        }
+        "json" | "viewer-json" => {
+            if requested_workbench {
+                build_export_workbench(
+                    &inputs,
+                    &graph_path,
+                    node_limit,
+                    &view_requests,
+                    &ExportViewOptions {
+                        direction: view_direction,
+                        depth: view_depth,
+                        max_nodes: view_max_nodes,
+                        max_edges: view_max_edges,
+                        include_heuristic,
+                        relations: &view_relations,
+                        program_path: program_path.as_deref(),
+                    },
+                )
                 .and_then(|model| serde_json::to_string(&model).map_err(|error| error.to_string()))
                 .map(ExportOutput::text)
+            } else {
+                let options = HtmlOptions {
+                    community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
+                    member_counts: None,
+                    node_limit: Some(node_limit),
+                    learning_overlay: None,
+                };
+                let model = if let Some(community) = community {
+                    graph_community_view_model_document(
+                        &inputs.document,
+                        &inputs.communities,
+                        &graph_path,
+                        &options,
+                        community,
+                    )
+                    .map_err(|error| error.to_string())
+                } else {
+                    graph_view_model_document(
+                        &inputs.document,
+                        &inputs.communities,
+                        &graph_path,
+                        &options,
+                    )
+                    .map_err(|error| error.to_string())
+                    .and_then(|model| {
+                        model.ok_or_else(|| "graph has no renderable community overview".to_owned())
+                    })
+                };
+                model
+                    .and_then(|model| {
+                        serde_json::to_string(&model).map_err(|error| error.to_string())
+                    })
+                    .map(ExportOutput::text)
+            }
         }
+        "workbench-json" => build_export_workbench(
+            &inputs,
+            &graph_path,
+            node_limit,
+            &view_requests,
+            &ExportViewOptions {
+                direction: view_direction,
+                depth: view_depth,
+                max_nodes: view_max_nodes,
+                max_edges: view_max_edges,
+                include_heuristic,
+                relations: &view_relations,
+                program_path: program_path.as_deref(),
+            },
+        )
+        .and_then(|model| serde_json::to_string(&model).map_err(|error| error.to_string()))
+        .map(ExportOutput::text),
         "callflow-html" => export_callflow(
             &inputs,
             &graph_path,
-            output_path,
+            output_path.clone(),
             sections_path.as_deref(),
             &language,
             max_sections,
@@ -3221,7 +3759,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     };
     match result {
         Ok(mut output) => {
-            if format == "html" {
+            if format == "html" && output_path.is_none() {
                 let artifact_directory = graph_path.parent().unwrap_or_else(|| Path::new("."));
                 let output_container =
                     compass_files::BuildGuard::output_container_for_artifact(&graph_path);
@@ -3248,6 +3786,353 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
         }
         Err(error) => Outcome::failure(format!("error: {error}")),
     }
+}
+
+fn build_export_workbench(
+    inputs: &ExportInputs,
+    graph_path: &Path,
+    node_limit: isize,
+    requested_views: &[ExportViewRequest],
+    options: &ExportViewOptions<'_>,
+) -> Result<WorkbenchModel, String> {
+    let default_views = [ExportViewRequest::Code];
+    let requests = if requested_views.is_empty() {
+        &default_views[..]
+    } else {
+        requested_views
+    };
+    let title = export_project_title(inputs, graph_path);
+    let graph_identity = graph_artifact_identity(graph_path).map_err(|error| error.to_string())?;
+    let labels = (!inputs.labels.is_empty()).then_some(&inputs.labels);
+    let html_options = HtmlOptions {
+        community_labels: labels,
+        member_counts: None,
+        node_limit: Some(node_limit),
+        learning_overlay: None,
+    };
+    let analysis = options
+        .program_path
+        .map(program_commands::load_program)
+        .transpose()?;
+    let mut ids = std::collections::BTreeMap::<String, usize>::new();
+    let mut views = Vec::with_capacity(requests.len());
+    for request in requests {
+        let (base_id, view) = match request {
+            ExportViewRequest::Code => {
+                let bundle = graph_view_model_bundle_document(
+                    &inputs.document,
+                    &inputs.communities,
+                    graph_path,
+                    &html_options,
+                )
+                .map_err(|error| error.to_string())?;
+                let coverage = if bundle.truncated {
+                    WorkbenchCoverage::bounded(
+                        bundle.overview.stats.nodes,
+                        bundle.overview.stats.edges,
+                        true,
+                    )
+                } else {
+                    WorkbenchCoverage::graph(&bundle.overview)
+                };
+                (
+                    "code".to_owned(),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: "Code graph".to_owned(),
+                        description: "Repository structure, ownership, and relationships"
+                            .to_owned(),
+                        coverage,
+                        content: WorkbenchViewContent::Code {
+                            model: bundle.overview,
+                            community_details: bundle.community_details,
+                        },
+                    },
+                )
+            }
+            ExportViewRequest::Architecture => {
+                let model = architecture_view_model(inputs, graph_path, &title)?;
+                let coverage = WorkbenchCoverage::bounded(
+                    model.statistics.nodes,
+                    model.statistics.edges,
+                    false,
+                );
+                (
+                    "architecture".to_owned(),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: "Architecture".to_owned(),
+                        description: "Subsystems, scopes, and cross-section calls".to_owned(),
+                        coverage,
+                        content: WorkbenchViewContent::Architecture { model },
+                    },
+                )
+            }
+            ExportViewRequest::Call(root) => {
+                let graph = build_universal_call_graph(
+                    &inputs.document,
+                    analysis.as_ref(),
+                    &UniversalCallGraphRequest {
+                        root: UniversalCallGraphRoot::Symbol {
+                            symbol: root.clone(),
+                        },
+                        direction: options.direction,
+                        depth: options.depth,
+                        max_nodes: options.max_nodes,
+                        max_edges: options.max_edges,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+                let coverage = WorkbenchCoverage {
+                    status: if graph.truncated || graph.coverage.partial {
+                        WorkbenchCoverageStatus::Partial
+                    } else {
+                        WorkbenchCoverageStatus::Complete
+                    },
+                    truncated: graph.truncated,
+                    nodes: graph.nodes.len(),
+                    edges: graph.edges.len(),
+                    limitations: graph.coverage.limitations.clone(),
+                };
+                (
+                    format!("call-{}", safe_output_name(root)),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: format!("Calls · {root}"),
+                        description: "Caller and callee evidence around one symbol".to_owned(),
+                        coverage,
+                        content: WorkbenchViewContent::Call {
+                            root: root.clone(),
+                            graph,
+                        },
+                    },
+                )
+            }
+            ExportViewRequest::Impact(root) => {
+                let cache = graph_path
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join("cache");
+                let engine =
+                    open_code_query(graph_path, None, &cache).map_err(|error| error.to_string())?;
+                let max_nodes = u32::try_from(options.max_nodes)
+                    .map_err(|_| "--max-nodes exceeds the impact query limit".to_owned())?;
+                let max_edges = u32::try_from(options.max_edges)
+                    .map_err(|_| "--max-edges exceeds the impact query limit".to_owned())?;
+                let result = engine
+                    .impact(ImpactRequest {
+                        symbol: root.clone(),
+                        include_heuristic: options.include_heuristic,
+                        limits: CodeQueryLimits {
+                            max_depth: options.depth,
+                            max_nodes,
+                            max_edges,
+                            ..CodeQueryLimits::default()
+                        },
+                    })
+                    .map_err(|error| error.to_string())?;
+                let coverage = WorkbenchCoverage::bounded(
+                    result.nodes.len(),
+                    result.edges.len(),
+                    result.truncated,
+                );
+                (
+                    format!("impact-{}", safe_output_name(root)),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: format!("Impact · {root}"),
+                        description: "Inbound code paths that can be affected by a change"
+                            .to_owned(),
+                        coverage,
+                        content: WorkbenchViewContent::Impact {
+                            root: root.clone(),
+                            result,
+                        },
+                    },
+                )
+            }
+            ExportViewRequest::Affected(root) => {
+                let relations = if options.relations.is_empty() {
+                    DEFAULT_AFFECTED_RELATIONS
+                        .iter()
+                        .map(|relation| (*relation).to_owned())
+                        .collect::<Vec<_>>()
+                } else {
+                    options.relations.to_vec()
+                };
+                let projection = affected_lens_view_model(
+                    &inputs.document,
+                    &inputs.communities,
+                    labels,
+                    root,
+                    AffectedLensOptions {
+                        relations: &relations,
+                        depth: usize::try_from(options.depth).unwrap_or(usize::MAX),
+                        max_nodes: options.max_nodes,
+                        max_edges: options.max_edges,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+                let coverage = WorkbenchCoverage::bounded(
+                    projection.model.stats.nodes,
+                    projection.model.stats.edges,
+                    projection.truncated,
+                );
+                (
+                    format!("affected-{}", safe_output_name(root)),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: format!("Affected · {root}"),
+                        description: "Reverse dependency expansion from the selected node"
+                            .to_owned(),
+                        coverage,
+                        content: WorkbenchViewContent::Affected {
+                            root: root.clone(),
+                            relations,
+                            depth: usize::try_from(options.depth).unwrap_or(usize::MAX),
+                            model: projection.model,
+                        },
+                    },
+                )
+            }
+            ExportViewRequest::History { base, target } => {
+                let (base_revision, _, before) =
+                    history_commands::load_history_view_model_at(base, node_limit)?;
+                let (target_revision, _, after) =
+                    history_commands::load_history_view_model_at(target, node_limit)?;
+                let summarized = before.stats.aggregated || after.stats.aggregated;
+                let coverage = WorkbenchCoverage {
+                    status: if summarized {
+                        WorkbenchCoverageStatus::Summary
+                    } else {
+                        WorkbenchCoverageStatus::Complete
+                    },
+                    truncated: false,
+                    nodes: before.stats.nodes.saturating_add(after.stats.nodes),
+                    edges: before.stats.edges.saturating_add(after.stats.edges),
+                    limitations: if summarized {
+                        vec!["At least one historical graph is aggregated by community.".to_owned()]
+                    } else {
+                        Vec::new()
+                    },
+                };
+                (
+                    format!(
+                        "history-{}-{}",
+                        safe_output_name(base),
+                        safe_output_name(target)
+                    ),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: format!("History · {base}..{target}"),
+                        description: "Structural comparison between immutable realizations"
+                            .to_owned(),
+                        coverage,
+                        content: WorkbenchViewContent::History {
+                            base_revision,
+                            target_revision,
+                            before,
+                            after,
+                        },
+                    },
+                )
+            }
+            ExportViewRequest::Artifact(lens) => {
+                let projection = artifact_lens_view_model(
+                    &inputs.document,
+                    &inputs.communities,
+                    labels,
+                    *lens,
+                    options.max_nodes,
+                    options.max_edges,
+                );
+                let relations = lens.relations();
+                let coverage = WorkbenchCoverage::bounded(
+                    projection.model.stats.nodes,
+                    projection.model.stats.edges,
+                    projection.truncated,
+                );
+                (
+                    format!("artifact-{}", lens.key()),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: lens.label().to_owned(),
+                        description: format!(
+                            "Artifact lens over {} relationship kinds",
+                            relations.len()
+                        ),
+                        coverage,
+                        content: WorkbenchViewContent::Artifact {
+                            lens: *lens,
+                            relations,
+                            model: projection.model,
+                        },
+                    },
+                )
+            }
+        };
+        let count = ids.entry(base_id.clone()).or_default();
+        *count += 1;
+        let id = if *count == 1 {
+            base_id
+        } else {
+            format!("{base_id}-{count}")
+        };
+        views.push(WorkbenchView { id, ..view });
+    }
+    Ok(WorkbenchModel::new(title, graph_identity, views))
+}
+
+fn export_project_title(inputs: &ExportInputs, graph_path: &Path) -> String {
+    inputs
+        .document
+        .graph
+        .get("project_name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| {
+            graph_path
+                .parent()
+                .and_then(Path::parent)
+                .and_then(Path::file_name)
+                .and_then(|value| value.to_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "Compass graph".to_owned())
+}
+
+fn architecture_view_model(
+    inputs: &ExportInputs,
+    graph_path: &Path,
+    title: &str,
+) -> Result<compass_output::CallflowViewModel, String> {
+    callflow_view_model(
+        &inputs.document,
+        &inputs.communities,
+        &CallflowOptions {
+            community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
+            report: &inputs.report,
+            project_name: title,
+            ..CallflowOptions::default()
+        },
+    )
+    .map_err(|error| {
+        format!(
+            "could not build architecture view for {}: {error}",
+            graph_path.display()
+        )
+    })
+}
+
+fn export_workbench_html(model: &WorkbenchModel, path: PathBuf) -> Result<ExportOutput, String> {
+    write_workbench_html(model, &path).map_err(|error| error.to_string())?;
+    Ok(ExportOutput::html(
+        format!(
+            "{} written - open in any browser, no server needed",
+            path.display()
+        ),
+        path,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3378,42 +4263,6 @@ fn export_falkordb(
             path.display()
         ))
     }
-}
-
-fn export_html(
-    inputs: &ExportInputs,
-    output_dir: &Path,
-    no_viz: bool,
-    node_limit: isize,
-) -> Result<ExportOutput, String> {
-    let path = output_dir.join("graph.html");
-    if no_viz {
-        if path.exists() {
-            fs::remove_file(&path).map_err(|error| error.to_string())?;
-        }
-        return Ok(ExportOutput::text(
-            "--no-viz: skipped graph.html".to_owned(),
-        ));
-    }
-    let result = write_html(
-        &inputs.document,
-        &inputs.communities,
-        &path,
-        &HtmlOptions {
-            community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
-            member_counts: None,
-            node_limit: Some(node_limit),
-            learning_overlay: None,
-        },
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(match result {
-        Some(_) => ExportOutput::html(
-            "graph.html written - open in any browser, no server needed".to_owned(),
-            path,
-        ),
-        None => ExportOutput::text(String::new()),
-    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3627,7 +4476,13 @@ fn safe_output_name(value: &str) -> String {
 }
 
 fn export_help() -> String {
-    "Usage: compass export <format>\n  orientation-json [--graph PATH]\n  html      [--graph PATH] [--labels PATH] [--node-limit N] [--no-viz]\n  json      [--graph PATH] [--labels PATH] [--node-limit N] [--community ID]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]".to_owned()
+    "Usage: compass export <format>\n  orientation-json [--graph PATH]\n  html      [--graph PATH] [--output HTML] [VIEW ...]\n  json      [--graph PATH] [--node-limit N] [--community ID] [VIEW ...]\n  workbench-json [--graph PATH] [VIEW ...]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]\n\nVIEW may be repeated: --code-graph, --architecture-graph, --call-graph SYMBOL, --impact-graph SYMBOL, --affected-graph NODE, --history-graph OLD..NEW, --artifact-lens LENS, or --view SPEC.".to_owned()
+}
+
+fn export_workbench_help(format: &str) -> String {
+    format!(
+        "Usage: compass export {format} [--graph PATH] [--labels PATH] [--node-limit N] [--output HTML] [VIEW ...]\n\nViews are emitted in command order into one navigable workbench:\n  --code-graph\n  --architecture-graph\n  --call-graph SYMBOL\n  --impact-graph SYMBOL\n  --affected-graph NODE\n  --history-graph OLD..NEW\n  --artifact-lens dependencies|routes|data|messaging|tests|provenance\n  --view code|architecture|call:SYMBOL|impact:SYMBOL|affected:NODE|history:OLD..NEW|artifact:LENS\n\nView options:\n  --direction callers|callees|both\n  --depth N\n  --max-nodes N\n  --max-edges N\n  --relation RELATION (repeatable; affected views)\n  --include-heuristic (impact views)\n  --program PATH (Program IR enrichment for call views)"
+    )
 }
 
 fn command_export_orientation_json(args: &[String]) -> Outcome {
@@ -3705,7 +4560,7 @@ fn command_export_orientation_json(args: &[String]) -> Outcome {
 }
 
 fn export_json_help() -> String {
-    "Usage: compass export json [--graph PATH] [--labels PATH] [--node-limit N] [--community ID]\n  --graph PATH       graph JSON (default compass-out/graph.json)\n  --labels PATH      community-label JSON\n  --node-limit N     maximum overview or community-detail nodes (default 5000)\n  --community ID     export one complete community detail graph".to_owned()
+    "Usage: compass export json [--graph PATH] [--labels PATH] [--node-limit N] [--community ID] [VIEW ...]\n  With no VIEW, emit the compatible compass.viewer.graph/1 model.\n  With any VIEW, emit compass.viewer.workbench/1.\n  --community ID exports one complete community and cannot be combined with VIEW.".to_owned()
 }
 
 fn callflow_help() -> String {
