@@ -199,6 +199,20 @@
   repository-relative identity for universal framework facts so shallow source
   paths are published instead of being mistaken for temporary-directory paths.
 
+## 0.3.10 - 2026-08-12
+
+- Add bounded `compass.task-context/1` packets through `compass context` and
+  MCP `task_context`, plus an independent `compass.pr-readiness/1` envelope
+  through `compass review --readiness` and MCP `pr_readiness`. Results include
+  exact target resolution, digest-verified source, provenance, deterministic
+  omissions, work accounting, and stable readiness evidence.
+
+- Improve `GRAPH_REPORT.md` as a label-first architecture entry map with a
+  bounded ranked Community Directory, anchored boundary evidence, compact
+  labels, deterministic community navigation, and larger report/resource
+  envelopes. Nested community layout resume now reheats settled graphs so
+  pause/resume produces visible movement.
+
 ## 0.3.9 - 2026-08-12
 
 - Add the versioned `compass.viewer.workbench/1` export contract and a shared

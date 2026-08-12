@@ -306,7 +306,7 @@ fn report_is_a_label_first_directory_of_all_bounded_communities() -> Result<(), 
                 community,
                 (0..10)
                     .map(|offset| format!("internal::node::{}", community * 10 + offset))
-                    .collect(),
+                    .collect::<Vec<_>>(),
             )
         })
         .collect::<BTreeMap<_, _>>();
