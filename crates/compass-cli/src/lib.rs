@@ -25,6 +25,7 @@ mod semantic_commands;
 mod semantic_diff_commands;
 mod semantic_diff_render;
 mod store_commands;
+mod task_context_commands;
 mod upgrade_commands;
 
 use std::collections::{HashMap, HashSet};
@@ -362,6 +363,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "impact" => code_query_commands::command("impact", &args),
         "explore" => code_query_commands::command("explore", &args),
         "node" => code_query_commands::command("node", &args),
+        "context" => task_context_commands::command(&args),
         "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => semantic_diff_commands::command(frontend, &args),
         "query" => query_commands::command_query(frontend, &args),

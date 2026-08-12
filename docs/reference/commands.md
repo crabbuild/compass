@@ -320,6 +320,22 @@ compass affected "<node-or-label>"
 
 Traverses incoming impact-relevant relations.
 
+### `context`
+
+```text
+compass context explain|modify|debug|test TARGET
+  [--graph PATH] [--program PATH] [--root PATH] [--memory PATH]
+  [--engine default|json|store] [--format text|json]
+  [--max-depth N] [--max-nodes N] [--max-edges N]
+  [--max-paths N] [--max-candidates N] [--max-source-bytes N]
+  [--max-knowledge-items N] [--max-response-bytes N]
+```
+
+Emits `compass.task-context/1` after exact target resolution. It composes
+digest-verified source, exact calls, related tests, bounded impact, and
+identity-linked reflection memory. Ambiguous and fuzzy-only targets retain
+candidates but do not compose structural evidence.
+
 ### `tree`
 
 ```text
@@ -422,6 +438,7 @@ compass review --base REV --head REV
   [--repo OWNER/REPO] [--host HOST] [--pull-request-number N]
   [--fingerprint SHA256]
   [--format text|json|markdown|sarif]
+  [--readiness]
   [--output PATH]
   [--max-findings N --max-output-bytes N]
 
@@ -443,6 +460,8 @@ deterministic synthetic merge; a conflict uses the PR-head realization and
 reports unavailable/indeterminate merge-dependent conclusions. `--output`
 writes atomically. Markdown-only budgets report exact projection omissions.
 Advisory risk and typed gate state do not change the CLI success code.
+With `--readiness`, JSON or Markdown emits the additive
+`compass.pr-readiness/1` envelope referencing the unchanged report digest.
 
 See [PR Intelligence](pr-intelligence.md) for schema, rubric, bounds, MCP, and
 gate semantics.

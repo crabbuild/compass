@@ -1,8 +1,14 @@
 use compass_history::{HistoryStore, PublishedVersion, Repository};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+use std::time::Duration;
+
 use compass_pr_intelligence::{
     ChangeRequest, Completeness, EvidenceManifest, EvidenceRepository, EvidenceSource, Freshness,
-    GraphSnapshot, MergeOutcome, PullRequestReport, analyze, canonical_json_bytes,
+    GraphSnapshot, LocalOwnership, MergeOutcome, PullRequestReadiness, PullRequestReport,
+    ReadinessExtractionFingerprints, analyze, build_readiness, canonical_json_bytes,
 };
+use compass_prs::ProcessRunner;
 use compass_semantic_diff::SemanticDiffReport;
 use sha2::{Digest, Sha256};
 
@@ -16,6 +22,41 @@ pub enum ReviewError {
     SemanticDiff(#[from] compass_semantic_diff::SemanticDiffError),
     #[error("review evidence is not comparable: {0}")]
     NotComparable(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PullRequestReadinessBundle {
+    pub report: PullRequestReport,
+    pub readiness: PullRequestReadiness,
+}
+
+/// Produce the unchanged canonical report and an additive readiness envelope.
+///
+/// Ownership is derived only from bounded local Git history. Its absence is
+/// represented as missing evidence and never prevents the semantic review.
+pub fn review_change_request_ready_exact(
+    repository: &Repository,
+    history: &HistoryStore,
+    request: &ChangeRequest,
+    base: &PublishedVersion,
+    comparison: &PublishedVersion,
+    completeness: Completeness,
+    runner: &dyn ProcessRunner,
+) -> Result<PullRequestReadinessBundle, ReviewError> {
+    let report =
+        review_change_request_exact(repository, history, request, base, comparison, completeness)?;
+    let (ownership, ownership_omission) = local_ownership(runner, repository.root(), request);
+    let readiness = build_readiness(
+        &report,
+        request,
+        ReadinessExtractionFingerprints {
+            base: base.version.extraction_fingerprint.clone(),
+            comparison: comparison.version.extraction_fingerprint.clone(),
+        },
+        ownership,
+        ownership_omission,
+    )?;
+    Ok(PullRequestReadinessBundle { report, readiness })
 }
 
 /// Compute semantic evidence and review one exact immutable candidate.
@@ -178,4 +219,118 @@ fn profile_value(version: &PublishedVersion, key: &str) -> Result<String, Review
 
 fn digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+fn local_ownership(
+    runner: &dyn ProcessRunner,
+    root: &Path,
+    request: &ChangeRequest,
+) -> (Vec<LocalOwnership>, Option<String>) {
+    const MAX_PATHS: usize = 200;
+    const MAX_COMMITS: usize = 200;
+    const MAX_OWNERS_PER_PATH: usize = 3;
+    let mut paths = request
+        .hunks
+        .iter()
+        .map(|hunk| {
+            if hunk.status == "deleted" {
+                hunk.old_path.clone()
+            } else {
+                hunk.new_path.clone()
+            }
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if paths.is_empty() {
+        return (
+            Vec::new(),
+            Some("the change request contains no changed path".to_owned()),
+        );
+    }
+    let truncated = paths.len() > MAX_PATHS;
+    paths.truncate(MAX_PATHS);
+    let root_text = root.as_os_str().to_string_lossy();
+    if root_text.contains('\u{fffd}') || root_text.chars().any(char::is_control) {
+        return (
+            Vec::new(),
+            Some("repository path cannot be represented safely for local ownership".to_owned()),
+        );
+    }
+    let mut arguments = vec![
+        "-C".to_owned(),
+        root_text.into_owned(),
+        "log".to_owned(),
+        format!("--max-count={MAX_COMMITS}"),
+        "--format=@@%ae".to_owned(),
+        "--name-only".to_owned(),
+        request.revisions.pull_request_head.clone(),
+        "--".to_owned(),
+    ];
+    arguments.extend(paths.iter().cloned());
+    let output = match runner.run("git", &arguments, Duration::from_secs(10)) {
+        Ok(output) if output.code == 0 => output,
+        Ok(output) => {
+            return (
+                Vec::new(),
+                Some(format!(
+                    "bounded local Git ownership exited with status {}",
+                    output.code
+                )),
+            );
+        }
+        Err(error) => {
+            return (
+                Vec::new(),
+                Some(format!("bounded local Git ownership failed: {error}")),
+            );
+        }
+    };
+    let selected = paths.iter().cloned().collect::<BTreeSet<_>>();
+    let mut contributor = None;
+    let mut counts = BTreeMap::<(String, String), u32>::new();
+    for line in output.stdout.lines() {
+        if let Some(value) = line.strip_prefix("@@") {
+            let value = value.trim();
+            contributor =
+                (!value.is_empty() && value.len() <= 4_096 && !value.chars().any(char::is_control))
+                    .then(|| value.to_owned());
+        } else if let Some(owner) = contributor.as_ref() {
+            let path = line.trim();
+            if selected.contains(path) {
+                let entry = counts.entry((path.to_owned(), owner.clone())).or_default();
+                *entry = entry.saturating_add(1);
+            }
+        }
+    }
+    let mut by_path = BTreeMap::<String, Vec<(String, u32)>>::new();
+    for ((path, owner), count) in counts {
+        by_path.entry(path).or_default().push((owner, count));
+    }
+    let mut records = Vec::new();
+    for (path, mut owners) in by_path {
+        owners.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+        for (owner, commits) in owners.into_iter().take(MAX_OWNERS_PER_PATH) {
+            records.push(LocalOwnership {
+                path: path.clone(),
+                contributor: owner,
+                commits,
+                evidence_revision: request.revisions.pull_request_head.clone(),
+            });
+        }
+    }
+    records.sort();
+    let omission = if truncated {
+        Some(format!(
+            "local ownership was bounded to {MAX_PATHS} changed paths"
+        ))
+    } else if records.is_empty() {
+        Some(
+            "bounded local Git history contained no ownership evidence for changed paths"
+                .to_owned(),
+        )
+    } else {
+        None
+    };
+    (records, omission)
 }

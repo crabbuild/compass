@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add bounded `compass.task-context/1` packets through `compass context` and
+  MCP `task_context`, with exact target resolution, digest-verified source,
+  provenance, linked reflection memory, deterministic omissions, work
+  accounting, and result digests. Add an independent
+  `compass.pr-readiness/1` envelope through `compass review --readiness` and
+  MCP `pr_readiness`, preserving the canonical PR report digest while
+  summarizing signature/body changes, impact, static test evidence, advisory
+  documentation drift, and bounded local ownership.
+
 - Make PHP extraction and type resolution fail closed for colliding exact or
   case-folded symbols instead of selecting a hash-iteration winner. Qualified
   duplicate types now prefer one unique same-file declaration and otherwise

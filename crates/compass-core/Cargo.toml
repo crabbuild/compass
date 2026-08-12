@@ -33,6 +33,8 @@ compass-history = { path = "../compass-history", version = "0.3.7" }
 compass-store = { path = "../compass-store", version = "0.3.7" }
 compass-output = { path = "../compass-output", version = "0.3.7" }
 compass-pr-intelligence = { path = "../compass-pr-intelligence", version = "0.3.7" }
+compass-prs = { path = "../compass-prs", version = "0.3.7" }
+compass-query = { path = "../compass-query", version = "0.3.7" }
 compass-reflect = { path = "../compass-reflect", version = "0.3.7" }
 compass-resolve = { path = "../compass-resolve", version = "0.3.7" }
 compass-semantic-diff = { path = "../compass-semantic-diff", version = "0.3.7" }

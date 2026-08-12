@@ -236,22 +236,11 @@ impl GraphStore {
         )
     }
 
-    fn review_root(&self, project_path: Option<&str>) -> Result<PathBuf, String> {
-        if let Some(project) = project_path {
-            return Ok(PathBuf::from(project));
-        }
-        let graph = if self.inner.default_graph.is_absolute() {
-            self.inner.default_graph.clone()
-        } else {
-            std::env::current_dir()
-                .map_err(|error| error.to_string())?
-                .join(&self.inner.default_graph)
-        };
-        Ok(graph
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or(graph.as_path())
-            .to_path_buf())
+    fn source_root(&self, project_path: Option<&str>) -> Result<PathBuf, String> {
+        project_path.map_or_else(
+            || std::env::current_dir().map_err(|error| error.to_string()),
+            |project| Ok(PathBuf::from(project)),
+        )
     }
 
     fn load(&self, project_path: Option<&str>) -> Result<Arc<GraphContext>, String> {
@@ -455,12 +444,38 @@ impl CompassMcp {
             }
             None => None,
         };
-        if name == "review_pull_request" {
+        if matches!(name, "review_pull_request" | "pr_readiness") {
             let root = self
                 .store
-                .review_root(project_path.as_deref())
+                .source_root(project_path.as_deref())
                 .map_err(InvocationError::Internal)?;
-            return invoke_review_tool(arguments, &root);
+            return invoke_review_tool(arguments, &root, name == "pr_readiness");
+        }
+        if name == "task_context" {
+            let graph_path = self
+                .store
+                .resolve(project_path.as_deref())
+                .map_err(InvocationError::Internal)?;
+            let root = self
+                .store
+                .source_root(project_path.as_deref())
+                .map_err(InvocationError::Internal)?;
+            let context = if compass_query::has_published_store(&graph_path) {
+                None
+            } else {
+                Some(
+                    self.store
+                        .load(project_path.as_deref())
+                        .map_err(InvocationError::Internal)?,
+                )
+            };
+            return invoke_task_context(
+                &self.store,
+                arguments,
+                &graph_path,
+                &root,
+                context.as_deref(),
+            );
         }
         if name == "query_graph" && natural_discovery_requested(arguments) {
             let graph_path = self
@@ -804,6 +819,31 @@ fn tool_specs() -> Vec<Tool> {
                 "fingerprint":{"type":"string","pattern":"^[0-9a-f]{64}$","description":"Optional extraction fingerprint required at both revisions"}
             },"required":["base","head"]}),
         ),
+        tool(
+            "pr_readiness",
+            "Compose the additive compass.pr-readiness/1 envelope for exact local revisions. It references the unchanged canonical PR report digest and uses only bounded local evidence.",
+            json!({"type":"object","additionalProperties":false,"properties":{
+                "base":{"type":"string","minLength":1,"maxLength":4096},
+                "head":{"type":"string","minLength":1,"maxLength":4096},
+                "fingerprint":{"type":"string","pattern":"^[0-9a-f]{64}$"}
+            },"required":["base","head"]}),
+        ),
+        tool(
+            "task_context",
+            "Compose a bounded, verified compass.task-context/1 packet after exact target resolution. Ambiguous fuzzy candidates are never selected.",
+            json!({"type":"object","additionalProperties":false,"properties":{
+                "intent":{"type":"string","enum":["explain","modify","debug","test"]},
+                "target":{"type":"string","minLength":1,"maxLength":16384},
+                "max_depth":{"type":"integer","minimum":1},
+                "max_nodes":{"type":"integer","minimum":1},
+                "max_edges":{"type":"integer","minimum":1},
+                "max_paths":{"type":"integer","minimum":1},
+                "max_candidates":{"type":"integer","minimum":1},
+                "max_source_bytes":{"type":"integer","minimum":1},
+                "max_response_bytes":{"type":"integer","minimum":1,"maximum":67108864},
+                "max_knowledge_items":{"type":"integer","minimum":1,"maximum":100}
+            },"required":["intent","target"]}),
+        ),
     ];
     for spec in &mut specs {
         Arc::make_mut(&mut spec.input_schema)
@@ -822,11 +862,17 @@ fn tool_specs() -> Vec<Tool> {
 fn invoke_review_tool(
     arguments: &Map<String, Value>,
     root: &Path,
+    readiness: bool,
 ) -> Result<ToolInvocation, InvocationError> {
     for name in arguments.keys() {
         if !matches!(name.as_str(), "base" | "head" | "fingerprint") {
+            let tool = if readiness {
+                "pr_readiness"
+            } else {
+                "review_pull_request"
+            };
             return Err(InvocationError::InvalidParams(format!(
-                "unknown review_pull_request argument {name:?}"
+                "unknown {tool} argument {name:?}"
             )));
         }
     }
@@ -896,16 +942,50 @@ fn invoke_review_tool(
         })?;
     let old_version = select_review_realization(&history, &old, fingerprint)?;
     let new_version = select_review_realization(&history, &new, fingerprint)?;
-    let report = compass_core::review_change_request_exact(
-        &repository,
-        &history,
-        &request,
-        &old_version,
-        &new_version,
-        compass_pr_intelligence::Completeness::LocalExact,
-    )
-    .map_err(|error| InvocationError::Internal(error.to_string()))?;
-    review_tool_invocation(report)
+    if readiness {
+        let bundle = compass_core::review_change_request_ready_exact(
+            &repository,
+            &history,
+            &request,
+            &old_version,
+            &new_version,
+            compass_pr_intelligence::Completeness::LocalExact,
+            &SystemRunner,
+        )
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+        readiness_tool_invocation(bundle.readiness)
+    } else {
+        let report = compass_core::review_change_request_exact(
+            &repository,
+            &history,
+            &request,
+            &old_version,
+            &new_version,
+            compass_pr_intelligence::Completeness::LocalExact,
+        )
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+        review_tool_invocation(report)
+    }
+}
+
+fn readiness_tool_invocation(
+    readiness: compass_pr_intelligence::PullRequestReadiness,
+) -> Result<ToolInvocation, InvocationError> {
+    let text = format!(
+        "PR readiness: {:?} tests, {:?} documentation drift, {} missing evidence records",
+        readiness.facets.tests.state,
+        readiness.facets.documentation_drift.state,
+        readiness.missing_evidence.len()
+    );
+    let digest = readiness.readiness_digest.clone();
+    Ok(ToolInvocation {
+        text,
+        structured_content: Some(transport_envelope_with_digest(
+            serde_json::to_value(readiness)
+                .map_err(|error| InvocationError::Internal(error.to_string()))?,
+            Some(&digest),
+        )?),
+    })
 }
 
 fn review_tool_invocation(
@@ -922,6 +1002,125 @@ fn review_tool_invocation(
         structured_content: Some(transport_envelope(
             serde_json::to_value(report)
                 .map_err(|error| InvocationError::Internal(error.to_string()))?,
+        )?),
+    })
+}
+
+fn invoke_task_context(
+    store: &GraphStore,
+    arguments: &Map<String, Value>,
+    graph_path: &Path,
+    root: &Path,
+    graph_context: Option<&GraphContext>,
+) -> Result<ToolInvocation, InvocationError> {
+    const ALLOWED: &[&str] = &[
+        "intent",
+        "target",
+        "max_depth",
+        "max_nodes",
+        "max_edges",
+        "max_paths",
+        "max_candidates",
+        "max_source_bytes",
+        "max_response_bytes",
+        "max_knowledge_items",
+    ];
+    if let Some(name) = arguments
+        .keys()
+        .find(|name| !ALLOWED.contains(&name.as_str()))
+    {
+        return Err(InvocationError::InvalidParams(format!(
+            "unknown task_context argument {name:?}"
+        )));
+    }
+    let intent = match string_argument(arguments, "intent")? {
+        "explain" => compass_core::TaskContextIntent::Explain,
+        "modify" => compass_core::TaskContextIntent::Modify,
+        "debug" => compass_core::TaskContextIntent::Debug,
+        "test" => compass_core::TaskContextIntent::Test,
+        value => {
+            return Err(InvocationError::InvalidParams(format!(
+                "intent must be explain, modify, debug, or test (found {value})"
+            )));
+        }
+    };
+    let target = string_argument(arguments, "target")?.to_owned();
+    if target.is_empty() || target.len() > 16_384 || target.chars().any(char::is_control) {
+        return Err(InvocationError::InvalidParams(
+            "target must contain 1 to 16384 non-control bytes".to_owned(),
+        ));
+    }
+    let mut query_limits = code_query::limits(arguments).map_err(InvocationError::InvalidParams)?;
+    let max_response_bytes = arguments
+        .get("max_response_bytes")
+        .and_then(Value::as_u64)
+        .unwrap_or(16 * 1024 * 1024);
+    query_limits.max_response_bytes = query_limits
+        .max_response_bytes
+        .min(compass_model::query_contract::CodeQueryLimits::default().max_response_bytes);
+    let max_knowledge_items = match arguments.get("max_knowledge_items") {
+        Some(value) => value
+            .as_u64()
+            .ok_or_else(|| {
+                InvocationError::InvalidParams(
+                    "max_knowledge_items must be a positive 32-bit integer".to_owned(),
+                )
+            })
+            .and_then(|value| {
+                u32::try_from(value).map_err(|_| {
+                    InvocationError::InvalidParams("max_knowledge_items exceeds u32".to_owned())
+                })
+            })?,
+        None => 20_u32,
+    };
+    let limits = compass_core::TaskContextLimits {
+        query: query_limits,
+        max_knowledge_items,
+        max_response_bytes,
+    };
+    if !limits.is_valid() {
+        return Err(InvocationError::InvalidParams(
+            "task-context limits are zero or exceed their ceilings".to_owned(),
+        ));
+    }
+    let engine = cached_typed_engine(store, graph_path, graph_context)?;
+    let engine = engine
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let result = compass_core::build_task_context(
+        &engine,
+        &compass_core::TaskContextRequest {
+            intent,
+            target,
+            repository_root: root.to_string_lossy().into_owned(),
+            limits,
+        },
+        &compass_reflect::load_memory_docs(
+            &graph_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join("memory"),
+        ),
+    )
+    .map_err(|error| match error {
+        compass_core::TaskContextError::InvalidRequest(message) => {
+            InvocationError::InvalidParams(message)
+        }
+        other => InvocationError::Internal(other.to_string()),
+    })?;
+    let text = format!(
+        "Task context: {:?}, {} sections{}",
+        result.target,
+        result.sections.len(),
+        if result.truncated { " (truncated)" } else { "" }
+    );
+    let digest = result.result_digest.clone();
+    Ok(ToolInvocation {
+        text,
+        structured_content: Some(transport_envelope_with_digest(
+            serde_json::to_value(result)
+                .map_err(|error| InvocationError::Internal(error.to_string()))?,
+            Some(&digest),
         )?),
     })
 }
@@ -1975,7 +2174,19 @@ mod tests {
         let graph = temp.path().join("graph.json");
         sample(&graph)?;
         let server = CompassMcp::new(graph);
-        assert_eq!(CompassMcp::tools().len(), 16);
+        let tools = CompassMcp::tools();
+        assert_eq!(tools.len(), 18);
+        for (name, required) in [
+            ("task_context", json!(["intent", "target"])),
+            ("pr_readiness", json!(["base", "head"])),
+        ] {
+            let spec = tools
+                .iter()
+                .find(|tool| tool.name == name)
+                .ok_or("new tool is missing")?;
+            assert_eq!(spec.input_schema["additionalProperties"], false);
+            assert_eq!(spec.input_schema["required"], required);
+        }
         assert_eq!(CompassMcp::resources().len(), 7);
         let text = server.invoke("graph_stats", Map::new());
         assert_eq!(
@@ -2000,14 +2211,14 @@ mod tests {
         arguments.insert("base".to_owned(), Value::String("main".to_owned()));
         arguments.insert("head".to_owned(), Value::String("feature".to_owned()));
         arguments.insert("fingerprint".to_owned(), json!(42));
-        let error = invoke_review_tool(&arguments, Path::new("."))
+        let error = invoke_review_tool(&arguments, Path::new("."), false)
             .err()
             .ok_or("invalid fingerprint unexpectedly reached repository access")?;
         assert!(error.to_string().contains("fingerprint must be a string"));
 
         arguments.remove("fingerprint");
         arguments.insert("unexpected".to_owned(), Value::Bool(true));
-        let error = invoke_review_tool(&arguments, Path::new("."))
+        let error = invoke_review_tool(&arguments, Path::new("."), false)
             .err()
             .ok_or("unknown argument unexpectedly reached repository access")?;
         assert!(

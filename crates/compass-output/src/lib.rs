@@ -57,8 +57,9 @@ pub use report::{
     render_orientation_json, render_orientation_markdown, validate_orientation_graph_identity,
 };
 pub use review::{
-    MAX_REVIEW_RENDER_BYTES, RenderedReview, render_review_json, render_review_markdown,
-    render_review_markdown_bounded, render_review_sarif, render_review_text,
+    MAX_REVIEW_RENDER_BYTES, RenderedReview, render_readiness_json, render_readiness_markdown,
+    render_review_json, render_review_markdown, render_review_markdown_bounded,
+    render_review_sarif, render_review_text,
 };
 pub use svg::{SvgOptions, spring_layout, svg_document, write_svg};
 pub use tree::{TreeNode, TreeOptions, build_tree, tree_html_document, write_tree_html};

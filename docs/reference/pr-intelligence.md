@@ -141,6 +141,25 @@ The structured response is bounded at 16 MiB. If the report does not fit, MCP
 returns an explicit transport-limit error; it never truncates findings or
 substitutes an empty report.
 
+## Additive readiness envelope
+
+`compass review --base REV --head REV --readiness --format json` emits
+`compass.pr-readiness/1`. It references, but does not modify or embed, the
+canonical report by `reportDigest` and repeats exact revision,
+graph/extractor/configuration, base/comparison extraction fingerprints, and
+evidence-manifest identities.
+
+Facets cover signature/body findings, direct and transitive impact, static
+related-test mappings and gaps, advisory documentation drift, and bounded
+local Git ownership. Missing test evidence is `unknown`, never “untested.”
+Documentation drift is advisory-only and includes exact `documents`
+relationships when the canonical finding witnesses contain them. Ownership
+uses bounded local history at the exact PR head and never contacts a forge.
+
+MCP `pr_readiness` accepts the same `base`, `head`, optional `fingerprint`, and
+optional `project_path` as `review_pull_request`. Its domain digest is also the
+transport `semanticResultDigest`.
+
 ## Projections
 
 - JSON is the canonical report and round-trips through the strict schema.

@@ -136,6 +136,12 @@ instead of publishing a partial semantic result.
 Natural discovery results additionally expose the same query-owned
 `semanticResultDigest` in this transport envelope, enabling direct/persistent
 result parity checks without requiring an agent client to invent a digest.
+Task-oriented results use strict `compass.task-context/1` and
+`compass.task-context-profile/1` contracts through `compass context` and MCP
+`task_context`. Exact identity resolution, digest-verified source, provenance,
+omissions, and domain truncation remain inside the result; fuzzy candidates
+are never selected. The domain digest excludes only its own field and the
+observational response-byte count.
 
 Structural operands use the same bounded exact, alias, term, and typo recall
 channels as search. A unique relationship-role seed may disambiguate a
@@ -305,6 +311,14 @@ and MCP contracts are unchanged; `compass diff` gains only the optional typed
 topology field above. Consumers that adopt the new
 report must reject unknown majors and validate `report_digest`. See the
 [PR Intelligence reference](docs/reference/pr-intelligence.md).
+
+`compass review --readiness` and MCP `pr_readiness` add the strict
+`compass.pr-readiness/1` envelope. It references the unchanged canonical report
+digest and exact revisions/profile/evidence identity. Documentation drift is
+advisory-only, both extraction fingerprints remain explicit, unavailable test
+evidence remains unknown, and bounded local ownership failure is an explicit
+omission. This addition does not change
+`compass.pr_intelligence.report/1`, its digest, or existing review projections.
 
 The `extract --code-only` profile excludes document extractors from structural
 node and edge publication while retaining the scanned file inventory and its
