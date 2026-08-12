@@ -2346,6 +2346,10 @@ fn append_community_directory(
             community.incident_edge_count,
             community.adjacent_community_count,
         ));
+        lines.push(format!(
+            "- Evidence label: {}",
+            markdown_value(&community.label, MARKDOWN_VALUE_MAX_CHARS)
+        ));
         if obsidian {
             lines.push(format!(
                 "- Obsidian note: {}",
