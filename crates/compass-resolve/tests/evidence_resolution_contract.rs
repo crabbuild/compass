@@ -376,6 +376,12 @@ fn materialization_preserves_the_decision_rule_and_occurrence_anchor() -> Result
     let mut edges = Vec::new();
     resolver.materialize(&mut nodes, &mut edges);
 
+    assert_resolved(
+        resolver.resolve(CANDIDATE_ID),
+        "decl:exact",
+        ResolutionRule::ExactSourceDeclaration,
+    );
+
     let edge = edges
         .iter()
         .find(|edge| edge.source == "node:caller" && edge.target == "node:exact")

@@ -5,6 +5,8 @@ use compass_languages::{Extraction, RawCall, is_language_builtin_global, make_id
 use compass_languages::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 
+use crate::ResolutionAdmission;
+
 /// Apply the deterministic language-specific member-call passes to merged facts.
 pub fn resolve_language_calls(extractions: &[Extraction], merged: &mut Extraction) {
     resolve_language_call_facts(collect_language_call_facts(extractions), merged);
@@ -47,7 +49,8 @@ pub(crate) fn collect_language_call_facts_owned(
 }
 
 pub(crate) fn resolve_language_call_facts(facts: LanguageCallFacts, merged: &mut Extraction) {
-    let (external_nodes, edges) = resolve_language_call_facts_additions(&facts, merged);
+    let (external_nodes, edges) =
+        resolve_language_call_facts_additions(&facts, merged, ResolutionAdmission::Max);
     merged.edges.extend(edges);
     merged.nodes.extend(external_nodes);
 }
@@ -55,6 +58,7 @@ pub(crate) fn resolve_language_call_facts(facts: LanguageCallFacts, merged: &mut
 pub(crate) fn resolve_language_call_facts_additions(
     facts: &LanguageCallFacts,
     merged: &Extraction,
+    admission: ResolutionAdmission,
 ) -> (Vec<NodeRecord>, Vec<EdgeRecord>) {
     if facts.calls.is_empty() {
         return (Vec::new(), Vec::new());
@@ -95,13 +99,18 @@ pub(crate) fn resolve_language_call_facts_additions(
             &facts.calls,
             &indexes,
             &facts.tables,
+            admission,
             &mut existing,
             &mut edges,
         );
         resolve_python_members(&facts.calls, &indexes, &mut existing, &mut edges);
         resolve_ruby_members(&facts.calls, &indexes, &mut existing, &mut edges);
         resolve_pascal_inherited(&facts.calls, &indexes, &mut existing, &mut edges);
-        retain_qualified_python_external_calls(&facts.calls, &mut existing, &mut edges)
+        if admission.admits_qualified_external() {
+            retain_qualified_python_external_calls(&facts.calls, &mut existing, &mut edges)
+        } else {
+            Vec::new()
+        }
     };
     (external_nodes, edges)
 }
@@ -354,6 +363,7 @@ fn resolve_typed_members(
     calls: &[RawCall],
     indexes: &Indexes,
     tables: &TypeTables,
+    admission: ResolutionAdmission,
     existing: &mut HashSet<(String, String, String)>,
     edges: &mut Vec<EdgeRecord>,
 ) {
@@ -440,6 +450,9 @@ fn resolve_typed_members(
         } else {
             ("INFERRED", 0.8)
         };
+        if confidence.0 == "INFERRED" && !admission.admits_source_backed_inference() {
+            continue;
+        }
         emit(
             call,
             target,

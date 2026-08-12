@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Make PHP extraction and type resolution fail closed for colliding exact or
+  case-folded symbols instead of selecting a hash-iteration winner. Qualified
+  duplicate types now prefer one unique same-file declaration and otherwise
+  remain unresolved. Advance extraction semantics to v9 so affected cached
+  facts rebuild automatically.
+
 - Add canonical `compass.pr_intelligence.report/1` review analysis over exact
   immutable target, PR-head, and synthetic-merge realizations, with stable
   `cmpprv1` findings, explicit completeness, a versioned advisory integer
@@ -45,19 +51,66 @@
   back to full Louvain for removals or oversized regions. Reduce immutable-store
   query startup reads, reject unsupported one-term fallback seeds for
   multi-concept discovery, and add a pinned Delta suite with independently
-  labeled positive and negative accuracy oracles.
+  labeled positive and negative accuracy oracles. Apply the established absent
+  composite-identifier no-answer rule before generic term and relationship
+  posting hydration, preserving exact ID/name ranking and ambiguity while
+  making proven no-answer queries constant-work.
 
 - Improve agent discovery accuracy and latency with deterministic identifier-
   subword postings, exact trusted-call relationship-term postings, bounded
   proof-complete caller recall, distinct supporting-callee evidence, fair
   candidate allocation, persistence-predicate precision within trusted
-  relation candidates, capacity-aware traversal, selected-subgraph edge-ref
-  filtering, bounded batched node and edge hydration, and one pinned immutable
-  store reader with a bounded decoded-object cache per request.
+  relation candidates, a compact source-backed operation-role term index,
+  subject-complete action ranking, capacity-aware traversal, selected-subgraph
+  edge-ref filtering, bounded batched node and edge hydration, and one pinned
+  immutable store reader with a bounded decoded-object cache per request.
+  Intersect multi-concept exact-term IDs before hydrating surviving records,
+  and make the normal discovery neighborhood a focused 64 nodes and 128 edges
+  while retaining 500/1,000 as explicit hard ceilings. Compare the full
+  specificity rank before labeling natural-query alternatives as ambiguous,
+  while preserving equal-rank and exact-name ambiguity. Admit explicit `path
+  from <symbol> to <symbol>` questions when both endpoints are exact symbol
+  references, without weakening generic multi-concept no-answer admission.
   Legacy store snapshots remain readable and report incomplete identifier or
-  relationship coverage until they are rebuilt. The immutable relationship
-  capability is v2, and the disposable SQLite query accelerator now uses
-  internal format v7 and rebuilds automatically.
+  relationship coverage until they are rebuilt; operation queries use the
+  existing bounded fallback until the compact role index is available. The
+  immutable relationship capability is v2, and the disposable SQLite query
+  accelerator now uses internal format v7 and rebuilds automatically.
+
+- Configure one-shot graph builds to use mimalloc without its process-wide
+  reserved arena while preserving explicit operator allocator settings. This
+  lets freed extraction and resolver pages return to the operating system
+  between build stages instead of accumulating in a 1 GiB arena.
+
+- Thread inference admission into universal, generic, and language-member
+  resolution so low builds do not materialize deferred receivers, heuristic
+  calls, or inferred external placeholders. Preserve exact test roles without
+  retaining discarded inferred test edges. After enforcing the original
+  evidence limits, compact uniquely paired duplicate `tests` candidates while
+  independently resolving their relation-sensitive rules. Published low nodes
+  and relationships remain equivalent to the prior authoritative post-filter;
+  graph-level coverage and diagnostics now describe admitted records instead
+  of inference that was constructed only to be discarded.
+
+- Make streaming portable-AST cache publication encode and atomically write
+  one entry at a time for every batch size. Large cold builds no longer retain
+  concurrent MessagePack buffers and compression workspaces under an API whose
+  documented purpose is bounded residency; the parallel encode-then-publish
+  API remains available where callers explicitly accept batch memory.
+
+- Store universal resolver declarations, scopes, bindings, and occurrences in
+  deterministic sorted fact tables instead of hash maps that duplicate every
+  fact's owned ID as a second key. Move relationship candidates into a private
+  interned table while validated per-file batches are drained, retaining
+  bounded per-candidate inflation during index construction and projection.
+  Compact validated occurrences into a private slot-backed string table and
+  retain only the role, spelling, qualifier, context, and exact range consumed
+  by resolution.
+  Release secondary resolver indexes after every build decision is fixed, and
+  consume the legacy clustering/report projection instead of retaining it
+  beside a complete typed graph. Borrowed lookup and explicit duplicate-ID
+  rejection preserve graph semantics while reducing the transient resolver
+  working set without changing the public evidence, cache, or graph schema.
 
 - Add a digest-pinned 500-question, AI-reviewed synthetic relevance matrix
   covering all query classes, execute it in CI with strict ranking, recall,

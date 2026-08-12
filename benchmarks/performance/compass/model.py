@@ -291,6 +291,9 @@ class AuditResult:
     audited_accepted_edges: int
     precision: AuditMetric
     recall: AuditMetric
+    f1: float | None
+    ambiguity: AuditMetric
+    source_coverage: dict[str, dict[str, int | float]]
     judgments: dict[str, int]
     critical_violations: dict[str, int]
     strata: dict[str, dict[str, dict[str, int | float | None]]]

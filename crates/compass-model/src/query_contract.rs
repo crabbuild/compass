@@ -16,6 +16,8 @@ pub const MAX_DISCOVERY_SEEDS: u32 = 3;
 pub const MAX_DISCOVERY_CANDIDATES: u32 = 256;
 pub const MAX_DISCOVERY_NODES: u32 = 500;
 pub const MAX_DISCOVERY_EDGES: u32 = 1_000;
+pub const DEFAULT_DISCOVERY_NODES: u32 = 64;
+pub const DEFAULT_DISCOVERY_EDGES: u32 = 128;
 pub const MAX_DISCOVERY_EXPANDED_RELATIONSHIPS: u64 = 10_000;
 /// Maximum indexed candidate records read across exact-ID, exact-name, alias,
 /// term, and fuzzy recall for one typed query. This bound is independent of
@@ -234,8 +236,8 @@ impl Default for DiscoveryLimits {
             max_depth: 2,
             max_seeds: 3,
             max_candidates: MAX_DISCOVERY_CANDIDATES,
-            max_nodes: MAX_DISCOVERY_NODES,
-            max_edges: MAX_DISCOVERY_EDGES,
+            max_nodes: DEFAULT_DISCOVERY_NODES,
+            max_edges: DEFAULT_DISCOVERY_EDGES,
             max_expanded_relationships: MAX_DISCOVERY_EXPANDED_RELATIONSHIPS,
             max_response_bytes: MAX_DISCOVERY_RESPONSE_BYTES,
             timeout_ms: MAX_DISCOVERY_TIMEOUT_MS,
@@ -680,8 +682,9 @@ mod discovery_contract_tests {
     use serde_json::json;
 
     use super::{
-        DISCOVERY_QUERY_SCHEMA_V1, DiscoveryDirection, DiscoveryLimits, DiscoveryQueryRequest,
-        DiscoveryTraversal, MAX_DISCOVERY_CANDIDATES, MAX_DISCOVERY_DEPTH, MAX_DISCOVERY_EDGES,
+        DEFAULT_DISCOVERY_EDGES, DEFAULT_DISCOVERY_NODES, DISCOVERY_QUERY_SCHEMA_V1,
+        DiscoveryDirection, DiscoveryLimits, DiscoveryQueryRequest, DiscoveryTraversal,
+        MAX_DISCOVERY_CANDIDATES, MAX_DISCOVERY_DEPTH, MAX_DISCOVERY_EDGES,
         MAX_DISCOVERY_EXPANDED_RELATIONSHIPS, MAX_DISCOVERY_NODES, MAX_DISCOVERY_RESPONSE_BYTES,
         MAX_DISCOVERY_SEEDS, MAX_DISCOVERY_TIMEOUT_MS,
     };
@@ -693,8 +696,10 @@ mod discovery_contract_tests {
         assert_eq!(limits.max_depth, 2);
         assert_eq!(limits.max_seeds, 3);
         assert_eq!(limits.max_candidates, MAX_DISCOVERY_CANDIDATES);
-        assert_eq!(limits.max_nodes, MAX_DISCOVERY_NODES);
-        assert_eq!(limits.max_edges, MAX_DISCOVERY_EDGES);
+        assert_eq!(limits.max_nodes, DEFAULT_DISCOVERY_NODES);
+        assert_eq!(limits.max_edges, DEFAULT_DISCOVERY_EDGES);
+        assert!(limits.max_nodes < MAX_DISCOVERY_NODES);
+        assert!(limits.max_edges < MAX_DISCOVERY_EDGES);
         assert_eq!(
             limits.max_expanded_relationships,
             MAX_DISCOVERY_EXPANDED_RELATIONSHIPS

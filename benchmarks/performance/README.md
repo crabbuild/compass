@@ -108,6 +108,11 @@ symbol later in a broad traversal does not count as selecting the right seed.
 Top-1, MRR@10, recall@10, completeness, and exact source-anchor counts are
 reported with the same labels used for Compass.
 
+The same suite is also used across inference levels. A result is not
+quality-eligible merely because it is faster: each level must pass the source-
+anchored positive, ambiguity, and no-answer judgments, and its run metadata
+must bind the exact graph/store artifact used for every sample.
+
 Run the focused low-inference comparison with:
 
 ```bash
@@ -296,10 +301,30 @@ provider, scanned/parsed counts, and inventory SHA-256 into its
 inventory from the pinned corpus; copying only selected records cannot conceal
 an unsupported, skipped, or stale source population.
 
+Audit results report precision, recall, F1, source-oracle ambiguity, and
+scanned/parsed/unsupported file coverage. Language and relation strata carry
+their own precision, recall, F1, and ambiguity measures. Incomplete source
+coverage remains visible in conformance output but fails the production
+qualification gate; unsupported files cannot disappear behind a smaller
+denominator.
+
 The checked-in `audits/universal-core.json` is only a small conformance fixture.
 Production qualification still requires the fixed sample, precision, Wilson
 lower-bound, capability, corpus, relation, diversity, and recall thresholds
 enforced by `compass/audit.py`.
+
+Audit occurrence multiplicity and relationship serialization separately:
+
+```bash
+python3 benchmarks/performance/harness.py multiplicity \
+  --graph /path/to/pinned/compass/graph.json
+```
+
+The bounded streaming report groups exact `(source, relation, target)` pairs,
+counts repeated source occurrences, rejects duplicate edge IDs or duplicate
+pair/site records, and reports serialized relationship bytes by relation.
+Repeated pairs are therefore not treated as removable duplication unless their
+source occurrence is also identical.
 
 ## Output and interruption policy
 

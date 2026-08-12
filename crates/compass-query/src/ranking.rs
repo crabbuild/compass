@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 
 use compass_model::code_graph::{NodeKind, NodeRecord};
 use compass_model::provenance::EvidenceConfidence;
+use compass_model::search::OPERATION_ROLE_TOKENS;
 
 use crate::recall::{CandidateSource, SearchCandidate};
 use crate::text::{canonical_query_token, search_tokens, strip_diacritics};
@@ -376,12 +377,37 @@ fn behavior_channel_rank(
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct OperationRootRank {
+    predicate_full_subject_aligned: bool,
     full_subject_match: bool,
+    direct_predicate_matches: usize,
     predicate_matches: usize,
     matched_subject_tokens: usize,
+    operation_role_aligned: bool,
     exact_terminal: bool,
     terminal_tokens: Reverse<usize>,
     builder: bool,
+}
+
+impl OperationRootRank {
+    /// Whether this role root has enough direct evidence to dominate a type
+    /// declaration that was not present in the compact role-only index.
+    pub(crate) const fn dominates_omitted_type(self) -> bool {
+        self.operation_role_aligned
+            && (self.predicate_full_subject_aligned
+                || (self.predicate_matches == 0
+                    && self.full_subject_match
+                    && self.matched_subject_tokens >= 2))
+    }
+
+    pub(crate) const fn is_operation_role_aligned(self) -> bool {
+        self.operation_role_aligned
+    }
+
+    /// Whether a complete type-declaration recall channel proves that this
+    /// candidate outranks every omitted non-type candidate.
+    pub(crate) const fn dominates_omitted_non_type(self) -> bool {
+        self.full_subject_match && (self.exact_terminal || self.matched_subject_tokens >= 2)
+    }
 }
 
 fn operation_root_rank(
@@ -408,7 +434,11 @@ fn operation_root_rank(
     let builder = normalize_symbol_name(&node.name).ends_with("builder");
     let subject_tokens = terminal_tokens
         .iter()
-        .filter(|term| !is_operation_role_token(term) && canonical_predicate_token(term).is_none())
+        .filter(|term| {
+            !is_operation_role_token(term)
+                && canonical_predicate_token(term).is_none()
+                && !matches!(term.as_str(), "for" | "from" | "into" | "of" | "to")
+        })
         .cloned()
         .collect::<BTreeSet<_>>();
     let predicate_tokens = terminal_tokens
@@ -419,6 +449,12 @@ fn operation_root_rank(
         .iter()
         .filter_map(|term| canonical_predicate_token(term))
         .collect::<BTreeSet<_>>();
+    let operation_role_aligned = terms
+        .iter()
+        .any(|term| is_explicit_operation_predicate(term))
+        && terminal_tokens
+            .iter()
+            .any(|term| is_operation_role_token(term));
     let matched_subject_tokens = subject_tokens
         .iter()
         .filter(|subject| {
@@ -435,15 +471,23 @@ fn operation_root_rank(
     let predicate_only_root = subject_tokens.is_empty() && direct_predicate_matches > 0;
     let full_subject_match = predicate_only_root
         || (!subject_tokens.is_empty() && matched_subject_tokens == subject_tokens.len());
+    let predicate_full_subject_aligned = predicate_matches > 0 && full_subject_match;
     let exact_terminal =
         predicate_only_root || (subject_tokens.len() == 1 && matched_subject_tokens == 1);
     let subject_root = matched_subject_tokens > 0
-        && (builder || full_subject_match || matched_subject_tokens >= 2);
+        && (terminal_tokens
+            .iter()
+            .any(|term| is_operation_role_token(term))
+            || full_subject_match
+            || matched_subject_tokens >= 2);
 
     (predicate_only_root || subject_root).then_some(OperationRootRank {
+        predicate_full_subject_aligned,
         full_subject_match,
+        direct_predicate_matches,
         predicate_matches,
         matched_subject_tokens,
+        operation_role_aligned,
         exact_terminal,
         terminal_tokens: Reverse(terminal_tokens.len()),
         builder,
@@ -470,10 +514,7 @@ fn query_initialisms(query: &str) -> BTreeSet<String> {
 }
 
 fn is_operation_role_token(token: &str) -> bool {
-    matches!(
-        token,
-        "builder" | "factory" | "handler" | "manager" | "provider" | "service"
-    )
+    OPERATION_ROLE_TOKENS.contains(&token)
 }
 
 #[derive(Debug)]
@@ -688,11 +729,46 @@ pub(crate) fn canonical_predicate_token(token: &str) -> Option<&'static str> {
         "represent" => Some("represent"),
         "resolve" => Some("resolve"),
         "restore" => Some("restore"),
-        "run" | "schedule" => Some("execute"),
+        "execute" | "run" | "schedule" => Some("execute"),
         "update" => Some("update"),
         "vacuum" => Some("vacuum"),
         _ => None,
     }
+}
+
+pub(crate) fn is_explicit_operation_predicate(token: &str) -> bool {
+    matches!(
+        token,
+        "add"
+            | "change"
+            | "check"
+            | "compact"
+            | "configure"
+            | "convert"
+            | "create"
+            | "delete"
+            | "dispatch"
+            | "execute"
+            | "invoke"
+            | "load"
+            | "merge"
+            | "open"
+            | "optimize"
+            | "persist"
+            | "process"
+            | "recognize"
+            | "refresh"
+            | "resolve"
+            | "restore"
+            | "run"
+            | "save"
+            | "schedule"
+            | "set"
+            | "update"
+            | "vacuum"
+            | "write"
+            | "written"
+    )
 }
 
 fn symbol_owner(qualified_name: &str) -> Option<String> {
@@ -1231,6 +1307,50 @@ mod tests {
     }
 
     #[test]
+    fn direct_predicate_root_beats_a_subject_handler_with_a_noun_synonym() {
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:storage-handler",
+                    "DeltaStorageHandler",
+                    NodeKind::Class,
+                    "python/fs_handler.py",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["delta".to_owned(), "write".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:write-builder",
+                    "WriteBuilder",
+                    NodeKind::Struct,
+                    "src/operations/write.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["write".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how does delta write data to a table",
+            &[
+                "data".to_owned(),
+                "delta".to_owned(),
+                "table".to_owned(),
+                "write".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:write-builder");
+    }
+
+    #[test]
     fn source_less_builder_does_not_claim_operation_root_evidence() {
         let candidates = vec![SearchCandidate {
             node: node(
@@ -1492,6 +1612,145 @@ mod tests {
         );
 
         assert_eq!(ranked[0].node_id, "n:set-properties");
+    }
+
+    #[test]
+    fn complete_transaction_subject_beats_an_unrelated_configuration_root() {
+        let mut commit_properties = node(
+            "n:commit-properties",
+            "CommitProperties",
+            NodeKind::Struct,
+            "src/transaction.rs",
+            false,
+        );
+        commit_properties.qualified_name = "transaction::CommitProperties".to_owned();
+        let candidates = vec![
+            SearchCandidate {
+                node: commit_properties,
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from([
+                    "commit".to_owned(),
+                    "properties".to_owned(),
+                    "transaction".to_owned(),
+                ]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:set-properties",
+                    "SetTablePropertiesBuilder",
+                    NodeKind::Struct,
+                    "src/set_properties.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["configure".to_owned(), "properties".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "where are transaction commit properties configured",
+            &[
+                "commit".to_owned(),
+                "configure".to_owned(),
+                "properties".to_owned(),
+                "transaction".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:commit-properties");
+    }
+
+    #[test]
+    fn predicate_and_subject_alignment_beats_a_generic_full_subject_role() {
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:generic",
+                    "DeltaTableFactory",
+                    NodeKind::Struct,
+                    "src/table.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["delta".to_owned(), "table".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:convert",
+                    "ConvertToDeltaBuilder",
+                    NodeKind::Struct,
+                    "src/convert.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["convert".to_owned(), "delta".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how are files converted into a delta table",
+            &[
+                "convert".to_owned(),
+                "delta".to_owned(),
+                "file".to_owned(),
+                "table".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:convert");
+    }
+
+    #[test]
+    fn storage_noun_does_not_promote_a_factory_over_the_abstraction() {
+        let candidates = vec![
+            SearchCandidate {
+                node: node(
+                    "n:store",
+                    "LogStore",
+                    NodeKind::Trait,
+                    "src/logstore.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["log".to_owned(), "storage".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:factory",
+                    "LogStoreFactory",
+                    NodeKind::Trait,
+                    "src/logstore.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["log".to_owned(), "storage".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how are transaction log storage backends abstracted",
+            &[
+                "abstract".to_owned(),
+                "backend".to_owned(),
+                "log".to_owned(),
+                "storage".to_owned(),
+                "transaction".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:store");
     }
 
     #[test]

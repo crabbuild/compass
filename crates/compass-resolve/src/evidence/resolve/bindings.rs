@@ -38,7 +38,7 @@ impl ResolutionDb<'_> {
         }
         let qualified_occurrence = self
             .occurrence(candidate)
-            .is_some_and(|occurrence| occurrence.qualifier.is_some());
+            .is_some_and(|occurrence| occurrence.qualifier().is_some());
         if !qualified_occurrence
             && let Some(target) = binding.target_declaration_id.as_ref()
             && self.declaration_allowed(target, candidate)

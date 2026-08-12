@@ -46,6 +46,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(sum(query.allow_no_match for query in queries), 5)
         self.assertTrue(all(query.judgment_source == "manual_source_review" for query in queries))
         self.assertTrue(all(query.judgment_reason for query in queries))
+        commit_properties = queries[3]
+        self.assertTrue(commit_properties.expected_ambiguous)
+        self.assertEqual(
+            [seed.qualified_name for seed in commit_properties.acceptable_seeds],
+            ["python.deltalake.transaction.CommitProperties"],
+        )
 
     def test_unknown_field_is_rejected(self) -> None:
         raw = (ROOT / "repositories.toml").read_text(encoding="utf-8")

@@ -35,6 +35,8 @@ pub const GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1: &str = "compass.store.graph-selecto
 pub const GRAPH_SNAPSHOT_CANONICAL_ENCODING_V1: &str = "canonical-json-v1";
 pub const DISCOVERY_SCOPE_INDEX_CAPABILITY_V1: &str = "compass.discovery-scope-index/1";
 pub const IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1: &str = "__compass_cap_identifier_subwords_v1__";
+pub const OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1: &str = "__compass_cap_operation_role_terms_v1__";
+pub const DECLARATION_TERM_INDEX_CAPABILITY_V1: &str = "__compass_cap_declaration_terms_v1__";
 pub const RELATIONSHIP_TERM_INDEX_CAPABILITY_V2: &str = "__compass_cap_relationship_terms_v2__";
 pub const GRAPH_SNAPSHOT_OBJECT_PARTITION: &str = "graph-snapshot/objects";
 pub const GRAPH_SNAPSHOT_CATALOG_PARTITION: &str = "graph-snapshot/catalog";
@@ -2143,6 +2145,152 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         Ok(posting.term == capability && posting.node_ids.is_empty())
     }
 
+    /// Whether this snapshot includes exact term postings restricted to
+    /// source-backed operation-role declarations.
+    pub fn supports_operation_role_terms(&self) -> Result<bool, SnapshotError> {
+        let capability = OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1;
+        let key = encode_graph_index_key(
+            IndexKind::Terms,
+            &[b"operation_role", capability.as_bytes(), b"00000000"],
+        )?;
+        let Some(value) = self.lookup(IndexKind::Terms, &key)? else {
+            return Ok(false);
+        };
+        let posting = decode_json::<TermPostingChunk>(&value)?;
+        Ok(posting.term == capability && posting.node_ids.is_empty())
+    }
+
+    /// Whether this snapshot includes exact identifier terms restricted to
+    /// source-backed type declarations.
+    pub fn supports_declaration_terms(&self) -> Result<bool, SnapshotError> {
+        let capability = DECLARATION_TERM_INDEX_CAPABILITY_V1;
+        let key = encode_graph_index_key(
+            IndexKind::Terms,
+            &[b"declaration", capability.as_bytes(), b"00000000"],
+        )?;
+        let Some(value) = self.lookup(IndexKind::Terms, &key)? else {
+            return Ok(false);
+        };
+        let posting = decode_json::<TermPostingChunk>(&value)?;
+        Ok(posting.term == capability && posting.node_ids.is_empty())
+    }
+
+    /// Return the bounded union of operation-role declarations matching any
+    /// exact normalized term, together with exact posting work.
+    pub fn operation_role_nodes_for_terms_bounded_work(
+        &self,
+        terms: &[String],
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<NodeRecord>, bool, TermPostingWork), SnapshotError> {
+        let normalized_terms = terms
+            .iter()
+            .map(|term| normalize_search_term(term))
+            .filter(|term| !term.is_empty())
+            .collect::<BTreeSet<_>>();
+        if normalized_terms.is_empty() {
+            return Ok((Vec::new(), false, TermPostingWork::default()));
+        }
+        let total_chunk_limit = limits.max_items / GRAPH_TERM_POSTING_CHUNK_ITEMS;
+        if total_chunk_limit < normalized_terms.len() {
+            return Ok((Vec::new(), true, TermPostingWork::default()));
+        }
+        let per_term_chunk_limit = total_chunk_limit / normalized_terms.len();
+        let mut ids = BTreeSet::new();
+        let mut truncated = false;
+        let mut work = TermPostingWork::default();
+        for term in normalized_terms {
+            let prefix =
+                encode_graph_index_key(IndexKind::Terms, &[b"operation_role", term.as_bytes()])?;
+            let (values, posting_truncated) = self.scan_values_bounded(
+                IndexKind::Terms,
+                Some(&prefix),
+                SnapshotReadLimits {
+                    max_items: per_term_chunk_limit,
+                    ..limits
+                },
+            )?;
+            truncated |= posting_truncated;
+            for value in values {
+                let posting = decode_json::<TermPostingChunk>(&value)?;
+                work.chunks_decoded = work.chunks_decoded.saturating_add(1);
+                work.node_ids_decoded = work
+                    .node_ids_decoded
+                    .saturating_add(u64::try_from(posting.node_ids.len()).unwrap_or(u64::MAX));
+                if normalize_search_term(&posting.term) != term {
+                    continue;
+                }
+                for node_id in posting.node_ids {
+                    ids.insert(node_id);
+                    if ids.len() > limits.max_items {
+                        ids.pop_last();
+                        truncated = true;
+                    }
+                }
+            }
+        }
+        let nodes =
+            self.get_nodes_by_ids_bounded_work(&ids, point_lookup_batch_limits(ids.len()))?;
+        Ok((nodes, truncated, work))
+    }
+
+    /// Return the bounded union of source-backed type declarations matching
+    /// any exact normalized identifier term, together with exact posting work.
+    pub fn declaration_nodes_for_terms_bounded_work(
+        &self,
+        terms: &[String],
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<NodeRecord>, bool, TermPostingWork), SnapshotError> {
+        let normalized_terms = terms
+            .iter()
+            .map(|term| normalize_search_term(term))
+            .filter(|term| !term.is_empty())
+            .collect::<BTreeSet<_>>();
+        if normalized_terms.is_empty() {
+            return Ok((Vec::new(), false, TermPostingWork::default()));
+        }
+        let total_chunk_limit = limits.max_items / GRAPH_TERM_POSTING_CHUNK_ITEMS;
+        if total_chunk_limit < normalized_terms.len() {
+            return Ok((Vec::new(), true, TermPostingWork::default()));
+        }
+        let per_term_chunk_limit = total_chunk_limit / normalized_terms.len();
+        let mut ids = BTreeSet::new();
+        let mut truncated = false;
+        let mut work = TermPostingWork::default();
+        for term in normalized_terms {
+            let prefix =
+                encode_graph_index_key(IndexKind::Terms, &[b"declaration", term.as_bytes()])?;
+            let (values, posting_truncated) = self.scan_values_bounded(
+                IndexKind::Terms,
+                Some(&prefix),
+                SnapshotReadLimits {
+                    max_items: per_term_chunk_limit,
+                    ..limits
+                },
+            )?;
+            truncated |= posting_truncated;
+            for value in values {
+                let posting = decode_json::<TermPostingChunk>(&value)?;
+                work.chunks_decoded = work.chunks_decoded.saturating_add(1);
+                work.node_ids_decoded = work
+                    .node_ids_decoded
+                    .saturating_add(u64::try_from(posting.node_ids.len()).unwrap_or(u64::MAX));
+                if normalize_search_term(&posting.term) != term {
+                    continue;
+                }
+                for node_id in posting.node_ids {
+                    ids.insert(node_id);
+                    if ids.len() > limits.max_items {
+                        ids.pop_last();
+                        truncated = true;
+                    }
+                }
+            }
+        }
+        let nodes =
+            self.get_nodes_by_ids_bounded_work(&ids, point_lookup_batch_limits(ids.len()))?;
+        Ok((nodes, truncated, work))
+    }
+
     /// Whether this snapshot includes exact direct-caller concept postings.
     pub fn supports_relationship_terms(&self) -> Result<bool, SnapshotError> {
         let capability = RELATIONSHIP_TERM_INDEX_CAPABILITY_V2;
@@ -2305,14 +2453,15 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         ))
     }
 
-    /// Return candidates for one exact normalized term posting. Discovery uses
-    /// exact token matches before the broader bounded prefix channel so dense
-    /// shared prefixes cannot hide a present identifier token.
-    pub fn nodes_for_exact_term_bounded_work(
+    /// Return node IDs for one exact normalized term posting without hydrating
+    /// node records. Multi-term discovery intersects these compact IDs first
+    /// so common postings do not force full-record reads for candidates that a
+    /// later term will reject.
+    pub fn node_ids_for_exact_term_bounded_work(
         &self,
         term: &str,
         limits: SnapshotReadLimits,
-    ) -> Result<(Vec<NodeRecord>, bool, TermPostingWork), SnapshotError> {
+    ) -> Result<(Vec<String>, bool, TermPostingWork), SnapshotError> {
         let normalized = normalize_search_term(term);
         if normalized.is_empty() {
             return Ok((Vec::new(), false, TermPostingWork::default()));
@@ -2360,6 +2509,19 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 }
             }
         }
+        Ok((ids.into_iter().collect(), truncated, work))
+    }
+
+    /// Return candidates for one exact normalized term posting. Discovery uses
+    /// exact token matches before the broader bounded prefix channel so dense
+    /// shared prefixes cannot hide a present identifier token.
+    pub fn nodes_for_exact_term_bounded_work(
+        &self,
+        term: &str,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<NodeRecord>, bool, TermPostingWork), SnapshotError> {
+        let (ids, truncated, work) = self.node_ids_for_exact_term_bounded_work(term, limits)?;
+        let ids = ids.into_iter().collect::<BTreeSet<_>>();
         let nodes =
             self.get_nodes_by_ids_bounded_work(&ids, point_lookup_batch_limits(ids.len()))?;
         Ok((nodes, truncated, work))
@@ -3022,6 +3184,74 @@ fn build_index(
                     node_ids: Vec::new(),
                 },
             )?;
+            for (term, node_ids) in operation_role_term_postings(graph) {
+                for (chunk_index, chunk) in
+                    node_ids.chunks(GRAPH_TERM_POSTING_CHUNK_ITEMS).enumerate()
+                {
+                    let chunk_index = format!("{chunk_index:08}");
+                    insert_json(
+                        &mut entries,
+                        encode_graph_index_key(
+                            IndexKind::Terms,
+                            &[b"operation_role", term.as_bytes(), chunk_index.as_bytes()],
+                        )?,
+                        &TermPostingChunk {
+                            term: term.clone(),
+                            node_ids: chunk.to_vec(),
+                        },
+                    )?;
+                }
+            }
+            let operation_capability = OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1;
+            insert_json(
+                &mut entries,
+                encode_graph_index_key(
+                    IndexKind::Terms,
+                    &[
+                        b"operation_role",
+                        operation_capability.as_bytes(),
+                        b"00000000",
+                    ],
+                )?,
+                &TermPostingChunk {
+                    term: operation_capability.to_owned(),
+                    node_ids: Vec::new(),
+                },
+            )?;
+            for (term, node_ids) in declaration_term_postings(graph, term_postings) {
+                for (chunk_index, chunk) in
+                    node_ids.chunks(GRAPH_TERM_POSTING_CHUNK_ITEMS).enumerate()
+                {
+                    let chunk_index = format!("{chunk_index:08}");
+                    insert_json(
+                        &mut entries,
+                        encode_graph_index_key(
+                            IndexKind::Terms,
+                            &[b"declaration", term.as_bytes(), chunk_index.as_bytes()],
+                        )?,
+                        &TermPostingChunk {
+                            term: term.clone(),
+                            node_ids: chunk.to_vec(),
+                        },
+                    )?;
+                }
+            }
+            let declaration_capability = DECLARATION_TERM_INDEX_CAPABILITY_V1;
+            insert_json(
+                &mut entries,
+                encode_graph_index_key(
+                    IndexKind::Terms,
+                    &[
+                        b"declaration",
+                        declaration_capability.as_bytes(),
+                        b"00000000",
+                    ],
+                )?,
+                &TermPostingChunk {
+                    term: declaration_capability.to_owned(),
+                    node_ids: Vec::new(),
+                },
+            )?;
             let relationship_postings =
                 compass_model::search::direct_call_source_identifier_postings(graph);
             for (term, source_ids) in &relationship_postings {
@@ -3185,6 +3415,71 @@ fn build_index(
         IndexKind::Diagnostics => {}
     }
     Ok(entries)
+}
+
+fn is_operation_role_declaration(node: &NodeRecord) -> bool {
+    is_source_backed_type_declaration(node)
+        && compass_model::search::identifier_search_terms(&node.name)
+            .iter()
+            .any(|term| compass_model::search::OPERATION_ROLE_TOKENS.contains(&term.as_str()))
+}
+
+fn is_source_backed_type_declaration(node: &NodeRecord) -> bool {
+    matches!(
+        node.kind,
+        NodeKind::Class
+            | NodeKind::Struct
+            | NodeKind::Interface
+            | NodeKind::Trait
+            | NodeKind::Protocol
+            | NodeKind::Enum
+            | NodeKind::TypeAlias
+    ) && node.source_file().is_some_and(|file| !file.is_empty())
+}
+
+fn operation_role_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
+    let mut postings = BTreeMap::<String, Vec<String>>::new();
+    for node in graph
+        .nodes
+        .iter()
+        .filter(|node| is_operation_role_declaration(node))
+    {
+        let mut terms = compass_model::search::identifier_search_terms(&node.name);
+        terms.extend(compass_model::search::identifier_search_terms(
+            &node.qualified_name,
+        ));
+        for term in terms {
+            postings.entry(term).or_default().push(node.id.clone());
+        }
+    }
+    for node_ids in postings.values_mut() {
+        node_ids.sort();
+        node_ids.dedup();
+    }
+    postings
+}
+
+fn declaration_term_postings(
+    graph: &GraphDocument,
+    term_postings: &BTreeMap<String, Vec<String>>,
+) -> BTreeMap<String, Vec<String>> {
+    let declaration_ids = graph
+        .nodes
+        .iter()
+        .filter(|node| is_source_backed_type_declaration(node))
+        .map(|node| node.id.as_str())
+        .collect::<BTreeSet<_>>();
+    term_postings
+        .iter()
+        .filter_map(|(term, node_ids)| {
+            let declarations = node_ids
+                .iter()
+                .filter(|node_id| declaration_ids.contains(node_id.as_str()))
+                .cloned()
+                .collect::<Vec<_>>();
+            (!declarations.is_empty()).then(|| (term.clone(), declarations))
+        })
+        .collect()
 }
 
 fn validate_file_node_delta(
@@ -4763,6 +5058,14 @@ mod tests {
                 b"00000000",
             ],
         )?);
+        term_entries.remove(&encode_graph_index_key(
+            IndexKind::Terms,
+            &[
+                b"declaration",
+                DECLARATION_TERM_INDEX_CAPABILITY_V1.as_bytes(),
+                b"00000000",
+            ],
+        )?);
         let term_entry_count = term_entries.len() as u64;
         let mut writer = ObjectWriter::new(&store)?;
         let term_digest = build_index_tree(&mut writer, IndexKind::Terms, term_entries)?;
@@ -4782,6 +5085,7 @@ mod tests {
             .ok_or_else(|| SnapshotError::Corrupt("active snapshot is missing".to_owned()))?;
         assert!(reader.nodes(SnapshotReadLimits::default())?.is_empty());
         assert!(reader.supports_identifier_subwords()?);
+        assert!(!reader.supports_declaration_terms()?);
         assert!(!reader.supports_relationship_terms()?);
         assert_eq!(
             reader
@@ -4792,6 +5096,112 @@ mod tests {
                 .0,
             Vec::<String>::new()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn operation_role_term_index_is_complete_and_excludes_data_types() -> Result<(), SnapshotError>
+    {
+        let mut graph = GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "operation-role-test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "tree".to_owned(),
+            configuration_digest: "config".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        });
+        graph.graph.files.push(FileRecord {
+            id: compass_model::identity::file_id("src/table.rs"),
+            path: "src/table.rs".to_owned(),
+            language: Some("rust".to_owned()),
+            content_digest: "sha256:test".to_owned(),
+            byte_size: 1,
+            generated: false,
+            extraction_status: ExtractionStatus::Extracted,
+            extractor_versions: Vec::new(),
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+        });
+        let node = |id: &str, name: &str| NodeRecord {
+            id: id.to_owned(),
+            kind: NodeKind::Struct,
+            roles: Vec::new(),
+            name: name.to_owned(),
+            qualified_name: format!("crate::{name}"),
+            language: Some("rust".to_owned()),
+            framework: None,
+            source: Some(SourceAnchor {
+                file: "src/table.rs".to_owned(),
+                start_byte: 0,
+                end_byte: 1,
+                start_line: 1,
+                start_column: 0,
+                end_line: 1,
+                end_column: 1,
+            }),
+            details: None,
+            evidence: vec![Provenance {
+                origin: EvidenceOrigin::Ast,
+                extractor: "test".to_owned(),
+                confidence: EvidenceConfidence::Exact,
+                rule: None,
+                anchors: vec![SourceAnchor {
+                    file: "src/table.rs".to_owned(),
+                    start_byte: 0,
+                    end_byte: 1,
+                    start_line: 1,
+                    start_column: 0,
+                    end_line: 1,
+                    end_column: 1,
+                }],
+                wiring_site: None,
+                score: None,
+                candidates: Vec::new(),
+            }],
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+            community: None,
+        };
+        graph.nodes = vec![
+            node("builder", "DeltaTableBuilder"),
+            node("table", "DeltaTable"),
+        ];
+        let store = compass_store::MemoryStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let prepared = builder.prepare(&store, &graph)?;
+        builder.activate(&store, &prepared)?;
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("active snapshot is missing".to_owned()))?;
+
+        assert!(reader.supports_operation_role_terms()?);
+        let (nodes, truncated, work) = reader.operation_role_nodes_for_terms_bounded_work(
+            &["delta".to_owned(), "open".to_owned()],
+            SnapshotReadLimits::default(),
+        )?;
+        assert!(!truncated);
+        assert_eq!(
+            nodes
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            ["builder"]
+        );
+        assert_eq!(work.node_ids_decoded, 1);
+
+        assert!(reader.supports_declaration_terms()?);
+        let (declarations, truncated, work) = reader.declaration_nodes_for_terms_bounded_work(
+            &["delta".to_owned(), "table".to_owned()],
+            SnapshotReadLimits::default(),
+        )?;
+        assert!(!truncated);
+        assert_eq!(
+            declarations
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            ["builder", "table"]
+        );
+        assert_eq!(work.node_ids_decoded, 4);
         Ok(())
     }
 

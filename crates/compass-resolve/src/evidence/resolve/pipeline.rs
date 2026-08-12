@@ -3,6 +3,7 @@
 use super::super::*;
 use super::context::{CandidateContext, ResolutionDb};
 use super::outcome::StageOutcome;
+use crate::ResolutionAdmission;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ResolutionStage {
@@ -39,7 +40,11 @@ impl ResolutionStage {
 
 impl UniversalResolutionIndex {
     pub fn resolve(&self, candidate_id: &str) -> ResolutionDecision {
-        ResolutionDb::new(self).resolve(candidate_id)
+        let indexes = self
+            .indexes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        ResolutionDb::new(self, &indexes).resolve(candidate_id)
     }
 }
 
@@ -48,8 +53,19 @@ impl ResolutionDb<'_> {
         let Some(candidate) = self.facts.candidates.get(candidate_id) else {
             return ResolutionDecision::Unresolved;
         };
+        self.resolve_candidate(&candidate, ResolutionAdmission::Max)
+    }
+
+    pub(in crate::evidence) fn resolve_candidate(
+        &self,
+        candidate: &RelationshipCandidate,
+        admission: ResolutionAdmission,
+    ) -> ResolutionDecision {
         let context = CandidateContext::new(self, candidate);
         for stage in ResolutionStage::ORDER {
+            if !stage.is_admitted(admission, candidate) {
+                continue;
+            }
             if let StageOutcome::Decided(decision) = self.run_stage(stage, &context) {
                 return decision;
             }
@@ -299,9 +315,28 @@ impl ResolutionDb<'_> {
     }
 }
 
+impl ResolutionStage {
+    fn is_admitted(
+        self,
+        admission: ResolutionAdmission,
+        candidate: &RelationshipCandidate,
+    ) -> bool {
+        match self {
+            Self::QualifiedExternal => {
+                admission.admits_qualified_external() || candidate.binding_id.is_some()
+            }
+            Self::DeferredReceiver => admission.admits_deferred_receiver(),
+            _ => true,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use compass_languages::{CandidateRelation, RelationshipCandidate, ResolutionConstraint};
+
     use super::ResolutionStage;
+    use crate::ResolutionAdmission;
 
     #[test]
     fn stage_order_is_the_resolution_precedence_contract() {
@@ -328,5 +363,41 @@ mod tests {
                 DeferredReceiver,
             ]
         ));
+    }
+
+    #[test]
+    fn inference_only_stages_are_never_entered_below_their_admission_level() {
+        let mut candidate = RelationshipCandidate {
+            id: "candidate".to_owned(),
+            language: "python".to_owned(),
+            relation: CandidateRelation::Calls,
+            source_declaration_id: "caller".to_owned(),
+            occurrence_id: Some("occurrence".to_owned()),
+            binding_id: None,
+            target_spelling: "execute".to_owned(),
+            constraints: ResolutionConstraint::default(),
+        };
+
+        assert!(
+            !ResolutionStage::QualifiedExternal.is_admitted(ResolutionAdmission::Low, &candidate)
+        );
+        assert!(
+            !ResolutionStage::QualifiedExternal
+                .is_admitted(ResolutionAdmission::Medium, &candidate)
+        );
+        assert!(
+            ResolutionStage::QualifiedExternal.is_admitted(ResolutionAdmission::High, &candidate)
+        );
+        assert!(
+            !ResolutionStage::DeferredReceiver.is_admitted(ResolutionAdmission::High, &candidate)
+        );
+        assert!(
+            ResolutionStage::DeferredReceiver.is_admitted(ResolutionAdmission::Max, &candidate)
+        );
+
+        candidate.binding_id = Some("explicit-import".to_owned());
+        assert!(
+            ResolutionStage::QualifiedExternal.is_admitted(ResolutionAdmission::Low, &candidate)
+        );
     }
 }

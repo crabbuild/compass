@@ -4,6 +4,7 @@ use super::super::*;
 use super::{
     HierarchyIndexes, MemberIndexes, NameIndexes, RustIndexes, TypeScriptIndexes, WildcardIndexes,
 };
+use crate::ResolutionAdmission;
 
 #[derive(Clone, Copy, Debug, Default)]
 struct LanguagePresence {
@@ -43,6 +44,7 @@ struct IndexBuilder<'a> {
     root: &'a Path,
     limits: UniversalResolutionLimits,
     validate_batches: bool,
+    admission: ResolutionAdmission,
 }
 
 impl<'a> IndexBuilder<'a> {
@@ -53,6 +55,7 @@ impl<'a> IndexBuilder<'a> {
         root: &'a Path,
         limits: UniversalResolutionLimits,
         validate_batches: bool,
+        admission: ResolutionAdmission,
     ) -> Self {
         Self {
             batches,
@@ -61,6 +64,7 @@ impl<'a> IndexBuilder<'a> {
             root,
             limits,
             validate_batches,
+            admission,
         }
     }
 }
@@ -88,7 +92,16 @@ impl UniversalResolutionIndex {
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
-        IndexBuilder::new(batches, inventory_nodes, &[], root, limits, true).build()
+        IndexBuilder::new(
+            batches,
+            inventory_nodes,
+            &[],
+            root,
+            limits,
+            true,
+            ResolutionAdmission::Max,
+        )
+        .build()
     }
 
     pub(crate) fn new_with_project_inventory_owned(
@@ -98,29 +111,49 @@ impl UniversalResolutionIndex {
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
-        IndexBuilder::new(batches, inventory_nodes, project_edges, root, limits, true).build()
+        IndexBuilder::new(
+            batches,
+            inventory_nodes,
+            project_edges,
+            root,
+            limits,
+            true,
+            ResolutionAdmission::Max,
+        )
+        .build()
     }
 
-    pub(crate) fn new_with_prevalidated_project_inventory_owned(
+    pub(crate) fn new_with_prevalidated_project_inventory_owned_at_inference(
         batches: Vec<SemanticEvidenceBatch>,
         inventory_nodes: &[NodeRecord],
         project_edges: &[EdgeRecord],
         root: &Path,
         limits: UniversalResolutionLimits,
+        admission: ResolutionAdmission,
     ) -> Result<Self, String> {
-        IndexBuilder::new(batches, inventory_nodes, project_edges, root, limits, false).build()
+        IndexBuilder::new(
+            batches,
+            inventory_nodes,
+            project_edges,
+            root,
+            limits,
+            false,
+            admission,
+        )
+        .build()
     }
 }
 
 impl IndexBuilder<'_> {
     fn build(self) -> Result<UniversalResolutionIndex, String> {
         let Self {
-            batches,
+            mut batches,
             inventory_nodes,
             project_edges,
             root,
             limits,
             validate_batches,
+            admission,
         } = self;
         let languages = LanguagePresence::detect(&batches, inventory_nodes);
         let mut profile_started = Instant::now();
@@ -138,7 +171,7 @@ impl IndexBuilder<'_> {
         // consulted. The scope table has no separate public limit; sharing the
         // candidate ceiling keeps the public limit shape stable while still
         // bounding every resolver-owned primary table.
-        let capacities = batches.iter().try_fold(
+        let mut capacities = batches.iter().try_fold(
             [0_usize; 5],
             |mut counts, batch| -> Result<[usize; 5], String> {
                 for (index, (name, value)) in [
@@ -172,34 +205,44 @@ impl IndexBuilder<'_> {
             }
         }
 
+        let low_test_aliases = if admission == ResolutionAdmission::Low {
+            let aliases = compact_low_test_candidates(&mut batches);
+            capacities[3] = batches.iter().map(|batch| batch.candidates.len()).sum();
+            if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+                eprintln!(
+                    "[compass internal] universal low test compaction: aliases={} retained_candidates={}",
+                    aliases.values().map(Vec::len).sum::<usize>(),
+                    capacities[3],
+                );
+            }
+            aliases
+        } else {
+            AHashMap::new()
+        };
+
         let go_module_path = languages.go.then(|| read_go_module_path(root)).flatten();
         // Reserve the checked aggregate fact counts before consuming the
-        // batches. A corpus-scale evidence index otherwise grows each primary
-        // map by repeated rehashes while the old and new tables overlap in
-        // memory.
-        let mut declarations = AHashMap::with_capacity(capacities[0]);
-        let mut occurrences = AHashMap::with_capacity(capacities[1]);
-        let mut bindings = AHashMap::with_capacity(capacities[2]);
-        let mut candidates = AHashMap::with_capacity(capacities[3]);
-        let mut scopes = AHashMap::with_capacity(capacities[4]);
+        // batches. Moving facts into one allocation per sorted primary table
+        // avoids repeated vector growth while the per-file batch containers
+        // are still being drained.
+        let mut declarations = Vec::with_capacity(capacities[0]);
+        let mut occurrences = Vec::with_capacity(capacities[1]);
+        let mut bindings = Vec::with_capacity(capacities[2]);
+        let mut candidates = CandidateTableBuilder::with_capacity(capacities[3]);
+        let mut scopes = Vec::with_capacity(capacities[4]);
         profile_internal("universal evidence validation", &mut profile_started);
         for batch in batches {
-            for fact in batch.declarations {
-                insert_unique(&mut declarations, fact.id.clone(), fact)?;
-            }
-            for fact in batch.occurrences {
-                insert_unique(&mut occurrences, fact.id.clone(), fact)?;
-            }
-            for fact in batch.bindings {
-                insert_unique(&mut bindings, fact.id.clone(), fact)?;
-            }
-            for fact in batch.candidates {
-                insert_unique(&mut candidates, fact.id.clone(), fact)?;
-            }
-            for fact in batch.scopes {
-                insert_unique(&mut scopes, fact.id.clone(), fact)?;
-            }
+            declarations.extend(batch.declarations);
+            occurrences.extend(batch.occurrences);
+            bindings.extend(batch.bindings);
+            candidates.extend(batch.candidates)?;
+            scopes.extend(batch.scopes);
         }
+        let declarations = FactTable::from_values(declarations)?;
+        let occurrences = OccurrenceTable::from_values(occurrences)?;
+        let bindings = FactTable::from_values(bindings)?;
+        let candidates = candidates.finish()?;
+        let scopes = FactTable::from_values(scopes)?;
         profile_internal("universal fact collection", &mut profile_started);
         let rust_source_wildcard_targets = if languages.rust {
             declarations
@@ -213,8 +256,10 @@ impl IndexBuilder<'_> {
         } else {
             AHashSet::new()
         };
-        let mut declaration_ids = declarations.keys().cloned().collect::<Vec<_>>();
-        declaration_ids.sort_unstable();
+        let declaration_ids = declarations
+            .values()
+            .map(|declaration| declaration.id.clone())
+            .collect::<Vec<_>>();
         if u32::try_from(declaration_ids.len()).is_err() {
             return Err("universal declaration slot count exceeds u32".to_owned());
         }
@@ -489,7 +534,7 @@ impl IndexBuilder<'_> {
                         .occurrence_id
                         .as_deref()
                         .and_then(|id| occurrences.get(id))
-                        .map(|occurrence| &occurrence.range);
+                        .map(|occurrence| occurrence.range());
                     let entry = direct_bases
                         .entry((candidate.language.clone(), owner.qualified_name.clone()))
                         .or_insert_with(|| DirectBaseSet {
@@ -842,7 +887,7 @@ impl IndexBuilder<'_> {
                 .occurrence_id
                 .as_deref()
                 .and_then(|id| occurrences.get(id))
-                .map_or(u64::MAX, |occurrence| occurrence.range.start_byte);
+                .map_or(u64::MAX, |occurrence| occurrence.range().start_byte);
             return_entries
                 .entry((candidate.language.clone(), callable.qualified_name.clone()))
                 .or_default()
@@ -851,7 +896,7 @@ impl IndexBuilder<'_> {
                 .occurrence_id
                 .as_deref()
                 .and_then(|id| occurrences.get(id))
-                .and_then(|occurrence| occurrence.context.as_deref())
+                .and_then(OccurrenceRef::context)
                 == Some("rust-outer-nominal-return")
             {
                 outer_return_entries
@@ -899,7 +944,7 @@ impl IndexBuilder<'_> {
                 scopes,
                 definition_ranges,
             },
-            indexes: ResolutionIndexes {
+            indexes: Mutex::new(ResolutionIndexes {
                 names: NameIndexes {
                     by_qualified,
                     by_module_name,
@@ -936,7 +981,7 @@ impl IndexBuilder<'_> {
                     impl_traits: rust_impl_traits,
                     source_wildcard_targets: rust_source_wildcard_targets,
                 },
-            },
+            }),
             project: ProjectContext {
                 root: root.to_path_buf(),
                 typescript_project_modules,
@@ -944,6 +989,141 @@ impl IndexBuilder<'_> {
                 go_module_path,
             },
             budget: LookupBudget::from(limits),
+            low_test_aliases,
         })
+    }
+}
+
+type TestAliasKey<'a> = (&'a str, &'a str, Option<&'a str>, Option<&'a str>, &'a str);
+
+fn compact_low_test_candidates(
+    batches: &mut [SemanticEvidenceBatch],
+) -> AHashMap<String, Vec<String>> {
+    let mut aliases = AHashMap::<String, Vec<String>>::new();
+    for batch in batches {
+        compact_low_test_candidates_in_batch(&mut batch.candidates, &mut aliases);
+    }
+    for test_ids in aliases.values_mut() {
+        test_ids.sort_unstable();
+        test_ids.dedup();
+    }
+    aliases
+}
+
+fn compact_low_test_candidates_in_batch(
+    candidates: &mut Vec<RelationshipCandidate>,
+    aliases: &mut AHashMap<String, Vec<String>>,
+) {
+    let (batch_aliases, removed) = {
+        let mut calls = AHashMap::<TestAliasKey<'_>, Vec<&RelationshipCandidate>>::new();
+        for candidate in candidates
+            .iter()
+            .filter(|candidate| candidate.relation == CandidateRelation::Calls)
+        {
+            calls
+                .entry(test_alias_key(candidate))
+                .or_default()
+                .push(candidate);
+        }
+        let mut batch_aliases = Vec::new();
+        let mut removed = AHashSet::new();
+        for candidate in candidates
+            .iter()
+            .filter(|candidate| candidate.relation == CandidateRelation::Tests)
+        {
+            let mut matching = calls
+                .get(&test_alias_key(candidate))
+                .into_iter()
+                .flatten()
+                .filter(|call| call.constraints == candidate.constraints)
+                .take(2);
+            let Some(call) = matching.next() else {
+                continue;
+            };
+            if matching.next().is_some() {
+                continue;
+            }
+            batch_aliases.push((call.id.clone(), candidate.id.clone()));
+            removed.insert(candidate.id.clone());
+        }
+        (batch_aliases, removed)
+    };
+    if !removed.is_empty() {
+        candidates.retain(|candidate| !removed.contains(&candidate.id));
+    }
+    for (call_id, test_id) in batch_aliases {
+        aliases.entry(call_id).or_default().push(test_id);
+    }
+}
+
+fn test_alias_key(candidate: &RelationshipCandidate) -> TestAliasKey<'_> {
+    (
+        &candidate.language,
+        &candidate.source_declaration_id,
+        candidate.occurrence_id.as_deref(),
+        candidate.binding_id.as_deref(),
+        &candidate.target_spelling,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use compass_languages::ResolutionConstraint;
+
+    use super::*;
+
+    #[test]
+    fn low_test_compaction_requires_one_identical_call_candidate() {
+        let call = candidate("call", CandidateRelation::Calls, 0);
+        let matching_test = candidate("test-matching", CandidateRelation::Tests, 0);
+        let distinct_test = candidate("test-distinct", CandidateRelation::Tests, 1);
+        let mut candidates = vec![call, matching_test, distinct_test];
+        let mut aliases = AHashMap::new();
+
+        compact_low_test_candidates_in_batch(&mut candidates, &mut aliases);
+
+        assert_eq!(aliases.get("call"), Some(&vec!["test-matching".to_owned()]));
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.id.as_str())
+                .collect::<Vec<_>>(),
+            ["call", "test-distinct"]
+        );
+    }
+
+    #[test]
+    fn low_test_compaction_keeps_ambiguous_call_pairs() {
+        let mut candidates = vec![
+            candidate("call-a", CandidateRelation::Calls, 0),
+            candidate("call-b", CandidateRelation::Calls, 0),
+            candidate("test", CandidateRelation::Tests, 0),
+        ];
+        let mut aliases = AHashMap::new();
+
+        compact_low_test_candidates_in_batch(&mut candidates, &mut aliases);
+
+        assert!(aliases.is_empty());
+        assert_eq!(candidates.len(), 3);
+    }
+
+    fn candidate(
+        id: &str,
+        relation: CandidateRelation,
+        argument_count: u32,
+    ) -> RelationshipCandidate {
+        RelationshipCandidate {
+            id: id.to_owned(),
+            language: "rust".to_owned(),
+            relation,
+            source_declaration_id: "declaration:test".to_owned(),
+            occurrence_id: Some("occurrence:call".to_owned()),
+            binding_id: Some("binding:target".to_owned()),
+            target_spelling: "target".to_owned(),
+            constraints: ResolutionConstraint {
+                argument_count: Some(argument_count),
+                ..ResolutionConstraint::default()
+            },
+        }
     }
 }

@@ -784,10 +784,12 @@ def _source_oracle(value: object, index: int) -> AuditSourceOracle:
         or isinstance(parsed, bool)
         or not isinstance(parsed, int)
         or scanned <= 0
-        or parsed != scanned
+        or parsed < 0
+        or parsed > scanned
     ):
         raise AuditError(
-            f"{context} must prove a non-empty, completely parsed source population"
+            f"{context} must contain a non-empty source population with parsedFiles "
+            "between zero and scannedFiles"
         )
     return AuditSourceOracle(
         corpus=_text(item["corpus"], f"{context}.corpus", identity=True),
@@ -1036,6 +1038,14 @@ def _metric(numerator: int, denominator: int, *, interval: bool = False) -> Audi
     )
 
 
+def _f1(precision: float | None, recall: float | None) -> float | None:
+    if precision is None or recall is None:
+        return None
+    if precision + recall == 0.0:
+        return 0.0
+    return 2.0 * precision * recall / (precision + recall)
+
+
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -1186,12 +1196,6 @@ def _validate_record_inputs(
                 f"observed {provider!r}"
             )
         inventory = independent_source_inventory(root, source_oracle.adapter)
-        if inventory.rejected_files:
-            raise AuditError(
-                f"source oracle {(source_oracle.corpus, source_oracle.adapter)!r} "
-                "could not parse files: "
-                + ", ".join(inventory.rejected_files[:10])
-            )
         observed_counts = (inventory.scanned_files, inventory.parsed_files)
         expected_counts = (
             source_oracle.scanned_files,
@@ -1329,24 +1333,58 @@ def _strata(
             precision_denominator = sum(value[1] for value in contributions)
             recall_numerator = sum(value[2] for value in contributions)
             recall_denominator = sum(value[3] for value in contributions)
+            precision = (
+                precision_numerator / precision_denominator
+                if precision_denominator
+                else None
+            )
+            recall = (
+                recall_numerator / recall_denominator
+                if recall_denominator
+                else None
+            )
+            source_oracle_records = sum(
+                record.pool == "source_oracle" for record in values
+            )
+            ambiguous = sum(
+                record.pool == "source_oracle" and record.judgment == "ambiguous"
+                for record in values
+            )
             result[dimension][key] = {
                 "records": len(values),
                 "correctAccepted": precision_numerator,
                 "auditedAccepted": precision_denominator,
-                "precision": (
-                    precision_numerator / precision_denominator
-                    if precision_denominator
-                    else None
-                ),
+                "precision": precision,
                 "recovered": recall_numerator,
                 "recallCandidates": recall_denominator,
-                "recall": (
-                    recall_numerator / recall_denominator
-                    if recall_denominator
-                    else None
+                "recall": recall,
+                "f1": _f1(precision, recall),
+                "sourceOracleRecords": source_oracle_records,
+                "ambiguous": ambiguous,
+                "ambiguityRate": (
+                    ambiguous / source_oracle_records if source_oracle_records else None
                 ),
             }
     return result, grouped
+
+
+def _source_coverage(
+    manifest: AuditManifest,
+) -> dict[str, dict[str, int | float]]:
+    by_language: dict[str, list[AuditSourceOracle]] = defaultdict(list)
+    for source_oracle in manifest.source_oracles:
+        by_language[source_oracle.adapter].append(source_oracle)
+    coverage: dict[str, dict[str, int | float]] = {}
+    for language in sorted(by_language):
+        scanned = sum(item.scanned_files for item in by_language[language])
+        parsed = sum(item.parsed_files for item in by_language[language])
+        coverage[language] = {
+            "scannedFiles": scanned,
+            "parsedFiles": parsed,
+            "unsupportedFiles": scanned - parsed,
+            "coverage": parsed / scanned,
+        }
+    return coverage
 
 
 def _qualification_failures(
@@ -1357,6 +1395,13 @@ def _qualification_failures(
     precision: AuditMetric,
 ) -> list[str]:
     failures: list[str] = []
+    for source_oracle in manifest.source_oracles:
+        if source_oracle.parsed_files != source_oracle.scanned_files:
+            failures.append(
+                f"source oracle {(source_oracle.corpus, source_oracle.adapter)!r} "
+                f"parsed {source_oracle.parsed_files}/{source_oracle.scanned_files} files; "
+                "complete source coverage is required"
+            )
     if precision.denominator < QUALIFICATION_MINIMUM:
         failures.append(
             f"accepted audit sample has {precision.denominator} records; "
@@ -1477,6 +1522,13 @@ def run_audit(manifest_path: Path, graph_path: Path, corpus_path: Path) -> Audit
         sum(value[2] for value in contributions),
         sum(value[3] for value in contributions),
     )
+    source_oracle_records = [
+        record for record in records if record.pool == "source_oracle"
+    ]
+    ambiguity = _metric(
+        sum(record.judgment == "ambiguous" for record in source_oracle_records),
+        len(source_oracle_records),
+    )
     judgments = Counter(record.judgment for record in records)
     critical = {
         judgment: judgments.get(judgment, 0) for judgment in CRITICAL_JUDGMENTS
@@ -1509,6 +1561,9 @@ def run_audit(manifest_path: Path, graph_path: Path, corpus_path: Path) -> Audit
         audited_accepted_edges=precision.denominator,
         precision=precision,
         recall=recall,
+        f1=_f1(precision.observed, recall.observed),
+        ambiguity=ambiguity,
+        source_coverage=_source_coverage(manifest),
         judgments={key: judgments[key] for key in sorted(judgments)},
         critical_violations=critical,
         strata=strata,
@@ -1526,6 +1581,7 @@ def audit_result_json_value(result: AuditResult) -> dict[str, Any]:
         "audited_accepted_edges": "auditedAcceptedEdges",
         "wilson_95": "wilson95",
         "critical_violations": "criticalViolations",
+        "source_coverage": "sourceCoverage",
     }
 
     def convert(value: Any) -> Any:

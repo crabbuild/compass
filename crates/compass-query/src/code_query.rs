@@ -8,7 +8,9 @@ use compass_graph::{
     GraphSnapshotReader, SnapshotReadLimits, TermPostingWork,
 };
 use compass_ir::ProgramBundle;
-use compass_model::code_graph::{EdgeKind, EdgeRecord, FileRecord, GraphDocument, NodeRecord};
+use compass_model::code_graph::{
+    EdgeKind, EdgeRecord, FileRecord, GraphDocument, NodeKind, NodeRecord,
+};
 use compass_model::provenance::{EvidenceConfidence, ResolutionState};
 use compass_model::query_contract::{
     CallRequest, CodeQueryOperation, CodeQueryResponse, DiscoveryScopeKind, ExploreRequest,
@@ -394,6 +396,7 @@ pub(crate) enum PinnedDiscoveryBackend<'a> {
 pub(crate) struct CodeLookupIndex {
     node_by_id: HashMap<String, usize>,
     nodes_by_normalized_name: HashMap<String, Vec<usize>>,
+    operation_nodes_by_term: HashMap<String, Vec<usize>>,
     file_by_path: HashMap<String, usize>,
     scope_values: HashMap<(u8, String), Vec<String>>,
 }
@@ -403,6 +406,7 @@ impl CodeLookupIndex {
         let mut lookup = Self {
             node_by_id: HashMap::with_capacity(graph.nodes.len()),
             nodes_by_normalized_name: HashMap::new(),
+            operation_nodes_by_term: HashMap::new(),
             file_by_path: HashMap::with_capacity(graph.graph.files.len()),
             scope_values: HashMap::new(),
         };
@@ -414,6 +418,19 @@ impl CodeLookupIndex {
                     .entry(normalize_symbol(name))
                     .or_default()
                     .push(index);
+            }
+            if is_operation_role_declaration(node) {
+                let mut terms = compass_model::search::identifier_search_terms(&node.name);
+                terms.extend(compass_model::search::identifier_search_terms(
+                    &node.qualified_name,
+                ));
+                for term in terms {
+                    lookup
+                        .operation_nodes_by_term
+                        .entry(term)
+                        .or_default()
+                        .push(index);
+                }
             }
             for (posting_kind, value, canonical) in discovery_scope_postings(node) {
                 let Some(kind) = scope_kind_from_posting(&posting_kind) else {
@@ -427,6 +444,10 @@ impl CodeLookupIndex {
             }
         }
         for nodes in lookup.nodes_by_normalized_name.values_mut() {
+            nodes.sort_by(|left, right| graph.nodes[*left].id.cmp(&graph.nodes[*right].id));
+            nodes.dedup();
+        }
+        for nodes in lookup.operation_nodes_by_term.values_mut() {
             nodes.sort_by(|left, right| graph.nodes[*left].id.cmp(&graph.nodes[*right].id));
             nodes.dedup();
         }
@@ -448,6 +469,21 @@ impl CodeLookupIndex {
         self.nodes_by_normalized_name
             .get(name)
             .map_or(&[], Vec::as_slice)
+    }
+
+    fn operation_nodes_for_terms(&self, terms: &[String], limit: usize) -> (Vec<usize>, bool) {
+        let mut nodes = BTreeSet::new();
+        let mut truncated = false;
+        for term in terms {
+            for index in self.operation_nodes_by_term.get(term).into_iter().flatten() {
+                nodes.insert(*index);
+                if nodes.len() > limit {
+                    nodes.pop_last();
+                    truncated = true;
+                }
+            }
+        }
+        (nodes.into_iter().collect(), truncated)
     }
 
     fn file_by_path(&self, path: &str) -> Option<usize> {
@@ -1110,6 +1146,82 @@ impl PinnedDiscoveryBackend<'_> {
         }
     }
 
+    pub(crate) fn operation_role_candidates(
+        &self,
+        terms: &[String],
+        limit: usize,
+    ) -> Result<Option<TermCandidateRead>, QueryError> {
+        match self {
+            Self::Materialized { graph, lookup, .. } => {
+                let (indices, truncated) = lookup.operation_nodes_for_terms(terms, limit);
+                let nodes = indices
+                    .into_iter()
+                    .map(|index| graph.nodes[index].clone())
+                    .collect::<Vec<_>>();
+                Ok(Some(TermCandidateRead {
+                    node_ids_decoded: u64::try_from(nodes.len()).unwrap_or(u64::MAX),
+                    nodes,
+                    matched_concepts: BTreeMap::new(),
+                    truncated,
+                    chunks_decoded: 0,
+                }))
+            }
+            Self::Store(reader) => {
+                if !reader
+                    .supports_operation_role_terms()
+                    .map_err(snapshot_error)?
+                {
+                    return Ok(None);
+                }
+                let minimum = GRAPH_TERM_POSTING_CHUNK_ITEMS.saturating_mul(terms.len().max(1));
+                let (mut nodes, truncated, work) = reader
+                    .operation_role_nodes_for_terms_bounded_work(
+                        terms,
+                        snapshot_limits(limit.max(minimum))?,
+                    )
+                    .map_err(snapshot_error)?;
+                let truncated = truncated || nodes.len() > limit;
+                nodes.truncate(limit);
+                Ok(Some(TermCandidateRead {
+                    nodes,
+                    matched_concepts: BTreeMap::new(),
+                    truncated,
+                    node_ids_decoded: work.node_ids_decoded,
+                    chunks_decoded: work.chunks_decoded,
+                }))
+            }
+        }
+    }
+
+    pub(crate) fn declaration_candidates(
+        &self,
+        terms: &[String],
+        limit: usize,
+    ) -> Result<Option<TermCandidateRead>, QueryError> {
+        let Self::Store(reader) = self else {
+            return Ok(None);
+        };
+        if !reader
+            .supports_declaration_terms()
+            .map_err(snapshot_error)?
+        {
+            return Ok(None);
+        }
+        let minimum = GRAPH_TERM_POSTING_CHUNK_ITEMS.saturating_mul(terms.len().max(1));
+        let (mut nodes, truncated, work) = reader
+            .declaration_nodes_for_terms_bounded_work(terms, snapshot_limits(limit.max(minimum))?)
+            .map_err(snapshot_error)?;
+        let truncated = truncated || nodes.len() > limit;
+        nodes.truncate(limit);
+        Ok(Some(TermCandidateRead {
+            nodes,
+            matched_concepts: BTreeMap::new(),
+            truncated,
+            node_ids_decoded: work.node_ids_decoded,
+            chunks_decoded: work.chunks_decoded,
+        }))
+    }
+
     fn store_term_candidates(
         &self,
         concepts: &[String],
@@ -1130,12 +1242,12 @@ impl PinnedDiscoveryBackend<'_> {
                 .nodes_for_exact_term_bounded_work(concept, exact_read_limits)
                 .map_err(snapshot_error)?
         } else {
-            let mut intersection = None::<BTreeMap<String, NodeRecord>>;
+            let mut intersection = None::<BTreeSet<String>>;
             let mut exact_truncated = false;
             let mut exact_work = TermPostingWork::default();
             for concept in concepts {
-                let (term_nodes, term_truncated, term_work) = reader
-                    .nodes_for_exact_term_bounded_work(concept, exact_read_limits)
+                let (term_ids, term_truncated, term_work) = reader
+                    .node_ids_for_exact_term_bounded_work(concept, exact_read_limits)
                     .map_err(snapshot_error)?;
                 exact_truncated |= term_truncated;
                 exact_work.chunks_decoded = exact_work
@@ -1144,30 +1256,24 @@ impl PinnedDiscoveryBackend<'_> {
                 exact_work.node_ids_decoded = exact_work
                     .node_ids_decoded
                     .saturating_add(term_work.node_ids_decoded);
-                let term_ids = term_nodes
-                    .iter()
-                    .map(|node| node.id.clone())
-                    .collect::<BTreeSet<_>>();
+                let term_ids = term_ids.into_iter().collect::<BTreeSet<_>>();
                 match &mut intersection {
-                    Some(previous) => previous.retain(|id, _| term_ids.contains(id)),
-                    None => {
-                        intersection = Some(
-                            term_nodes
-                                .into_iter()
-                                .map(|node| (node.id.clone(), node))
-                                .collect(),
-                        );
-                    }
+                    Some(previous) => previous.retain(|id| term_ids.contains(id)),
+                    None => intersection = Some(term_ids),
                 }
-                if intersection.as_ref().is_some_and(BTreeMap::is_empty) {
+                if intersection.as_ref().is_some_and(BTreeSet::is_empty) {
                     break;
                 }
             }
-            (
-                intersection.unwrap_or_default().into_values().collect(),
-                exact_truncated,
-                exact_work,
-            )
+            let ids = intersection.unwrap_or_default();
+            let nodes = if ids.is_empty() {
+                Vec::new()
+            } else {
+                reader
+                    .get_nodes_by_ids_bounded_work(&ids, snapshot_limits(ids.len())?)
+                    .map_err(snapshot_error)?
+            };
+            (nodes, exact_truncated, exact_work)
         };
         if nodes.is_empty() && !truncated {
             (nodes, truncated, work) = reader
@@ -2893,6 +2999,22 @@ pub(crate) fn normalize_symbol(value: &str) -> String {
         .trim_end_matches("()")
         .trim_start_matches('.')
         .to_lowercase()
+}
+
+fn is_operation_role_declaration(node: &NodeRecord) -> bool {
+    matches!(
+        node.kind,
+        NodeKind::Class
+            | NodeKind::Struct
+            | NodeKind::Interface
+            | NodeKind::Trait
+            | NodeKind::Protocol
+            | NodeKind::Enum
+            | NodeKind::TypeAlias
+    ) && node.source_file().is_some_and(|file| !file.is_empty())
+        && compass_model::search::identifier_search_terms(&node.name)
+            .iter()
+            .any(|term| compass_model::search::OPERATION_ROLE_TOKENS.contains(&term.as_str()))
 }
 
 fn add_admitted_candidates(

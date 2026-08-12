@@ -43,8 +43,10 @@ forbidden = ["RestoreBuilder"]
 expectedDirection = "both"
 relevantNodes = [{ qualifiedName = "deltalake_core::kernel::transaction::CommitProperties", source = { file = "crates/core/src/kernel/transaction/mod.rs", startLine = 514 } }]
 expectedSeeds = [{ qualifiedName = "deltalake_core::kernel::transaction::CommitProperties", source = { file = "crates/core/src/kernel/transaction/mod.rs", startLine = 514 } }]
+acceptableSeeds = [{ qualifiedName = "python.deltalake.transaction.CommitProperties", source = { file = "python/deltalake/transaction.py", startLine = 48 } }]
+expectedAmbiguous = true
 judgmentSource = "manual_source_review"
-judgmentReason = "The pinned declaration owns transaction commit configuration."
+judgmentReason = "Source review found separate public Rust-core and Python-facing CommitProperties declarations that both configure commit behavior; the unscoped natural question is legitimately cross-language ambiguous."
 
 [[repository.query]]
 question = "how does delta-rs write data to a table"

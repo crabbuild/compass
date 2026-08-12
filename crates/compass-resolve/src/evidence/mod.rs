@@ -1,14 +1,14 @@
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::Hash;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Instant;
 
 use ahash::{AHashMap, AHashSet};
 use compass_languages::{
     BindingFact, CandidateRelation, DeclarationFact, EvidenceLimits, EvidenceRange,
-    HierarchyConstraint, OccurrenceFact, ReceiverDispatchStrategy, RelationshipCandidate,
-    SemanticEvidenceBatch, make_id, validate_evidence,
+    HierarchyConstraint, ReceiverDispatchStrategy, RelationshipCandidate, SemanticEvidenceBatch,
+    make_id, validate_evidence,
 };
 use compass_model::provenance::{NODE_PROVENANCE_ANCHOR_ATTRIBUTE, OCCURRENCE_RULE_ATTRIBUTE};
 use rayon::prelude::*;
@@ -30,7 +30,10 @@ pub(crate) use projection::is_replaced_relation;
 
 pub use api::{ResolutionDecision, ResolutionEvidence, ResolutionRule, UniversalResolutionLimits};
 use budget::LookupBudget;
-use facts::FactStore;
+use facts::{
+    CandidateSlot, CandidateTable, CandidateTableBuilder, FactStore, FactTable, OccurrenceRef,
+    OccurrenceTable,
+};
 use index::ResolutionIndexes;
 use languages::policy::LanguagePolicyKind;
 use languages::rust::{
@@ -139,33 +142,35 @@ struct TypeScriptExportWalk<'a> {
 
 pub struct UniversalResolutionIndex {
     facts: FactStore,
-    indexes: ResolutionIndexes,
+    indexes: Mutex<ResolutionIndexes>,
     project: ProjectContext,
     budget: LookupBudget,
+    low_test_aliases: AHashMap<String, Vec<String>>,
 }
 
 impl UniversalResolutionIndex {
-    #[must_use]
-    pub fn candidate_ids(&self) -> Vec<&str> {
-        let db = ResolutionDb::new(self);
+    fn ordered_candidates(&self) -> Vec<CandidateSlot> {
         let mut ordered = self
             .facts
             .candidates
-            .iter()
-            .map(|(id, candidate)| {
-                let range = db
-                    .occurrence(candidate)
-                    .map(|occurrence| &occurrence.range)
+            .slots()
+            .map(|slot| {
+                let range = self
+                    .facts
+                    .candidates
+                    .occurrence_id(slot)
+                    .and_then(|id| self.facts.occurrences.get(id))
+                    .map(OccurrenceRef::range)
                     .or_else(|| {
                         self.facts
                             .declarations
-                            .get(&candidate.source_declaration_id)
+                            .get(self.facts.candidates.source_declaration_id(slot)?)
                             .map(|declaration| &declaration.range)
                     });
-                (id.as_str(), range)
+                (slot, range)
             })
             .collect::<Vec<_>>();
-        ordered.par_sort_unstable_by(|(left_id, left_range), (right_id, right_range)| {
+        ordered.par_sort_unstable_by(|(left, left_range), (right, right_range)| {
             left_range
                 .map(|range| range.source_file.as_str())
                 .unwrap_or_default()
@@ -184,9 +189,25 @@ impl UniversalResolutionIndex {
                         .map_or(u64::MAX, |range| range.end_byte)
                         .cmp(&right_range.map_or(u64::MAX, |range| range.end_byte))
                 })
-                .then_with(|| left_id.cmp(right_id))
+                .then_with(|| {
+                    self.facts
+                        .candidates
+                        .id(*left)
+                        .cmp(&self.facts.candidates.id(*right))
+                })
         });
-        ordered.into_iter().map(|(id, _)| id).collect()
+        ordered
+            .into_iter()
+            .map(|(candidate, _)| candidate)
+            .collect()
+    }
+
+    #[must_use]
+    pub fn candidate_ids(&self) -> Vec<&str> {
+        self.ordered_candidates()
+            .into_iter()
+            .filter_map(|slot| self.facts.candidates.id(slot))
+            .collect()
     }
 }
 
@@ -219,7 +240,7 @@ impl ResolutionDb<'_> {
     pub(in crate::evidence) fn occurrence(
         &self,
         candidate: &RelationshipCandidate,
-    ) -> Option<&OccurrenceFact> {
+    ) -> Option<OccurrenceRef<'_>> {
         candidate
             .occurrence_id
             .as_deref()
@@ -458,16 +479,6 @@ fn profile_internal(label: &str, started: &mut Instant) {
     }
 }
 
-fn insert_unique<T>(map: &mut AHashMap<String, T>, id: String, value: T) -> Result<(), String> {
-    match map.entry(id) {
-        Entry::Occupied(entry) => Err(format!("duplicate universal evidence id {:?}", entry.key())),
-        Entry::Vacant(entry) => {
-            entry.insert(value);
-            Ok(())
-        }
-    }
-}
-
 fn sort_declaration_index<K: Eq + Hash>(
     index: &mut AHashMap<K, Vec<DeclarationSlot>>,
     declaration_ids: &[String],
@@ -500,8 +511,8 @@ fn candidate_storage_limit(candidate_limit: usize) -> usize {
 }
 
 fn unique_definition_ranges(
-    declarations: &AHashMap<String, DeclarationFact>,
-    scopes: &AHashMap<String, compass_languages::ScopeFact>,
+    declarations: &FactTable<DeclarationFact>,
+    scopes: &FactTable<compass_languages::ScopeFact>,
 ) -> BTreeMap<String, EvidenceRange> {
     let mut ranges = BTreeMap::new();
     let mut ambiguous = BTreeSet::new();

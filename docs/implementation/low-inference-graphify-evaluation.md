@@ -72,6 +72,30 @@ Persistent Compass p50 was `0.024` to `0.555` seconds for those rows, showing
 that startup removal helps most when little graph work remains but does not
 dominate broader searches.
 
+An additional 2026-08-11 hydration replay isolated the remaining negative-
+query cost on the same immutable SQLite artifact. Seven fresh release-binary
+processes per row showed that the four slow rows decoded 684 to 3,471 generic
+candidate IDs even though the existing composite-identifier specificity rule
+would reject every non-exact channel when no exact candidate exists. Moving
+that no-answer decision directly after exact-ID and exact-name lookup produced
+these medians:
+
+| Negative identifier | Before | After | Candidate nodes after |
+| --- | ---: | ---: | ---: |
+| `QzxvQuantumBananaSync` | 0.04 s | 0.02 s | 0 |
+| `FlorbGizmoTransactionQuasar` | 0.37 s | 0.05 s | 0 |
+| `NebulaVacuumPineappleWidget` | 0.38 s | 0.02 s | 0 |
+| `CeruleanSnapshotWalrusFactory` | 0.35 s | 0.01 s | 0 |
+| `ZorpMergeCactusProtocol` | 0.52 s | 0.02 s | 0 |
+
+All five remained deterministic no-answer results with two exact probes, and
+the exact composite `AddColumnBuilder` remained an `exact_name` hit. The full
+`compass-query` suite, store/JSON parity regression, and the independently
+labeled relevance qualification passed. These samples had warm filesystem
+caches and are a focused before/after result, not a new cross-platform or
+positive-query speed claim. They demonstrate that candidate hydration, not
+process startup or rendering, was the dominant cost for this negative shape.
+
 The low graph contained 9,982 nodes and 25,206 relationships, versus
 Graphify's 9,670 nodes and 27,173 relationships. Compass published 25,206
 exact-evidence relationships: 24,489 AST, 615 artifact, 100 convention, and
@@ -246,6 +270,173 @@ is discarded. Moving evidence admission earlier is required for low inference
 to become a cold-build optimization rather than primarily an output and query
 optimization.
 
+### Resolver-admission follow-up
+
+A subsequent implementation threads the selected level into universal,
+generic, and language-member resolution. Low resolution now suppresses
+deferred receivers, inferred source-backed calls, and qualified external
+placeholders before their graph records are allocated. Exact `tests`
+relationships still publish normally; a successfully resolved inferred test
+relationship can assign the structural test role without retaining its
+discarded edge or placeholder.
+
+One fresh delta-rs validation sample after that change completed in 2.45 s
+with 798.0 MiB peak RSS. This is a 40.4% wall-time reduction and a 26.0% RSS
+reduction relative to the cold median above, but it is a single diagnostic
+sample rather than a replacement median. It still uses 5.33x Graphify's
+documented cold RSS, so the memory gate remains failed.
+
+The follow-up graph retained the same 9,982 nodes, 25,206 relationships, and
+532 communities. Its ordered node and relationship arrays were byte-equivalent
+to the pre-admission low artifact. Graph coverage entries decreased from 4,907
+to 4,535 and diagnostics from 470 to 466 because those graph-level sections
+now describe records admitted by low resolution, rather than inferred records
+that were later filtered. This is an observable reporting change, not a graph
+recall claim.
+
+Internal inventory identified the remaining cold-memory floor: 9,280
+declarations, 7,482 scopes, 23,243 bindings, 88,447 occurrences, and 118,935
+relationship candidates coexist before resolution on this corpus. Of those,
+21,524 Rust `tests` candidates are exact storage duplicates of uniquely paired
+`calls` candidates. Low resolution now validates the original aggregate limits
+first, retains ambiguous or mismatched pairs, and then stores those exact pairs
+as compact aliases. Each alias is still resolved independently with its
+original `tests` relation, preserving relation-sensitive resolution rules and
+the ordered graph contract.
+
+Three fresh samples with this additional compaction had a 2.88 s median and
+756.2 MiB median peak RSS. Every sample's ordered 9,982 nodes and 25,206
+relationships remained byte-equivalent to the pre-admission low artifact.
+Compared with the 798.0 MiB single sample above, median RSS was 5.2% lower
+while median wall time was 17.6% higher; this cross-sample comparison remains
+diagnostic rather than a replacement controlled baseline. Independent
+resolution deliberately trades some CPU for a lower retained evidence set.
+Compass still used 5.05x Graphify's documented cold RSS, so the memory gate
+remains failed. The next memory work must compact or stream the remaining
+string-dense evidence representation; clustering and final graph serialization
+are not the dominant cold allocation.
+
+Stage-correlated RSS sampling then found that the nominally streaming portable
+AST cache writer still encoded large batches in parallel, retaining concurrent
+MessagePack buffers and compression workspaces. Enforcing its documented
+one-entry-at-a-time contract produced three fresh samples with a 2.37 s median
+and 673.8 MiB median peak RSS. All three again retained byte-equivalent ordered
+nodes and relationships. Cache publication itself increased from about 0.11 s
+to 0.25–0.28 s, while total observed wall time decreased in these samples;
+that total-time change is diagnostic and may reflect lower allocator and CPU
+contention rather than guaranteed throughput.
+
+Relative to the preceding 756.2 MiB median, this additional change reduced
+median RSS by 10.9%. Compass still used about 4.50x Graphify's documented cold
+RSS, so this does not pass the memory gate. It removes an avoidable concurrent
+allocation layer; it does not eliminate the remaining resolver, graph, and
+publication working sets.
+
+The resolver's primary fact maps also duplicated each fact's long owned ID as
+an independently allocated hash key. Replacing those maps with deterministic
+sorted fact tables retained borrowed lookup and explicit duplicate-ID failure
+without changing a serialized contract. Three final-revision samples completed
+with a 2.44 s median and 610.7 MiB median peak RSS, and all ordered nodes and
+relationships remained byte-equivalent. Relative to the preceding cache-only
+median, RSS decreased 9.4% while total time increased about 3.0%.
+
+The local tradeoff is more visible than the total: universal resolution rose
+from roughly 0.29 s to 0.40 s because ID lookup now uses binary search. The
+memory gate still fails at about 4.08x Graphify's documented RSS. Closing it
+requires eliminating additional simultaneous index/projection and graph/
+publication working sets, not relabeling this reduction as success.
+
+The next revision stopped carrying full `RelationshipCandidate` objects
+through secondary-index construction. After the original batch and aggregate
+limits and low test-alias checks succeed, candidate fields are moved into a
+resolver-private interned table while the per-file batches are drained. The
+public evidence/cache schema is unchanged, duplicate IDs still fail
+explicitly, and resolution inflates only the bounded candidate currently being
+examined.
+
+Three fresh clustered delta-rs samples completed with a 2.63 s wall-time
+median and 598.9 MiB median peak RSS. All three retained byte-equivalent
+ordered 9,982-node and 25,206-relationship arrays. Relative to the preceding
+610.7 MiB median, RSS decreased 1.9% while wall time increased 7.8%. Compass
+still used about 4.00x Graphify's documented cold RSS. This is a measured
+representation improvement, but it also proves that compacting only as
+already-materialized batches enter the resolver cannot remove the extraction
+allocator high-water mark. The remaining work must avoid corpus-wide full
+candidate and occurrence materialization at the producer/cache handoff.
+
+The next representation pass moved all 88,447 validated occurrences into a
+resolver-private string pool and slot table. It retains the exact range plus
+the role, spelling, qualifier, and context consumed by resolution, while
+dropping language, owner, and scope only after the unchanged validation
+boundary proves the original batch. Three fresh samples reported 2.86/2.57/
+2.65 s and 616,022,016/620,822,528/644,366,336 bytes peak RSS, for medians of
+2.65 s and 592.1 MiB. The 34,117,849-byte canonical graph had the same
+`3bf374f10463a1d8fa81533cd59c2240cf9814298d9cf5026a7492d6ed68b0af`
+SHA-256 digest as the preceding artifact. Relative to candidate compaction,
+median RSS decreased 1.14% and wall time increased 0.8%; Compass still used
+about 3.96x Graphify's documented cold RSS. This is an exact but modest
+resolver-local reduction, not evidence that the producer/cache high-water
+mark is solved.
+
+### Final admission replay and resolver-edge identity pruning
+
+A clean replay of the final admission binary completed in 4.12 seconds with
+461,357,056 bytes (440.0 MiB) maximum RSS. Its canonical graph contained 9,982
+nodes, 25,206 relationships, 532 communities, and 1,212 structural test roles.
+The 34,116,625-byte artifact had SHA-256
+`971d588275cbad097ed1f7b5f54e32b86a80fadd8875760e3848b9948069f573`.
+This is the semantic reference for subsequent final-admission measurements;
+hashes reported above remain historical evidence for their recorded binaries.
+
+The materialized resolver edge still duplicated candidate and occurrence IDs
+after their relation, occurrence rule, exact anchor, endpoints, and provenance
+were fixed. Those IDs have no consumer on ordinary resolved edges; the
+separate universal project-edge path retains its candidate ID through its own
+deduplication boundary. Removing only the dead ordinary-edge copies produced
+three fresh clustered samples at 4.30/4.36/4.06 seconds and
+455,966,720/455,131,136/462,143,488 bytes maximum RSS. The medians are 4.30
+seconds and 434.8 MiB. Every graph was byte-identical to the clean replay,
+including all 1,212 test roles.
+
+This is a diagnostic 1.2% RSS reduction relative to the single clean replay,
+not a replacement controlled baseline. Compass still used about 2.91x
+Graphify's retained 149.47 MiB cold RSS. The experiment establishes that dead
+identity attributes are removable without losing parallel-edge meaning, but
+also that field pruning alone cannot close the representation gap.
+
+The bounded streaming multiplicity audit over the same graph reported 25,206
+unique edge IDs and 23,209 semantic `(source, relation, target)` pairs. There
+were 1,076 parallel pairs containing 3,073 distinct source occurrences, so
+pair-only coalescing would lose 1,997 real events. The audit found no duplicate
+edge IDs, duplicate pair/site records, or missing relationship sites. Calls
+contributed 533 parallel pairs, tests 295, and references 173; the remainder
+were distributed across construction, reads, exports, returns, and type facts.
+
+Relationships serialized to 22,808,206 bytes, or 66.9% of the 34,116,625-byte
+graph, averaging 904.9 bytes each. The artifact-size opportunity is therefore
+real, but it is in shared provenance/anchor representation rather than removal
+of occurrence-distinct parallel edges.
+
+### Focused all-level deterministic replay
+
+The same pinned delta-rs corpus was then built at `medium`, `high`, and `max`
+with clustered default-SQLite output. A second forced build at each level
+reproduced the exact first graph digest:
+
+| Level | Nodes | Relationships | Communities | JSON bytes | First build | Peak RSS | SHA-256 prefix |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| low | 9,982 | 25,206 | 532 | 34,116,625 | 4.30 s median | 434.8 MiB median | `971d5882` |
+| medium | 9,982 | 25,219 | 528 | 34,137,117 | 4.43 s | 433.0 MiB | `27492c72` |
+| high | 21,368 | 56,640 | 749 | 85,047,812 | 5.91 s | 722.8 MiB | `8a70927b` |
+| max | 34,384 | 93,247 | 1,078 | 143,936,676 | 9.02 s | 1,120.9 MiB | `dc87abf2` |
+
+Only low has three measured samples; the other timing/RSS rows are one sample
+plus an unmeasured deterministic rebuild. The replay is focused corpus
+evidence, not the required eight-repository all-level qualification. It shows
+that medium adds only 13 source-backed inferred edges on delta-rs, while high
+and max expose a distinct external/deferred graph-size and memory ceiling that
+low-only tuning does not address.
+
 ## Work required to surpass Graphify
 
 1. **Move inference admission before materialization.** Thread the selected
@@ -267,7 +458,9 @@ optimization.
    candidate hydration, traversal, and text rendering independently; qualify
    both fresh CLI and persistent MCP sessions. The immediate cross-tool gate
    is at most 0.59 s on this corpus without increasing query work or weakening
-   deterministic results.
+   deterministic results. Composite-identifier negatives now meet this gate
+   with constant exact-channel work; positive and ordinary natural-language
+   rows still require independent hydration and ranking qualification.
 5. **Create an independent quality denominator.** Graphify overlap is useful
    differential evidence, not truth. Expand compiler/source oracles and
    adjudicated samples for declarations, imports, calls, members, returns,

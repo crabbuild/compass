@@ -44,6 +44,10 @@ from benchmarks.performance.compass.model import (
     QualificationRun,
     RepositorySpec,
 )
+from benchmarks.performance.compass.multiplicity import (
+    DEFAULT_MAX_RELATIONSHIPS,
+    audit_multiplicity,
+)
 from benchmarks.performance.compass.report import (
     compare_baseline,
     compare_tools,
@@ -629,6 +633,15 @@ def typescript_scorecard(args: argparse.Namespace) -> int:
     return 0 if result["passed"] else 1
 
 
+def multiplicity(args: argparse.Namespace) -> int:
+    result = audit_multiplicity(
+        args.graph,
+        max_relationships=args.max_relationships,
+    )
+    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    return 0 if result["passed"] else 1
+
+
 def _common(parser: argparse.ArgumentParser, *, execution: bool = False) -> None:
     parser.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     parser.add_argument("--workspace", type=Path, default=DEFAULT_WORKSPACE)
@@ -703,6 +716,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scorecard_parser.add_argument("--scorecard", type=Path, required=True)
     scorecard_parser.add_argument("--output", type=Path)
+    multiplicity_parser = subparsers.add_parser(
+        "multiplicity",
+        help="audit parallel relationship occurrences and serialized size",
+    )
+    multiplicity_parser.add_argument("--graph", type=Path, required=True)
+    multiplicity_parser.add_argument(
+        "--max-relationships",
+        type=int,
+        default=DEFAULT_MAX_RELATIONSHIPS,
+    )
     return parser
 
 
@@ -732,6 +755,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return audit_candidates(args)
         if args.command == "typescript-scorecard":
             return typescript_scorecard(args)
+        if args.command == "multiplicity":
+            return multiplicity(args)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

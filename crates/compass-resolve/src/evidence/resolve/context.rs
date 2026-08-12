@@ -11,10 +11,13 @@ pub(in crate::evidence) struct ResolutionDb<'a> {
 }
 
 impl<'a> ResolutionDb<'a> {
-    pub(in crate::evidence) const fn new(index: &'a UniversalResolutionIndex) -> Self {
+    pub(in crate::evidence) const fn new(
+        index: &'a UniversalResolutionIndex,
+        indexes: &'a ResolutionIndexes,
+    ) -> Self {
         Self {
             facts: &index.facts,
-            indexes: &index.indexes,
+            indexes,
             project: &index.project,
             budget: index.budget,
         }
@@ -62,7 +65,7 @@ impl<'a> CandidateContext<'a> {
 
     pub(super) fn qualifier<'b>(&'b self, db: &'b ResolutionDb<'_>) -> Option<&'b str> {
         db.occurrence(self.candidate())
-            .and_then(|occurrence| occurrence.qualifier.as_deref())
+            .and_then(OccurrenceRef::qualifier)
     }
 
     pub(super) fn has_unbound_qualified_receiver(&self, db: &ResolutionDb<'_>) -> bool {

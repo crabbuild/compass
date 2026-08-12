@@ -522,11 +522,11 @@ impl Cache {
             let bytes = encode_messagepack(*value, destination)?;
             write_cache_bytes(destination, &bytes)
         };
-        if jobs.len() < 256 {
-            jobs.iter().try_for_each(write_job)
-        } else {
-            jobs.par_iter().try_for_each(write_job)
-        }
+        // This API is the bounded-residency alternative to the parallel batch
+        // encoder above. Encoding a large batch in parallel retains one zstd
+        // workspace and MessagePack buffer per worker, contradicting the
+        // one-entry-at-a-time contract and raising cold-build peak RSS.
+        jobs.iter().try_for_each(write_job)
     }
 
     /// Atomically publish cache payloads prepared by

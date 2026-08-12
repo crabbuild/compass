@@ -128,7 +128,7 @@ impl ResolutionDb<'_> {
             let Some(candidate) = self.facts.candidates.get(candidate_id) else {
                 return Err(0);
             };
-            match self.resolve_rust_impl_trait_candidate(candidate, raw_trait_name) {
+            match self.resolve_rust_impl_trait_candidate(&candidate, raw_trait_name) {
                 ResolutionDecision::Resolved { declaration_id, .. } => {
                     let Some(declaration) = self.facts.declarations.get(&declaration_id) else {
                         return Err(0);
@@ -238,8 +238,8 @@ impl ResolutionDb<'_> {
         };
         if !matches!(candidate.target_spelling.as_str(), "Send" | "Sized")
             || self
-                .occurrence(candidate)
-                .is_none_or(|occurrence| occurrence.qualifier.is_some())
+                .occurrence(&candidate)
+                .is_none_or(|occurrence| occurrence.qualifier().is_some())
         {
             return false;
         }
@@ -249,11 +249,11 @@ impl ResolutionDb<'_> {
             .and_then(|binding_id| self.facts.bindings.get(binding_id))
         {
             Some(binding) if binding.spelling == "*" => {
-                self.resolve_wildcard_binding("rust", candidate).is_none()
+                self.resolve_wildcard_binding("rust", &candidate).is_none()
             }
             Some(_) => false,
             None => self
-                .resolve_visible_wildcard_bindings("rust", candidate)
+                .resolve_visible_wildcard_bindings("rust", &candidate)
                 .is_none(),
         }
     }
@@ -329,14 +329,14 @@ pub(in crate::evidence) fn rust_external_wildcard_target_is_explicit(
 }
 
 pub(in crate::evidence) fn rust_impl_associated_type_index(
-    declarations: &AHashMap<String, DeclarationFact>,
+    declarations: &FactTable<DeclarationFact>,
     declaration_ids: &[String],
-    scopes: &AHashMap<String, compass_languages::ScopeFact>,
-    candidates: &AHashMap<String, RelationshipCandidate>,
-    occurrences: &AHashMap<String, OccurrenceFact>,
+    scopes: &FactTable<compass_languages::ScopeFact>,
+    candidates: &CandidateTable,
+    occurrences: &OccurrenceTable,
     candidate_limit: usize,
 ) -> AHashMap<(String, String, String), AssociatedTypeSet> {
-    let mut implementations = AHashMap::<String, Vec<&RelationshipCandidate>>::new();
+    let mut implementations = AHashMap::<String, Vec<RelationshipCandidate>>::new();
     for candidate in candidates.values().filter(|candidate| {
         candidate.language == "rust" && candidate.relation == CandidateRelation::Implements
     }) {
@@ -366,7 +366,7 @@ pub(in crate::evidence) fn rust_impl_associated_type_index(
                     .occurrence_id
                     .as_deref()
                     .and_then(|id| occurrences.get(id))?;
-                range_contains(&scope.range, &occurrence.range)
+                range_contains(&scope.range, occurrence.range())
                     .then_some(candidate.constraints.qualified_name.as_ref())
                     .flatten()
             })
@@ -444,7 +444,7 @@ pub(in crate::evidence) fn rust_impl_associated_trait_name_index(
 }
 
 pub(in crate::evidence) fn rust_impl_trait_index(
-    candidates: &AHashMap<String, RelationshipCandidate>,
+    candidates: &CandidateTable,
     candidate_limit: usize,
 ) -> AHashMap<(String, String), RustImplTraitSet> {
     let mut index = AHashMap::<(String, String), RustImplTraitSet>::new();

@@ -415,29 +415,34 @@ impl<'tree> State<'_, 'tree> {
     }
 
     fn add_calls(&mut self) {
-        let labels: HashMap<String, String> = self
-            .extraction
-            .nodes
-            .iter()
-            .filter_map(|node| {
-                node.attributes
-                    .get("label")
-                    .and_then(Value::as_str)
-                    .map(|label| {
-                        (
-                            label
-                                .trim_matches(['(', ')'])
-                                .trim_start_matches('.')
-                                .to_owned(),
-                            node.id.clone(),
-                        )
-                    })
-            })
-            .collect();
-        let labels_ci: HashMap<_, _> = labels
-            .iter()
-            .map(|(label, id)| (label.to_ascii_lowercase(), id.clone()))
-            .collect();
+        let labels = unique_label_index(self.extraction.nodes.iter().filter_map(|node| {
+            node.attributes
+                .get("label")
+                .and_then(Value::as_str)
+                .map(|label| {
+                    (
+                        label
+                            .trim_matches(['(', ')'])
+                            .trim_start_matches('.')
+                            .to_owned(),
+                        node.id.clone(),
+                    )
+                })
+        }));
+        let labels_ci = unique_label_index(self.extraction.nodes.iter().filter_map(|node| {
+            node.attributes
+                .get("label")
+                .and_then(Value::as_str)
+                .map(|label| {
+                    (
+                        label
+                            .trim_matches(['(', ')'])
+                            .trim_start_matches('.')
+                            .to_ascii_lowercase(),
+                        node.id.clone(),
+                    )
+                })
+        }));
         let functions = std::mem::take(&mut self.functions);
         let mut seen_calls = HashSet::new();
         let mut seen_special = HashSet::new();
@@ -619,17 +624,12 @@ impl<'tree> State<'_, 'tree> {
     }
 
     fn add_listener_edges(&mut self) {
-        let labels: HashMap<String, String> = self
-            .extraction
-            .nodes
-            .iter()
-            .filter_map(|node| {
-                node.attributes
-                    .get("label")
-                    .and_then(Value::as_str)
-                    .map(|label| (label.to_ascii_lowercase(), node.id.clone()))
-            })
-            .collect();
+        let labels = unique_label_index(self.extraction.nodes.iter().filter_map(|node| {
+            node.attributes
+                .get("label")
+                .and_then(Value::as_str)
+                .map(|label| (label.to_ascii_lowercase(), node.id.clone()))
+        }));
         let listeners = std::mem::take(&mut self.pending_listeners);
         let mut seen = HashSet::new();
         for listener in listeners {
@@ -754,6 +754,28 @@ impl<'tree> State<'_, 'tree> {
     }
 }
 
+fn unique_label_index(
+    labels: impl IntoIterator<Item = (String, String)>,
+) -> HashMap<String, String> {
+    let mut candidates = HashMap::<String, Option<String>>::new();
+    for (label, id) in labels {
+        match candidates.entry(label) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(Some(id));
+            }
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if entry.get().as_ref() != Some(&id) {
+                    entry.insert(None);
+                }
+            }
+        }
+    }
+    candidates
+        .into_iter()
+        .filter_map(|(label, candidate)| candidate.map(|id| (label, id)))
+        .collect()
+}
+
 struct Call {
     name: String,
     member: bool,
@@ -875,4 +897,27 @@ fn text<'source>(node: Node<'_>, source: &'source [u8]) -> &'source str {
 
 fn line(node: Node<'_>) -> usize {
     node.start_position().row + 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unique_label_index;
+
+    #[test]
+    fn unique_label_index_rejects_collisions_in_every_input_order() {
+        let forward = unique_label_index([
+            ("post".to_owned(), "class-post".to_owned()),
+            ("post".to_owned(), "method-post".to_owned()),
+            ("user".to_owned(), "class-user".to_owned()),
+        ]);
+        let reversed = unique_label_index([
+            ("user".to_owned(), "class-user".to_owned()),
+            ("post".to_owned(), "method-post".to_owned()),
+            ("post".to_owned(), "class-post".to_owned()),
+        ]);
+
+        assert_eq!(forward, reversed);
+        assert!(!forward.contains_key("post"));
+        assert_eq!(forward.get("user").map(String::as_str), Some("class-user"));
+    }
 }

@@ -108,6 +108,12 @@ pagination uses the versioned `compass.query.discovery-text-page/1` cursor;
 JSON rejects those presentation-only controls.
 
 Default discovery JSON remains the strict `compass.query.discovery/1` shape.
+The focused default neighborhood is 64 nodes and 128 edges. The existing hard
+ceilings remain 500 nodes and 1,000 edges, and callers that require the wider
+neighborhood can continue to request it explicitly with `--max-nodes 500
+--max-edges 1000` or the equivalent typed request fields. This changes only
+default breadth; the v1 request and response schemas, ordering, truncation,
+and omission contracts are unchanged.
 The additive `--result-envelope` option requires `--format json` and returns a
 typed `compass.query.discovery-result/1` envelope containing the unchanged v1
 result plus its query-owned `semanticResultDigest`. The digest is computed from
@@ -174,10 +180,27 @@ persistence, dispatch, invocation, processing, recognition, refresh,
 resolution, and scheduling) affect ranking only: they cannot add a posting,
 candidate, relationship concept, or relation eligibility. Equal evidence
 vectors remain explicitly ambiguous.
+Natural-query alternatives now require the same channel, operation,
+relationship, and calibrated score rank before they are labeled ambiguous.
+This removes false ambiguity between a specifically ranked operation or
+representation and a weaker same-name/helper candidate. Equal-rank candidates
+and duplicate exact-name lookups remain explicit ambiguity.
 
-Discovery performs at most eight deterministic multi-concept term-index
-intersections before independent term unions. Intersection reads spend the
-same candidate, posting, object, byte, and probe budgets as all other recall;
+For explicit action predicates, discovery first reads one compact exact-term
+index restricted to source-backed operation-role declarations. It may finish
+from that index only when the complete role set proves that the top role also
+dominates omitted non-role types; location-style questions otherwise continue
+through general recall. A second compact channel projects the existing full
+term postings onto source-backed type declarations. Discovery may finish from
+that channel only when it is complete, contains every requested seed slot, and
+the existing ranker proves each selected declaration dominates every omitted
+non-type. This can intentionally keep a direct representation type ahead of a
+less-specific operation-role type that max-level inferred relationship evidence
+would otherwise promote. Legacy snapshots use at most 18 deterministic bounded
+role-name/intersection probes and fall through to general recall when the
+declaration capability is absent. Discovery then performs at most eight general
+multi-concept term-index intersections before independent term unions. Every
+read spends the same candidate, posting, object, byte, and probe budgets;
 exhaustion remains explicit truncation rather than an empty result. A complete
 exact-name lookup can prove its top channel despite truncation in lower recall
 channels, while duplicate exact names remain ambiguous.
@@ -191,6 +214,9 @@ isolated generic subword hits, the response is an explicit `no_match` instead
 of presenting unrelated symbols as an answer. This tightens result admission
 without changing the `compass.query.discovery/1` schema or deterministic rank
 ordering of admitted candidates.
+An explicit `path from <symbol> to <symbol>` question is admitted when recall
+proves two distinct exact terminal symbol references. This narrow structural
+case preserves path discovery without admitting generic multi-concept noise.
 
 Discovery traversal bounds adjacency reads by remaining node capacity and
 stops endpoint hydration at the node cap. Store-backed final edge assembly
@@ -198,18 +224,24 @@ scans unit-valued outgoing references, rejects targets outside the selected
 subgraph before record hydration, and resolves the remaining edge IDs through
 a bounded shared tree traversal. This preserves canonical parallel-edge order
 and exact edge omissions when the reference scan completes; a shared expansion
-limit still produces explicit incomplete counts. Exact term candidates and
-adjacency records use bounded multi-key tree walks so immutable branch and leaf
+limit still produces explicit incomplete counts. Multi-concept exact-term
+recall intersects compact node IDs before hydrating the surviving node records.
+Exact term candidates and adjacency records use bounded multi-key tree walks so
+immutable branch and leaf
 objects are decoded once per batch. A pinned request reader retains only
 digest-verified, decoded, schema-validated tree objects in an 8 MiB envelope
 with a 7 MiB decoded-object budget and a 1,024-object ceiling. Branches are
 retained preferentially and leaves use LRU eviction; cache hits do not bypass
 any logical item, byte, object, depth, or truncation accounting.
 
-The immutable store records identifier and relationship capabilities as
-separate empty reserved postings in its existing additive terms root, which
-older same-major readers ignore. Relationship membership is also stored as a
-bounded unit-valued `(source, term)` key so a complete sparse posting can prove
+The immutable store records identifier, operation-role, declaration, and
+relationship capabilities as separate empty reserved postings in its existing
+additive terms root, which older same-major readers ignore. Snapshots without
+the operation-role capability remain readable and use the bounded role
+fallback. Snapshots without the declaration capability remain readable and
+continue through general recall; no candidate meaning is invented from either
+missing accelerator. Relationship membership is also stored as a bounded
+unit-valued `(source, term)` key so a complete sparse posting can prove
 membership in one truncated dense posting without scanning adjacency. The v2
 relationship capability also stores bounded unit-valued
 `(source, term, target)` evidence so ranking can count distinct query-supporting

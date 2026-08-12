@@ -56,6 +56,12 @@ the former relevance traversal; its `--budget`/`--page` behavior remains.
 CompassQL and explicit `ask`, `search`, `callers`, `callees`, and other typed
 commands are unchanged.
 
+Natural discovery now defaults to a focused 64-node, 128-edge neighborhood.
+Automation that depended on the former 500-node, 1,000-edge default should pass
+`--max-nodes 500 --max-edges 1000` explicitly. Those values remain supported
+hard ceilings; the discovery JSON schema and deterministic result ordering are
+unchanged.
+
 MCP clients must read structured results from the `result` field of the
 `compass.mcp.tool-result/1` envelope and inspect `transportTruncation`
 separately from the domain result's own `truncated` field.

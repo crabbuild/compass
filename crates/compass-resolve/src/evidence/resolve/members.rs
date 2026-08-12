@@ -164,8 +164,7 @@ impl ResolutionDb<'_> {
         }
         let Some(qualifier) = self.occurrence(candidate).and_then(|occurrence| {
             occurrence
-                .qualifier
-                .as_deref()
+                .qualifier()
                 .filter(|qualifier| qualifier.contains('.'))
         }) else {
             return Ok(None);
@@ -548,7 +547,7 @@ impl ResolutionDb<'_> {
                     return Err(1);
                 };
                 let trait_name = match self
-                    .resolve_rust_impl_trait_candidate(implementation, raw_trait_name)
+                    .resolve_rust_impl_trait_candidate(&implementation, raw_trait_name)
                 {
                     ResolutionDecision::Resolved { declaration_id, .. } => {
                         let Some(declaration) = self.facts.declarations.get(&declaration_id) else {

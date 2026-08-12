@@ -51,8 +51,9 @@ use compass_output::{
     graph_view_model_document, render_agent_report_markdown, render_orientation_json, write_html,
 };
 use compass_resolve::{
-    apply_program_projection, collect_program_projection_sites, merge_decl_def_classes_if_needed,
-    merge_decl_def_classes_if_needed_changed, resolve_prevalidated_owned_with_root,
+    ResolutionAdmission, apply_program_projection, collect_program_projection_sites,
+    merge_decl_def_classes_if_needed, merge_decl_def_classes_if_needed_changed,
+    resolve_prevalidated_owned_with_root_at_inference,
 };
 use compass_store::{
     GRAPH_SCHEMA_V1, STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef,
@@ -2716,7 +2717,8 @@ fn build_graph_inner_unscoped(
     }
     let worker_count = options
         .max_workers
-        .unwrap_or_else(|| default_ast_workers(missing.len()));
+        .unwrap_or_else(|| default_ast_workers(missing.len()))
+        .max(1);
     // Resolver source text is only consulted by the PHP type-reference pass.
     // Keeping every decoded source string alive across extraction and graph
     // publication otherwise duplicates the repository's source footprint in
@@ -2728,29 +2730,13 @@ fn build_graph_inner_unscoped(
     });
     // An explicit worker count is an opt-in performance decision. Honor it
     // even for smaller repositories so callers can trade parser-table
-    // residency for throughput instead of silently falling back to the
-    // sequential path below. The automatic path uses the same bounded local
-    // pool once enough missing files exist to amortize parser-table residency.
-    // On small repositories, a single requested worker remains sequential; it
-    // avoids paying for a pool that cannot add parallelism.
+    // residency for throughput. On small repositories, a single requested
+    // worker remains sequential so pool scheduling cannot dominate extraction.
     let parallel_extraction = should_parallel_extract(options, missing.len());
-    let worker_pool = if parallel_extraction {
-        Some(
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(worker_count)
-                .thread_name(|index| format!("compass-ast-{index}"))
-                .build()
-                .map_err(|error| CoreError::WorkerPool(error.to_string()))?,
-        )
-    } else {
-        None
-    };
     profile_internal("extract setup and cache load", &mut internal_started);
-    // A Rayon worker pool costs more resident memory than it saves time when
-    // only a handful of files are missing. Below the measured crossover stay
-    // sequential; above it use a bounded local pool so an embedding
-    // application's global Rayon settings cannot silently serialize cold
-    // extraction or multiply parser working sets without an explicit opt-in.
+    // The full build already runs inside Compass's bounded pipeline pool.
+    // Reuse those workers so parser/evidence pages remain available to later
+    // phases instead of being abandoned when a short-lived nested pool exits.
     let completed_files = Mutex::new(0_usize);
     let total_files = missing.len();
     let extract_source =
@@ -2862,20 +2848,22 @@ fn build_graph_inner_unscoped(
             .collect::<Vec<_>>()
     } else {
         let worker_evidence = Arc::clone(&project_evidence);
-        let extract = || {
-            missing
-                .par_iter()
-                .map_init(
-                    || Engine::with_project_evidence(Arc::clone(&worker_evidence)),
-                    extract_source,
-                )
-                .collect::<Vec<_>>()
-        };
-        if let Some(pool) = &worker_pool {
-            pool.install(extract)
-        } else {
-            extract()
-        }
+        let chunk_size = missing.len().div_ceil(worker_count).max(1);
+        missing
+            .par_chunks(chunk_size)
+            .map_init(
+                || Engine::with_project_evidence(Arc::clone(&worker_evidence)),
+                |engine, paths| {
+                    paths
+                        .iter()
+                        .map(|path| extract_source(engine, path))
+                        .collect::<Vec<_>>()
+                },
+            )
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flatten()
+            .collect()
     };
     let mut extraction_failures = BTreeMap::new();
     let mut fresh = missing
@@ -3218,23 +3206,32 @@ fn build_graph_inner_unscoped(
     };
     let cached_source_text: HashMap<_, _> = if sources.len() < 256 {
         sources.iter().filter_map(read_cached_source).collect()
-    } else if let Some(pool) = &worker_pool {
-        pool.install(|| sources.par_iter().filter_map(read_cached_source).collect())
     } else {
         sources.par_iter().filter_map(read_cached_source).collect()
     };
     fresh_source_text.extend(cached_source_text);
     let source_text = fresh_source_text;
     profile_internal("resolver source inventory", &mut internal_started);
-    drop(worker_pool);
     drop(project_evidence);
     drop(fresh_paths);
     drop(ordered_paths);
     drop(ast_id_remap);
     drop(ast_root_marker);
+    profile_extraction_inventory(&ordered);
     let program_projection_sites = collect_program_projection_sites(&ordered);
     profile_internal("Program projection site collection", &mut internal_started);
-    let mut resolved = resolve_prevalidated_owned_with_root(ordered, &source_text, &root);
+    let resolution_admission = match options.inference_level {
+        InferenceLevel::Low => ResolutionAdmission::Low,
+        InferenceLevel::Medium => ResolutionAdmission::Medium,
+        InferenceLevel::High => ResolutionAdmission::High,
+        InferenceLevel::Max => ResolutionAdmission::Max,
+    };
+    let mut resolved = resolve_prevalidated_owned_with_root_at_inference(
+        ordered,
+        &source_text,
+        &root,
+        resolution_admission,
+    );
     profile_internal("cross-file resolution total", &mut internal_started);
     drop(source_text);
     internal_started = Instant::now();
@@ -3765,8 +3762,13 @@ fn build_graph_inner_unscoped(
     if published.document.nodes.is_empty() {
         return Err(CoreError::EmptyGraph);
     }
-    let report_health = current_orientation_health(options, published.omissions);
-    let document = published.document.to_legacy_document()?;
+    let omissions = published.omissions;
+    let report_health = current_orientation_health(options, omissions);
+    // Legacy clustering and report code needs a compatibility projection, but
+    // retaining it beside the complete typed authority doubles the dominant
+    // graph working set. Move records into the projection and reconstruct the
+    // strict authority after those consumers finish instead.
+    let document = published.document.into_legacy_document()?;
 
     // A history realization must depend only on the target commit and build
     // profile. Prior community numbering is current-worktree operational state
@@ -3953,11 +3955,10 @@ fn build_graph_inner_unscoped(
         overview_elapsed,
     );
 
-    // The legacy projection is needed only by clustering, reports, and the
-    // bounded overview.  Release it before serializing the typed authority so
-    // large builds do not retain two complete graph representations while the
-    // SQLite/JSON publication path is writing its final artifacts.
-    drop(document);
+    // Move the compatibility records back into the typed authority before
+    // publication. The consuming conversion drains each record, so the two
+    // complete representations never coexist.
+    let mut published_document = V1GraphDocument::from_legacy_document(document)?;
 
     let publish_started = Instant::now();
     let graph_output_started = Instant::now();
@@ -3970,7 +3971,7 @@ fn build_graph_inner_unscoped(
                 .map(move |member| (member.as_str(), *community))
         })
         .collect::<HashMap<_, _>>();
-    for node in &mut published.document.nodes {
+    for node in &mut published_document.nodes {
         let Some(&community_index) = node_communities.get(node.id.as_str()) else {
             continue;
         };
@@ -3983,22 +3984,21 @@ fn build_graph_inner_unscoped(
             color: None,
         });
     }
-    let published_nodes = published.document.nodes.len();
-    let published_edges = published.document.links.len();
-    let omissions = published.omissions;
+    let published_nodes = published_document.nodes.len();
+    let published_edges = published_document.links.len();
     let serialization_started = Instant::now();
     let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
         let (metrics, seal) =
-            if let Some(previous) = load_graph_delta_base(&output_dir, &published.document) {
-                publish_graph_and_store_delta(&output_dir, &previous, &published.document)?
+            if let Some(previous) = load_graph_delta_base(&output_dir, &published_document) {
+                publish_graph_and_store_delta(&output_dir, &previous, &published_document)?
             } else {
-                publish_graph_and_store_from_canonical(&output_dir, &published.document)?
+                publish_graph_and_store_from_canonical(&output_dir, &published_document)?
             };
         (Some(metrics), Some(seal))
     } else {
         let graph_path = output_dir.join("graph.json");
         let receipt = write_atomic_with_digest(&graph_path, |writer| {
-            write_canonical_graph_json(&published.document, writer).map_err(|source| {
+            write_canonical_graph_json(&published_document, writer).map_err(|source| {
                 compass_files::FileError::Io {
                     path: graph_path.clone(),
                     source,
@@ -4038,7 +4038,7 @@ fn build_graph_inner_unscoped(
     profile_internal_duration("graph.json v1 serialization", serialization_elapsed);
     profile_internal("graph.json v1 publication", &mut output_profile_started);
     let graph_output_elapsed = graph_output_started.elapsed();
-    let retained_document = retain_artifacts.then_some(published.document);
+    let retained_document = retain_artifacts.then_some(published_document);
     profile_internal_duration("graph publication", graph_output_elapsed);
     internal_started = Instant::now();
     timings.graph_assembly += stage_started.elapsed();
@@ -4780,14 +4780,6 @@ fn write_store_ref(output_dir: &Path, reference: &StoreRef) -> Result<(), CoreEr
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-fn default_ast_workers(missing: usize) -> usize {
-    available_worker_count()
-        .min(default_ast_worker_cap(missing))
-        .max(1)
-}
-
-#[cfg(not(target_os = "macos"))]
 fn default_ast_workers(missing: usize) -> usize {
     available_worker_count()
         .min(default_ast_worker_cap(missing))
@@ -4805,10 +4797,9 @@ fn available_worker_count() -> usize {
     num_cpus::get()
 }
 
-// Large cold repositories retain enough per-file parser state for worker
-// parallelism to dominate peak RSS. Keep the automatic path bounded by the
-// host-aware pipeline ceiling; callers that have a known memory budget can
-// still opt into a different count through BuildOptions::max_workers.
+// Large cold repositories have enough files to amortize the pipeline ceiling.
+// Smaller repositories retain the established lower parser concurrency while
+// still reusing the long-lived pool's allocator pages in later build phases.
 const LARGE_REPOSITORY_AST_WORKER_CAP: usize = PIPELINE_RAYON_WORKER_CAP;
 const LARGE_REPOSITORY_AST_WORKER_MIN_FILES: usize = 1_024;
 const AUTOMATIC_PARALLEL_EXTRACT_MIN_FILES: usize = 32;
@@ -7043,6 +7034,59 @@ fn profile_internal_duration(label: &str, elapsed: Duration) {
     }
 }
 
+fn profile_extraction_inventory(extractions: &[Extraction]) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_none() {
+        return;
+    }
+    let mut declarations = 0_usize;
+    let mut scopes = 0_usize;
+    let mut bindings = 0_usize;
+    let mut occurrences = 0_usize;
+    let mut candidates = 0_usize;
+    let mut external_candidates = 0_usize;
+    let mut hierarchy_candidates = 0_usize;
+    let mut relations = BTreeMap::<&'static str, usize>::new();
+    for batch in extractions
+        .iter()
+        .filter_map(|extraction| extraction.semantic_evidence.as_ref())
+    {
+        declarations = declarations.saturating_add(batch.declarations.len());
+        scopes = scopes.saturating_add(batch.scopes.len());
+        bindings = bindings.saturating_add(batch.bindings.len());
+        occurrences = occurrences.saturating_add(batch.occurrences.len());
+        candidates = candidates.saturating_add(batch.candidates.len());
+        for candidate in &batch.candidates {
+            if candidate.constraints.allow_external {
+                external_candidates = external_candidates.saturating_add(1);
+            }
+            if candidate.constraints.hierarchy.is_some() {
+                hierarchy_candidates = hierarchy_candidates.saturating_add(1);
+            }
+            let relation = match candidate.relation {
+                compass_languages::CandidateRelation::Calls => "calls",
+                compass_languages::CandidateRelation::IndirectCalls => "indirect_calls",
+                compass_languages::CandidateRelation::Tests => "tests",
+                compass_languages::CandidateRelation::References => "references",
+                compass_languages::CandidateRelation::Contains => "contains",
+                compass_languages::CandidateRelation::Owns => "owns",
+                _ => "other",
+            };
+            *relations.entry(relation).or_default() += 1;
+        }
+    }
+    eprintln!(
+        "[compass internal] extraction inventory: raw_nodes={} raw_edges={} declarations={declarations} scopes={scopes} bindings={bindings} occurrences={occurrences} candidates={candidates} external_candidates={external_candidates} hierarchy_candidates={hierarchy_candidates} relations={relations:?}",
+        extractions
+            .iter()
+            .map(|extraction| extraction.nodes.len())
+            .sum::<usize>(),
+        extractions
+            .iter()
+            .map(|extraction| extraction.edges.len())
+            .sum::<usize>(),
+    );
+}
+
 fn join_program_worker(
     handle: Option<std::thread::JoinHandle<Result<(ProgramBuildSummary, Duration), CoreError>>>,
     timings: &mut BuildTimings,
@@ -7237,14 +7281,28 @@ mod tests {
             r#"
                 use external_crate::ExternalType;
 
+                struct LocalService;
+
+                impl LocalService {
+                    fn call() {}
+                }
+
                 fn run(value: ExternalType) {
                     value.execute();
+                    external_crate::Service::call();
+                }
+
+                #[test]
+                fn test_run() {
+                    LocalService::call();
                     external_crate::Service::call();
                 }
             "#,
         )?;
 
         let mut previous = None;
+        let mut low_graph = None;
+        let mut max_graph = None;
         for level in [
             InferenceLevel::Low,
             InferenceLevel::Medium,
@@ -7268,6 +7326,9 @@ mod tests {
                 .count();
             if level == InferenceLevel::Low {
                 assert_eq!(inferred, 0);
+                low_graph = Some((document.nodes.clone(), document.links.clone()));
+            } else if level == InferenceLevel::Max {
+                max_graph = Some(document.clone());
             }
             if let Some((nodes, edges, inferred_before)) = previous {
                 assert!(document.nodes.len() >= nodes);
@@ -7278,6 +7339,11 @@ mod tests {
         }
         let (_, _, max_inferred) = previous.ok_or("inference levels were not built")?;
         assert!(max_inferred > 0);
+        let (low_nodes, low_edges) = low_graph.ok_or("low inference graph was not built")?;
+        let mut filtered_max = max_graph.ok_or("max inference graph was not built")?;
+        apply_inference_level(&mut filtered_max, InferenceLevel::Low);
+        assert_eq!(low_nodes, filtered_max.nodes);
+        assert_eq!(low_edges, filtered_max.links);
         Ok(())
     }
 
